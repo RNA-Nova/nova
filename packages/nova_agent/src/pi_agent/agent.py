@@ -8,6 +8,7 @@ from typing import (
     Any, Callable, List, Literal, Optional, Set, Union, Awaitable, cast
 )
 from dataclasses import dataclass, field
+from .signal import AbortSignal
 
 # Import from nova_ai (replaces pi-ai)
 from nova_ai import (
@@ -66,7 +67,7 @@ class Agent:
         *,
         initial_state: Optional[AgentState] = None,
         convert_to_llm: Optional[Callable[[List[AgentMessage]], Union[List[Message], Awaitable[List[Message]]]]] = None,
-        transform_context: Optional[Callable[[List[AgentMessage], Optional[asyncio.Event]], Awaitable[List[AgentMessage]]]] = None,
+        transform_context: Optional[Callable[[List[AgentMessage], Optional[AbortSignal]], Awaitable[List[AgentMessage]]]] = None,
         steering_mode: Literal["all", "one-at-a-time"] = "one-at-a-time",
         follow_up_mode: Literal["all", "one-at-a-time"] = "one-at-a-time",
         stream_fn: Optional[StreamFn] = None,
@@ -93,7 +94,7 @@ class Agent:
         )
 
         self._listeners: Set[Callable[[AgentEvent], None]] = set()
-        self._abort_event: Optional[asyncio.Event] = None
+        self._abort_event: Optional[AbortSignal] = None
         self._running_task: Optional[asyncio.Task] = None
 
         self.convert_to_llm = convert_to_llm or _default_convert_to_llm
@@ -257,14 +258,21 @@ class Agent:
         # Convert input to a list of AgentMessages
         messages: List[AgentMessage]
         if isinstance(input, str):
-            content: List[Union[TextContent, ImageContent]] = [TextContent(**{"type": "text", "text": input})]
+            content: List[Union[TextContent, ImageContent]] = [
+                TextContent(
+                    type="text", 
+                    text=input
+                )
+            ]
             if images:
                 content.extend(images)
-            messages = [UserMessage(**{
-                "role": "user",
-                "content": content,
-                "timestamp": asyncio.get_event_loop().time(),  # approximate; use int if needed
-            })]
+            messages = [
+                UserMessage(
+                    role="user",
+                    content=content,
+                    timestamp=asyncio.get_event_loop().time(),  # approximate; use int if needed
+                )
+            ]
         elif isinstance(input, list):
             messages = input
         else:
@@ -345,7 +353,7 @@ class Agent:
         self._state.is_streaming = True
         self._state.stream_message = None
         self._state.error = None
-        self._abort_event = asyncio.Event()
+        self._abort_event = AbortSignal()
 
         # Prepare context
         context = AgentContext(
@@ -437,24 +445,35 @@ class Agent:
                 raise
             except Exception as e:
                 # Build an error assistant message
-                error_msg: AgentMessage = AssistantMessage(**{
-                    "role": "assistant",
-                    "content": [TextContent(**{"type": "text", "text": ""})],
-                    "api": model.api,
-                    "provider": model.provider,
-                    "model": model.id,
-                    "usage": Usage(**{
-                        "input": 0,
-                        "output": 0,
-                        "cache_read": 0,
-                        "cache_write": 0,
-                        "total_tokens": 0,
-                        "cost": Cost(**{"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0}),
-                    }),
-                    "stop_reason": "aborted" if (self._abort_event and self._abort_event.is_set()) else "error",
-                    "error_message": str(e),
-                    "timestamp": asyncio.get_event_loop().time(),
-                })
+                error_msg: AgentMessage = AssistantMessage(
+                    role="assistant",
+                    content=[
+                        TextContent(
+                            type="text", 
+                            text=""
+                        )
+                    ],
+                    api=model.api,
+                    provider=model.provider,
+                    model=model.id,
+                    usage=Usage(
+                        input=0,
+                        output=0,
+                        cache_read=0,
+                        cache_write=0,
+                        total_tokens=0,
+                        cost=Cost(
+                            input=0, 
+                            output=0, 
+                            cache_read=0, 
+                            cache_write=0, 
+                            total=0
+                        ),
+                    ),
+                    stop_reason="aborted" if (self._abort_event and self._abort_event.is_set()) else "error",
+                    error_message=str(e),
+                    timestamp=asyncio.get_event_loop().time(),
+                )
                 self.append_message(error_msg)
                 self._state.error = str(e)
                 self._emit(AgentEndEvent(messages=[error_msg]))

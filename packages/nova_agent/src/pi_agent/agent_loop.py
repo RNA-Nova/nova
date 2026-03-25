@@ -7,6 +7,7 @@ import asyncio
 from typing import (
     AsyncIterator, Optional, List, Callable, Awaitable, Union, Any, cast
 )
+from .signal import AbortSignal
 from dataclasses import dataclass, field
 from copy import deepcopy
 # Import from nova_ai (replacing pi-ai)
@@ -102,7 +103,7 @@ def agent_loop(
     prompts: List[AgentMessage],
     context: AgentContext,
     config: AgentLoopConfig,
-    signal: Optional[asyncio.Event] = None,
+    signal: Optional[AbortSignal] = None,
     stream_fn: Optional[StreamFn] = None,
 ) -> AgentEventStream:
     """
@@ -133,7 +134,7 @@ def agent_loop(
 def agent_loop_continue(
     context: AgentContext,
     config: AgentLoopConfig,
-    signal: Optional[asyncio.Event] = None,
+    signal: Optional[AbortSignal] = None,
     stream_fn: Optional[StreamFn] = None,
 ) -> AgentEventStream:
     """
@@ -167,7 +168,7 @@ async def _run_loop(
     current_context: AgentContext,
     new_messages: List[AgentMessage],
     config: AgentLoopConfig,
-    signal: Optional[asyncio.Event],
+    signal: Optional[AbortSignal],
     stream: AgentEventStream,
     stream_fn: Optional[StreamFn],
 ) -> None:
@@ -259,7 +260,7 @@ async def _run_loop(
 async def _stream_assistant_response(
     context: AgentContext,
     config: AgentLoopConfig,
-    signal: Optional[asyncio.Event],
+    signal: Optional[AbortSignal],
     stream: AgentEventStream,
     stream_fn: Optional[StreamFn],
 ) -> AssistantMessage:
@@ -360,7 +361,7 @@ class ToolExecutionResult:
 async def _execute_tool_calls(
     tools: Optional[List[AgentTool]],
     assistant_message: AssistantMessage,
-    signal: Optional[asyncio.Event],
+    signal: Optional[AbortSignal],
     stream: AgentEventStream,
     get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]],
 ) -> ToolExecutionResult:
@@ -405,7 +406,12 @@ async def _execute_tool_calls(
             )
         except Exception as e:
             result = AgentToolResult(
-                content=[TextContent(**{"type": "text", "text": str(e)})],
+                content=[
+                    TextContent(
+                        type="text", 
+                        text= str(e)
+                    )
+                ],
                 details={},
             )
             is_error = True
@@ -450,7 +456,12 @@ def _skip_tool_call(
 ) -> ToolResultMessage:
     """Create a 'skipped' tool result for remaining tool calls when interrupted."""
     result = AgentToolResult(
-        content=[TextContent(**{"type": "text", "text": "Skipped due to queued user message."})],
+        content=[
+            TextContent(
+                type="text", 
+                text="Skipped due to queued user message."
+            )
+        ],
         details={},
     )
 

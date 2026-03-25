@@ -594,217 +594,217 @@ async def stream_openai_completions(
             timestamp=int(time.time() * 1000)
         )
         
-        # try:
-        api_key = options.api_key if options else None
-        client = create_client(model, context, api_key, options.headers if options else None)
-        params = build_params(model, context, options)
-        
-        if options and options.on_payload:
-            options.on_payload(params)
-        
-        openai_stream = await client.chat.completions.create(**params)
-        
-        stream.push(StartEvent(partial=deepcopy(output)))
-        
-        current_block = None
-        current_block_index = -1
-        
-        def finish_current_block(block=None):
-            nonlocal current_block, current_block_index
-            if block:
-                if block.type == "text":
-                    stream.push(TextEndEvent(
-                        content_index=current_block_index,
-                        content=block,
-                        partial=deepcopy(output)
-                    ))
-                elif block.type == "thinking":
-                    stream.push(ThinkingEndEvent(
-                        content_index=current_block_index,
-                        content=block,
-                        partial=deepcopy(output)
-                    ))
-                elif block.type == "toolCall":
-                    block.arguments = parse_streaming_json(block.partial_args)
-                    if hasattr(block, "partial_args"):
-                        del block.partial_args
-                    stream.push(ToolCallEndEvent(
-                        content_index=current_block_index,
-                        tool_call=ToolCall(
-                            id=block.id,
-                            name=block.name,
-                            arguments=block.arguments,
-                            thought_signature=block.thought_signature if hasattr(block, "thought_signature") else None
-                        ),
-                        partial=deepcopy(output)
-                    ))
+        try:
+            api_key = options.api_key if options else None
+            client = create_client(model, context, api_key, options.headers if options else None)
+            params = build_params(model, context, options)
+            
+            if options and options.on_payload:
+                options.on_payload(params)
+            
+            openai_stream = await client.chat.completions.create(**params)
+            
+            stream.push(StartEvent(partial=deepcopy(output)))
+            
             current_block = None
             current_block_index = -1
-        
-        async for chunk in openai_stream:
-            if chunk.usage:
-                cached_tokens = getattr(chunk.usage.prompt_tokens_details, 'cached_tokens', 0) if chunk.usage.prompt_tokens_details else 0
-                reasoning_tokens = getattr(chunk.usage.completion_tokens_details, 'reasoning_tokens', 0) if chunk.usage.completion_tokens_details else 0
-                
-                input_tokens = (chunk.usage.prompt_tokens or 0) - cached_tokens
-                output_tokens = (chunk.usage.completion_tokens or 0) + reasoning_tokens
-                
-                output.usage.input = input_tokens
-                output.usage.output = output_tokens
-                output.usage.cache_read = cached_tokens
-                output.usage.cache_write = 0
-                output.usage.total_tokens = input_tokens + output_tokens + cached_tokens
-                
-                calculate_cost(model, output.usage)
             
-            if not chunk.choices:
-                continue
-            
-            choice = chunk.choices[0]
-            
-            if choice.finish_reason:
-                output.stop_reason = map_stop_reason(choice.finish_reason)
-            
-            if choice.delta:
-                delta = choice.delta
-                
-                if delta.content and len(delta.content) > 0:
-                    if not current_block or current_block.type != "text":
-                        finish_current_block(current_block)
-                        current_block = TextContent(
-                            type = "text", 
-                            text = ""
-                                                    
-                        )
-                        output.content.append(current_block)
-                        current_block_index = len(output.content) - 1
-                        stream.push(TextStartEvent(
+            def finish_current_block(block=None):
+                nonlocal current_block, current_block_index
+                if block:
+                    if block.type == "text":
+                        stream.push(TextEndEvent(
                             content_index=current_block_index,
+                            content=block,
                             partial=deepcopy(output)
                         ))
+                    elif block.type == "thinking":
+                        stream.push(ThinkingEndEvent(
+                            content_index=current_block_index,
+                            content=block,
+                            partial=deepcopy(output)
+                        ))
+                    elif block.type == "toolCall":
+                        block.arguments = parse_streaming_json(block.partial_args)
+                        if hasattr(block, "partial_args"):
+                            del block.partial_args
+                        stream.push(ToolCallEndEvent(
+                            content_index=current_block_index,
+                            tool_call=ToolCall(
+                                id=block.id,
+                                name=block.name,
+                                arguments=block.arguments,
+                                thought_signature=block.thought_signature if hasattr(block, "thought_signature") else None
+                            ),
+                            partial=deepcopy(output)
+                        ))
+                current_block = None
+                current_block_index = -1
+            
+            async for chunk in openai_stream:
+                if chunk.usage:
+                    cached_tokens = getattr(chunk.usage.prompt_tokens_details, 'cached_tokens', 0) if chunk.usage.prompt_tokens_details else 0
+                    reasoning_tokens = getattr(chunk.usage.completion_tokens_details, 'reasoning_tokens', 0) if chunk.usage.completion_tokens_details else 0
                     
-                    if current_block.type == "text":
-                        current_block.text += delta.content
-                        stream.push(TextDeltaEvent(
-                            content_index=current_block_index,
-                            delta=delta.content,
-                            partial=deepcopy(output)
-                        ))
-                
-                delta_dict = delta.model_dump() if hasattr(delta, 'model_dump') else {}
-                reasoning_fields = ["reasoning_content", "reasoning", "reasoning_text"]
-                found_reasoning = None
-                
-                for field in reasoning_fields:
-                    if field in delta_dict and delta_dict[field] and len(delta_dict[field]) > 0:
-                        found_reasoning = field
-                        break
-                
-                if found_reasoning:
-                    if not current_block or current_block.type != "thinking":
-                        finish_current_block(current_block)
-                        current_block = ThinkingContent(
-                            type = "thinking",
-                            thinking = "",
-                            thinking_signature = found_reasoning
-                        )
-                        output.content.append(current_block)
-                        current_block_index = len(output.content) - 1
-                        stream.push(ThinkingStartEvent(
-                            content_index=current_block_index,
-                            partial=deepcopy(output)
-                        ))
+                    input_tokens = (chunk.usage.prompt_tokens or 0) - cached_tokens
+                    output_tokens = (chunk.usage.completion_tokens or 0) + reasoning_tokens
                     
-                    if current_block.type == "thinking":
-                        delta_text = delta_dict[found_reasoning]
-                        current_block.thinking += delta_text
-                        stream.push(ThinkingDeltaEvent(
-                            content_index=current_block_index,
-                            delta=delta_text,
-                            partial=deepcopy(output)
-                        ))
+                    output.usage.input = input_tokens
+                    output.usage.output = output_tokens
+                    output.usage.cache_read = cached_tokens
+                    output.usage.cache_write = 0
+                    output.usage.total_tokens = input_tokens + output_tokens + cached_tokens
+                    
+                    calculate_cost(model, output.usage)
                 
-                if delta.tool_calls:
-                    for tool_call in delta.tool_calls:
-                        if (not current_block or 
-                            current_block.type != "toolCall" or
-                            (tool_call.id and current_block.id != tool_call.id)):
+                if not chunk.choices:
+                    continue
+                
+                choice = chunk.choices[0]
+                
+                if choice.finish_reason:
+                    output.stop_reason = map_stop_reason(choice.finish_reason)
+                
+                if choice.delta:
+                    delta = choice.delta
+                    
+                    if delta.content and len(delta.content) > 0:
+                        if not current_block or current_block.type != "text":
                             finish_current_block(current_block)
-                            current_block = ToolCall(
-                                type="toolCall",
-                                id=tool_call.id or "",
-                                name=tool_call.function.name if tool_call.function else "",
-                                arguments={},
+                            current_block = TextContent(
+                                type = "text", 
+                                text = ""
+                                                        
                             )
-                            current_block.partial_args=""
                             output.content.append(current_block)
                             current_block_index = len(output.content) - 1
-                            stream.push(ToolCallStartEvent(
+                            stream.push(TextStartEvent(
                                 content_index=current_block_index,
                                 partial=deepcopy(output)
                             ))
                         
-                        if current_block.type == "toolCall":
-                            if tool_call.id:
-                                current_block.id = tool_call.id
-                            if tool_call.function and tool_call.function.name:
-                                current_block.name = tool_call.function.name
-                            
-                            delta_args = ""
-                            if tool_call.function and tool_call.function.arguments:
-                                delta_args = tool_call.function.arguments
-                                current_block.partial_args = current_block.partial_args + delta_args
-                                current_block.arguments = parse_streaming_json(current_block.partial_args)
-                            
-                            stream.push(ToolCallDeltaEvent(
+                        if current_block.type == "text":
+                            current_block.text += delta.content
+                            stream.push(TextDeltaEvent(
                                 content_index=current_block_index,
-                                delta=delta_args,
+                                delta=delta.content,
                                 partial=deepcopy(output)
                             ))
-                
-                if "reasoning_details" in delta_dict and delta_dict["reasoning_details"]:
-                    reasoning_details = delta_dict["reasoning_details"]
-                    if isinstance(reasoning_details, list):
-                        for detail in reasoning_details:
-                            if (isinstance(detail, dict) and 
-                                detail.get("type") == "reasoning.encrypted" and
-                                detail.get("id") and detail.get("data")):
-                                for block in output.content:
-                                    if (block.type == "toolCall" and 
-                                        block.id == detail.id):
-                                        block.thought_signature = json.dumps(detail)
-                                        break
-        
-        finish_current_block(current_block)
-        
-        if options and options.signal and hasattr(options.signal, 'aborted') and options.signal.aborted:
-            raise Exception("Request was aborted")
-        
-        if output.stop_reason in [StopReason.ABORTED, StopReason.ERROR]:
-            raise Exception("An unknown error occurred")
-        
-        stream.push(DoneEvent(
-            reason=output.stop_reason,
-            message=deepcopy(output)
-        ))
-        stream.end()
+                    
+                    delta_dict = delta.model_dump() if hasattr(delta, 'model_dump') else {}
+                    reasoning_fields = ["reasoning_content", "reasoning", "reasoning_text"]
+                    found_reasoning = None
+                    
+                    for field in reasoning_fields:
+                        if field in delta_dict and delta_dict[field] and len(delta_dict[field]) > 0:
+                            found_reasoning = field
+                            break
+                    
+                    if found_reasoning:
+                        if not current_block or current_block.type != "thinking":
+                            finish_current_block(current_block)
+                            current_block = ThinkingContent(
+                                type = "thinking",
+                                thinking = "",
+                                thinking_signature = found_reasoning
+                            )
+                            output.content.append(current_block)
+                            current_block_index = len(output.content) - 1
+                            stream.push(ThinkingStartEvent(
+                                content_index=current_block_index,
+                                partial=deepcopy(output)
+                            ))
+                        
+                        if current_block.type == "thinking":
+                            delta_text = delta_dict[found_reasoning]
+                            current_block.thinking += delta_text
+                            stream.push(ThinkingDeltaEvent(
+                                content_index=current_block_index,
+                                delta=delta_text,
+                                partial=deepcopy(output)
+                            ))
+                    
+                    if delta.tool_calls:
+                        for tool_call in delta.tool_calls:
+                            if (not current_block or 
+                                current_block.type != "toolCall" or
+                                (tool_call.id and current_block.id != tool_call.id)):
+                                finish_current_block(current_block)
+                                current_block = ToolCall(
+                                    type="toolCall",
+                                    id=tool_call.id or "",
+                                    name=tool_call.function.name if tool_call.function else "",
+                                    arguments={},
+                                )
+                                current_block.partial_args=""
+                                output.content.append(current_block)
+                                current_block_index = len(output.content) - 1
+                                stream.push(ToolCallStartEvent(
+                                    content_index=current_block_index,
+                                    partial=deepcopy(output)
+                                ))
+                            
+                            if current_block.type == "toolCall":
+                                if tool_call.id:
+                                    current_block.id = tool_call.id
+                                if tool_call.function and tool_call.function.name:
+                                    current_block.name = tool_call.function.name
+                                
+                                delta_args = ""
+                                if tool_call.function and tool_call.function.arguments:
+                                    delta_args = tool_call.function.arguments
+                                    current_block.partial_args = current_block.partial_args + delta_args
+                                    current_block.arguments = parse_streaming_json(current_block.partial_args)
+                                
+                                stream.push(ToolCallDeltaEvent(
+                                    content_index=current_block_index,
+                                    delta=delta_args,
+                                    partial=deepcopy(output)
+                                ))
+                    
+                    if "reasoning_details" in delta_dict and delta_dict["reasoning_details"]:
+                        reasoning_details = delta_dict["reasoning_details"]
+                        if isinstance(reasoning_details, list):
+                            for detail in reasoning_details:
+                                if (isinstance(detail, dict) and 
+                                    detail.get("type") == "reasoning.encrypted" and
+                                    detail.get("id") and detail.get("data")):
+                                    for block in output.content:
+                                        if (block.type == "toolCall" and 
+                                            block.id == detail.id):
+                                            block.thought_signature = json.dumps(detail)
+                                            break
             
-        # except Exception as e:
-        #     for block in output.content:
-        #         if "partial_args" in block:
-        #             del block.partial_args
+            finish_current_block(current_block)
             
-        #     output.stop_reason = StopReason.ABORTED if (options and options.signal and options.signal.aborted) else StopReason.ERROR
-        #     output.error_message = str(e)
+            if options and options.signal and hasattr(options.signal, 'aborted') and options.signal.aborted:
+                raise Exception("Request was aborted")
             
-        #     if hasattr(e, 'error') and hasattr(e.error, 'metadata') and hasattr(e.error.metadata, 'raw'):
-        #         output.error_message += f"\n{e.error.metadata.raw}"
+            if output.stop_reason in [StopReason.ABORTED, StopReason.ERROR]:
+                raise Exception("An unknown error occurred")
             
-        #     stream.push(ErrorEvent(
-        #         reason=output.stop_reason,
-        #         error=deepcopy(output)
-        #     ))
-        #     stream.end()
+            stream.push(DoneEvent(
+                reason=output.stop_reason,
+                message=deepcopy(output)
+            ))
+            stream.end()
+            
+        except Exception as e:
+            for block in output.content:
+                if "partial_args" in block:
+                    del block.partial_args
+            
+            output.stop_reason = StopReason.ABORTED if (options and options.signal and options.signal.aborted) else StopReason.ERROR
+            output.error_message = str(e)
+            
+            if hasattr(e, 'error') and hasattr(e.error, 'metadata') and hasattr(e.error.metadata, 'raw'):
+                output.error_message += f"\n{e.error.metadata.raw}"
+            
+            stream.push(ErrorEvent(
+                reason=output.stop_reason,
+                error=deepcopy(output)
+            ))
+            stream.end()
     
     asyncio.create_task(process_stream())
     return stream

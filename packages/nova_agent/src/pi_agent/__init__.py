@@ -35,6 +35,7 @@ from .events import (
 
 from .agent_loop import agent_loop, agent_loop_continue, AgentEventStream
 from .utils import validate_tool_call, validate_tool_arguments, set_validation_enabled, clear_validator_cache
+from .signal import AbortSignal
 
 # 版本信息
 __version__ = "0.1.0"
@@ -81,7 +82,7 @@ __all__ = [
     "validate_tool_arguments",
     "set_validation_enabled",
     "clear_validator_cache",
-]
 
-# 方便导入的快捷方式
-from typing import Union, List, Optional, Any, Dict, Callable, Awaitable
+    # 信号函数
+    "AbortSignal"
+]
