@@ -18,6 +18,7 @@ from nova_ai import (
     Message,
     Model,
     SimpleStreamOptions,
+    ThinkingLevel,
     stream_simple,
     TextContent,
     Tool,
@@ -38,9 +39,6 @@ AgentMessage = Union[Message, CustomAgentMessage]
 # ----------------------------------------------------------------------
 # Type aliases
 # ----------------------------------------------------------------------
-
-ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
-"""Thinking/reasoning level for models that support it."""
 
 # Stream function signature – can be sync or async (returns a Promise in TS)
 class StreamFn(Protocol):
