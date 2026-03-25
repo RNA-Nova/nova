@@ -91,7 +91,7 @@ async def complete(
     Returns:
         完整的助手消息
     """
-    event_stream = stream(model, context, options)
+    event_stream = await stream(model, context, options)
     return await event_stream.result()
 
 
@@ -131,7 +131,7 @@ async def complete_simple(
     Returns:
         完整的助手消息
     """
-    event_stream = stream_simple(model, context, options)
+    event_stream = await stream_simple(model, context, options)
     return await event_stream.result()
 
 
