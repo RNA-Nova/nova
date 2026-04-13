@@ -47,7 +47,7 @@ from .registry import (
     
     # 内置注册
     register_builtin_api_providers, register_builtin_models,
-    register_all_builtins, reset_registry,
+    register_all_builtins,reset_api_registry,reset_model_registry, reset_registry,
 )
 
 # 重新导出providers模块
@@ -81,6 +81,9 @@ from .utils import (
     # HTTP代理
     setup_http_proxy, get_http_proxy, get_https_proxy,
     configure_http_client_proxy, is_node_environment,
+
+    # overflow
+    is_context_overflow
 )
 
 # 重新导出compat模块
@@ -96,7 +99,7 @@ from .auth import (
 
 # 重新导出models模块（仅数据）
 from .models import (
-    Model, ModelCost,
+    Model, ModelCost,calculate_cost, supports_xhigh_thinking, models_are_equal,
     OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS,
     get_openai_model, get_anthropic_model, get_google_model,
     list_openai_models, list_anthropic_models, list_google_models,
@@ -155,7 +158,8 @@ __all__ = [
     
     # registry.builtins
     "register_builtin_api_providers", "register_builtin_models",
-    "register_all_builtins", "reset_registry",
+    "register_all_builtins", "reset_api_registry",
+    "reset_model_registry","reset_registry",
     
     # providers (可选)
     "stream_openai_completions", "stream_simple_openai_completions", "OpenAICompletionsOptions",
@@ -183,6 +187,9 @@ __all__ = [
     # utils.http_proxy
     "setup_http_proxy", "get_http_proxy", "get_https_proxy",
     "configure_http_client_proxy", "is_node_environment",
+
+    # utils.overflow
+    "is_context_overflow",
     
     # compat
     "OpenAICompletionsCompat", "OpenAIResponsesCompat",
@@ -194,7 +201,7 @@ __all__ = [
     "get_bedrock_credentials_type", "get_bedrock_region",
     
     # models.data
-    "OPENAI_MODELS", "ANTHROPIC_MODELS", "GOOGLE_MODELS",
+    "OPENAI_MODELS", "ANTHROPIC_MODELS", "GOOGLE_MODELS","calculate_cost", "supports_xhigh_thinking", "models_are_equal",
     "get_openai_model", "get_anthropic_model", "get_google_model",
     "list_openai_models", "list_anthropic_models", "list_google_models",
 ]

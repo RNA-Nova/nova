@@ -4,6 +4,7 @@ Provides state management, event subscription, message queuing, and lifecycle co
 """
 
 import asyncio
+import inspect
 from typing import (
     Any, Callable, List, Literal, Optional, Set, Union, Awaitable, cast
 )
@@ -50,6 +51,9 @@ from .events import (
 )
 from .agent_loop import agent_loop, agent_loop_continue
 
+Listener = Callable[[AgentEvent], None]
+AsyncListener = Callable[[AgentEvent], Awaitable[None]]
+AgentListener = Union[Listener, AsyncListener]
 
 async def _default_convert_to_llm(messages: List[AgentMessage]) -> List[Message]:
     """Default converter: keep only LLM‑compatible messages."""
@@ -78,13 +82,13 @@ class Agent:
         max_retry_delay_ms: Optional[int] = None,
     ):
         # Default model (matching the TypeScript example)
-        default_model = get_model("google", "gemini-2.5-flash-lite-preview-06-17")
+        default_model = get_model("volcengine", "deepseek-r1-250528")
 
         # Initialise state
         self._state = AgentState(
             system_prompt=initial_state.get("system_prompt", "") if initial_state else "",
             model=initial_state.get("model", default_model) if initial_state else default_model,
-            thinking_level=initial_state.get("thinking_level", "off") if initial_state else "off",
+            thinking_level=initial_state.get("thinking_level", None) if initial_state else None,
             tools=initial_state.get("tools", []) if initial_state else [],
             messages=initial_state.get("messages", []) if initial_state else [],
             is_streaming=False,
@@ -156,8 +160,8 @@ class Agent:
     # Public API
     # ----------------------------------------------------------------------
 
-    def subscribe(self, fn: Callable[[AgentEvent], None]) -> Callable[[], None]:
-        """Register an event listener. Returns an unsubscribe function."""
+    def subscribe(self, fn: AgentListener) -> Callable[[], None]:
+        """注册事件监听器（支持同步或异步函数）。返回取消订阅函数。"""
         self._listeners.add(fn)
         return lambda: self._listeners.discard(fn)
 
@@ -378,7 +382,7 @@ class Agent:
         # Build the loop configuration
         config = AgentLoopConfig(
             model=model,
-            reasoning=None if self._state.thinking_level == "off" else self._state.thinking_level,
+            reasoning=self._state.thinking_level,
             session_id=self._session_id,
             transport=self._transport,
             thinking_budgets=self._thinking_budgets,
@@ -425,7 +429,7 @@ class Agent:
                         self._state.stream_message = None
 
                     # Emit to listeners
-                    self._emit(event)
+                    await self._emit(event)
 
                 # Handle any remaining partial message (non‑empty)
                 if partial and partial.role == "assistant" and partial.content:
@@ -476,7 +480,7 @@ class Agent:
                 )
                 self.append_message(error_msg)
                 self._state.error = str(e)
-                self._emit(AgentEndEvent(messages=[error_msg]))
+                await self._emit(AgentEndEvent(messages=[error_msg]))
             finally:
                 self._state.is_streaming = False
                 self._state.stream_message = None
@@ -490,11 +494,22 @@ class Agent:
         finally:
             self._running_task = None
 
-    def _emit(self, event: AgentEvent) -> None:
-        """Synchronously notify all listeners."""
+    async def _emit(self, event: AgentEvent) -> None:
+        """带超时的异步事件分发"""
+        tasks = []
+        
         for listener in self._listeners:
-            try:
-                listener(event)
-            except Exception:
-                # Log or ignore listener errors
-                pass
+            if inspect.iscoroutinefunction(listener):
+                # 包装任务，添加超时保护
+                task = asyncio.create_task(
+                    asyncio.wait_for(listener(event), timeout=120)
+                )
+                tasks.append(task)
+            else:
+                # 同步函数在线程池中运行，避免阻塞事件循环
+                loop = asyncio.get_event_loop()
+                task = loop.run_in_executor(None, listener, event)
+                tasks.append(task)
+        
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)

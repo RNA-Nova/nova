@@ -56,23 +56,7 @@ def stream(
     """
     provider = resolve_api_provider(model.api)
     
-    stream_options = None
-    if options:
-        stream_options = ProviderStreamOptions(
-            temperature=options.temperature,
-            max_tokens=options.max_tokens,
-            signal=options.signal,
-            api_key=options.api_key,
-            transport=options.transport,
-            cache_retention=options.cache_retention,
-            session_id=options.session_id,
-            headers=options.headers,
-            on_payload=options.on_payload,
-            max_retry_delay_ms=options.max_retry_delay_ms,
-            metadata=options.metadata,
-        )
-    
-    return provider.stream(model, context, stream_options)
+    return provider.stream(model, context, options)
 
 
 async def complete(

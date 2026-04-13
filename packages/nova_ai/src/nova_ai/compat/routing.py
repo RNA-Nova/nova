@@ -6,9 +6,10 @@
 from typing import Optional, List
 from dataclasses import dataclass, field
 
+from mashumaro.mixins.json import DataClassJSONMixin
 
 @dataclass
-class OpenRouterRouting:
+class OpenRouterRouting(DataClassJSONMixin):
     """
     OpenRouter 提供商路由偏好设置
     控制OpenRouter将请求路由到哪些上游提供商
@@ -23,7 +24,7 @@ class OpenRouterRouting:
 
 
 @dataclass
-class VercelGatewayRouting:
+class VercelGatewayRouting(DataClassJSONMixin):
     """
     Vercel AI Gateway 路由偏好设置
     控制网关将请求路由到哪些上游提供商

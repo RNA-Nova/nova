@@ -13,8 +13,8 @@ from .events import AssistantMessageEvent, DoneEvent, ErrorEvent
 T = TypeVar('T')
 R = TypeVar('R')
 
-
-class EventStream(Generic[T, R]):
+TIME_OUT = 60
+class EventStream(Generic[T, R], AsyncIterator[T]):
     """
     通用事件流类，支持异步迭代
     """
@@ -59,23 +59,26 @@ class EventStream(Generic[T, R]):
                 StopAsyncIteration("Stream ended without result")
             )
 
-    async def __aiter__(self) -> AsyncIterator[T]:
-        """异步迭代器"""
+    async def __anext__(self) -> T:
+        """实现 AsyncIterator 的 __anext__ 方法"""
+        # 如果队列为空且已完成，则停止迭代
+        if self._queue.empty() and self._done:
+            raise StopAsyncIteration
+        
+        # 获取下一个事件
         while True:
             try:
-                # 如果队列为空且已完成，则停止
+                event = await asyncio.wait_for(self._queue.get(), timeout=TIME_OUT)
+                return event
+            except asyncio.TimeoutError:
+                # 如果超时但流已完成且队列为空，则停止
                 if self._queue.empty() and self._done:
-                    break
-                
-                # 获取下一个事件
-                try:
-                    event = await asyncio.wait_for(self._queue.get(), timeout=0.1)
-                    yield event
-                except asyncio.TimeoutError:
-                    continue
-                    
-            except Exception as e:
-                break
+                    raise StopAsyncIteration
+                continue
+
+    def __aiter__(self) -> AsyncIterator[T]:
+        """返回异步迭代器自身"""
+        return self
 
     async def result(self) -> R:
         """获取最终结果"""

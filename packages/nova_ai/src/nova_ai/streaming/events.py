@@ -8,16 +8,17 @@ from dataclasses import dataclass, field
 from ..core.messages import AssistantMessage
 from ..core.content import ToolCall
 
+from mashumaro.mixins.json import DataClassJSONMixin
 
 @dataclass
-class StartEvent:
+class StartEvent(DataClassJSONMixin):
     """流开始事件"""
     type: Literal["start"] = "start"
     partial: AssistantMessage = field(default_factory=AssistantMessage)
 
 
 @dataclass
-class TextStartEvent:
+class TextStartEvent(DataClassJSONMixin):
     """文本内容开始事件"""
     type: Literal["text_start"] = "text_start"
     content_index: int = 0
@@ -25,7 +26,7 @@ class TextStartEvent:
 
 
 @dataclass
-class TextDeltaEvent:
+class TextDeltaEvent(DataClassJSONMixin):
     """文本内容增量事件"""
     type: Literal["text_delta"] = "text_delta"
     content_index: int = 0
@@ -34,7 +35,7 @@ class TextDeltaEvent:
 
 
 @dataclass
-class TextEndEvent:
+class TextEndEvent(DataClassJSONMixin):
     """文本内容结束事件"""
     type: Literal["text_end"] = "text_end"
     content_index: int = 0
@@ -43,7 +44,7 @@ class TextEndEvent:
 
 
 @dataclass
-class ThinkingStartEvent:
+class ThinkingStartEvent(DataClassJSONMixin):
     """思考内容开始事件"""
     type: Literal["thinking_start"] = "thinking_start"
     content_index: int = 0
@@ -51,7 +52,7 @@ class ThinkingStartEvent:
 
 
 @dataclass
-class ThinkingDeltaEvent:
+class ThinkingDeltaEvent(DataClassJSONMixin):
     """思考内容增量事件"""
     type: Literal["thinking_delta"] = "thinking_delta"
     content_index: int = 0
@@ -60,7 +61,7 @@ class ThinkingDeltaEvent:
 
 
 @dataclass
-class ThinkingEndEvent:
+class ThinkingEndEvent(DataClassJSONMixin):
     """思考内容结束事件"""
     type: Literal["thinking_end"] = "thinking_end"
     content_index: int = 0
@@ -69,7 +70,7 @@ class ThinkingEndEvent:
 
 
 @dataclass
-class ToolCallStartEvent:
+class ToolCallStartEvent(DataClassJSONMixin):
     """工具调用开始事件"""
     type: Literal["toolcall_start"] = "toolcall_start"
     content_index: int = 0
@@ -77,7 +78,7 @@ class ToolCallStartEvent:
 
 
 @dataclass
-class ToolCallDeltaEvent:
+class ToolCallDeltaEvent(DataClassJSONMixin):
     """工具调用增量事件"""
     type: Literal["toolcall_delta"] = "toolcall_delta"
     content_index: int = 0
@@ -86,7 +87,7 @@ class ToolCallDeltaEvent:
 
 
 @dataclass
-class ToolCallEndEvent:
+class ToolCallEndEvent(DataClassJSONMixin):
     """工具调用结束事件"""
     type: Literal["toolcall_end"] = "toolcall_end"
     content_index: int = 0
@@ -95,7 +96,7 @@ class ToolCallEndEvent:
 
 
 @dataclass
-class DoneEvent:
+class DoneEvent(DataClassJSONMixin):
     """完成事件"""
     type: Literal["done"] = "done"
     reason: Literal["stop", "length", "toolUse"] = "stop"
@@ -103,7 +104,7 @@ class DoneEvent:
 
 
 @dataclass
-class ErrorEvent:
+class ErrorEvent(DataClassJSONMixin):
     """错误事件"""
     type: Literal["error"] = "error"
     reason: Literal["aborted", "error"] = "error"

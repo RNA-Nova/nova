@@ -80,16 +80,29 @@ def register_all_builtins() -> None:
     register_builtin_models()
 
 
-def reset_registry() -> None:
-    """重置所有注册表"""
+def reset_api_registry() -> None:
+    """重置API提供者注册表并重新注册内置API提供者"""
     clear_api_providers()
+    register_builtin_api_providers()
+
+
+def reset_model_registry() -> None:
+    """重置模型注册表并重新注册内置模型"""
     clear_model_registry()
-    register_all_builtins()
+    register_builtin_models()
+
+
+def reset_registry() -> None:
+    """重置所有注册表（API提供者和模型）"""
+    reset_api_registry()
+    reset_model_registry()
 
 
 __all__ = [
     "register_builtin_api_providers",
     "register_builtin_models",
     "register_all_builtins",
+    "reset_api_registry",
+    "reset_model_registry",
     "reset_registry",
 ]

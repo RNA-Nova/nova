@@ -5,21 +5,31 @@
 from typing import List, Optional, Union, Literal, Dict, Any, TypeVar, Generic
 from dataclasses import dataclass, field
 
+from mashumaro import field_options
+from mashumaro.mixins.json import DataClassJSONMixin
+
 from .enums import Api, Provider, StopReason
 from .content import TextContent, ThinkingContent, ToolCall, ImageContent, ContentUnion
 from .usage import Usage
 
+from .serialize import serialize_content, deserialize_content
 
 @dataclass
-class UserMessage:
+class UserMessage(DataClassJSONMixin):
     """用户消息（用于上下文理解）"""
     role: Literal["user"] = "user"
-    content: Union[str, List[Union[TextContent, ImageContent]]] = field(default_factory=list)
+    content: Union[str, List[Union[TextContent, ImageContent]]] = field(
+        default_factory=list,
+        metadata=field_options(
+            serialize=serialize_content,
+            deserialize=deserialize_content
+        )
+    )
     timestamp: int = 0
 
 
 @dataclass
-class AssistantMessage:
+class AssistantMessage(DataClassJSONMixin):
     """助手消息"""
     role: Literal["assistant"] = "assistant"
     content: List[Union[TextContent, ThinkingContent, ToolCall]] = field(default_factory=list)
@@ -33,7 +43,7 @@ class AssistantMessage:
 
 
 @dataclass
-class ToolResultMessage:
+class ToolResultMessage(DataClassJSONMixin):
     """工具结果消息（用于上下文理解）"""
     role: Literal["toolResult"] = "toolResult"
     tool_call_id: str = ""
@@ -53,7 +63,7 @@ T = TypeVar('T')
 
 
 @dataclass
-class Tool(Generic[T]):
+class Tool(Generic[T],DataClassJSONMixin):
     """工具定义"""
     name: str = ""
     description: str = ""
@@ -61,7 +71,7 @@ class Tool(Generic[T]):
 
 
 @dataclass
-class Context:
+class Context(DataClassJSONMixin):
     """上下文"""
     system_prompt: Optional[str] = None
     messages: List[Message] = field(default_factory=list)
