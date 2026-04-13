@@ -4,14 +4,15 @@
 """
 
 from typing import Optional, Dict, Any, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field,InitVar
 
 from ..core.enums import ThinkingLevel, CacheRetention, Transport
 from ..models import Model
-
+from mashumaro.mixins.json import DataClassJSONMixin
+from mashumaro.config import BaseConfig
 
 @dataclass
-class ThinkingBudgets:
+class ThinkingBudgets(DataClassJSONMixin):
     """各思考级别的token预算"""
     minimal: Optional[int] = None
     low: Optional[int] = None
@@ -19,20 +20,32 @@ class ThinkingBudgets:
     high: Optional[int] = None
 
 
+from mashumaro.mixins.json import DataClassJSONMixin
+from mashumaro.config import BaseConfig
+from dataclasses import dataclass, field, InitVar
+from typing import Optional, Dict, Any, Callable
+
 @dataclass
-class StreamOptions:
+class StreamOptions(DataClassJSONMixin):
     """流式选项"""
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
-    signal: Optional[Any] = None  # Python中可以使用asyncio.Event或自定义信号
     api_key: Optional[str] = None
-    transport: Optional[Transport] = None  # 传输协议偏好
-    cache_retention: Optional[CacheRetention] = None
+    transport: Optional[Any] = None
+    cache_retention: Optional[Any] = None
     session_id: Optional[str] = None
     headers: Optional[Dict[str, str]] = None
-    on_payload: Optional[Callable[[Any], None]] = None
     max_retry_delay_ms: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
+    
+    # 使用 InitVar 标记为初始化变量，不会被序列化
+    signal: InitVar[Optional[Any]] = None
+    on_payload: InitVar[Optional[Callable]] = None
+    
+    def __post_init__(self, signal: Optional[Any] = None, on_payload: Optional[Callable] = None):
+        """存储 InitVar 变量到实例属性"""
+        self.signal = signal
+        self.on_payload = on_payload
 
 
 @dataclass

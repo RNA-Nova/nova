@@ -14,6 +14,7 @@ from copy import deepcopy
 from nova_ai import (
     AssistantMessage,
     Context,
+    EventStream,
     stream_simple,
     ToolResultMessage,
     AssistantMessageEvent,  # for type hints
@@ -49,7 +50,8 @@ from .events import (
 # Custom async event stream (replacement for EventStream from pi-ai)
 # ----------------------------------------------------------------------
 
-class AgentEventStream(AsyncIterator[AgentEvent]):
+
+class AgentEventStream(EventStream[AgentEvent, List[AgentMessage]]):
     """
     An asynchronous stream of AgentEvents. Usage:
         stream = AgentEventStream()
@@ -59,41 +61,16 @@ class AgentEventStream(AsyncIterator[AgentEvent]):
     """
 
     def __init__(self):
-        self._queue: asyncio.Queue[Union[AgentEvent, _EndMarker]] = asyncio.Queue()
-        self._final_result: Optional[List[AgentMessage]] = None
-        self._ended = False
+        def is_complete(event: AgentEvent) -> bool:
+            # 根据 AgentEvent 的实际结构判断是否结束
+            # 假设有 done 或 end 类型的事件
+            return getattr(event, "type", None) in ("done", "end", "error")
 
-    def push(self, event: AgentEvent) -> None:
-        """Push an event into the stream."""
-        if self._ended:
-            raise RuntimeError("Stream already ended")
-        self._queue.put_nowait(event)
+        def extract_result(event: AgentEvent) -> List[AgentMessage]:
+            # 从结束事件中提取最终结果
+            return getattr(event, "messages", []) or getattr(event, "result", [])
 
-    def end(self, result: List[AgentMessage]) -> None:
-        """Mark the stream as finished and provide the final result."""
-        if self._ended:
-            return
-        self._ended = True
-        self._final_result = result
-        self._queue.put_nowait(_EndMarker())
-
-    def get_result(self) -> List[AgentMessage]:
-        """Return the final result after the stream ends."""
-        if self._final_result is None:
-            raise RuntimeError("Stream not ended yet")
-        return self._final_result
-
-    async def __anext__(self) -> AgentEvent:
-        item = await self._queue.get()
-        if isinstance(item, _EndMarker):
-            raise StopAsyncIteration
-        return item
-
-
-class _EndMarker:
-    """Internal marker to signal stream end."""
-    pass
-
+        super().__init__(is_complete, extract_result)
 
 # ----------------------------------------------------------------------
 # Public API

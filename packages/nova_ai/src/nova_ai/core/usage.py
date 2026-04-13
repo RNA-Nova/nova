@@ -4,9 +4,11 @@
 
 from dataclasses import dataclass, field
 
+from mashumaro.mixins.json import DataClassJSONMixin
+
 
 @dataclass
-class Cost:
+class Cost(DataClassJSONMixin):
     """成本明细"""
     input: float = 0.0          # 输入成本
     output: float = 0.0         # 输出成本
@@ -16,7 +18,7 @@ class Cost:
 
 
 @dataclass
-class Usage:
+class Usage(DataClassJSONMixin):
     """令牌使用统计"""
     input: int = 0               # 输入令牌数
     output: int = 0              # 输出令牌数

@@ -65,6 +65,7 @@ class StopReason(str, Enum):
 
 class ThinkingLevel(str, Enum):
     """思考级别"""
+    OFF = "none"
     MINIMAL = "minimal"
     LOW = "low"
     MEDIUM = "medium"

@@ -31,6 +31,8 @@ from .builtins import (
     register_builtin_api_providers,
     register_builtin_models,
     register_all_builtins,
+    reset_api_registry,
+    reset_model_registry,
     reset_registry,
 )
 
@@ -48,5 +50,6 @@ __all__ = [
     
     # 内置注册
     "register_builtin_api_providers", "register_builtin_models",
-    "register_all_builtins", "reset_registry",
+    "register_all_builtins", "reset_api_registry",
+    "reset_model_registry","reset_registry",
 ]

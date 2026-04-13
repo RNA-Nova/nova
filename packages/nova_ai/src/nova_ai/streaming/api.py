@@ -56,23 +56,7 @@ def stream(
     """
     provider = resolve_api_provider(model.api)
     
-    stream_options = None
-    if options:
-        stream_options = ProviderStreamOptions(
-            temperature=options.temperature,
-            max_tokens=options.max_tokens,
-            signal=options.signal,
-            api_key=options.api_key,
-            transport=options.transport,
-            cache_retention=options.cache_retention,
-            session_id=options.session_id,
-            headers=options.headers,
-            on_payload=options.on_payload,
-            max_retry_delay_ms=options.max_retry_delay_ms,
-            metadata=options.metadata,
-        )
-    
-    return provider.stream(model, context, stream_options)
+    return provider.stream(model, context, options)
 
 
 async def complete(
@@ -91,7 +75,7 @@ async def complete(
     Returns:
         完整的助手消息
     """
-    event_stream = stream(model, context, options)
+    event_stream = await stream(model, context, options)
     return await event_stream.result()
 
 
@@ -131,7 +115,7 @@ async def complete_simple(
     Returns:
         完整的助手消息
     """
-    event_stream = stream_simple(model, context, options)
+    event_stream = await stream_simple(model, context, options)
     return await event_stream.result()
 
 

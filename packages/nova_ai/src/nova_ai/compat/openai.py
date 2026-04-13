@@ -8,8 +8,10 @@ from dataclasses import dataclass, field
 from ..core.enums import ThinkingFormat
 from .routing import OpenRouterRouting, VercelGatewayRouting
 
+from mashumaro.mixins.json import DataClassJSONMixin
+
 @dataclass
-class OpenAICompletionsCompat:
+class OpenAICompletionsCompat(DataClassJSONMixin):
     """
     OpenAI-compatible completions API 兼容性设置
     用于覆盖基于URL的自动检测

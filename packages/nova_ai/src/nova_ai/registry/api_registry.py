@@ -11,7 +11,6 @@ from ..core.messages import Context
 from ..streaming.event_stream import AssistantMessageEventStream
 from ..utils.stream_options import StreamOptions, SimpleStreamOptions
 
-
 class ApiProvider(Protocol):
     """
     API提供者接口协议

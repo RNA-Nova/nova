@@ -4,10 +4,10 @@
 
 from typing import Literal, Dict, Any, Optional
 from dataclasses import dataclass, field
-
+from mashumaro.mixins.json import DataClassJSONMixin
 
 @dataclass
-class TextContent:
+class TextContent(DataClassJSONMixin):
     """文本内容"""
     type: Literal["text"] = "text"
     text: str = ""
@@ -15,7 +15,7 @@ class TextContent:
 
 
 @dataclass
-class ThinkingContent:
+class ThinkingContent(DataClassJSONMixin):
     """思考过程内容（推理过程）"""
     type: Literal["thinking"] = "thinking"
     thinking: str = ""
@@ -28,7 +28,7 @@ class ThinkingContent:
 
 
 @dataclass
-class ToolCall:
+class ToolCall(DataClassJSONMixin):
     """工具调用"""
     type: Literal["toolCall"] = "toolCall"
     id: str = ""
@@ -38,7 +38,7 @@ class ToolCall:
 
 
 @dataclass
-class ImageContent:
+class ImageContent(DataClassJSONMixin):
     """图像内容（用于用户消息和工具结果）"""
     type: Literal["image"] = "image"
     data: str = ""  # base64 encoded image data

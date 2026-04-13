@@ -7,7 +7,7 @@ from typing import (
     Any, Union, Optional, List, Dict, Set, Callable, Awaitable, TypeVar, Generic,
     Protocol, runtime_checkable, Literal
 )
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from abc import ABC, abstractmethod
 import asyncio
 
@@ -18,17 +18,20 @@ from nova_ai import (
     Message,
     Model,
     SimpleStreamOptions,
+    ThinkingLevel,
     stream_simple,
     TextContent,
     Tool,
     ToolResultMessage,
 )
 
+from mashumaro.mixins.json import DataClassJSONMixin
+
 # ----------------------------------------------------------------------
 # Custom message support
 # ----------------------------------------------------------------------
-
-class CustomAgentMessage(ABC):
+@dataclass
+class CustomAgentMessage(DataClassJSONMixin):
     """Base class for custom agent messages. Extend this to add your own message types."""
     pass
 
@@ -38,9 +41,6 @@ AgentMessage = Union[Message, CustomAgentMessage]
 # ----------------------------------------------------------------------
 # Type aliases
 # ----------------------------------------------------------------------
-
-ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
-"""Thinking/reasoning level for models that support it."""
 
 # Stream function signature – can be sync or async (returns a Promise in TS)
 class StreamFn(Protocol):
@@ -56,7 +56,7 @@ TDetails = TypeVar("TDetails")
 """Type variable for tool execution details."""
 
 @dataclass
-class AgentToolResult(Generic[TDetails]):
+class AgentToolResult(Generic[TDetails],DataClassJSONMixin):
     """Result of a tool execution."""
     content: List[Union[TextContent, ImageContent]]
     """Content blocks supporting text and images."""
@@ -101,7 +101,7 @@ class AgentTool(Tool[TParameters], Generic[TParameters, TDetails], ABC):
 # ----------------------------------------------------------------------
 
 @dataclass
-class AgentContext:
+class AgentContext(DataClassJSONMixin):
     """Agent context similar to SimpleStreamOptions but using AgentMessage."""
     system_prompt: str
     messages: List[AgentMessage]
@@ -117,7 +117,7 @@ class AgentLoopConfig(SimpleStreamOptions):
     model: Model = None
     """The LLM model to use."""
 
-    convert_to_llm: Callable[[List[AgentMessage]], Union[List[Message], Awaitable[List[Message]]]] = NotImplemented
+    convert_to_llm: InitVar[Callable[[List[AgentMessage]], Union[List[Message], Awaitable[List[Message]]]]] = NotImplemented
     """
     Converts AgentMessage[] to LLM‑compatible Message[] before each LLM call.
     Each AgentMessage must be converted to a UserMessage, AssistantMessage,
@@ -125,7 +125,7 @@ class AgentLoopConfig(SimpleStreamOptions):
     converted (e.g., UI‑only notifications) should be filtered out.
     """
 
-    transform_context: Optional[Callable[[List[AgentMessage], Optional[Any]], Awaitable[List[AgentMessage]]]] = None
+    transform_context: InitVar[Optional[Callable[[List[AgentMessage], Optional[Any]], Awaitable[List[AgentMessage]]]]] = None
     """
     Optional transform applied to the context before `convert_to_llm`.
     Use this for operations that work at the AgentMessage level:
@@ -133,13 +133,13 @@ class AgentLoopConfig(SimpleStreamOptions):
     - Injecting context from external sources
     """
 
-    get_api_key: Optional[Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]] = None
+    get_api_key: InitVar[Optional[Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]]] = None
     """
     Resolves an API key dynamically for each LLM call.
     Useful for short‑lived OAuth tokens that may expire during long‑running tool execution.
     """
 
-    get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None
+    get_steering_messages: InitVar[Optional[Callable[[], Awaitable[List[AgentMessage]]]]] = None
     """
     Returns steering messages to inject into the conversation mid‑run.
     Called after each tool execution to check for user interruptions.
@@ -147,23 +147,42 @@ class AgentLoopConfig(SimpleStreamOptions):
     are added to the context before the next LLM call.
     """
 
-    get_follow_up_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None
+    get_follow_up_messages: InitVar[Optional[Callable[[], Awaitable[List[AgentMessage]]]]] = None
     """
     Returns follow‑up messages to process after the agent would otherwise stop.
     Called when the agent has no more tool calls and no steering messages.
     If messages are returned, they're added to the context and the agent continues.
     """
 
+    def __post_init__(self, 
+                      signal: Optional[Any] = None,
+                      on_payload: Optional[Callable] = None,
+                      convert_to_llm: Callable[[List[AgentMessage]], Union[List[Message], Awaitable[List[Message]]]] = NotImplemented,
+                      transform_context: Optional[Callable[[List[AgentMessage], Optional[Any]], Awaitable[List[AgentMessage]]]] = None,
+                      get_api_key: Optional[Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]] = None,
+                      get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None,
+                      get_follow_up_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None,
+                      ):
+        """将 InitVar 参数转换为实例属性"""
+        # 调用父类的 __post_init__
+        super().__post_init__(signal=signal, on_payload=on_payload)
+        
+        # 设置子类的 InitVar 属性
+        self.convert_to_llm = convert_to_llm
+        self.transform_context = transform_context
+        self.get_api_key = get_api_key
+        self.get_steering_messages = get_steering_messages
+        self.get_follow_up_messages = get_follow_up_messages
 # ----------------------------------------------------------------------
 # Agent state
 # ----------------------------------------------------------------------
 
 @dataclass
-class AgentState:
+class AgentState(DataClassJSONMixin):
     """Agent state containing all configuration and conversation data."""
-    system_prompt: str
-    model: Model
-    thinking_level: ThinkingLevel
+    system_prompt: Optional[str]
+    model: Optional[Model]
+    thinking_level: Optional[ThinkingLevel]
     tools: List[AgentTool[Any, Any]]
     messages: List[AgentMessage]
     is_streaming: bool
@@ -176,49 +195,49 @@ class AgentState:
 # ----------------------------------------------------------------------
 
 @dataclass
-class AgentStartEvent:
+class AgentStartEvent(DataClassJSONMixin):
     type: Literal["agent_start"] = "agent_start"
 
 @dataclass
-class AgentEndEvent:
+class AgentEndEvent(DataClassJSONMixin):
     type: Literal["agent_end"] = "agent_end"
     messages: List[AgentMessage] = None
 
 @dataclass
-class TurnStartEvent:
+class TurnStartEvent(DataClassJSONMixin):
     type: Literal["turn_start"] = "turn_start"
 
 @dataclass
-class TurnEndEvent:
+class TurnEndEvent(DataClassJSONMixin):
     type: Literal["turn_end"] = "turn_end"
     message: AgentMessage = None
     tool_results: List[ToolResultMessage] = None
 
 @dataclass
-class MessageStartEvent:
+class MessageStartEvent(DataClassJSONMixin):
     type: Literal["message_start"] = "message_start"
     message: AgentMessage = None
 
 @dataclass
-class MessageUpdateEvent:
+class MessageUpdateEvent(DataClassJSONMixin):
     type: Literal["message_update"] = "message_update"
     message: AgentMessage = None
     assistant_message_event: AssistantMessageEvent = None
 
 @dataclass
-class MessageEndEvent:
+class MessageEndEvent(DataClassJSONMixin):
     type: Literal["message_end"] = "message_end"
     message: AgentMessage = None
 
 @dataclass
-class ToolExecutionStartEvent:
+class ToolExecutionStartEvent(DataClassJSONMixin):
     type: Literal["tool_execution_start"] = "tool_execution_start"
     tool_call_id: str = None
     tool_name: str = None
     args: Any = None
 
 @dataclass
-class ToolExecutionUpdateEvent:
+class ToolExecutionUpdateEvent(DataClassJSONMixin):
     type: Literal["tool_execution_update"] = "tool_execution_update"
     tool_call_id: str = None
     tool_name: str = None
@@ -226,7 +245,7 @@ class ToolExecutionUpdateEvent:
     partial_result: Any = None
 
 @dataclass
-class ToolExecutionEndEvent:
+class ToolExecutionEndEvent(DataClassJSONMixin):
     type: Literal["tool_execution_end"] = "tool_execution_end"
     tool_call_id: str = None
     tool_name: str = None

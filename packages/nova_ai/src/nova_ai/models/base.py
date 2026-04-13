@@ -6,6 +6,8 @@ from typing import Optional, Dict, List, Literal, Union, TypeVar, Generic
 from dataclasses import dataclass, field
 from enum import Enum
 
+from mashumaro.mixins.json import DataClassJSONMixin
+
 from ..core.usage import Usage,Cost
 
 from ..core.enums import Api, Provider, KnownApi, KnownProvider
@@ -13,7 +15,7 @@ from ..compat.openai import OpenAICompletionsCompat, OpenAIResponsesCompat
 
 
 @dataclass
-class ModelCost:
+class ModelCost(DataClassJSONMixin):
     """模型成本（$/百万tokens）"""
     input: float = 0.0
     output: float = 0.0
@@ -22,7 +24,7 @@ class ModelCost:
 
 
 @dataclass
-class Model:
+class Model(DataClassJSONMixin):
     """模型定义"""
     id: str
     name: str
@@ -98,3 +100,23 @@ def supports_xhigh_thinking(model: Model) -> bool:
         return "opus-4-6" in model.id or "opus-4.6" in model.id
     
     return False
+
+def models_are_equal(
+    a: Optional[Model],
+    b: Optional[Model]
+) -> bool:
+    """
+    检查两个模型是否相等（比较 id 和 provider）
+    
+    如果任一模型为 None，返回 False
+    
+    Args:
+        a: 第一个模型
+        b: 第二个模型
+        
+    Returns:
+        两个模型是否相等
+    """
+    if a is None or b is None:
+        return False
+    return a.id == b.id and a.provider == b.provider
