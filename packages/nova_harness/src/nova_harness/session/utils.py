@@ -13,13 +13,16 @@ from .types import (
     SessionEntry, SessionHeader, FileEntry,
     SessionMessageEntry, ThinkingLevelChangeEntry,
     ModelChangeEntry, CompactionEntry, BranchSummaryEntry,
-    CustomEntry, CustomMessageEntry, LabelEntry, SessionInfoEntry,
+    CustomEntry, SendToFrontendEntry, SendToAgentEntry,
+    CustomMessageEntry, InterAgentMessageEntry,
+    FrontendMessageEntry, LabelEntry, SessionInfoEntry,
     SessionContext
 )
 from ..config import get_agent_dir
 from ..messages import (
     create_compaction_summary_message, create_custom_message,
-    create_branch_summary_message
+    create_branch_summary_message, create_inter_agent_message,
+    create_frontend_message
 )
 
 
@@ -56,12 +59,20 @@ def parse_session_entries(content: str) -> List[FileEntry]:
                 entries.append(BranchSummaryEntry.from_dict(data))
             elif data.get('type') == 'custom':
                 entries.append(CustomEntry.from_dict(data))
+            elif data.get('type') == 'send_to_frontend':
+                entries.append(SendToFrontendEntry.from_dict(data))
+            elif data.get('type') == 'send_to_agent_message':
+                entries.append(SendToAgentEntry.from_dict(data))
             elif data.get('type') == 'label':
                 entries.append(LabelEntry.from_dict(data))
             elif data.get('type') == 'session_info':
                 entries.append(SessionInfoEntry.from_dict(data))
             elif data.get('type') == 'custom_message':
                 entries.append(CustomMessageEntry.from_dict(data))
+            elif data.get('type') == 'inter_agent_message':
+                entries.append(InterAgentMessageEntry.from_dict(data))
+            elif data.get('type') == 'frontend_message':
+                entries.append(FrontendMessageEntry.from_dict(data))
         except (json.JSONDecodeError, TypeError):
             continue
     return entries
@@ -127,6 +138,17 @@ def build_session_context(
             messages.append(
                 create_custom_message(entry.custom_type, entry.content, 
                                   entry.display, entry.details, entry.timestamp)
+            )
+        elif entry.type == "inter_agent_message":
+            messages.append(
+                create_inter_agent_message(
+                    entry.sender_id, entry.sender_name, entry.content,
+                    entry.display, entry.timestamp
+                )
+            )
+        elif entry.type == "frontend_message":
+            messages.append(
+                create_frontend_message(entry.content, entry.display, entry.timestamp)
             )
         elif entry.type == "branch_summary" and entry.summary:
             messages.append(

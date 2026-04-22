@@ -15,6 +15,8 @@ from ..messages import (
     create_branch_summary_message,
     create_compaction_summary_message,
     create_custom_message,
+    create_inter_agent_message,
+    create_frontend_message,
 )
 from ..session import SessionManager, SessionEntry
 from .types import (
@@ -112,6 +114,22 @@ def _get_message_from_entry(entry: SessionEntry) -> Optional[AgentMessage]:
             entry.content,
             entry.display,
             entry.details,
+            entry.timestamp,
+        )
+
+    if entry.type == "inter_agent_message":
+        return create_inter_agent_message(
+            entry.sender_id,
+            entry.sender_name,
+            entry.content,
+            entry.display,
+            entry.timestamp,
+        )
+
+    if entry.type == "frontend_message":
+        return create_frontend_message(
+            entry.content,
+            entry.display,
             entry.timestamp,
         )
 

@@ -13,7 +13,7 @@ from nova_ai import (
     AssistantMessage, ImageContent, Message, Model, TextContent, ThinkingLevel,
     UserMessage, ToolResultMessage  # DataClassJSONMixin 继承类
 )
-from ..messages import CustomMessage, FrontendToAgentMessage, AgentToFrontendMessage
+from ..messages import CustomMessage, InterAgentMessage, FrontendMessage
 from nova_ai import (
     is_context_overflow, models_are_equal, reset_api_registry, supports_xhigh_thinking
 )
@@ -49,15 +49,17 @@ THINKING_LEVELS_WITH_XHIGH = [ThinkingLevel.OFF, ThinkingLevel.MINIMAL, Thinking
 class AgentSession:
     def __init__(self, config: AgentSessionConfig):
         self._agent = config.agent
-        self._build_system_prompt = config.system_prompt_fn
+        self._definitor = config.definitor
         self._session_manager = config.session_manager
         self._settings_manager = config.settings_manager
         self._computex_manager = config.computex_manager
         self._scoped_models = config.scoped_models or []
         self._resource_loader = config.resource_loader
         self._cwd = config.cwd
+        self._workspace = config.workspace
         self._model_registry = config.model_registry
         self._initial_active_tool_names = config.initial_active_tool_names
+        self._valid_tool_names = config.initial_active_tool_names
         self._base_tools_override = config.base_tools_override
 
         self._unsubscribe_agent: Optional[Callable[[], None]] = None
@@ -202,12 +204,20 @@ class AgentSession:
 
         return unsubscribe
 
-    def _emit(self, event: AgentSessionEvent) -> None:
+    async def _emit(self, event: AgentSessionEvent) -> None:
+        import inspect
+
+        tasks = []
         for listener in self._event_listeners:
             try:
-                listener(event)
+                if inspect.iscoroutinefunction(listener):
+                    tasks.append(asyncio.create_task(listener(event)))
+                else:
+                    listener(event)
             except Exception:
                 pass
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _disconnect_from_agent(self) -> None:
         if self._unsubscribe_agent:
@@ -235,7 +245,7 @@ class AgentSession:
                     elif message_text in self._follow_up_messages:
                         self._follow_up_messages.remove(message_text)
 
-        self._emit(event)
+        await self._emit(event)
 
         if hasattr(event, 'type') and event.type == "message_end":
             msg = event.message
@@ -245,23 +255,21 @@ class AgentSession:
                 self._session_manager.append_custom_message_entry(
                     msg.custom_type, msg.content, msg.display, msg.details
                 )
+            elif isinstance(msg, InterAgentMessage):
+                self._session_manager.append_inter_agent_message_entry(
+                    msg.sender_id, msg.sender_name, msg.content, msg.display
+                )
+            elif isinstance(msg, FrontendMessage):
+                self._session_manager.append_frontend_message_entry(
+                    msg.content, msg.display
+                )
             elif isinstance(msg, (UserMessage, AssistantMessage, ToolResultMessage)):
                 self._session_manager.append_message(msg)
-                if isinstance(msg,ToolResultMessage):
-                    if msg.details.get("agent_to_frontend"):
-                        agent_to_frontend_message_json = msg.content[0].text
-                        agent_to_frontend_message_dict = repair_json(agent_to_frontend_message_json, return_objects=True)
-                        agent_to_frontend_message = AgentToFrontendMessage.from_dict(agent_to_frontend_message_dict)
-                        self._session_manager.append_agent_to_frontend_message(
-                            content=agent_to_frontend_message.content,
-                            display=agent_to_frontend_message.display,
-
-                        )
 
             if isinstance(msg, AssistantMessage):
                 self._last_assistant_message = msg
                 if msg.stop_reason != "error" and self._retry_attempt > 0:
-                    self._emit(AutoRetryEndEvent(
+                    await self._emit(AutoRetryEndEvent(
                         success=True, attempt=self._retry_attempt
                     ))
                     self._retry_attempt = 0
@@ -319,7 +327,13 @@ class AgentSession:
             {"name": t.name, "description": t.description, "parameters": t.parameters}
             for t in self._tool_registry.values()
         ]
-
+    def change_definition(self, definition_dir: str):
+        self._definitor.set_agent_dir(definition_dir)
+        self._build_runtime({'active_tool_names': self._definitor.get_available_tools()})
+    def change_workspace(self, workspace: str):
+        self._workspace = workspace
+        self._base_system_prompt = self._rebuild_system_prompt()
+        self._agent.set_system_prompt(self._base_system_prompt)
     def set_active_tools_by_name(self, tool_names: List[str]) -> None:
         tools = []
         valid_tool_names = []
@@ -328,16 +342,16 @@ class AgentSession:
             if tool:
                 tools.append(tool)
                 valid_tool_names.append(name)
-
+        self._valid_tool_names = valid_tool_names
         self._agent.set_tools(tools)
-        self._base_system_prompt = self._rebuild_system_prompt(valid_tool_names)
+        self._base_system_prompt = self._rebuild_system_prompt()
         self._agent.set_system_prompt(self._base_system_prompt)
 
-    def _rebuild_system_prompt(self, tool_names: List[str]) -> str:
-        valid_tool_names = [n for n in tool_names if n in self._tool_registry]
-        return self._build_system_prompt(
+    def _rebuild_system_prompt(self) -> str:
+        valid_tool_names = [n for n in self._valid_tool_names if n in self._tool_registry]
+        return self._definitor.build_system_prompt(
             DynamicContext(
-                cwd = self._cwd
+                cwd = self._workspace,
             ),
             valid_tool_names,
         )
@@ -365,7 +379,8 @@ class AgentSession:
         self._agent.set_tools(active_tools)
 
         system_prompt_names = [n for n in active_set if n in self._tool_registry]
-        self._base_system_prompt = self._rebuild_system_prompt(system_prompt_names)
+        self._valid_tool_names = system_prompt_names
+        self._base_system_prompt = self._rebuild_system_prompt()
         self._agent.set_system_prompt(self._base_system_prompt)
 
     # -------------------------------------------------------------------------
@@ -477,13 +492,10 @@ class AgentSession:
         opts = options or {}
         
         # 使用 CustomMessage dataclass 构造实例（而非 dict）
-        custom_message = CustomMessage(
-            custom_type=message_data.get('custom_type'),
-            content=message_data.get('content'),
-            display=message_data.get('display'),
-            details=message_data.get('details'),
-            timestamp=asyncio.get_event_loop().time()
+        custom_message = CustomMessage.from_dict(
+            message_data
         )
+        custom_message.timestamp = asyncio.get_event_loop().time()
 
         deliver_as = opts.get('deliver_as')
 
@@ -505,35 +517,64 @@ class AgentSession:
                 custom_message.details
             )
 
-    async def send_frontend_to_agent_message(
+    async def send_frontend_message(
         self,
-        message_data: Dict[str, Any],  # 输入参数，构造为 CustomMessage
+        message_data: Dict[str, Any],
         options: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """构造 CustomMessage dataclass 实例"""
+        """构造 FrontendMessage dataclass 实例并传递给 Agent"""
         opts = options or {}
         
-        # 使用 CustomMessage dataclass 构造实例（而非 dict）
-        frontend_to_agent_message = FrontendToAgentMessage.from_dict(
-            message_data
-        )
-        frontend_to_agent_message.timestamp = asyncio.get_event_loop().time()
+        frontend_message = FrontendMessage.from_dict(message_data)
+        frontend_message.timestamp = asyncio.get_event_loop().time()
         deliver_as = opts.get('deliver_as')
 
         if deliver_as == "next_turn":
-            self._pending_next_turn_messages.append(frontend_to_agent_message)
+            self._pending_next_turn_messages.append(frontend_message)
         elif self.is_streaming:
             if deliver_as == "follow_up":
-                self._agent.follow_up(frontend_to_agent_message)
+                self._agent.follow_up(frontend_message)
             else:
-                self._agent.steer(frontend_to_agent_message)
+                self._agent.steer(frontend_message)
         elif opts.get('trigger_turn'):
-            await self._agent.prompt([frontend_to_agent_message])
+            await self._agent.prompt([frontend_message])
         else:
-            self._agent.append_message(frontend_to_agent_message)
-            self._session_manager.append_frontend_to_agent_message(
-                frontend_to_agent_message.content,
-                frontend_to_agent_message.display,
+            self._agent.append_message(frontend_message)
+            self._session_manager.append_frontend_message(
+                frontend_message.content,
+                frontend_message.display,
+            )
+
+    async def send_inter_agent_message(
+        self,
+        message_data: Dict[str, Any],
+        options: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """构造 InterAgentMessage dataclass 实例并传递给 Agent"""
+        opts = options or {}
+        
+        inter_agent_message = InterAgentMessage.from_dict(message_data)
+        inter_agent_message.timestamp = asyncio.get_event_loop().time()
+        deliver_as = opts.get('deliver_as')
+
+        if deliver_as == "next_turn":
+            self._pending_next_turn_messages.append(inter_agent_message)
+        elif self.is_streaming:
+            if deliver_as == "follow_up":
+                self._agent.follow_up(inter_agent_message)
+            else:
+                self._agent.steer(inter_agent_message)
+        elif opts.get('trigger_turn'):
+            await self._agent.prompt([inter_agent_message])
+        else:
+            self._agent.append_message(inter_agent_message)
+            self._session_manager.append_inter_agent_message(
+                inter_agent_message.content,
+                inter_agent_message.sender_id,
+                inter_agent_message.sender_name,
+                inter_agent_message.recipient_id,
+                inter_agent_message.recipient_name,
+                inter_agent_message.display,
             )
 
     async def send_user_message(
@@ -655,6 +696,9 @@ class AgentSession:
         self._reconnect_to_agent()
         return True
 
+    def get_session_header(self):
+        return self._session_manager.get_header()
+
     def set_session_name(self, name: str) -> None:
         self._session_manager.append_session_info(name)
 
@@ -748,6 +792,24 @@ class AgentSession:
             new_leaf_id = target_entry.parent_id
             editor_text = self._get_user_message_text(target_entry.message)
         elif target_entry.type == "custom_message":
+            new_leaf_id = target_entry.parent_id
+            content = target_entry.content
+            if isinstance(content, str):
+                editor_text = content
+            else:
+                editor_text = "".join([
+                    c.text for c in content if isinstance(c, TextContent)
+                ])
+        elif target_entry.type == "inter_agent_message":
+            new_leaf_id = target_entry.parent_id
+            content = target_entry.content
+            if isinstance(content, str):
+                editor_text = content
+            else:
+                editor_text = "".join([
+                    c.text for c in content if isinstance(c, TextContent)
+                ])
+        elif target_entry.type == "frontend_message":
             new_leaf_id = target_entry.parent_id
             content = target_entry.content
             if isinstance(content, str):
@@ -1165,24 +1227,24 @@ class AgentSession:
         settings = self._settings_manager.get_compaction_settings()
 
         enum_reason = AutoCompactionReason.OVERFLOW if reason == "overflow" else AutoCompactionReason.THRESHOLD
-        self._emit(AutoCompactionStartEvent(reason=enum_reason))
+        await self._emit(AutoCompactionStartEvent(reason=enum_reason))
         self._auto_compaction_abort_controller = AbortSignal()
 
         try:
             if not self.model:
-                self._emit(AutoCompactionEndEvent(result=None, aborted=False, will_retry=False))
+                await self._emit(AutoCompactionEndEvent(result=None, aborted=False, will_retry=False))
                 return
 
             api_key = await self._model_registry.get_api_key(self.model)
             if not api_key:
-                self._emit(AutoCompactionEndEvent(result=None, aborted=False, will_retry=False))
+                await self._emit(AutoCompactionEndEvent(result=None, aborted=False, will_retry=False))
                 return
 
             path_entries = self._session_manager.get_branch()
             preparation = prepare_compaction(path_entries, settings)
 
             if not preparation:
-                self._emit(AutoCompactionEndEvent(result=None, aborted=False, will_retry=False))
+                await self._emit(AutoCompactionEndEvent(result=None, aborted=False, will_retry=False))
                 return
 
             result = await compact(
@@ -1191,7 +1253,7 @@ class AgentSession:
             )
 
             if self._auto_compaction_abort_controller.aborted:
-                self._emit(AutoCompactionEndEvent(result=None, aborted=True, will_retry=False))
+                await self._emit(AutoCompactionEndEvent(result=None, aborted=True, will_retry=False))
                 return
 
             self._session_manager.append_compaction(
@@ -1201,7 +1263,7 @@ class AgentSession:
             session_context = self._session_manager.build_session_context()
             self._agent.replace_messages(session_context.messages)
 
-            self._emit(AutoCompactionEndEvent(result=result, aborted=False, will_retry=will_retry))
+            await self._emit(AutoCompactionEndEvent(result=result, aborted=False, will_retry=will_retry))
 
             if will_retry:
                 messages = self._agent.state.messages
@@ -1219,7 +1281,7 @@ class AgentSession:
                 f"Context overflow recovery failed: {error_message}" if reason == "overflow"
                 else f"Auto-compaction failed: {error_message}"
             )
-            self._emit(AutoCompactionEndEvent(
+            await self._emit(AutoCompactionEndEvent(
                 result=None, aborted=False, will_retry=False, error_message=final_error
             ))
         finally:
@@ -1251,7 +1313,8 @@ class AgentSession:
             r'overloaded|rate.?limit|too many requests|429|500|502|503|504|'
             r'service.?unavailable|server error|internal error|connection.?error|'
             r'connection.?refused|other side closed|fetch failed|upstream.?connect|'
-            r'reset before headers|terminated|retry delay'
+            r'reset before headers|terminated|retry delay|'
+            r'timeout|timed out'
         )
         return bool(re.search(pattern, err, re.IGNORECASE))
 
@@ -1269,7 +1332,7 @@ class AgentSession:
             )
 
         if self._retry_attempt > settings.max_retries:
-            self._emit(AutoRetryEndEvent(
+            await self._emit(AutoRetryEndEvent(
                 success=False, attempt=self._retry_attempt - 1,
                 final_error=message.error_message
             ))
@@ -1279,7 +1342,7 @@ class AgentSession:
 
         delay_ms = settings.base_delay_ms * (2 ** (self._retry_attempt - 1))
 
-        self._emit(AutoRetryStartEvent(
+        await self._emit(AutoRetryStartEvent(
             attempt=self._retry_attempt, max_attempts=settings.max_retries,
             delay_ms=delay_ms, error_message=message.error_message or "Unknown error"
         ))
@@ -1295,7 +1358,7 @@ class AgentSession:
             attempt = self._retry_attempt
             self._retry_attempt = 0
             self._retry_abort_controller = None
-            self._emit(AutoRetryEndEvent(
+            await self._emit(AutoRetryEndEvent(
                 success=False, attempt=attempt, final_error="Retry cancelled"
             ))
             self._resolve_retry()

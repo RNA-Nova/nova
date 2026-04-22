@@ -42,42 +42,6 @@ class FileContent(DataClassJSONMixin):
     size: Optional[int] = None      # 文件大小（字节），可选
 
 
-# ============================================================================
-# 前后端通信专用消息类型（新增）
-# ============================================================================
-
-@dataclass
-class FrontendToAgentMessage(DataClassJSONMixin):
-    """前端发送给 Agent 的消息类型。
-    
-    用于处理来自前端的输入，支持文本、图片和文件内容的混合列表。
-    类似于 CustomMessage，但专门用于前端到 Agent 的通信。
-    """
-    
-    content: Union[str, List[Union[TextContent, ImageContent, FileContent]]]  # 支持字符串或混合内容列表
-    display: bool = True                     # 是否在前端显示
-    timestamp: Optional[int] = None
-    role: Literal["frontend_to_agent"] = "frontend_to_agent"
-
-
-@dataclass
-class AgentToFrontendMessage(DataClassJSONMixin):
-    """Agent 发送给前端的消息类型。
-    
-    用于向前端发送响应，支持文本、图片和文件内容的混合列表。
-    可以包含需要在前端展示或下载的文件。
-    """
-    
-    content: Union[str, List[Union[TextContent, ImageContent, FileContent]]]  # 支持字符串或混合内容列表
-    display: bool = True                     # 是否在前端显示
-    timestamp: Optional[int] = None
-    role: Literal["agent_to_frontend"] = "agent_to_frontend"
-
-
-# ============================================================================
-# 原有消息类型
-# ============================================================================
-
 @dataclass
 class BashExecutionMessage(DataClassJSONMixin):
     """Message type for bash executions via the ! command."""
@@ -105,6 +69,28 @@ class CustomMessage(DataClassJSONMixin):
     details: Optional[Any] = None
     timestamp: Optional[int] = None
     role: Literal["custom"] = "custom"
+
+
+@dataclass
+class InterAgentMessage(DataClassJSONMixin):
+    """Message type for inter-agent communication."""
+    
+    sender_id: str
+    sender_name: str
+    content: Union[str, List[Union[TextContent, ImageContent, FileContent]]]
+    display: bool = True
+    timestamp: Optional[int] = None
+    role: Literal["interAgent"] = "interAgent"
+
+
+@dataclass
+class FrontendMessage(DataClassJSONMixin):
+    """Message type for frontend-initiated messages."""
+    
+    content: Union[str, List[Union[TextContent, ImageContent, FileContent]]]
+    display: bool = True
+    timestamp: Optional[int] = None
+    role: Literal["frontend"] = "frontend"
 
 
 @dataclass
@@ -215,63 +201,34 @@ def create_custom_message(
     )
 
 
-# ============================================================================
-# 前后端消息创建函数（新增）
-# ============================================================================
-
-# def create_frontend_to_agent_message(
-#     content: Union[str, List[ContentItem]],
-#     display: bool = True,
-#     metadata: Optional[dict] = None,
-#     timestamp: Optional[str] = None,
-# ) -> FrontendToAgentMessage:
-#     """创建前端发送给 Agent 的消息。
-    
-#     Args:
-#         content: 消息内容，可以是字符串或包含 TextContent/ImageContent/FileContent 的列表
-#         display: 是否在前端显示此消息
-#         metadata: 可选的元数据字典
-#         timestamp: ISO 格式时间戳字符串，默认为当前时间
-    
-#     Returns:
-#         FrontendToAgentMessage 实例
-#     """
-#     ts = _parse_timestamp(timestamp) if timestamp else int(datetime.now().timestamp() * 1000)
-#     return FrontendToAgentMessage(
-#         content=content,
-#         display=display,
-#         metadata=metadata,
-#         timestamp=ts,
-#     )
+def create_inter_agent_message(
+    sender_id: str,
+    sender_name: str,
+    content: Union[str, List[Union[TextContent, ImageContent]]],
+    display: bool,
+    timestamp: str,
+) -> InterAgentMessage:
+    """Convert InterAgentMessageEntry to AgentMessage format."""
+    return InterAgentMessage(
+        sender_id=sender_id,
+        sender_name=sender_name,
+        content=content,
+        display=display,
+        timestamp=_parse_timestamp(timestamp),
+    )
 
 
-# def create_agent_to_frontend_message(
-#     content: Union[str, List[ContentItem]],
-#     display: bool = True,
-#     require_ack: bool = False,
-#     metadata: Optional[dict] = None,
-#     timestamp: Optional[str] = None,
-# ) -> AgentToFrontendMessage:
-#     """创建 Agent 发送给前端的消息。
-    
-#     Args:
-#         content: 消息内容，可以是字符串或包含 TextContent/ImageContent/FileContent 的列表
-#         display: 是否在前端显示此消息
-#         require_ack: 是否需要前端确认接收（用于重要文件传输）
-#         metadata: 可选的元数据字典（如文件下载链接、操作指令等）
-#         timestamp: ISO 格式时间戳字符串，默认为当前时间
-    
-#     Returns:
-#         AgentToFrontendMessage 实例
-#     """
-#     ts = _parse_timestamp(timestamp) if timestamp else int(datetime.now().timestamp() * 1000)
-#     return AgentToFrontendMessage(
-#         content=content,
-#         display=display,
-#         require_ack=require_ack,
-#         metadata=metadata,
-#         timestamp=ts,
-#     )
+def create_frontend_message(
+    content: Union[str, List[Union[TextContent, ImageContent]]],
+    display: bool,
+    timestamp: str,
+) -> FrontendMessage:
+    """Convert FrontendMessageEntry to AgentMessage format."""
+    return FrontendMessage(
+        content=content,
+        display=display,
+        timestamp=_parse_timestamp(timestamp),
+    )
 
 
 def _parse_timestamp(timestamp: str) -> int:
@@ -321,15 +278,32 @@ async def convert_to_llm(messages: List[AgentMessage]) -> List[UserMessage]:
                 timestamp=m.timestamp,
             )
         
-        elif m.role == "frontend_to_agent":
-            # 前端发来的消息转换为LLM可理解的格式
-            content = convert_content(m.content)
+        elif m.role == "interAgent":
+            content = m.content
+            if isinstance(content, str):
+                content = [TextContent(type="text", text=content)]
+            else: 
+                content = convert_content(content)
+            
             msg = UserMessage(
                 role="user",
                 content=content,
                 timestamp=m.timestamp,
             )
         
+        elif m.role == "frontend":
+            content = m.content
+            if isinstance(content, str):
+                content = [TextContent(type="text", text=content)]
+            else: 
+                content = convert_content(content)
+            
+            msg = UserMessage(
+                role="user",
+                content=content,
+                timestamp=m.timestamp,
+            )
+            
         elif m.role == "branchSummary":
             msg = UserMessage(
                 role="user",

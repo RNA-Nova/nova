@@ -26,6 +26,11 @@ class AgentDefinitor:
     """
     
     def __init__(self, agent_dir: str) -> None:
+        self._init_paths(agent_dir)
+        self.refresh()
+
+    def _init_paths(self, agent_dir: str) -> None:
+        """初始化或更新 agent 目录相关路径。"""
         if not os.path.exists(agent_dir):
             raise FileNotFoundError(f"Agent directory not found: {agent_dir}")
         
@@ -47,7 +52,17 @@ class AgentDefinitor:
             name=self.agent_name,
             agent_dir=self.agent_dir
         )
+
+    def set_agent_dir(self, agent_dir: str) -> None:
+        """
+        动态切换 agent 定义目录。
+
+        切换后会自动重新加载所有内容（description、sections、tools、setup、user）。
         
+        Args:
+            agent_dir: 新的 agent 定义目录路径
+        """
+        self._init_paths(agent_dir)
         self.refresh()
 
     def refresh(self) -> None:
