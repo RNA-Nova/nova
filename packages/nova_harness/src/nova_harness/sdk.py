@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from nova_ai import Model
 from .agent import AgentSession,AgentSessionConfig 
@@ -40,11 +40,12 @@ class CreateAgentSessionOptions:
     """
     cwd: Optional[Path] = None
     agent_dir: Optional[Path] = None
+    workspace: Optional[Path] = None
     auth_storage: Optional[AuthStorage] = None
     model_registry: Optional[ModelRegistry] = None
     model: Optional[Model] = None
     thinking_level: Optional[ThinkingLevel] = None
-    tools: Optional[List[AgentTool]] = None
+    tools: Optional[Dict[str,AgentTool]] = None
     resource_loader: Optional[ResourceLoader] = None
     agent_definitior: Optional[AgentDefinitor] = None
     session_manager: Optional[SessionManager] = None
@@ -53,9 +54,24 @@ class CreateAgentSessionOptions:
 
 async def create_agent_session(options: CreateAgentSessionOptions = None):
     options = CreateAgentSessionOptions() if not options else options
-    agent_dir = options.agent_dir or get_agent_dir()
-    cwd = options.cwd or os.getcwd()
-    session_manager = SessionManager.create(cwd) if not options.session_manager else options.session_manager
+    agent_dir = Path(options.agent_dir) if options.agent_dir else get_agent_dir()
+    if not os.path.exists(agent_dir):
+        os.makedirs(agent_dir, exist_ok=True)
+
+    cwd = options.cwd if options.cwd else os.getcwd()
+    if not os.path.exists(cwd):
+        os.makedirs(cwd, exist_ok=True)
+
+    workspace = Path(options.workspace) if options.workspace else os.getcwd()+'/workspace'
+    if not os.path.exists(workspace):
+        os.makedirs(workspace, exist_ok=True)
+    cleaned_cwd = cwd.lstrip('/\\').replace('/', '-').replace('\\', '-')
+    safe_path = f"--{cleaned_cwd}--"
+    session_dir = os.path.join(agent_dir, "sessions", safe_path)
+    agent_definition_dir = os.path.join(agent_dir, "definitions", "base_agent")
+    if not os.path.exists(session_dir):
+        os.makedirs(session_dir, exist_ok=True)
+    session_manager = SessionManager.create(cwd,session_dir) if not options.session_manager else options.session_manager
     settings_manager = SettingsManager.create(cwd,agent_dir) if not options.settings_manager else options.settings_manager
     computex_manager = ComputexManager() if not options.computex_manager else options.computex_manager
     auth_path = agent_dir / 'auth.json'
@@ -69,7 +85,6 @@ async def create_agent_session(options: CreateAgentSessionOptions = None):
         no_prompt_templates=False,
     )
     resource_loader = DefaultResourceLoader(resource_loader_options) if not options.resource_loader else options.resource_loader
-    agent_definition_dir = Path(cwd) / CONFIG_DIR_NAME / "definition"
     agent_definitor = AgentDefinitor(agent_definition_dir) if not options.agent_definitior else options.agent_definitior
     get_api_key = partial(
         resolve_api_key, 
@@ -90,28 +105,18 @@ async def create_agent_session(options: CreateAgentSessionOptions = None):
         thinking_budgets = settings_manager.get_thinking_budgets(),
         max_retry_delay_ms = settings_manager.get_retry_settings().max_delay_ms
     )
-    system_prompt_fn = partial(
-        agent_definitor.build_system_prompt,
-        include_user = True,
-        include_tools = True,
-        include_dynamic = False,
-    )
+    initial_active_tool_names=agent_definitor.get_available_tools() if agent_definitor.get_available_tools() else []
     config = AgentSessionConfig(
         agent=agent,
-        system_prompt_fn=system_prompt_fn,
+        definitor=agent_definitor,
         session_manager=session_manager,
         settings_manager=settings_manager,
         computex_manager=computex_manager,
         cwd=cwd,
+        workspace=workspace,
         resource_loader=resource_loader,
         model_registry=model_registry,
-        initial_active_tool_names=[
-            'execute_command',
-            'skill_tool',
-            'write',
-            'read',
-            'send_to_frontend',
-        ],
+        initial_active_tool_names=initial_active_tool_names,
         base_tools_override=options.tools if options.tools else None
     ) 
     agent_session = AgentSession(config)

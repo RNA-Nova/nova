@@ -48,6 +48,9 @@ from .events import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
     ToolExecutionEndEvent,
+    PreToolCallHook,
+    PostToolCallHook,
+    PostAssistantHook,
 )
 from .agent_loop import agent_loop, agent_loop_continue
 
@@ -116,6 +119,11 @@ class Agent:
         self._steering_queue: List[AgentMessage] = []
         self._follow_up_queue: List[AgentMessage] = []
 
+        # Hooks
+        self._pre_tool_call_hooks: List[PreToolCallHook] = []
+        self._post_tool_call_hooks: List[PostToolCallHook] = []
+        self._post_assistant_hooks: List[PostAssistantHook] = []
+
     # ----------------------------------------------------------------------
     # Properties (mirroring TypeScript get/set)
     # ----------------------------------------------------------------------
@@ -164,6 +172,21 @@ class Agent:
         """注册事件监听器（支持同步或异步函数）。返回取消订阅函数。"""
         self._listeners.add(fn)
         return lambda: self._listeners.discard(fn)
+
+    def on_pre_tool_call(self, fn: PreToolCallHook) -> Callable[[], None]:
+        """注册 pre-tool-call 钩子。返回取消注册函数。"""
+        self._pre_tool_call_hooks.append(fn)
+        return lambda: self._pre_tool_call_hooks.remove(fn)
+
+    def on_post_tool_call(self, fn: PostToolCallHook) -> Callable[[], None]:
+        """注册 post-tool-call 钩子。返回取消注册函数。"""
+        self._post_tool_call_hooks.append(fn)
+        return lambda: self._post_tool_call_hooks.remove(fn)
+
+    def on_post_assistant(self, fn: PostAssistantHook) -> Callable[[], None]:
+        """注册 post-assistant 钩子。返回取消注册函数。"""
+        self._post_assistant_hooks.append(fn)
+        return lambda: self._post_assistant_hooks.remove(fn)
 
     # State mutators
     def set_system_prompt(self, value: str) -> None:
@@ -379,6 +402,36 @@ class Agent:
         async def get_follow_up() -> List[AgentMessage]:
             return self._dequeue_follow_up_messages()
 
+        async def _pre_tool_call_hook(tool: AgentTool[Any, Any], params: Any, tool_call_id: str) -> Any:
+            result = None
+            for hook in self._pre_tool_call_hooks:
+                res = hook(tool, params, tool_call_id)
+                if inspect.isawaitable(res):
+                    res = await res
+                if res is not None:
+                    result = res
+            return result
+
+        async def _post_tool_call_hook(tool: AgentTool[Any, Any], params: Any, tool_call_id: str, result: Any) -> Any:
+            hook_result = None
+            for hook in self._post_tool_call_hooks:
+                res = hook(tool, params, tool_call_id, result)
+                if inspect.isawaitable(res):
+                    res = await res
+                if res is not None:
+                    hook_result = res
+            return hook_result
+
+        async def _post_assistant_hook(message: Any) -> Any:
+            result = None
+            for hook in self._post_assistant_hooks:
+                res = hook(message)
+                if inspect.isawaitable(res):
+                    res = await res
+                if res is not None:
+                    result = res
+            return result
+
         # Build the loop configuration
         config = AgentLoopConfig(
             model=model,
@@ -392,6 +445,9 @@ class Agent:
             get_api_key=self.get_api_key,
             get_steering_messages=get_steering,
             get_follow_up_messages=get_follow_up,
+            pre_tool_call_hook=_pre_tool_call_hook if self._pre_tool_call_hooks else None,
+            post_tool_call_hook=_post_tool_call_hook if self._post_tool_call_hooks else None,
+            post_assistant_hook=_post_assistant_hook if self._post_assistant_hooks else None,
         )
 
         # Choose the appropriate loop starter

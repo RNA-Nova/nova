@@ -8,8 +8,8 @@ from pathlib import Path
 APP_NAME = "nova"                     # 可通过环境变量 PI_APP_NAME 覆盖
 CONFIG_DIR_NAME = ".nova"             # 可通过环境变量 PI_CONFIG_DIR 覆盖
 
-# 环境变量名，例如 PI_SIMPLE_AGENT_DIR
-ENV_AGENT_DIR = f"{APP_NAME.upper()}_SIMPLE_AGENT_DIR"
+# 环境变量名，例如 PI_AGENT_DIR
+ENV_AGENT_DIR = f"{APP_NAME.upper()}_AGENT_DIR"
 
 # =============================================================================
 # User Config Paths

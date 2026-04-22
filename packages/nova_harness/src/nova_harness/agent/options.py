@@ -8,6 +8,7 @@ from nova_ai import (
     ImageContent, Model, ThinkingLevel,
 )
 from ..model_registry import ModelRegistry
+from ..definition import AgentDefinitor
 from ..session import SessionManager
 from ..setting import SettingsManager
 from ..computex import ComputexManager
@@ -32,11 +33,12 @@ class SessionTokens:
 @dataclass
 class AgentSessionConfig:
     agent: 'Agent'
-    system_prompt_fn: callable
+    definitor: 'AgentDefinitor'
     session_manager: 'SessionManager'
     settings_manager: 'SettingsManager'
     computex_manager: 'ComputexManager'
     cwd: str
+    workspace: str
     scoped_models: List[ScopedModelConfig] = field(default_factory=list)
     resource_loader: Optional['ResourceLoader'] = None
     model_registry: Optional['ModelRegistry'] = None

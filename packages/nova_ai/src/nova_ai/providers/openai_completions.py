@@ -56,6 +56,7 @@ class OpenAICompletionsOptions(StreamOptions):
     """OpenAI Completions 特定选项"""
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     reasoning_effort: Optional[str] = None
+    parallel_tool_calls: Optional[bool] = None
 
 
 def normalize_mistral_tool_id(id: str) -> str:
@@ -514,7 +515,6 @@ def build_params(
     compat = get_compat(model)
     messages = convert_messages(model, context, compat)
     maybe_add_openrouter_anthropic_cache_control(model, messages)
-    
     params: Dict[str, Any] = {
         "model": model.id,
         "messages": messages,
@@ -538,6 +538,7 @@ def build_params(
     
     if context.tools:
         params["tools"] = convert_tools(context.tools, compat)
+        params["parallel_tool_calls"] = options.parallel_tool_calls if (options and options.parallel_tool_calls is not None) else True
     elif has_tool_history(context.messages):
         params["tools"] = []
     
@@ -790,6 +791,7 @@ async def stream_openai_completions(
             stream.end()
             
         except Exception as e:
+            
             for block in output.content:
                 if "partial_args" in block:
                     del block.partial_args
@@ -820,9 +822,6 @@ async def stream_simple_openai_completions(
     if not api_key:
         api_key = get_env_api_key(model.provider)
     
-    if not api_key:
-        raise ValueError(f"No API key for provider: {model.provider}")
-    
     base = build_base_options(model, options, api_key)
     
     reasoning_effort = None
@@ -849,6 +848,5 @@ async def stream_simple_openai_completions(
         tool_choice=tool_choice,
         reasoning_effort=reasoning_effort
     )
-    
     # 等待协程执行完成
     return await stream_openai_completions(model, context, openai_options)

@@ -1,21 +1,32 @@
 [tool.poetry]
 name = "nova-ai"
+version = "0.1.0"
+description = "统一的 LLM 提供商抽象层，支持流式调用、模型注册和鉴权。"
+authors = ["Liujinming"]
+readme = "README.md"
+license = "MIT"
+keywords = ["llm", "ai", "streaming", "openai", "anthropic", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
 packages = [
     { include = "nova_ai", from = "src" },
 ]
-version = "0.0.1" # Use "-rc1", "-rc2", etc. for pre-release versions
-description = "Let language models run code"
-authors = ["Liujinming"]
-readme = "README.md"
 
 [tool.poetry.dependencies]
-
-# Required dependencies
 python = ">=3.9,<3.13"
 setuptools = "*"
-astor = "^0.8.1"
-git-python = "^1.0.3"
-
+openai = ">=1.109.1"
+mashumaro = ">=3.20"
+json-repair = ">=0.58.4"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"

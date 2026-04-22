@@ -4,6 +4,7 @@ Converts AgentMessage to LLM messages only at the call boundary.
 """
 
 import asyncio
+import inspect
 from typing import (
     AsyncIterator, Optional, List, Callable, Awaitable, Union, Any, cast
 )
@@ -73,6 +74,19 @@ class AgentEventStream(EventStream[AgentEvent, List[AgentMessage]]):
         super().__init__(is_complete, extract_result)
 
 # ----------------------------------------------------------------------
+# Hook helpers
+# ----------------------------------------------------------------------
+
+async def _run_hook(hook: Optional[Callable[..., Any]], *args: Any) -> Any:
+    """运行同步或异步钩子，若返回非 None 则视为覆盖值。"""
+    if hook is None:
+        return None
+    result = hook(*args)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+# ----------------------------------------------------------------------
 # Public API
 # ----------------------------------------------------------------------
 
@@ -101,7 +115,6 @@ def agent_loop(
         for prompt in prompts:
             stream.push(MessageStartEvent(message=prompt))
             stream.push(MessageEndEvent(message=prompt))
-
         await _run_loop(current_context, new_messages, config, signal, stream, stream_fn)
 
     asyncio.create_task(_run())
@@ -155,7 +168,7 @@ async def _run_loop(
     pending_messages: List[AgentMessage] = []
     if config.get_steering_messages:
         pending_messages = await config.get_steering_messages() or []
-
+    
     while True:
         has_more_tool_calls = True
         steering_after_tools: Optional[List[AgentMessage]] = None
@@ -174,11 +187,16 @@ async def _run_loop(
                     current_context.messages.append(msg)
                     new_messages.append(msg)
                 pending_messages = []
-
             # Stream assistant response
             assistant_msg = await _stream_assistant_response(
                 current_context, config, signal, stream, stream_fn
             )
+
+            # 调用 postassistant hook
+            hook_result = await _run_hook(config.post_assistant_hook, assistant_msg)
+            if hook_result is not None:
+                assistant_msg = hook_result
+            
             new_messages.append(assistant_msg)
 
             if assistant_msg.stop_reason in ("error", "aborted"):
@@ -198,7 +216,7 @@ async def _run_loop(
                     assistant_msg,
                     signal,
                     stream,
-                    config.get_steering_messages,
+                    config,
                 )
                 tool_results = tool_exec.tool_results
                 steering_after_tools = tool_exec.steering_messages
@@ -225,7 +243,6 @@ async def _run_loop(
 
         # No more messages, exit
         break
-
     stream.push(AgentEndEvent(messages=new_messages))
     stream.end(new_messages)
 
@@ -279,7 +296,6 @@ async def _stream_assistant_response(
     stream_config.pop("get_follow_up_messages", None)
     stream_config.pop("signal", None)
     stream_config.pop("model",None)
-
     # Call the underlying streaming function (returns async iterator of events)
     response = await stream_func(
         config.model,
@@ -289,7 +305,6 @@ async def _stream_assistant_response(
             signal=signal
         ),
     )
-
     partial_message: Optional[AssistantMessage] = None
     added_partial = False
 
@@ -340,7 +355,7 @@ async def _execute_tool_calls(
     assistant_message: AssistantMessage,
     signal: Optional[AbortSignal],
     stream: AgentEventStream,
-    get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]],
+    config: AgentLoopConfig,
 ) -> ToolExecutionResult:
     """Execute tool calls from an assistant message."""
     tool_calls = [c for c in assistant_message.content if c.type == "toolCall"]
@@ -349,6 +364,20 @@ async def _execute_tool_calls(
 
     for idx, tool_call in enumerate(tool_calls):
         tool = next((t for t in (tools or []) if t.name == tool_call.name), None)
+
+        # Create the toolResult message skeleton *first* so that
+        # MessageStartEvent fires before ToolExecution events.
+        tool_result_message = ToolResultMessage(
+            role="toolResult",
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            content=[],
+            details={},
+            is_error=False,
+            timestamp=asyncio.get_event_loop().time(),
+        )
+
+        stream.push(MessageStartEvent(message=tool_result_message))
 
         stream.push(ToolExecutionStartEvent(
             tool_call_id=tool_call.id,
@@ -366,6 +395,11 @@ async def _execute_tool_calls(
             # Validate arguments using nova_ai helper
             validated_args = validate_tool_arguments(tool, tool_call)
 
+            # 调用 pretoolcall hook
+            hook_result = await _run_hook(config.pre_tool_call_hook, tool, validated_args, tool_call.id)
+            if hook_result is not None:
+                validated_args = hook_result
+
             # Execute tool (must be async)
             def on_update(partial: AgentToolResult[Any]):
                 stream.push(ToolExecutionUpdateEvent(
@@ -381,6 +415,11 @@ async def _execute_tool_calls(
                 signal,
                 on_update,
             )
+
+            # 调用 posttoolcall hook
+            hook_result = await _run_hook(config.post_tool_call_hook, tool, validated_args, tool_call.id, result)
+            if hook_result is not None:
+                result = hook_result
         except Exception as e:
             result = AgentToolResult(
                 content=[
@@ -400,23 +439,17 @@ async def _execute_tool_calls(
             is_error=is_error,
         ))
 
-        tool_result_message = ToolResultMessage(
-            role="toolResult",
-            tool_call_id=tool_call.id,
-            tool_name=tool_call.name,
-            content=result.content,
-            details=result.details,
-            is_error=is_error,
-            timestamp=asyncio.get_event_loop().time(),  # approximate; use int if needed
-        )
+        # Fill in the actual result data and close the entry.
+        tool_result_message.content = result.content
+        tool_result_message.details = result.details
+        tool_result_message.is_error = is_error
 
         results.append(tool_result_message)
-        stream.push(MessageStartEvent(message=tool_result_message))
         stream.push(MessageEndEvent(message=tool_result_message))
 
         # Check for steering messages – skip remaining tools if user interrupted
-        if get_steering_messages:
-            steering = await get_steering_messages()
+        if config.get_steering_messages:
+            steering = await config.get_steering_messages()
             if steering:
                 steering_messages = steering
                 remaining = tool_calls[idx + 1:]
@@ -442,6 +475,18 @@ def _skip_tool_call(
         details={},
     )
 
+    tool_result_message = ToolResultMessage(
+        role="toolResult",
+        tool_call_id=tool_call.id,
+        tool_name=tool_call.name,
+        content=result.content,
+        details={},
+        is_error=True,
+        timestamp=asyncio.get_event_loop().time(),
+    )
+
+    stream.push(MessageStartEvent(message=tool_result_message))
+
     stream.push(ToolExecutionStartEvent(
         tool_call_id=tool_call.id,
         tool_name=tool_call.name,
@@ -454,17 +499,6 @@ def _skip_tool_call(
         is_error=True,
     ))
 
-    tool_result_message = ToolResultMessage(
-        role="toolResult",
-        tool_call_id=tool_call.id,
-        tool_name=tool_call.name,
-        content=result.content,
-        details={},
-        is_error=True,
-        timestamp=asyncio.get_event_loop().time(),
-    )
-
-    stream.push(MessageStartEvent(message=tool_result_message))
     stream.push(MessageEndEvent(message=tool_result_message))
 
     return tool_result_message

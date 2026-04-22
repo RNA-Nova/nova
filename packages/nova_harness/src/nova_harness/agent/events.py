@@ -3,7 +3,7 @@
 # ============================================================================
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Awaitable
 
 
 from pi_agent import AgentEvent
@@ -57,4 +57,7 @@ AgentSessionEvent = Union[
     AutoRetryEndEvent,
 ]
 
-AgentSessionEventListener = Callable[[AgentSessionEvent], None]
+AgentSessionEventListener = Union[
+    Callable[[AgentSessionEvent], None],
+    Callable[[AgentSessionEvent], Awaitable[None]],
+]

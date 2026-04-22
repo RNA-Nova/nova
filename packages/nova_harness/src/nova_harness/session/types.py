@@ -3,7 +3,7 @@ Type definitions for session management
 """
 
 from typing import (
-    Optional, List, Union, Tuple, Generic, TypeVar, Literal
+    Any, Dict, Optional, List, Union, Tuple, Generic, TypeVar, Literal
 )
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,7 +16,8 @@ from .constants import CURRENT_SESSION_VERSION
 from pi_agent import AgentMessage
 from nova_ai import ImageContent, Message, TextContent, ThinkingLevel
 from ..messages import (
-    BashExecutionMessage, CustomMessage, FileContent
+    BashExecutionMessage, CustomMessage, FileContent,
+    InterAgentMessage, FrontendMessage
 )
 from mashumaro.mixins.json import DataClassJSONMixin
 
@@ -96,7 +97,7 @@ class CustomEntry(SessionEntryBase):
     """自定义条目（不参与LLM上下文）"""
     type: Literal["custom"] = "custom"
     custom_type: str = ""
-    data: Optional[CompactionDetails] = None
+    data: Optional[Dict[str,Any]] = None
 
 
 @dataclass
@@ -134,6 +135,37 @@ def deserialize_content(value):
             res.append(FileContent.from_dict(item))
     return res
 
+
+@dataclass
+class SendToFrontendEntry(SessionEntryBase):
+    """发送到前端的消息条目（不参与LLM上下文）"""
+    type: Literal["send_to_frontend"] = "send_to_frontend"
+    content: Union[str, List[Union['TextContent', 'ImageContent']]] = field(
+        default_factory=list,
+        metadata=field_options(
+            serialize=serialize_content,
+            deserialize=deserialize_content
+        )
+    )
+    display: bool = True
+
+
+@dataclass
+class SendToAgentEntry(SessionEntryBase):
+    """发送到Agent的消息条目（不参与LLM上下文）"""
+    type: Literal["send_to_agent_message"] = "send_to_agent_message"
+    receiver_id: str = ""
+    receiver_name: str = ""
+    content: Union[str, List[Union['TextContent', 'ImageContent']]] = field(
+        default_factory=list,
+        metadata=field_options(
+            serialize=serialize_content,
+            deserialize=deserialize_content
+        )
+    )
+    display: bool = True
+
+
 @dataclass
 class CustomMessageEntry(SessionEntryBase):
     """自定义消息条目（参与LLM上下文）"""
@@ -149,11 +181,14 @@ class CustomMessageEntry(SessionEntryBase):
     details: Optional[CompactionDetails] = None
     display: bool = True
 
+
 @dataclass
-class FrontendToAgentEntry(SessionEntryBase):
-    """前端到 Agent 的消息条目（参与LLM上下文）"""
-    type: Literal["frontend_to_agent"] = "frontend_to_agent"
-    content: Union[str, List[Union['TextContent', 'ImageContent', 'FileContent']]] = field(
+class InterAgentMessageEntry(SessionEntryBase):
+    """Inter-agent 消息条目（参与LLM上下文）"""
+    type: Literal["inter_agent_message"] = "inter_agent_message"
+    sender_id: str = ""
+    sender_name: str = ""
+    content: Union[str, List[Union['TextContent', 'ImageContent']]] = field(
         default_factory=list,
         metadata=field_options(
             serialize=serialize_content,
@@ -164,10 +199,10 @@ class FrontendToAgentEntry(SessionEntryBase):
 
 
 @dataclass
-class AgentToFrontendEntry(SessionEntryBase):
-    """Agent 到前端的消息条目（参与LLM上下文）"""
-    type: Literal["agent_to_frontend"] = "agent_to_frontend"
-    content: Union[str, List[Union['TextContent', 'ImageContent', 'FileContent']]] = field(
+class FrontendMessageEntry(SessionEntryBase):
+    """Frontend 消息条目（参与LLM上下文）"""
+    type: Literal["frontend_message"] = "frontend_message"
+    content: Union[str, List[Union['TextContent', 'ImageContent']]] = field(
         default_factory=list,
         metadata=field_options(
             serialize=serialize_content,
@@ -175,6 +210,7 @@ class AgentToFrontendEntry(SessionEntryBase):
         )
     )
     display: bool = True
+
 
 # 会话条目联合类型
 SessionEntry = Union[
@@ -184,9 +220,11 @@ SessionEntry = Union[
     CompactionEntry,
     BranchSummaryEntry,
     CustomEntry,
+    SendToFrontendEntry,
+    SendToAgentEntry,
     CustomMessageEntry,
-    FrontendToAgentEntry,
-    AgentToFrontendEntry,
+    InterAgentMessageEntry,
+    FrontendMessageEntry,
     LabelEntry,
     SessionInfoEntry
 ]

@@ -11,10 +11,11 @@ from typing import Optional, List, Dict, Any, Union, Callable
 
 from nova_ai import Message, TextContent, ImageContent, ThinkingLevel
 from .types import (
-    AgentToFrontendEntry, FrontendToAgentEntry, SessionHeader, SessionEntry, FileEntry, SessionTreeNode,
+    SessionHeader, SessionEntry, FileEntry, SessionTreeNode,
     SessionContext, SessionInfo, SessionMessageEntry,
     ThinkingLevelChangeEntry, ModelChangeEntry, CompactionEntry,
-    BranchSummaryEntry, CustomEntry, CustomMessageEntry,
+    BranchSummaryEntry, CustomEntry, SendToFrontendEntry, SendToAgentEntry,
+    CustomMessageEntry, InterAgentMessageEntry, FrontendMessageEntry,
     LabelEntry, SessionInfoEntry
 )
 from .constants import CURRENT_SESSION_VERSION
@@ -179,7 +180,7 @@ class SessionManager:
     
     def get_session_file(self) -> Optional[str]:
         return self._session_file
-    
+
     def append_message(self, message: Union[Message, CustomMessage, BashExecutionMessage]) -> str:
         """追加消息"""
         entry = SessionMessageEntry(
@@ -188,40 +189,6 @@ class SessionManager:
             parent_id=self._leaf_id,
             timestamp=datetime.now().isoformat(),
             message=message
-        )
-        self._append_entry(entry)
-        return entry.id
-    
-    def append_frontend_to_agent_message(
-            self,
-            content: Union[str, List[Union[TextContent, ImageContent, FileContent]]],
-            display: bool = True,
-        ) -> str:
-        """追加前端的消息"""
-        entry = FrontendToAgentEntry(
-            type="frontend_to_agent",
-            content=content,
-            display=display,
-            id=generate_id(set(self._by_id.keys())),
-            parent_id=self._leaf_id,
-            timestamp=datetime.now().isoformat()
-        )
-        self._append_entry(entry)
-        return entry.id
-    
-    def append_agent_to_frontend_message(
-            self,
-            content: Union[str, List[Union[TextContent, ImageContent, FileContent]]],
-            display: bool = True,
-        ) -> str:
-        """追加前端的消息"""
-        entry = AgentToFrontendEntry(
-            type="agent_to_frontend",
-            content=content,
-            display=display,
-            id=generate_id(set(self._by_id.keys())),
-            parent_id=self._leaf_id,
-            timestamp=datetime.now().isoformat()
         )
         self._append_entry(entry)
         return entry.id
@@ -286,6 +253,44 @@ class SessionManager:
         )
         self._append_entry(entry)
         return entry.id
+
+    def append_send_to_frontend_entry(
+        self,
+        content: Union[str, List[Union[TextContent, ImageContent]]],
+        display: bool = True
+    ) -> str:
+        """追加发送到前端的条目"""
+        entry = SendToFrontendEntry(
+            type="send_to_frontend",
+            content=content,
+            display=display,
+            id=generate_id(set(self._by_id.keys())),
+            parent_id=self._leaf_id,
+            timestamp=datetime.now().isoformat()
+        )
+        self._append_entry(entry)
+        return entry.id
+
+    def append_send_to_agent_entry(
+        self,
+        receiver_id: str,
+        receiver_name: str,
+        content: Union[str, List[Union[TextContent, ImageContent]]],
+        display: bool = True
+    ) -> str:
+        """追加发送到Agent的条目"""
+        entry = SendToAgentEntry(
+            type="send_to_agent_message",
+            receiver_id=receiver_id,
+            receiver_name=receiver_name,
+            content=content,
+            display=display,
+            id=generate_id(set(self._by_id.keys())),
+            parent_id=self._leaf_id,
+            timestamp=datetime.now().isoformat()
+        )
+        self._append_entry(entry)
+        return entry.id
     
     def append_session_info(self, name: str) -> str:
         """追加会话信息"""
@@ -321,6 +326,44 @@ class SessionManager:
             content=content,
             display=display,
             details=details,
+            id=generate_id(set(self._by_id.keys())),
+            parent_id=self._leaf_id,
+            timestamp=datetime.now().isoformat()
+        )
+        self._append_entry(entry)
+        return entry.id
+
+    def append_inter_agent_message_entry(
+        self,
+        sender_id: str,
+        sender_name: str,
+        content: Union[str, List[Union[TextContent, ImageContent]]],
+        display: bool = True
+    ) -> str:
+        """追加 inter-agent 消息条目"""
+        entry = InterAgentMessageEntry(
+            type="inter_agent_message",
+            sender_id=sender_id,
+            sender_name=sender_name,
+            content=content,
+            display=display,
+            id=generate_id(set(self._by_id.keys())),
+            parent_id=self._leaf_id,
+            timestamp=datetime.now().isoformat()
+        )
+        self._append_entry(entry)
+        return entry.id
+
+    def append_frontend_message_entry(
+        self,
+        content: Union[str, List[Union[TextContent, ImageContent]]],
+        display: bool = True
+    ) -> str:
+        """追加 frontend 消息条目"""
+        entry = FrontendMessageEntry(
+            type="frontend_message",
+            content=content,
+            display=display,
             id=generate_id(set(self._by_id.keys())),
             parent_id=self._leaf_id,
             timestamp=datetime.now().isoformat()

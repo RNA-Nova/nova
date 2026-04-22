@@ -16,6 +16,8 @@ from ..messages import (
     create_branch_summary_message,
     create_compaction_summary_message,
     create_custom_message,
+    create_inter_agent_message,
+    create_frontend_message,
 )
 from ..session import CompactionEntry, SessionEntry
 from .types import (
@@ -88,6 +90,20 @@ def _get_message_from_entry(entry: SessionEntry) -> Optional[AgentMessage]:
             entry.content,
             entry.display,
             entry.details,
+            entry.timestamp,
+        )
+    if entry.type == "inter_agent_message":
+        return create_inter_agent_message(
+            entry.sender_id,
+            entry.sender_name,
+            entry.content,
+            entry.display,
+            entry.timestamp,
+        )
+    if entry.type == "frontend_message":
+        return create_frontend_message(
+            entry.content,
+            entry.display,
             entry.timestamp,
         )
     if entry.type == "branch_summary":
@@ -240,7 +256,7 @@ def estimate_tokens(message: AgentMessage) -> int:
                 chars += len(str(args))
         return (chars + 3) // 4
 
-    elif message.role in ("custom", "toolResult"):
+    elif message.role in ("custom", "interAgent", "frontend", "toolResult"):
         if isinstance(message.content, str):
             chars = len(message.content)
         else:
@@ -286,8 +302,8 @@ def _find_valid_cut_points(
                 "assistant",
             ):
                 cut_points.append(i)
-        # branch_summary and custom_message are user-role messages, valid cut points
-        if entry.type in ("branch_summary", "custom_message"):
+        # branch_summary, custom_message, inter_agent_message and frontend_message are user-role messages, valid cut points
+        if entry.type in ("branch_summary", "custom_message", "inter_agent_message", "frontend_message"):
             cut_points.append(i)
     return cut_points
 
@@ -302,8 +318,8 @@ def find_turn_start_index(
     """
     for i in range(entry_index, start_index - 1, -1):
         entry = entries[i]
-        # branch_summary and custom_message are user-role messages, can start a turn
-        if entry.type in ("branch_summary", "custom_message"):
+        # branch_summary, custom_message, inter_agent_message and frontend_message are user-role messages, can start a turn
+        if entry.type in ("branch_summary", "custom_message", "inter_agent_message", "frontend_message"):
             return i
         if entry.type == "message":
             role = entry.message.role

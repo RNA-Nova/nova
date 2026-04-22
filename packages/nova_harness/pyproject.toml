@@ -1,21 +1,33 @@
 [tool.poetry]
 name = "nova-harness"
+version = "0.1.0"
+description = "基于 nova_ai + pi_agent 构建的高阶 Agent SDK，提供会话管理、上下文压缩和资源加载。"
+authors = ["Liujinming"]
+readme = "README.md"
+license = "MIT"
+keywords = ["agent", "session", "harness", "llm", "sdk", "compaction"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
 packages = [
     { include = "nova_harness", from = "src" },
 ]
-version = "0.0.1" # Use "-rc1", "-rc2", etc. for pre-release versions
-description = "Harness Agent"
-authors = ["Liujinming"]
-readme = "README.md"
 
 [tool.poetry.dependencies]
-
-# Required dependencies
 python = ">=3.9,<3.13"
 setuptools = "*"
-astor = "^0.8.1"
-git-python = "^1.0.3"
-
+mashumaro = ">=3.20"
+json-repair = ">=0.58.4"
+pyyaml = "^6.0.1"
+filelock = "^3.24.3"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"
