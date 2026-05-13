@@ -1,3 +1,4 @@
+<!-- From: /root/nova/packages/nova_harness/AGENTS.md -->
 # nova_harness — Agent SDK 项目指南
 
 > 本文件面向 AI Coding Agent 编写。如果你不了解本项目，请从这里开始阅读。

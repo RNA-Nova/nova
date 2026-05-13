@@ -13,6 +13,7 @@ import asyncio
 
 # Import types from nova_ai (replacement for pi-ai)
 from nova_ai import (
+    AssistantMessage,
     AssistantMessageEvent,
     ImageContent,
     Message,
@@ -37,18 +38,6 @@ class CustomAgentMessage(DataClassJSONMixin):
 
 # AgentMessage can be either a standard Message or any custom message
 AgentMessage = Union[Message, CustomAgentMessage]
-
-# ----------------------------------------------------------------------
-# Hook types
-# ----------------------------------------------------------------------
-PreToolCallHook = Callable[[AgentTool[Any, Any], Any, str], Union[None, Awaitable[None]]]
-"""(tool, params, tool_call_id) -> 可选的新 params 工具调用前钩子"""
-
-PostToolCallHook = Callable[[AgentTool[Any, Any], Any, str, AgentToolResult[Any]], Union[None, Awaitable[None]]]
-"""(tool, params, tool_call_id, result) -> 可选的新 result 工具调用后钩子"""
-
-PostAssistantHook = Callable[[AssistantMessage], Union[None, Awaitable[None]]]
-"""(message) -> 可选的新 message Assistant消息生成后钩子"""
 
 # ----------------------------------------------------------------------
 # Type aliases
@@ -107,6 +96,18 @@ class AgentTool(Tool[TParameters], Generic[TParameters, TDetails], ABC):
         - on_update: optional callback for streaming partial results
         """
         pass
+
+# ----------------------------------------------------------------------
+# Hook types
+# ----------------------------------------------------------------------
+PreToolCallHook = Callable[[AgentTool[Any, Any], Any, str], Union[None, Awaitable[None]]]
+"""(tool, params, tool_call_id) -> 可选的新 params 工具调用前钩子"""
+
+PostToolCallHook = Callable[[AgentTool[Any, Any], Any, str, AgentToolResult[Any]], Union[None, Awaitable[None]]]
+"""(tool, params, tool_call_id, result) -> 可选的新 result 工具调用后钩子"""
+
+PostAssistantHook = Callable[[AssistantMessage], Union[None, Awaitable[None]]]
+"""(message) -> 可选的新 message Assistant消息生成后钩子"""
 
 # ----------------------------------------------------------------------
 # Context and configuration
@@ -292,3 +293,5 @@ AgentEvent = Union[
     ToolExecutionUpdateEvent,
     ToolExecutionEndEvent,
 ]
+
+
