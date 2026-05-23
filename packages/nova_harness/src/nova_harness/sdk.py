@@ -93,7 +93,7 @@ async def create_agent_session(options: CreateAgentSessionOptions = None):
     agent = Agent(
         initial_state = {
             'system_prompt':None,
-            'model':model_registry.find("volcengine", "deepseek-r1-250528"),
+            'model':model_registry.find("volcengine", "deepseek-v3-2-251201"),
             'thinking_level':ThinkingLevel.MEDIUM,
             'tools':[],
         },

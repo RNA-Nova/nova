@@ -13,7 +13,6 @@ import asyncio
 
 # Import types from nova_ai (replacement for pi-ai)
 from nova_ai import (
-    AssistantMessage,
     AssistantMessageEvent,
     ImageContent,
     Message,
@@ -98,18 +97,6 @@ class AgentTool(Tool[TParameters], Generic[TParameters, TDetails], ABC):
         pass
 
 # ----------------------------------------------------------------------
-# Hook types
-# ----------------------------------------------------------------------
-PreToolCallHook = Callable[[AgentTool[Any, Any], Any, str], Union[None, Awaitable[None]]]
-"""(tool, params, tool_call_id) -> 可选的新 params 工具调用前钩子"""
-
-PostToolCallHook = Callable[[AgentTool[Any, Any], Any, str, AgentToolResult[Any]], Union[None, Awaitable[None]]]
-"""(tool, params, tool_call_id, result) -> 可选的新 result 工具调用后钩子"""
-
-PostAssistantHook = Callable[[AssistantMessage], Union[None, Awaitable[None]]]
-"""(message) -> 可选的新 message Assistant消息生成后钩子"""
-
-# ----------------------------------------------------------------------
 # Context and configuration
 # ----------------------------------------------------------------------
 
@@ -167,15 +154,6 @@ class AgentLoopConfig(SimpleStreamOptions):
     If messages are returned, they're added to the context and the agent continues.
     """
 
-    pre_tool_call_hook: InitVar[Optional[PreToolCallHook]] = None
-    """工具调用前钩子，可返回新的 params 覆盖原参数。"""
-
-    post_tool_call_hook: InitVar[Optional[PostToolCallHook]] = None
-    """工具调用后钩子，可返回新的 result 覆盖原结果。"""
-
-    post_assistant_hook: InitVar[Optional[PostAssistantHook]] = None
-    """Assistant 消息生成后钩子，可返回新的 message 覆盖原消息。"""
-
     def __post_init__(self, 
                       signal: Optional[Any] = None,
                       on_payload: Optional[Callable] = None,
@@ -184,9 +162,6 @@ class AgentLoopConfig(SimpleStreamOptions):
                       get_api_key: Optional[Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]] = None,
                       get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None,
                       get_follow_up_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None,
-                      pre_tool_call_hook: Optional[PreToolCallHook] = None,
-                      post_tool_call_hook: Optional[PostToolCallHook] = None,
-                      post_assistant_hook: Optional[PostAssistantHook] = None,
                       ):
         """将 InitVar 参数转换为实例属性"""
         # 调用父类的 __post_init__
@@ -198,9 +173,6 @@ class AgentLoopConfig(SimpleStreamOptions):
         self.get_api_key = get_api_key
         self.get_steering_messages = get_steering_messages
         self.get_follow_up_messages = get_follow_up_messages
-        self.pre_tool_call_hook = pre_tool_call_hook
-        self.post_tool_call_hook = post_tool_call_hook
-        self.post_assistant_hook = post_assistant_hook
 # ----------------------------------------------------------------------
 # Agent state
 # ----------------------------------------------------------------------
@@ -293,5 +265,3 @@ AgentEvent = Union[
     ToolExecutionUpdateEvent,
     ToolExecutionEndEvent,
 ]
-
-
