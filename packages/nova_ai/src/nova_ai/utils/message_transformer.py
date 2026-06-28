@@ -3,19 +3,18 @@
 用于跨提供商兼容性的消息转换
 """
 
-from typing import List, Dict, Optional, Set, Callable, Union, Any
+from typing import List, Dict, Optional, Set, Callable
 import time
 from copy import deepcopy
 
-from ..core.messages import (
-    Message, UserMessage, AssistantMessage, ToolResultMessage,
-    MessageUnion
+from ..types.messages import (
+    Message, AssistantMessage, ToolResultMessage
 )
-from ..core.content import (
-    TextContent, ThinkingContent, ToolCall, ImageContent, ContentUnion
+from ..types.content import (
+    TextContent, ToolCall, ContentUnion
 )
-from ..models import Model
-from ..core.enums import StopReason, Api
+from ..types.model import Model
+from ..types.enums import StopReason
 
 
 def transform_messages(
@@ -158,6 +157,8 @@ def transform_messages(
                 usage=assistant_msg.usage,
                 stop_reason=assistant_msg.stop_reason,
                 error_message=assistant_msg.error_message,
+                response_id=assistant_msg.response_id,
+                response_model=assistant_msg.response_model,
                 timestamp=assistant_msg.timestamp
             )
             transformed.append(new_assistant_msg)
@@ -243,110 +244,3 @@ def transform_messages(
     return result
 
 
-def normalize_openai_tool_call_id(
-    tool_call_id: str,
-    model: Model,
-    source_msg: AssistantMessage
-) -> str:
-    """
-    OpenAI工具调用ID规范化函数
-    
-    OpenAI Responses API生成的ID长达450+字符，包含`|`等特殊字符。
-    Anthropic等API要求ID匹配 ^[a-zA-Z0-9_-]+$（最多64字符）。
-    
-    Args:
-        tool_call_id: 原始工具调用ID
-        model: 目标模型
-        source_msg: 源消息
-        
-    Returns:
-        规范化的工具调用ID
-    """
-    # 如果ID已经是简单格式，直接返回
-    import re
-    if re.match(r'^[a-zA-Z0-9_-]{1,64}$', tool_call_id):
-        return tool_call_id
-    
-    # 生成简化的ID
-    # 使用原始ID的哈希或最后部分
-    import hashlib
-    
-    # 方法1：使用hash截断
-    hash_obj = hashlib.sha256(tool_call_id.encode())
-    short_id = hash_obj.hexdigest()[:16]
-    
-    # 方法2：从原始ID提取有效字符
-    # 提取字母数字和_-，取最后部分
-    valid_chars = ''.join(c for c in tool_call_id if c.isalnum() or c in '_-')
-    if valid_chars:
-        # 取最后最多16个字符
-        short_id = valid_chars[-16:]
-    else:
-        # 如果完全没有有效字符，使用时间戳
-        short_id = f"call_{int(time.time())}"
-    
-    # 确保不超过64字符
-    return short_id[:64]
-
-
-def normalize_anthropic_tool_call_id(
-    tool_call_id: str,
-    model: Model,
-    source_msg: AssistantMessage
-) -> str:
-    """
-    Anthropic工具调用ID规范化函数
-    
-    Anthropic要求ID格式: ^[a-zA-Z0-9_-]+$，最多64字符
-    
-    Args:
-        tool_call_id: 原始工具调用ID
-        model: 目标模型
-        source_msg: 源消息
-        
-    Returns:
-        规范化的工具调用ID
-    """
-    import re
-    
-    # 移除所有不允许的字符
-    normalized = re.sub(r'[^a-zA-Z0-9_-]', '', tool_call_id)
-    
-    # 如果结果为空，生成一个默认ID
-    if not normalized:
-        import hashlib
-        import time
-        normalized = f"tool_{hashlib.md5(str(time.time()).encode()).hexdigest()[:8]}"
-    
-    # 限制长度
-    return normalized[:64]
-
-
-def should_keep_thinking_block(
-    thinking_block: ThinkingContent,
-    is_same_model: bool
-) -> bool:
-    """
-    判断是否应该保留思考块
-    
-    Args:
-        thinking_block: 思考块
-        is_same_model: 是否是同一模型
-        
-    Returns:
-        是否保留
-    """
-    # 被屏蔽的思考仅对同一模型有效
-    if thinking_block.redacted:
-        return is_same_model
-    
-    # 同一模型：只要有签名就保留（即使是空的）
-    if is_same_model and thinking_block.thinking_signature:
-        return True
-    
-    # 不同模型：只有有内容的才保留（会转换为文本）
-    if not is_same_model:
-        return bool(thinking_block.thinking and thinking_block.thinking.strip())
-    
-    # 同一模型但没有签名：保留有内容的
-    return bool(thinking_block.thinking and thinking_block.thinking.strip())

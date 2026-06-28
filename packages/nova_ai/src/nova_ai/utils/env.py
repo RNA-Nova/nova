@@ -4,54 +4,36 @@
 """
 
 import os
-import sys
-from typing import Optional, Dict, Any
-from pathlib import Path
-
-from ..core.enums import KnownProvider
-from ..auth.vertex import has_vertex_adc_credentials
-from ..auth.bedrock import has_bedrock_credentials
+from typing import Optional, Dict
+from ..types.enums import KnownProvider
 
 
 def get_env_api_key(provider: str) -> Optional[str]:
     """
     从已知的环境变量获取提供商的API密钥
-    
+
     对于需要OAuth令牌的提供商不会返回API密钥
-    
+
     Args:
         provider: 提供商名称
-        
+
     Returns:
         API密钥或None
     """
     # GitHub Copilot 特殊处理
     if provider == "github-copilot":
-        return (os.environ.get("COPILOT_GITHUB_TOKEN") or 
-                os.environ.get("GH_TOKEN") or 
-                os.environ.get("GITHUB_TOKEN"))
-    
+        return (
+            os.environ.get("COPILOT_GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or os.environ.get("GITHUB_TOKEN")
+        )
+
     # Anthropic: ANTHROPIC_OAUTH_TOKEN 优先于 ANTHROPIC_API_KEY
     if provider == "anthropic":
-        return os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")
-    
-    # Vertex AI 使用 Application Default Credentials，不是API密钥
-    # 认证通过 `gcloud auth application-default login` 配置
-    if provider == "google-vertex":
-        if has_vertex_adc_credentials():
-            has_project = bool(os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCLOUD_PROJECT"))
-            has_location = bool(os.environ.get("GOOGLE_CLOUD_LOCATION"))
-            
-            if has_project and has_location:
-                return "<authenticated>"
-        return None
-    
-    # Amazon Bedrock 支持多种认证源
-    if provider == "amazon-bedrock":
-        if has_bedrock_credentials():
-            return "<authenticated>"
-        return None
-    
+        return os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get(
+            "ANTHROPIC_API_KEY"
+        )
+
     # 标准API密钥映射
     env_map = {
         "openai": "OPENAI_API_KEY",
@@ -71,32 +53,45 @@ def get_env_api_key(provider: str) -> Optional[str]:
         "kimi-coding": "KIMI_API_KEY",
         "volcengine": "VOLCENGINE_API_KEY",
     }
-    
+
     env_var = env_map.get(provider)
     return os.environ.get(env_var) if env_var else None
 
 
 def get_env_api_key_typed(provider: KnownProvider) -> Optional[str]:
     """类型化的 get_env_api_key 版本"""
-    return get_env_api_key(provider.value if hasattr(provider, 'value') else provider)
+    return get_env_api_key(provider.value if hasattr(provider, "value") else provider)
 
 
 def get_all_env_api_keys() -> Dict[str, Optional[str]]:
     """获取所有已知提供商的环境变量值"""
     providers = [
-        "github-copilot", "anthropic", "google-vertex", "amazon-bedrock",
-        "openai", "azure-openai-responses", "google", "groq", "cerebras",
-        "xai", "openrouter", "vercel-ai-gateway", "zai", "mistral",
-        "minimax", "minimax-cn", "huggingface", "opencode", "kimi-coding"
+        "github-copilot",
+        "anthropic",
+        "openai",
+        "azure-openai-responses",
+        "google",
+        "groq",
+        "cerebras",
+        "xai",
+        "openrouter",
+        "vercel-ai-gateway",
+        "zai",
+        "mistral",
+        "minimax",
+        "minimax-cn",
+        "huggingface",
+        "opencode",
+        "kimi-coding",
+        "volcengine",
     ]
-    
+
     result = {}
     for provider in providers:
         value = get_env_api_key(provider)
         if value:
-            # 隐藏实际密钥值，只显示是否存在
-            result[provider] = "<set>" if value != "<authenticated>" else value
+            result[provider] = "<set>"
         else:
             result[provider] = None
-    
+
     return result

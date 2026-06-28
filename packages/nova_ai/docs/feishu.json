@@ -1,0 +1,95 @@
+{
+    "index": {
+        "url": "https://ucoyxk075n.feishu.cn/wiki/LHG2wokhKi9cODkKfV2cKkx8nrc",
+        "node_token": "LHG2wokhKi9cODkKfV2cKkx8nrc",
+        "obj_token": "IVecdZaJwopHpox5b6ecYTqfnVe"
+    },
+    "architecture-design": {
+        "node_token": "Gwo8wMHK4imJXakQ7okcymC4ncd",
+        "obj_token": "KfGydwABwoQ90Qx8aWTcrjgunmc"
+    },
+    "devlog": {
+        "node_token": "R2NHwwsQ3iqYDyk5jJQcMhhMnLh",
+        "obj_token": "MdIjdXFGuolO40x3Vngc1BwJn5e"
+    },
+    "adr": {
+        "node_token": "OlgqwgcSViTxMck3csScINeIn0d",
+        "obj_token": "LOILdOxuHoSHHFxnw4QcRp97nld",
+        "children": {
+            "001-protocol-vs-abc": {
+                "node_token": "Kvm8wsUHriJs25k9nKUc0p8PnDb",
+                "obj_token": "QUXodaEqDo7Al7x8XqYcRrp7n4e"
+            },
+            "002-registry-no-split": {
+                "node_token": "UJ0WwxKM5iCPdAkJSdKcl8GenFf",
+                "obj_token": "POVcdZN9AoSH1NxyXUlcgndXn1g"
+            },
+            "003-event-stream-design": {
+                "node_token": "RZwGwwaZmi9XffkSaLSc3phQnvb",
+                "obj_token": "C5I0dTQtPoIRufx03yucVpCvnfc"
+            },
+            "004-import-rules": {
+                "node_token": "GvKGwKm4Wi6DcBkVrdxcHh0enUb",
+                "obj_token": "ItdkdluBlo0PS8xoCdZc3REsnHb"
+            },
+            "006-dispatch-not-api": {
+                "node_token": "UkbFw3j1ciXeU8kbUWmc4Fu8nGe",
+                "obj_token": "EdBKdisrlopeXPxgLjYc2p2AnDc"
+            }
+        }
+    },
+    "guides": {
+        "node_token": "YMrsw1ot7iicaukXJwfcItaRnDf",
+        "obj_token": "XM1jdUdLfoqc8FxrKWCcjFm9nfg",
+        "children": {
+            "quickstart": {
+                "node_token": "Rt6uww6TEi1oYvk3ypHcWmXbnhe",
+                "obj_token": "HmdZdWN6TonBUExry5TcAOfGnMe"
+            },
+            "examples": {
+                "node_token": "QiV6w78Z7ipHY5kxWkxcvULpnth",
+                "obj_token": "Wk1AdNDruoIxz1xWp12crrvUn9f"
+            },
+            "error-handling": {
+                "node_token": "HcK1wvtnoi2OKMkDfm9czhVcnyd",
+                "obj_token": "N0oTdk8mao5VY9xKOEAcCyv4nLh"
+            },
+            "configuration": {
+                "node_token": "LAKbw1rCDio6vYk2AR5cJNF9nVh",
+                "obj_token": "MvZed84vfoFP8ZxH1KYc6Q1pnzd"
+            },
+            "maintaining-api-impls": {
+                "node_token": "ZdwgwOj5ni1GCGkh9h2cl02cnyf",
+                "obj_token": "Ha7hdDYN9o8FAcx3aoVc5f2xnXg"
+            },
+            "maintaining-models": {
+                "node_token": "IortwI0HziTc9vkLbeTcOcoCnfg",
+                "obj_token": "ECWMdlsAPoWRpkxHynHcbrHnnme"
+            },
+            "maintaining-types": {
+                "node_token": "MYUlwFb50ic6lfkWYoIc1m3rnpc",
+                "obj_token": "Kiz5dlAAcoKBVkxbGWyc2yPwnDd"
+            }
+        }
+    },
+    "conventions": {
+        "node_token": "MW5ewXJqRiyPPPk3R2AcFyY8nid",
+        "obj_token": "HyC2dMaFboTEcFxhdHNckxo8ndg",
+        "children": {
+            "coding-conventions": {
+                "node_token": "Y4n5wbtJUipCyPkZdTMc0g7SnMo",
+                "obj_token": "Q6z8dLOyWoeae1xQzEscJw7fntb"
+            }
+        }
+    },
+    "reference": {
+        "node_token": "Uv2UwFnlKi076qkeeRkcKRD1nje",
+        "obj_token": "XxGJddUlJomuNLxI1AqcgQecnYl",
+        "children": {
+            "api-reference": {
+                "node_token": "Hcq0wUThViLXmBkfo3ic4De1nkc",
+                "obj_token": "GGxodRXGnoO3Jwxz3CncKpX4nmF"
+            }
+        }
+    }
+}

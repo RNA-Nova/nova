@@ -1,0 +1,30 @@
+[
+  {
+    "name": "read",
+    "description": "读取本地文件内容。支持文本文件与图片，可指定偏移行数和最大行数，自动截断大文件。"
+  },
+  {
+    "name": "write",
+    "description": "将内容写入本地文件。自动创建缺失的父目录，并发写入时串行化以保证文件完整性。"
+  },
+  {
+    "name": "edit",
+    "description": "批量编辑本地文件，将每处 oldText 替换为 newText。支持 CRLF、BOM 与 diff 摘要。"
+  },
+  {
+    "name": "bash",
+    "description": "在本地执行 bash 命令。支持设置工作目录、超时时间、环境变量与流式输出。"
+  },
+  {
+    "name": "grep",
+    "description": "在指定路径下搜索匹配正则表达式的文件内容。优先使用 rg，未安装时回退到纯 Python。"
+  },
+  {
+    "name": "find",
+    "description": "在指定路径下递归查找文件或目录。优先使用 fd，未安装时回退到 pathlib。"
+  },
+  {
+    "name": "ls",
+    "description": "列出目录条目，按字母序排列，目录加 / 后缀。"
+  }
+]

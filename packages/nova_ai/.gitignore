@@ -76,3 +76,7 @@ poetry.lock
 
 # macOS
 .DS_Store
+
+# Feishu CLI skills
+.agents/
+.pi/

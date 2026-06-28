@@ -1,6 +1,6 @@
-# nova_agent / pi_agent
+# nova_agent
 
-`nova_agent` 是 Nova monorepo 的底层 Agent 框架包，核心实现位于 `pi_agent` 目录。
+`nova_agent` 是 Nova monorepo 的底层 Agent 框架包。
 
 ## 职责
 
@@ -17,8 +17,30 @@ cd packages/nova_agent
 poetry install
 ```
 
+## 运行测试
+
+```bash
+# 单元测试
+pytest -m "not integration"
+
+# 真实模型集成测试（需配置 VOLCENGINE_API_KEY）
+pytest tests/test_integration_agent.py
+```
+
+## 示例
+
+详见 [`examples/`](./examples) 目录下的 Jupyter Notebook：
+
+- `01-quickstart.ipynb` — `Agent` 基本用法
+- `02-custom-tools.ipynb` — 自定义工具
+- `03-hooks.ipynb` — Hook 机制
+- `04-steering-follow-up.ipynb` — Steering / Follow-up 队列
+- `05-abort-continue.ipynb` — 中断与继续
+- `06-event-stream.ipynb` — 低层事件流 + mock stream
+- `07-tool-validation.ipynb` — 工具参数验证
+
 ## 主要依赖
 
-- `nova-ai`（本地路径依赖）
-- `mashumaro >= 3.0`
+- `nova-ai`（运行时 import）
+- `pydantic ^2.0`
 - `jsonschema ^4.0`

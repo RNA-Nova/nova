@@ -3,21 +3,19 @@
 包含所有注册相关的逻辑
 """
 
+from ..types import ApiAdapter
 from .api_registry import (
-    ApiProvider,
-    ApiProviderRecord,
-    ApiProviderRegistry,
-    register_api_provider,
-    get_api_provider,
-    list_api_providers,
-    unregister_api_provider,
-    has_api_provider,
-    clear_api_providers,
+    ApiRegistry,
+    register_api_adapter,
+    get_api_adapter,
+    list_api_adapters,
+    unregister_api_adapter,
+    has_api_adapter,
+    clear_api_adapters,
 )
 
 from .model_registry import (
     ModelRegistry,
-    ModelProvider,
     register_model,
     get_model,
     get_models_by_provider,
@@ -28,28 +26,28 @@ from .model_registry import (
 )
 
 from .builtins import (
-    register_builtin_api_providers,
+    register_builtin_api_adapters,
     register_builtin_models,
     register_all_builtins,
-    reset_api_registry,
+    reset_api_adapter_registry,
     reset_model_registry,
     reset_registry,
 )
 
 __all__ = [
     # API注册表
-    "ApiProvider", "ApiProviderRecord", "ApiProviderRegistry",
-    "register_api_provider", "get_api_provider", "list_api_providers",
-    "unregister_api_provider", "has_api_provider", "clear_api_providers",
+    "ApiAdapter", "ApiRegistry",
+    "register_api_adapter", "get_api_adapter", "list_api_adapters",
+    "unregister_api_adapter", "has_api_adapter", "clear_api_adapters",
     
     # 模型注册表
-    "ModelRegistry", "ModelProvider",
+    "ModelRegistry",
     "register_model", "get_model", "get_models_by_provider",
     "list_providers", "list_all_models", "find_model_by_id",
     "register_models_from_dict",
     
     # 内置注册
-    "register_builtin_api_providers", "register_builtin_models",
-    "register_all_builtins", "reset_api_registry",
+    "register_builtin_api_adapters", "register_builtin_models",
+    "register_all_builtins", "reset_api_adapter_registry",
     "reset_model_registry","reset_registry",
 ]

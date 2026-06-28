@@ -3,8 +3,8 @@
 只包含流式处理的核心机制，不包含注册逻辑
 """
 
-# 事件类型
-from .events import (
+# 事件类型（从 types 模块重新导出）
+from ..types.events import (
     AssistantMessageEvent,
     StartEvent, TextStartEvent, TextDeltaEvent, TextEndEvent,
     ThinkingStartEvent, ThinkingDeltaEvent, ThinkingEndEvent,
@@ -20,7 +20,7 @@ from .event_stream import (
 )
 
 # 主要API函数
-from .api import (
+from .invoke import (
     stream,
     complete,
     stream_simple,

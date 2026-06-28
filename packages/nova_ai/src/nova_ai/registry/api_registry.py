@@ -1,182 +1,110 @@
 """
-API注册表
-管理不同API类型的提供者
+API 注册表
+管理不同 API 协议的适配器
 """
 
-from typing import Dict, Optional, List, Callable, Awaitable, Union, Protocol
-from dataclasses import dataclass
-from ..core.enums import Api, KnownApi
-from ..models import Model
-from ..core.messages import Context
-from ..streaming.event_stream import AssistantMessageEventStream
-from ..utils.stream_options import StreamOptions, SimpleStreamOptions
-
-class ApiProvider(Protocol):
-    """
-    API提供者接口协议
-    
-    每个API类型（如openai-completions, anthropic-messages等）都需要注册一个提供者
-    """
-    
-    def stream(
-        self,
-        model: Model,
-        context: Context,
-        options: Optional[StreamOptions] = None
-    ) -> AssistantMessageEventStream:
-        """流式调用"""
-        ...
-    
-    def stream_simple(
-        self,
-        model: Model,
-        context: Context,
-        options: Optional[SimpleStreamOptions] = None
-    ) -> AssistantMessageEventStream:
-        """简化的流式调用"""
-        ...
+from typing import Dict, Optional, List, Union
+from ..types.enums import Api
+from ..types.api_adapter import ApiAdapter
 
 
-@dataclass
-class ApiProviderRecord:
-    """API提供者记录"""
-    api: str
-    stream: Callable
-    stream_simple: Callable
+class ApiRegistry:
+    """API 适配器注册表"""
 
-
-class ApiProviderRegistry:
-    """API提供者注册表"""
-    
     def __init__(self):
-        self._providers: Dict[str, ApiProviderRecord] = {}
-    
-    def register(self, provider: Union[ApiProviderRecord, dict]) -> None:
+        self._adapters: Dict[str, ApiAdapter] = {}
+
+    def register(self, adapter: ApiAdapter) -> None:
         """
-        注册API提供者
-        
+        注册 API 适配器
+
         Args:
-            provider: 提供者记录，可以是ApiProviderRecord或包含api, stream, stream_simple的字典
+            adapter: 实现 ApiAdapter Protocol 的对象，包含 api 属性以及
+                     stream、stream_simple 方法
         """
-        if isinstance(provider, dict):
-            provider = ApiProviderRecord(
-                api=provider["api"],
-                stream=provider["stream"],
-                stream_simple=provider["stream_simple"]
-            )
-        self._providers[provider.api] = provider
-    
-    def get(self, api: Union[Api, str]) -> Optional[ApiProviderRecord]:
+        self._adapters[adapter.api] = adapter
+
+    def get(self, api: Union[Api, str]) -> Optional[ApiAdapter]:
         """
-        获取API提供者
-        
+        获取 API 适配器
+
         Args:
-            api: API类型
-            
+            api: API 类型
+
         Returns:
-            提供者记录，如果未注册则返回None
+            适配器对象，如果未注册则返回 None
         """
         api_str = api.value if hasattr(api, 'value') else api
-        return self._providers.get(api_str)
-    
+        return self._adapters.get(api_str)
+
     def list(self) -> List[str]:
-        """列出所有已注册的API类型"""
-        return list(self._providers.keys())
-    
-    def unregister(self, api: Union[Api, str]) -> Optional[ApiProviderRecord]:
+        """列出所有已注册的 API 类型"""
+        return list(self._adapters.keys())
+
+    def unregister(self, api: Union[Api, str]) -> Optional[ApiAdapter]:
         """
-        注销API提供者
-        
+        注销 API 适配器
+
         Args:
-            api: API类型
-            
+            api: API 类型
+
         Returns:
-            被注销的提供者记录，如果未注册则返回None
+            被注销的适配器对象，如果未注册则返回 None
         """
         api_str = api.value if hasattr(api, 'value') else api
-        return self._providers.pop(api_str, None)
-    
-    def has_provider(self, api: Union[Api, str]) -> bool:
-        """检查是否已注册指定API的提供者"""
+        return self._adapters.pop(api_str, None)
+
+    def has_adapter(self, api: Union[Api, str]) -> bool:
+        """检查是否已注册指定 API 的适配器"""
         api_str = api.value if hasattr(api, 'value') else api
-        return api_str in self._providers
-    
+        return api_str in self._adapters
+
     def clear(self) -> None:
-        """清空所有注册的提供者"""
-        self._providers.clear()
+        """清空所有注册的适配器"""
+        self._adapters.clear()
 
 
 # 全局注册表实例
-_registry = ApiProviderRegistry()
+_api_registry = ApiRegistry()
 
 
-def register_api_provider(provider: Union[ApiProviderRecord, dict]) -> None:
-    """
-    注册API提供者（便捷函数）
-    
-    Args:
-        provider: 提供者记录
-    """
-    _registry.register(provider)
+def register_api_adapter(adapter: ApiAdapter) -> None:
+    """注册 API 适配器（便捷函数）"""
+    _api_registry.register(adapter)
 
 
-def get_api_provider(api: Union[Api, str]) -> Optional[ApiProviderRecord]:
-    """
-    获取API提供者（便捷函数）
-    
-    Args:
-        api: API类型
-        
-    Returns:
-        提供者记录，如果未注册则返回None
-    """
-    return _registry.get(api)
+def get_api_adapter(api: Union[Api, str]) -> Optional[ApiAdapter]:
+    """获取 API 适配器（便捷函数）"""
+    return _api_registry.get(api)
 
 
-def list_api_providers() -> List[str]:
-    """列出所有已注册的API类型（便捷函数）"""
-    return _registry.list()
+def list_api_adapters() -> List[str]:
+    """列出所有已注册的 API 类型（便捷函数）"""
+    return _api_registry.list()
 
 
-def unregister_api_provider(api: Union[Api, str]) -> Optional[ApiProviderRecord]:
-    """
-    注销API提供者（便捷函数）
-    
-    Args:
-        api: API类型
-        
-    Returns:
-        被注销的提供者记录
-    """
-    return _registry.unregister(api)
+def unregister_api_adapter(api: Union[Api, str]) -> Optional[ApiAdapter]:
+    """注销 API 适配器（便捷函数）"""
+    return _api_registry.unregister(api)
 
 
-def has_api_provider(api: Union[Api, str]) -> bool:
-    """
-    检查是否已注册指定API的提供者
-    
-    Args:
-        api: API类型
-        
-    Returns:
-        是否已注册
-    """
-    return _registry.has_provider(api)
+def has_api_adapter(api: Union[Api, str]) -> bool:
+    """检查是否已注册指定 API 的适配器"""
+    return _api_registry.has_adapter(api)
 
 
-def clear_api_providers() -> None:
-    """清空所有注册的API提供者"""
-    _registry.clear()
+def clear_api_adapters() -> None:
+    """清空所有 API 适配器"""
+    _api_registry.clear()
 
 
 __all__ = [
-    "ApiProvider",
-    "ApiProviderRecord",
-    "ApiProviderRegistry",
-    "register_api_provider",
-    "get_api_provider",
-    "list_api_providers",
-    "unregister_api_provider",
-    "has_api_provider",
-    "clear_api_providers",
+    "ApiAdapter",
+    "ApiRegistry",
+    "register_api_adapter",
+    "get_api_adapter",
+    "list_api_adapters",
+    "unregister_api_adapter",
+    "has_api_adapter",
+    "clear_api_adapters",
 ]

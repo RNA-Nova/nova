@@ -19,7 +19,7 @@ nova/
 ## 子包简介
 
 - **nova_ai**：支持流式调用、模型注册、多厂商鉴权的 LLM 统一封装。
-- **nova_agent**（核心实现为 `pi_agent`）：提供 `Agent` 类、事件订阅、`agent_loop` 循环与生命周期管理。
+- **nova_agent**（核心实现为 `nova_agent`）：提供 `Agent` 类、事件订阅、`agent_loop` 循环与生命周期管理。
 - **nova_harness**：在底层框架之上构建 `AgentSession`，支持会话树、分支导航、上下文压缩与远程计算。
 - **nova_team**：主从多智能体挂载配置与团队编排。
 

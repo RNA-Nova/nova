@@ -1,0 +1,27 @@
+{
+  "name": "grep",
+  "description": "在指定路径下搜索匹配正则表达式的文件内容。优先使用 rg，未安装时回退到纯 Python 实现。",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "搜索起始目录或文件路径（相对或绝对路径）"
+      },
+      "regex": {
+        "type": "string",
+        "description": "要匹配的正则表达式"
+      },
+      "file_pattern": {
+        "type": "string",
+        "description": "可选的文件名过滤 glob，例如 '*.py'"
+      },
+      "case_sensitive": {
+        "type": "boolean",
+        "default": false,
+        "description": "是否区分大小写，默认不区分"
+      }
+    },
+    "required": ["path", "regex"]
+  }
+}

@@ -4,13 +4,13 @@ JSON解析工具
 """
 
 import json
-from typing import TypeVar, Any, Union, Dict, List
+from typing import TypeVar, Any, Union, Dict, List, Optional
 from json_repair import repair_json
 
 T = TypeVar('T')
 
 
-def parse_streaming_json(json_str: str | None) -> Union[Dict[str, Any], List[Any]]:
+def parse_streaming_json(json_str: Optional[str]) -> Union[Dict[str, Any], List[Any]]:
     """
     解析流式响应中的部分JSON
     

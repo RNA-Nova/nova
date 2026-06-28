@@ -1,0 +1,27 @@
+{
+  "name": "nova-tui",
+  "version": "0.1.0",
+  "description": "Terminal UI for Nova Harness — Node.js frontend + Python backend",
+  "type": "module",
+  "bin": {
+    "nova": "dist/tui/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/tui/main.ts",
+    "start": "node dist/tui/main.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "^0.74.0",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

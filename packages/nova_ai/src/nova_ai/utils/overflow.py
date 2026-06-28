@@ -1,6 +1,6 @@
 import re
 from typing import Optional, List
-from nova_ai import AssistantMessage
+from ..types.messages import AssistantMessage
 
 """
 Regex patterns to detect context overflow errors from different providers.
@@ -114,11 +114,3 @@ def is_context_overflow(message: AssistantMessage, context_window: Optional[int]
     return False
 
 
-def get_overflow_patterns() -> List[re.Pattern]:
-    """
-    Get the overflow patterns for testing purposes.
-    
-    Returns:
-        A copy of the OVERFLOW_PATTERNS list
-    """
-    return OVERFLOW_PATTERNS.copy()
