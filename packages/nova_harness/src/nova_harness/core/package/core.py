@@ -207,15 +207,22 @@ class PackageManager:
             name=name,
         )
 
-    def _check_binary_deps(self, with_binaries: bool) -> None:
-        """Detect optional binaries and either hint or attempt installation."""
-        missing = detect_missing_binaries()
+    def _check_binary_deps(
+        self, binary_map: Dict[str, str], with_binaries: bool
+    ) -> None:
+        """Detect optional binaries declared by the bundle and hint or install."""
+        if not binary_map:
+            return
+
+        missing = detect_missing_binaries(binary_map)
         if not missing:
             return
 
         if with_binaries:
             results = try_install_binaries(missing)
-            still_missing = [cmd for cmd in missing if not results.get(cmd)]
+            still_missing = {
+                cmd: pkg for cmd, pkg in missing.items() if not results.get(cmd)
+            }
             if still_missing:
                 print(format_binary_hints(still_missing))
         else:
@@ -517,7 +524,8 @@ class PackageManager:
 
         _copy_entry(abs_src, str(dest))
         self._install_deps(abs_src, manifest, no_deps)
-        self._check_binary_deps(with_binaries)
+        binary_map = manifest.nova.binary_dependencies if manifest.nova else {}
+        self._check_binary_deps(binary_map, with_binaries)
 
         meta = PackageMetadata(
             name=pkg_name,
@@ -584,7 +592,8 @@ class PackageManager:
             )
 
         self._install_deps(abs_src, manifest, no_deps)
-        self._check_binary_deps(with_binaries)
+        binary_map = manifest.nova.binary_dependencies if manifest.nova else {}
+        self._check_binary_deps(binary_map, with_binaries)
 
         meta = PackageMetadata(
             name=pkg_name,

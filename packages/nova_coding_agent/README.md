@@ -32,12 +32,16 @@ nova_coding_agent/
 
 ## 可选依赖
 
-`grep` 与 `find` 工具优先使用外部二进制以获得更好性能：
+`grep` 与 `find` 工具优先使用外部二进制以获得更好性能。这些二进制在 `package.json` 的 `nova.binary_dependencies` 中声明：
 
-- `rg`（ripgrep）
-- `fd`（fd-find）
+```json
+"binary_dependencies": {
+  "rg": "ripgrep",
+  "fd": "fd-find"
+}
+```
 
-未安装时会自动回退到纯 Python 实现。如需安装：
+未安装时会自动回退到纯 Python 实现。如需手动安装：
 
 ```bash
 # macOS

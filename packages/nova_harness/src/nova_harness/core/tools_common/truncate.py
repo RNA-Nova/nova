@@ -2,7 +2,6 @@
 
 from typing import List, Tuple
 
-
 # 与 pi 参考实现对齐的默认截断阈值
 DEFAULT_MAX_LINES = 2000
 DEFAULT_MAX_BYTES = 50 * 1024  # 50KB

@@ -15,7 +15,11 @@ Example manifest::
       "nova": {
         "agents": ["./agents/coding_agent"],
         "tools": ["./tools/bash"],
-        "auto_install_dependencies": true
+        "auto_install_dependencies": true,
+        "binary_dependencies": {
+          "rg": "ripgrep",
+          "fd": "fd-find"
+        }
       }
     }
 """
@@ -34,6 +38,7 @@ class NovaManifest(NovaBaseModel):
     tools: List[str] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
     auto_install_dependencies: bool = True
+    binary_dependencies: Dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

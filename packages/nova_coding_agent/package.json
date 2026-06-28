@@ -16,6 +16,10 @@
       "./tools/read",
       "./tools/write"
     ],
-    "auto_install_dependencies": true
+    "auto_install_dependencies": true,
+    "binary_dependencies": {
+      "rg": "ripgrep",
+      "fd": "fd-find"
+    }
   }
 }

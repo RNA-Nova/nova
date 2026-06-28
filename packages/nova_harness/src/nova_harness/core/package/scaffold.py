@@ -80,6 +80,7 @@ def scaffold_package_json(
             "tools": entries["tools"],
             "skills": entries["skills"],
             "auto_install_dependencies": True,
+            "binary_dependencies": {},
         },
     }
 
