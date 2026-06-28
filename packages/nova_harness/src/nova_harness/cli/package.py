@@ -66,15 +66,20 @@ def cmd_install(pm: PackageManager, args):
         name=args.name,
         no_deps=args.no_deps,
         with_binaries=args.with_binaries,
+        dry_run=args.dry_run,
+        quiet=args.json,
     )
-    print(f"Installed '{meta.name}' ({meta.kind}) @ {meta.version}")
+    if args.dry_run:
+        print(f"[dry-run] Would install '{meta.name}' ({meta.kind}) @ {meta.version}")
+    else:
+        print(f"Installed '{meta.name}' ({meta.kind}) @ {meta.version}")
     print(f"  source: {meta.source}")
     print(f"  -> {meta.install_path}")
     return 0
 
 
 def cmd_uninstall(pm: PackageManager, args):
-    ok = pm.uninstall(args.name, kind=args.kind)
+    ok = pm.uninstall(args.name, kind=args.kind, remove_deps=args.remove_deps)
     if ok:
         print(f"Uninstalled '{args.name}' ({args.kind})")
         return 0
@@ -177,7 +182,12 @@ def main(argv=None):
     p_install.add_argument(
         "--with-binaries",
         action="store_true",
-        help="Attempt to install optional binaries (rg, fd)",
+        help="Attempt to install optional binaries",
+    )
+    p_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview what would be installed without making changes",
     )
 
     # uninstall
@@ -188,6 +198,11 @@ def main(argv=None):
         required=True,
         choices=_KIND_CHOICES,
         help="Package kind",
+    )
+    p_uninstall.add_argument(
+        "--remove-deps",
+        action="store_true",
+        help="Also uninstall Python deps not used by other packages",
     )
 
     # update
@@ -282,16 +297,27 @@ def main(argv=None):
                     name=args.name,
                     no_deps=args.no_deps,
                     with_binaries=args.with_binaries,
+                    dry_run=args.dry_run,
+                    quiet=True,
                 )
-                print(_json.dumps(meta.model_dump(), ensure_ascii=False))
+                payload = meta.model_dump()
+                payload["dry_run"] = args.dry_run
+                print(_json.dumps(payload, ensure_ascii=False))
                 return 0
             elif args.command == "init":
                 path = scaffold_package_json(args.directory or ".", name=args.name)
                 print(_json.dumps({"created": path}, ensure_ascii=False))
                 return 0
             elif args.command == "uninstall":
-                ok = pm.uninstall(args.name, kind=args.kind)
-                print(_json.dumps({"ok": ok}, ensure_ascii=False))
+                ok = pm.uninstall(
+                    args.name, kind=args.kind, remove_deps=args.remove_deps
+                )
+                print(
+                    _json.dumps(
+                        {"ok": ok, "remove_deps": args.remove_deps},
+                        ensure_ascii=False,
+                    )
+                )
                 return 0
             elif args.command == "update":
                 meta = pm.update(args.name, kind=args.kind)

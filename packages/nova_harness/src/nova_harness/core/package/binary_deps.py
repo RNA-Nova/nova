@@ -7,10 +7,11 @@
 字段声明，格式为 ``{命令名: 系统包名}``。
 """
 
+import os
 import platform
 import shutil
 import subprocess
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 def detect_missing_binaries(binary_map: Dict[str, str]) -> Dict[str, str]:
@@ -31,10 +32,38 @@ def _platform_family() -> str:
     return "other"
 
 
+def _is_root() -> bool:
+    """Check whether the current process has root privileges."""
+    try:
+        return os.geteuid() == 0
+    except AttributeError:
+        return False
+
+
+def _has_sudo() -> bool:
+    """Check whether ``sudo`` is available."""
+    return shutil.which("sudo") is not None
+
+
 def _brew_package(package_name: str) -> Optional[str]:
     # Homebrew 中部分包名与 Debian 不同，这里做简单映射。
     mapping = {"fd-find": "fd"}
     return mapping.get(package_name, package_name)
+
+
+def _linux_manager() -> Optional[Tuple[str, List[str]]]:
+    """Return (manager_name, install_command_prefix) for the current Linux distro."""
+    if shutil.which("apt-get"):
+        return "apt-get", ["apt-get", "install", "-y"]
+    if shutil.which("apt"):
+        return "apt", ["apt", "install", "-y"]
+    if shutil.which("dnf"):
+        return "dnf", ["dnf", "install", "-y"]
+    if shutil.which("yum"):
+        return "yum", ["yum", "install", "-y"]
+    if shutil.which("pacman"):
+        return "pacman", ["pacman", "-S", "--noconfirm"]
+    return None
 
 
 def get_install_hint(cmd: str, package_name: str) -> Optional[str]:
@@ -45,16 +74,11 @@ def get_install_hint(cmd: str, package_name: str) -> Optional[str]:
         if pkg and shutil.which("brew"):
             return f"brew install {pkg}"
     elif family == "linux":
-        if shutil.which("apt-get"):
-            return f"sudo apt-get install {package_name}"
-        if shutil.which("apt"):
-            return f"sudo apt install {package_name}"
-        if shutil.which("dnf"):
-            return f"sudo dnf install {package_name}"
-        if shutil.which("yum"):
-            return f"sudo yum install {package_name}"
-        if shutil.which("pacman"):
-            return f"sudo pacman -S {package_name}"
+        manager_info = _linux_manager()
+        if manager_info:
+            manager, prefix = manager_info
+            sudo_prefix = "sudo " if not _is_root() else ""
+            return f"{sudo_prefix}{' '.join(prefix)} {package_name}"
     return None
 
 
@@ -73,61 +97,60 @@ def format_binary_hints(missing: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _build_install_command(
+    package_name: str,
+) -> Optional[Tuple[List[str], bool]]:
+    """Build a subprocess command to install a binary package.
+
+    Returns:
+        ``(command_args, needs_sudo)`` or None if platform is unsupported.
+    """
+    family = _platform_family()
+    if family == "macos" and shutil.which("brew"):
+        pkg = _brew_package(package_name)
+        if pkg:
+            return ["brew", "install", pkg], False
+        return None
+
+    if family == "linux":
+        manager_info = _linux_manager()
+        if manager_info:
+            _, prefix = manager_info
+            if _is_root():
+                return prefix + [package_name], False
+            if _has_sudo():
+                return ["sudo"] + prefix + [package_name], True
+            return prefix + [package_name], True
+
+    return None
+
+
 def try_install_binaries(missing: Dict[str, str]) -> Dict[str, bool]:
     """尝试通过系统包管理器安装二进制依赖。
 
     返回每个命令是否安装成功。未成功时不会抛出异常，仅返回 False。
     """
     results: Dict[str, bool] = {}
-    family = _platform_family()
+    if not missing:
+        return results
 
-    if family == "macos" and shutil.which("brew"):
-        packages = []
-        for cmd, package_name in missing.items():
-            pkg = _brew_package(package_name)
-            if pkg:
-                packages.append(pkg)
-        if packages:
-            try:
-                subprocess.run(["brew", "install"] + packages, check=True)
-                for cmd in missing:
-                    results[cmd] = shutil.which(cmd) is not None
-                return results
-            except Exception:
-                for cmd in missing:
-                    results[cmd] = False
-                return results
+    for cmd, package_name in missing.items():
+        command_info = _build_install_command(package_name)
+        if command_info is None:
+            results[cmd] = False
+            continue
 
-    if family == "linux":
-        manager = None
-        install_cmd = None
-        if shutil.which("apt-get"):
-            manager = "apt-get"
-            install_cmd = ["apt-get", "install", "-y"]
-        elif shutil.which("apt"):
-            manager = "apt"
-            install_cmd = ["apt", "install", "-y"]
-        elif shutil.which("dnf"):
-            manager = "dnf"
-            install_cmd = ["dnf", "install", "-y"]
-        elif shutil.which("yum"):
-            manager = "yum"
-            install_cmd = ["yum", "install", "-y"]
-        elif shutil.which("pacman"):
-            manager = "pacman"
-            install_cmd = ["pacman", "-S", "--noconfirm"]
+        args, needs_sudo = command_info
+        if needs_sudo and not _is_root() and not _has_sudo():
+            results[cmd] = False
+            continue
 
-        if install_cmd:
-            for cmd, package_name in missing.items():
-                try:
-                    subprocess.run(install_cmd + [package_name], check=True)
-                    results[cmd] = shutil.which(cmd) is not None
-                except Exception:
-                    results[cmd] = False
-            return results
+        try:
+            subprocess.run(args, check=True)
+            results[cmd] = shutil.which(cmd) is not None
+        except Exception:
+            results[cmd] = False
 
-    for cmd in missing:
-        results[cmd] = False
     return results
 
 

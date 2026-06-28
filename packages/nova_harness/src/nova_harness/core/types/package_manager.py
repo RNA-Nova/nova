@@ -40,6 +40,7 @@ class PackageMetadata(NovaBaseModel):
     installed_at: str
     author: str = ""
     dependencies: List[str] = Field(default_factory=list)
+    installed_dependencies: List[str] = Field(default_factory=list)
     installed_items: List[InstalledItem] = Field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -53,6 +54,7 @@ class PackageMetadata(NovaBaseModel):
             "installed_at": self.installed_at,
             "author": self.author,
             "dependencies": self.dependencies,
+            "installed_dependencies": self.installed_dependencies,
             "installed_items": [item.model_dump() for item in self.installed_items],
         }
 
@@ -68,6 +70,7 @@ class PackageMetadata(NovaBaseModel):
             installed_at=data.get("installed_at", ""),
             author=data.get("author", ""),
             dependencies=data.get("dependencies", []),
+            installed_dependencies=data.get("installed_dependencies", []),
             installed_items=[
                 InstalledItem.model_validate(i) for i in data.get("installed_items", [])
             ],
