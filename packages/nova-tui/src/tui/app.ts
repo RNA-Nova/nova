@@ -12,7 +12,7 @@ import {
   type SlashCommand,
 } from '@earendil-works/pi-tui';
 
-import type { AgentEvent } from './rpc-client.js';
+import type { AgentEvent, UIRequest } from './rpc-client.js';
 import { NovaRpcClient } from './rpc-client.js';
 import { createTUIState, type TUIState } from './state.js';
 import { FooterComponent } from './components/footer.js';
@@ -125,6 +125,7 @@ export class NovaTUI {
   async start(): Promise<void> {
     await this.client.start();
     this.client.onEvent((evt) => this._handleAgentEvent(evt));
+    this.client.onUIRequest((req) => this._handleUIRequest(req));
     this.client.onClose(() => {
       if (!this.shuttingDown) {
         this.transcriptCtrl.showStatus('Python server disconnected', '#e06c75');
@@ -453,5 +454,93 @@ export class NovaTUI {
     if (evt.type === 'agent_end' || evt.type === 'turn_end') {
       void this._pollContextUsage();
     }
+  }
+
+  // ------------------------------------------------------------------
+  // UI 原语请求（由后端扩展触发）
+  // ------------------------------------------------------------------
+  private async _handleUIRequest(req: UIRequest): Promise<void> {
+    const { id, method } = req;
+    try {
+      switch (method) {
+        case 'select': {
+          const options = (req.options as string[]) || [];
+          const title = (req.title as string) || '';
+          const selected = await this._promptSelection(title, options);
+          this.client.sendUIResponse(id, selected);
+          break;
+        }
+        case 'confirm': {
+          const title = (req.title as string) || '';
+          const message = (req.message as string) || '';
+          const confirmed = await this._promptConfirm(title, message);
+          this.client.sendUIResponse(id, confirmed);
+          break;
+        }
+        case 'input': {
+          // TODO: 实现真正的输入弹窗；目前返回空字符串避免阻塞。
+          this.client.sendUIResponse(id, '');
+          break;
+        }
+        case 'notify': {
+          const message = (req.message as string) || '';
+          const type = (req.type as string) || 'info';
+          const color = type === 'error' ? '#e06c75' : type === 'warning' ? '#e5c07b' : '#98c379';
+          this.transcriptCtrl.showStatus(message, color);
+          break;
+        }
+        case 'setStatus': {
+          const text = (req.text as string | undefined) ?? '';
+          this.transcriptCtrl.showStatus(text, '#61afef');
+          break;
+        }
+        case 'setWorkingMessage': {
+          const message = (req.message as string) || '';
+          this.transcriptCtrl.showStatus(message, '#61afef');
+          break;
+        }
+        case 'setWorkingVisible': {
+          // 目前无独立 working indicator，忽略可见性变化。
+          break;
+        }
+        default:
+          // 未知方法默认返回 null
+          this.client.sendUIResponse(id, null);
+      }
+    } catch (e) {
+      this.transcriptCtrl.showError(
+        `UI request failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      this.client.sendUIResponse(id, null);
+    }
+  }
+
+  private async _promptSelection(title: string, options: string[]): Promise<string | null> {
+    return new Promise((resolve) => {
+      const theme = createEditorTheme(defaultColors);
+      const items: SelectItem[] = options.map((label) => ({ value: label, label }));
+      const selectList = new SelectList(items, Math.min(10, items.length), theme.selectList);
+      selectList.onSelect = (item) => {
+        this.state.activityContainer.removeChild(selectList);
+        this.state.ui.setFocus(this.editor);
+        this.state.ui.requestRender();
+        resolve((item.value as string) || null);
+      };
+      selectList.onCancel = () => {
+        this.state.activityContainer.removeChild(selectList);
+        this.state.ui.setFocus(this.editor);
+        this.state.ui.requestRender();
+        resolve(null);
+      };
+      this.transcriptCtrl.showStatus(title, '#e5c07b');
+      this.state.activityContainer.addChild(selectList);
+      this.state.ui.setFocus(selectList);
+      this.state.ui.requestRender();
+    });
+  }
+
+  private async _promptConfirm(title: string, message: string): Promise<boolean> {
+    const selected = await this._promptSelection(`${title}\n${message}`, ['Yes', 'No']);
+    return selected === 'Yes';
   }
 }

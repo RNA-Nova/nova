@@ -22,4 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Added
 - nova_ai：LLM 统一抽象层、流式接口、模型注册表、内置厂商支持（OpenAI、Anthropic、Google、Volcengine）。
 - nova_agent（nova_agent）：Agent 核心、事件系统、工具校验、异步循环。
-- nova_harness：AgentSession、会话树管理、上下文压缩、资源加载、Computex 远程工具。
+- nova_harness：AgentSession、会话树管理、上下文压缩、资源加载。

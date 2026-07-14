@@ -2,6 +2,7 @@
 OpenAI Completions API 流式处理实现
 """
 
+import inspect
 import json
 import re
 import time
@@ -919,7 +920,10 @@ def stream_openai_completions(
             params = build_params(model, context, options, compat, cache_retention)
 
             if options and options.on_payload:
-                options.on_payload(params)
+                payload_result = options.on_payload(params)
+                if inspect.isawaitable(payload_result):
+                    payload_result = await payload_result
+                params = payload_result or params
 
             timeout = options.timeout if options else None
             request_timeout = timeout if timeout is not None else openai.NOT_GIVEN
@@ -932,13 +936,15 @@ def stream_openai_completions(
                 raw_response = await client.chat.completions.with_raw_response.create(
                     **params, timeout=request_timeout
                 )
-                options.on_response(
+                response_result = options.on_response(
                     ProviderResponse(
                         status=raw_response.status_code,
                         headers=dict(raw_response.headers),
                     ),
                     model,
                 )
+                if inspect.isawaitable(response_result):
+                    await response_result
                 openai_stream = raw_response.parse()
             else:
                 openai_stream = await client.chat.completions.create(

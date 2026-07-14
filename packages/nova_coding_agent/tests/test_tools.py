@@ -23,7 +23,7 @@ def _load_executor(tool_name: str):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ def test_find_file(tmpdir):
     open(os.path.join(tmpdir, "other.txt"), "w").close()
 
     executor = _load_executor("find")
-    result = _run(executor.execute("id", {"path": tmpdir, "glob": "*.py"}))
+    result = _run(executor.execute("id", {"path": tmpdir, "pattern": "*.py"}))
 
     assert "target.py" in result.content[0].text
     assert "other.txt" not in result.content[0].text

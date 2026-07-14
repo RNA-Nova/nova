@@ -14,7 +14,7 @@ from nova_ai import (
 )
 
 from nova_harness.core.config.resolve import resolve_headers
-from nova_harness.core.types.model_registry import (
+from nova_harness.core.types.config.model_registry import (
     CustomModelsResult,
     ModelOverride,
     OpenAICompat,

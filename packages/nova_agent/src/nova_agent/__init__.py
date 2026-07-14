@@ -55,7 +55,7 @@ from .utils import (
     set_validation_enabled,
     clear_validator_cache,
 )
-from .signal import AbortSignal
+from .signal import AbortController, AbortSignal
 
 # 版本信息
 __version__ = "0.1.0"
@@ -111,5 +111,6 @@ __all__ = [
     "set_validation_enabled",
     "clear_validator_cache",
     # 信号函数
+    "AbortController",
     "AbortSignal",
 ]

@@ -1,39 +1,70 @@
 """
 Bash 执行抽象。
 
-提供本地/远程统一的 Bash 执行接口，与 TypeScript 版的 ``executeBashWithOperations``
-和 ``createLocalBashOperations`` 对齐。
+提供本地/远程统一的 Bash 执行接口，并支持 spawn hook 在子进程启动前
+调整 command、cwd 或 env。
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Protocol
+import inspect
+import os
+import shutil
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+
+from nova_harness.core.types.runtime.bash import (
+    BashOperations,
+    BashResult,
+    BashSpawnContext,
+    BashSpawnHook,
+)
 
 
-@dataclass
-class BashResult:
-    """Bash 命令执行结果。"""
+def _is_aborted(signal: Any) -> bool:
+    """判断 signal 是否已经触发中断。"""
+    if signal is None:
+        return False
+    if isinstance(signal, asyncio.Event):
+        return signal.is_set()
+    if getattr(signal, "aborted", False):
+        return True
+    return False
 
-    output: str
-    exit_code: int
-    cancelled: bool = False
-    truncated: bool = False
-    full_output_path: Optional[str] = None
+
+def _create_signal_wait_task(signal: Any) -> Optional[asyncio.Task]:
+    """如果 signal 支持异步等待，返回一个等待它的 Task；否则返回 None 由调用方轮询。"""
+    if signal is None:
+        return None
+    if isinstance(signal, asyncio.Event):
+        return asyncio.create_task(signal.wait())
+    wait_fn = getattr(signal, "wait", None)
+    if wait_fn is not None and callable(wait_fn):
+        # AbortSignal.wait() 是 coroutine function
+        if inspect.iscoroutinefunction(wait_fn):
+            return asyncio.create_task(wait_fn())
+        # 某些对象可能提供返回 awaitable 的 wait 方法
+        result = wait_fn()
+        if inspect.isawaitable(result):
+            return asyncio.create_task(result)
+    return None
 
 
-class BashOperations(Protocol):
-    """Bash 执行后端协议（本地子进程、远程主机等）。"""
-
-    async def execute(
-        self,
-        command: str,
-        cwd: str,
-        options: Dict[str, Any],
-    ) -> BashResult:
-        """执行命令并返回结果。"""
-        ...
+def _resolve_spawn_context(
+    command: str,
+    cwd: str,
+    spawn_hook: Optional[BashSpawnHook] = None,
+) -> BashSpawnContext:
+    """应用 spawn hook 得到最终启动上下文。"""
+    base = BashSpawnContext(
+        command=command,
+        cwd=cwd,
+        env={**os.environ},
+    )
+    if spawn_hook is None:
+        return base
+    return spawn_hook(base)
 
 
 @dataclass
@@ -42,6 +73,7 @@ class LocalBashOperations:
 
     shell_path: Optional[str] = None
     max_output_length: int = 100_000
+    spawn_hook: Optional[BashSpawnHook] = field(default=None)
 
     async def execute(
         self,
@@ -51,20 +83,24 @@ class LocalBashOperations:
     ) -> BashResult:
         on_chunk: Optional[Callable[[str], None]] = options.get("on_chunk")
         signal: Any = options.get("signal")
+        spawn_hook: Optional[BashSpawnHook] = options.get(
+            "spawn_hook", self.spawn_hook
+        )
 
         chunks: List[str] = []
         cancelled = False
 
-        executable = self.shell_path or "/bin/bash"
-        # 显式指定 -c 以支持自定义 shell
-        cmd_list = [executable, "-c", command]
+        ctx = _resolve_spawn_context(command, cwd, spawn_hook)
+        executable = self.shell_path or shutil.which("bash") or "/bin/bash"
+        cmd_list = [executable, "-c", ctx.command]
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd_list,
-                cwd=cwd,
+                cwd=ctx.cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=ctx.env,
             )
         except Exception as exc:
             return BashResult(output=f"Failed to start shell: {exc}", exit_code=-1)
@@ -88,29 +124,42 @@ class LocalBashOperations:
         stdout_task = asyncio.create_task(read_stream(proc.stdout))
         stderr_task = asyncio.create_task(read_stream(proc.stderr))
 
-        # 等待子进程结束或被取消
+        # 等待子进程结束或被中断
         wait_task = asyncio.create_task(proc.wait())
-        abort_event = asyncio.Event()
+        signal_task = _create_signal_wait_task(signal)
 
-        def _check_signal() -> None:
-            if signal is None:
-                return
-            if isinstance(signal, asyncio.Event):
-                if signal.is_set():
-                    abort_event.set()
-            elif getattr(signal, "aborted", False):
-                abort_event.set()
+        tasks: set = {wait_task}
+        if signal_task is not None:
+            tasks.add(signal_task)
 
-        check_interval = 0.1
-        while not wait_task.done():
-            _check_signal()
-            try:
-                await asyncio.wait_for(abort_event.wait(), timeout=check_interval)
-                break
-            except asyncio.TimeoutError:
-                continue
+        aborted = False
+        if tasks == {wait_task}:
+            # 没有可等待的 signal，退回到轮询
+            check_interval = 0.1
+            while not wait_task.done():
+                if _is_aborted(signal):
+                    aborted = True
+                    break
+                try:
+                    await asyncio.wait_for(
+                        asyncio.Event().wait(), timeout=check_interval
+                    )
+                except asyncio.TimeoutError:
+                    continue
+        else:
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            aborted = signal_task is not None and signal_task in done
 
-        if not wait_task.done():
+        if aborted:
             cancelled = True
             try:
                 proc.kill()
@@ -139,9 +188,10 @@ class LocalBashOperations:
 
 def create_local_bash_operations(
     shell_path: Optional[str] = None,
+    spawn_hook: Optional[BashSpawnHook] = None,
 ) -> LocalBashOperations:
     """创建本地 Bash 执行后端。"""
-    return LocalBashOperations(shell_path=shell_path)
+    return LocalBashOperations(shell_path=shell_path, spawn_hook=spawn_hook)
 
 
 async def execute_bash(
@@ -153,3 +203,12 @@ async def execute_bash(
     """使用给定 operations 执行 Bash 命令。"""
     opts = options or {}
     return await operations.execute(command, cwd, opts)
+
+
+__all__ = [
+    "create_local_bash_operations",
+    "execute_bash",
+    "LocalBashOperations",
+    "BashSpawnContext",
+    "BashSpawnHook",
+]

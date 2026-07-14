@@ -3,32 +3,44 @@
 包含两个层次：
 
 1. 文件级：发现 ``SKILL.md`` 文件并解析其 YAML frontmatter。
-2. Resource 级：按 Nova 资源优先级（additional -> settings -> project -> global）
-   发现并加载 skill，处理去重与冲突诊断。
+2. Resource 级：由 ``PackageResolver`` 提供路径，处理去重与冲突诊断。
 """
 
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from nova_harness.core.config.defaults import CONFIG_DIR_NAME
-from nova_harness.core.types.diagnostics import ResourceCollision, ResourceDiagnostic
+from nova_harness.core.package.utils.ignore import (
+    IgnoreSpecWithPrefix,
+    is_ignored_by_specs,
+    load_ignore_specs,
+)
+from nova_harness.core.resources.source_info import (
+    find_source_info_for_path,
+    source_info_from_metadata,
+)
+from nova_harness.core.types.extensions import SourceInfo
+from nova_harness.core.types.package_manager import (
+    ResolvedResource,
+    SourceOrigin,
+    SourceScope,
+)
+from nova_harness.core.types.resources.diagnostics import (
+    ResourceCollision,
+    ResourceDiagnostic,
+)
 from nova_harness.core.types.skills import Skill
+from nova_harness.core.utils.files import canonicalize_path
 from nova_harness.core.utils.frontmatter import parse_frontmatter
 
-_NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _MAX_NAME_LEN = 64
 _MAX_DESCRIPTION_LEN = 1024
 
 
-# =============================================================================
-# 文件级加载
-# =============================================================================
-
-
 def validate_name(name: str) -> Tuple[bool, str]:
-    """校验 skill 名称是否合法。"""
+    """校验 skill 名称是否合法（与 TS 规则对齐）。"""
     if not name:
         return False, "Skill name is required"
     if len(name) > _MAX_NAME_LEN:
@@ -36,10 +48,12 @@ def validate_name(name: str) -> Tuple[bool, str]:
     if not _NAME_PATTERN.match(name):
         return (
             False,
-            "Skill name must be lowercase alphanumeric with hyphens only",
+            "Skill name must contain lowercase a-z, 0-9, hyphens only",
         )
     if name.startswith("-") or name.endswith("-"):
         return False, "Skill name must not start or end with a hyphen"
+    if "--" in name:
+        return False, "Skill name must not contain consecutive hyphens"
     return True, ""
 
 
@@ -56,7 +70,9 @@ def validate_description(description: str) -> Tuple[bool, str]:
 
 
 def load_skill_from_file(
-    file_path: str, source_label: str = "unknown"
+    file_path: str,
+    source_label: str = "unknown",
+    source_info: Optional[SourceInfo] = None,
 ) -> Optional[Skill]:
     """加载单个 SKILL.md 文件。
 
@@ -71,14 +87,19 @@ def load_skill_from_file(
     parsed = parse_frontmatter(content)
     fm = parsed.frontmatter
 
-    name = fm.get("name") if isinstance(fm, dict) else None
+    raw_name = fm.get("name") if isinstance(fm, dict) else None
     description = fm.get("description") if isinstance(fm, dict) else None
     disable = (
         bool(fm.get("disable-model-invocation")) if isinstance(fm, dict) else False
     )
 
-    if not isinstance(name, str):
-        return None
+    # frontmatter 未提供有效 name 时，fallback 到父目录名（与 TS 行为对齐）。
+    parent_dir_name = Path(file_path).parent.name
+    if isinstance(raw_name, str) and raw_name.strip():
+        name = raw_name.strip()
+    else:
+        name = parent_dir_name
+
     if not isinstance(description, str):
         return None
 
@@ -96,33 +117,101 @@ def load_skill_from_file(
         base_dir=str(Path(file_path).parent),
         disable_model_invocation=disable,
         source_label=source_label,
+        source_info=source_info,
     )
 
 
-def load_skills_from_dir(directory: str, source_label: str = "unknown") -> List[Skill]:
-    """递归扫描目录，加载所有 ``SKILL.md``。
+def load_skills_from_dir(
+    directory: str,
+    source_label: str = "unknown",
+    source_info: Optional[SourceInfo] = None,
+    allowed_names: Optional[set[str]] = None,
+) -> List[Skill]:
+    """递归扫描目录，加载所有 ``SKILL.md``，应用目录树中的 ignore 规则。
 
     如果某个目录包含 ``SKILL.md``，则停止继续递归该目录的子目录。
+
+    Args:
+        allowed_names: 若提供，仅返回名称在该集合中的 skill。
     """
+    root_dir = str(Path(directory).resolve())
+    specs = load_ignore_specs(root_dir)
+    return _load_skills_from_dir_internal(
+        directory,
+        source_label=source_label,
+        source_info=source_info,
+        allowed_names=allowed_names,
+        root_dir=root_dir,
+        specs=specs,
+    )
+
+
+def _load_skills_from_dir_internal(
+    directory: str,
+    source_label: str = "unknown",
+    source_info: Optional[SourceInfo] = None,
+    allowed_names: Optional[set[str]] = None,
+    root_dir: Optional[str] = None,
+    specs: Optional[List[IgnoreSpecWithPrefix]] = None,
+) -> List[Skill]:
     skills: List[Skill] = []
     root = Path(directory)
     if not root.exists() or not root.is_dir():
         return skills
 
+    resolved_root = root.resolve()
+    if root_dir is None:
+        root_dir = str(resolved_root)
+        specs = load_ignore_specs(root_dir)
+    assert specs is not None
+
+    try:
+        rel_prefix = str(resolved_root.relative_to(Path(root_dir).resolve()))
+    except ValueError:
+        rel_prefix = ""
+    if rel_prefix:
+        rel_prefix += "/"
+
     for entry in sorted(root.iterdir()):
+        entry_rel = f"{rel_prefix}{entry.name}"
+
         if entry.is_file() and entry.name == "SKILL.md":
-            skill = load_skill_from_file(str(entry), source_label=source_label)
-            if skill is not None:
+            if is_ignored_by_specs(entry_rel, is_dir=False, specs=specs):
+                continue
+            skill = load_skill_from_file(
+                str(entry), source_label=source_label, source_info=source_info
+            )
+            if skill is not None and (
+                allowed_names is None or skill.name in allowed_names
+            ):
                 skills.append(skill)
         elif entry.is_dir():
+            if is_ignored_by_specs(entry_rel, is_dir=True, specs=specs):
+                continue
             skill_file = entry / "SKILL.md"
             if skill_file.exists():
-                skill = load_skill_from_file(str(skill_file), source_label=source_label)
-                if skill is not None:
+                skill_rel = f"{entry_rel}/SKILL.md"
+                if is_ignored_by_specs(skill_rel, is_dir=False, specs=specs):
+                    continue
+                skill = load_skill_from_file(
+                    str(skill_file),
+                    source_label=source_label,
+                    source_info=source_info,
+                )
+                if skill is not None and (
+                    allowed_names is None or skill.name in allowed_names
+                ):
                     skills.append(skill)
             else:
                 skills.extend(
-                    load_skills_from_dir(str(entry), source_label=source_label)
+                    _load_skills_from_dir_internal(
+                        str(entry),
+                        source_label=source_label,
+                        source_info=source_info,
+                        allowed_names=allowed_names,
+                        root_dir=root_dir,
+                        specs=specs,
+                    )
                 )
 
     return skills
@@ -133,79 +222,106 @@ def load_skills_from_dir(directory: str, source_label: str = "unknown") -> List[
 # =============================================================================
 
 
+def _source_label_from_resource(resource: ResolvedResource) -> str:
+    """根据 resolver 元数据生成 skill 来源标签。"""
+    metadata = resource.metadata
+    if metadata.origin == SourceOrigin.PACKAGE:
+        return "package"
+    scope = metadata.scope
+    if isinstance(scope, SourceScope):
+        return scope.value
+    return str(scope)
+
+
 def _collect_skill_paths(
-    cwd: str,
-    agent_dir: str,
-    settings_manager: Optional[Any],
     additional_paths: Optional[List[str]],
     no_skills: bool,
-) -> List[Tuple[str, str]]:
-    """Return list of (path, source_label) to load skills from."""
-    if no_skills:
-        return []
+    resolved_resources: Optional[List[ResolvedResource]] = None,
+    extension_source_infos: Optional[List[SourceInfo]] = None,
+) -> List[Tuple[str, str, Optional[SourceInfo]]]:
+    """Return list of (path, source_label, source_info) to load skills from.
 
-    paths: List[Tuple[str, str]] = []
+    ``no_skills=True`` 只禁用 ``resolved_resources``（自动发现/包解析的资源），
+    不禁用 ``additional_paths``（CLI/程序显式传入的路径），与 TS 行为一致。
+    """
+    paths: List[Tuple[str, str, Optional[SourceInfo]]] = []
     seen: set = set()
 
-    def add(path: str, label: str) -> None:
+    def add(path: str, label: str, source_info: Optional[SourceInfo] = None) -> None:
         resolved = Path(path).resolve()
-        if resolved.exists() and str(resolved) not in seen:
-            seen.add(str(resolved))
-            paths.append((str(resolved), label))
+        if not resolved.exists():
+            return
+        real = canonicalize_path(str(resolved))
+        if real not in seen:
+            seen.add(real)
+            paths.append((str(resolved), label, source_info))
 
-    # 1. 显式配置路径
+    if not no_skills:
+        for resource in resolved_resources or []:
+            if not resource.enabled:
+                continue
+            add(
+                resource.path,
+                _source_label_from_resource(resource),
+                source_info_from_metadata(resource),
+            )
+
     for p in additional_paths or []:
-        add(p, "path")
-
-    # 2. settings 中配置的 skill paths
-    if settings_manager is not None:
-        for p in settings_manager.get_skill_paths():
-            add(p, "settings")
-
-    # 3. 项目级自动发现
-    project_skills = Path(cwd) / CONFIG_DIR_NAME / "skills"
-    if project_skills.exists():
-        add(str(project_skills), "project")
-
-    # 4. 全局自动发现
-    global_skills = Path(agent_dir) / "skills"
-    if global_skills.exists():
-        add(str(global_skills), "global")
+        resolved = Path(p).resolve()
+        source_info = None
+        if extension_source_infos:
+            source_info = find_source_info_for_path(
+                str(resolved), extension_source_infos
+            )
+        add(p, "path", source_info)
 
     return paths
 
 
 def load_skills(
-    cwd: str,
-    agent_dir: str,
-    settings_manager: Optional[Any] = None,
     additional_paths: Optional[List[str]] = None,
     no_skills: bool = False,
+    resolved_resources: Optional[List[ResolvedResource]] = None,
+    extension_source_infos: Optional[List[SourceInfo]] = None,
+    allowed_names: Optional[set[str]] = None,
 ) -> Tuple[Dict[str, Skill], List[ResourceDiagnostic]]:
     """加载所有可用 skill。
 
     返回 ``(skills_by_name, diagnostics)``。同名 skill 按优先级保留第一个，
     后续重复项生成 collision 诊断。
+
+    路径必须由 ``PackageResolver`` 提供；``additional_paths`` 作为补充追加。
+
+    Args:
+        allowed_names: 若提供，仅加载名称在该集合中的 skill。
+            注意：白名单过滤在去重**之前**执行，被过滤掉的 skill 不会产生
+            collision 诊断。
     """
     candidates = _collect_skill_paths(
-        cwd=cwd,
-        agent_dir=agent_dir,
-        settings_manager=settings_manager,
         additional_paths=additional_paths,
         no_skills=no_skills,
+        resolved_resources=resolved_resources,
+        extension_source_infos=extension_source_infos,
     )
 
     skills: Dict[str, Skill] = {}
     diagnostics: List[ResourceDiagnostic] = []
 
-    for path, label in candidates:
+    for path, label, source_info in candidates:
         if os.path.isdir(path):
-            loaded = load_skills_from_dir(path, source_label=label)
+            loaded = load_skills_from_dir(
+                path, source_label=label, source_info=source_info
+            )
         else:
-            skill = load_skill_from_file(path, source_label=label)
+            skill = load_skill_from_file(
+                path, source_label=label, source_info=source_info
+            )
             loaded = [skill] if skill is not None else []
 
         for skill in loaded:
+            if allowed_names is not None and skill.name not in allowed_names:
+                continue
+
             existing = skills.get(skill.name)
             if existing is not None:
                 diagnostics.append(

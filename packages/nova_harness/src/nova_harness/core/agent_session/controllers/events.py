@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import time
+from typing import Any
 
 from nova_agent import AgentMessage
 
@@ -28,21 +29,24 @@ from nova_harness.core.types.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from nova_harness.core.types.protocols import AgentSessionProtocol
 from nova_harness.core.utils.messages import extract_text_from_content
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
 
 
 class EventController:
     """封装 AgentSession 的底层 Agent 事件处理、扩展转发与消息持久化。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
+        self._turn_index = 0
 
     async def handle(self, event: Any) -> None:
         """处理底层 Agent 事件：持久化消息、转发扩展、维护内部状态。"""
         event_type = getattr(event, "type", None)
+
+        # agent_start 时重置 turn 计数器
+        if event_type == AGENT_START:
+            self._turn_index = 0
 
         # 当用户消息开始消费时，先从待处理队列中移除并更新 UI
         if (
@@ -92,6 +96,10 @@ class EventController:
                             )
                             self._session._retry_attempt = 0
 
+        # turn_end 后递增计数器，供下一轮使用
+        if event_type == TURN_END:
+            self._turn_index += 1
+
     async def forward_to_runner(self, event: Any) -> None:
         """把底层 Agent 事件映射为 Nova 扩展事件并分发给 runner。"""
         runner = self._session._extension_runner
@@ -105,11 +113,15 @@ class EventController:
             await runner.emit(AgentEndEvent(messages=getattr(event, "messages", [])))
         elif event_type == TURN_START:
             await runner.emit(
-                TurnStartEvent(turn_index=getattr(event, "turn_index", 0))
+                TurnStartEvent(
+                    turn_index=self._turn_index,
+                    timestamp=int(time.time() * 1000),
+                )
             )
         elif event_type == TURN_END:
             await runner.emit(
                 TurnEndEvent(
+                    turn_index=self._turn_index,
                     message=getattr(event, "message", None),
                     tool_results=getattr(event, "tool_results", []),
                 )

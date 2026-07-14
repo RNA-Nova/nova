@@ -2,12 +2,66 @@
 Shared utilities for compaction and branch summarization.
 """
 
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from nova_agent import AgentMessage
 from nova_ai import Message
 
 from nova_harness.core.types.compaction import FileOperations
+from nova_harness.core.types.session import SessionEntry
+from nova_harness.core.utils.messages import (
+    create_branch_summary_message,
+    create_compaction_summary_message,
+    create_custom_message,
+)
+
+# ============================================================================
+# Message Extraction
+# ============================================================================
+
+
+def get_message_from_entry(
+    entry: SessionEntry,
+    *,
+    skip_compaction: bool = False,
+    skip_tool_results: bool = False,
+) -> Optional[AgentMessage]:
+    """
+    从会话条目中提取 AgentMessage。
+
+    Args:
+        entry: 会话条目。
+        skip_compaction: 为 True 时跳过 compaction 条目（用于压缩自身遍历）。
+        skip_tool_results: 为 True 时跳过 role 为 toolResult 的消息（用于分支摘要）。
+    """
+    if entry.type == "message":
+        if skip_tool_results and entry.message.role == "toolResult":
+            return None
+        return entry.message
+    if entry.type == "custom_message":
+        return create_custom_message(
+            entry.custom_type,
+            entry.content,
+            entry.display,
+            entry.details,
+            entry.timestamp,
+        )
+    if entry.type == "branch_summary":
+        return create_branch_summary_message(
+            entry.summary,
+            entry.from_id,
+            entry.timestamp,
+        )
+    if entry.type == "compaction":
+        if skip_compaction:
+            return None
+        return create_compaction_summary_message(
+            entry.summary,
+            entry.tokens_before,
+            entry.timestamp,
+        )
+    return None
+
 
 # ============================================================================
 # File Operation Tracking

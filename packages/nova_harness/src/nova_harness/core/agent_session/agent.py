@@ -1,9 +1,6 @@
 """AgentSession - Agent 生命周期与会话管理核心。
 
-本实现持续向 TypeScript 版 ``agent-session.ts`` 全额对齐，
-在保持 Python 侧现有结构（``AgentSessionConfig``、``ExtensionRunner``、
-``SystemPromptManager`` 等）的前提下，补齐事件体系、自动重试、自动压缩、
-模型循环、队列管理、工具元数据等能力。
+负责事件体系、自动重试、自动压缩、模型循环、队列管理、工具元数据等能力。
 
 为降低 ``AgentSession`` 的复杂度，具体的领域逻辑已拆分到
 ``core/controllers/`` 下的各控制器；``AgentSession`` 负责编排入口、
@@ -14,11 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
+import os
 import time
-from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Union
+import traceback
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Union
 
 from nova_agent import (
+    AbortController,
     Agent,
     AgentMessage,
     ThinkingLevel,
@@ -32,43 +33,86 @@ from nova_ai import (
 
 from nova_harness.core.agent_session.controllers import (
     BashController,
-    CommandDispatcher,
     CompactionController,
     EventController,
     ModelController,
     QueueController,
     RetryController,
+    SlashInputHandler,
     StatsCollector,
     ToolController,
     TreeNavigator,
 )
-from nova_harness.core.agent_session.extensions import ExtensionRunner
-from nova_harness.core.agent_session.options import AgentSessionConfig
+from nova_harness.core.extensions import ExtensionRunner
+from nova_harness.core.harness.session import SessionManager
 from nova_harness.core.harness.skills import expand_skill_command
+from nova_harness.core.harness.system_prompt import SystemPromptManager
+from nova_harness.core.harness.tools import ToolsManager
 from nova_harness.core.resources.loaders.prompt_templates import expand_prompt_template
 from nova_harness.core.types.agent import (
     ModelCycleResult,
-    NavigateOptions,
-    PromptOptions,
     ScopedModelConfig,
-    SessionStats,
 )
 from nova_harness.core.types.compaction import CompactionResult
 from nova_harness.core.types.events import (
+    AgentSessionEvent,
     AutoRetryEndEvent,
+    BeforeAgentStartEvent,
+    ExtensionErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
     SessionInfoChangedEvent,
     SessionShutdownEvent,
     SessionStartEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     TurnEndEvent,
 )
+from nova_harness.core.types.protocols import (
+    ModelRegistryProtocol,
+    ResourceLoaderProtocol,
+    SessionManagerProtocol,
+    SettingsManagerProtocol,
+    SystemPromptManagerProtocol,
+    ToolsManagerProtocol,
+)
+from nova_harness.core.types.events.constants import (
+    INPUT,
+    RESOURCES_DISCOVER,
+    TOOL_CALL,
+    TOOL_RESULT,
+)
+from nova_harness.core.types.extensions import (
+    ExecOptions,
+    ExecResult,
+    ExtensionActions,
+    ExtensionCommandContextActions,
+    ExtensionContextActions,
+    ExtensionProviderActions,
+    SlashCommandInfo,
+    SourceInfo,
+)
 from nova_harness.core.types.messages import BashExecutionMessage
-from nova_harness.core.types.resource import (
+from nova_harness.core.types.resources.paths import (
     ResourceExtensionPathEntry,
     ResourceExtensionPaths,
 )
+from nova_harness.core.types.runtime.tools import ToolDefinition
+from nova_harness.core.types.session import (
+    NavigateOptions,
+    PromptOptions,
+    SessionStats,
+)
+from nova_harness.core.types.session.config import AgentSessionConfig
+from nova_harness.core.types.ui import ExtensionMode, UIContext
 from nova_harness.core.utils.messages import extract_text_from_content
+
+# ============================================================================
+# Extension action 具体实现（替代 SimpleNamespace，提供类型安全）
+# ============================================================================
+
+
+
 
 # ============================================================================
 # AgentSession
@@ -78,49 +122,51 @@ from nova_harness.core.utils.messages import extract_text_from_content
 class AgentSession:
     """Agent 会话核心：状态、事件、模型、工具、压缩、树导航。"""
 
-    # 为了让 MagicMock(spec=AgentSession) 能访问到这些实例属性，
-    # 在类层级做类型标注并给默认占位值（实际值仍在 __init__ 中设置）。
+    # 类层级只做类型标注，不赋可变默认值；实例值在 __init__ 中设置。
     config: AgentSessionConfig = None  # type: ignore[assignment]
     agent: Agent = None  # type: ignore[assignment]
-    session_manager: Any = None
-    settings_manager: Any = None
+    session_manager: SessionManagerProtocol = None  # type: ignore[assignment]
+    settings_manager: SettingsManagerProtocol = None  # type: ignore[assignment]
     cwd: str = ""
-    system_prompt_manager: Any = None
-    _resource_loader: Any = None
-    _model_registry: Any = None
-    scoped_models: List[ScopedModelConfig] = []
-    initial_active_tool_names: List[str] = []
+    system_prompt_manager: Optional[SystemPromptManagerProtocol] = None
+    tools_manager: Optional[ToolsManagerProtocol] = None
+    _resource_loader: ResourceLoaderProtocol = None  # type: ignore[assignment]
+    _model_registry: ModelRegistryProtocol = None  # type: ignore[assignment]
+    scoped_models: List[ScopedModelConfig]
+    initial_active_tool_names: List[str]
     base_tools_override: Optional[Dict[str, Any]] = None
-    services: Any = None
+    custom_tools: Optional[List[ToolDefinition]] = None
+    allowed_tool_names: Optional[Set[str]] = None
+    excluded_tool_names: Optional[Set[str]] = None
+    no_tools: Optional[Literal["all", "builtin"]] = None
     extension_runner_ref: Optional[Dict[str, Optional[Any]]] = None
     session_start_event: SessionStartEvent = None  # type: ignore[assignment]
-    _runtime: Optional[Any] = None
     _extension_runner: Optional[ExtensionRunner] = None
     _unsubscribe_agent: Optional[Callable[[], None]] = None
-    _event_listeners: List[Callable[[Any], None]] = []
-    _tool_registry: Dict[str, Any] = {}
-    _tool_definitions: Dict[str, Any] = {}
-    _steering_messages: List[str] = []
-    _follow_up_messages: List[str] = []
-    _pending_next_turn_messages: List[AgentMessage] = []
-    _pending_bash_messages: List[BashExecutionMessage] = []
+    _event_listeners: List[Callable[[AgentSessionEvent], None]]
+    _steering_messages: List[str]
+    _follow_up_messages: List[str]
+    _pending_next_turn_messages: List[AgentMessage]
+    _pending_bash_messages: List[BashExecutionMessage]
     _last_assistant_message: Optional[AssistantMessage] = None
-    _bash_abort_event: Optional[asyncio.Event] = None
+    _bash_abort_event: Optional[AbortController] = None
     _retry_attempt: int = 0
-    _retry_abort_event: Optional[asyncio.Event] = None
+    _retry_abort_event: Optional[AbortController] = None
     _overflow_recovery_attempted: bool = False
-    _compaction_abort_controller: Optional[Any] = None
-    _auto_compaction_abort_controller: Optional[Any] = None
-    _branch_summary_abort_controller: Optional[Any] = None
+    _compaction_abort_controller: Optional[AbortController] = None
+    _auto_compaction_abort_controller: Optional[AbortController] = None
+    _branch_summary_abort_controller: Optional[AbortController] = None
     _base_system_prompt: str = ""
+    _base_system_prompt_options: Dict[str, Any]
 
     # Extension binding state（用于 reload 后恢复绑定）
-    _extension_ui_context: Optional[Any] = None
-    _extension_mode: Optional[str] = None
-    _extension_command_context_actions: Optional[Any] = None
+    _extension_ui_context: Optional[UIContext] = None
+    _extension_mode: Optional[ExtensionMode] = None
+    _extension_command_context_actions: Optional[ExtensionCommandContextActions] = None
     _extension_abort_handler: Optional[Callable[[], None]] = None
     _extension_shutdown_handler: Optional[Callable[[], None]] = None
-    _extension_error_listener: Optional[Callable[[Any], None]] = None
+    _extension_error_listener: Optional[Callable[[ExtensionErrorEvent], None]] = None
+    _extension_error_unsubscriber: Optional[Callable[[], None]] = None
 
     # 领域控制器
     _retry: RetryController = None  # type: ignore[assignment]
@@ -132,7 +178,7 @@ class AgentSession:
     _queue: QueueController = None  # type: ignore[assignment]
     _tree: TreeNavigator = None  # type: ignore[assignment]
     _stats: StatsCollector = None  # type: ignore[assignment]
-    _commands: CommandDispatcher = None  # type: ignore[assignment]
+    _slash_handler: SlashInputHandler = None  # type: ignore[assignment]
 
     def __init__(self, config: AgentSessionConfig) -> None:
         self.config = config
@@ -140,7 +186,6 @@ class AgentSession:
         self.session_manager = config.session_manager
         self.settings_manager = config.settings_manager
         self.cwd: str = config.cwd
-        self.system_prompt_manager = config.system_prompt_manager
         self._resource_loader = config.resource_loader
         self._model_registry = config.model_registry
         self.scoped_models: List[ScopedModelConfig] = config.scoped_models or []
@@ -148,9 +193,18 @@ class AgentSession:
             config.initial_active_tool_names or []
         )
         self.base_tools_override: Optional[Dict[str, Any]] = config.base_tools_override
+        self.custom_tools: Optional[List[ToolDefinition]] = config.custom_tools
+        self.allowed_tool_names: Optional[Set[str]] = (
+            set(config.allowed_tool_names) if config.allowed_tool_names else None
+        )
+        self.excluded_tool_names: Optional[Set[str]] = (
+            set(config.excluded_tool_names) if config.excluded_tool_names else None
+        )
+        self.no_tools: Optional[Literal["all", "builtin"]] = config.no_tools
 
-        # 服务集合：优先使用 config.services，否则用 SimpleNamespace 构造最小对象
-        self.services = config.services or self._make_services()
+        self.system_prompt_manager = config.system_prompt_manager
+        self.tools_manager = config.tools_manager
+
         self.extension_runner_ref = config.extension_runner_ref
         self.session_start_event: SessionStartEvent = (
             config.session_start_event or SessionStartEvent(reason="new")
@@ -159,30 +213,30 @@ class AgentSession:
         self._runtime: Optional[Any] = None
         self._extension_runner: Optional[ExtensionRunner] = None
         self._unsubscribe_agent: Optional[Callable[[], None]] = None
-        self._event_listeners: List[Callable[[Any], None]] = []
+        self._event_listeners: List[Callable[[AgentSessionEvent], None]] = []
 
-        self._tool_registry: Dict[str, Any] = {}
-        self._tool_definitions: Dict[str, Any] = {}
         self._steering_messages: List[str] = []
         self._follow_up_messages: List[str] = []
         self._pending_next_turn_messages: List[AgentMessage] = []
         self._pending_bash_messages: List[BashExecutionMessage] = []
         self._last_assistant_message: Optional[AssistantMessage] = None
-        self._bash_abort_event: Optional[asyncio.Event] = None
+        self._bash_abort_event: Optional[AbortController] = None
         self._retry_attempt: int = 0
-        self._retry_abort_event: Optional[asyncio.Event] = None
+        self._retry_abort_event: Optional[AbortController] = None
         self._overflow_recovery_attempted: bool = False
-        self._compaction_abort_controller: Optional[Any] = None
-        self._auto_compaction_abort_controller: Optional[Any] = None
-        self._branch_summary_abort_controller: Optional[Any] = None
+        self._compaction_abort_controller: Optional[AbortController] = None
+        self._auto_compaction_abort_controller: Optional[AbortController] = None
+        self._branch_summary_abort_controller: Optional[AbortController] = None
         self._base_system_prompt: str = ""
+        self._base_system_prompt_options: Dict[str, Any] = {}
 
-        self._extension_ui_context: Optional[Any] = None
-        self._extension_mode: Optional[str] = None
-        self._extension_command_context_actions: Optional[Any] = None
+        self._extension_ui_context: Optional[UIContext] = None
+        self._extension_mode: Optional[ExtensionMode] = None
+        self._extension_command_context_actions: Optional[ExtensionCommandContextActions] = None
         self._extension_abort_handler: Optional[Callable[[], None]] = None
         self._extension_shutdown_handler: Optional[Callable[[], None]] = None
-        self._extension_error_listener: Optional[Callable[[Any], None]] = None
+        self._extension_error_listener: Optional[Callable[[ExtensionErrorEvent], None]] = None
+        self._extension_error_unsubscriber: Optional[Callable[[], None]] = None
 
         # 初始化控制器
         self._retry = RetryController(self)
@@ -194,7 +248,7 @@ class AgentSession:
         self._queue = QueueController(self)
         self._tree = TreeNavigator(self)
         self._stats = StatsCollector(self)
-        self._commands = CommandDispatcher(self)
+        self._slash_handler = SlashInputHandler(self)
 
         self._subscribe_agent_events()
         self._install_agent_hooks()
@@ -204,16 +258,6 @@ class AgentSession:
     # -------------------------------------------------------------------------
     # 内部构造
     # -------------------------------------------------------------------------
-
-    def _make_services(self) -> Any:
-        """当 config.services 未提供时，构造 ExtensionRunner 需要的最小 services。"""
-        return SimpleNamespace(
-            cwd=self.cwd,
-            session_manager=self.session_manager,
-            settings_manager=self.settings_manager,
-            model_registry=self.model_registry,
-            resource_loader=self.resource_loader,
-        )
 
     def _subscribe_agent_events(self) -> None:
         """订阅底层 Agent 事件，用于持久化与会话生命周期。"""
@@ -227,20 +271,16 @@ class AgentSession:
 
         async def before_tool_call(ctx: Any, signal: Optional[Any] = None) -> Any:
             runner = self._extension_runner
-            if runner is None or not runner.has_handlers("tool_call"):
+            if runner is None or not runner.has_handlers(TOOL_CALL):
                 return None
             tool_call = ctx.tool_call
             result = await runner.emit_tool_call(
-                type(
-                    "ToolCallEvent",
-                    (),
-                    {
-                        "type": "tool_call",
-                        "tool_call_id": getattr(tool_call, "id", ""),
-                        "tool_name": getattr(tool_call, "name", ""),
-                        "args": getattr(ctx, "args", {}),
-                    },
-                )()
+                ToolCallEvent(
+                    type=TOOL_CALL,
+                    tool_call_id=getattr(tool_call, "id", ""),
+                    tool_name=getattr(tool_call, "name", ""),
+                    args=getattr(ctx, "args", {}),
+                )
             )
             if getattr(result, "block", False):
                 from nova_agent import BeforeToolCallResult
@@ -252,23 +292,19 @@ class AgentSession:
 
         async def after_tool_call(ctx: Any, signal: Optional[Any] = None) -> Any:
             runner = self._extension_runner
-            if runner is None or not runner.has_handlers("tool_result"):
+            if runner is None or not runner.has_handlers(TOOL_RESULT):
                 return None
             tool_call = ctx.tool_call
             result = await runner.emit_tool_result(
-                type(
-                    "ToolResultEvent",
-                    (),
-                    {
-                        "type": "tool_result",
-                        "tool_call_id": getattr(tool_call, "id", ""),
-                        "tool_name": getattr(tool_call, "name", ""),
-                        "args": getattr(ctx, "args", {}),
-                        "content": getattr(ctx.result, "content", []),
-                        "details": getattr(ctx.result, "details", None),
-                        "is_error": getattr(ctx, "is_error", False),
-                    },
-                )()
+                ToolResultEvent(
+                    type=TOOL_RESULT,
+                    tool_call_id=getattr(tool_call, "id", ""),
+                    tool_name=getattr(tool_call, "name", ""),
+                    args=getattr(ctx, "args", {}),
+                    content=getattr(ctx.result, "content", []),
+                    details=getattr(ctx.result, "details", None),
+                    is_error=getattr(ctx, "is_error", False),
+                )
             )
             if result is None:
                 return None
@@ -285,6 +321,7 @@ class AgentSession:
             if runner is None:
                 return None
             event = TurnEndEvent(
+                turn_index=getattr(ctx, "turn_index", 0),
                 message=getattr(ctx, "message", None),
                 tool_results=getattr(ctx, "tool_results", []),
             )
@@ -295,6 +332,7 @@ class AgentSession:
             if runner is None:
                 return False
             event = TurnEndEvent(
+                turn_index=getattr(ctx, "turn_index", 0),
                 message=getattr(ctx, "message", None),
                 tool_results=getattr(ctx, "tool_results", []),
             )
@@ -314,46 +352,126 @@ class AgentSession:
         self.agent.should_stop_after_turn = should_stop_after_turn
         self.agent.transform_context = transform_context
 
+    def _get_allowed_extensions(self, extensions: List[Any]) -> List[Any]:
+        """按当前 agent 的 extensions 白名单过滤扩展。
+
+        未配置白名单（空 list/None）时允许全部扩展，与 TS 行为一致；
+        显式配置非空 list 时才按名称过滤。
+        """
+        config = None
+        if self.system_prompt_manager is not None:
+            config = self.system_prompt_manager.get_agent_config()
+        allowed = getattr(config, "extensions", None) or []
+        if not allowed:
+            return list(extensions)
+        allowed_names = set(allowed)
+        return [
+            ext for ext in extensions if getattr(ext, "name", None) in allowed_names
+        ]
+
+    def _get_allowed_skills(self) -> Dict[str, Any]:
+        """按当前 agent 的 skills 白名单过滤 skill。"""
+        skills = {}
+        if self.resource_loader is not None:
+            skills = self.resource_loader.get_skills().get("skills") or {}
+
+        config = None
+        if self.system_prompt_manager is not None:
+            config = self.system_prompt_manager.get_agent_config()
+        if config is None or not getattr(config, "skills", None):
+            return {}
+        allowed = set(config.skills)
+        return {name: skill for name, skill in skills.items() if name in allowed}
+
     def _build_runtime(
         self,
         active_tool_names: Optional[List[str]] = None,
         flag_values: Optional[Dict[str, Any]] = None,
-        include_all_extension_tools: bool = True,
     ) -> None:
         """初始化扩展 runner、工具注册表与系统提示词。"""
-        from nova_harness.core.types.extensions import LoadedExtensionsResult
+        from nova_harness.core.extensions.event_bus import ExtensionEventBus
+        from nova_harness.core.types.extensions import ExtensionRuntime
 
         raw_extensions_result = self.resource_loader.get_extensions()
-        if isinstance(raw_extensions_result, LoadedExtensionsResult):
-            extensions = raw_extensions_result.extensions
-        else:
-            # 兼容测试用 mock（未配置 get_extensions 返回值）
-            extensions = []
+        extensions = raw_extensions_result.extensions
+        extension_runtime = raw_extensions_result.runtime
+
+        extensions = self._get_allowed_extensions(extensions)
+
+        if extension_runtime is None:
+            extension_runtime = ExtensionRuntime(
+                cwd=self.cwd,
+                event_bus=self.resource_loader.event_bus,
+                model_registry=self._model_registry,
+            )
 
         self._extension_runner = ExtensionRunner(
-            services=self.services,
             extensions=extensions,
+            runtime=extension_runtime,
+            cwd=self.cwd,
+            session_manager=self.session_manager,
+            model_registry=self._model_registry,
         )
         if flag_values:
-            self._extension_runner._flag_values = dict(flag_values)
+            extension_runtime.flag_values.update(flag_values)
         if self.extension_runner_ref is not None:
             self.extension_runner_ref["current"] = self._extension_runner
 
-        self._extension_runner.bind_session(self)
+        self._bind_extension_core(self._extension_runner)
         self._apply_extension_bindings(self._extension_runner)
+
+        # 若 ToolsManager 已存在，更新其 extension_runner 引用（reload 等场景）
+        if self.tools_manager is not None:
+            self.tools_manager.extension_runner = self._extension_runner
+
+        # 确定当前 agent 名称
+        agent_name = "base_agent"
+        if self._resource_loader is not None:
+            names = self._resource_loader.get_agent_names()
+            if isinstance(names, (list, tuple)) and names:
+                agent_name = names[0]
+        if self.system_prompt_manager is not None:
+            agent_name = self.system_prompt_manager.agent_name
+
+        # 创建 ToolsManager 并重建工具注册表
+        if self.tools_manager is None:
+            self.tools_manager = ToolsManager(
+                resource_loader=self._resource_loader,
+                extension_runner=self._extension_runner,
+                base_tools_override=self.base_tools_override,
+                custom_tools=self.custom_tools,
+                allowed_tool_names=self.allowed_tool_names,
+                excluded_tool_names=self.excluded_tool_names,
+                default_active_tools=self.initial_active_tool_names,
+                no_tools=self.no_tools,
+                agent_name=agent_name,
+            )
+        else:
+            self.tools_manager.agent_name = agent_name
+
+        # 创建/更新 SystemPromptManager，绑定 ToolsManager
+        if self.system_prompt_manager is None:
+            self.system_prompt_manager = SystemPromptManager(
+                resource_loader=self._resource_loader,
+                agent_name=agent_name,
+                tools_manager=self.tools_manager,
+            )
+
         self._tools.refresh_registry(
             active_tool_names=active_tool_names,
-            include_all_extension_tools=include_all_extension_tools,
         )
         self._sync_system_prompt()
 
     def _sync_system_prompt(self) -> None:
         """用当前配置和工具白名单重建系统提示词。"""
-        from nova_harness.core.types.agent_config import DynamicContext
+        from nova_harness.core.types.agent.config import DynamicContext
 
         context = DynamicContext(cwd=self.cwd, session_id=str(self.session_id))
         self._base_system_prompt = self.system_prompt_manager.build_system_prompt(
             context
+        )
+        self._base_system_prompt_options = (
+            self.system_prompt_manager.build_system_prompt_options(context)
         )
         self.agent.state.system_prompt = self._base_system_prompt
 
@@ -423,15 +541,39 @@ class AgentSession:
 
     @property
     def auto_retry_enabled(self) -> bool:
+        """是否启用自动重试。"""
+        if self.settings_manager is None:
+            return False
         return bool(self.settings_manager.get_retry_enabled())
 
     @property
     def auto_compaction_enabled(self) -> bool:
+        """是否启用自动压缩。"""
+        if self.settings_manager is None:
+            return False
         return bool(self.settings_manager.get_compaction_enabled())
 
     @property
     def retry_attempt(self) -> int:
-        return self._retry.attempt
+        """当前重试次数。"""
+        return self._retry_attempt
+
+    @property
+    def prompt_templates(self) -> List[Any]:
+        """返回已加载的 prompt 模板列表。"""
+        if self._resource_loader is None:
+            return []
+        return list(self._resource_loader.get_prompts().get("prompts", []))
+
+    @property
+    def is_bash_running(self) -> bool:
+        """是否有 bash 命令正在执行。"""
+        return self._bash.is_running
+
+    @property
+    def has_pending_bash_messages(self) -> bool:
+        """是否有待处理的 bash 消息。"""
+        return self._bash.has_pending_messages
 
     @property
     def resource_loader(self) -> Any:
@@ -440,10 +582,6 @@ class AgentSession:
     @property
     def model_registry(self) -> Any:
         return self._model_registry
-
-    @property
-    def prompt_templates(self) -> List[Any]:
-        return list(self._resource_loader.get_prompts().get("prompts", []))
 
     # -------------------------------------------------------------------------
     # 事件分发
@@ -464,12 +602,6 @@ class AgentSession:
     # 生命周期
     # -------------------------------------------------------------------------
 
-    def bind_runtime(self, runtime: Any) -> None:
-        """绑定 AgentSessionRuntime，激活扩展中的会话控制 action。"""
-        self._runtime = runtime
-        if self._extension_runner is not None:
-            self._extension_runner.bind_runtime(runtime)
-
     async def bind_extensions(self, bindings: Optional[Dict[str, Any]] = None) -> None:
         """扩展加载完成后绑定 UI/动作回调，并触发 session_start 与资源发现。"""
         if bindings is not None:
@@ -487,33 +619,343 @@ class AgentSession:
             await self._extension_runner.emit(self.session_start_event)
             await self._extend_resources_from_extensions()
 
-    def _apply_extension_bindings(self, runner: ExtensionRunner) -> None:
-        """把保存的错误监听器等回调应用到指定 runner。
+    def _bind_extension_core(self, runner: ExtensionRunner) -> None:
+        """把 session 能力打包成 actions 注入 runner。"""
 
-        UI context / mode / command actions 当前由 runner 在构造后通过
-        session/runtime 绑定间接使用，这里仅注册显式错误监听器。
+        async def send_message(
+            message: Dict[str, Any], options: Optional[Any] = None
+        ) -> None:
+            try:
+                return await self.send_custom_message(message, options)
+            except Exception as exc:
+                runner.emit_error(
+                    ExtensionErrorEvent(
+                        extension_path="<runtime>",
+                        event="send_message",
+                        error=str(exc),
+                        stack=traceback.format_exc() if __debug__ else None,
+                    )
+                )
+
+        async def send_user_message(
+            content: Any, options: Optional[Any] = None
+        ) -> None:
+            try:
+                return await self.send_user_message(content, options)
+            except Exception as exc:
+                runner.emit_error(
+                    ExtensionErrorEvent(
+                        extension_path="<runtime>",
+                        event="send_user_message",
+                        error=str(exc),
+                        stack=traceback.format_exc() if __debug__ else None,
+                    )
+                )
+
+        def _refresh_current_model() -> None:
+            current = self.model
+            if current is None:
+                return
+            refreshed = self._model_registry.find(current.provider, current.id)
+            if refreshed and refreshed is not current:
+                self.agent.state.model = refreshed
+
+        def register_provider(name: str, config: Any) -> None:
+            self._model_registry.register_provider(name, config)
+            _refresh_current_model()
+
+        def unregister_provider(name: str) -> None:
+            self._model_registry.unregister_provider(name)
+            _refresh_current_model()
+
+        def compact(options: Optional[Any] = None) -> None:
+            custom_instructions = (
+                options.get("custom_instructions") if options else None
+            )
+            on_complete = options.get("on_complete") if options else None
+            on_error = options.get("on_error") if options else None
+
+            async def _run() -> None:
+                try:
+                    result = await self.compact(custom_instructions)
+                    if on_complete is not None:
+                        on_complete(result)
+                except Exception as exc:
+                    if on_error is not None:
+                        on_error(exc)
+
+            asyncio.create_task(_run())
+
+        def abort() -> None:
+            if self._extension_abort_handler is not None:
+                self._extension_abort_handler()
+                return
+            asyncio.create_task(self.abort())
+
+        async def exec_command(
+            command: str, args: List[str], options: Optional[Any] = None
+        ) -> ExecResult:
+            """执行子进程命令。"""
+            if isinstance(options, ExecOptions):
+                opts = options
+            else:
+                opts = ExecOptions(**(options or {}))
+            cwd = opts.cwd or self.cwd
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    command,
+                    *args,
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                if opts.timeout and opts.timeout > 0:
+                    try:
+                        stdout_b, stderr_b = await asyncio.wait_for(
+                            proc.communicate(), timeout=opts.timeout
+                        )
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        stdout_b, stderr_b = await proc.communicate()
+                        return ExecResult(
+                            stdout=stdout_b.decode(errors="replace"),
+                            stderr=stderr_b.decode(errors="replace"),
+                            code=proc.returncode or 1,
+                            killed=True,
+                        )
+                else:
+                    stdout_b, stderr_b = await proc.communicate()
+                code = proc.returncode if proc.returncode is not None else 1
+                return ExecResult(
+                    stdout=stdout_b.decode(errors="replace"),
+                    stderr=stderr_b.decode(errors="replace"),
+                    code=code,
+                    killed=False,
+                )
+            except Exception as exc:
+                return ExecResult(stdout="", stderr=str(exc), code=1, killed=False)
+
+        def shutdown() -> None:
+            if self._extension_shutdown_handler is not None:
+                self._extension_shutdown_handler()
+
+        def is_project_trusted() -> bool:
+            if self.settings_manager is not None:
+                return self.settings_manager.is_project_trusted()
+            trusted = runner.project_trusted
+            return True if trusted is None else trusted
+
+        def get_signal() -> Optional[Any]:
+            return getattr(self.agent, "signal", None)
+
+        actions = ExtensionActions(
+            send_message=send_message,
+            send_user_message=send_user_message,
+            exec=exec_command,
+            append_entry=lambda entry_type, data=None: self.session_manager.append_custom_entry(
+                entry_type, data
+            ),
+            set_session_name=lambda name: self.set_session_name(name),
+            get_session_name=lambda: self.session_manager.get_session_name(),
+            set_label=lambda entry_id, label: self.session_manager.append_label_change(
+                entry_id, label
+            ),
+            get_active_tools=lambda: self.get_active_tool_names(),
+            get_all_tools=lambda: [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                    "prompt_guidelines": t.prompt_guidelines,
+                    "source_info": SourceInfo(
+                        path=t.source_path or t.name,
+                        source=t.source or "package",
+                        scope="project" if t.source == "package" else "temporary",
+                        origin="package" if t.source == "package" else "top-level",
+                    ),
+                }
+                for t in self.get_all_tools()
+            ],
+            set_active_tools=lambda tool_names: self.set_active_tools_by_name(
+                tool_names
+            ),
+            refresh_tools=lambda: self._tools.refresh_registry(),
+            get_commands=lambda: [
+                SlashCommandInfo(
+                    name=c.resolved_name(),
+                    description=c.description,
+                    source="extension",
+                    source_info=c.source_info
+                    or SourceInfo(
+                        path=c.extension_path or "",
+                        source="extension",
+                        scope="temporary",
+                        origin="top-level",
+                    ),
+                )
+                for c in runner.get_registered_commands()
+            ]
+            + [
+                SlashCommandInfo(
+                    name=t.name,
+                    description=t.description,
+                    source="prompt",
+                    source_info=t.source_info
+                    or SourceInfo(
+                        path=t.file_path,
+                        source="local",
+                        scope="temporary",
+                        origin="top-level",
+                    ),
+                )
+                for t in self.resource_loader.get_prompts().get("prompts", [])
+            ]
+            + [
+                SlashCommandInfo(
+                    name=f"skill:{s.name}",
+                    description=s.description,
+                    source="skill",
+                    source_info=s.source_info
+                    or SourceInfo(
+                        path=s.file_path,
+                        source="local",
+                        scope="temporary",
+                        origin="top-level",
+                    ),
+                )
+                for s in self.resource_loader.get_skills().get("skills", {}).values()
+            ],
+            set_model=lambda model: self.set_model(model),
+            get_thinking_level=lambda: self.thinking_level,
+            set_thinking_level=lambda level: self.set_thinking_level(level),
+        )
+
+        context_actions = ExtensionContextActions(
+            get_model=lambda: self.model,
+            is_idle=lambda: not self.is_streaming,
+            is_project_trusted=is_project_trusted,
+            get_signal=get_signal,
+            abort=abort,
+            has_pending_messages=lambda: self.pending_message_count() > 0,
+            shutdown=shutdown,
+            get_context_usage=lambda: self.get_context_usage(),
+            compact=compact,
+            get_system_prompt=lambda: self.system_prompt,
+            get_system_prompt_options=lambda: dict(self._base_system_prompt_options),
+        )
+
+        provider_actions = ExtensionProviderActions(
+            register_provider=register_provider,
+            unregister_provider=unregister_provider,
+        )
+
+        runner.bind_core(
+            actions,
+            context_actions,
+            provider_actions,
+        )
+
+    def _apply_extension_bindings(self, runner: ExtensionRunner) -> None:
+        """把保存的 UI、模式、命令上下文与错误监听器绑定到指定 runner。
+
+        每次重建 runner（如 _build_runtime / reload）都会调用本方法，
+        因此需要先取消旧的错误监听器再注册新的，避免重复订阅。
         """
+        runner.set_ui_context(self._extension_ui_context, self._extension_mode)
+        if self._extension_command_context_actions is None:
+            self._extension_command_context_actions = (
+                self._create_default_command_context_actions()
+            )
+        runner.bind_command_context(self._extension_command_context_actions)
+
+        if self._extension_error_unsubscriber is not None:
+            self._extension_error_unsubscriber()
+            self._extension_error_unsubscriber = None
+
         if self._extension_error_listener is not None:
-            runner.register_error_handler(self._extension_error_listener)
+            self._extension_error_unsubscriber = runner.on_error(
+                self._extension_error_listener
+            )
+
+    def _create_default_command_context_actions(self) -> ExtensionCommandContextActions:
+        """当外部（如 RPC/TUI）未注入命令上下文 actions 时，使用 AgentSession 自身能力构造默认值。"""
+
+        async def wait_for_idle() -> None:
+            if hasattr(self.agent, "wait_for_idle"):
+                await self.agent.wait_for_idle()
+
+        async def new_session(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            return await self.new_agent_session(
+                kwargs.get("parent_session") if kwargs else None
+            )
+
+        async def fork(entry_id: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+            position = kwargs.get("position", "after")
+            return await self.fork_session(entry_id, position)
+
+        async def navigate_tree(
+            target_id: str, *args: Any, **kwargs: Any
+        ) -> Dict[str, Any]:
+            return await self.navigate_tree(target_id, kwargs)
+
+        async def switch_session(
+            session_path: str, *args: Any, **kwargs: Any
+        ) -> Dict[str, Any]:
+            return await self.switch_agent_session(session_path)
+
+        async def reload(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            await self.reload()
+            return {"cancelled": False}
+
+        def get_session_info(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            return self.get_session_info()
+
+        def trust_project(*args: Any, **kwargs: Any) -> None:
+            self.trust_project(True)
+
+        def untrust_project(*args: Any, **kwargs: Any) -> None:
+            self.trust_project(False)
+
+        async def clone(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            return await self.clone_session()
+
+        async def export(path: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+            return await self.export_session(path)
+
+        async def import_session(path: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+            return await self.import_session(path)
+
+        return ExtensionCommandContextActions(
+            wait_for_idle=wait_for_idle,
+            new_session=new_session,
+            fork=fork,
+            navigate_tree=navigate_tree,
+            switch_session=switch_session,
+            reload=reload,
+            get_session_info=get_session_info,
+            trust_project=trust_project,
+            untrust_project=untrust_project,
+            clone=clone,
+            export=export,
+            import_session=import_session,
+        )
 
     async def reload(self) -> None:
         """重新加载设置、资源与扩展，并刷新当前 session 的系统提示词。"""
         previous_flag_values: Dict[str, Any] = {}
         if self._extension_runner is not None:
             previous_flag_values = self._extension_runner.get_flag_values()
-            await self._extension_runner.emit(SessionShutdownEvent(reason="reload"))
+            await self._extension_runner.emit_session_shutdown(
+                SessionShutdownEvent(reason="reload")
+            )
 
-        if hasattr(self.settings_manager, "reload"):
-            self.settings_manager.reload()
+        await self.settings_manager.reload()
         self.sync_queue_modes_from_settings()
-
-        if hasattr(self.resource_loader, "reload"):
-            await self.resource_loader.reload()
+        await self.resource_loader.reload()
 
         self._build_runtime(
             active_tool_names=self.get_active_tool_names(),
             flag_values=previous_flag_values,
-            include_all_extension_tools=True,
         )
 
         if self._has_extension_bindings() and self._extension_runner is not None:
@@ -536,25 +978,41 @@ class AgentSession:
         """收集扩展贡献的临时资源路径并重新加载受影响资源。"""
         if self._extension_runner is None:
             return
-        if not self._extension_runner.has_handlers("resources_discover"):
+        if not self._extension_runner.has_handlers(RESOURCES_DISCOVER):
             return
 
         result = await self._extension_runner.emit_resources_discover(self.cwd, reason)
-        if not (result.skill_paths or result.prompt_paths or result.theme_paths):
+        skill_paths = result.get("skill_paths", [])
+        prompt_paths = result.get("prompt_paths", [])
+        theme_paths = result.get("theme_paths", [])
+        if not (skill_paths or prompt_paths or theme_paths):
             return
 
         paths = ResourceExtensionPaths(
             skill_paths=[
-                ResourceExtensionPathEntry(path=p) for p in result.skill_paths
+                ResourceExtensionPathEntry(
+                    path=p["path"], extension_path=p.get("extensionPath")
+                )
+                for p in skill_paths
             ],
             prompt_paths=[
-                ResourceExtensionPathEntry(path=p) for p in result.prompt_paths
+                ResourceExtensionPathEntry(
+                    path=p["path"], extension_path=p.get("extensionPath")
+                )
+                for p in prompt_paths
             ],
             theme_paths=[
-                ResourceExtensionPathEntry(path=p) for p in result.theme_paths
+                ResourceExtensionPathEntry(
+                    path=p["path"], extension_path=p.get("extensionPath")
+                )
+                for p in theme_paths
             ],
         )
         self.resource_loader.extend_resources(paths)
+        # 扩展贡献的 skill 可能包含新工具，刷新注册表后再重建 system prompt
+        self._tools.refresh_registry(
+            active_tool_names=self.get_active_tool_names(),
+        )
         self._sync_system_prompt()
 
     def _disconnect_from_agent(self) -> None:
@@ -608,18 +1066,17 @@ class AgentSession:
         messages: Optional[List[AgentMessage]] = None
 
         try:
-            # 扩展命令立即执行（不排队）
+            # 1. 扩展命令立即执行（input 事件不能拦截扩展命令）
             if expand_prompt_templates and current_text.startswith("/"):
-                handled = await self._commands.try_execute(current_text)
-                if handled:
+                if await self._slash_handler.execute_command(current_text):
                     if preflight_result is not None:
                         preflight_result(True)
                     return
 
-            # 扩展 input 事件拦截
+            # 2. 扩展 input 事件拦截
             if (
                 self._extension_runner is not None
-                and self._extension_runner.has_handlers("input")
+                and self._extension_runner.has_handlers(INPUT)
             ):
                 from nova_harness.core.types.events import InputEvent
 
@@ -641,13 +1098,10 @@ class AgentSession:
                     if getattr(input_result, "images", None) is not None:
                         current_images = input_result.images
 
-            # skill 命令与 prompt 模板展开
+            # 3. skill / prompt template 展开
             if expand_prompt_templates:
-                current_text = expand_skill_command(
-                    current_text, self.resource_loader.get_skills()
-                )
-                current_text = expand_prompt_template(
-                    current_text, self.resource_loader.get_prompts().get("prompts", [])
+                current_text = self._slash_handler.expand_skill_and_prompt(
+                    current_text
                 )
 
             # 流式中排队
@@ -705,18 +1159,19 @@ class AgentSession:
 
             # before_agent_start 扩展事件
             if self._extension_runner is not None:
-                current_system_prompt, extra_messages = (
-                    await self._extension_runner.emit_before_agent_start(
-                        current_text,
-                        current_images,
-                        self._base_system_prompt,
-                        {"cwd": self.cwd},
+                before_result = await self._extension_runner.emit_before_agent_start(
+                    BeforeAgentStartEvent(
+                        prompt=current_text,
+                        images=current_images,
+                        system_prompt=self._base_system_prompt,
+                        system_prompt_options={"cwd": self.cwd},
                     )
                 )
-                if current_system_prompt is not None:
-                    self.agent.state.system_prompt = current_system_prompt
-                if extra_messages:
-                    messages.extend(extra_messages)
+                if before_result is not None:
+                    if before_result.system_prompt is not None:
+                        self.agent.state.system_prompt = before_result.system_prompt
+                    if before_result.messages:
+                        messages.extend(before_result.messages)
             else:
                 self.agent.state.system_prompt = self._base_system_prompt
 
@@ -750,14 +1205,6 @@ class AgentSession:
 
     def abort_bash(self) -> None:
         self._bash.abort_bash()
-
-    @property
-    def is_bash_running(self) -> bool:
-        return self._bash.is_running
-
-    @property
-    def has_pending_bash_messages(self) -> bool:
-        return self._bash.has_pending_messages
 
     async def _run_agent_prompt(
         self, messages: Union[AgentMessage, List[AgentMessage]]
@@ -811,9 +1258,12 @@ class AgentSession:
         self, text: str, images: Optional[List[ImageContent]] = None
     ) -> None:
         """在 Agent 运行时插入一条 steering 消息。"""
-        if text.startswith("/"):
-            self._commands.throw_if_extension_command(text)
-        expanded = expand_skill_command(text, self.resource_loader.get_skills())
+        if text.startswith("/") and self._slash_handler.is_extension_command(text):
+            raise RuntimeError(
+                f'Extension command "{text}" cannot be queued. '
+                "Use prompt() or execute the command when not streaming."
+            )
+        expanded = expand_skill_command(text, self._get_allowed_skills())
         expanded = expand_prompt_template(
             expanded, self.resource_loader.get_prompts().get("prompts", [])
         )
@@ -823,22 +1273,54 @@ class AgentSession:
         self, text: str, images: Optional[List[ImageContent]] = None
     ) -> None:
         """在 Agent 完成当前 turn 后追加一条 follow-up 消息。"""
-        if text.startswith("/"):
-            self._commands.throw_if_extension_command(text)
-        expanded = expand_skill_command(text, self.resource_loader.get_skills())
+        if text.startswith("/") and self._slash_handler.is_extension_command(text):
+            raise RuntimeError(
+                f'Extension command "{text}" cannot be queued. '
+                "Use prompt() or execute the command when not streaming."
+            )
+        expanded = expand_skill_command(text, self._get_allowed_skills())
         expanded = expand_prompt_template(
             expanded, self.resource_loader.get_prompts().get("prompts", [])
         )
         await self._queue.follow_up(expanded, images)
 
     def clear_queue(self) -> Dict[str, List[str]]:
+        """清空 steering 与 follow-up 队列。"""
         return self._queue.clear()
 
     def get_steering_messages(self) -> List[str]:
-        return self._queue.get_steering()
+        """返回当前 steering 消息列表。"""
+        return list(self._queue.get_steering())
 
     def get_follow_up_messages(self) -> List[str]:
-        return self._queue.get_follow_up()
+        """返回当前 follow-up 消息列表。"""
+        return list(self._queue.get_follow_up())
+
+    def export_to_jsonl(self) -> str:
+        """将会话条目导出为 JSONL 字符串。"""
+        entries = self.session_manager.get_entries()
+        return "\n".join(
+            json.dumps(entry.model_dump(), ensure_ascii=False) for entry in entries
+        )
+
+    def get_last_assistant_text(self) -> Optional[str]:
+        """获取最后一条 assistant 消息的文本内容。"""
+        msg = self._find_last_assistant_message()
+        if msg is None:
+            return None
+        return extract_text_from_content(getattr(msg, "content", []))
+
+    def has_extension_handlers(self, event_type: str) -> bool:
+        """指定事件类型是否有扩展处理器。"""
+        if self._extension_runner is None:
+            return False
+        return self._extension_runner.has_handlers(event_type)
+
+    def get_tool_definition(self, name: str) -> Optional[Any]:
+        """按名称返回工具定义。"""
+        if self.tools_manager is None:
+            return None
+        return self.tools_manager.get_tool_definition(name)
 
     async def send_user_message(
         self,
@@ -919,6 +1401,30 @@ class AgentSession:
         self._emit(MessageStartEvent(message=custom_message))
         self._emit(MessageEndEvent(message=custom_message))
 
+    def create_replaced_session_context(self) -> Any:
+        """创建用于 session 替换后的扩展上下文。
+
+        复制 ``ExtensionCommandContext`` 的所有能力，并额外提供
+        ``send_message`` / ``send_user_message``，使扩展在新会话上
+        也能直接发送消息。
+        """
+        ctx = self.extension_runner.create_command_context()
+
+        async def send_message(
+            message: Dict[str, Any], options: Optional[Dict[str, Any]] = None
+        ) -> None:
+            return await self.send_custom_message(message, options)
+
+        async def send_user_message(
+            content: Union[str, List[Union[TextContent, ImageContent]]],
+            options: Optional[Dict[str, Any]] = None,
+        ) -> None:
+            return await self.send_user_message(content, options)
+
+        ctx.send_message = send_message
+        ctx.send_user_message = send_user_message
+        return ctx
+
     async def abort(self) -> None:
         """中止当前 Agent 运行并等待空闲。"""
         self.abort_retry()
@@ -956,8 +1462,8 @@ class AgentSession:
     # 模型与思考级别
     # -------------------------------------------------------------------------
 
-    async def set_model(self, model: Any) -> None:
-        await self._model.set_model(model)
+    async def set_model(self, model: Any) -> bool:
+        return await self._model.set_model(model)
 
     async def cycle_model(
         self, direction: str = "forward"
@@ -986,6 +1492,8 @@ class AgentSession:
     def change_agent(self, name: str) -> None:
         """切换当前 Agent 配置。"""
         self.system_prompt_manager.change_agent(name)
+        if self.tools_manager is not None:
+            self.tools_manager.agent_name = name
         self._sync_system_prompt()
 
     # -------------------------------------------------------------------------
@@ -997,9 +1505,6 @@ class AgentSession:
 
     def get_all_tools(self) -> List[Any]:
         return self._tools.get_all_tools()
-
-    def get_tool_definition(self, name: str) -> Optional[Any]:
-        return self._tools.get_definition(name)
 
     def refresh_tools(self) -> None:
         self._tools.refresh()
@@ -1023,6 +1528,186 @@ class AgentSession:
         if getattr(message, "role", None) != "user":
             return ""
         return extract_text_from_content(getattr(message, "content", ""))
+
+    async def fork_session(
+        self, entry_id: str, position: str = "before"
+    ) -> Dict[str, Any]:
+        """在指定条目处 fork 出新的分支会话。"""
+        if position not in ("at", "before", "after"):
+            raise ValueError(f"Invalid fork position: {position}")
+
+        target_leaf_id = entry_id
+        if position != "at":
+            selected_entry = self.session_manager.get_entry(entry_id)
+            if selected_entry is None:
+                raise ValueError(f"Entry {entry_id} not found")
+            if selected_entry.type != "message" or not isinstance(
+                selected_entry.message, UserMessage
+            ):
+                raise ValueError("Invalid entry ID for forking")
+            target_leaf_id = selected_entry.parent_id
+
+        self.session_manager.create_branched_session(target_leaf_id)
+        self.agent.state.messages = (
+            self.session_manager.build_session_context().messages
+        )
+        self._sync_system_prompt()
+        self.session_start_event = SessionStartEvent(
+            reason="fork", previous_session_file=self.session_file
+        )
+        if self._extension_runner is not None:
+            await self._extension_runner.emit(self.session_start_event)
+        return {"cancelled": False}
+
+    async def clone_session(self) -> Dict[str, Any]:
+        """克隆当前会话到一个新的会话文件并切换到该会话。"""
+        import shutil
+
+        if not self.session_manager.is_persisted():
+            raise RuntimeError("Clone is only supported for persisted sessions")
+
+        session_file = self.session_manager.get_session_file()
+        session_dir = self.session_manager.get_session_dir()
+        if not session_file or not session_dir:
+            raise RuntimeError("Current session is not persisted")
+
+        from nova_harness.core.harness.session.utils import (
+            generate_session_id,
+        )
+
+        new_session_id = generate_session_id()
+        timestamp = datetime.now().isoformat().replace(":", "-").replace(".", "-")
+        new_file = os.path.join(session_dir, f"{timestamp}_{new_session_id}.jsonl")
+        shutil.copy2(session_file, new_file)
+
+        # 重写头部，使用新的 session id，避免与原始会话冲突
+        header = None
+        with open(new_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if lines:
+            header_data = json.loads(lines[0])
+            header_data["id"] = new_session_id
+            header_data["timestamp"] = datetime.now().isoformat()
+            lines[0] = json.dumps(header_data, ensure_ascii=False) + "\n"
+        with open(new_file, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        self.session_manager = SessionManager.open(new_file, session_dir)
+        self.agent.state.messages = (
+            self.session_manager.build_session_context().messages
+        )
+        self._sync_system_prompt()
+        self.session_start_event = SessionStartEvent(
+            reason="clone", previous_session_file=session_file
+        )
+        if self._extension_runner is not None:
+            await self._extension_runner.emit(self.session_start_event)
+        return {"cancelled": False}
+
+    async def export_session(self, path: str) -> Dict[str, Any]:
+        """将当前会话导出为 JSONL 文件。"""
+        import shutil
+
+        session_file = self.session_manager.get_session_file()
+        if not session_file:
+            raise RuntimeError("No session file to export")
+        shutil.copy2(session_file, path)
+        return {"exported_to": os.path.abspath(path)}
+
+    async def import_session(
+        self, path: str, cwd_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """从 JSONL 文件导入会话并切换到该会话。"""
+        import shutil
+
+        resolved_path = os.path.abspath(path)
+        if not os.path.exists(resolved_path):
+            raise FileNotFoundError(f"Session file not found: {resolved_path}")
+
+        session_dir = self.session_manager.get_session_dir()
+        previous_session_file = self.session_file
+        if session_dir:
+            destination_path = os.path.join(
+                session_dir, os.path.basename(resolved_path)
+            )
+            if os.path.abspath(destination_path) != os.path.abspath(resolved_path):
+                shutil.copy2(resolved_path, destination_path)
+        else:
+            destination_path = resolved_path
+
+        self.session_manager = SessionManager.open(
+            destination_path, session_dir, cwd_override
+        )
+        self.agent.state.messages = (
+            self.session_manager.build_session_context().messages
+        )
+        self._sync_system_prompt()
+        self.session_start_event = SessionStartEvent(
+            reason="import", previous_session_file=previous_session_file
+        )
+        if self._extension_runner is not None:
+            await self._extension_runner.emit(self.session_start_event)
+        return {"cancelled": False}
+
+    async def new_agent_session(
+        self, parent_session: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """创建新会话并切换到该会话。"""
+        previous_session_file = self.session_file
+        self.session_manager.new_session(parent_session=parent_session)
+        self.agent.state.messages = (
+            self.session_manager.build_session_context().messages
+        )
+        self._sync_system_prompt()
+        self.session_start_event = SessionStartEvent(
+            reason="new", previous_session_file=previous_session_file
+        )
+        if self._extension_runner is not None:
+            await self._extension_runner.emit(self.session_start_event)
+        return {"cancelled": False}
+
+    async def switch_agent_session(self, session_path: str) -> Dict[str, Any]:
+        """切换到指定的会话文件。"""
+        previous_session_file = self.session_file
+        session_dir = self.session_manager.get_session_dir()
+        self.session_manager = SessionManager.open(session_path, session_dir)
+        self.agent.state.messages = (
+            self.session_manager.build_session_context().messages
+        )
+        self._sync_system_prompt()
+        self.session_start_event = SessionStartEvent(
+            reason="resume", previous_session_file=previous_session_file
+        )
+        if self._extension_runner is not None:
+            await self._extension_runner.emit(self.session_start_event)
+        return {"cancelled": False}
+
+    def get_session_info(self) -> Dict[str, Any]:
+        """获取当前会话摘要信息。"""
+        header = self.session_manager.get_header()
+        return {
+            "id": self.session_manager.get_session_id(),
+            "name": self.session_manager.get_session_name(),
+            "cwd": getattr(header, "cwd", self.cwd) if header else self.cwd,
+            "file": self.session_manager.get_session_file(),
+            "entry_count": len(self.session_manager.get_entries()),
+            "leaf_id": self.session_manager.get_leaf_id(),
+            "persisted": self.session_manager.is_persisted(),
+        }
+
+    async def list_sessions(self) -> List[Dict[str, Any]]:
+        """列出当前 cwd 下的可用会话。"""
+        sessions = await SessionManager.list_sessions(
+            self.cwd, self.session_manager.get_session_dir()
+        )
+        return [s.model_dump() for s in sessions]
+
+    def trust_project(self, trusted: bool = True) -> None:
+        """保存项目信任决策。"""
+        if self.settings_manager is not None and hasattr(
+            self.settings_manager, "set_project_trusted"
+        ):
+            self.settings_manager.set_project_trusted(trusted)
 
     def _find_last_assistant_message(self) -> Optional[AssistantMessage]:
         """在 agent state 中查找最后一条 assistant 消息。"""

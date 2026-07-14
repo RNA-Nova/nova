@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 
 from nova_harness.core.harness.compaction.compaction import estimate_context_tokens
-from nova_harness.core.types.agent import SessionStats, SessionTokens
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
+from nova_harness.core.types.protocols import AgentSessionProtocol
+from nova_harness.core.types.session.state import SessionStats, SessionTokens
 
 
 class StatsCollector:
     """封装 AgentSession 的统计信息计算。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     def get_context_usage(self) -> Optional[Dict[str, Any]]:

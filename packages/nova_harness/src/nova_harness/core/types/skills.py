@@ -3,9 +3,12 @@
 Skill 是一份可被发现的 Markdown 指令文件，通常命名为 ``SKILL.md``。
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
 from nova_ai.types.base_model import NovaBaseModel
+
+from nova_harness.core.types.extensions import SourceInfo
 
 
 class Skill(NovaBaseModel):
@@ -17,14 +20,25 @@ class Skill(NovaBaseModel):
     base_dir: str
     disable_model_invocation: bool = False
     source_label: str = "unknown"
+    source_info: Optional[SourceInfo] = None
 
 
 class SkillFrontmatter(NovaBaseModel):
-    """SKILL.md  frontmatter 的规范子集。"""
+    """SKILL.md frontmatter 的规范子集。"""
 
     name: Optional[str] = None
     description: Optional[str] = None
     disable_model_invocation: bool = False
 
 
-__all__ = ["Skill", "SkillFrontmatter"]
+@dataclass(frozen=True)
+class ParsedSkillBlock:
+    """从用户消息中解析出的 skill block。"""
+
+    name: str
+    location: str
+    content: str
+    user_message: Optional[str] = None
+
+
+__all__ = ["Skill", "SkillFrontmatter", "ParsedSkillBlock"]

@@ -14,9 +14,8 @@ from nova_harness.core.agent_session.services import (
     CreateAgentSessionRuntimeResult,
 )
 from nova_harness.core.config import AuthStorage, ModelRegistry, SettingsManager
-from nova_harness.core.harness.system_prompt import SystemPromptManager
 from nova_harness.core.resources.loader import ResourceLoader
-from nova_harness.core.types.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.core.types.runtime.diagnostics import AgentSessionRuntimeDiagnostic
 
 
 class _DummyResourceLoader(ResourceLoader):
@@ -52,6 +51,9 @@ class _DummyResourceLoader(ResourceLoader):
     def get_tools(self) -> Dict[str, Any]:
         return {}
 
+    def get_context_files(self) -> list:
+        return []
+
 
 class _DummySettingsManager(SettingsManager):
     def __init__(self):  # noqa: D107
@@ -68,21 +70,14 @@ class _DummyModelRegistry(ModelRegistry):
         pass
 
 
-class _DummySystemPromptManager(SystemPromptManager):
-    def __init__(self, *args, **kwargs):  # noqa: D107
-        pass
-
-
 def test_services_fields(tmp_path):
-    """AgentSessionServices 字段可通过 model_construct 正确设置。"""
-    services = AgentSessionServices.model_construct(
+    """AgentSessionServices 字段可直接构造并正确设置。"""
+    services = AgentSessionServices(
         cwd=str(tmp_path),
         agent_dir=str(tmp_path / "agent"),
-        session_manager=MagicMock(),
         settings_manager=MagicMock(),
         model_registry=MagicMock(),
         resource_loader=MagicMock(),
-        system_prompt_manager=MagicMock(),
         auth_storage=MagicMock(),
         diagnostics=[
             AgentSessionRuntimeDiagnostic(
@@ -98,13 +93,12 @@ def test_services_fields(tmp_path):
 
 def test_services_diagnostics_default_empty(tmp_path):
     """diagnostics 默认应为空列表。"""
-    services = AgentSessionServices.model_construct(
+    services = AgentSessionServices(
         cwd=str(tmp_path),
         agent_dir=str(tmp_path / "agent"),
         settings_manager=MagicMock(),
         model_registry=MagicMock(),
         resource_loader=MagicMock(),
-        system_prompt_manager=MagicMock(),
         auth_storage=MagicMock(),
     )
     assert services.diagnostics == []
@@ -113,10 +107,12 @@ def test_services_diagnostics_default_empty(tmp_path):
 def test_create_agent_session_runtime_result():
     """CreateAgentSessionRuntimeResult 可正确承载 session/services/diagnostics。"""
     session = MagicMock()
+    session.session_manager = MagicMock()
     services = MagicMock()
     result = CreateAgentSessionRuntimeResult(
         session=session,
         services=services,
+        extensions_result=MagicMock(),
         diagnostics=[
             AgentSessionRuntimeDiagnostic(type="error", message="factory diagnostic")
         ],
@@ -135,7 +131,6 @@ async def test_services_create_uses_passed_dependencies(tmp_path):
     settings_manager = _DummySettingsManager()
     model_registry = _DummyModelRegistry()
     resource_loader = _DummyResourceLoader()
-    system_prompt_manager = _DummySystemPromptManager(resource_loader, "base_agent")
 
     services = await AgentSessionServices.create(
         cwd=str(tmp_path),
@@ -144,14 +139,12 @@ async def test_services_create_uses_passed_dependencies(tmp_path):
         settings_manager=settings_manager,
         model_registry=model_registry,
         resource_loader=resource_loader,
-        system_prompt_manager=system_prompt_manager,
     )
 
     assert services.auth_storage is auth_storage
     assert services.settings_manager is settings_manager
     assert services.model_registry is model_registry
     assert services.resource_loader is resource_loader
-    assert services.system_prompt_manager is system_prompt_manager
 
 
 @pytest.mark.asyncio
@@ -165,7 +158,6 @@ async def test_services_create_picks_agent_name_from_loader(tmp_path):
         resource_loader=resource_loader,
     )
 
-    assert services.system_prompt_manager is not None
     assert services.resource_loader is resource_loader
 
 
@@ -180,5 +172,5 @@ async def test_services_create_falls_back_to_base_agent(tmp_path):
         resource_loader=resource_loader,
     )
 
-    assert services.system_prompt_manager is not None
+    assert services.resource_loader is resource_loader
     assert services.cwd == str(tmp_path)

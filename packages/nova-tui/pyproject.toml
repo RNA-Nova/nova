@@ -24,6 +24,9 @@ classifiers = [
 python = ">=3.9,<3.13"
 nova-harness = { path = "../nova_harness", develop = true }
 
+[tool.uv.sources]
+nova-harness = { path = "../nova_harness" }
+
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"
 isort = "^5.12.0"

@@ -61,6 +61,7 @@ class ShouldStopAfterTurnContext(NovaBaseModel):
     tool_results: List[ToolResultMessage]
     context: "AgentContext"
     new_messages: List[AgentMessage]
+    turn_index: int = 0
 
 
 class AgentLoopTurnUpdate(NovaBaseModel):

@@ -10,12 +10,12 @@ import pytest
 from nova_ai import UserMessage
 
 from nova_harness.core import AgentSession, AgentSessionRuntime, AgentSessionServices
-from nova_harness.core.agent_session.services import CreateAgentSessionRuntimeResult
-from nova_harness.core.types.agent import (
+from nova_harness.core.types.session import (
     ForkOptions,
     NavigateOptions,
     NewSessionOptions,
 )
+from nova_harness.core.types.session.runtime import CreateAgentSessionRuntimeResult
 
 
 def _make_old_session():
@@ -27,7 +27,6 @@ def _make_old_session():
     session.session_manager.get_session_dir.return_value = "/tmp/sessions"
     session.extension_runner = None
     session.dispose = MagicMock()
-    session.bind_runtime = MagicMock()
     session.bind_extensions = AsyncMock()
     session.navigate_tree = AsyncMock(
         return_value={"cancelled": False, "editorText": None}
@@ -39,14 +38,12 @@ def _make_old_session():
 
 def _make_services(session):
     """构造一个使用 mock 的 services 对象。"""
-    return AgentSessionServices.model_construct(
+    return AgentSessionServices(
         cwd="/tmp",
         agent_dir="/tmp/agent",
-        session_manager=session.session_manager,
         settings_manager=MagicMock(),
         model_registry=MagicMock(),
         resource_loader=MagicMock(),
-        system_prompt_manager=MagicMock(),
         auth_storage=MagicMock(),
         diagnostics=[],
     )
@@ -58,6 +55,7 @@ def _make_factory(new_session, new_services):
         return_value=CreateAgentSessionRuntimeResult(
             session=new_session,
             services=new_services,
+            extensions_result=MagicMock(),
             diagnostics=[],
             model_fallback_message=None,
         )
@@ -104,8 +102,7 @@ async def test_new_session_uses_factory_and_replaces_session():
     assert runtime.services is new_services
     factory.assert_awaited_once()
     old_session.dispose.assert_called_once()
-    new_session.bind_runtime.assert_called_once_with(runtime)
-    new_session.bind_extensions.assert_awaited_once()
+    # runtime 不再反向绑定到 session；runner 通过 action-injection 获取能力
 
 
 @pytest.mark.asyncio
@@ -164,11 +161,12 @@ async def test_new_session_with_parent_and_setup():
     new_session.agent.state.messages = []
     new_services = _make_services(new_session)
 
-    async def factory_impl(cwd, agent_dir, session_manager, start_event):
-        new_session.session_manager = session_manager
+    async def factory_impl(options):
+        new_session.session_manager = options.session_manager
         return CreateAgentSessionRuntimeResult(
             session=new_session,
             services=new_services,
+            extensions_result=MagicMock(),
             diagnostics=[],
             model_fallback_message=None,
         )
@@ -214,7 +212,7 @@ async def test_switch_session_opens_existing_file():
     ) as mock_open:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "switched.jsonl"
-        new_sm.get_cwd.return_value = "/tmp/switched"
+        new_sm.get_cwd.return_value = "/tmp"
         mock_open.return_value = new_sm
 
         result = await runtime.switch_session("/path/to/session.jsonl")
@@ -396,6 +394,11 @@ async def test_rebind_and_with_session_callbacks():
     with_session = AsyncMock()
     runtime.set_rebind_session(rebind)
 
+    replaced_context = MagicMock()
+    new_session.create_replaced_session_context = MagicMock(
+        return_value=replaced_context
+    )
+
     with patch(
         "nova_harness.core.agent_session.runtime.SessionManager.create"
     ) as mock_create:
@@ -407,4 +410,58 @@ async def test_rebind_and_with_session_callbacks():
         await runtime.new_session(NewSessionOptions(with_session=with_session))
 
     rebind.assert_awaited_once_with(new_session)
-    with_session.assert_awaited_once_with(new_session)
+    new_session.create_replaced_session_context.assert_called_once()
+    with_session.assert_awaited_once_with(replaced_context)
+
+
+@pytest.mark.asyncio
+async def test_import_from_jsonl(tmp_path):
+    """import_from_jsonl 复制 JSONL 到 session dir 并切换到该会话。"""
+    from nova_ai import UserMessage
+
+    from nova_harness.core.harness.session import SessionManager
+
+    # 准备一个源 JSONL 会话
+    source_session_dir = tmp_path / "source_sessions"
+    source_session_dir.mkdir()
+    source_manager = SessionManager.create(str(tmp_path), str(source_session_dir))
+    source_manager.append_message(UserMessage(role="user", content="hello import"))
+    source_manager._rewrite_file()
+    source_file = source_manager.get_session_file()
+    assert source_file is not None
+
+    # 构造 runtime
+    old_session = _make_old_session()
+    old_session.session_manager.get_session_dir.return_value = str(
+        tmp_path / "sessions"
+    )
+    services = _make_services(old_session)
+
+    imported_session = _make_old_session()
+    imported_session.extension_runner = None
+    imported_session.session_manager = MagicMock()
+    imported_session.session_manager.get_cwd.return_value = str(tmp_path)
+    imported_services = _make_services(imported_session)
+
+    factory = _make_factory(imported_session, imported_services)
+    runtime = AgentSessionRuntime(old_session, services, factory)
+
+    result = await runtime.import_from_jsonl(source_file)
+
+    assert result["cancelled"] is False
+    assert runtime.session is imported_session
+    factory.assert_awaited_once()
+    old_session.dispose.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_import_from_jsonl_file_not_found(tmp_path):
+    """import_from_jsonl 在文件不存在时抛出 SessionImportFileNotFoundError。"""
+    from nova_harness.core.agent_session.runtime import SessionImportFileNotFoundError
+
+    old_session = _make_old_session()
+    services = _make_services(old_session)
+    runtime = AgentSessionRuntime(old_session, services, AsyncMock())
+
+    with pytest.raises(SessionImportFileNotFoundError):
+        await runtime.import_from_jsonl(str(tmp_path / "nonexistent.jsonl"))

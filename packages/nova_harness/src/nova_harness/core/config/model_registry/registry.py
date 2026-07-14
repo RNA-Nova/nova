@@ -22,7 +22,7 @@ from nova_ai import (
 from nova_harness.core.config.auth.storage import AuthStorage
 
 # 本地导入（resolve.py 已移至同级目录）
-from nova_harness.core.config.defaults import get_agent_dir
+from nova_harness.core.config.defaults import MODELS_FILE_NAME, get_agent_dir
 from nova_harness.core.config.model_registry.helpers import (
     apply_model_override,
     empty_custom_models_result,
@@ -32,7 +32,7 @@ from nova_harness.core.config.resolve import (
     resolve_config_value,
     resolve_headers,
 )
-from nova_harness.core.types.model_registry import (
+from nova_harness.core.types.config.model_registry import (
     CustomModelsResult,
     ModelOverride,
     ModelsConfig,
@@ -51,7 +51,7 @@ class ModelRegistry:
     ):
         self.auth_storage: AuthStorage = auth_storage
         self.models_json_path: str = models_json_path or os.path.join(
-            get_agent_dir(), "models.json"
+            get_agent_dir(), MODELS_FILE_NAME
         )
         self.models: List[Model] = []
         self.custom_provider_api_keys: Dict[str, str] = {}
@@ -181,7 +181,7 @@ class ModelRegistry:
             content = path.read_text(encoding="utf-8")
             config_data = json.loads(content)
 
-            # 使用 mashumaro 验证和解析（替代原 Ajv）
+            # 使用 Pydantic v2 验证和解析（替代原 Ajv）
             config = ModelsConfig.model_validate(config_data)
 
             # 额外业务逻辑验证
@@ -376,6 +376,10 @@ class ModelRegistry:
     async def get_api_key(self, model: Model) -> Optional[str]:
         """Get API key for a model."""
         return await self.auth_storage.get_api_key(model.provider)
+
+    def has_configured_auth(self, model: Model) -> bool:
+        """Check whether a model has authentication configured (fast sync check)."""
+        return self.auth_storage.has_auth(model.provider)
 
     async def get_api_key_for_provider(self, provider: str) -> Optional[str]:
         """Get API key for a provider."""

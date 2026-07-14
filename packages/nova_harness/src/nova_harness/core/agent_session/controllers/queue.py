@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from nova_ai import ImageContent, TextContent, UserMessage
 
 from nova_harness.core.types.events import QueueUpdateEvent
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
+from nova_harness.core.types.protocols import AgentSessionProtocol
 
 
 class QueueController:
     """封装 AgentSession 的 steering / follow-up 队列管理。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     def emit_update(self) -> None:

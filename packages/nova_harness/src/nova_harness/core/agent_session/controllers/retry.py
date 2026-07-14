@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from nova_agent import AbortController
 from nova_ai import AssistantMessage
 
 from nova_harness.core.types.events import AutoRetryEndEvent, AutoRetryStartEvent
+from nova_harness.core.types.protocols import AgentSessionProtocol
 from nova_harness.core.utils import is_context_overflow
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
 
 
 class RetryController:
     """封装 AgentSession 的自动错误重试逻辑。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     @property
@@ -42,7 +41,7 @@ class RetryController:
         return False
 
     def is_retryable_error(self, message: AssistantMessage) -> bool:
-        """判断 assistant 错误消息是否可重试（与 TS 版 `_isRetryableError` 对齐）。"""
+        """判断 assistant 错误消息是否可重试。"""
         if message.stop_reason != "error" or not message.error_message:
             return False
 
@@ -110,7 +109,10 @@ class RetryController:
             return False
 
         base_delay_ms = getattr(retry_settings, "base_delay_ms", 1000) or 1000
-        max_delay_ms = getattr(retry_settings, "max_delay_ms", 60000) or 60000
+        provider = getattr(retry_settings, "provider", None)
+        max_delay_ms = 60000
+        if provider is not None:
+            max_delay_ms = getattr(provider, "max_retry_delay_ms", 60000) or 60000
         delay_ms = min(
             base_delay_ms * (2 ** (self._session._retry_attempt - 1)), max_delay_ms
         )
@@ -131,10 +133,10 @@ class RetryController:
             self._session.agent.state.messages = messages[:-1]
 
         # 可中断的指数退避等待
-        self._session._retry_abort_event = asyncio.Event()
+        self._session._retry_abort_event = AbortController("retry")
         try:
             await asyncio.wait_for(
-                self._session._retry_abort_event.wait(), timeout=delay_s
+                self._session._retry_abort_event.signal.wait(), timeout=delay_s
             )
             # 被中断
             attempt = self._session._retry_attempt
@@ -155,7 +157,7 @@ class RetryController:
     def abort_retry(self) -> None:
         """取消进行中的自动重试。"""
         if self._session._retry_abort_event is not None:
-            self._session._retry_abort_event.set()
+            self._session._retry_abort_event.abort()
 
     def set_auto_retry_enabled(self, enabled: bool) -> None:
         """开关自动重试设置。"""

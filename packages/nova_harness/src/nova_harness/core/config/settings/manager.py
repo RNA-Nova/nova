@@ -2,26 +2,33 @@
 Settings management module with file-based and in-memory storage backends.
 """
 
+import asyncio
 import json
+import logging
 import os
 import threading
+import uuid
 from copy import deepcopy
 from typing import Any, Callable, Literal, Optional
 
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
 from nova_ai import ThinkingLevel, Transport
 
-from nova_harness.core.config.defaults import get_agent_dir
+from nova_harness.core.config.defaults import get_agent_dir, get_project_base_dir
 from nova_harness.core.config.settings.storage import (
     FileSettingsStorage,
-    InMemorySettingsStorage,
     SettingsStorage,
 )
 from nova_harness.core.config.settings.utils import deep_merge_settings
 from nova_harness.core.types.compaction import CompactionSettings
-from nova_harness.core.types.setting import (
+from nova_harness.core.types.config.settings import (
     BranchSummarySettings,
+    DefaultProjectTrust,
     ImageSettings,
-    PackageSource,
+    PackageSourceSpec,
     RetrySettings,
     Settings,
     SettingsError,
@@ -29,10 +36,11 @@ from nova_harness.core.types.setting import (
     TerminalSettings,
     ThinkingBudgetsSettings,
 )
+from nova_harness.core.types.project_trust import ProjectNotTrustedError
 
 
 class SettingsManager:
-    """Manages application settings with global and project scopes."""
+    """Manages application settings with file-based and in-memory storage backends."""
 
     # 默认常量定义
     DEFAULT_RETRY_ENABLED = True
@@ -65,6 +73,7 @@ class SettingsManager:
         global_load_error: Optional[Exception] = None,
         project_load_error: Optional[Exception] = None,
         initial_errors: Optional[list[SettingsError]] = None,
+        project_trusted: bool = True,
     ) -> None:
         self._storage = storage
         self._global_settings = initial_global
@@ -72,6 +81,7 @@ class SettingsManager:
         self._global_settings_load_error = global_load_error
         self._project_settings_load_error = project_load_error
         self._errors = initial_errors or []
+        self._project_trusted = project_trusted
 
         self._settings = deep_merge_settings(
             self._global_settings, self._project_settings
@@ -82,20 +92,30 @@ class SettingsManager:
         self._modified_project_nested_fields: dict[str, set[str]] = {}
         self._write_queue: list[Callable[[], None]] = []
         self._write_lock = threading.Lock()
+        self._settings_lock = threading.RLock()
 
     @classmethod
     def create(
-        cls, cwd: str = os.getcwd(), agent_dir: str = str(get_agent_dir())
+        cls,
+        cwd: str = os.getcwd(),
+        agent_dir: str = str(get_agent_dir()),
+        project_trusted: bool = True,
     ) -> "SettingsManager":
         """Create a SettingsManager that loads from files."""
         storage = FileSettingsStorage(cwd, agent_dir)
-        return cls.from_storage(storage)
+        return cls.from_storage(storage, project_trusted=project_trusted)
 
     @classmethod
-    def from_storage(cls, storage: SettingsStorage) -> "SettingsManager":
+    def from_storage(
+        cls, storage: SettingsStorage, project_trusted: bool = True
+    ) -> "SettingsManager":
         """Create a SettingsManager from an arbitrary storage backend."""
-        global_load = cls._try_load_from_storage(storage, SettingsScope.GLOBAL)
-        project_load = cls._try_load_from_storage(storage, SettingsScope.PROJECT)
+        global_load = cls._try_load_from_storage(
+            storage, SettingsScope.GLOBAL, project_trusted=True
+        )
+        project_load = cls._try_load_from_storage(
+            storage, SettingsScope.PROJECT, project_trusted=project_trusted
+        )
 
         initial_errors: list[SettingsError] = []
         if global_load["error"]:
@@ -114,18 +134,68 @@ class SettingsManager:
             global_load["error"],
             project_load["error"],
             initial_errors,
+            project_trusted=project_trusted,
         )
 
-    @classmethod
-    def in_memory(cls, settings: Optional[dict[str, Any]] = None) -> "SettingsManager":
-        """Create an in-memory SettingsManager (no file I/O)."""
-        storage = InMemorySettingsStorage()
-        initial = Settings.model_validate(settings) if settings else Settings()
-        return cls(storage, initial, Settings())
+    @staticmethod
+    def migrate_settings(data: dict) -> dict:
+        """Migrate old settings format to the current schema.
+
+        处理已知历史字段重命名与格式变更。Python Settings 使用 snake_case，
+        因此迁移目标字段也使用 snake_case。
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # Migrate queueMode -> steering_mode
+        if "queueMode" in data and "steering_mode" not in data:
+            data["steering_mode"] = data.pop("queueMode")
+
+        # Migrate legacy websockets boolean -> transport enum.
+        # transport 已固定为 sse，因此无论原值如何都归一化为 sse。
+        if "transport" not in data and isinstance(data.get("websockets"), bool):
+            data.pop("websockets")
+            data["transport"] = "sse"
+
+        # Migrate old skills object format to new array format
+        skills = data.get("skills")
+        if isinstance(skills, dict) and skills is not None:
+            skills_settings = skills
+            if (
+                "enableSkillCommands" in skills_settings
+                and "enable_skill_commands" not in data
+            ):
+                data["enable_skill_commands"] = skills_settings["enableSkillCommands"]
+            if isinstance(skills_settings.get("customDirectories"), list):
+                data["skills"] = skills_settings["customDirectories"]
+            else:
+                data.pop("skills", None)
+
+        # Migrate retry.maxDelayMs -> retry.provider.max_retry_delay_ms
+        retry = data.get("retry")
+        if isinstance(retry, dict) and retry is not None:
+            provider = retry.get("provider")
+            if not isinstance(provider, dict) or provider is None:
+                provider = {}
+                retry["provider"] = provider
+            if "maxDelayMs" in retry and provider.get("max_retry_delay_ms") is None:
+                provider["max_retry_delay_ms"] = retry.pop("maxDelayMs")
+            # Also normalize legacy flat max_delay_ms if present.
+            if "max_delay_ms" in retry and provider.get("max_retry_delay_ms") is None:
+                provider["max_retry_delay_ms"] = retry.pop("max_delay_ms")
+
+        return data
 
     @staticmethod
-    def _load_from_storage(storage: SettingsStorage, scope: SettingsScope) -> Settings:
+    def _load_from_storage(
+        storage: SettingsStorage,
+        scope: SettingsScope,
+        project_trusted: bool = True,
+    ) -> Settings:
         """Load settings from storage."""
+        if scope == SettingsScope.PROJECT and not project_trusted:
+            return Settings()
+
         content: Optional[str] = None
 
         def getter(current: Optional[str]) -> Optional[str]:
@@ -139,15 +209,24 @@ class SettingsManager:
             return Settings()
 
         data = json.loads(content)
+        data = SettingsManager.migrate_settings(data)
         return Settings.model_validate(data)
 
     @classmethod
     def _try_load_from_storage(
-        cls, storage: SettingsStorage, scope: SettingsScope
+        cls,
+        storage: SettingsStorage,
+        scope: SettingsScope,
+        project_trusted: bool = True,
     ) -> dict[str, Any]:
         """Try to load settings, catching errors."""
         try:
-            return {"settings": cls._load_from_storage(storage, scope), "error": None}
+            return {
+                "settings": cls._load_from_storage(
+                    storage, scope, project_trusted=project_trusted
+                ),
+                "error": None,
+            }
         except Exception as e:
             return {"settings": Settings(), "error": e}
 
@@ -159,9 +238,16 @@ class SettingsManager:
         """Return a copy of project settings."""
         return deepcopy(self._project_settings)
 
-    def reload(self) -> None:
-        """Reload settings from storage."""
-        global_load = self._try_load_from_storage(self._storage, SettingsScope.GLOBAL)
+    async def reload(self) -> None:
+        """Reload settings from storage.
+
+        先 flush 内存中尚未写盘的修改，避免 reload 覆盖丢失。
+        """
+        await self.flush()
+
+        global_load = self._try_load_from_storage(
+            self._storage, SettingsScope.GLOBAL, project_trusted=True
+        )
         if not global_load["error"]:
             self._global_settings = global_load["settings"]
             self._global_settings_load_error = None
@@ -169,12 +255,9 @@ class SettingsManager:
             self._global_settings_load_error = global_load["error"]
             self._record_error(SettingsScope.GLOBAL, global_load["error"])
 
-        self._modified_fields.clear()
-        self._modified_nested_fields.clear()
-        self._modified_project_fields.clear()
-        self._modified_project_nested_fields.clear()
-
-        project_load = self._try_load_from_storage(self._storage, SettingsScope.PROJECT)
+        project_load = self._try_load_from_storage(
+            self._storage, SettingsScope.PROJECT, project_trusted=self._project_trusted
+        )
         if not project_load["error"]:
             self._project_settings = project_load["settings"]
             self._project_settings_load_error = None
@@ -182,6 +265,51 @@ class SettingsManager:
             self._project_settings_load_error = project_load["error"]
             self._record_error(SettingsScope.PROJECT, project_load["error"])
 
+        self._settings = deep_merge_settings(
+            self._global_settings, self._project_settings
+        )
+
+        # 已从磁盘重新加载，清空所有修改标记。
+        self._modified_fields.clear()
+        self._modified_nested_fields.clear()
+        self._modified_project_fields.clear()
+        self._modified_project_nested_fields.clear()
+
+    def is_project_trusted(self) -> bool:
+        """返回当前项目是否被信任。"""
+        return self._project_trusted
+
+    def set_project_trusted(self, trusted: bool) -> None:
+        """设置项目信任状态。
+
+        设置为不信任时会清空已加载的项目级设置与修改标记，避免未信任项目
+        的设置被后续流程使用。设置为信任时则从存储重新加载项目设置，使当前
+        进程立即生效。
+
+        直接同步加载 project settings，避免在同步上下文中产生 async 调用。
+        """
+        if self._project_trusted == trusted:
+            return
+
+        self._project_trusted = trusted
+        self._modified_project_fields.clear()
+        self._modified_project_nested_fields.clear()
+
+        if not trusted:
+            self._project_settings = Settings()
+            self._project_settings_load_error = None
+            self._settings = deep_merge_settings(
+                self._global_settings, self._project_settings
+            )
+            return
+
+        project_load = self._try_load_from_storage(
+            self._storage, SettingsScope.PROJECT, project_trusted=trusted
+        )
+        self._project_settings = project_load["settings"]
+        self._project_settings_load_error = project_load["error"]
+        if project_load["error"]:
+            self._record_error(SettingsScope.PROJECT, project_load["error"])
         self._settings = deep_merge_settings(
             self._global_settings, self._project_settings
         )
@@ -221,7 +349,7 @@ class SettingsManager:
             self._modified_project_fields.clear()
             self._modified_project_nested_fields.clear()
 
-    def _enqueue_write(self, scope: SettingsScope, task: Callable[[], None]) -> None:
+    def _enqueue_write(self, task: Callable[[], None]) -> None:
         """Enqueue a write task."""
         with self._write_lock:
             self._write_queue.append(task)
@@ -245,6 +373,9 @@ class SettingsManager:
             current_file_settings = {}
             if current:
                 current_file_settings = json.loads(current)
+                current_file_settings = SettingsManager.migrate_settings(
+                    current_file_settings
+                )
 
             merged_settings = dict(current_file_settings)
 
@@ -253,7 +384,7 @@ class SettingsManager:
                 if (
                     field in modified_nested
                     and value is not None
-                    and hasattr(type(value), "model_fields")
+                    and isinstance(value, BaseModel)
                 ):
                     nested_modified = modified_nested[field]
                     base_nested = current_file_settings.get(field, {})
@@ -263,8 +394,8 @@ class SettingsManager:
                             if hasattr(value, nested_key):
                                 # 将嵌套 Pydantic 模型转为 dict
                                 nested_val = getattr(value, nested_key)
-                                if nested_val is not None and hasattr(
-                                    type(nested_val), "model_fields"
+                                if nested_val is not None and isinstance(
+                                    nested_val, BaseModel
                                 ):
                                     merged_nested[nested_key] = nested_val.model_dump()
                                 else:
@@ -272,11 +403,13 @@ class SettingsManager:
                         merged_settings[field] = merged_nested
                     else:
                         merged_settings[field] = (
-                            value.model_dump() if hasattr(value, "to_dict") else value
+                            value.model_dump()
+                            if isinstance(value, BaseModel)
+                            else value
                         )
                 else:
-                    # 使用 Pydantic 兼容的 to_dict() 方法
-                    if value is not None and hasattr(value, "to_dict"):
+                    # 使用 Pydantic v2 的 model_dump() 方法
+                    if value is not None and isinstance(value, BaseModel):
                         merged_settings[field] = value.model_dump()
                     else:
                         merged_settings[field] = value
@@ -287,16 +420,17 @@ class SettingsManager:
 
     def _save(self) -> None:
         """Save global settings."""
-        self._settings = deep_merge_settings(
-            self._global_settings, self._project_settings
-        )
+        with self._settings_lock:
+            self._settings = deep_merge_settings(
+                self._global_settings, self._project_settings
+            )
 
-        if self._global_settings_load_error:
-            return
+            if self._global_settings_load_error:
+                return
 
-        snapshot_global = deepcopy(self._global_settings)
-        modified_fields = set(self._modified_fields)
-        modified_nested = self._clone_modified_nested(self._modified_nested_fields)
+            snapshot_global = deepcopy(self._global_settings)
+            modified_fields = set(self._modified_fields)
+            modified_nested = self._clone_modified_nested(self._modified_nested_fields)
 
         def task() -> None:
             self._persist_scoped_settings(
@@ -304,23 +438,24 @@ class SettingsManager:
             )
             self._clear_modified_scope(SettingsScope.GLOBAL)
 
-        self._enqueue_write(SettingsScope.GLOBAL, task)
+        self._enqueue_write(task)
 
     def _save_project_settings(self, settings: Settings) -> None:
         """Save project settings."""
-        self._project_settings = deepcopy(settings)
-        self._settings = deep_merge_settings(
-            self._global_settings, self._project_settings
-        )
+        with self._settings_lock:
+            self._project_settings = deepcopy(settings)
+            self._settings = deep_merge_settings(
+                self._global_settings, self._project_settings
+            )
 
-        if self._project_settings_load_error:
-            return
+            if self._project_settings_load_error:
+                return
 
-        snapshot_project = deepcopy(self._project_settings)
-        modified_fields = set(self._modified_project_fields)
-        modified_nested = self._clone_modified_nested(
-            self._modified_project_nested_fields
-        )
+            snapshot_project = deepcopy(self._project_settings)
+            modified_fields = set(self._modified_project_fields)
+            modified_nested = self._clone_modified_nested(
+                self._modified_project_nested_fields
+            )
 
         def task() -> None:
             self._persist_scoped_settings(
@@ -331,17 +466,25 @@ class SettingsManager:
             )
             self._clear_modified_scope(SettingsScope.PROJECT)
 
-        self._enqueue_write(SettingsScope.PROJECT, task)
+        self._enqueue_write(task)
 
-    def flush(self) -> None:
-        """Execute all pending write operations."""
+    async def flush(self) -> None:
+        """异步等待所有待写入操作完成。
+
+        返回一个可被 ``await`` 的 coroutine，实际写盘在独立线程中执行，
+        避免阻塞事件循环。
+        """
+        await asyncio.to_thread(self.flush_sync)
+
+    def flush_sync(self) -> None:
+        """同步执行所有待写入操作。"""
         with self._write_lock:
             for task in self._write_queue:
                 try:
                     task()
                 except Exception as e:
                     # Log error but continue with other tasks
-                    print(f"Error flushing settings: {e}")
+                    logger.error("Error flushing settings: %s", e)
             self._write_queue.clear()
 
     def drain_errors(self) -> list[SettingsError]:
@@ -350,7 +493,7 @@ class SettingsManager:
         self._errors.clear()
         return drained
 
-    # Getter and setter methods (保持不变，但使用 mashumaro 进行序列化)
+    # Getter and setter methods（使用 Pydantic v2 序列化）
 
     def get_last_changelog_version(self) -> Optional[str]:
         return self._settings.last_changelog_version
@@ -399,14 +542,6 @@ class SettingsManager:
         self._mark_modified("follow_up_mode")
         self._save()
 
-    def get_theme(self) -> Optional[str]:
-        return self._settings.theme
-
-    def set_theme(self, theme: str) -> None:
-        self._global_settings.theme = theme
-        self._mark_modified("theme")
-        self._save()
-
     def get_default_thinking_level(self) -> Optional[ThinkingLevel]:
         return self._settings.default_thinking_level
 
@@ -416,12 +551,14 @@ class SettingsManager:
         self._save()
 
     def get_transport(self) -> "Transport":
-        return self._settings.transport or "sse"
+        # nova_ai 当前仅实现 SSE，WebSocket 传输未实际支持。
+        # 固定返回 "sse"，避免用户设置失效或产生误解。
+        return "sse"
 
     def set_transport(self, transport: "Transport") -> None:
-        self._global_settings.transport = transport
-        self._mark_modified("transport")
-        self._save()
+        # transport 已固定为 sse；保留本方法以免外部调用方报错，但写入被忽略。
+        # 如需恢复可配置性，需先在 nova_ai 实现 WebSocket 传输。
+        return
 
     def get_compaction_enabled(self) -> bool:
         if (
@@ -497,6 +634,7 @@ class SettingsManager:
     def get_retry_settings(self) -> RetrySettings:
         """获取 retry 设置，所有 None 值会被替换为默认值。"""
         retry = self._settings.retry
+        provider = retry.provider if retry is not None else None
         return RetrySettings.model_validate(
             {
                 "enabled": self.get_retry_enabled(),
@@ -510,11 +648,24 @@ class SettingsManager:
                     if retry is not None and retry.base_delay_ms is not None
                     else self.DEFAULT_RETRY_BASE_DELAY_MS
                 ),
-                "max_delay_ms": (
-                    retry.max_delay_ms
-                    if retry is not None and retry.max_delay_ms is not None
-                    else self.DEFAULT_RETRY_MAX_DELAY_MS
-                ),
+                "provider": {
+                    "timeout_ms": (
+                        provider.timeout_ms
+                        if provider is not None and provider.timeout_ms is not None
+                        else None
+                    ),
+                    "max_retries": (
+                        provider.max_retries
+                        if provider is not None and provider.max_retries is not None
+                        else None
+                    ),
+                    "max_retry_delay_ms": (
+                        provider.max_retry_delay_ms
+                        if provider is not None
+                        and provider.max_retry_delay_ms is not None
+                        else self.DEFAULT_RETRY_MAX_DELAY_MS
+                    ),
+                },
             }
         )
 
@@ -562,21 +713,197 @@ class SettingsManager:
         self._mark_modified("collapse_changelog")
         self._save()
 
-    def get_packages(self) -> list[PackageSource]:
+    def get_default_project_trust(self) -> DefaultProjectTrust:
+        """获取全局默认项目信任策略。
+
+        支持 ``ask`` / ``always`` / ``never``。仅全局生效；project scope 不保存该字段。
+        """
+        return self._global_settings.default_project_trust or "ask"
+
+    def set_default_project_trust(self, trust: DefaultProjectTrust) -> None:
+        self._global_settings.default_project_trust = trust
+        self._mark_modified("default_project_trust")
+        self._save()
+
+    def get_packages(self) -> list[PackageSourceSpec]:
         return (
             list(self._settings.packages) if self._settings.packages is not None else []
         )
 
-    def set_packages(self, packages: list[PackageSource]) -> None:
-        self._global_settings.packages = packages
-        self._mark_modified("packages")
-        self._save()
+    def set_packages(self, packages: list[PackageSourceSpec]) -> None:
+        with self._settings_lock:
+            self._global_settings.packages = packages
+            self._mark_modified("packages")
+            self._save()
 
-    def set_project_packages(self, packages: list[PackageSource]) -> None:
-        project_settings = deepcopy(self._project_settings)
-        project_settings.packages = packages
-        self._mark_project_modified("packages")
-        self._save_project_settings(project_settings)
+    def set_project_packages(self, packages: list[PackageSourceSpec]) -> None:
+        if not self._project_trusted:
+            raise ProjectNotTrustedError("project")
+        with self._settings_lock:
+            project_settings = deepcopy(self._project_settings)
+            project_settings.packages = packages
+            self._mark_project_modified("packages")
+            self._save_project_settings(project_settings)
+
+    # ------------------------------------------------------------------
+    # Package source management (merged from PackageSettingsStore)
+    # ------------------------------------------------------------------
+    def _package_base_dir(self, local: bool, base_dir: Optional[str] = None) -> str:
+        """Return the base directory used for package source normalization."""
+        if base_dir is not None:
+            return os.path.abspath(os.path.expanduser(base_dir))
+        if local:
+            return str(get_project_base_dir())
+        return str(get_agent_dir())
+
+    def get_package_sources(
+        self,
+        local: bool = False,
+        base_dir: Optional[str] = None,
+    ) -> list[PackageSourceSpec]:
+        """Return resolved package source specs for the requested scope."""
+        from nova_harness.core.package.source import (
+            resolve_package_source_from_settings,
+        )
+
+        base = self._package_base_dir(local, base_dir)
+        if local:
+            raw = list(self._project_settings.packages or [])
+        else:
+            raw = list(self._global_settings.packages or [])
+        return [resolve_package_source_from_settings(s, base) for s in raw]
+
+    def get_project_package_sources(
+        self, base_dir: Optional[str] = None
+    ) -> list[PackageSourceSpec]:
+        """Convenience wrapper for project-scope resolved package sources."""
+        return self.get_package_sources(local=True, base_dir=base_dir)
+
+    def set_package_sources(
+        self,
+        sources: list[PackageSourceSpec],
+        local: bool = False,
+        base_dir: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> None:
+        """Persist normalized package source specs for the requested scope."""
+        from nova_harness.core.package.source import (
+            normalize_package_source_for_settings,
+        )
+
+        base = self._package_base_dir(local, base_dir)
+        resolve_cwd = cwd if cwd is not None else os.getcwd()
+        normalized = [
+            normalize_package_source_for_settings(s, base, cwd=resolve_cwd)
+            for s in sources
+        ]
+        if local:
+            self.set_project_packages(normalized)
+        else:
+            self.set_packages(normalized)
+        self.flush_sync()
+
+    def set_project_package_sources(
+        self,
+        sources: list[PackageSourceSpec],
+        base_dir: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> None:
+        """Convenience wrapper for project-scope package source persistence."""
+        self.set_package_sources(sources, local=True, base_dir=base_dir, cwd=cwd)
+
+    def add_package_source(
+        self,
+        source: PackageSourceSpec,
+        local: bool = False,
+        base_dir: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> None:
+        """Add a source spec, replacing any existing entry with the same identity.
+
+        先对输入 source 做 normalize 再计算 identity，与 ``get_package_sources()`` 返回的
+        已解析 spec 比较，避免 ``./foo``、``path:./foo``、绝对路径等不同写法产生重复
+        条目。合并与写入仍使用原始 source，由 ``set_package_sources()`` 统一做一次相对化，
+        避免二次 normalize 把已相对化的路径按 cwd 再次解析。
+        """
+        from nova_harness.core.package.source import (
+            get_package_identity,
+            merge_package_source_specs,
+            normalize_package_source_for_settings,
+        )
+
+        base = self._package_base_dir(local, base_dir)
+        resolve_cwd = cwd if cwd is not None else os.getcwd()
+        normalized_source = normalize_package_source_for_settings(
+            source, base, cwd=resolve_cwd
+        )
+        new_identity = get_package_identity(normalized_source, base)
+        sources = self.get_package_sources(local=local, base_dir=base)
+        new_sources: list[PackageSourceSpec] = []
+        replaced = False
+        for existing in sources:
+            if get_package_identity(existing, base) == new_identity:
+                # 保留旧 spec 中的 filters 与 editable，避免重复安装时丢失配置。
+                merged = merge_package_source_specs(existing, source)
+                new_sources.append(merged)
+                replaced = True
+            else:
+                new_sources.append(existing)
+        if not replaced:
+            new_sources.append(source)
+        self.set_package_sources(
+            new_sources, local=local, base_dir=base, cwd=resolve_cwd
+        )
+
+    def add_project_package_source(
+        self,
+        source: PackageSourceSpec,
+        base_dir: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> None:
+        """Convenience wrapper for adding a project-scope package source."""
+        self.add_package_source(source, local=True, base_dir=base_dir, cwd=cwd)
+
+    def remove_package_source(
+        self,
+        source: PackageSourceSpec,
+        local: bool = False,
+        base_dir: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> bool:
+        """Remove all source specs matching the package identity of *source*."""
+        from nova_harness.core.package.source import (
+            get_package_identity,
+            normalize_package_source_for_settings,
+        )
+
+        base = self._package_base_dir(local, base_dir)
+        resolve_cwd = cwd if cwd is not None else os.getcwd()
+        normalized_source = normalize_package_source_for_settings(
+            source, base, cwd=resolve_cwd
+        )
+        target_identity = get_package_identity(normalized_source, base)
+        sources = self.get_package_sources(local=local, base_dir=base)
+        new_sources = [
+            s for s in sources if get_package_identity(s, base) != target_identity
+        ]
+        if len(new_sources) == len(sources):
+            return False
+        self.set_package_sources(
+            new_sources, local=local, base_dir=base, cwd=resolve_cwd
+        )
+        return True
+
+    def remove_project_package_source(
+        self,
+        source: PackageSourceSpec,
+        base_dir: Optional[str] = None,
+        cwd: Optional[str] = None,
+    ) -> bool:
+        """Convenience wrapper for removing a project-scope package source."""
+        return self.remove_package_source(
+            source, local=True, base_dir=base_dir, cwd=cwd
+        )
 
     def get_extension_paths(self) -> list[str]:
         return (
@@ -591,6 +918,8 @@ class SettingsManager:
         self._save()
 
     def set_project_extension_paths(self, paths: list[str]) -> None:
+        if not self._project_trusted:
+            raise ProjectNotTrustedError("project")
         project_settings = deepcopy(self._project_settings)
         project_settings.extensions = paths
         self._mark_project_modified("extensions")
@@ -605,6 +934,8 @@ class SettingsManager:
         self._save()
 
     def set_project_skill_paths(self, paths: list[str]) -> None:
+        if not self._project_trusted:
+            raise ProjectNotTrustedError("project")
         project_settings = deepcopy(self._project_settings)
         project_settings.skills = paths
         self._mark_project_modified("skills")
@@ -621,31 +952,71 @@ class SettingsManager:
         self._save()
 
     def set_project_prompt_template_paths(self, paths: list[str]) -> None:
+        if not self._project_trusted:
+            raise ProjectNotTrustedError("project")
         project_settings = deepcopy(self._project_settings)
         project_settings.prompts = paths
         self._mark_project_modified("prompts")
         self._save_project_settings(project_settings)
 
-    def get_theme_paths(self) -> list[str]:
-        return list(self._settings.themes) if self._settings.themes is not None else []
-
-    def set_theme_paths(self, paths: list[str]) -> None:
-        self._global_settings.themes = paths
-        self._mark_modified("themes")
-        self._save()
-
-    def set_project_theme_paths(self, paths: list[str]) -> None:
-        project_settings = deepcopy(self._project_settings)
-        project_settings.themes = paths
-        self._mark_project_modified("themes")
-        self._save_project_settings(project_settings)
-
     def get_enable_skill_commands(self) -> bool:
-        return self._settings.enable_skill_commands or True
+        if self._settings.enable_skill_commands is not None:
+            return self._settings.enable_skill_commands
+        return True
 
     def set_enable_skill_commands(self, enabled: bool) -> None:
         self._global_settings.enable_skill_commands = enabled
         self._mark_modified("enable_skill_commands")
+        self._save()
+
+    DEFAULT_ENABLE_INSTALL_TELEMETRY = True
+
+    def get_enable_install_telemetry(self) -> bool:
+        if self._settings.enable_install_telemetry is None:
+            return self.DEFAULT_ENABLE_INSTALL_TELEMETRY
+        return self._settings.enable_install_telemetry
+
+    DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000
+
+    def get_http_idle_timeout_ms(self) -> int:
+        if self._settings.http_idle_timeout_ms is None:
+            return self.DEFAULT_HTTP_IDLE_TIMEOUT_MS
+        return self._settings.http_idle_timeout_ms
+
+    def set_http_idle_timeout_ms(self, timeout_ms: int) -> None:
+        self._global_settings.http_idle_timeout_ms = timeout_ms
+        self._mark_modified("http_idle_timeout_ms")
+        self._save()
+
+    DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 30_000
+
+    def get_websocket_connect_timeout_ms(self) -> int:
+        if self._settings.websocket_connect_timeout_ms is None:
+            return self.DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS
+        return self._settings.websocket_connect_timeout_ms
+
+    def set_websocket_connect_timeout_ms(self, timeout_ms: int) -> None:
+        self._global_settings.websocket_connect_timeout_ms = timeout_ms
+        self._mark_modified("websocket_connect_timeout_ms")
+        self._save()
+
+    def get_enable_analytics(self) -> bool:
+        return self._settings.enable_analytics or False
+
+    def get_tracking_id(self) -> Optional[str]:
+        return self._settings.tracking_id
+
+    def set_enable_analytics(self, enabled: bool) -> None:
+        self._global_settings.enable_analytics = enabled
+        self._mark_modified("enable_analytics")
+        if enabled and not self._global_settings.tracking_id:
+            self._global_settings.tracking_id = str(uuid.uuid4())
+            self._mark_modified("tracking_id")
+        self._save()
+
+    def set_enable_install_telemetry(self, enabled: bool) -> None:
+        self._global_settings.enable_install_telemetry = enabled
+        self._mark_modified("enable_install_telemetry")
         self._save()
 
     def get_thinking_budgets(self) -> Optional[ThinkingBudgetsSettings]:

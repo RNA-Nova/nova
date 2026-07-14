@@ -95,6 +95,7 @@ from .constants import (
 )
 from .results import (
     BeforeAgentStartEventResult,
+    BeforeProviderRequestEventResult,
     ContextEventResult,
     InputEventResult,
     MessageEndEventResult,
@@ -226,6 +227,7 @@ __all__ = [
     "ToolResultEventResult",
     "MessageEndEventResult",
     "BeforeAgentStartEventResult",
+    "BeforeProviderRequestEventResult",
     "SessionBeforeSwitchResult",
     "SessionBeforeForkResult",
     "SessionBeforeCompactResult",

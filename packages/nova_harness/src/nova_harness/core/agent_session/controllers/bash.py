@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+
+from nova_agent import AbortController
 
 from nova_harness.core.types.messages import BashExecutionMessage
+from nova_harness.core.types.protocols import AgentSessionProtocol
+from nova_harness.core.types.runtime.bash import BashSpawnContext, BashSpawnHook
 from nova_harness.core.utils.bash import (
     BashOperations,
     BashResult,
@@ -14,14 +17,21 @@ from nova_harness.core.utils.bash import (
     execute_bash,
 )
 
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
+
+def _compose_spawn_hooks(hooks: list[BashSpawnHook]) -> BashSpawnHook:
+    """把多个 spawn hook 链式组合成一个。"""
+    def _combined(ctx: BashSpawnContext) -> BashSpawnContext:
+        current = ctx
+        for hook in hooks:
+            current = hook(current)
+        return current
+    return _combined
 
 
 class BashController:
     """封装 AgentSession 的 bash 命令执行与结果记录。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     @property
@@ -49,10 +59,23 @@ class BashController:
 
         resolved_command = f"{prefix}\n{command}" if prefix else command
 
-        self._session._bash_abort_event = asyncio.Event()
-        signal = opts.get("signal") or self._session._bash_abort_event
+        self._session._bash_abort_event = AbortController("bash")
+        signal = opts.get("signal") or self._session._bash_abort_event.signal
+
+        spawn_hooks: list[BashSpawnHook] = []
+        runner = getattr(self._session, "extension_runner", None)
+        if runner is not None:
+            spawn_hooks.extend(getattr(runner.runtime, "bash_spawn_hooks", []) or [])
+        existing_hook = opts.get("spawn_hook")
+        if existing_hook is not None:
+            spawn_hooks.append(existing_hook)
+
         operations: BashOperations = opts.get(
-            "operations", create_local_bash_operations(shell_path=shell_path)
+            "operations",
+            create_local_bash_operations(
+                shell_path=shell_path,
+                spawn_hook=_compose_spawn_hooks(spawn_hooks) if spawn_hooks else None,
+            ),
         )
 
         try:
@@ -95,7 +118,7 @@ class BashController:
     def abort_bash(self) -> None:
         """取消正在运行的 bash 命令。"""
         if self._session._bash_abort_event is not None:
-            self._session._bash_abort_event.set()
+            self._session._bash_abort_event.abort()
 
     def flush_pending(self) -> None:
         """把运行期间累积的 bash 消息追加到会话。"""

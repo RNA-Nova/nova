@@ -1,8 +1,0 @@
-{
-  "name": "coding_agent",
-  "version": "1.0.0",
-  "description": "Nova coding agent definition with local file system tools",
-  "kind": "definition",
-  "author": "nova",
-  "dependencies": []
-}

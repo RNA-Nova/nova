@@ -11,8 +11,12 @@ from nova_harness.core.types.skills import Skill
 
 def test_validate_name():
     assert validate_name("my-skill")[0] is True
-    assert validate_name("")[0] is False
+    # TS-aligned: only lowercase a-z, 0-9, single hyphens
     assert validate_name("MySkill")[0] is False
+    assert validate_name("my_skill")[0] is False
+    assert validate_name("my.skill")[0] is False
+    assert validate_name("my--skill")[0] is False
+    assert validate_name("")[0] is False
     assert validate_name("-my-skill")[0] is False
     assert validate_name("my-skill-")[0] is False
     assert validate_name("a" * 65)[0] is False
@@ -45,12 +49,29 @@ def test_load_skill_missing_frontmatter(tmp_path):
 
 
 def test_load_skill_invalid_name(tmp_path):
-    skill_file = tmp_path / "SKILL.md"
+    # 父目录名也无效（含空格），确保 fallback 后仍返回 None
+    bad_dir = tmp_path / "bad dir"
+    bad_dir.mkdir()
+    skill_file = bad_dir / "SKILL.md"
     skill_file.write_text(
         "---\nname: Bad Name\ndescription: desc\n---\n\nBody\n",
         encoding="utf-8",
     )
     assert load_skill_from_file(str(skill_file)) is None
+
+
+def test_load_skill_from_file_falls_back_to_parent_dir_name(tmp_path):
+    skill_dir = tmp_path / "fallback-skill"
+    skill_dir.mkdir()
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_text(
+        "---\ndescription: A fallback skill\n---\n\nBody\n",
+        encoding="utf-8",
+    )
+    skill = load_skill_from_file(str(skill_file), source_label="test")
+    assert isinstance(skill, Skill)
+    assert skill.name == "fallback-skill"
+    assert skill.description == "A fallback skill"
 
 
 def test_load_skills_from_dir(tmp_path):
@@ -86,3 +107,37 @@ def test_load_skills_from_dir_stops_at_skill_md(tmp_path):
     skills = load_skills_from_dir(str(tmp_path))
     assert len(skills) == 1
     assert skills[0].name == "parent"
+
+
+def test_load_skills_from_dir_allowed_names_filters(tmp_path):
+    (tmp_path / "skill-a").mkdir()
+    (tmp_path / "skill-a" / "SKILL.md").write_text(
+        "---\nname: skill-a\ndescription: first\n---\n\nA\n", encoding="utf-8"
+    )
+    (tmp_path / "skill-b").mkdir()
+    (tmp_path / "skill-b" / "SKILL.md").write_text(
+        "---\nname: skill-b\ndescription: second\n---\n\nB\n", encoding="utf-8"
+    )
+
+    skills = load_skills_from_dir(str(tmp_path), allowed_names={"skill-a"})
+    names = {s.name for s in skills}
+    assert names == {"skill-a"}
+
+
+def test_load_skills_allowed_names_filters(tmp_path):
+    from nova_harness.core.resources.loaders.skills import load_skills
+
+    (tmp_path / "skill-a").mkdir()
+    (tmp_path / "skill-a" / "SKILL.md").write_text(
+        "---\nname: skill-a\ndescription: first\n---\n\nA\n", encoding="utf-8"
+    )
+    (tmp_path / "skill-b").mkdir()
+    (tmp_path / "skill-b" / "SKILL.md").write_text(
+        "---\nname: skill-b\ndescription: second\n---\n\nB\n", encoding="utf-8"
+    )
+
+    skills, diagnostics = load_skills(
+        additional_paths=[str(tmp_path)], allowed_names={"skill-b"}
+    )
+    assert set(skills.keys()) == {"skill-b"}
+    assert diagnostics == []

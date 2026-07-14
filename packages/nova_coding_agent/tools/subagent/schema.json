@@ -1,0 +1,61 @@
+{
+    "name": "subagent",
+    "label": "Subagent",
+    "description": "Delegate tasks to other installed agents with isolated context.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "agent": {
+                "type": "string",
+                "description": "Name of the installed agent to invoke (single mode)."
+            },
+            "task": {
+                "type": "string",
+                "description": "Task to delegate (single mode)."
+            },
+            "cwd": {
+                "type": "string",
+                "description": "Working directory for the subagent process (single mode)."
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["single", "parallel", "chain"],
+                "default": "single",
+                "description": "Execution mode hint."
+            },
+            "tasks": {
+                "type": "array",
+                "description": "Array of {agent, task, cwd?} for parallel mode.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {"type": "string"},
+                        "task": {"type": "string"},
+                        "cwd": {"type": "string"}
+                    },
+                    "required": ["agent", "task"]
+                }
+            },
+            "chain": {
+                "type": "array",
+                "description": "Array of {agent, task, cwd?} for chain mode; use {previous} placeholder.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {"type": "string"},
+                        "task": {"type": "string"},
+                        "cwd": {"type": "string"}
+                    },
+                    "required": ["agent", "task"]
+                }
+            },
+            "agent_scope": {
+                "type": "string",
+                "enum": ["user", "project", "both"],
+                "default": "user",
+                "description": "Which agent directories to search. 'user' uses ~/.nova/agent/agents, 'project' uses <cwd>/.nova/agent/agents, 'both' merges them."
+            }
+        }
+    },
+    "prompt_snippet": "Use the `subagent` tool to delegate specialized tasks to other installed agents. Modes: single { agent, task }, parallel { tasks: [...] }, chain { chain: [...] } — previous step output is available via {previous} placeholder."
+}

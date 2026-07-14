@@ -8,19 +8,23 @@ import pytest
 from nova_ai import ThinkingLevel
 
 from nova_harness.core.types.compaction import CompactionSettings
+from nova_harness.core.types.config.model_registry import (
+    CustomModelsResult,
+    ModelDefinition,
+    ModelsConfig,
+    ProviderConfig,
+    ProviderOverride,
+)
+from nova_harness.core.types.config.settings import (
+    RetrySettings,
+    Settings,
+)
 from nova_harness.core.types.messages import (
     BashExecutionMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
     CustomMessage,
     FileContent,
-)
-from nova_harness.core.types.model_registry import (
-    CustomModelsResult,
-    ModelDefinition,
-    ModelsConfig,
-    ProviderConfig,
-    ProviderOverride,
 )
 from nova_harness.core.types.session import (
     ActiveToolsChangeEntry,
@@ -29,10 +33,6 @@ from nova_harness.core.types.session import (
     LeafEntry,
     SessionHeader,
     ThinkingLevelChangeEntry,
-)
-from nova_harness.core.types.setting import (
-    RetrySettings,
-    Settings,
 )
 
 SIMPLE_TYPES = [

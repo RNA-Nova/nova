@@ -1,6 +1,6 @@
 import yaml
 
-from nova_harness.core.types.resource import ParsedFrontmatter
+from nova_harness.core.types.resources.prompts import ParsedFrontmatter
 
 
 def normalize_newlines(value: str) -> str:

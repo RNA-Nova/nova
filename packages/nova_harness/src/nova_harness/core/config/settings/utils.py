@@ -2,7 +2,7 @@
 Settings utilities for merging and migration.
 """
 
-from nova_harness.core.types.setting import Settings
+from nova_harness.core.types.config.settings import Settings
 
 
 def deep_merge_settings(base: Settings, overrides: Settings) -> Settings:

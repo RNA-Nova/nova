@@ -50,7 +50,7 @@ from nova_harness.core.harness.compaction.utils import (
 from nova_harness.core.harness.session import SessionManager
 from nova_harness.core.types.compaction import CompactionSettings, CutPointResult
 from nova_harness.core.types.messages import BashExecutionMessage
-from nova_harness.core.types.session import SessionContext
+from nova_harness.core.types.session.context import SessionContext
 
 
 def _user(text: str) -> UserMessage:

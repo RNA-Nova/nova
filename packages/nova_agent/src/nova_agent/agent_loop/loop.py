@@ -17,7 +17,6 @@ from nova_ai import (
 from ..signal import AbortSignal
 from ..types import (
     AgentContext,
-    AgentEvent,
     AgentEventSink,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
@@ -104,6 +103,7 @@ async def _run_loop(
     current_context = initial_context
     config = initial_config
     first_turn = True
+    turn_index = 0
     pending_messages: List[AgentMessage] = []
     if config.get_steering_messages:
         pending_messages = await config.get_steering_messages() or []
@@ -161,6 +161,7 @@ async def _run_loop(
                 tool_results=tool_results,
                 context=current_context,
                 new_messages=new_messages,
+                turn_index=turn_index,
             )
             next_turn_snapshot = await _maybe_call_prepare_next_turn(
                 config, next_turn_context
@@ -199,12 +200,14 @@ async def _run_loop(
                     tool_results=tool_results,
                     context=current_context,
                     new_messages=new_messages,
+                    turn_index=turn_index,
                 ),
             )
             if should_stop:
                 await emit(AgentEndEvent(messages=new_messages))
                 return
 
+            turn_index += 1
             pending_messages = await _maybe_get_steering_messages(config)
 
         # Agent would stop here. Check for follow-up messages.

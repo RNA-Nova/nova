@@ -30,11 +30,18 @@ export interface RpcNotification {
   params?: unknown;
 }
 
+export interface UIRequest {
+  id: string;
+  method: string;
+  [key: string]: unknown;
+}
+
 export class NovaRpcClient {
   private child: ChildProcess | undefined;
   private id = 0;
   private pending = new Map<number | string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private onEventHandler: ((event: AgentEvent) => void) | undefined;
+  private onUIRequestHandler: ((request: UIRequest) => void) | undefined;
   private onCloseHandler: (() => void) | undefined;
 
   constructor(
@@ -139,8 +146,25 @@ export class NovaRpcClient {
     this.onEventHandler = handler;
   }
 
+  onUIRequest(handler: (request: UIRequest) => void): void {
+    this.onUIRequestHandler = handler;
+  }
+
   onClose(handler: () => void): void {
     this.onCloseHandler = handler;
+  }
+
+  sendUIResponse(id: string, result: unknown): void {
+    if (!this.child?.stdin) {
+      throw new Error('RPC client not connected');
+    }
+    const req = {
+      jsonrpc: '2.0' as const,
+      id: `ui-resp-${id}`,
+      method: 'extension/ui/response',
+      params: { id, result },
+    };
+    this.child.stdin.write(JSON.stringify(req) + '\n');
   }
 
   async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -182,6 +206,11 @@ export class NovaRpcClient {
 
     if ('method' in msg && msg.method === 'agent/event') {
       this.onEventHandler?.(msg.params as AgentEvent);
+      return;
+    }
+
+    if ('method' in msg && msg.method === 'extension/ui/request') {
+      this.onUIRequestHandler?.(msg.params as UIRequest);
     }
   }
 }

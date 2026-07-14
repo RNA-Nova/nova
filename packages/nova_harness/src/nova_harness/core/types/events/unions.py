@@ -146,3 +146,11 @@ ExtensionEventResult = Union[
 ExtensionEventHandler = Callable[
     [Any], Union[ExtensionEventResult, Awaitable[ExtensionEventResult]]
 ]
+
+__all__ = [
+    "AgentSessionEvent",
+    "AgentSessionEventListener",
+    "ExtensionEvent",
+    "ExtensionEventResult",
+    "ExtensionEventHandler",
+]

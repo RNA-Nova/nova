@@ -9,13 +9,14 @@ import pytest
 from nova_agent import AgentToolResult
 from nova_ai import TextContent
 
+from nova_harness.core.harness.tools.dynamic_tool import DynamicTool
 from nova_harness.core.resources.loaders.tools import (
     ToolLoader,
     load_json_file,
     load_text_file,
     load_tool_definition,
 )
-from nova_harness.core.types.tools import DynamicTool, ToolDefinition
+from nova_harness.core.types.runtime.tools import ToolDefinition
 
 
 @pytest.fixture
@@ -147,39 +148,94 @@ async def test_dynamic_tool_missing_execute_handler():
 
 
 def test_tool_loader_discovers_and_loads(tmp_path: Path):
-    # 项目级工具
-    project = tmp_path / "project"
-    project.mkdir()
-    project_tool = project / ".nova" / "tools" / "hello"
-    project_tool.mkdir(parents=True)
-    (project_tool / "schema.json").write_text(
-        '{"name": "hello", "description": "project"}', encoding="utf-8"
-    )
-    (project_tool / "executor.py").write_text(
-        "class ToolExecutor:\n    def execute(self, *a, **k): return 'project'\n",
-        encoding="utf-8",
-    )
-
-    # 额外目录中的同名工具，应覆盖项目级工具并产生诊断
+    # 工具只能通过 additional_paths 显式提供。
     extra = tmp_path / "extra" / "hello"
     extra.mkdir(parents=True)
     (extra / "schema.json").write_text(
-        '{"name": "hello", "description": "override"}', encoding="utf-8"
+        '{"name": "hello", "description": "extra"}', encoding="utf-8"
     )
     (extra / "executor.py").write_text(
-        "class ToolExecutor:\n    def execute(self, *a, **k): return 'override'\n",
+        "class ToolExecutor:\n    def execute(self, *a, **k): return 'extra'\n",
         encoding="utf-8",
     )
 
     loader = ToolLoader(
         agent_dir=str(tmp_path / "agent"),
-        cwd=str(project),
+        cwd=str(tmp_path / "project"),
         additional_paths=[str(tmp_path / "extra")],
     )
     tools = loader.load_tools()
     assert "hello" in tools
+
+
+def test_tool_loader_additional_paths_override(tmp_path: Path):
+    # 后出现的 additional_paths 中的同名工具应覆盖先出现的，并产生诊断。
+    first = tmp_path / "first" / "hello"
+    first.mkdir(parents=True)
+    (first / "schema.json").write_text(
+        '{"name": "hello", "description": "first"}', encoding="utf-8"
+    )
+    (first / "executor.py").write_text(
+        "class ToolExecutor:\n    def execute(self, *a, **k): return 'first'\n",
+        encoding="utf-8",
+    )
+
+    second = tmp_path / "second" / "hello"
+    second.mkdir(parents=True)
+    (second / "schema.json").write_text(
+        '{"name": "hello", "description": "second"}', encoding="utf-8"
+    )
+    (second / "executor.py").write_text(
+        "class ToolExecutor:\n    def execute(self, *a, **k): return 'second'\n",
+        encoding="utf-8",
+    )
+
+    loader = ToolLoader(additional_paths=[str(first), str(second)])
+    tools = loader.load_tools()
+    assert "hello" in tools
     diagnostics = loader.get_diagnostics()
-    assert any("overrides" in d.message for d in diagnostics)
+    assert any("shadows" in d.message for d in diagnostics)
+
+
+def test_tool_loader_allowed_names_filters_tools(tmp_path: Path):
+    """allowed_names 预过滤只加载白名单内的工具。"""
+    tools_root = tmp_path / "tools"
+    tools_root.mkdir()
+    for name in ["read", "write", "jump"]:
+        d = tools_root / name
+        d.mkdir()
+        (d / "schema.json").write_text(
+            f'{{"name": "{name}", "description": "{name}"}}',
+            encoding="utf-8",
+        )
+        (d / "executor.py").write_text(
+            "class ToolExecutor:\n    def execute(self, *a, **k): return None\n",
+            encoding="utf-8",
+        )
+
+    loader = ToolLoader(
+        additional_paths=[str(tools_root)], allowed_names={"read", "jump"}
+    )
+    tools = loader.load_tools()
+    assert set(tools.keys()) == {"read", "jump"}
+
+
+def test_tool_loader_allowed_names_empty_set_loads_none(tmp_path: Path):
+    """allowed_names 为空集合时不加载任何工具。"""
+    tools_root = tmp_path / "tools"
+    tools_root.mkdir()
+    d = tools_root / "read"
+    d.mkdir()
+    (d / "schema.json").write_text(
+        '{"name": "read", "description": "read"}', encoding="utf-8"
+    )
+    (d / "executor.py").write_text(
+        "class ToolExecutor:\n    def execute(self, *a, **k): return None\n",
+        encoding="utf-8",
+    )
+
+    loader = ToolLoader(additional_paths=[str(tools_root)], allowed_names=set())
+    assert loader.load_tools() == {}
 
 
 def test_tool_loader_no_tools_flag():

@@ -38,7 +38,7 @@ from nova_harness.core.harness.session.utils import (
     load_entries_from_file,
     parse_session_entries,
 )
-from nova_harness.core.types.session import CURRENT_SESSION_VERSION
+from nova_harness.core.types.session.constants import CURRENT_SESSION_VERSION
 
 __all__ = [
     # Core manager

@@ -4,7 +4,6 @@ AgentSessionRuntime - AgentSession 生命周期管理层。
 把会话切换、fork、导航等“替换当前 runtime”的操作从 AgentSession 中抽出来，
 让 AgentSession 专注单一会话内的消息/工具/事件处理。
 
-与 TypeScript 参考实现对齐：
 - Runtime 持有 ``create_runtime`` 工厂，每次替换会话时通过工厂重新创建 services + session。
 - 提供 ``set_rebind_session`` / ``set_before_session_invalidate`` 钩子。
 - 负责 ``session_before_switch`` / ``session_before_fork`` / ``session_shutdown`` 等生命周期事件。
@@ -12,33 +11,42 @@ AgentSessionRuntime - AgentSession 生命周期管理层。
 
 from __future__ import annotations
 
+import os
+import shutil
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from nova_ai import UserMessage
 
 from nova_harness.core.agent_session.agent import AgentSession
-from nova_harness.core.agent_session.services import (
-    AgentSessionServices,
-    CreateAgentSessionRuntimeResult,
-)
+from nova_harness.core.agent_session.services import AgentSessionServices
 from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.types.agent import (
-    ForkOptions,
-    NewSessionOptions,
-    SwitchSessionOptions,
-)
-from nova_harness.core.types.diagnostics import AgentSessionRuntimeDiagnostic
 from nova_harness.core.types.events import (
     SessionBeforeForkEvent,
     SessionBeforeSwitchEvent,
     SessionShutdownEvent,
     SessionStartEvent,
 )
+from nova_harness.core.types.runtime.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.core.types.session import (
+    ForkOptions,
+    NewSessionOptions,
+    SwitchSessionOptions,
+)
+from nova_harness.core.types.session.runtime import (
+    CreateAgentSessionRuntimeFactory,
+    CreateAgentSessionRuntimeOptions,
+    CreateAgentSessionRuntimeResult,
+)
+from nova_harness.core.utils.session_cwd import assert_session_cwd_exists
 
-CreateAgentSessionRuntimeFactory = Callable[
-    [str, str, SessionManager, Optional[SessionStartEvent]],
-    Awaitable[CreateAgentSessionRuntimeResult],
-]
+
+class SessionImportFileNotFoundError(FileNotFoundError):
+    """导入 JSONL 时输入路径不存在。"""
+
+    def __init__(self, file_path: str) -> None:
+        super().__init__(f"File not found: {file_path}")
+        self.file_path = file_path
 
 
 class AgentSessionRuntime:
@@ -63,6 +71,7 @@ class AgentSessionRuntime:
     ) -> None:
         self._session = session
         self._services = services
+        self._session_manager = session.session_manager
         self._create_runtime = create_runtime
         self._diagnostics = diagnostics or []
         self._model_fallback_message = model_fallback_message
@@ -81,6 +90,10 @@ class AgentSessionRuntime:
     @property
     def cwd(self) -> str:
         return self._services.cwd
+
+    @property
+    def session_manager(self) -> SessionManager:
+        return self._session.session_manager
 
     @property
     def diagnostics(self) -> List[AgentSessionRuntimeDiagnostic]:
@@ -139,10 +152,10 @@ class AgentSessionRuntime:
         self, reason: str, target_session_file: Optional[str] = None
     ) -> None:
         runner = self._extension_runner()
-        if runner is not None:
+        if runner is not None and runner.has_handlers("session_shutdown"):
             await runner.emit(
                 SessionShutdownEvent(
-                    reason=reason,  # type: ignore[arg-type]
+                    reason=reason,
                     target_session_file=target_session_file,
                 )
             )
@@ -153,17 +166,17 @@ class AgentSessionRuntime:
     def _apply(self, result: CreateAgentSessionRuntimeResult) -> None:
         self._session = result.session
         self._services = result.services
+        self._session_manager = result.session.session_manager
         self._diagnostics = result.diagnostics
         self._model_fallback_message = result.model_fallback_message
-        self._session.bind_runtime(self)
 
     async def _finish_session_replacement(
-        self, with_session: Optional[Callable[[AgentSession], Awaitable[None]]] = None
+        self, with_session: Optional[Callable[[Any], Awaitable[None]]] = None
     ) -> None:
         if self._rebind_session is not None:
             await self._rebind_session(self._session)
         if with_session is not None:
-            await with_session(self._session)
+            await with_session(self._session.create_replaced_session_context())
 
     # -------------------------------------------------------------------------
     # 公开 API
@@ -182,9 +195,9 @@ class AgentSessionRuntime:
         previous_session_file = self._session.session_file
         session_manager = (
             SessionManager.create(
-                self._services.cwd, self._services.session_manager.get_session_dir()
+                self._services.cwd, self._session_manager.get_session_dir()
             )
-            if self._services.session_manager.is_persisted()
+            if self._session_manager.is_persisted()
             else SessionManager.in_memory(self._services.cwd)
         )
         if opts.parent_session:
@@ -192,12 +205,14 @@ class AgentSessionRuntime:
 
         await self._teardown_current("new", session_manager.get_session_file())
         result = await self._create_runtime(
-            self._services.cwd,
-            self._services.agent_dir,
-            session_manager,
-            SessionStartEvent(
-                reason="new", previous_session_file=previous_session_file
-            ),
+            CreateAgentSessionRuntimeOptions(
+                cwd=self._services.cwd,
+                agent_dir=self._services.agent_dir,
+                session_manager=session_manager,
+                session_start_event=SessionStartEvent(
+                    reason="new", previous_session_file=previous_session_file
+                ),
+            )
         )
         self._apply(result)
 
@@ -207,7 +222,6 @@ class AgentSessionRuntime:
                 self._session.session_manager.build_session_context().messages
             )
 
-        await self._session.bind_extensions()
         await self._finish_session_replacement(opts.with_session)
         return {"cancelled": False}
 
@@ -223,21 +237,30 @@ class AgentSessionRuntime:
 
         previous_session_file = self._session.session_file
         session_manager = SessionManager.open(session_path, None, opts.cwd_override)
+        assert_session_cwd_exists(session_manager, self._services.cwd)
 
         await self._teardown_current(
             "resume", target_session_file=session_manager.get_session_file()
         )
 
+        project_trust_context = None
+        if opts.project_trust_context_factory is not None:
+            project_trust_context = opts.project_trust_context_factory(
+                session_manager.get_cwd()
+            )
+
         result = await self._create_runtime(
-            session_manager.get_cwd(),
-            self._services.agent_dir,
-            session_manager,
-            SessionStartEvent(
-                reason="switch", previous_session_file=previous_session_file
-            ),
+            CreateAgentSessionRuntimeOptions(
+                cwd=session_manager.get_cwd(),
+                agent_dir=self._services.agent_dir,
+                session_manager=session_manager,
+                session_start_event=SessionStartEvent(
+                    reason="resume", previous_session_file=previous_session_file
+                ),
+                project_trust_context=project_trust_context,
+            )
         )
         self._apply(result)
-        await self._session.bind_extensions()
         await self._finish_session_replacement(opts.with_session)
         return {"cancelled": False}
 
@@ -271,11 +294,11 @@ class AgentSessionRuntime:
 
         previous_session_file = self._session.session_file
 
-        if self._services.session_manager.is_persisted():
+        if self._session_manager.is_persisted():
             current_session_file = self._session.session_file
             if not current_session_file:
                 raise ValueError("Persisted session is missing a session file")
-            session_dir = self._services.session_manager.get_session_dir()
+            session_dir = self._session_manager.get_session_dir()
 
             if target_leaf_id is None:
                 session_manager = SessionManager.create(self._services.cwd, session_dir)
@@ -286,7 +309,7 @@ class AgentSessionRuntime:
                 if not forked_path:
                     raise ValueError("Failed to create forked session")
         else:
-            session_manager = self._services.session_manager
+            session_manager = self._session_manager
             if target_leaf_id is None:
                 session_manager.new_session(parent_session=self._session.session_file)
             else:
@@ -294,39 +317,92 @@ class AgentSessionRuntime:
 
         await self._teardown_current("fork", session_manager.get_session_file())
         result = await self._create_runtime(
-            session_manager.get_cwd(),
-            self._services.agent_dir,
-            session_manager,
-            SessionStartEvent(
-                reason="fork", previous_session_file=previous_session_file
-            ),
+            CreateAgentSessionRuntimeOptions(
+                cwd=session_manager.get_cwd(),
+                agent_dir=self._services.agent_dir,
+                session_manager=session_manager,
+                session_start_event=SessionStartEvent(
+                    reason="fork", previous_session_file=previous_session_file
+                ),
+            )
         )
         self._apply(result)
-        await self._session.bind_extensions()
         await self._finish_session_replacement(opts.with_session)
         return {"cancelled": False, "selected_text": selected_text}
 
     async def reload(self) -> Dict[str, Any]:
         """重新加载设置、资源与扩展，并刷新当前 session 的系统提示词。
 
-        当前为最小实现：触发 ``resources_discover`` 并重建系统提示词。
-        如扩展需要完整的 runtime 重建，可后续扩展为通过 ``create_runtime`` 重新创建。
+        直接委托给 ``AgentSession.reload()``，确保扩展 runner、工具注册表和系统
+        提示词都被重建，与 TypeScript 端行为一致。
         """
-        if hasattr(self._services.resource_loader, "reload"):
-            await self._services.resource_loader.reload()
-        if hasattr(self._services.system_prompt_manager, "reload"):
-            await self._services.system_prompt_manager.reload()
-        self._session._sync_system_prompt()
-        await self._session.bind_extensions()
+        await self._session.reload()
+        return {"cancelled": False}
+
+    async def import_from_jsonl(
+        self, input_path: str, cwd_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """从 JSONL 文件导入会话并切换到该会话。
+
+        Args:
+            input_path: JSONL 文件路径。
+            cwd_override: 可选的 cwd 覆盖。
+
+        Returns:
+            ``{"cancelled": false}`` 表示成功；若被 ``session_before_switch`` 取消则返回
+            ``{"cancelled": true}``。
+
+        Raises:
+            SessionImportFileNotFoundError: 输入路径不存在。
+        """
+        resolved_path = str(Path(input_path).resolve())
+        if not os.path.exists(resolved_path):
+            raise SessionImportFileNotFoundError(resolved_path)
+
+        session_dir = self._session_manager.get_session_dir()
+        if session_dir and not os.path.exists(session_dir):
+            os.makedirs(session_dir, exist_ok=True)
+
+        destination_path = (
+            os.path.join(session_dir, os.path.basename(resolved_path))
+            if session_dir
+            else resolved_path
+        )
+
+        before = await self._emit_before_switch("resume", destination_path)
+        if before["cancelled"]:
+            return {"cancelled": True}
+
+        previous_session_file = self._session.session_file
+
+        if os.path.abspath(destination_path) != os.path.abspath(resolved_path):
+            shutil.copy2(resolved_path, destination_path)
+
+        session_manager = SessionManager.open(
+            destination_path, session_dir, cwd_override
+        )
+        assert_session_cwd_exists(session_manager, self._services.cwd)
+
+        await self._teardown_current("resume", session_manager.get_session_file())
+        result = await self._create_runtime(
+            CreateAgentSessionRuntimeOptions(
+                cwd=session_manager.get_cwd(),
+                agent_dir=self._services.agent_dir,
+                session_manager=session_manager,
+                session_start_event=SessionStartEvent(
+                    reason="resume", previous_session_file=previous_session_file
+                ),
+            )
+        )
+        self._apply(result)
+        await self._finish_session_replacement()
         return {"cancelled": False}
 
     async def dispose(self) -> None:
         """释放当前 runtime 占用的资源。"""
         runner = self._extension_runner()
-        if runner is not None:
-            await runner.emit(
-                SessionShutdownEvent(reason="dispose")  # type: ignore[arg-type]
-            )
+        if runner is not None and runner.has_handlers("session_shutdown"):
+            await runner.emit(SessionShutdownEvent(reason="quit"))
         if self._before_session_invalidate is not None:
             self._before_session_invalidate()
         self._session.dispose()

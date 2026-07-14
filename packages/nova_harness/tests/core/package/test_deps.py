@@ -8,7 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from nova_harness.core.package.deps import find_uv, install_dependencies
+from nova_harness.core.package.backend.python import (
+    PipBackend,
+    UvBackend,
+    find_uv,
+    get_backend,
+    install_dependencies,
+    install_package,
+)
 
 
 def test_find_uv_found():
@@ -21,6 +28,18 @@ def test_find_uv_not_found():
         assert find_uv() is None
 
 
+def test_get_backend_prefers_uv():
+    with patch("shutil.which", side_effect={"uv": "/usr/bin/uv"}.get):
+        backend = get_backend()
+        assert isinstance(backend, UvBackend)
+
+
+def test_get_backend_falls_back_to_pip():
+    with patch("shutil.which", return_value=None):
+        backend = get_backend()
+        assert isinstance(backend, PipBackend)
+
+
 def test_install_dependencies_no_work():
     """没有依赖和 requirements 时不调用 subprocess。"""
     with patch("subprocess.run") as mock_run:
@@ -29,18 +48,16 @@ def test_install_dependencies_no_work():
 
 
 def test_install_dependencies_with_uv():
-    """找到 uv 时使用 uv pip install。"""
-    with patch("shutil.which", return_value="/usr/bin/uv"):
+    """找到 uv 时使用 uv pip install --python sys.executable。"""
+    with patch("shutil.which", side_effect={"uv": "/usr/bin/uv"}.get):
         with patch("subprocess.run") as mock_run:
-            install_dependencies(
-                ["requests>=2.0"], python_executable="/usr/bin/python3"
-            )
+            install_dependencies(["requests>=2.0"])
             mock_run.assert_called_once()
             args = mock_run.call_args[0][0]
             assert args[0] == "/usr/bin/uv"
             assert "pip" in args
             assert "--python" in args
-            assert "/usr/bin/python3" in args
+            assert sys.executable in args
             assert "requests>=2.0" in args
 
 
@@ -60,17 +77,14 @@ def test_install_dependencies_without_uv():
 
 @pytest.mark.parametrize("uv_available", [True, False])
 def test_install_dependencies_with_requirements(uv_available):
-    """带 requirements.txt 时传递 --requirements/--requirement 参数。"""
-    with patch("shutil.which", return_value="/usr/bin/uv" if uv_available else None):
+    """带 requirements.txt 时传递 -r 参数。"""
+    which_map = {"uv": "/usr/bin/uv"} if uv_available else {}
+    with patch("shutil.which", side_effect=which_map.get):
         with patch("subprocess.run") as mock_run:
             install_dependencies(["requests>=2.0"], requirements_path="/tmp/req.txt")
             args = mock_run.call_args[0][0]
-            if uv_available:
-                assert "--requirements" in args
-                assert "/tmp/req.txt" in args
-            else:
-                assert "--requirement" in args
-                assert "/tmp/req.txt" in args
+            assert "-r" in args
+            assert "/tmp/req.txt" in args
 
 
 def test_install_dependencies_called_process_error():
@@ -84,10 +98,30 @@ def test_install_dependencies_called_process_error():
                 install_dependencies(["missing-pkg"])
 
 
-def test_install_dependencies_quiet_flag():
-    """quiet=True 时包含 --quiet。"""
-    with patch("shutil.which", return_value=None):
+def test_install_package_passes_no_deps():
+    """install_package 使用 --no-deps 避免重复安装依赖。"""
+    with patch("shutil.which", side_effect={"uv": "/usr/bin/uv"}.get):
         with patch("subprocess.run") as mock_run:
-            install_dependencies(["requests>=2.0"], quiet=True)
+            install_package("/path/to/pkg", editable=True)
             args = mock_run.call_args[0][0]
-            assert "--quiet" in args
+            assert "-e" in args
+            assert "/path/to/pkg" in args
+            assert "--no-deps" in args
+
+
+def test_uv_backend_uninstall_ignores_errors():
+    backend = UvBackend("/usr/bin/uv")
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, ["uv", "pip", "uninstall"]),
+    ):
+        backend.uninstall("some-pkg")  # should not raise
+
+
+def test_pip_backend_uninstall_ignores_errors():
+    backend = PipBackend()
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, ["pip", "uninstall"]),
+    ):
+        backend.uninstall("some-pkg")  # should not raise

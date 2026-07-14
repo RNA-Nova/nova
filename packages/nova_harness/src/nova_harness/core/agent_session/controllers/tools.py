@@ -2,123 +2,89 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-from nova_agent import AgentTool
-
-from nova_harness.core.types.tools import DynamicTool
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
+from nova_harness.core.types.protocols import AgentSessionProtocol, ToolsManagerProtocol
 
 
 class ToolController:
-    """封装 AgentSession 的工具注册表管理。"""
+    """封装 AgentSession 的工具注册表管理，实际逻辑委托给 ToolsManager。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
+
+    def _tools_manager(self) -> ToolsManagerProtocol:
+        manager = self._session.tools_manager
+        if manager is None:
+            return manager  # type: ignore[return-value]
+        # 保持 ToolsManager 与 session 的当前配置一致（测试会替换 runner/override）
+        manager.extension_runner = self._session.extension_runner
+        manager.base_tools_override = self._session.base_tools_override
+        manager.custom_tools = self._session.custom_tools
+        allowed = self._session.allowed_tool_names
+        manager.allowed_tool_names = set(allowed) if allowed else None
+        excluded = self._session.excluded_tool_names
+        manager.excluded_tool_names = set(excluded) if excluded else None
+        manager.no_tools = self._session.no_tools
+        return manager
 
     def refresh_registry(
         self,
         active_tool_names: Optional[List[str]] = None,
-        include_all_extension_tools: bool = True,
     ) -> None:
-        """根据 ResourceLoader、扩展工具、调用方覆盖与激活白名单重建工具注册表。"""
-        registry: Dict[str, AgentTool] = {}
-
-        # 1) 包管理器安装的工具（由 ResourceLoader 统一加载）
-        package_tools = self._session.resource_loader.get_tools()
-        if package_tools:
-            registry.update(package_tools)
-
-        # 2) 扩展工具可覆盖同名包管理工具
-        runner = self._session._extension_runner
-        if runner is not None:
-            for tool in runner.get_extension_tools():
-                registry[tool.name] = tool
-
-        # 3) 调用方显式覆盖最高优先级
-        if self._session.base_tools_override:
-            registry.update(self._session.base_tools_override)
-
-        self._session._tool_registry = registry
-
-        # 收集 ToolDefinition 用于系统提示词渲染 snippet/guidelines
-        definitions: Dict[str, Any] = {}
-        for name, tool in registry.items():
-            if isinstance(tool, DynamicTool):
-                definitions[name] = tool._definition
-        self._session._tool_definitions = definitions
-        spm = self._session.system_prompt_manager
-        if hasattr(spm, "set_tool_definitions"):
-            spm.set_tool_definitions(list(definitions.values()))
-
-        previous_active_names = set(active_tool_names) if active_tool_names else set()
-        if previous_active_names:
-            active_names = [n for n in previous_active_names if n in registry]
-        elif self._session.base_tools_override:
-            active_names = list(self._session.base_tools_override.keys())
-        else:
-            active_names = [
-                n for n in self._session.initial_active_tool_names if n in registry
-            ]
-
-        # reload 时若保留全部扩展工具，则把新增的工具也加入激活列表
-        if include_all_extension_tools and runner is not None:
-            for tool in runner.get_extension_tools():
-                if tool.name not in active_names:
-                    active_names.append(tool.name)
-
-        self.set_active_by_name(active_names)
+        """重建工具注册表与激活集合。"""
+        if active_tool_names is None:
+            # 未显式指定时，优先使用初始白名单；若为空则让 ToolsManager 按默认规则决定
+            active_tool_names = self._session.initial_active_tool_names or None
+        manager = self._tools_manager()
+        manager.refresh(
+            active_tool_names=active_tool_names,
+        )
 
     def get_active_names(self) -> List[str]:
         """返回当前激活的工具名称列表。"""
-        return [t.name for t in getattr(self._session.agent.state, "tools", [])]
+        return self._tools_manager().get_active_tools()
 
     def get_all_tools(self) -> List[Any]:
         """返回所有可用工具的 ToolInfo 列表。"""
-        from nova_harness.core.types.agent_config import ToolInfo
-
-        tools = []
-        seen = set()
-        for name, tool in self._session._tool_registry.items():
-            if name in seen:
-                continue
-            seen.add(name)
-            tools.append(
-                ToolInfo(
-                    name=name,
-                    description=getattr(tool, "description", ""),
-                )
-            )
-        return tools
+        return self._tools_manager().get_all_tools()
 
     def get_definition(self, name: str) -> Optional[Any]:
-        """按名称返回工具定义（占位，后续补齐 ToolDefinition）。"""
-        return self._session._tool_registry.get(name)
+        """按名称返回工具实例。"""
+        return self._tools_manager().get_tool(name)
 
     def refresh(self) -> None:
-        """重新扫描扩展工具并刷新工具注册表。"""
+        """重新扫描工具并刷新工具注册表。"""
         self.refresh_registry(
             active_tool_names=self.get_active_names(),
-            include_all_extension_tools=True,
         )
 
     def set_active_by_name(self, tool_names: List[str]) -> None:
         """按名称设置 Agent 当前激活的工具。"""
-        tools: List[AgentTool] = []
+        manager = self._tools_manager()
+        manager.set_active_tools(tool_names)
+        valid_names = self._sync_to_agent()
+        self._session.system_prompt_manager.set_active_tools(valid_names)
+        self._session._sync_system_prompt()
+        self._record_active_tools_change(valid_names)
+
+    def _sync_to_agent(self) -> List[str]:
+        """把激活工具同步到 Agent.state.tools，返回有效工具名列表。"""
+        manager = self._tools_manager()
+        active_names = manager.get_active_tools()
+        tools = []
         valid_names: List[str] = []
-        for name in tool_names:
-            tool = self._session._tool_registry.get(name)
+        for name in active_names:
+            tool = manager.get_tool(name)
             if tool is not None:
                 tools.append(tool)
                 valid_names.append(name)
 
         self._session.agent.state.tools = tools
-        spm = self._session.system_prompt_manager
-        if hasattr(spm, "set_active_tools"):
-            spm.set_active_tools(valid_names)
-        self._session._sync_system_prompt()
+        return valid_names
+
+    def _record_active_tools_change(self, valid_names: List[str]) -> None:
+        """如果 session 支持，记录一次激活工具变更。"""
         if valid_names and hasattr(
             self._session.session_manager, "append_active_tools_change"
         ):

@@ -1,15 +1,25 @@
 """Write tool executor —— 写入本地文件。"""
 
-import os
 from typing import Any, Dict, Optional
 
 from nova_agent import AbortSignal, AgentToolResult
 from nova_ai import TextContent
-from nova_harness.core.tools_common.file_queue import with_file_write_lock
-from nova_harness.core.tools_common.path_utils import is_path_traversal, resolve_path
+
+from nova_coding_agent.tools_common.file_queue import with_file_write_lock
+from nova_coding_agent.tools_common.operations import (
+    WriteOperations,
+    create_local_write_operations,
+)
+from nova_coding_agent.tools_common.path_utils import is_path_traversal, resolve_path
 
 
 class ToolExecutor:
+    def __init__(
+        self,
+        operations: Optional[WriteOperations] = None,
+    ):
+        self.operations = operations or create_local_write_operations()
+
     async def execute(
         self,
         tool_call_id: str,
@@ -44,26 +54,27 @@ class ToolExecutor:
         path = resolve_path(path)
 
         try:
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-
-            existed = os.path.exists(path)
+            self.operations.ensure_parent_dir(path)
+            existed = self.operations.exists(path)
 
             async with with_file_write_lock(path):
-                with open(path, "w", encoding=encoding) as f:
-                    f.write(content)
+                result = await self.operations.write_file(
+                    path, content, encoding=encoding
+                )
+
+            if result.error:
+                raise RuntimeError(result.error)
 
             action = "覆盖" if existed else "创建"
             msg = f"""## ✅ 文件写入成功
 
 **路径**: `{path}`
 **操作**: {action}
-**大小**: {len(content)} 字符
+**大小**: {result.chars} 字符
 """
             return AgentToolResult(
                 content=[TextContent(type="text", text=msg)],
-                details={"path": path, "action": action.lower(), "chars": len(content)},
+                details={"path": path, "action": action.lower(), "chars": result.chars},
             )
         except Exception as e:
             return AgentToolResult(

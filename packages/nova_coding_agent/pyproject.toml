@@ -5,6 +5,9 @@ description = "Nova coding agent with local file system tools"
 authors = ["nova"]
 readme = "README.md"
 license = "MIT"
+packages = [
+    { include = "nova_coding_agent", from = "src" },
+]
 keywords = ["agent", "coding", "llm", "tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -17,9 +20,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
-# 注意：这是一个纯 Nova bundle，不再作为可 import 的 Python 包。
-# pyproject.toml 仅用于声明 Python 运行时依赖（供 nova-pkg install 读取）
-# 以及开发工具配置（black / isort / pytest）。
+# 这是一个 Nova bundle，同时也是一个可 import 的 Python 包。
+# tools/ 下的 executor 通过 ``from nova_coding_agent.tools_common import ...``
+# 复用 bundle 内部共享辅助模块。安装时 nova-pkg 会执行 ``pip install -e .``。
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"
@@ -45,3 +48,33 @@ target-version = ['py311']
 profile = "black"
 multi_line_output = 3
 include_trailing_comma = true
+
+[tool.uv.sources]
+nova-ai = { path = "../nova_ai" }
+nova-agent = { path = "../nova_agent" }
+nova-harness = { path = "../nova_harness" }
+
+[tool.nova]
+agents = [
+    "./agents/coding_agent"
+]
+tools = [
+    "./tools/bash",
+    "./tools/edit",
+    "./tools/find",
+    "./tools/grep",
+    "./tools/ls",
+    "./tools/read",
+    "./tools/subagent",
+    "./tools/write"
+]
+skills = []
+extensions = [
+    "./extensions/session_commands"
+]
+prompts = [
+    "./prompts/debug.md",
+    "./prompts/refactor.md"
+]
+auto_install_dependencies = true
+

@@ -22,6 +22,7 @@ from nova_harness.core.harness.compaction.utils import (
     extract_file_ops_from_message,
     format_file_operations,
     get_detail_value,
+    get_message_from_entry,
     serialize_conversation,
 )
 from nova_harness.core.harness.session import SessionManager
@@ -31,13 +32,8 @@ from nova_harness.core.types.compaction import (
     CollectEntriesResult,
     GenerateBranchSummaryOptions,
 )
-from nova_harness.core.types.session import SessionEntry
-from nova_harness.core.utils.messages import (
-    convert_to_llm,
-    create_branch_summary_message,
-    create_compaction_summary_message,
-    create_custom_message,
-)
+from nova_harness.core.types.session.entries import SessionEntry
+from nova_harness.core.utils.messages import convert_to_llm
 
 # ============================================================================
 # Entry Collection
@@ -97,50 +93,8 @@ def collect_entries_for_branch_summary(
 
 
 # ============================================================================
-# Entry to Message Conversion
+# Entry Collection
 # ============================================================================
-
-
-def _get_message_from_entry(entry: SessionEntry) -> Optional[AgentMessage]:
-    """
-    Extract AgentMessage from a session entry.
-    Similar to getMessageFromEntry in compaction.ts but also handles compaction entries.
-    """
-    if entry.type == "message":
-        # Skip tool results - context is in assistant's tool call
-        if entry.message.role == "toolResult":
-            return None
-        return entry.message
-
-    if entry.type == "custom_message":
-        return create_custom_message(
-            entry.custom_type,
-            entry.content,
-            entry.display,
-            entry.details,
-            entry.timestamp,
-        )
-
-    if entry.type == "branch_summary":
-        return create_branch_summary_message(
-            entry.summary,
-            entry.from_id,
-            entry.timestamp,
-        )
-
-    if entry.type == "compaction":
-        return create_compaction_summary_message(
-            entry.summary,
-            entry.tokens_before,
-            entry.timestamp,
-        )
-
-    # These don't contribute to conversation content
-    # case "thinking_level_change":
-    # case "model_change":
-    # case "custom":
-    # case "label":
-    return None
 
 
 def prepare_branch_entries(
@@ -170,7 +124,7 @@ def prepare_branch_entries(
 
     # First pass: collect file ops from ALL entries (even if they don't fit in token budget)
     # This ensures we capture cumulative file tracking from nested branch summaries
-    # Only extract from pi-generated summaries (from_hook !== true), not extension-generated ones
+    # Only extract from pi-generated summaries (from_hook is not true), not extension-generated ones
     for entry in entries:
         if entry.type == "branch_summary" and not entry.from_hook and entry.details:
             details = entry.details
@@ -187,7 +141,7 @@ def prepare_branch_entries(
     # Second pass: walk from newest to oldest, adding messages until token budget
     for i in range(len(entries) - 1, -1, -1):
         entry = entries[i]
-        message = _get_message_from_entry(entry)
+        message = get_message_from_entry(entry, skip_tool_results=True)
         if not message:
             continue
 

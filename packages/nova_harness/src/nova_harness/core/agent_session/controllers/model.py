@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 from nova_ai import Model, ThinkingLevel
 
-from nova_harness.core.types.agent import ModelCycleResult
+from nova_harness.core.types.agent.model import ModelCycleResult
 from nova_harness.core.types.events import (
     ModelSelectEvent,
     ThinkingLevelChangedEvent,
     ThinkingLevelSelectEvent,
 )
+from nova_harness.core.types.protocols import AgentSessionProtocol
 from nova_harness.core.utils import models_are_equal
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
 
 
 def _thinking_level_from_value(
@@ -40,7 +37,7 @@ def _thinking_level_from_value(
 class ModelController:
     """封装 AgentSession 的模型切换、思考级别与相关事件。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     async def emit_model_select(
@@ -54,32 +51,35 @@ class ModelController:
             return
         runner = self._session._extension_runner
         if runner is not None:
-            await runner.emit(
+            await runner.emit_model_select(
                 ModelSelectEvent(
                     model=next_model, previous_model=previous_model, source=source
                 )
             )
 
-    async def set_model(self, model: Model) -> None:
-        """设置当前模型并持久化到会话与设置。"""
+    async def set_model(self, model: Model) -> bool:
+        """设置当前模型并持久化到会话与设置。
+
+        返回 ``True`` 表示切换成功；若缺少 API key 则返回 ``False``。
+        """
         registry = self._session.model_registry
-        if hasattr(registry, "get_api_key"):
-            api_key = await registry.get_api_key(model)
-            if not api_key:
-                raise RuntimeError(f"No API key for {model.provider}/{model.id}")
+        api_key = await registry.get_api_key(model)
+        if not api_key:
+            return False
 
         previous_model = self._session.model
         thinking_level = self._get_thinking_level_for_model_switch()
         self._session.agent.state.model = model
         self._session.session_manager.append_model_change(model.provider, model.id)
         settings = self._session.settings_manager
-        if hasattr(settings, "set_default_model_and_provider"):
-            settings.set_default_model_and_provider(model.provider, model.id)
+        settings.set_default_model_and_provider(model.provider, model.id)
 
         # 根据新模型能力重新钳制思考级别
         await self.set_thinking_level(thinking_level)
 
-        await self.emit_model_select(model, previous_model, "set")
+        if previous_model != model:
+            await self.emit_model_select(model, previous_model, "set")
+        return True
 
     async def cycle_model(
         self, direction: str = "forward"
@@ -91,7 +91,8 @@ class ModelController:
 
     async def _cycle_scoped_model(self, direction: str) -> Optional[ModelCycleResult]:
         scoped = [
-            s for s in self._session.scoped_models if self._model_has_auth(s.model)
+            s for s in self._session.scoped_models
+            if await self._model_has_auth(s.model)
         ]
         if len(scoped) <= 1:
             return None
@@ -118,11 +119,11 @@ class ModelController:
             nxt.model.provider, nxt.model.id
         )
         settings = self._session.settings_manager
-        if hasattr(settings, "set_default_model_and_provider"):
-            settings.set_default_model_and_provider(nxt.model.provider, nxt.model.id)
+        settings.set_default_model_and_provider(nxt.model.provider, nxt.model.id)
 
-        await self.set_thinking_level(thinking_level)
-        await self.emit_model_select(nxt.model, previous, "cycle")
+        if previous != nxt.model:
+            await self.set_thinking_level(thinking_level)
+            await self.emit_model_select(nxt.model, previous, "cycle")
 
         return ModelCycleResult(
             model=nxt.model, thinking_level=self._session.thinking_level, is_scoped=True
@@ -132,8 +133,6 @@ class ModelController:
         self, direction: str
     ) -> Optional[ModelCycleResult]:
         registry = self._session.model_registry
-        if not hasattr(registry, "get_available"):
-            return None
         available = registry.get_available()
         if len(available) <= 1:
             return None
@@ -160,11 +159,11 @@ class ModelController:
             next_model.provider, next_model.id
         )
         settings = self._session.settings_manager
-        if hasattr(settings, "set_default_model_and_provider"):
-            settings.set_default_model_and_provider(next_model.provider, next_model.id)
+        settings.set_default_model_and_provider(next_model.provider, next_model.id)
 
-        await self.set_thinking_level(thinking_level)
-        await self.emit_model_select(next_model, previous, "cycle")
+        if previous != next_model:
+            await self.set_thinking_level(thinking_level)
+            await self.emit_model_select(next_model, previous, "cycle")
 
         return ModelCycleResult(
             model=next_model,
@@ -172,23 +171,11 @@ class ModelController:
             is_scoped=False,
         )
 
-    def _model_has_auth(self, model: Model) -> bool:
-        """检查模型是否已配置鉴权（同步/异步兼容）。"""
+    async def _model_has_auth(self, model: Model) -> bool:
+        """检查模型是否已配置鉴权。"""
         registry = self._session.model_registry
-        if hasattr(registry, "has_configured_auth"):
-            return bool(registry.has_configured_auth(model))
-        if hasattr(registry, "get_api_key"):
-            get_api_key = registry.get_api_key
-            # 同步上下文中无法等待异步函数；保守认为有 auth
-            if inspect.iscoroutinefunction(get_api_key):
-                return True
-            key = get_api_key(model)
-            if inspect.isawaitable(key):
-                # 对返回协程的同步包装也保守认为有 auth
-                key.close()
-                return True
-            return bool(key)
-        return True
+        api_key = await registry.get_api_key(model)
+        return api_key is not None and api_key != ""
 
     def set_scoped_models(self, scoped_models: List[object]) -> None:
         """更新 scoped models（例如来自 --models 参数）。"""
@@ -202,19 +189,17 @@ class ModelController:
         if effective == previous:
             return
 
-        if hasattr(self._session.agent, "set_thinking_level"):
-            self._session.agent.set_thinking_level(effective)
+        self._session.agent.set_thinking_level(effective)
         self._session.agent.state.thinking_level = effective
 
         self._session.session_manager.append_thinking_level_change(effective)
         settings = self._session.settings_manager
-        if hasattr(settings, "set_default_thinking_level"):
-            settings.set_default_thinking_level(effective)
+        settings.set_default_thinking_level(effective)
 
         self._session._emit(ThinkingLevelChangedEvent(level=effective))
         runner = self._session._extension_runner
         if runner is not None:
-            await runner.emit(
+            await runner.emit_thinking_level_select(
                 ThinkingLevelSelectEvent(level=effective, previous_level=previous)
             )
 
@@ -227,9 +212,7 @@ class ModelController:
         if self._supports_thinking():
             return self._session.thinking_level
         settings = self._session.settings_manager
-        if hasattr(settings, "get_default_thinking_level"):
-            return settings.get_default_thinking_level()
-        return None
+        return settings.get_default_thinking_level()
 
     def supports_thinking(self) -> bool:
         """当前模型是否支持 thinking/reasoning。"""

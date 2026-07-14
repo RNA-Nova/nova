@@ -11,34 +11,14 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from nova_ai import get_env_api_key
-from nova_ai.types.base_model import NovaBaseModel
 
-from nova_harness.core.config.defaults import get_agent_dir
+from nova_harness.core.config.defaults import AUTH_FILE_NAME, get_agent_dir
 from nova_harness.core.config.resolve import resolve_config_value
 from nova_harness.core.config.storage import (
     FileStorageBackend,
-    InMemoryStorageBackend,
     StorageBackend,
 )
-
-
-class ApiKeyCredential(NovaBaseModel):
-    """API key credential type."""
-
-    type: str = "api_key"
-    key: str
-
-    def to_dict(self) -> Dict[str, str]:
-        """Convert to dictionary for serialization."""
-        return {"type": self.type, "key": self.key}
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, str]) -> "ApiKeyCredential":
-        """Create from dictionary."""
-        if data.get("type") != "api_key":
-            raise ValueError(f"Invalid credential type: {data.get('type')}")
-        return cls(key=data["key"])
-
+from nova_harness.core.types.config.auth import ApiKeyCredential, AuthStorageData
 
 AuthStorageData = Dict[str, Dict[str, str]]
 
@@ -67,7 +47,7 @@ class AuthStorage:
     ) -> "AuthStorage":
         """Create AuthStorage with file backend."""
         if auth_path is None:
-            auth_path = Path(get_agent_dir()) / "auth.json"
+            auth_path = Path(get_agent_dir()) / AUTH_FILE_NAME
         storage = FileStorageBackend(
             auth_path,
             timeout=timeout,
@@ -81,14 +61,6 @@ class AuthStorage:
     def from_storage(cls, storage: StorageBackend) -> "AuthStorage":
         """Create AuthStorage from existing backend."""
         return cls(storage)
-
-    @classmethod
-    def in_memory(cls, data: Optional[AuthStorageData] = None) -> "AuthStorage":
-        """Create in-memory AuthStorage for testing."""
-        if data is None:
-            data = {}
-        storage = InMemoryStorageBackend(json.dumps(data, indent=2))
-        return cls.from_storage(storage)
 
     def set_runtime_api_key(self, provider: str, api_key: str) -> None:
         """

@@ -4,11 +4,13 @@ AuthStorage 测试。
 
 import pytest
 
-from nova_harness.core.config.auth.storage import ApiKeyCredential, AuthStorage
+from nova_harness.core.config.auth.storage import AuthStorage
+from nova_harness.core.types.config.auth import ApiKeyCredential
+from tests._helpers.auth_storage import auth_storage_in_memory
 
 
 def test_auth_storage_in_memory_get_set_remove():
-    storage = AuthStorage.in_memory({})
+    storage = auth_storage_in_memory({})
     storage.set("openai", ApiKeyCredential(key="sk-test"))
     assert storage.has("openai") is True
     cred = storage.get("openai")
@@ -21,7 +23,9 @@ def test_auth_storage_in_memory_get_set_remove():
 
 
 def test_auth_storage_runtime_override_wins():
-    storage = AuthStorage.in_memory({"openai": {"type": "api_key", "key": "from-file"}})
+    storage = auth_storage_in_memory(
+        {"openai": {"type": "api_key", "key": "from-file"}}
+    )
     storage.set_runtime_api_key("openai", "runtime-key")
     assert storage.get_api_key_sync("openai") == "runtime-key"
 
@@ -30,7 +34,7 @@ def test_auth_storage_runtime_override_wins():
 
 
 def test_auth_storage_fallback_resolver():
-    storage = AuthStorage.in_memory({})
+    storage = auth_storage_in_memory({})
     storage.set_fallback_resolver(
         lambda provider: "fallback" if provider == "custom" else None
     )
@@ -40,12 +44,12 @@ def test_auth_storage_fallback_resolver():
 
 def test_auth_storage_env_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    storage = AuthStorage.in_memory({})
+    storage = auth_storage_in_memory({})
     assert storage.get_api_key_sync("openai") == "env-key"
 
 
 def test_auth_storage_list_and_all():
-    storage = AuthStorage.in_memory(
+    storage = auth_storage_in_memory(
         {
             "openai": {"type": "api_key", "key": "k1"},
             "anthropic": {"type": "api_key", "key": "k2"},
@@ -64,9 +68,7 @@ def _patch_sync_api_key():
         def _sync(self, provider):
             import asyncio
 
-            return asyncio.get_event_loop().run_until_complete(
-                self.get_api_key(provider)
-            )
+            return asyncio.run(self.get_api_key(provider))
 
         AuthStorage.get_api_key_sync = _sync
     yield

@@ -9,9 +9,28 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from nova_harness.core.config.defaults import CONFIG_DIR_NAME, get_prompts_dir
-from nova_harness.core.types.diagnostics import ResourceDiagnostic
-from nova_harness.core.types.resource import LoadPromptTemplatesOptions, PromptTemplate
+from nova_harness.core.config.defaults import (
+    CONFIG_DIR_NAME,
+    PROMPTS_DIR_NAME,
+    get_prompts_dir,
+)
+from nova_harness.core.package.discovery import collect_prompt_entries
+from nova_harness.core.resources.source_info import (
+    find_source_info_for_path,
+    source_info_from_metadata,
+)
+from nova_harness.core.types.extensions import SourceInfo
+from nova_harness.core.types.package_manager import ResolvedResource
+from nova_harness.core.types.resources.diagnostics import (
+    ResourceCollision,
+    ResourceDiagnostic,
+)
+from nova_harness.core.types.resources.paths import ResourceExtensionPathEntry
+from nova_harness.core.types.resources.prompts import (
+    LoadPromptTemplatesOptions,
+    PromptTemplate,
+)
+from nova_harness.core.utils.files import canonicalize_path
 from nova_harness.core.utils.frontmatter import parse_frontmatter
 
 # ---------------------------------------------------------------------------
@@ -56,6 +75,7 @@ def substitute_args(content: str, args: List[str]) -> str:
     Supports:
     - $1, $2, ... for positional args
     - $@ and $ARGUMENTS for all args
+    - ${N:-default} for positional arg N with default when missing or empty
     - ${@:N} for args from Nth onwards (bash-style slicing)
     - ${@:N:L} for L args starting from Nth
 
@@ -63,6 +83,15 @@ def substitute_args(content: str, args: List[str]) -> str:
     containing patterns like $1, $@, or $ARGUMENTS are NOT recursively substituted.
     """
     result = content
+
+    def replace_default(match):
+        num = int(match.group(1))
+        default = match.group(2)
+        index = num - 1
+        value = args[index] if index < len(args) else ""
+        return value if value else default
+
+    result = re.sub(r"\$\{(\d+):-([^}]*)\}", replace_default, result)
 
     def replace_positional(match):
         num = int(match.group(1))
@@ -94,12 +123,15 @@ def substitute_args(content: str, args: List[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 单文件 / 单目录加载
+# 单文件加载
 # ---------------------------------------------------------------------------
 
 
 def _load_template_from_file(
-    file_path: str, source: str, source_label: str
+    file_path: str,
+    source: str,
+    source_label: str,
+    source_info: Optional[SourceInfo] = None,
 ) -> Optional[PromptTemplate]:
     """Load a single template from a markdown file."""
     try:
@@ -120,50 +152,21 @@ def _load_template_from_file(
                     description += "..."
 
         description = f"{description} {source_label}" if description else source_label
+        argument_hint = frontmatter.get("argument-hint")
+        if not isinstance(argument_hint, str):
+            argument_hint = None
 
         return PromptTemplate(
             name=name,
             description=description,
+            argument_hint=argument_hint,
             content=body,
             source=source,
             file_path=file_path,
+            source_info=source_info,
         )
     except Exception:
         return None
-
-
-def _load_templates_from_dir(
-    dir_path: str, source: str, source_label: str
-) -> List[PromptTemplate]:
-    """Scan a directory for .md files (non-recursive) and load them as prompt templates."""
-    templates: List[PromptTemplate] = []
-
-    path = Path(dir_path)
-    if not path.exists():
-        return templates
-
-    try:
-        for entry in path.iterdir():
-            full_path = entry
-
-            is_file = entry.is_file()
-            if entry.is_symlink():
-                try:
-                    is_file = full_path.resolve().is_file()
-                except OSError:
-                    continue
-
-            if is_file and entry.suffix == ".md":
-                template = _load_template_from_file(
-                    str(full_path), source, source_label
-                )
-                if template:
-                    templates.append(template)
-
-    except OSError:
-        pass
-
-    return templates
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +230,11 @@ def load_prompt_templates(
     options: Optional[LoadPromptTemplatesOptions] = None,
 ) -> List[PromptTemplate]:
     """
-    Load all prompt templates from:
-    1. Global: agent_dir/prompts/
-    2. Project: cwd/{CONFIG_DIR_NAME}/prompts/
-    3. Explicit prompt paths
+    从显式提供的路径加载 prompt templates。
+
+    ``prompt_paths`` 中的目录会交给发现层（``collect_prompt_entries``）递归展开为
+    ``.md`` 文件列表；本函数只负责单文件解析。路径必须由调用方（如
+    ``PackageResolver``）或 CLI/扩展显式提供。
     """
     if options is None:
         options = LoadPromptTemplatesOptions()
@@ -238,38 +242,57 @@ def load_prompt_templates(
     resolved_cwd = options.cwd or os.getcwd()
     resolved_agent_dir = options.agent_dir or get_prompts_dir()
     prompt_paths = options.prompt_paths or []
-    include_defaults = (
-        options.include_defaults if options.include_defaults is not None else True
-    )
+    resolved_resources = options.resolved_resources or []
+    extension_source_infos = options.extension_source_infos or []
 
     templates: List[PromptTemplate] = []
+    seen_paths: set = set()
 
     user_prompts_dir = (
-        os.path.join(options.agent_dir, "prompts")
+        os.path.join(options.agent_dir, PROMPTS_DIR_NAME)
         if options.agent_dir
         else resolved_agent_dir
     )
-    project_prompts_dir = os.path.join(resolved_cwd, CONFIG_DIR_NAME, "prompts")
+    project_prompts_dir = os.path.join(resolved_cwd, CONFIG_DIR_NAME, PROMPTS_DIR_NAME)
 
-    if include_defaults:
-        global_prompts_dir = (
-            os.path.join(options.agent_dir, "prompts")
-            if options.agent_dir
-            else resolved_agent_dir
-        )
-        templates.extend(_load_templates_from_dir(global_prompts_dir, "user", "(user)"))
-        templates.extend(
-            _load_templates_from_dir(project_prompts_dir, "project", "(project)")
+    # 优先使用 resolver 提供的精确 metadata
+    source_info_by_path: Dict[str, SourceInfo] = {}
+    for resource in resolved_resources:
+        if not resource.enabled:
+            continue
+        source_info_by_path[str(Path(resource.path).resolve())] = (
+            source_info_from_metadata(resource)
         )
 
-    def _get_source_info(resolved_path: str):
-        """Determine source and label for a path."""
-        if not include_defaults:
-            if _is_under_path(resolved_path, user_prompts_dir):
-                return {"source": "user", "label": "(user)"}
-            if _is_under_path(resolved_path, project_prompts_dir):
-                return {"source": "project", "label": "(project)"}
-        return {"source": "path", "label": _build_path_source_label(resolved_path)}
+    def _get_source(resolved_path: str):
+        """Determine source, label and SourceInfo for a path."""
+        resolved = str(Path(resolved_path).resolve())
+        if resolved in source_info_by_path:
+            info = source_info_by_path[resolved]
+            return {
+                "source": info.source,
+                "label": f"({info.scope})",
+                "source_info": info,
+            }
+
+        # 扩展贡献路径按前缀匹配
+        info = find_source_info_for_path(resolved, extension_source_infos)
+        if info is not None:
+            return {
+                "source": info.source,
+                "label": f"({info.scope})",
+                "source_info": info,
+            }
+
+        if _is_under_path(resolved_path, user_prompts_dir):
+            return {"source": "user", "label": "(user)", "source_info": None}
+        if _is_under_path(resolved_path, project_prompts_dir):
+            return {"source": "project", "label": "(project)", "source_info": None}
+        return {
+            "source": "path",
+            "label": _build_path_source_label(resolved_path),
+            "source_info": None,
+        }
 
     for raw_path in prompt_paths:
         resolved_path = _resolve_prompt_path(raw_path, resolved_cwd)
@@ -277,23 +300,39 @@ def load_prompt_templates(
         if not os.path.exists(resolved_path):
             continue
 
+        # 按真实路径去重：避免 symlink、相对/绝对路径重复加载同一文件
+        real_path = canonicalize_path(resolved_path)
+        if real_path in seen_paths:
+            continue
+        seen_paths.add(real_path)
+
         try:
             path = Path(resolved_path)
-            source_info = _get_source_info(resolved_path)
 
             if path.is_dir():
-                templates.extend(
-                    _load_templates_from_dir(
-                        resolved_path,
-                        source_info["source"],
-                        source_info["label"],
+                # 目录递归由发现层负责；loader 只加载单文件。
+                for file_path in collect_prompt_entries(resolved_path):
+                    real_file_path = canonicalize_path(file_path)
+                    if real_file_path in seen_paths:
+                        continue
+                    seen_paths.add(real_file_path)
+
+                    file_source = _get_source(file_path)
+                    template = _load_template_from_file(
+                        file_path,
+                        file_source["source"],
+                        file_source["label"],
+                        source_info=file_source["source_info"],
                     )
-                )
+                    if template:
+                        templates.append(template)
             elif path.is_file() and resolved_path.endswith(".md"):
+                source = _get_source(resolved_path)
                 template = _load_template_from_file(
                     resolved_path,
-                    source_info["source"],
-                    source_info["label"],
+                    source["source"],
+                    source["label"],
+                    source_info=source["source_info"],
                 )
                 if template:
                     templates.append(template)
@@ -314,17 +353,17 @@ def _dedupe_prompts(
         existing = seen.get(prompt.name)
         if existing:
             diagnostics.append(
-                {
-                    "type": "collision",
-                    "message": f'name "/{prompt.name}" collision',
-                    "path": prompt.file_path,
-                    "collision": {
-                        "resource_type": "prompt",
-                        "name": prompt.name,
-                        "winner_path": existing.file_path,
-                        "loser_path": prompt.file_path,
-                    },
-                }
+                ResourceDiagnostic(
+                    category="collision",
+                    message=f'name "/{prompt.name}" collision',
+                    path=prompt.file_path,
+                    collision=ResourceCollision(
+                        resource_type="prompt",
+                        name=prompt.name,
+                        winner_path=existing.file_path,
+                        loser_path=prompt.file_path,
+                    ),
+                )
             )
         else:
             seen[prompt.name] = prompt

@@ -4,16 +4,22 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.sdk import CreateAgentSessionOptions, create_agent_session
+from nova_harness.core.config.defaults import (
+    AUTH_FILE_NAME,
+    MODELS_FILE_NAME,
+    get_agent_dir,
+)
+from nova_harness.core.sdk import create_agent_session_runtime
+from nova_harness.core.types.session.config import CreateAgentSessionOptions
 from nova_harness.modes.rpc.errors import JSONRPCError
 
 
 class RpcMethods:
     """All JSON-RPC method handlers for the nova_harness AgentSession bridge."""
 
-    def __init__(self) -> None:
+    def __init__(self, ui_context: Optional[Any] = None) -> None:
         self._runtime: Optional[Any] = None
+        self.ui_context = ui_context
 
     @property
     def runtime(self) -> Optional[Any]:
@@ -57,8 +63,9 @@ class RpcMethods:
             model=model,
             thinking_level=params.get("thinking_level"),
             agent_name=params.get("agentName"),
+            ui_context=self.ui_context,
         )
-        self._runtime = await create_agent_session(opts)
+        self._runtime = await create_agent_session_runtime(opts)
 
         session_flag = params.get("sessionFlag")
         continue_last = params.get("continueLast")
@@ -111,8 +118,8 @@ class RpcMethods:
         )
 
         agent_dir = get_agent_dir()
-        auth_path = os.path.join(agent_dir, "auth.json")
-        models_path = os.path.join(agent_dir, "models.json")
+        auth_path = os.path.join(agent_dir, AUTH_FILE_NAME)
+        models_path = os.path.join(agent_dir, MODELS_FILE_NAME)
         auth_storage = AuthStorage.create(auth_path)
         registry = ModelRegistry(auth_storage, models_path)
         model = registry.find(provider, model_id)
@@ -208,7 +215,21 @@ class RpcMethods:
         text = params.get("text", "")
         if not text:
             raise JSONRPCError(-32602, "Missing 'text' parameter")
-        await self._runtime.session.prompt(text)
+
+        from nova_harness.core.agent_session.agent import PromptOptions
+
+        options = PromptOptions(
+            expand_prompt_templates=params.get("expandPromptTemplates", True),
+            streaming_behavior=params.get("streamingBehavior"),
+            source="rpc",
+        )
+        images = params.get("images")
+        if images:
+            from nova_ai import ImageContent
+
+            options.images = [ImageContent.model_validate(img) for img in images]
+
+        await self._runtime.session.prompt(text, options=options)
         return {"ok": True}
 
     # ------------------------------------------------------------------
@@ -227,8 +248,8 @@ class RpcMethods:
         if self._runtime is None:
             raise JSONRPCError(-32000, "No active session")
         model = self._resolve_model(params.get("model"))
-        await self._runtime.session.set_model(model)
-        return {"ok": True}
+        ok = await self._runtime.session.set_model(model)
+        return {"ok": ok}
 
     # ------------------------------------------------------------------
     # setThinkingLevel
@@ -428,34 +449,55 @@ class RpcMethods:
     # ==================================================================
     # Package manager
     # ==================================================================
-    async def pkgList(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _package_manager(self, local: bool = False) -> "PackageManager":
+        """构造与当前 session 信任状态一致的 PackageManager。
+
+        若存在活跃 session，复用其 settings_manager 与 project_trusted 状态；
+        否则退化为默认 PackageManager（与无 RPC session 时行为一致）。
+        """
         from nova_harness.core.package import PackageManager
 
-        pm = PackageManager()
-        views = pm.list_by_bundle()
+        if self._runtime is not None and self._runtime.session is not None:
+            session = self._runtime.session
+            project_trusted = (
+                session.settings_manager.is_project_trusted()
+                if session.settings_manager is not None
+                else None
+            )
+            return PackageManager(
+                cwd=session.cwd,
+                settings_manager=session.settings_manager,
+                project_trusted=project_trusted,
+            )
+        return PackageManager()
+
+    async def pkgList(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        pm = self._package_manager(local=params.get("local", False))
+        views = pm.list_with_resources(local=params.get("local", False))
         return {k: v.model_dump() for k, v in views.items()}
 
     async def pkgInstall(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        from nova_harness.core.package import PackageManager
-
-        pm = PackageManager()
-        meta = pm.install(
-            params["source"],
-            kind=params.get("kind"),
-            name=params.get("name"),
+        pm = self._package_manager(local=params.get("local", False))
+        meta = pm.install_and_persist(
+            params["source"], local=params.get("local", False)
         )
         return meta.model_dump()
 
     async def pkgUninstall(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        from nova_harness.core.package import PackageManager
-
-        pm = PackageManager()
-        ok = pm.uninstall(params["name"], kind=params["kind"])
-        return {"ok": ok}
+        pm = self._package_manager(local=params.get("local", False))
+        result = pm.uninstall(
+            params["name_or_source"], local=params.get("local", False)
+        )
+        return {"ok": result.removed, "messages": result.messages}
 
     async def pkgInfo(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        from nova_harness.core.package import PackageManager
-
-        pm = PackageManager()
-        meta = pm.info(params["name"], kind=params["kind"])
+        pm = self._package_manager(local=params.get("local", False))
+        meta = pm.info(params["name_or_source"], local=params.get("local", False))
         return meta.model_dump() if meta else None
+
+    async def pkgUpdate(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        pm = self._package_manager(local=params.get("local", False))
+        metas = await pm.update(
+            params["name_or_source"], local=params.get("local", False)
+        )
+        return [m.model_dump() for m in metas]

@@ -198,6 +198,12 @@ def test_agent_init_custom_state(dummy_model):
     assert len(agent.state.messages) == 1
 
 
+def test_agent_timeout_propagates_to_loop_config(dummy_model):
+    agent = Agent(initial_state={"model": dummy_model}, timeout=123.0)
+    config = agent._create_loop_config()
+    assert config.timeout == 123.0
+
+
 def test_agent_state_mutators(dummy_model):
     agent = Agent()
     agent.set_system_prompt("sys")

@@ -14,31 +14,22 @@ async def sleep(seconds: float, signal: Optional[AbortSignal] = None) -> None:
 
     Raises:
         RuntimeError: If the signal is already aborted when sleep starts
-        RuntimeError: If the signal is aborted during sleep
+        RuntimeError: If the signal is aborted during sleep or the task is cancelled
     """
     if signal is not None and signal.aborted:
         raise RuntimeError("Aborted")
 
     try:
-        await asyncio.wait_for(_sleep_with_abort(seconds, signal), timeout=None)
+        if signal is None:
+            await asyncio.sleep(seconds)
+        else:
+            await asyncio.wait_for(signal.wait(), timeout=seconds)
     except asyncio.CancelledError:
         raise RuntimeError("Aborted") from None
-
-
-async def _sleep_with_abort(seconds: float, signal: Optional[AbortSignal]) -> None:
-    """Internal sleep implementation with abort polling."""
-    if signal is None:
-        await asyncio.sleep(seconds)
+    except asyncio.TimeoutError:
+        # signal 等待正常超时，未触发中断
         return
 
-    # 每 10ms 检查一次中断信号，平衡响应速度和 CPU 占用
-    check_interval = 0.5
-    remaining = seconds
-
-    while remaining > 0:
-        if signal.aborted:
-            raise RuntimeError("Aborted")
-
-        step = min(check_interval, remaining)
-        await asyncio.sleep(step)
-        remaining -= step
+    # signal.wait() 在未超时的情况下返回，说明 signal 已被触发
+    if signal is not None:
+        raise RuntimeError("Aborted")

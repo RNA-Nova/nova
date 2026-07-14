@@ -118,9 +118,10 @@ class Agent:
         thinking_budgets: Optional[ThinkingBudgets] = None,
         transport: Transport = "sse",
         max_retry_delay_ms: Optional[int] = None,
+        timeout: Optional[float] = None,
         tool_execution: ToolExecutionMode = "parallel",
-        on_payload: Optional[Callable[[Any], None]] = None,
-        on_response: Optional[Callable[[ProviderResponse, Any], None]] = None,
+        on_payload: Optional[Callable[[Any], Any]] = None,
+        on_response: Optional[Callable[[ProviderResponse, Any], Any]] = None,
         before_tool_call: Optional[
             Callable[
                 [BeforeToolCallContext, Optional[AbortSignal]],
@@ -184,6 +185,7 @@ class Agent:
         self._thinking_budgets = thinking_budgets
         self._transport = transport
         self.max_retry_delay_ms = max_retry_delay_ms
+        self._timeout = timeout
         self.tool_execution = tool_execution
         self.on_payload = on_payload
         self.on_response = on_response
@@ -451,6 +453,7 @@ class Agent:
             transport=self._transport,
             thinking_budgets=self._thinking_budgets,
             max_retry_delay_ms=self.max_retry_delay_ms,
+            timeout=self._timeout,
             tool_execution=self.tool_execution,
             on_payload=self.on_payload,
             on_response=self.on_response,

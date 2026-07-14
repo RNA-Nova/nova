@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from nova_harness.core.config import AuthStorage, ModelRegistry
+from nova_harness.core.config import ModelRegistry
+from tests._helpers.auth_storage import auth_storage_in_memory
 
 
 @pytest.fixture
 def auth_with_volc_key():
-    storage = AuthStorage.in_memory({})
+    storage = auth_storage_in_memory({})
     storage.set_runtime_api_key("volcengine", "volc-key")
     return storage
 
@@ -55,7 +56,7 @@ def test_model_registry_custom_models_json(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    storage = AuthStorage.in_memory({})
+    storage = auth_storage_in_memory({})
     registry = ModelRegistry(storage, str(models_json))
     model = registry.find("custom", "local-model")
     assert model is not None

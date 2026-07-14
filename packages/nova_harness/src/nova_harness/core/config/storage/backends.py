@@ -5,6 +5,7 @@
 """
 
 import os
+import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
@@ -64,16 +65,23 @@ class FileStorageBackend(StorageBackend):
     def _acquire_lock(self):
         self._ensure_parent()
         self._ensure_file()
-        lock = FileLock(str(self._lock_path), timeout=self._timeout)
-        try:
-            with lock:
-                yield
-        except Timeout:
-            raise RuntimeError(
-                f"Could not acquire lock for {self._path} within {self._timeout} seconds. "
-                f"Another process may be holding the lock. "
-                f"Lock file: {self._lock_path}"
-            ) from None
+        lock = FileLock(str(self._lock_path))
+        # 使用短重试而不是一次性长超时，提高并发获取锁的响应性。
+        retries = 10
+        delay_ms = 20
+        for attempt in range(retries):
+            try:
+                with lock.acquire(timeout=self._timeout / retries):
+                    yield
+                    return
+            except Timeout:
+                if attempt == retries - 1:
+                    raise RuntimeError(
+                        f"Could not acquire lock for {self._path} within "
+                        f"{self._timeout} seconds. Another process may be holding "
+                        f"the lock. Lock file: {self._lock_path}"
+                    ) from None
+                time.sleep(delay_ms / 1000.0)
 
     def with_lock(self, fn: Callable[[Optional[str]], Optional[str]]) -> None:
         with self._acquire_lock():

@@ -1,14 +1,18 @@
-"""
-自定义消息类型。
+"""自定义消息类型与相关常量。
 
-对应原 `nova_harness.messages.types`，仅保留纯数据类型与前缀常量。
+对应原 `nova_harness.messages.types`。
 """
 
+from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional, Union
 
 from nova_agent import CustomAgentMessage
 from nova_ai import ImageContent, TextContent
 from nova_ai.types.base_model import NovaBaseModel
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
 
 COMPACTION_SUMMARY_PREFIX = """The conversation history before this point was compacted into the following summary:
 
@@ -24,6 +28,22 @@ BRANCH_SUMMARY_PREFIX = """The following is a summary of a branch that this conv
 """
 
 BRANCH_SUMMARY_SUFFIX = """</summary>"""
+
+
+# ---------------------------------------------------------------------------
+# 类型
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ContentBlock:
+    """表示消息中的一个内容块。"""
+
+    type: str
+    text: str = ""
+    thinking: str = ""
+    name: str = ""
+    arguments: Any = field(default_factory=dict)
 
 
 class FileContent(NovaBaseModel):
@@ -82,10 +102,13 @@ class CompactionSummaryMessage(CustomAgentMessage):
 
 
 __all__ = [
+    # constants
     "COMPACTION_SUMMARY_PREFIX",
     "COMPACTION_SUMMARY_SUFFIX",
     "BRANCH_SUMMARY_PREFIX",
     "BRANCH_SUMMARY_SUFFIX",
+    # types
+    "ContentBlock",
     "FileContent",
     "BashExecutionMessage",
     "CustomMessage",

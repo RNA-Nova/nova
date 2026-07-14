@@ -5,6 +5,7 @@ import asyncio
 import signal
 import sys
 
+from nova_harness.modes.rpc.output_guard import OutputGuard
 from nova_harness.modes.rpc.server import NovaRpcServer
 
 
@@ -23,21 +24,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 async def _async_main() -> int:
     _build_parser().parse_args()
-    server = NovaRpcServer()
 
-    loop = asyncio.get_running_loop()
+    with OutputGuard() as guard:
+        server = NovaRpcServer(output_guard=guard)
 
-    def _on_signal(signum: int) -> None:
-        server.shutdown()
+        loop = asyncio.get_running_loop()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _on_signal, sig)
+        def _on_signal(signum: int) -> None:
+            server.shutdown()
 
-    try:
-        await server.run()
-    finally:
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.remove_signal_handler(sig)
+            loop.add_signal_handler(sig, _on_signal, sig)
+
+        try:
+            await server.run()
+        finally:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
     return 0
 
 

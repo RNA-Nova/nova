@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
+from nova_agent import AbortController
+
 from nova_harness.core.harness.compaction import compaction as _compaction_module
 from nova_harness.core.harness.compaction.compaction import (
     calculate_context_tokens,
@@ -17,18 +19,18 @@ from nova_harness.core.types.events import (
     CompactionStartEvent,
     SessionCompactEvent,
 )
+from nova_harness.core.types.events.constants import SESSION_BEFORE_COMPACT
+from nova_harness.core.types.protocols import AgentSessionProtocol
 from nova_harness.core.utils import is_context_overflow
 
 if TYPE_CHECKING:
     from nova_ai import AssistantMessage
 
-    from nova_harness.core.agent_session.agent import AgentSession
-
 
 class CompactionController:
     """封装 AgentSession 的手动/自动压缩逻辑。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     @property
@@ -42,14 +44,14 @@ class CompactionController:
     def abort_compaction(self) -> None:
         """取消进行中的压缩（手动或自动）。"""
         if self._session._compaction_abort_controller is not None:
-            self._session._compaction_abort_controller.aborted = True
+            self._session._compaction_abort_controller.abort()
         if self._session._auto_compaction_abort_controller is not None:
-            self._session._auto_compaction_abort_controller.aborted = True
+            self._session._auto_compaction_abort_controller.abort()
 
     def abort_branch_summary(self) -> None:
         """取消进行中的分支摘要。"""
         if self._session._branch_summary_abort_controller is not None:
-            self._session._branch_summary_abort_controller.aborted = True
+            self._session._branch_summary_abort_controller.abort()
 
     def set_auto_compaction_enabled(self, enabled: bool) -> None:
         """开关自动压缩设置。"""
@@ -70,9 +72,7 @@ class CompactionController:
             raise RuntimeError(f"No API key for {self._session.model.provider}")
 
         self._session._disconnect_from_agent()
-        self._session._compaction_abort_controller = type(
-            "AbortController", (), {"aborted": False}
-        )()
+        self._session._compaction_abort_controller = AbortController("compact")
         self._session._emit(
             CompactionStartEvent(
                 reason="manual", custom_instructions=custom_instructions
@@ -96,7 +96,7 @@ class CompactionController:
             from_extension = False
 
             runner = self._session._extension_runner
-            if runner is not None and runner.has_handlers("session_before_compact"):
+            if runner is not None and runner.has_handlers(SESSION_BEFORE_COMPACT):
                 from nova_harness.core.types.events import SessionBeforeCompactEvent
 
                 result = await runner.emit(
@@ -104,7 +104,7 @@ class CompactionController:
                         preparation=preparation,
                         branch_entries=path_entries,
                         custom_instructions=custom_instructions,
-                        signal=self._session._compaction_abort_controller,
+                        signal=self._session._compaction_abort_controller.signal,
                     )
                 )
                 if getattr(result, "cancel", False):
@@ -122,7 +122,7 @@ class CompactionController:
                         self._session.model,
                         api_key,
                         custom_instructions=custom_instructions,
-                        signal=self._session._compaction_abort_controller,
+                        signal=self._session._compaction_abort_controller.signal,
                         thinking_level=self._session.thinking_level,
                     )
                     summary = result.summary
@@ -143,7 +143,7 @@ class CompactionController:
                 tokens_before = result.tokens_before
                 details = getattr(result, "details", None)
 
-            if getattr(self._session._compaction_abort_controller, "aborted", False):
+            if self._session._compaction_abort_controller.signal.aborted:
                 raise RuntimeError("Compaction cancelled")
 
             self._session.session_manager.append_compaction(
@@ -282,9 +282,9 @@ class CompactionController:
         """内部：执行自动压缩并发射事件。"""
         settings = self._session.settings_manager.get_compaction_settings()
         self._session._emit(CompactionStartEvent(reason=reason))
-        self._session._auto_compaction_abort_controller = type(
-            "AbortController", (), {"aborted": False}
-        )()
+        self._session._auto_compaction_abort_controller = AbortController(
+            "auto_compact"
+        )
 
         try:
             if self._session.model is None:
@@ -324,7 +324,7 @@ class CompactionController:
             from_extension = False
 
             runner = self._session._extension_runner
-            if runner is not None and runner.has_handlers("session_before_compact"):
+            if runner is not None and runner.has_handlers(SESSION_BEFORE_COMPACT):
                 from nova_harness.core.types.events import SessionBeforeCompactEvent
 
                 result = await runner.emit(
@@ -332,7 +332,7 @@ class CompactionController:
                         preparation=preparation,
                         branch_entries=path_entries,
                         custom_instructions=None,
-                        signal=self._session._auto_compaction_abort_controller,
+                        signal=self._session._auto_compaction_abort_controller.signal,
                     )
                 )
                 if getattr(result, "cancel", False):
@@ -354,7 +354,7 @@ class CompactionController:
                         preparation,
                         self._session.model,
                         api_key,
-                        signal=self._session._auto_compaction_abort_controller,
+                        signal=self._session._auto_compaction_abort_controller.signal,
                         thinking_level=self._session.thinking_level,
                     )
                     summary = result.summary
@@ -366,7 +366,7 @@ class CompactionController:
                     preparation,
                     self._session.model,
                     api_key,
-                    signal=self._session._auto_compaction_abort_controller,
+                    signal=self._session._auto_compaction_abort_controller.signal,
                     thinking_level=self._session.thinking_level,
                 )
                 summary = result.summary
@@ -374,9 +374,7 @@ class CompactionController:
                 tokens_before = result.tokens_before
                 details = getattr(result, "details", None)
 
-            if getattr(
-                self._session._auto_compaction_abort_controller, "aborted", False
-            ):
+            if self._session._auto_compaction_abort_controller.signal.aborted:
                 self._session._emit(
                     CompactionEndEvent(
                         reason=reason, result=None, aborted=True, will_retry=False

@@ -42,7 +42,9 @@ class StreamOptions(NovaBaseModel):
 
     # signal、on_payload、on_response 不参与序列化
     signal: Optional[Any] = Field(default=None, exclude=True)
-    on_payload: Optional[Callable] = Field(default=None, exclude=True)
+    on_payload: Optional[Callable[[Any], Optional[Any]]] = Field(
+        default=None, exclude=True
+    )
     on_response: Optional[Callable[[ProviderResponse, Any], None]] = Field(
         default=None, exclude=True
     )

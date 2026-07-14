@@ -1,7 +1,6 @@
 """
 AgentSession 的 cwd 绑定服务集合。
 
-与 TypeScript 参考实现中的 ``AgentSessionServices`` 对齐：
 - 负责创建 cwd 绑定的基础设施（auth/settings/modelRegistry/resourceLoader）。
 - 收集创建过程中的 diagnostics（扩展 provider 注册失败等）。
 - ``AgentSession`` 与 ``AgentSessionRuntime`` 通过本对象共享依赖。
@@ -11,35 +10,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import ConfigDict, Field
-
-from nova_harness.core.agent_session.extensions.api import NovaExtensionAPI
 from nova_harness.core.config import AuthStorage, ModelRegistry, SettingsManager
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.harness.system_prompt import SystemPromptManager
+from nova_harness.core.config.defaults import (
+    AUTH_FILE_NAME,
+    MODELS_FILE_NAME,
+    get_agent_dir,
+)
+from nova_harness.core.extensions.api import NovaExtensionAPI
+from nova_harness.core.package import PackageManager
 from nova_harness.core.resources.loader import DefaultResourceLoader, ResourceLoader
-from nova_harness.core.types.diagnostics import AgentSessionRuntimeDiagnostic
-from nova_harness.core.types.resource import DefaultResourceLoaderOptions
+from nova_harness.core.types.extensions import ExtensionFlag, LoadedExtensionsResult
+from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
+from nova_harness.core.types.runtime.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.core.types.session.runtime import CreateAgentSessionRuntimeResult
+from nova_harness.core.utils.timings import time
 
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
+__all__ = ["AgentSessionServices"]
 
 
 @dataclass
-class CreateAgentSessionRuntimeResult:
-    """Runtime 工厂返回的结果。"""
-
-    session: "AgentSession"
-    services: "AgentSessionServices"
-    diagnostics: List[AgentSessionRuntimeDiagnostic] = field(default_factory=list)
-    model_fallback_message: Optional[str] = None
-
-
-class AgentSessionServices(NovaBaseModel):
+class AgentSessionServices:
     """
     与某个 cwd/session 绑定的服务集合。
 
@@ -47,36 +39,35 @@ class AgentSessionServices(NovaBaseModel):
     切换会话时 Runtime 可以选择复用或重新创建 services。
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
-
     cwd: str
     agent_dir: str
-    session_manager: Optional[SessionManager] = None
-    settings_manager: SettingsManager
-    model_registry: ModelRegistry
-    resource_loader: ResourceLoader
-    system_prompt_manager: SystemPromptManager
-    auth_storage: AuthStorage
-    diagnostics: List[AgentSessionRuntimeDiagnostic] = Field(default_factory=list)
+    settings_manager: SettingsManager = field(default=None)  # type: ignore[assignment]
+    model_registry: ModelRegistry = field(default=None)  # type: ignore[assignment]
+    resource_loader: ResourceLoader = field(default=None)  # type: ignore[assignment]
+    auth_storage: AuthStorage = field(default=None)  # type: ignore[assignment]
+    diagnostics: List[AgentSessionRuntimeDiagnostic] = field(default_factory=list)
 
     @classmethod
     async def create(
         cls,
         cwd: str,
         agent_dir: Optional[Union[str, Path]] = None,
-        session_manager: Optional[SessionManager] = None,
         auth_storage: Optional[AuthStorage] = None,
         settings_manager: Optional[SettingsManager] = None,
         model_registry: Optional[ModelRegistry] = None,
         resource_loader: Optional[ResourceLoader] = None,
-        system_prompt_manager: Optional[SystemPromptManager] = None,
-        agent_name: Optional[str] = None,
+        extension_flag_values: Optional[Dict[str, Any]] = None,
+        install_missing_packages: bool = True,
+        project_trusted: Optional[bool] = None,
+        resolve_project_trust: Optional[
+            Callable[[LoadedExtensionsResult], Awaitable[bool]]
+        ] = None,
     ) -> "AgentSessionServices":
         """
         创建 cwd 绑定的服务集合。
 
         返回的 services 已经包含 authStorage、settingsManager、modelRegistry、
-        resourceLoader（已 reload）、systemPromptManager。扩展由 ResourceLoader 加载，
+        resourceLoader（已 reload）。扩展由 ResourceLoader 加载，
         AgentSession 在初始化时从 ResourceLoader 取出扩展并创建 ExtensionRunner。
         """
         resolved_cwd = str(Path(cwd).resolve())
@@ -86,16 +77,37 @@ class AgentSessionServices(NovaBaseModel):
             else str(Path(get_agent_dir()).resolve())
         )
         auth_storage = auth_storage or AuthStorage.create(
-            Path(resolved_agent_dir) / "auth.json"
+            Path(resolved_agent_dir) / AUTH_FILE_NAME
         )
-        settings_manager = settings_manager or SettingsManager.create(
-            resolved_cwd, resolved_agent_dir
+
+        # 未显式指定信任状态时，默认先不信任项目；由 resolve_project_trust 回调
+        # 或后续流程决定最终是否信任。
+        needs_trust_resolution = resolve_project_trust is not None
+        initial_project_trusted = (
+            project_trusted if project_trusted is not None else False
         )
+
+        if settings_manager is None:
+            settings_manager = SettingsManager.create(
+                resolved_cwd,
+                resolved_agent_dir,
+                project_trusted=initial_project_trusted,
+            )
+        elif project_trusted is not None:
+            settings_manager.set_project_trusted(initial_project_trusted)
+
         model_registry = model_registry or ModelRegistry(
-            auth_storage, Path(resolved_agent_dir) / "models.json"
+            auth_storage, Path(resolved_agent_dir) / MODELS_FILE_NAME
         )
 
         if resource_loader is None:
+            package_manager = PackageManager(
+                agent_dir=resolved_agent_dir,
+                cwd=resolved_cwd,
+                settings_manager=settings_manager,
+                project_trusted=initial_project_trusted,
+                install_missing_packages=install_missing_packages,
+            )
             resource_loader = DefaultResourceLoader(
                 DefaultResourceLoaderOptions(
                     cwd=resolved_cwd,
@@ -107,32 +119,148 @@ class AgentSessionServices(NovaBaseModel):
                     no_prompt_templates=False,
                     no_extensions=False,
                     extension_api_factory=lambda extension, context: NovaExtensionAPI(
-                        extension, context
+                        extension,
+                        context,
+                        cwd=getattr(context, "cwd", resolved_cwd),
+                        event_bus=getattr(context, "event_bus", None),
                     ),
+                    package_manager=package_manager,
+                    install_missing_packages=install_missing_packages,
+                    project_trusted=initial_project_trusted,
                 )
             )
-            await resource_loader.reload()
+            if needs_trust_resolution:
+                # 先以不信任状态加载全局/临时扩展，供信任裁决使用；
+                # 返回的结果会在最终 reload 中复用，避免扩展被加载两次。
+                pre_trust_extensions = (
+                    await resource_loader.load_project_trust_extensions()
+                )
+                time("resource loader pre-trust extensions")
+                trusted = await resolve_project_trust(pre_trust_extensions)
+                settings_manager.set_project_trusted(trusted)
+                await settings_manager.reload()
+                await resource_loader.reload(pre_trust_extensions=pre_trust_extensions)
+                time("resource loader trusted reload")
+            else:
+                await resource_loader.reload()
+                time("resource loader initial reload")
 
-        if system_prompt_manager is None:
-            resolved_agent_name = agent_name
-            if not resolved_agent_name:
-                names = resource_loader.get_agent_names()
-                if names:
-                    resolved_agent_name = names[0]
-                else:
-                    resolved_agent_name = "base_agent"
-            system_prompt_manager = SystemPromptManager(
-                resource_loader, resolved_agent_name
+        diagnostics: List[AgentSessionRuntimeDiagnostic] = []
+        extensions_result = resource_loader.get_extensions()
+        for err in getattr(extensions_result, "errors", None) or []:
+            diagnostics.append(
+                AgentSessionRuntimeDiagnostic(
+                    type="error",
+                    message=f'Extension "{err.get("path", "<unknown>")}" '
+                    f'failed to load: {err.get("error", "")}',
+                )
             )
+        cls._flush_pending_provider_registrations(
+            extensions_result, model_registry, diagnostics
+        )
+        flag_diagnostics = cls._apply_extension_flag_values(
+            extensions_result, extension_flag_values
+        )
+        diagnostics.extend(flag_diagnostics)
 
         return cls(
             cwd=resolved_cwd,
             agent_dir=resolved_agent_dir,
-            session_manager=session_manager,
             settings_manager=settings_manager,
             model_registry=model_registry,
             resource_loader=resource_loader,
-            system_prompt_manager=system_prompt_manager,
             auth_storage=auth_storage,
-            diagnostics=[],
+            diagnostics=diagnostics,
         )
+
+    @staticmethod
+    def _flush_pending_provider_registrations(
+        extensions_result: LoadedExtensionsResult,
+        model_registry: ModelRegistry,
+        diagnostics: List[AgentSessionRuntimeDiagnostic],
+    ) -> None:
+        """把扩展加载阶段排队的 provider 注册刷新到 model_registry。"""
+        runtime = extensions_result.runtime
+        if runtime is None:
+            return
+        for reg in list(runtime.pending_provider_registrations):
+            try:
+                model_registry.register_provider(reg.name, reg.config)
+            except Exception as error:
+                message = str(error)
+                diagnostics.append(
+                    AgentSessionRuntimeDiagnostic(
+                        type="error",
+                        message=f'Extension "{reg.extension_path or "<unknown>"}" '
+                        f'provider "{reg.name}" registration failed: {message}',
+                    )
+                )
+        runtime.pending_provider_registrations.clear()
+
+    @staticmethod
+    def _apply_extension_flag_values(
+        extensions_result: LoadedExtensionsResult,
+        extension_flag_values: Optional[Dict[str, Any]],
+    ) -> List[AgentSessionRuntimeDiagnostic]:
+        """应用 CLI 传入的扩展 flag 值。"""
+        diagnostics: List[AgentSessionRuntimeDiagnostic] = []
+        if not extension_flag_values:
+            return diagnostics
+
+        registered_flags: Dict[str, ExtensionFlag] = {}
+        for extension in extensions_result.extensions:
+            for flag in extension.flags.values():
+                if flag.name not in registered_flags:
+                    registered_flags[flag.name] = flag
+
+        runtime = extensions_result.runtime
+        unknown_flags: List[str] = []
+        for name, value in extension_flag_values.items():
+            flag = registered_flags.get(name)
+            if flag is None:
+                unknown_flags.append(name)
+                continue
+
+            if flag.type == "boolean":
+                # 布尔型 flag 作为开关：只要指定就视为 true
+                if runtime is not None:
+                    runtime.flag_values[name] = True
+                continue
+
+            if flag.type == "string":
+                if isinstance(value, str):
+                    if runtime is not None:
+                        runtime.flag_values[name] = value
+                    continue
+                diagnostics.append(
+                    AgentSessionRuntimeDiagnostic(
+                        type="error",
+                        message=f'Extension flag "--{name}" requires a string value',
+                    )
+                )
+                continue
+
+            if flag.type == "number":
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if runtime is not None:
+                        runtime.flag_values[name] = value
+                    continue
+                diagnostics.append(
+                    AgentSessionRuntimeDiagnostic(
+                        type="error",
+                        message=f'Extension flag "--{name}" requires a numeric value',
+                    )
+                )
+                continue
+
+        if unknown_flags:
+            suffix = "" if len(unknown_flags) == 1 else "s"
+            diagnostics.append(
+                AgentSessionRuntimeDiagnostic(
+                    type="error",
+                    message=f"Unknown option{suffix}: "
+                    f'{", ".join(f"--{name}" for name in unknown_flags)}',
+                )
+            )
+
+        return diagnostics

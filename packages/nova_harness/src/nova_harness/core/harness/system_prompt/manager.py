@@ -1,117 +1,194 @@
 """
-SystemPromptManager — 负责 agent 切换、工具选择和系统提示词构建。
+SystemPromptManager — 负责 agent 切换与系统提示词构建。
 
-它从 ResourceLoader 读取静态 Agent 配置，运行时维护当前选中的 agent 和工具白名单，
-并把最终系统提示词构建委托给 SystemPromptBuilder。
+它从 ResourceLoader 读取静态 Agent 配置，并把运行时工具选择委托给
+``ToolsManager``，自身只负责渲染 system prompt。
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional
-
-from nova_harness.core.types.agent_config import AgentConfig, DynamicContext, ToolInfo
-from nova_harness.core.types.tools import ToolDefinition
-
-if TYPE_CHECKING:
-    from nova_harness.core.resources.loader import ResourceLoader
+from typing import Any, Dict, List, Optional
 
 from nova_harness.core.harness.system_prompt.builder import compose_system_prompt
-from nova_harness.core.utils.skills import format_skills_for_prompt
+from nova_harness.core.types.agent.config import AgentConfig, DynamicContext, ToolInfo
+from nova_harness.core.types.protocols import (
+    ResourceLoaderProtocol,
+    ToolsManagerProtocol,
+)
+from nova_harness.core.types.runtime.tools import ToolDefinition
+from nova_harness.core.types.skills import Skill
 
 DEFAULT_ACTIVE_TOOLS = ["read", "bash", "edit", "write"]
 
 
 class SystemPromptManager:
     """
-    管理当前 Agent 配置、激活工具集和扩展工具，构建系统提示词。
+    管理当前 Agent 配置并构建系统提示词。
+
+    工具发现、过滤、激活等运行时逻辑已下沉到 ``ToolsManager``；
+    本类只负责：
+    - 维护当前 agent 名称与配置
+    - 调用 ``ToolsManager`` 获取激活工具和工具定义
+    - 渲染最终 system prompt
     """
 
     def __init__(
         self,
-        resource_loader: ResourceLoader,
+        resource_loader: ResourceLoaderProtocol,
         agent_name: str,
+        tools_manager: Optional[ToolsManagerProtocol] = None,
     ) -> None:
         self._resource_loader = resource_loader
         self._agent_name = agent_name
-        self._active_tools: List[str] = []
-        self._extension_tools: List[ToolInfo] = []
-        self._tool_definitions: Dict[str, ToolDefinition] = {}
-        self._reset_active_tools()
+        self._tools_manager = tools_manager
 
     @property
     def agent_name(self) -> str:
         return self._agent_name
 
-    def _agent_config(self) -> Optional[AgentConfig]:
+    def get_agent_config(self) -> Optional[AgentConfig]:
+        """返回当前 agent 的静态配置。"""
         return self._resource_loader.get_agents().get(self._agent_name)
 
+    def _agent_config(self) -> Optional[AgentConfig]:
+        return self.get_agent_config()
+
     def change_agent(self, name: str) -> None:
-        """切换当前 agent，重置扩展工具和默认激活工具。"""
+        """切换当前 agent。"""
         self._agent_name = name
-        self._extension_tools = []
-        self._reset_active_tools()
 
-    def _reset_active_tools(self) -> None:
-        """将激活工具重置为默认值（与可用工具的交集）。"""
-        available = self._available_config_tool_names()
-        defaults = [t for t in DEFAULT_ACTIVE_TOOLS if t in available]
-        self._active_tools = defaults if defaults else available
+    def _filter_skills_by_config(self, skills: Dict[str, Any]) -> Dict[str, Any]:
+        """按当前 agent 的 skills 白名单过滤 skill。"""
+        config = self.get_agent_config()
+        if config is None:
+            return {}
+        allowed = set(config.skills)
+        if not allowed:
+            return {}
+        return {name: skill for name, skill in skills.items() if name in allowed}
 
-    def _available_config_tool_names(self) -> List[str]:
+    def _tool_definitions(self) -> Dict[str, ToolDefinition]:
+        """返回工具定义字典；未绑定 ToolsManager 时返回空字典。"""
+        if self._tools_manager is None:
+            return {}
+        return getattr(self._tools_manager, "tool_definitions", None) or {}
+
+    def _all_tool_infos(self) -> List[ToolInfo]:
+        """返回 AgentConfig.tools 与 ToolsManager 贡献的工具的合并列表。
+
+        按工具名去重；当两者出现同名工具时，优先保留 AgentConfig 中显式声明
+        的定义，避免 ToolsManager 的默认发现覆盖用户配置。
+        """
         config = self._agent_config()
         if config is None:
             return []
-        return [t.name for t in config.tools]
+        merged: Dict[str, ToolInfo] = {}
+        for tool in config.tools:
+            merged[tool.name] = tool
+        if self._tools_manager is not None:
+            for tool in self._tools_manager.get_all_tools():
+                if tool.name not in merged:
+                    merged[tool.name] = tool
+        return list(merged.values())
 
     def set_active_tools(self, tool_names: List[str]) -> None:
-        """按可用工具集合过滤后设置激活工具白名单。"""
-        available = set(self.get_available_tool_names())
-        self._active_tools = [t for t in tool_names if t in available]
+        """设置激活工具（委托给 ToolsManager）。"""
+        if self._tools_manager is None:
+            return
+        self._tools_manager.set_active_tools(tool_names)
 
     def get_active_tool_names(self) -> List[str]:
-        return list(self._active_tools)
+        """返回当前激活工具名称。"""
+        if self._tools_manager is None:
+            return []
+        return self._tools_manager.get_active_tools()
 
     def get_available_tool_names(self) -> List[str]:
-        """返回配置工具 + 扩展工具的名称列表。"""
-        names = self._available_config_tool_names()
-        names.extend(t.name for t in self._extension_tools)
-        return names
+        """返回当前可用工具名称。"""
+        if self._tools_manager is None:
+            return []
+        return self._tools_manager.get_available_tools()
 
     def get_default_active_tool_names(self) -> List[str]:
         """返回当前 agent 的默认激活工具（无扩展工具）。"""
-        available = self._available_config_tool_names()
+        config = self.get_agent_config()
+        if config is None:
+            return []
+        available = {t.name for t in config.tools}
         defaults = [t for t in DEFAULT_ACTIVE_TOOLS if t in available]
-        return defaults if defaults else available
+        return defaults if defaults else list(available)
 
-    def set_extension_tools(self, tools: List[ToolInfo]) -> None:
-        """设置由扩展注入的额外工具描述。"""
-        self._extension_tools = list(tools)
+    def _collect_build_options(
+        self,
+        context: Optional[DynamicContext] = None,
+    ) -> Dict[str, Any]:
+        """收集构建 system prompt 时使用的选项，供缓存与扩展查询。"""
+        config = self._agent_config()
+        if config is None:
+            merged_config = AgentConfig(name=self._agent_name, agent_dir="")
+        else:
+            merged_config = config.model_copy(
+                update={"tools": self._all_tool_infos()}
+            )
 
-    def set_tool_definitions(self, definitions: List[ToolDefinition]) -> None:
-        """设置实际加载的工具定义，用于渲染 prompt snippet 与 guidelines。"""
-        self._tool_definitions = {d.name: d for d in definitions}
+        active_tools: List[str] = []
+        if self._tools_manager is not None:
+            active_tools = self._tools_manager.get_active_tools()
+
+        # 按当前 agent 的 skills 白名单过滤
+        skills = list(
+            self._filter_skills_by_config(
+                self._resource_loader.get_skills().get("skills", {})
+            ).values()
+        )
+
+        tool_snippets: Dict[str, str] = {}
+        prompt_guidelines: List[str] = []
+        for name, definition in self._tool_definitions().items():
+            if name not in active_tools:
+                continue
+            if definition.prompt_snippet:
+                tool_snippets[name] = definition.prompt_snippet
+            if definition.prompt_guidelines:
+                prompt_guidelines.extend(definition.prompt_guidelines)
+
+        context_files: List[Any] = []
+        if hasattr(self._resource_loader, "get_context_files"):
+            try:
+                raw = self._resource_loader.get_context_files()
+                if isinstance(raw, list):
+                    context_files = raw
+            except Exception:
+                context_files = []
+
+        return {
+            "cwd": context.cwd if context else "",
+            "skills": skills,
+            "context_files": context_files,
+            "selected_tools": active_tools,
+            "tool_snippets": tool_snippets,
+            "prompt_guidelines": prompt_guidelines,
+            "agent_config": merged_config,
+        }
 
     def build_system_prompt(
         self,
         context: Optional[DynamicContext] = None,
     ) -> str:
         """基于当前配置、激活工具和扩展工具构建系统提示词。"""
-        config = self._agent_config()
-        if config is None:
-            merged_config = AgentConfig(name=self._agent_name, agent_dir="")
-        else:
-            merged_tools = list(config.tools) + self._extension_tools
-            merged_config = config.model_copy(update={"tools": merged_tools})
-
-        # 只有当 read 工具可用时才注入 skill 列表（模型需要 read 才能加载 skill 文件）
-        has_read_tool = "read" in self._active_tools
-        skills = list(self._resource_loader.get_skills().values())
-        skills_append = format_skills_for_prompt(skills, has_read_tool)
-
+        options = self._collect_build_options(context)
         return compose_system_prompt(
-            config=merged_config,
+            config=options["agent_config"],
             context=context,
-            selected_tools=self._active_tools,
-            append_system_prompt=skills_append or None,
-            tool_definitions=self._tool_definitions,
+            selected_tools=options["selected_tools"],
+            skills=options["skills"],
+            tool_definitions=self._tool_definitions(),
+            context_files=options["context_files"],
         )
+
+    def build_system_prompt_options(
+        self,
+        context: Optional[DynamicContext] = None,
+    ) -> Dict[str, Any]:
+        """返回最近一次（或当前）构建 system prompt 时使用的选项。"""
+        return self._collect_build_options(context)

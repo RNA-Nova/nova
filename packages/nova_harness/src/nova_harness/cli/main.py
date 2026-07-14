@@ -26,20 +26,25 @@ def main(argv=None):
         "run",
         help="Run an installed agent with a single task",
     )
-    p_run.add_argument("agent", help="Name of the installed agent to run")
-    p_run.add_argument("--task", required=True, help="Task to delegate to the agent")
+    p_run.add_argument("agent", nargs="?", help="Name of the installed agent to run")
+    p_run.add_argument("--task", help="Task to delegate to the agent")
     p_run.add_argument("--cwd", help="Working directory for the agent")
     p_run.add_argument("--json", action="store_true", help="Output JSONL event stream")
     p_run.add_argument(
-        "--save-session",
+        "--trust",
         action="store_true",
-        help="Save the ephemeral subagent session to disk",
+        help="Trust the current project folder (load .nova settings and resources)",
+    )
+    p_run.add_argument(
+        "--no-session",
+        action="store_true",
+        help="Do not persist the session to disk (ephemeral)",
     )
 
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        from nova_harness.cli.run import cmd_run
+        from nova_harness.modes.print.cli import cmd_run
 
         return cmd_run(args)
 

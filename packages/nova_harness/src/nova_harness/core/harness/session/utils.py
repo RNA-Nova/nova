@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set
 
 from nova_ai import Message, TextContent
 
-from nova_harness.core.config.defaults import get_agent_dir
+from nova_harness.core.config.defaults import SESSIONS_DIR_NAME, get_agent_dir
 from nova_harness.core.types.session import (
     ActiveToolsChangeEntry,
     BranchSummaryEntry,
@@ -35,7 +35,7 @@ from nova_harness.core.utils.messages import (
     create_custom_message,
 )
 
-# TS 风格的 generate_session_id：时间戳 + 随机 + 序列号
+# generate_session_id：时间戳 + 随机 + 序列号
 _last_session_id_timestamp = 0
 _session_id_sequence = 0
 
@@ -49,7 +49,7 @@ def _format_uuid(bytes_data: bytes) -> str:
 
 
 def generate_session_id() -> str:
-    """生成与 TS 参考实现语义一致的会话 ID 字符串。"""
+    """生成会话 ID 字符串（基于时间戳、随机数和序列号）。"""
     global _last_session_id_timestamp, _session_id_sequence
 
     random = secrets.token_bytes(16)
@@ -90,7 +90,7 @@ def generate_session_id() -> str:
 
 
 def generate_id(by_id: Set[str]) -> str:
-    """生成唯一的短ID（TS 风格：generate_session_id 前 8 个 hex 字符）。"""
+    """生成唯一的短 ID（取 generate_session_id 前 8 个 hex 字符）。"""
     for _ in range(100):
         id_ = generate_session_id()[:8]
         if id_ not in by_id:
@@ -262,7 +262,7 @@ def get_default_session_dir(cwd: str) -> str:
     """获取默认会话目录"""
     cleaned_cwd = cwd.lstrip("/\\").replace("/", "-").replace("\\", "-")
     safe_path = f"--{cleaned_cwd}--"
-    session_dir = os.path.join(get_agent_dir(), "sessions", safe_path)
+    session_dir = os.path.join(get_agent_dir(), SESSIONS_DIR_NAME, safe_path)
     if not os.path.exists(session_dir):
         os.makedirs(session_dir, exist_ok=True)
     return session_dir

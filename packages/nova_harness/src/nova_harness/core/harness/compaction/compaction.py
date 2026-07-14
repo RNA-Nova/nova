@@ -29,6 +29,7 @@ from nova_harness.core.harness.compaction.utils import (
     extract_file_ops_from_message,
     format_file_operations,
     get_detail_value,
+    get_message_from_entry,
     serialize_conversation,
 )
 from nova_harness.core.harness.session import build_session_context
@@ -41,13 +42,8 @@ from nova_harness.core.types.compaction import (
     CutPointResult,
     FileOperations,
 )
-from nova_harness.core.types.session import CompactionEntry, SessionEntry
-from nova_harness.core.utils.messages import (
-    convert_to_llm,
-    create_branch_summary_message,
-    create_compaction_summary_message,
-    create_custom_message,
-)
+from nova_harness.core.types.session.entries import CompactionEntry, SessionEntry
+from nova_harness.core.utils.messages import convert_to_llm
 
 # ============================================================================
 # File Operation Tracking
@@ -68,8 +64,9 @@ def _extract_file_operations(
     if prev_compaction_index >= 0:
         prev_compaction = entries[prev_compaction_index]
         if isinstance(prev_compaction, CompactionEntry):
+            # 只从 pi 生成的摘要（from_hook 不为 True）提取文件操作，
+            # 避免重复读取 extension-generated 摘要里的已操作文件。
             if not prev_compaction.from_hook and prev_compaction.details:
-                # from_hook field kept for session file compatibility
                 details = prev_compaction.details
                 read_files = get_detail_value(details, "read_files")
                 if isinstance(read_files, list):
@@ -85,53 +82,6 @@ def _extract_file_operations(
         extract_file_ops_from_message(msg, file_ops)
 
     return file_ops
-
-
-# ============================================================================
-# Message Extraction
-# ============================================================================
-
-
-def _get_message_from_entry(entry: SessionEntry) -> Optional[AgentMessage]:
-    """
-    Extract AgentMessage from an entry if it produces one.
-    Returns None for entries that don't contribute to LLM context.
-    """
-    if entry.type == "message":
-        return entry.message
-    if entry.type == "custom_message":
-        return create_custom_message(
-            entry.custom_type,
-            entry.content,
-            entry.display,
-            entry.details,
-            entry.timestamp,
-        )
-    if entry.type == "branch_summary":
-        return create_branch_summary_message(
-            entry.summary,
-            entry.from_id,
-            entry.timestamp,
-        )
-    if entry.type == "compaction":
-        return create_compaction_summary_message(
-            entry.summary,
-            entry.tokens_before,
-            entry.timestamp,
-        )
-    return None
-
-
-def _get_message_from_entry_for_compaction(
-    entry: SessionEntry,
-) -> Optional[AgentMessage]:
-    """
-    Extract AgentMessage for compaction summarization.
-    Skips compaction entries themselves since they are already represented by previous_summary.
-    """
-    if entry.type == "compaction":
-        return None
-    return _get_message_from_entry(entry)
 
 
 # ============================================================================
@@ -656,7 +606,7 @@ def prepare_compaction(
             )
     boundary_end = len(path_entries)
 
-    # Estimate current full LLM context size, matching TS buildSessionContext().messages
+    # 估算当前完整 LLM 上下文大小
     tokens_before = estimate_context_tokens(
         build_session_context(path_entries).messages
     ).tokens
@@ -679,7 +629,7 @@ def prepare_compaction(
     # Messages to summarize (will be discarded after summary)
     messages_to_summarize: List[AgentMessage] = []
     for i in range(boundary_start, history_end):
-        msg = _get_message_from_entry_for_compaction(path_entries[i])
+        msg = get_message_from_entry(path_entries[i], skip_compaction=True)
         if msg:
             messages_to_summarize.append(msg)
 
@@ -687,7 +637,7 @@ def prepare_compaction(
     turn_prefix_messages: List[AgentMessage] = []
     if cut_point.is_split_turn:
         for i in range(cut_point.turn_start_index, cut_point.first_kept_entry_index):
-            msg = _get_message_from_entry_for_compaction(path_entries[i])
+            msg = get_message_from_entry(path_entries[i], skip_compaction=True)
             if msg:
                 turn_prefix_messages.append(msg)
 

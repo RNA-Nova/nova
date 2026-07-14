@@ -12,9 +12,10 @@ from nova_harness.core.harness.session.utils import (
     get_session_modified_date,
     parse_session_entries,
 )
-from nova_harness.core.types.session import SessionHeader, SessionInfo
+from nova_harness.core.types.session.entries import SessionHeader
+from nova_harness.core.types.session.info import SessionInfo
 
-# 同时加载会话信息的最大并发数，与 TypeScript 参考实现对齐
+# 同时加载会话信息的最大并发数
 MAX_CONCURRENT_SESSION_INFO_LOADS = 10
 
 

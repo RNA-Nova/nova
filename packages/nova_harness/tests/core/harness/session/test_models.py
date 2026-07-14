@@ -56,7 +56,7 @@ def test_build_session_info_sync_with_messages(tmp_path):
 
 
 def test_build_session_info_sync_with_session_info_name(tmp_path):
-    from nova_harness.core.types.session import SessionInfoEntry
+    from nova_harness.core.types.session.entries import SessionInfoEntry
 
     session_id = generate_session_id()
     header = SessionHeader(

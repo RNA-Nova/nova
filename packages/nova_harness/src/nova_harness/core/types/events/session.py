@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional
 
 from nova_harness.core.types.compaction import CompactionPreparation
-from nova_harness.core.types.session import SessionEntry
+from nova_harness.core.types.session.entries import SessionEntry
+from nova_harness.core.types.session_start_event import SessionStartEvent
 
 from .constants import (
     COMPACTION_END,
@@ -17,22 +18,14 @@ from .constants import (
     SESSION_BEFORE_TREE,
     SESSION_COMPACT,
     SESSION_SHUTDOWN,
-    SESSION_START,
     SESSION_TREE,
 )
 
 
 @dataclass
-class SessionStartEvent:
-    type: Literal["session_start"] = SESSION_START
-    reason: Literal["new", "reload", "switch", "fork"] = "new"
-    previous_session_file: Optional[str] = None
-
-
-@dataclass
 class SessionShutdownEvent:
     type: Literal["session_shutdown"] = SESSION_SHUTDOWN
-    reason: Literal["dispose", "reload", "switch"] = "dispose"
+    reason: Literal["quit", "reload", "new", "resume", "fork"] = "quit"
     target_session_file: Optional[str] = None
 
 

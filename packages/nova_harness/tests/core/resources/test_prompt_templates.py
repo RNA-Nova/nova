@@ -10,7 +10,6 @@ from nova_harness.core.resources.loaders.prompt_templates import (
     _dedupe_prompts,
     _is_under_path,
     _load_template_from_file,
-    _load_templates_from_dir,
     _normalize_path,
     _resolve_prompt_path,
     expand_prompt_template,
@@ -19,7 +18,7 @@ from nova_harness.core.resources.loaders.prompt_templates import (
     parse_command_args,
     substitute_args,
 )
-from nova_harness.core.types.resource import PromptTemplate
+from nova_harness.core.types.resources.prompts import PromptTemplate
 
 
 def test_parse_command_args_respects_quotes():
@@ -57,6 +56,18 @@ def test_substitute_args_sliced():
     assert substitute_args("${@:2:1}", ["a", "b", "c"]) == "b"
 
 
+def test_substitute_args_default_present():
+    assert substitute_args("Hello ${1:-World}", ["Alice"]) == "Hello Alice"
+
+
+def test_substitute_args_default_missing():
+    assert substitute_args("Hello ${1:-World}", []) == "Hello World"
+
+
+def test_substitute_args_default_empty():
+    assert substitute_args("Hello ${1:-World}", [""]) == "Hello World"
+
+
 def test_load_template_from_file(tmp_path: Path):
     file_path = tmp_path / "greet.md"
     file_path.write_text(
@@ -77,33 +88,91 @@ def test_load_template_from_file_uses_body_first_line(tmp_path: Path):
     assert "Header line" in template.description
 
 
+def test_load_template_from_file_argument_hint(tmp_path: Path):
+    file_path = tmp_path / "greet.md"
+    file_path.write_text(
+        "---\nname: greet\ndescription: Greeting\nargument-hint: name\n---\n\nHello!",
+        encoding="utf-8",
+    )
+    template = _load_template_from_file(str(file_path), "project", "(project)")
+    assert template is not None
+    assert template.argument_hint == "name"
+
+
 def test_load_template_from_file_missing(tmp_path: Path):
     assert (
         _load_template_from_file(str(tmp_path / "missing.md"), "user", "(user)") is None
     )
 
 
-def test_load_templates_from_dir(tmp_path: Path):
+def test_load_prompt_templates_from_dir(tmp_path: Path):
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+
     (tmp_path / "a.md").write_text("content A", encoding="utf-8")
     (tmp_path / "b.md").write_text("content B", encoding="utf-8")
     (tmp_path / "ignore.txt").write_text("text", encoding="utf-8")
 
-    templates = _load_templates_from_dir(str(tmp_path), "path", "(path)")
-    names = {t.name for t in templates}
+    result = load_prompt_templates(
+        LoadPromptTemplatesOptions(
+            cwd=str(tmp_path),
+            agent_dir=str(tmp_path / "agent"),
+            prompt_paths=[str(tmp_path)],
+        )
+    )
+    names = {t.name for t in result}
     assert names == {"a", "b"}
 
 
-def test_load_templates_from_dir_nonexistent():
-    assert _load_templates_from_dir("/nonexistent/path", "user", "(user)") == []
+def test_load_prompt_templates_from_dir_nonexistent(tmp_path: Path):
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+
+    result = load_prompt_templates(
+        LoadPromptTemplatesOptions(
+            cwd=str(tmp_path),
+            agent_dir=str(tmp_path / "agent"),
+            prompt_paths=["/nonexistent/path"],
+        )
+    )
+    assert result == []
 
 
-def test_load_templates_from_dir_symlink_to_file(tmp_path: Path):
-    target = tmp_path / "target.md"
-    target.write_text("symlink content", encoding="utf-8")
-    link = tmp_path / "link.md"
-    link.symlink_to(target)
-    templates = _load_templates_from_dir(str(tmp_path), "user", "(user)")
-    assert len(templates) == 2
+def test_load_prompt_templates_from_dir_recursive(tmp_path: Path):
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+
+    (tmp_path / "a.md").write_text("content A", encoding="utf-8")
+    nested = tmp_path / "sub"
+    nested.mkdir()
+    (nested / "b.md").write_text("content B", encoding="utf-8")
+
+    result = load_prompt_templates(
+        LoadPromptTemplatesOptions(
+            cwd=str(tmp_path),
+            agent_dir=str(tmp_path / "agent"),
+            prompt_paths=[str(tmp_path)],
+        )
+    )
+    names = {t.name for t in result}
+    assert names == {"a", "b"}
+
+
+def test_load_prompt_templates_from_dir_respects_nested_ignore(tmp_path: Path):
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+
+    (tmp_path / "a.md").write_text("content A", encoding="utf-8")
+    nested = tmp_path / "sub"
+    nested.mkdir()
+    (nested / "b.md").write_text("content B", encoding="utf-8")
+    (nested / ".ignore").write_text("b.md\n", encoding="utf-8")
+
+    result = load_prompt_templates(
+        LoadPromptTemplatesOptions(
+            cwd=str(tmp_path),
+            agent_dir=str(tmp_path / "agent"),
+            prompt_paths=[str(tmp_path)],
+        )
+    )
+    names = {t.name for t in result}
+    assert names == {"a"}
 
 
 def test_normalize_path_tilde():
@@ -160,7 +229,7 @@ def test_load_prompt_templates_defaults(tmp_path: Path):
 
 
 def test_load_prompt_templates_with_explicit_paths(tmp_path: Path):
-    from nova_harness.core.types.resource import LoadPromptTemplatesOptions
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
 
     extra_dir = tmp_path / "extra"
     extra_dir.mkdir()
@@ -171,7 +240,6 @@ def test_load_prompt_templates_with_explicit_paths(tmp_path: Path):
             cwd=str(tmp_path),
             agent_dir=str(tmp_path / "agent"),
             prompt_paths=[str(extra_dir)],
-            include_defaults=False,
         )
     )
     assert len(result) == 1
@@ -179,7 +247,7 @@ def test_load_prompt_templates_with_explicit_paths(tmp_path: Path):
 
 
 def test_load_prompt_templates_with_file_path(tmp_path: Path):
-    from nova_harness.core.types.resource import LoadPromptTemplatesOptions
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
 
     f = tmp_path / "single.md"
     f.write_text("single", encoding="utf-8")
@@ -188,21 +256,19 @@ def test_load_prompt_templates_with_file_path(tmp_path: Path):
             cwd=str(tmp_path),
             agent_dir=str(tmp_path / "agent"),
             prompt_paths=[str(f)],
-            include_defaults=False,
         )
     )
     assert len(result) == 1
 
 
 def test_load_prompt_templates_skips_missing_path(tmp_path: Path):
-    from nova_harness.core.types.resource import LoadPromptTemplatesOptions
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
 
     result = load_prompt_templates(
         LoadPromptTemplatesOptions(
             cwd=str(tmp_path),
             agent_dir=str(tmp_path / "agent"),
             prompt_paths=[str(tmp_path / "missing")],
-            include_defaults=False,
         )
     )
     assert result == []
@@ -228,11 +294,11 @@ def test_dedupe_prompts_records_collision():
     result = _dedupe_prompts(prompts)
     assert len(result["prompts"]) == 1
     assert len(result["diagnostics"]) == 1
-    assert result["diagnostics"][0]["type"] == "collision"
+    assert result["diagnostics"][0].category == "collision"
 
 
 def test_load_prompt_templates_with_diagnostics(tmp_path: Path):
-    from nova_harness.core.types.resource import LoadPromptTemplatesOptions
+    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
 
     extra_dir = tmp_path / "extra"
     extra_dir.mkdir()
@@ -243,7 +309,6 @@ def test_load_prompt_templates_with_diagnostics(tmp_path: Path):
             cwd=str(tmp_path),
             agent_dir=str(tmp_path / "agent"),
             prompt_paths=[str(extra_dir)],
-            include_defaults=False,
         )
     )
     assert len(result["prompts"]) == 1

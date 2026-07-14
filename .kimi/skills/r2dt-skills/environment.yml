@@ -1,0 +1,8 @@
+name: r2dt
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  # R2DT 通过 Docker 镜像分发，请确保系统已安装并启用 Docker：
+  #   docker --version

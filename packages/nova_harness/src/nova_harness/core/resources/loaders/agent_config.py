@@ -1,11 +1,10 @@
 """Agent 配置加载实现。
 
-负责从文件系统加载 Agent 配置源文件（description.md、sections/、tools.json、
-setup.md、user/），并按 Nova 资源优先级（全局 -> 项目级）合并结果。
+负责从文件系统加载 Agent 配置源文件（agent.yaml、description.md、sections/），
+并按 Nova 资源优先级合并结果。
 """
 
 import glob
-import json
 import os
 import re
 from pathlib import Path
@@ -13,60 +12,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from nova_harness.core.config.defaults import CONFIG_DIR_NAME
-from nova_harness.core.types.agent_config import AgentConfig, Section, ToolInfo
+from nova_harness.core.types.agent.config import AgentConfig, Section, ToolInfo
+from nova_harness.core.types.package_manager import ResolvedResource
+from nova_harness.core.utils.files import load_text_file
 
 # =============================================================================
 # 文件级加载
 # =============================================================================
-
-
-def load_text_file(file_path: str) -> Optional[str]:
-    """安全加载文本文件。"""
-    if not os.path.exists(file_path):
-        return None
-
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            return content if content else None
-    except (IOError, UnicodeDecodeError):
-        return None
-
-
-def load_json_file(file_path: str) -> Optional[dict]:
-    """安全加载 JSON 文件。"""
-    if not os.path.exists(file_path):
-        return None
-
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
-
-
-def load_tools(tools_file: str) -> List[ToolInfo]:
-    """
-    加载 tools.json 为 ToolInfo 列表。
-
-    格式示例：
-    [
-      {"name": "read_file", "description": "读取文件..."},
-      {"name": "write_file", "description": "写入文件..."}
-    ]
-    """
-    data = load_json_file(tools_file)
-    if not isinstance(data, list):
-        return []
-
-    tools = []
-    for item in data:
-        if isinstance(item, dict) and "name" in item:
-            tools.append(
-                ToolInfo(name=item["name"], description=item.get("description", ""))
-            )
-    return tools
 
 
 def load_sections(sections_dir: str, source_label: str = "system") -> List[Section]:
@@ -114,41 +66,12 @@ def load_sections(sections_dir: str, source_label: str = "system") -> List[Secti
     return sections
 
 
-def load_user_sections_recursive(user_dir: str) -> List[Section]:
-    """递归加载 user/ 目录的所有 Markdown 文件。"""
-    sections = []
-
-    if not os.path.exists(user_dir):
-        return sections
-
-    md_files = []
-    for root, _, files in os.walk(user_dir):
-        for filename in sorted(files):
-            if filename.endswith(".md"):
-                filepath = os.path.join(root, filename)
-                relpath = os.path.relpath(filepath, user_dir)
-                md_files.append((filepath, relpath))
-
-    md_files.sort(key=lambda x: x[1])
-
-    for order, (filepath, relpath) in enumerate(md_files, start=1):
-        content = load_text_file(filepath)
-        if content:
-            name = relpath.replace(".md", "").replace(os.sep, "/")
-            sections.append(
-                Section(
-                    name=name, order=order, content=content, source=f"user:{relpath}"
-                )
-            )
-
-    return sections
-
-
-def _parse_description_md(file_path: str) -> Tuple[Dict[str, Any], Optional[str]]:
+def _parse_description_md(
+    file_path: str,
+) -> Tuple[Dict[str, Any], Optional[str]]:
     """解析 description.md，支持可选 YAML frontmatter。
 
-    返回 (frontmatter_dict, body_text)。
-    没有 frontmatter 时返回 ({}, original_text)。
+    返回 (frontmatter_dict, body_text)。没有 frontmatter 时 body 为原文本。
     """
     content = load_text_file(file_path)
     if content is None:
@@ -161,20 +84,74 @@ def _parse_description_md(file_path: str) -> Tuple[Dict[str, Any], Optional[str]
     if len(parts) < 3:
         return {}, content
 
+    body = parts[2].strip() or None
     try:
         frontmatter = yaml.safe_load(parts[1]) or {}
     except yaml.YAMLError:
-        frontmatter = {}
+        return {}, body
 
-    body = parts[2].strip() or None
     return frontmatter, body
 
 
+def _load_agent_yaml(agent_yaml_path: str) -> Dict[str, Any]:
+    """加载 agent.yaml 为字典，失败时返回空字典。"""
+    if not os.path.exists(agent_yaml_path):
+        return {}
+
+    try:
+        with open(agent_yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
+    except yaml.YAMLError:
+        return {}
+
+
+def _parse_tool_items(items: List[Any]) -> List[ToolInfo]:
+    """把 agent.yaml/frontmatter 中的 tool 条目解析为 ToolInfo 列表。"""
+    tools: List[ToolInfo] = []
+    seen: set = set()
+
+    for item in items or []:
+        if isinstance(item, str):
+            name = item.strip()
+            if name and name not in seen:
+                seen.add(name)
+                tools.append(ToolInfo(name=name, description=""))
+        elif isinstance(item, dict) and "name" in item:
+            name = str(item["name"]).strip()
+            if name and name not in seen:
+                seen.add(name)
+                tools.append(
+                    ToolInfo(
+                        name=name,
+                        description=item.get("description", ""),
+                        parameters=item.get("parameters"),
+                        prompt_snippet=item.get("prompt_snippet"),
+                        prompt_guidelines=item.get("prompt_guidelines"),
+                    )
+                )
+
+    return tools
+
+
+def _parse_string_list(items: List[Any]) -> List[str]:
+    """把字符串列表过滤、去重。"""
+    seen: set = set()
+    result: List[str] = []
+    for item in items or []:
+        if isinstance(item, str):
+            value = item.strip()
+            if value and value not in seen:
+                seen.add(value)
+                result.append(value)
+    return result
+
+
 def _merge_tools(
-    file_tools: List[ToolInfo], frontmatter_tools: Optional[List[Any]]
+    yaml_tools: List[ToolInfo], frontmatter_tools: Optional[List[Any]]
 ) -> List[ToolInfo]:
-    """合并 tools.json 与 frontmatter 中的 tools，按 name 去重。"""
-    seen = {t.name: t for t in file_tools}
+    """合并 agent.yaml 与 frontmatter 中的 tools，按 name 去重。"""
+    seen = {t.name: t for t in yaml_tools}
 
     for item in frontmatter_tools or []:
         if isinstance(item, str):
@@ -191,27 +168,81 @@ def _merge_tools(
     return list(seen.values())
 
 
+def _merge_string_lists(
+    yaml_values: List[str], frontmatter_values: Optional[List[Any]]
+) -> List[str]:
+    """合并 agent.yaml 与 frontmatter 中的字符串列表，按顺序去重。"""
+    seen: set = set()
+    result: List[str] = []
+
+    for value in yaml_values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+
+    for item in frontmatter_values or []:
+        if isinstance(item, str):
+            value = item.strip()
+            if value and value not in seen:
+                seen.add(value)
+                result.append(value)
+
+    return result
+
+
 def load_agent_config_from_dir(agent_dir: str) -> Optional[AgentConfig]:
     """加载单个 Agent 配置目录为 AgentConfig。"""
     directory = Path(agent_dir)
+
+    agent_yaml_path = directory / "agent.yaml"
     description_file = directory / "description.md"
-    if not description_file.exists():
+
+    # 至少要存在 agent.yaml 或 description.md 才认为是一个 agent 目录
+    if not agent_yaml_path.exists() and not description_file.exists():
         return None
 
-    frontmatter, description = _parse_description_md(str(description_file))
-    file_tools = load_tools(str(directory / "tools.json"))
-    tools = _merge_tools(file_tools, frontmatter.get("tools"))
+    agent_data = _load_agent_yaml(str(agent_yaml_path))
+    frontmatter, description_body = (
+        _parse_description_md(str(description_file))
+        if description_file.exists()
+        else ({}, None)
+    )
+
+    # 名称优先用 agent.yaml 里的，否则用目录名
+    name = agent_data.get("name") or directory.name
+
+    yaml_tools = _parse_tool_items(agent_data.get("tools"))
+    tools = _merge_tools(yaml_tools, frontmatter.get("tools"))
+
+    subagents = _merge_string_lists(
+        _parse_string_list(agent_data.get("subagents")),
+        frontmatter.get("subagents"),
+    )
+    skills = _merge_string_lists(
+        _parse_string_list(agent_data.get("skills")),
+        frontmatter.get("skills"),
+    )
+    extensions = _merge_string_lists(
+        _parse_string_list(agent_data.get("extensions")),
+        frontmatter.get("extensions"),
+    )
+
+    description = (
+        agent_data.get("description")
+        or frontmatter.get("description")
+        or description_body
+    )
 
     return AgentConfig(
-        name=directory.name,
+        name=name,
         agent_dir=str(directory),
         description=description,
-        model=frontmatter.get("model"),
-        subagents=frontmatter.get("subagents") or [],
+        model=agent_data.get("model") or frontmatter.get("model"),
+        subagents=subagents,
         sections=load_sections(str(directory / "sections"), source_label="system"),
         tools=tools,
-        setup_content=load_text_file(str(directory / "setup.md")) or None,
-        user_sections=load_user_sections_recursive(str(directory / "user")),
+        skills=skills,
+        extensions=extensions,
     )
 
 
@@ -232,42 +263,32 @@ def load_agents(agents_dir: str) -> Dict[str, AgentConfig]:
     return agents
 
 
-# Backward-compatible alias
-def load_agent_definitions(definitions_dir: str) -> Dict[str, AgentConfig]:
-    """已废弃，请使用 :func:`load_agents`。"""
-    return load_agents(definitions_dir)
-
-
 # =============================================================================
 # Resource 级加载
 # =============================================================================
 
 
-def load_agent_config(cwd: str, agent_dir: str) -> Dict[str, AgentConfig]:
-    """
-    按资源优先级加载所有可用 Agent 配置。
+def load_agent_configs(
+    resolved_paths: Optional[List[ResolvedResource]] = None,
+) -> Dict[str, AgentConfig]:
+    """根据 resolver 给出的 Agent 路径加载配置。
 
-    先加载全局配置，再由项目级配置覆盖同名配置。
+    路径已按优先级排序，后续配置会覆盖同名配置。
     """
     agents: Dict[str, AgentConfig] = {}
-
-    global_agents = load_agents(str(Path(agent_dir) / "agents"))
-    agents.update(global_agents)
-
-    project_agents = load_agents(str(Path(cwd) / CONFIG_DIR_NAME / "agents"))
-    agents.update(project_agents)
-
+    for resource in resolved_paths or []:
+        if not resource.enabled:
+            continue
+        config = load_agent_config_from_dir(resource.path)
+        if config is not None:
+            agents[config.name] = config
     return agents
 
 
 __all__ = [
     "load_agent_config",
-    "load_text_file",
-    "load_json_file",
-    "load_tools",
+    "load_agent_configs",
     "load_sections",
-    "load_user_sections_recursive",
     "load_agent_config_from_dir",
     "load_agents",
-    "load_agent_definitions",
 ]

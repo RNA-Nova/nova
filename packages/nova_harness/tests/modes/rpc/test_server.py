@@ -21,6 +21,7 @@ def _make_fake_runtime():
     runtime.session.session_id = "session-1"
     runtime.session.session_name = "Test Session"
     runtime.session.subscribe = MagicMock()
+    runtime.session.bind_extensions = AsyncMock()
     return runtime
 
 
@@ -135,16 +136,20 @@ class TestNovaRpcServerHandleMessage:
         }
 
     async def test_create_session_binds_events(self, server):
-        """createSession 成功后应调用 bind_session_events 订阅事件。"""
+        """createSession 成功后应绑定扩展并订阅事件。"""
         fake_runtime = _make_fake_runtime()
         with patch(
-            "nova_harness.modes.rpc.methods.create_agent_session",
+            "nova_harness.modes.rpc.methods.create_agent_session_runtime",
             new=AsyncMock(return_value=fake_runtime),
         ):
             await server._handle_message(
                 {"id": 6, "method": "createSession", "params": {"cwd": "/tmp"}}
             )
 
+        fake_runtime.session.bind_extensions.assert_awaited_once()
+        bindings = fake_runtime.session.bind_extensions.call_args.args[0]
+        assert bindings["mode"] == "rpc"
+        assert bindings["ui_context"] is server._ui_context
         fake_runtime.session.subscribe.assert_called_once()
         assert server._methods.runtime is fake_runtime
         written = self._capture_write(server)
@@ -162,6 +167,30 @@ class TestNovaRpcServerHandleMessage:
         """消息中没有 method 键时不应发送任何响应。"""
         await server._handle_message({"id": 7, "params": {}})
         server._transport.write.assert_not_called()
+
+    async def test_create_session_registers_rebind_hook(self, server):
+        """createSession 应注册 rebind hook，hook 触发时重新绑定扩展并订阅事件。"""
+        fake_runtime = _make_fake_runtime()
+        fake_runtime.set_rebind_session = MagicMock()
+        with patch(
+            "nova_harness.modes.rpc.methods.create_agent_session_runtime",
+            new=AsyncMock(return_value=fake_runtime),
+        ):
+            await server._handle_message(
+                {"id": 8, "method": "createSession", "params": {"cwd": "/tmp"}}
+            )
+
+        fake_runtime.set_rebind_session.assert_called_once()
+        rebind_cb = fake_runtime.set_rebind_session.call_args.args[0]
+
+        new_session = MagicMock()
+        new_session.bind_extensions = AsyncMock()
+        await rebind_cb(new_session)
+        new_session.bind_extensions.assert_awaited_once()
+        bindings = new_session.bind_extensions.call_args.args[0]
+        assert bindings["mode"] == "rpc"
+        assert bindings["ui_context"] is server._ui_context
+        new_session.subscribe.assert_called_once_with(server._on_agent_event)
 
 
 class TestNovaRpcServerRunLoop:

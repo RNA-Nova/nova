@@ -9,25 +9,17 @@
 """
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Mapping, Optional
 
 from nova_harness.core.types.extensions import ExtensionCommand
-from nova_harness.core.types.skills import Skill
+from nova_harness.core.types.skills import ParsedSkillBlock, Skill
 from nova_harness.core.utils.frontmatter import strip_frontmatter
-from nova_harness.core.utils.skills import format_skills_for_prompt, list_skill_commands
-
-
-def _escape_xml(value: str) -> str:
-    """对 XML 属性/文本进行简单转义（与 TypeScript 侧保持一致）。"""
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&apos;")
-    )
+from nova_harness.core.utils.skills import (
+    _escape_xml,
+    format_skills_for_prompt,
+    list_skill_commands,
+)
 
 
 def expand_skill_command(text: str, skills: Mapping[str, Skill]) -> str:
@@ -68,16 +60,6 @@ def expand_skill_command(text: str, skills: Mapping[str, Skill]) -> str:
     if args:
         return f"{block}\n\n{args}"
     return block
-
-
-@dataclass(frozen=True)
-class ParsedSkillBlock:
-    """从用户消息中解析出的 skill block。"""
-
-    name: str
-    location: str
-    content: str
-    user_message: Optional[str] = None
 
 
 _SKILL_BLOCK_RE = re.compile(

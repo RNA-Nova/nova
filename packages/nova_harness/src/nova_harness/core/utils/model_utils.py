@@ -83,3 +83,6 @@ def clamp_thinking_level(
         if preferred in supported:
             return preferred
     return supported[0]
+
+
+__all__ = ["models_are_equal", "get_supported_thinking_levels", "clamp_thinking_level"]

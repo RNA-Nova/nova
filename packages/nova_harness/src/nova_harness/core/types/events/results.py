@@ -35,6 +35,11 @@ class MessageEndEventResult:
 
 
 @dataclass
+class BeforeProviderRequestEventResult:
+    payload: Any = None
+
+
+@dataclass
 class BeforeAgentStartEventResult:
     message: Optional[AgentMessage] = None
     system_prompt: Optional[str] = None
@@ -97,3 +102,23 @@ class PrepareNextTurnEventResult:
 @dataclass
 class ShouldStopAfterTurnEventResult:
     stop: bool = False
+
+
+@dataclass
+class AfterProviderResponseEventResult:
+    payload: Any = None
+
+
+@dataclass
+class ModelSelectEventResult:
+    model: Any = None
+
+
+@dataclass
+class ThinkingLevelSelectEventResult:
+    level: Any = None
+
+
+@dataclass
+class SessionShutdownEventResult:
+    cancelled: bool = False

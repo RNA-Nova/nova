@@ -12,7 +12,7 @@ from nova_harness.core.types.skills import Skill
 
 
 def _escape_xml(value: str) -> str:
-    """对 XML 属性/文本进行简单转义（与 TypeScript 侧保持一致）。"""
+    """对 XML 属性/文本进行简单转义。"""
     return (
         value.replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -75,6 +75,7 @@ def list_skill_commands(skills: dict[str, Skill]) -> list[ExtensionCommand]:
 
 
 __all__ = [
+    "_escape_xml",
     "format_skills_for_prompt",
     "list_skill_commands",
 ]

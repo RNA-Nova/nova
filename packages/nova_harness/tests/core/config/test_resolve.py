@@ -8,17 +8,17 @@ from unittest.mock import patch
 import pytest
 
 from nova_harness.core.config.resolve import (
-    clear_config_value_cache,
     resolve_config_value,
     resolve_headers,
 )
+from tests._helpers.resolve import clear_command_cache
 
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    clear_config_value_cache()
+    clear_command_cache()
     yield
-    clear_config_value_cache()
+    clear_command_cache()
 
 
 def test_resolve_config_value_returns_env_variable():

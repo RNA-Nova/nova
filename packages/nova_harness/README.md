@@ -23,9 +23,9 @@ poetry install
 - `nova-ai`（本地路径依赖）
 - `nova-agent`（本地路径依赖）
 - `pydantic ^2.0`
-- `json-repair >= 1.0`
 - `pyyaml ^6.0`
 - `filelock ^3.0`
+- `tomli ^2.0.1`（Python < 3.11）
 
 ## 运行测试
 

@@ -1,13 +1,17 @@
 """Edit tool executor —— 批量替换文件中的文本片段。"""
 
 import difflib
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from nova_agent import AbortSignal, AgentToolResult
 from nova_ai import TextContent
-from nova_harness.core.tools_common.file_queue import with_file_write_lock
-from nova_harness.core.tools_common.path_utils import is_path_traversal, resolve_path
+
+from nova_coding_agent.tools_common.file_queue import with_file_write_lock
+from nova_coding_agent.tools_common.operations import (
+    EditOperations,
+    create_local_edit_operations,
+)
+from nova_coding_agent.tools_common.path_utils import is_path_traversal, resolve_path
 
 
 def _detect_line_endings(text: str) -> str:
@@ -24,27 +28,13 @@ def _strip_bom(text: str) -> Tuple[str, str]:
     return text, ""
 
 
-def _apply_edits(text: str, edits: List[Dict[str, str]]) -> Tuple[str, int, List[str]]:
-    """依次应用 edits，返回 (新内容, 总替换次数, diff 列表)。"""
-    total = 0
-    diffs = []
-    for edit in edits:
-        old_text = edit.get("oldText", "")
-        new_text = edit.get("newText", "")
-        if old_text == "":
-            diffs.append("⚠️ 跳过空 oldText 的编辑项")
-            continue
-        count = text.count(old_text)
-        if count == 0:
-            diffs.append(f"❌ 未找到: {old_text[:40]!r}")
-            continue
-        text = text.replace(old_text, new_text)
-        total += count
-        diffs.append(f"✅ {count} 处替换: {old_text[:40]!r} -> {new_text[:40]!r}")
-    return text, total, diffs
-
-
 class ToolExecutor:
+    def __init__(
+        self,
+        operations: Optional[EditOperations] = None,
+    ):
+        self.operations = operations or create_local_edit_operations()
+
     async def execute(
         self,
         tool_call_id: str,
@@ -88,27 +78,21 @@ class ToolExecutor:
 
         path = resolve_path(path)
 
-        if not os.path.exists(path):
-            return AgentToolResult(
-                content=[
-                    TextContent(type="text", text=f"## ❌ 文件不存在\n\n路径: `{path}`")
-                ],
-                details={"error": "File not found", "path": path},
-            )
-
         try:
             async with with_file_write_lock(path):
-                with open(path, "r", encoding=encoding) as f:
-                    original = f.read()
+                original = await self.operations.read_text(path, encoding=encoding)
 
-                original, bom = _strip_bom(original)
-                line_sep = _detect_line_endings(original)
+                original_stripped, bom = _strip_bom(original)
+                line_sep = _detect_line_endings(original_stripped)
 
                 # 统一用 \n 处理，编辑完成后再恢复
-                normalized = original.replace("\r\n", "\n")
-                new_text, total, diffs = _apply_edits(normalized, edits)
+                normalized = original_stripped.replace("\r\n", "\n")
+                result = self.operations.apply_edits(normalized, edits)
 
-                if total == 0:
+                if result.error:
+                    raise RuntimeError(result.error)
+
+                if result.total_replacements == 0:
                     return AgentToolResult(
                         content=[
                             TextContent(
@@ -119,23 +103,23 @@ class ToolExecutor:
                         details={
                             "error": "No edits applied",
                             "path": path,
-                            "details": diffs,
+                            "details": result.diffs,
                         },
                     )
 
                 # 恢复换行符与 BOM
+                new_text = result.new_text
                 if line_sep == "\r\n":
                     new_text = new_text.replace("\n", "\r\n")
                 final_text = bom + new_text
 
-                with open(path, "w", encoding=encoding) as f:
-                    f.write(final_text)
+                await self.operations.write_text(path, final_text, encoding=encoding)
 
             # 生成 diff 摘要
             diff_lines = list(
                 difflib.unified_diff(
-                    original.splitlines(),
-                    new_text.splitlines(),
+                    original_stripped.splitlines(),
+                    result.new_text.splitlines(),
                     lineterm="",
                     n=2,
                 )
@@ -144,12 +128,12 @@ class ToolExecutor:
             if len(diff_lines) > 40:
                 diff_summary += "\n...（diff 过长，已截断）"
 
-            edits_summary = "\n".join(diffs)
+            edits_summary = "\n".join(result.diffs)
             msg = f"""## ✅ 文件编辑成功
 
 **路径**: `{path}`
-**总替换次数**: {total}
-**字符变化**: {len(final_text) - len(bom + original):+d}
+**总替换次数**: {result.total_replacements}
+**字符变化**: {len(final_text) - len(bom + original_stripped):+d}
 
 **编辑详情**:
 {edits_summary}
@@ -162,9 +146,9 @@ class ToolExecutor:
                 content=[TextContent(type="text", text=msg)],
                 details={
                     "path": path,
-                    "replacements": total,
-                    "delta": len(final_text) - len(bom + original),
-                    "details": diffs,
+                    "replacements": result.total_replacements,
+                    "delta": len(final_text) - len(bom + original_stripped),
+                    "details": result.diffs,
                 },
             )
         except Exception as e:

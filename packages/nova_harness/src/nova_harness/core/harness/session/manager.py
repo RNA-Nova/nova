@@ -2,6 +2,7 @@
 Session Manager - Core session management class
 """
 
+import asyncio
 import json
 import os
 from datetime import datetime
@@ -280,7 +281,7 @@ class SessionManager:
         first_kept_entry_id: str,
         tokens_before: int,
         details: Optional[Any] = None,
-        from_hook: bool = False,
+        from_hook: Optional[bool] = None,
     ) -> str:
         """追加压缩条目"""
         entry = CompactionEntry(
@@ -434,7 +435,7 @@ class SessionManager:
         branch_from_id: Optional[str],
         summary: str,
         details: Optional[Any] = None,
-        from_hook: bool = False,
+        from_hook: Optional[bool] = None,
     ) -> str:
         """带摘要的分支"""
         if branch_from_id is not None and branch_from_id not in self._by_id:
@@ -538,11 +539,19 @@ class SessionManager:
         return cls(cwd, dir_path, None, True)
 
     @classmethod
-    def open(cls, path: str, session_dir: Optional[str] = None) -> "SessionManager":
+    def open(
+        cls,
+        path: str,
+        session_dir: Optional[str] = None,
+        cwd_override: Optional[str] = None,
+    ) -> "SessionManager":
         """打开指定会话"""
         entries = load_entries_from_file(path)
         header = next((e for e in entries if isinstance(e, SessionHeader)), None)
-        cwd = header.cwd if header and hasattr(header, "cwd") else os.getcwd()
+        if cwd_override is not None:
+            cwd = cwd_override
+        else:
+            cwd = header.cwd if header and hasattr(header, "cwd") else os.getcwd()
         dir_path = (
             session_dir
             if session_dir is not None
@@ -590,7 +599,7 @@ class SessionManager:
         cls, on_progress: Optional[Callable[[int, int], None]] = None
     ) -> List[SessionInfo]:
         """列出所有会话"""
-        sessions_dir = get_sessions_dir()
+        sessions_dir = str(get_sessions_dir())
 
         try:
             if not os.path.exists(sessions_dir):
@@ -618,8 +627,6 @@ class SessionManager:
                     dir_files.append([])
 
             # 限制并发数处理所有文件
-            import asyncio
-
             semaphore = asyncio.Semaphore(10)
             loaded = 0
             sessions = []

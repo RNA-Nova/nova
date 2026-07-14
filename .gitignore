@@ -143,3 +143,6 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+# pixi environments
+.pixi/*
+!.pixi/config.toml

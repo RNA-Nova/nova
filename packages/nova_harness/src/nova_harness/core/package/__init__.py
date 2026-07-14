@@ -1,22 +1,37 @@
-"""Package manager for Nova agent configs, tools, and bundles.
+"""Package manager for Nova agent configs, tools, skills, extensions, and packages.
 
 Install, uninstall, list, update, and validate packages from local paths or git::
 
     >>> from nova_harness.core.package import PackageManager
     >>> pm = PackageManager()
     >>>
-    >>> # Install a single agent config
-    >>> pm.install("/path/to/my_agent", kind="agent")
+    >>> # Install a bundle and persist it to settings
+    >>> pm.install_and_persist("/path/to/nova_coding_agent")
     >>>
-    >>> # Install a bundle (agents + tools)
-    >>> pm.install("git:github.com/liujinming/nova-coding-agent@v1.0.0")
+    >>> # Resolve all runtime resources
+    >>> paths = await pm.resolve_resources()
     >>>
-    >>> for pkg in pm.list():
-    ...     print(f"{pkg.name} ({pkg.kind}) @ {pkg.version} from {pkg.source}")
-    >>>
-    >>> pm.uninstall("my_agent", kind="agent")
+    >>> pm.uninstall("nova-coding-agent")
+
+The public facade is `PackageManager`. Lower-level building blocks are also
+exported for advanced use cases:
+
+- `PackageInstaller`: install / uninstall / list / info / validate
+- `PackageResolver`: runtime resource path resolution
 """
 
-from nova_harness.core.package.core import PackageManager
+from nova_harness.core.package.installer import PackageInstaller
+from nova_harness.core.package.manager import (
+    PackageInstallError,
+    PackageManager,
+    PackageUpdateError,
+)
+from nova_harness.core.package.resolver import PackageResolver
 
-__all__ = ["PackageManager"]
+__all__ = [
+    "PackageInstallError",
+    "PackageManager",
+    "PackageInstaller",
+    "PackageResolver",
+    "PackageUpdateError",
+]

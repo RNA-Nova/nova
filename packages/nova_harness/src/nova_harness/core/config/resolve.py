@@ -65,9 +65,3 @@ def resolve_headers(headers: Optional[Dict[str, str]]) -> Optional[Dict[str, str
             resolved[key] = resolved_value
 
     return resolved if resolved else None
-
-
-def clear_config_value_cache() -> None:
-    """Clear the config value command cache. Exported for testing."""
-    with _cache_lock:
-        _command_result_cache.clear()

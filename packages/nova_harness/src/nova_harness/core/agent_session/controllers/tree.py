@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
+
+from nova_agent import AbortController
 
 from nova_harness.core.harness.compaction import branch_summarization as _branch_module
-from nova_harness.core.types.agent import NavigateOptions
 from nova_harness.core.types.compaction import GenerateBranchSummaryOptions
 from nova_harness.core.types.events import SessionTreeEvent
+from nova_harness.core.types.events.constants import SESSION_BEFORE_TREE
+from nova_harness.core.types.protocols import AgentSessionProtocol
+from nova_harness.core.types.session.options import NavigateOptions
 from nova_harness.core.utils.messages import extract_text_from_content
-
-if TYPE_CHECKING:
-    from nova_harness.core.agent_session.agent import AgentSession
 
 
 class TreeNavigator:
     """封装 AgentSession 的会话树导航与分支摘要生成。"""
 
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
 
     def _extract_user_message_text(self, content: Any) -> str:
@@ -66,7 +67,7 @@ class TreeNavigator:
 
         # session_before_tree 扩展 hook
         runner = self._session._extension_runner
-        if runner is not None and runner.has_handlers("session_before_tree"):
+        if runner is not None and runner.has_handlers(SESSION_BEFORE_TREE):
             from nova_harness.core.types.events import (
                 SessionBeforeTreeEvent,
                 TreePreparation,
@@ -82,14 +83,14 @@ class TreeNavigator:
                 replace_instructions=replace_instructions,
                 label=label,
             )
-            self._session._branch_summary_abort_controller = type(
-                "AbortController", (), {"aborted": False}
-            )()
+            self._session._branch_summary_abort_controller = AbortController(
+                "branch_summary"
+            )
             try:
                 result = await runner.emit(
                     SessionBeforeTreeEvent(
                         preparation=prep,
-                        signal=self._session._branch_summary_abort_controller,
+                        signal=self._session._branch_summary_abort_controller.signal,
                     )
                 )
                 if getattr(result, "cancel", False):
@@ -114,9 +115,9 @@ class TreeNavigator:
             summary_text = None
             summary_details = None
             from_extension = False
-            self._session._branch_summary_abort_controller = type(
-                "AbortController", (), {"aborted": False}
-            )()
+            self._session._branch_summary_abort_controller = AbortController(
+                "branch_summary"
+            )
 
         # 生成默认摘要
         if summarize and collect_result.entries and summary_text is None:
@@ -139,7 +140,7 @@ class TreeNavigator:
                     GenerateBranchSummaryOptions(
                         model=self._session.model,
                         api_key=api_key,
-                        signal=self._session._branch_summary_abort_controller,
+                        signal=self._session._branch_summary_abort_controller.signal,
                         custom_instructions=custom_instructions,
                         replace_instructions=replace_instructions,
                         reserve_tokens=reserve,

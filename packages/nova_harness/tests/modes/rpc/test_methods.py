@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nova_harness.core.types.package_manager import UninstallResult
 from nova_harness.modes.rpc.errors import JSONRPCError
 from nova_harness.modes.rpc.methods import RpcMethods
 
@@ -24,7 +25,7 @@ def _make_fake_runtime():
     runtime.session.session_name = "Test Session"
     runtime.session.prompt = AsyncMock()
     runtime.session.abort = AsyncMock()
-    runtime.session.set_model = AsyncMock()
+    runtime.session.set_model = AsyncMock(return_value=True)
     runtime.session.get_active_tool_names = MagicMock(return_value=["bash", "read"])
     runtime.session.change_agent = MagicMock()
 
@@ -77,7 +78,7 @@ class TestRpcMethodsCreateSession:
         """patch create_agent_session 并返回 fake runtime。"""
         fake_runtime = _make_fake_runtime()
         with patch(
-            "nova_harness.modes.rpc.methods.create_agent_session",
+            "nova_harness.modes.rpc.methods.create_agent_session_runtime",
             new=AsyncMock(return_value=fake_runtime),
         ) as mock:
             yield mock, fake_runtime
@@ -129,11 +130,15 @@ class TestRpcMethodsPrompt:
         return methods
 
     async def test_prompt_success(self, methods_with_runtime):
-        """prompt 应将 text 转发给 session.prompt。"""
+        """prompt 应将 text 和 options 转发给 session.prompt。"""
+
         methods = methods_with_runtime
         result = await methods.prompt({"text": "hello"})
         assert result == {"ok": True}
-        methods.runtime.session.prompt.assert_awaited_once_with("hello")
+        methods.runtime.session.prompt.assert_awaited_once()
+        call_args = methods.runtime.session.prompt.await_args
+        assert call_args.args == ("hello",)
+        assert call_args.kwargs["options"].source == "rpc"
 
     async def test_prompt_without_session(self):
         """无活跃 session 时应抛 JSONRPCError。"""
@@ -417,7 +422,7 @@ class TestRpcMethodsCreateSessionBranches:
     def patched_create_session(self):
         fake_runtime = _make_fake_runtime()
         with patch(
-            "nova_harness.modes.rpc.methods.create_agent_session",
+            "nova_harness.modes.rpc.methods.create_agent_session_runtime",
             new=AsyncMock(return_value=fake_runtime),
         ) as mock:
             yield mock, fake_runtime
@@ -701,7 +706,7 @@ class TestRpcMethodsPackageManager:
         fake_view.model_dump.return_value = {"name": "bundle"}
         with patch("nova_harness.core.package.PackageManager") as mock_pm_cls:
             pm = MagicMock()
-            pm.list_by_bundle.return_value = {"bundle": fake_view}
+            pm.list_with_resources.return_value = {"bundle": fake_view}
             mock_pm_cls.return_value = pm
 
             result = await methods.pkgList({})
@@ -713,25 +718,23 @@ class TestRpcMethodsPackageManager:
         fake_meta.model_dump.return_value = {"name": "pkg"}
         with patch("nova_harness.core.package.PackageManager") as mock_pm_cls:
             pm = MagicMock()
-            pm.install.return_value = fake_meta
+            pm.install_and_persist.return_value = fake_meta
             mock_pm_cls.return_value = pm
 
-            result = await methods.pkgInstall(
-                {"source": "/path", "kind": "tool", "name": "t"}
-            )
+            result = await methods.pkgInstall({"source": "/path"})
             assert result == {"name": "pkg"}
-            pm.install.assert_called_once_with("/path", kind="tool", name="t")
+            pm.install_and_persist.assert_called_once_with("/path", local=False)
 
     async def test_pkg_uninstall(self):
         methods = RpcMethods()
         with patch("nova_harness.core.package.PackageManager") as mock_pm_cls:
             pm = MagicMock()
-            pm.uninstall.return_value = True
+            pm.uninstall.return_value = UninstallResult(removed=True, messages=[])
             mock_pm_cls.return_value = pm
 
-            result = await methods.pkgUninstall({"name": "pkg", "kind": "tool"})
-            assert result == {"ok": True}
-            pm.uninstall.assert_called_once_with("pkg", kind="tool")
+            result = await methods.pkgUninstall({"name_or_source": "pkg"})
+            assert result == {"ok": True, "messages": []}
+            pm.uninstall.assert_called_once_with("pkg", local=False)
 
     async def test_pkg_info_found(self):
         methods = RpcMethods()
@@ -742,7 +745,7 @@ class TestRpcMethodsPackageManager:
             pm.info.return_value = fake_meta
             mock_pm_cls.return_value = pm
 
-            result = await methods.pkgInfo({"name": "pkg", "kind": "tool"})
+            result = await methods.pkgInfo({"name_or_source": "pkg"})
             assert result == {"name": "pkg"}
 
     async def test_pkg_info_not_found(self):
@@ -752,5 +755,28 @@ class TestRpcMethodsPackageManager:
             pm.info.return_value = None
             mock_pm_cls.return_value = pm
 
-            result = await methods.pkgInfo({"name": "pkg", "kind": "tool"})
+            result = await methods.pkgInfo({"name_or_source": "pkg"})
             assert result is None
+
+    async def test_pkg_list_uses_session_trust_state(self):
+        methods = RpcMethods()
+        fake_settings = MagicMock()
+        fake_settings.is_project_trusted.return_value = True
+        runtime = _make_fake_runtime()
+        runtime.session.settings_manager = fake_settings
+        runtime.session.cwd = "/project"
+        methods.set_runtime(runtime)
+
+        fake_view = MagicMock()
+        fake_view.model_dump.return_value = {"name": "bundle"}
+        with patch("nova_harness.core.package.PackageManager") as mock_pm_cls:
+            pm = MagicMock()
+            pm.list_with_resources.return_value = {"bundle": fake_view}
+            mock_pm_cls.return_value = pm
+
+            await methods.pkgList({"local": True})
+            mock_pm_cls.assert_called_once_with(
+                cwd="/project",
+                settings_manager=fake_settings,
+                project_trusted=True,
+            )

@@ -5,10 +5,22 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import AbortSignal, AgentToolResult
 from nova_ai import TextContent
-from nova_harness.core.tools_common.path_utils import is_path_traversal, resolve_path
+
+from nova_coding_agent.tools_common.operations import (
+    LsOperations,
+    LsOptions,
+    create_local_ls_operations,
+)
+from nova_coding_agent.tools_common.path_utils import is_path_traversal, resolve_path
 
 
 class ToolExecutor:
+    def __init__(
+        self,
+        operations: Optional[LsOperations] = None,
+    ):
+        self.operations = operations or create_local_ls_operations()
+
     async def execute(
         self,
         tool_call_id: str,
@@ -17,7 +29,7 @@ class ToolExecutor:
         on_update=None,
     ):
         path = params.get("path") or "."
-        limit = params.get("limit", 100)
+        limit = params.get("limit", 500)
 
         if is_path_traversal(path):
             return AgentToolResult(
@@ -48,25 +60,26 @@ class ToolExecutor:
             )
 
         try:
-            entries: List[str] = []
-            for name in sorted(os.listdir(path)):
-                full = os.path.join(path, name)
-                suffix = "/" if os.path.isdir(full) else ""
-                entries.append(f"{name}{suffix}")
-
-            total = len(entries)
-            displayed = entries[:limit]
-            truncated = total > limit
+            entries, truncated = await self.operations.list_dir(
+                LsOptions(path=path, limit=limit)
+            )
 
             lines = [
-                f"## 📁 目录列表\n\n**路径**: `{path}`\n**条目数**: {total}{'（已截断）' if truncated else ''}\n"
+                f"## 📁 目录列表\n\n**路径**: `{path}`\n**条目数**: {len(entries) + (1 if truncated else 0)}{'（已截断）' if truncated else ''}\n"
             ]
-            lines.extend(displayed)
+            for entry in entries:
+                suffix = "/" if entry.is_directory else ""
+                lines.append(f"{entry.name}{suffix}")
 
             msg = "\n".join(lines)
             return AgentToolResult(
                 content=[TextContent(type="text", text=msg)],
-                details={"path": path, "total": total, "displayed": len(displayed)},
+                details={
+                    "path": path,
+                    "total": len(entries) + (1 if truncated else 0),
+                    "displayed": len(entries),
+                    "truncated": truncated,
+                },
             )
         except Exception as e:
             return AgentToolResult(
