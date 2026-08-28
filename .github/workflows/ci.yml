@@ -55,3 +55,18 @@ jobs:
         run: |
           python -m pip install -e . pytest pytest-asyncio
           python -m pytest tests -q -m "not integration"
+
+  # 仓库卫生：大二进制/产物文件门禁（防污染回归——白名单见内）
+  blob-size:
+    name: blob-size 门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查 tracked 文件无 >1MB（lock 文件除外）
+        run: |
+          big=$(git ls-files | grep -vE '^(Cargo\.lock|pixi\.lock|.*Cargo\.lock)$' | while read -r f; do
+            if [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1048576 ]; then echo "$f ($(wc -c < "$f") bytes)"; fi
+          done)
+          if [ -n "$big" ]; then echo "::error::大二进制/产物文件进了库："; echo "$big"; exit 1; fi
+          echo "无 >1MB 的非 lock 文件"

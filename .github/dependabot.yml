@@ -1,0 +1,30 @@
+# Dependabot 配置：依赖更新自动 PR
+# https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  # Rust：executor workspace
+  - package-ecosystem: cargo
+    directory: packages/nova_executor
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  # Python：根 pixi workspace（pyproject.toml）+ 各子包
+  - package-ecosystem: pip
+    directories:
+      - "/"
+      - packages/nova-executor-py
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  # GitHub Actions 自身
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
