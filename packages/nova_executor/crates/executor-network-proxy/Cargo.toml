@@ -1,0 +1,53 @@
+[package]
+name = "nova-executor-network-proxy"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_executor_network_proxy"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+globset = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+nova-executor-utils-absolute-path = { workspace = true }
+nova-executor-utils-rustls-provider = { workspace = true }
+rama-core = { workspace = true }
+rama-http = { workspace = true }
+rama-http-backend = { workspace = true }
+rama-net = { workspace = true }
+rama-socks5 = { workspace = true }
+rama-tcp = { workspace = true }
+rama-tls-rustls = { workspace = true }
+
+[target.'cfg(target_family = "unix")'.dependencies]
+rama-unix = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.52"
+features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+]
+
+[target.'cfg(windows)'.dev-dependencies]
+nova-executor-windows-sandbox = { workspace = true }

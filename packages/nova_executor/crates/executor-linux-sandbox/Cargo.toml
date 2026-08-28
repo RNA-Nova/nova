@@ -1,0 +1,40 @@
+[package]
+name = "nova-executor-linux-sandbox"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_executor_linux_sandbox"
+path = "src/lib.rs"
+doctest = false
+
+# 二进制名保持 codex 原样：argv0 互操作契约（executor-sandboxing 的
+# CODEX_LINUX_SANDBOX_ARG0 按此名字自我 re-exec），照 executor-windows-sandbox
+# 保留 helper 原名的先例。
+[[bin]]
+name = "codex-linux-sandbox"
+path = "src/main.rs"
+
+# 实现为 Linux-only（bubblewrap + landlock + seccomp），依赖全部按 target
+# 门控；其他平台只编译 stub `run_main`。
+[target.'cfg(target_os = "linux")'.dependencies]
+clap = { workspace = true, features = ["derive"] }
+globset = { workspace = true }
+landlock = { workspace = true }
+libc = { workspace = true }
+nova-executor-network-proxy = { path = "../executor-network-proxy" }
+nova-executor-protocol-core = { path = "../executor-protocol-core" }
+nova-executor-sandboxing = { path = "../executor-sandboxing" }
+nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path" }
+rustix = { workspace = true }
+seccompiler = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+url = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+test-case = "3.3.1"

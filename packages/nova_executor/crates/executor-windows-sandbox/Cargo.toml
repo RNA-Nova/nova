@@ -1,0 +1,89 @@
+[package]
+name = "nova-executor-windows-sandbox"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+name = "nova_executor_windows_sandbox"
+path = "src/lib.rs"
+doctest = false
+
+# 二进制名保持 codex 原样：helper_materialization 按文件名查找/落盘这两个
+# helper（与 executor-sandboxing 保留 CODEX_LINUX_SANDBOX_ARG0 等 argv 契约一致）。
+[[bin]]
+name = "codex-windows-sandbox-setup"
+path = "src/bin/setup_main/main.rs"
+
+[[bin]]
+name = "codex-command-runner"
+path = "src/bin/command_runner/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+dunce = { workspace = true }
+glob = "0.3"
+nova-executor-otel = { path = "../executor-otel" }
+nova-executor-protocol-core = { path = "../executor-protocol-core" }
+nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path" }
+nova-executor-utils-pty = { path = "../executor-utils-pty" }
+nova-executor-utils-string = { path = "../executor-utils-string" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "macros", "signal", "time"] }
+tracing-appender = "0.2.3"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_WindowsFirewall",
+    "Win32_System_Com",
+    "Win32_System_Variant",
+] }
+
+# 与 codex 原版一致固定 rand 0.8（SmallRng::from_entropy / r#gen 旧 API），
+# 不与 workspace 的 rand 0.9 混用，避免改动 Windows-only 代码而无法本地验证。
+[dependencies.rand]
+default-features = false
+features = ["std", "small_rng"]
+version = "0.8"
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_System_SystemServices",
+    "Win32_System_Environment",
+    "Win32_System_Pipes",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_IO",
+    "Win32_System_Memory",
+    "Win32_System_Kernel",
+    "Win32_System_Console",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_NetworkManagement_NetManagement",
+    "Win32_NetworkManagement_WindowsFilteringPlatform",
+    "Win32_Networking_WinSock",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Authentication_Identity",
+    "Win32_System_Rpc",
+    "Win32_Graphics_Gdi",
+    "Win32_System_StationsAndDesktops",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_System_Registry",
+]
+version = "0.52"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

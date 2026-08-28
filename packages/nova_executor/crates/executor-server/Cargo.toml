@@ -1,0 +1,97 @@
+[package]
+name = "nova-executor-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_executor_server"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+toml = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+gethostname = { workspace = true }
+http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+nova-executor-protocol = { workspace = true }
+nova-executor-file-system = { workspace = true }
+nova-executor-sandboxing = { workspace = true }
+nova-executor-utils-absolute-path = { workspace = true }
+nova-executor-utils-path-uri = { workspace = true }
+nova-executor-utils-pty = { workspace = true }
+nova-executor-protocol-core = { workspace = true }
+nova-executor-network-proxy = { workspace = true }
+nova-executor-utils-home-dir = { workspace = true }
+nova-executor-utils-rustls-provider = { workspace = true }
+nova-executor-http-client = { workspace = true }
+nova-executor-websocket-client = { workspace = true }
+nova-executor-otel = { workspace = true }
+nova-executor-shell-command = { workspace = true }
+
+# WebSocket server
+axum = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+# TLS / 安全
+rustls = { workspace = true }
+
+# Noise 协议
+clatter = { workspace = true }
+prost = "0.14.3"
+arc-swap = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+# 沙箱开门 fd 传递：SCM_RIGHTS 收发（net）与 CLOEXEC 设置（fs）
+rustix = { version = "1.1.4", features = ["net", "fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    # no_follow 原语：SECURITY_QUALITY_OF_SERVICE / SecurityIdentification
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    # no_follow 原语：IO_STATUS_BLOCK
+    "Win32_System_IO",
+    # no_follow 原语：OBJ_CASE_INSENSITIVE / OBJ_DONT_REPARSE
+    "Win32_System_Kernel",
+    # no_follow windows 测试：CreateNamedPipeW
+    "Win32_System_Pipes",
+    # 沙箱开门句柄复制：OpenProcess / GetCurrentProcess / DuplicateHandle
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+ctor = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+serial_test = { workspace = true }
+test-case = "3.3.1"
+tokio = { workspace = true, features = ["test-util"] }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+wiremock = { workspace = true }
+nova-executor-network-proxy = { workspace = true }
+
+# chatgpt_cloudflare_affinity 集成测试：自建 MITM 代理需要就地签发证书
+rcgen = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+nova-executor-windows-sandbox = { workspace = true }
