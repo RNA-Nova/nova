@@ -150,3 +150,5 @@ pnpm-lock.yaml
 
 # 依赖 vendor 化（离线打包用，不进库）
 vendor/
+.kimi/
+.nova/settings.json.lock
