@@ -42,7 +42,7 @@ from nova_agent import (
     CustomAgentMessage,
 
     # 类型别名与枚举
-    ThinkingLevel,
+    ModelThinkingLevel,
     StreamFn,
     AgentToolUpdateCallback,
     ToolExecutionMode,
@@ -130,7 +130,7 @@ Agent(
 | 方法 | 说明 |
 |------|------|
 | `set_model(model: Model)` | 设置模型 |
-| `set_thinking_level(level: ThinkingLevel)` | 设置思考级别 |
+| `set_thinking_level(level: ModelThinkingLevel)` | 设置思考级别 |
 | `set_system_prompt(value: str)` | 设置系统提示词 |
 | `set_tools(tools: List[AgentTool])` | 设置工具列表 |
 | `replace_messages(messages: List[AgentMessage])` | 替换历史消息 |
@@ -250,7 +250,7 @@ AgentMessage = Union[Message, CustomAgentMessage]
 |------|------|------|
 | `system_prompt` | `Optional[str]` | 系统提示词 |
 | `model` | `Optional[Model]` | 当前模型 |
-| `thinking_level` | `Optional[ThinkingLevel]` | 思考级别 |
+| `thinking_level` | `ModelThinkingLevel` | 思考级别（默认 `OFF`） |
 | `tools` | `List[Any]` | 工具列表 |
 | `messages` | `List[AgentMessage]` | 对话历史 |
 | `is_streaming` | `bool` | 是否正在运行 |
@@ -262,7 +262,7 @@ AgentMessage = Union[Message, CustomAgentMessage]
 
 ## `AgentLoopConfig`
 
-`AgentLoopConfig` 继承 `nova_ai.SimpleStreamOptions`，因此也包含 `reasoning`、`session_id`、`transport`、`thinking_budgets`、`max_retry_delay_ms`、`on_payload`、`on_response` 等字段。
+`AgentLoopConfig` 是 dataclass，通过组合持有 `stream_options: SimpleStreamOptions`（传给 `nova_ai` 的纯数据选项，含 `reasoning`、`session_id`、`transport`、`thinking_budgets`、`max_retry_delay_ms`、`on_payload`、`on_response` 等字段），下表所列为其自身的运行时回调与策略字段。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -338,7 +338,7 @@ AgentMessage = Union[Message, CustomAgentMessage]
 |------|------|------|
 | `context` | `Optional[AgentContext]` | 替换下一轮使用的上下文 |
 | `model` | `Optional[Model]` | 替换下一轮使用的模型 |
-| `thinking_level` | `Optional[ThinkingLevel]` | 替换下一轮思考级别 |
+| `thinking_level` | `Optional[ModelThinkingLevel]` | 替换下一轮思考级别 |
 
 ---
 
@@ -405,7 +405,7 @@ from nova_agent import (
 | `StreamFn` | Protocol | 可同步或异步返回 stream 的函数签名 |
 | `ToolExecutionMode` | `Literal["parallel", "sequential"]` | 工具执行策略 |
 | `QueueMode` | `Literal["all", "one-at-a-time"]` | 队列 drain 策略 |
-| `ThinkingLevel` | 来自 `nova_ai` | 思考级别：`"low"` / `"medium"` / `"high"` 等，依模型而定 |
+| `ModelThinkingLevel` | 来自 `nova_ai` | 思考级别：`"low"` / `"medium"` / `"high"` 等，依模型而定 |
 
 ---
 

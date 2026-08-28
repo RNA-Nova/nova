@@ -7,9 +7,9 @@ from .base import (
     AgentMessage,
     AgentToolCall,
     CustomAgentMessage,
+    ModelThinkingLevel,
     QueueMode,
     StreamFn,
-    ThinkingLevel,
     ToolExecutionMode,
 )
 from .context import AgentContext, AgentLoopConfig
@@ -44,13 +44,6 @@ from .tool_execution import (
     PreparedToolCall,
 )
 
-# Resolve forward references now that AgentContext is available.
-BeforeToolCallContext.model_rebuild()
-AfterToolCallContext.model_rebuild()
-ShouldStopAfterTurnContext.model_rebuild()
-PrepareNextTurnContext.model_rebuild()
-AgentLoopTurnUpdate.model_rebuild()
-
 __all__ = [
     # base
     "AgentEventSink",
@@ -59,7 +52,7 @@ __all__ = [
     "CustomAgentMessage",
     "QueueMode",
     "StreamFn",
-    "ThinkingLevel",
+    "ModelThinkingLevel",
     "ToolExecutionMode",
     # context
     "AgentContext",

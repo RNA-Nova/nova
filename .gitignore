@@ -136,6 +136,7 @@ poetry.lock
 sessions/
 *.session
 *.auth.json
+.nova/
 
 # Node.js
 node_modules/
@@ -146,3 +147,6 @@ pnpm-lock.yaml
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# 依赖 vendor 化（离线打包用，不进库）
+vendor/

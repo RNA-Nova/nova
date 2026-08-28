@@ -2,23 +2,25 @@
 Tool execution intermediate types used by the agent loop.
 """
 
+from dataclasses import dataclass, field
 from typing import Any, List, Literal, Union
 
 from nova_ai import ToolResultMessage
-from nova_ai.types.base_model import NovaBaseModel
 
 from .base import AgentToolCall
 from .tool import AgentToolResult
 
 
-class ExecutedToolCallOutcome(NovaBaseModel):
+@dataclass(frozen=True)
+class ExecutedToolCallOutcome:
     """Raw outcome after a tool has been executed."""
 
     result: AgentToolResult[Any]
     is_error: bool
 
 
-class FinalizedToolCallOutcome(NovaBaseModel):
+@dataclass(frozen=True)
+class FinalizedToolCallOutcome:
     """Final outcome after afterToolCall hooks have been applied."""
 
     tool_call: AgentToolCall
@@ -26,24 +28,31 @@ class FinalizedToolCallOutcome(NovaBaseModel):
     is_error: bool
 
 
-class ExecutedToolCallBatch(NovaBaseModel):
+@dataclass(frozen=True)
+class ExecutedToolCallBatch:
     """Batch of tool result messages produced from a single assistant message."""
 
-    messages: List[ToolResultMessage] = []
+    messages: List[ToolResultMessage] = field(default_factory=list)
     terminate: bool = False
 
 
-class _ImmediateToolCallOutcome(NovaBaseModel):
-    kind: Literal["immediate"] = "immediate"
+@dataclass(frozen=True)
+class _ImmediateToolCallOutcome:
+    """A tool call whose outcome was determined during preparation (e.g. error or block)."""
+
     result: AgentToolResult[Any]
     is_error: bool
+    kind: Literal["immediate"] = field(default="immediate", init=False)
 
 
-class _PreparedToolCallModel(NovaBaseModel):
-    kind: Literal["prepared"] = "prepared"
+@dataclass(frozen=True)
+class _PreparedToolCallModel:
+    """A tool call that has been prepared and is ready for execution."""
+
     tool_call: AgentToolCall
     tool: Any
     args: Any
+    kind: Literal["prepared"] = field(default="prepared", init=False)
 
 
 PreparedToolCall = Union[_PreparedToolCallModel, _ImmediateToolCallOutcome]

@@ -124,7 +124,7 @@ options = SimpleStreamOptions(
 |------|------|------|
 | `temperature` | `float` | 采样温度，默认 1.0 |
 | `max_tokens` | `int` | 最大输出 token 数 |
-| `reasoning` | `ThinkingLevel` | 推理级别：`OFF`, `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, `XHIGH` |
+| `reasoning` | `ThinkingLevel` | 推理级别：`MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, `XHIGH`；不传（`None`）表示关闭思考 |
 | `thinking_budgets` | `ThinkingBudgets` | 各级别的 token 预算 |
 | `api_key` | `str` | 显式 API key（覆盖环境变量） |
 | `transport` | `Transport` | 传输层配置 |

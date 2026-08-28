@@ -1,32 +1,35 @@
 # nova_ai 示例
 
-本目录包含可直接在 Jupyter 中运行的示例 Notebook，帮助理解 `nova_ai` 的公共 API。
+本目录包含可直接运行的 Python 示例，覆盖 nova_ai 的核心能力。所有示例默认离线运行（mock 协议实现），真实 API 调用部分依赖环境变量中的 API Key，未设置时自动跳过。
 
 ## 环境要求
 
 - Python >= 3.9
-- 已安装 `nova_ai`：`cd packages/nova_ai && poetry install`
-- 至少配置一个厂商的 API Key（示例默认使用 Volcengine）：
+- 已安装 `nova_ai`（pixi workspace 或 `pip install -e packages/nova_ai`）
 
-```bash
-export VOLCENGINE_API_KEY="3b631f71-6bd6-464a-9abc-b0e8d19f25d7"
-# 或
-# export OPENAI_API_KEY=""  # 本地未设置，已注释
-```
-
-## Notebook 列表
+## 示例列表
 
 | 文件 | 主题 |
 |------|------|
-| `01-quickstart.ipynb` | 最简流式对话：配置 Key、发起 `stream_simple`、消费事件、获取最终消息 |
-| `02-multi-provider.ipynb` | 查看已注册 provider/model，并演示同一接口切换不同厂商模型 |
-| `03-tools.ipynb` | 定义 `Tool`、让模型生成 `ToolCall`、本地执行、构造 `ToolResultMessage` 并继续对话 |
+| `01_quickstart.py` | 最小用法：mock 协议模块 + `builtin_models()` 真实调用 |
+| `02_stream_events.py` | 流式事件类型详解：text / thinking / toolcall 事件的消费顺序 |
+| `03_models_and_providers.py` | Models 注册表：内置 provider、自定义 provider 注册、动态模型目录（`fetch_models`） |
+| `04_auth.py` | Auth 解析链：环境变量、`options.api_key` 覆盖、动态 key 注入 |
 
 ## 运行方式
 
 ```bash
 cd packages/nova_ai
-jupyter lab examples/
+python examples/01_quickstart.py
 ```
 
-打开任意 Notebook 后按顺序执行单元格即可。需要真实 API Key 的 Notebook 在首个代码单元格中提示设置环境变量。
+## 真实 API 调用
+
+示例中的真实调用默认使用 Volcengine（也可自行替换为其他 provider）：
+
+```bash
+export VOLCENGINE_API_KEY="<your-key>"
+python examples/01_quickstart.py
+```
+
+> **注意**：请勿在示例中写入真实 API Key。所有 key 一律通过环境变量注入。

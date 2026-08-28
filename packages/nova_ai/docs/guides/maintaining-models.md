@@ -140,7 +140,7 @@ thinking_level_map={
 
 规则：
 
-- 如果 `reasoning=False`，`get_supported_thinking_levels()` 只返回 `["off"]`
+- 如果 `reasoning=False`，`get_supported_thinking_levels()` 只返回 `[ModelThinkingLevel.OFF]`
 - 如果 `thinking_level_map` 中某级别映射为 `None`，该级别不受支持
 - `xhigh` 默认不受支持，除非 `thinking_level_map` 中显式定义
 

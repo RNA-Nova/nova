@@ -5,174 +5,45 @@ nova_agent Agent 包装类单元测试
 """
 
 import asyncio
-from typing import Any, Callable, List
+from typing import Any, List
 
 import pytest
+from helpers import (
+    AbortableTool,
+    EchoTool,
+    abortable_tool_call_stream,
+    make_assistant_message,
+    text_stream,
+    tool_call_stream,
+    tool_call_then_text_stream,
+)
+from nova_ai import (
+    DoneEvent,
+    EventStream,
+    ImageContent,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    ProviderResponse,
+    StartEvent,
+    TextContent,
+    ThinkingContent,
+    ThinkingDeltaEvent,
+    ThinkingEndEvent,
+    ThinkingStartEvent,
+    ToolCall,
+    UserMessage,
+)
 
 from nova_agent import (
     Agent,
     AgentContext,
     AgentLoopConfig,
-    AgentLoopTurnUpdate,
     AgentTool,
     AgentToolResult,
-    AbortSignal,
-    AfterToolCallContext,
-    AfterToolCallResult,
     BeforeToolCallContext,
-    BeforeToolCallResult,
-    PrepareNextTurnContext,
-    ShouldStopAfterTurnContext,
 )
-from nova_ai import (
-    AssistantMessage,
-    DoneEvent,
-    EventStream,
-    ImageContent,
-    Model,
-    ProviderResponse,
-    StartEvent,
-    TextContent,
-    TextDeltaEvent,
-    TextEndEvent,
-    ToolCall,
-    ToolCallEndEvent,
-    UserMessage,
-)
-from nova_ai import KnownApi, KnownProvider, ModelCost
-
-
-class EchoTool(AgentTool):
-    """基础 echo 工具。"""
-
-    name: str = "echo"
-    description: str = "Echo the input message"
-    parameters: dict = {
-        "type": "object",
-        "properties": {"message": {"type": "string"}},
-        "required": ["message"],
-    }
-    label: str = "Echo"
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        return AgentToolResult(
-            content=[TextContent(text=f"echo: {params.get('message', '')}")],
-            details={},
-        )
-
-
-class AbortableTool(AgentTool):
-    """可中断工具，用于测试 agent.abort()。"""
-
-    name: str = "abortable"
-    description: str = "Waits for abort signal"
-    parameters: dict = {"type": "object", "properties": {}}
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        for _ in range(100):
-            if signal and signal.aborted:
-                raise Exception("Operation aborted")
-            await asyncio.sleep(0.01)
-        return AgentToolResult(content=[TextContent(text="done")], details={})
-
-
-@pytest.fixture
-def dummy_model() -> Model:
-    return Model(
-        id="mock-model",
-        name="Mock Model",
-        api=KnownApi.OPENAI_COMPLETIONS,
-        provider=KnownProvider.OPENAI,
-        base_url="https://example.com",
-        max_tokens=4096,
-        context_window=8192,
-        input_types=["text"],
-        reasoning=False,
-        cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-    )
-
-
-def _make_assistant_message(
-    model: Model, content: List[Any], stop_reason: str = "stop"
-) -> AssistantMessage:
-    return AssistantMessage(
-        role="assistant",
-        content=content,
-        api=model.api,
-        provider=model.provider,
-        model=model.id,
-        stop_reason=stop_reason,
-    )
-
-
-def _text_stream(model: Model, text: str) -> EventStream:
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
-    partial = _make_assistant_message(model, [TextContent(text=text)])
-    stream.push(StartEvent(partial=partial))
-    if text:
-        stream.push(TextDeltaEvent(delta=text, partial=partial))
-        stream.push(TextEndEvent(content=text, partial=partial))
-    stream.push(DoneEvent(reason="stop", message=partial))
-    stream.end()
-    return stream
-
-
-def _tool_call_stream(model: Model, tool_name: str, arguments: dict) -> EventStream:
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
-    tool_call = ToolCall(id="tc-1", name=tool_name, arguments=arguments)
-    partial = _make_assistant_message(model, [tool_call], stop_reason="toolUse")
-    stream.push(StartEvent(partial=partial))
-    stream.push(ToolCallEndEvent(content_index=0, tool_call=tool_call, partial=partial))
-    stream.push(DoneEvent(reason="toolUse", message=partial))
-    stream.end()
-    return stream
-
-
-def _abortable_tool_call_stream(
-    tool_name: str, arguments: dict
-) -> Callable[[Model, Any, Any], EventStream]:
-    """第一次返回 tool call；若 signal 已 aborted，则返回 stop_reason='aborted' 的文本流。"""
-
-    def stream_fn(model: Model, context: Any, options: Any) -> EventStream:
-        signal = getattr(options, "signal", None)
-        if signal and signal.aborted:
-            partial = _make_assistant_message(
-                model, [TextContent(text="aborted")], stop_reason="aborted"
-            )
-            stream = EventStream(
-                is_complete=lambda e: getattr(e, "type", None) == "done",
-                extract_result=lambda e: e.message,
-            )
-            stream.push(StartEvent(partial=partial))
-            stream.push(DoneEvent(reason="aborted", message=partial))
-            stream.end()
-            return stream
-        return _tool_call_stream(model, tool_name, arguments)
-
-    return stream_fn
-
-
-def _tool_call_then_text_stream(
-    tool_name: str, arguments: dict, text: str = "ok"
-) -> Callable[[Model, Any, Any], EventStream]:
-    """第一次返回 tool call，之后返回固定文本。"""
-    step = 0
-
-    def stream_fn(model: Model, context: Any, options: Any) -> EventStream:
-        nonlocal step
-        step += 1
-        if step == 1:
-            return _tool_call_stream(model, tool_name, arguments)
-        return _text_stream(model, text)
-
-    return stream_fn
-
 
 # ------------------------------------------------------------------------------
 # 初始化与状态
@@ -201,7 +72,7 @@ def test_agent_init_custom_state(dummy_model):
 def test_agent_timeout_propagates_to_loop_config(dummy_model):
     agent = Agent(initial_state={"model": dummy_model}, timeout=123.0)
     config = agent._create_loop_config()
-    assert config.timeout == 123.0
+    assert config.stream_options.timeout == 123.0
 
 
 def test_agent_state_mutators(dummy_model):
@@ -233,12 +104,12 @@ def test_agent_state_mutators(dummy_model):
 
 @pytest.mark.asyncio
 async def test_agent_subscribe_and_unsubscribe(dummy_model):
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
 
     events: List[str] = []
 
-    def listener(event):
+    def listener(event, signal=None):
         events.append(event.type)
 
     unsub = agent.subscribe(listener)
@@ -258,11 +129,11 @@ async def test_agent_subscribe_and_unsubscribe(dummy_model):
 
 @pytest.mark.asyncio
 async def test_agent_prompt_basic(dummy_model):
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "hello"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "hello"))
     agent.set_model(dummy_model)
 
     events: List[str] = []
-    agent.subscribe(lambda e: events.append(e.type))
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
 
     await agent.prompt(UserMessage(role="user", content=[TextContent(text="hi")]))
 
@@ -274,7 +145,7 @@ async def test_agent_prompt_basic(dummy_model):
 
 @pytest.mark.asyncio
 async def test_agent_prompt_with_string_and_images(dummy_model):
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
 
     await agent.prompt(
@@ -288,7 +159,7 @@ async def test_agent_prompt_with_string_and_images(dummy_model):
 
 @pytest.mark.asyncio
 async def test_agent_continue_from_user_message(dummy_model):
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "continued"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "continued"))
     agent.set_model(dummy_model)
     agent.replace_messages([UserMessage(role="user", content=[TextContent(text="go")])])
 
@@ -312,8 +183,8 @@ async def test_agent_steer_queue_drained_on_continue(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _text_stream(model, "first")
-        return _text_stream(model, "steered")
+            return text_stream(model, "first")
+        return text_stream(model, "steered")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -340,8 +211,8 @@ async def test_agent_follow_up_queue_drained_on_continue(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _text_stream(model, "first")
-        return _text_stream(model, "followed")
+            return text_stream(model, "first")
+        return text_stream(model, "followed")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -371,14 +242,14 @@ async def test_agent_abort_during_tool_execution(dummy_model):
         return None
 
     agent = Agent(
-        stream_fn=_abortable_tool_call_stream("abortable", {}),
+        stream_fn=abortable_tool_call_stream("abortable", {}),
         before_tool_call=before,
     )
     agent.set_model(dummy_model)
     agent.set_tools([AbortableTool()])
 
     events: List[str] = []
-    agent.subscribe(lambda e: events.append(e.type))
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
 
     task = asyncio.create_task(agent.prompt("run"))
     await started.wait()
@@ -394,55 +265,12 @@ async def test_agent_abort_during_tool_execution(dummy_model):
 
 @pytest.mark.asyncio
 async def test_agent_wait_for_idle(dummy_model):
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
 
     await agent.prompt("hi")
     await agent.wait_for_idle()
     assert not agent.state.is_streaming
-
-
-def test_agent_reset(dummy_model):
-    agent = Agent()
-    agent.set_model(dummy_model)
-    agent.append_message(UserMessage(role="user", content=[TextContent(text="x")]))
-    agent.steer(UserMessage(role="user", content=[TextContent(text="y")]))
-    agent.follow_up(UserMessage(role="user", content=[TextContent(text="z")]))
-
-    agent.reset()
-
-    assert agent.state.messages == []
-    assert agent.state.error_message is None
-    assert not agent.state.is_streaming
-    assert not agent.has_queued_messages()
-
-
-@pytest.mark.asyncio
-async def test_agent_concurrent_prompt_raises(dummy_model):
-    async def slow_stream(model, context, options):
-        # async generator that waits a bit so the second prompt can collide
-        async def gen():
-            yield StartEvent(
-                partial=_make_assistant_message(model, [TextContent(text="x")])
-            )
-            await asyncio.sleep(0.1)
-            yield DoneEvent(
-                reason="stop",
-                message=_make_assistant_message(model, [TextContent(text="x")]),
-            )
-
-        return gen()
-
-    agent = Agent(stream_fn=slow_stream)
-    agent.set_model(dummy_model)
-
-    task = asyncio.create_task(agent.prompt("hi"))
-    await asyncio.sleep(0.01)
-
-    with pytest.raises(RuntimeError):
-        await agent.prompt("again")
-
-    await task
 
 
 # ------------------------------------------------------------------------------
@@ -455,20 +283,20 @@ async def test_agent_on_payload_and_on_response(dummy_model):
     payloads: List[Any] = []
     responses: List[ProviderResponse] = []
 
-    def on_payload(payload):
-        payloads.append(payload)
+    def on_payload(payload, model):
+        payloads.append((payload, model.id))
 
     def on_response(response, model):
         responses.append(response)
 
     def stream_fn(model, context, options):
         if options and options.on_payload:
-            options.on_payload({"model": model.id})
+            options.on_payload({"model": model.id}, model)
         if options and options.on_response:
             options.on_response(
                 ProviderResponse(status=200, headers={"x-test": "yes"}), model
             )
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn, on_payload=on_payload, on_response=on_response)
     agent.set_model(dummy_model)
@@ -476,7 +304,8 @@ async def test_agent_on_payload_and_on_response(dummy_model):
     await agent.prompt("hi")
 
     assert len(payloads) == 1
-    assert payloads[0]["model"] == dummy_model.id
+    assert payloads[0][0]["model"] == dummy_model.id
+    assert payloads[0][1] == dummy_model.id
     assert len(responses) == 1
     assert responses[0].status == 200
     assert responses[0].headers["x-test"] == "yes"
@@ -496,7 +325,7 @@ async def test_agent_convert_to_llm_hook(dummy_model):
         return messages
 
     agent = Agent(
-        stream_fn=lambda m, c, o: _text_stream(m, "ok"), convert_to_llm=convert
+        stream_fn=lambda m, c, o: text_stream(m, "ok"), convert_to_llm=convert
     )
     agent.set_model(dummy_model)
 
@@ -513,7 +342,7 @@ async def test_agent_transform_context_hook(dummy_model):
         return messages
 
     agent = Agent(
-        stream_fn=lambda m, c, o: _text_stream(m, "ok"), transform_context=transform
+        stream_fn=lambda m, c, o: text_stream(m, "ok"), transform_context=transform
     )
     agent.set_model(dummy_model)
 
@@ -529,93 +358,260 @@ async def test_agent_get_api_key_hook(dummy_model):
         called.append(provider)
         return "test-key"
 
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"), get_api_key=get_key)
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"), get_api_key=get_key)
     agent.set_model(dummy_model)
 
     await agent.prompt("hi")
     assert called == [dummy_model.provider]
 
 
+# ------------------------------------------------------------------------------
+# 无模型 fail-fast
+# ------------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_agent_should_stop_after_turn(dummy_model):
-    called = []
+async def test_agent_prompt_without_model_raises():
+    """未配置模型时 prompt 应立即报错，而不是走到 provider 层失败。"""
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    assert not agent.state.has_configured_model()
 
-    async def should_stop(ctx: ShouldStopAfterTurnContext):
-        called.append(True)
-        return True
+    with pytest.raises(RuntimeError, match="No model configured"):
+        await agent.prompt("hi")
 
-    agent = Agent(
-        stream_fn=lambda m, c, o: _text_stream(m, "stop here"),
-        should_stop_after_turn=should_stop,
+    assert agent.state.messages == []
+    assert not agent.state.is_streaming
+
+
+# ------------------------------------------------------------------------------
+# 监听器顺序与派发语义
+# ------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_listeners_called_in_subscription_order(dummy_model):
+    """监听器按订阅顺序逐个被调用（dict 保序）。"""
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    calls: List[str] = []
+    agent.subscribe(lambda e, signal=None: calls.append("first"))
+    agent.subscribe(lambda e, signal=None: calls.append("second"))
+
+    await agent.prompt("hi")
+
+    assert len(calls) > 0
+    assert len(calls) % 2 == 0
+    assert calls == ["first", "second"] * (len(calls) // 2)
+
+
+@pytest.mark.asyncio
+async def test_agent_listener_unsubscribe_during_dispatch(dummy_model):
+    """监听器在回调中退订其他监听器，不应打断或破坏本次派发（快照迭代）。"""
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    seen: List[tuple] = []
+    holder: dict = {}
+
+    def second(event, signal=None):
+        seen.append(("second", event.type))
+
+    def first(event, signal=None):
+        seen.append(("first", event.type))
+        holder["unsub_second"]()
+
+    holder["unsub_second"] = agent.subscribe(second)
+    agent.subscribe(first)
+
+    await agent.prompt("hi")
+
+    # 快照按事件派发：second 在 agent_start 派发期间被退订，
+    # 该事件不受影响（second 已收到），从下一个事件起不再收到。
+    second_events = [t for name, t in seen if name == "second"]
+    first_events = [t for name, t in seen if name == "first"]
+    assert second_events == ["agent_start"]
+    assert len(first_events) > len(second_events)
+    assert first_events[0] == "agent_start"
+    assert "agent_end" in first_events
+
+
+@pytest.mark.asyncio
+async def test_agent_sync_listener_returning_coroutine_is_awaited(dummy_model):
+    """同步函数返回 coroutine 的监听器也应被 await（isawaitable 语义）。"""
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    seen: List[str] = []
+
+    async def record(event_type: str) -> None:
+        seen.append(event_type)
+
+    def listener(event, signal=None):
+        # 非 async def，但返回 coroutine
+        return record(event.type)
+
+    agent.subscribe(listener)
+    await agent.prompt("hi")
+
+    assert "agent_start" in seen
+    assert "agent_end" in seen
+
+
+# ------------------------------------------------------------------------------
+# continue_ 错误路径
+# ------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_continue_without_messages_raises(dummy_model):
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    with pytest.raises(RuntimeError, match="No messages to continue from"):
+        await agent.continue_()
+
+
+@pytest.mark.asyncio
+async def test_agent_continue_from_assistant_without_queued_raises(dummy_model):
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+    await agent.prompt("hi")
+
+    # 末尾是 assistant 且 steering / follow_up 队列均为空
+    with pytest.raises(RuntimeError, match="assistant"):
+        await agent.continue_()
+
+
+# ------------------------------------------------------------------------------
+# thinking 内容块
+# ------------------------------------------------------------------------------
+
+
+def _thinking_stream(model: Model) -> EventStream:
+    stream = EventStream(
+        is_complete=lambda e: getattr(e, "type", None) == "done",
+        extract_result=lambda e: e.message,
     )
-    agent.set_model(dummy_model)
-
-    await agent.prompt("run")
-    assert called == [True]
-
-
-@pytest.mark.asyncio
-async def test_agent_before_tool_call_block(dummy_model):
-    async def before(ctx: BeforeToolCallContext, signal):
-        return BeforeToolCallResult(block=True, reason="test")
-
-    agent = Agent(
-        stream_fn=_tool_call_then_text_stream("echo", {"message": "x"}),
-        before_tool_call=before,
+    partial = make_assistant_message(
+        model,
+        [
+            ThinkingContent(type="thinking", thinking="let me think"),
+            TextContent(text="answer"),
+        ],
     )
-    agent.set_model(dummy_model)
-    agent.set_tools([EchoTool()])
-
-    await agent.prompt("run")
-    tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
-    assert tool_result.is_error is True
-    assert "test" in tool_result.content[0].text
-
-
-@pytest.mark.asyncio
-async def test_agent_after_tool_call_override(dummy_model):
-    async def after(ctx: AfterToolCallContext, signal):
-        return AfterToolCallResult(content=[TextContent(text="override")])
-
-    step = 0
-
-    async def stream_fn(model, context, options):
-        nonlocal step
-        step += 1
-        if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "x"})
-        return _text_stream(model, "ok")
-
-    agent = Agent(stream_fn=stream_fn, after_tool_call=after)
-    agent.set_model(dummy_model)
-    agent.set_tools([EchoTool()])
-
-    await agent.prompt("run")
-    tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
-    assert tool_result.content[0].text == "override"
+    stream.push(StartEvent(partial=partial))
+    stream.push(ThinkingStartEvent(content_index=0, partial=partial))
+    stream.push(
+        ThinkingDeltaEvent(content_index=0, delta="let me think", partial=partial)
+    )
+    stream.push(
+        ThinkingEndEvent(content_index=0, content="let me think", partial=partial)
+    )
+    stream.push(DoneEvent(reason="stop", message=partial))
+    stream.end()
+    return stream
 
 
 @pytest.mark.asyncio
-async def test_agent_prepare_next_turn_replaces_model_and_thinking_level(dummy_model):
-    new_model = dummy_model.model_copy(update={"id": "new-model"})
-    seen_models: List[str] = []
-    step = 0
+async def test_agent_thinking_content_preserved(dummy_model):
+    """流式 thinking 事件后，assistant 消息保留 thinking 内容块。"""
+    agent = Agent(stream_fn=lambda m, c, o: _thinking_stream(m))
+    agent.set_model(dummy_model)
 
-    async def stream_fn(model, context, options):
-        nonlocal step
-        step += 1
-        seen_models.append(model.id)
-        if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "x"})
-        return _text_stream(model, "done")
+    await agent.prompt("hi")
 
-    async def prepare(ctx: PrepareNextTurnContext):
-        return AgentLoopTurnUpdate(model=new_model, thinking_level="high")
+    last = agent.state.messages[-1]
+    assert last.role == "assistant"
+    assert [c.type for c in last.content] == ["thinking", "text"]
+    assert last.content[0].thinking == "let me think"
+    assert last.content[1].text == "answer"
 
-    agent = Agent(stream_fn=stream_fn, prepare_next_turn=prepare)
+
+# ------------------------------------------------------------------------------
+# pending_tool_calls 状态跟踪
+# ------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_pending_tool_calls_tracked(dummy_model):
+    """tool_execution_start/end 期间 pending_tool_calls 正确增减，run 结束后清空。"""
+    agent = Agent(stream_fn=tool_call_then_text_stream("echo", {"message": "x"}))
     agent.set_model(dummy_model)
     agent.set_tools([EchoTool()])
 
+    observed: List[bool] = []
+
+    def listener(event, signal=None):
+        if event.type == "tool_execution_start":
+            observed.append(event.tool_call_id in agent.state.pending_tool_calls)
+        elif event.type == "tool_execution_end":
+            observed.append(event.tool_call_id in agent.state.pending_tool_calls)
+
+    agent.subscribe(listener)
     await agent.prompt("run")
 
-    assert seen_models == [dummy_model.id, new_model.id]
+    assert observed == [True, False]
+    assert agent.state.pending_tool_calls == set()
+
+
+# ------------------------------------------------------------------------------
+# initial_state 严格校验 / wait_for_idle shield / convert_to_llm 无 role 过滤
+# ------------------------------------------------------------------------------
+
+
+def test_initial_state_rejects_unknown_keys(dummy_model):
+    """dict 形式 initial_state 含未知 key 时应立即 TypeError，而不是静默忽略。"""
+    with pytest.raises(TypeError, match="Unknown initial_state keys"):
+        Agent(initial_state={"model": dummy_model, "bogus_key": 1})
+
+
+def test_default_convert_to_llm_filters_messages_without_role(dummy_model):
+    """不带 role 字段的自定义消息应被默认 convert_to_llm 过滤而不是炸掉。"""
+    from nova_agent import CustomAgentMessage
+    from nova_agent.utils import default_convert_to_llm
+
+    class Notification(CustomAgentMessage):
+        text: str = ""
+
+    messages = [
+        UserMessage(role="user", content="hi"),
+        Notification(text="ui only"),
+    ]
+    out = default_convert_to_llm(messages)
+    assert len(out) == 1
+    assert out[0].role == "user"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_idle_shielded_from_cancellation(dummy_model):
+    """等待 wait_for_idle 的协程被取消时，正在运行的 run 不应被传染取消。"""
+
+    async def slow_stream(model, context, options):
+        # 让 run 持续一小段时间，保证 waiter 取消时 run 仍在进行
+        await asyncio.sleep(0.05)
+        return text_stream(model, "ok")
+
+    agent = Agent(stream_fn=slow_stream)
+    agent.set_model(dummy_model)
+
+    run_task = asyncio.create_task(agent.prompt("hi"))
+    # 等 run 真正开始（_running_task 已创建）
+    for _ in range(100):
+        if agent.state.is_streaming:
+            break
+        await asyncio.sleep(0)
+    assert agent.state.is_streaming
+
+    waiter = asyncio.create_task(agent.wait_for_idle())
+    # 让 waiter 进入 shield 等待
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    # run 不被影响，正常完成
+    await run_task
+    assert agent.state.messages[-1].role == "assistant"
+    assert not agent.state.is_streaming

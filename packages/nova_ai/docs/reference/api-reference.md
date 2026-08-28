@@ -325,8 +325,9 @@ get_all_env_api_keys()              # Dict[str, Optional[str]]
 
 ```python
 calculate_cost(model, usage)        # 返回 Cost，直接修改 usage.cost
-supports_xhigh_thinking(model)      # bool
-get_supported_thinking_levels(model)  # List[str]
+get_supported_thinking_levels(model)  # List[ModelThinkingLevel]
+clamp_thinking_level(model, level)    # ModelThinkingLevel（吸附到模型支持的级别）
+to_thinking_level(level)              # Optional[ThinkingLevel]（OFF/None → None）
 ```
 
 ### 溢出检测
@@ -371,6 +372,7 @@ class StreamOptions(NovaBaseModel):
     metadata: Optional[Dict[str, Any]] = None
     timeout: Optional[float] = None
     max_retries: Optional[int] = None
+    max_retry_delay_ms: Optional[int] = None
 
     signal: Optional[Any] = Field(default=None, exclude=True)
     on_payload: Optional[Callable] = Field(default=None, exclude=True)
@@ -391,6 +393,7 @@ class StreamOptions(NovaBaseModel):
 | `metadata` | `Dict[str, Any]` | 请求元数据，部分 provider 会记录 |
 | `timeout` | `float` | 单次请求超时（秒），透传给 OpenAI SDK |
 | `max_retries` | `int` | SDK 自动重试次数 |
+| `max_retry_delay_ms` | `int` | 单次重试等待上限（毫秒），约定默认 60000、0 为不封顶；仅供实现自有重试循环的 provider 消费，当前 openai-completions 不读取 |
 | `signal` | `AbortSignal` | 取消信号（不参与序列化） |
 | `on_payload` | `Callable` | 请求参数钩子（不参与序列化） |
 | `on_response` | `Callable[[ProviderResponse, Model], None]` | 原始 HTTP 响应钩子（不参与序列化） |
@@ -440,6 +443,15 @@ class StopReason(Enum):
     ABORTED = "aborted"
 
 class ThinkingLevel(Enum):
+    """请求侧思考级别（SimpleStreamOptions.reasoning）；关闭思考用 None。"""
+    MINIMAL = "minimal"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+
+class ModelThinkingLevel(Enum):
+    """状态侧思考级别（Agent/会话状态、UI 选择），OFF 表示关闭思考。"""
     OFF = "off"
     MINIMAL = "minimal"
     LOW = "low"

@@ -1,0 +1,7553 @@
+{
+  "$defs": {
+    "AbortResult": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "reason"
+      ],
+      "title": "AbortResult",
+      "type": "object"
+    },
+    "AbortUserToolParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "AbortUserToolParams",
+      "type": "object"
+    },
+    "AgentEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/AgentMessage"
+          },
+          "type": "array"
+        },
+        "type": {
+          "enum": [
+            "agent_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "messages"
+      ],
+      "title": "AgentEndEvent",
+      "type": "object"
+    },
+    "AgentEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "scope",
+        "origin",
+        "current"
+      ],
+      "title": "AgentEntry",
+      "type": "object"
+    },
+    "AgentListItem": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AgentListItem",
+      "type": "object"
+    },
+    "AgentMessage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UserMessage"
+        },
+        {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        {
+          "$ref": "#/$defs/ToolResultMessage"
+        },
+        {
+          "$ref": "#/$defs/CustomAgentMessage"
+        }
+      ]
+    },
+    "AgentMessageItem": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "agentMessage"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "text",
+        "error"
+      ],
+      "title": "AgentMessageItem",
+      "type": "object"
+    },
+    "AgentSettledEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "agent_settled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AgentSettledEvent",
+      "type": "object"
+    },
+    "AgentStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "agent_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AgentStartEvent",
+      "type": "object"
+    },
+    "AppendEntryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "customType": {
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "customType"
+      ],
+      "title": "AppendEntryParams",
+      "type": "object"
+    },
+    "AppendEntryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "entryId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "entryId"
+      ],
+      "title": "AppendEntryResult",
+      "type": "object"
+    },
+    "AssistantMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "anyOf": [
+            {
+              "enum": [
+                "openai-completions",
+                "openai-responses",
+                "azure-openai-responses",
+                "openai-codex-responses",
+                "anthropic-messages",
+                "bedrock-converse-stream",
+                "google-generative-ai",
+                "google-gemini-cli",
+                "google-vertex"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "content": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextContent"
+              },
+              {
+                "$ref": "#/$defs/ThinkingContent"
+              },
+              {
+                "$ref": "#/$defs/ToolCall"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorMessage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "enum": [
+                "amazon-bedrock",
+                "anthropic",
+                "google",
+                "google-gemini-cli",
+                "google-antigravity",
+                "google-vertex",
+                "openai",
+                "azure-openai-responses",
+                "openai-codex",
+                "github-copilot",
+                "xai",
+                "groq",
+                "cerebras",
+                "openrouter",
+                "vercel-ai-gateway",
+                "zai",
+                "zai-coding-cn",
+                "mistral",
+                "minimax",
+                "minimax-cn",
+                "huggingface",
+                "opencode",
+                "opencode-go",
+                "nvidia",
+                "moonshotai",
+                "moonshotai-cn",
+                "kimi-coding",
+                "volcengine"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "responseId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "responseModel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "enum": [
+            "assistant"
+          ],
+          "type": "string"
+        },
+        "stopReason": {
+          "enum": [
+            "stop",
+            "length",
+            "toolUse",
+            "error",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "role",
+        "content",
+        "api",
+        "provider",
+        "model",
+        "usage",
+        "stopReason",
+        "errorMessage",
+        "responseId",
+        "responseModel",
+        "diagnostics",
+        "timestamp"
+      ],
+      "title": "AssistantMessage",
+      "type": "object"
+    },
+    "AutoCompactionEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "aborted": {
+          "type": "boolean"
+        },
+        "errorMessage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactionResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "auto_compaction_end"
+          ],
+          "type": "string"
+        },
+        "willRetry": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "result",
+        "aborted",
+        "willRetry",
+        "errorMessage"
+      ],
+      "title": "AutoCompactionEndEvent",
+      "type": "object"
+    },
+    "AutoCompactionStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "threshold",
+            "overflow"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "auto_compaction_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason"
+      ],
+      "title": "AutoCompactionStartEvent",
+      "type": "object"
+    },
+    "AutoRetryEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "number"
+        },
+        "finalError": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "type": {
+          "enum": [
+            "auto_retry_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "success",
+        "attempt",
+        "finalError"
+      ],
+      "title": "AutoRetryEndEvent",
+      "type": "object"
+    },
+    "AutoRetryStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "number"
+        },
+        "delayMs": {
+          "type": "number"
+        },
+        "errorMessage": {
+          "type": "string"
+        },
+        "maxAttempts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "auto_retry_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "attempt",
+        "maxAttempts",
+        "delayMs",
+        "errorMessage"
+      ],
+      "title": "AutoRetryStartEvent",
+      "type": "object"
+    },
+    "BranchSummaryEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fromHook": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fromId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "branch_summary"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "fromId",
+        "summary",
+        "details",
+        "fromHook"
+      ],
+      "title": "BranchSummaryEntry",
+      "type": "object"
+    },
+    "BranchSummaryItem": {
+      "additionalProperties": false,
+      "properties": {
+        "fromId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "branchSummary"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "summary",
+        "fromId"
+      ],
+      "title": "BranchSummaryItem",
+      "type": "object"
+    },
+    "CacheMissEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "idleMs": {
+          "type": "number"
+        },
+        "missedCost": {
+          "type": "number"
+        },
+        "missedTokens": {
+          "type": "number"
+        },
+        "modelChanged": {
+          "type": "boolean"
+        },
+        "type": {
+          "enum": [
+            "cache_miss"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "missedTokens",
+        "missedCost",
+        "idleMs",
+        "modelChanged",
+        "type"
+      ],
+      "title": "CacheMissEvent",
+      "type": "object"
+    },
+    "CancelRequestParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "CancelRequestParams",
+      "type": "object"
+    },
+    "CancelRequestResult": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelled": {
+          "type": "boolean"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "cancelled"
+      ],
+      "title": "CancelRequestResult",
+      "type": "object"
+    },
+    "CapabilitiesInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "methods": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "domains",
+        "methods"
+      ],
+      "title": "CapabilitiesInfo",
+      "type": "object"
+    },
+    "CapabilitySelection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "resourceType": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "missing",
+            "disabled_by_settings",
+            "disabled_by_sdk"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "resourceType",
+        "name",
+        "status"
+      ],
+      "title": "CapabilitySelection",
+      "type": "object"
+    },
+    "ChangeAgentParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ChangeAgentParams",
+      "type": "object"
+    },
+    "ChangeAgentResult": {
+      "additionalProperties": false,
+      "properties": {
+        "agentName": {
+          "type": "string"
+        },
+        "availableTools": {
+          "items": {
+            "$ref": "#/$defs/ToolInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agentName",
+        "availableTools"
+      ],
+      "title": "ChangeAgentResult",
+      "type": "object"
+    },
+    "ClearQueueResult": {
+      "additionalProperties": false,
+      "properties": {
+        "followUp": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steering": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steering",
+        "followUp"
+      ],
+      "title": "ClearQueueResult",
+      "type": "object"
+    },
+    "CloneSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionFile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "cancelled",
+        "sessionId",
+        "sessionFile"
+      ],
+      "title": "CloneSessionResult",
+      "type": "object"
+    },
+    "CommandInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceInfo": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "source",
+        "sourceInfo"
+      ],
+      "title": "CommandInfo",
+      "type": "object"
+    },
+    "CompactParams": {
+      "additionalProperties": false,
+      "properties": {
+        "customInstructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "CompactParams",
+      "type": "object"
+    },
+    "CompactionEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "aborted": {
+          "type": "boolean"
+        },
+        "errorMessage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "manual",
+            "threshold",
+            "overflow"
+          ],
+          "type": "string"
+        },
+        "result": {},
+        "type": {
+          "enum": [
+            "compaction_end"
+          ],
+          "type": "string"
+        },
+        "willRetry": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "reason",
+        "result",
+        "aborted",
+        "willRetry",
+        "errorMessage"
+      ],
+      "title": "CompactionEndEvent",
+      "type": "object"
+    },
+    "CompactionEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firstKeptEntryId": {
+          "type": "string"
+        },
+        "fromHook": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "tokensBefore": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "compaction"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "summary",
+        "firstKeptEntryId",
+        "tokensBefore",
+        "details",
+        "fromHook"
+      ],
+      "title": "CompactionEntry",
+      "type": "object"
+    },
+    "CompactionItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tokensBefore": {
+          "type": "number"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "compaction"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "summary",
+        "tokensBefore",
+        "reason"
+      ],
+      "title": "CompactionItem",
+      "type": "object"
+    },
+    "CompactionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimatedTokensAfter": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firstKeptEntryId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tokensBefore": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "summary",
+        "firstKeptEntryId",
+        "tokensBefore",
+        "estimatedTokensAfter",
+        "details"
+      ],
+      "title": "CompactionResult",
+      "type": "object"
+    },
+    "CompactionStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "customInstructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "manual",
+            "threshold",
+            "overflow"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "compaction_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason",
+        "customInstructions"
+      ],
+      "title": "CompactionStartEvent",
+      "type": "object"
+    },
+    "Cost": {
+      "additionalProperties": false,
+      "properties": {
+        "cacheRead": {
+          "type": "number"
+        },
+        "cacheWrite": {
+          "type": "number"
+        },
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "total"
+      ],
+      "title": "Cost",
+      "type": "object"
+    },
+    "CreateSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "agentDir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "continueLast": {
+          "type": "boolean"
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "noSession": {
+          "type": "boolean"
+        },
+        "sessionFile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionFlag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "CreateSessionParams",
+      "type": "object"
+    },
+    "CreateSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "resumed": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "sessionName",
+        "resumed"
+      ],
+      "title": "CreateSessionResult",
+      "type": "object"
+    },
+    "CredentialInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "type"
+      ],
+      "title": "CredentialInfo",
+      "type": "object"
+    },
+    "CustomAgentMessage": {
+      "type": "object"
+    },
+    "CustomEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "customType": {
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "custom"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "customType",
+        "data"
+      ],
+      "title": "CustomEntry",
+      "type": "object"
+    },
+    "CustomItem": {
+      "additionalProperties": true,
+      "properties": {
+        "details": {},
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "details"
+      ],
+      "title": "CustomItem",
+      "type": "object"
+    },
+    "CustomMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TextContent"
+                  },
+                  {
+                    "$ref": "#/$defs/ImageContent"
+                  }
+                ]
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "customType": {
+          "type": "string"
+        },
+        "details": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display": {
+          "type": "boolean"
+        },
+        "role": {
+          "enum": [
+            "custom"
+          ],
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "customType",
+        "content",
+        "display",
+        "details",
+        "timestamp",
+        "role"
+      ],
+      "title": "CustomMessage",
+      "type": "object"
+    },
+    "CustomMessageEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TextContent"
+                  },
+                  {
+                    "$ref": "#/$defs/ImageContent"
+                  }
+                ]
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "customType": {
+          "type": "string"
+        },
+        "details": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "custom_message"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "customType",
+        "content",
+        "details",
+        "display"
+      ],
+      "title": "CustomMessageEntry",
+      "type": "object"
+    },
+    "CycleModelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "enum": [
+            "forward",
+            "backward"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "CycleModelParams",
+      "type": "object"
+    },
+    "CycleModelResult": {
+      "additionalProperties": false,
+      "properties": {
+        "isScoped": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "success",
+        "model",
+        "thinkingLevel",
+        "isScoped"
+      ],
+      "title": "CycleModelResult",
+      "type": "object"
+    },
+    "CycleThinkingLevelResult": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "success",
+        "thinkingLevel",
+        "reason"
+      ],
+      "title": "CycleThinkingLevelResult",
+      "type": "object"
+    },
+    "DeleteSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "DeleteSessionParams",
+      "type": "object"
+    },
+    "DeleteSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted"
+      ],
+      "title": "DeleteSessionResult",
+      "type": "object"
+    },
+    "DoneEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "reason": {
+          "enum": [
+            "stop",
+            "length",
+            "toolUse",
+            "error",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "done"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason",
+        "message"
+      ],
+      "title": "DoneEvent",
+      "type": "object"
+    },
+    "EmptyParams": {
+      "type": "object"
+    },
+    "EntryAppendedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "entry_appended"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "entry",
+        "type"
+      ],
+      "title": "EntryAppendedEvent",
+      "type": "object"
+    },
+    "ErrorEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "reason": {
+          "enum": [
+            "aborted",
+            "error"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "error"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason",
+        "error"
+      ],
+      "title": "ErrorEvent",
+      "type": "object"
+    },
+    "ExportSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ExportSessionParams",
+      "type": "object"
+    },
+    "ExportSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "exportedTo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "exportedTo"
+      ],
+      "title": "ExportSessionResult",
+      "type": "object"
+    },
+    "ExtensionErrorEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "event": {
+          "type": "string"
+        },
+        "extensionPath": {
+          "type": "string"
+        },
+        "stack": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "extension_error"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "extensionPath",
+        "event",
+        "error",
+        "stack"
+      ],
+      "title": "ExtensionErrorEvent",
+      "type": "object"
+    },
+    "ExtensionFlagInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extensionPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "type",
+        "default",
+        "value",
+        "extensionPath"
+      ],
+      "title": "ExtensionFlagInfo",
+      "type": "object"
+    },
+    "FollowUpParams": {
+      "additionalProperties": false,
+      "properties": {
+        "images": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ImageContent"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "FollowUpParams",
+      "type": "object"
+    },
+    "ForkParams": {
+      "additionalProperties": false,
+      "properties": {
+        "entryId": {
+          "type": "string"
+        },
+        "position": {
+          "enum": [
+            "before",
+            "after"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "entryId"
+      ],
+      "title": "ForkParams",
+      "type": "object"
+    },
+    "GetAgentsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents"
+      ],
+      "title": "GetAgentsResult",
+      "type": "object"
+    },
+    "GetAuthStatusResult": {
+      "additionalProperties": false,
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/CredentialInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "credentials"
+      ],
+      "title": "GetAuthStatusResult",
+      "type": "object"
+    },
+    "GetCommandsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/CommandInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commands"
+      ],
+      "title": "GetCommandsResult",
+      "type": "object"
+    },
+    "GetContextUsageResult": {
+      "additionalProperties": false,
+      "properties": {
+        "contextWindow": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "tokens",
+        "contextWindow",
+        "percent"
+      ],
+      "title": "GetContextUsageResult",
+      "type": "object"
+    },
+    "GetExtensionFlagsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "flags": {
+          "items": {
+            "$ref": "#/$defs/ExtensionFlagInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "flags"
+      ],
+      "title": "GetExtensionFlagsResult",
+      "type": "object"
+    },
+    "GetPersonasResult": {
+      "additionalProperties": false,
+      "properties": {
+        "override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "personas": {
+          "items": {
+            "$ref": "#/$defs/PersonaEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "personas",
+        "override"
+      ],
+      "title": "GetPersonasResult",
+      "type": "object"
+    },
+    "GetSessionEntriesParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number"
+        }
+      },
+      "required": [],
+      "title": "GetSessionEntriesParams",
+      "type": "object"
+    },
+    "GetSessionEntriesResult": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "entries",
+        "total",
+        "offset"
+      ],
+      "title": "GetSessionEntriesResult",
+      "type": "object"
+    },
+    "GetSettingsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "GetSettingsParams",
+      "type": "object"
+    },
+    "GetSettingsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "settings": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "settings"
+      ],
+      "title": "GetSettingsResult",
+      "type": "object"
+    },
+    "GetShortcutsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "shortcuts": {
+          "items": {
+            "$ref": "#/$defs/ShortcutInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "shortcuts"
+      ],
+      "title": "GetShortcutsResult",
+      "type": "object"
+    },
+    "GetToolsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "title": "GetToolsResult",
+      "type": "object"
+    },
+    "ImageContent": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "image"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "mimeType",
+        "data"
+      ],
+      "title": "ImageContent",
+      "type": "object"
+    },
+    "ImportSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ImportSessionParams",
+      "type": "object"
+    },
+    "ImportSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "cancelled",
+        "sessionId",
+        "sessionName"
+      ],
+      "title": "ImportSessionResult",
+      "type": "object"
+    },
+    "InitializeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/CapabilitiesInfo"
+        },
+        "contractVersionMajor": {
+          "type": "number"
+        },
+        "contractVersionMinor": {
+          "type": "number"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "contractVersionMajor",
+        "contractVersionMinor",
+        "capabilities"
+      ],
+      "title": "InitializeResult",
+      "type": "object"
+    },
+    "InvokeShortcutParams": {
+      "additionalProperties": false,
+      "properties": {
+        "shortcut": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "shortcut"
+      ],
+      "title": "InvokeShortcutParams",
+      "type": "object"
+    },
+    "InvokeUserToolParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "InvokeUserToolParams",
+      "type": "object"
+    },
+    "InvokeUserToolResult": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "InvokeUserToolResult",
+      "type": "object"
+    },
+    "ItemCompletedNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/NovaWireItem"
+        },
+        "type": {
+          "enum": [
+            "item_completed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "item"
+      ],
+      "title": "ItemCompletedNotification",
+      "type": "object"
+    },
+    "ItemDeltaNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "delta": {
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "item_delta"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "delta"
+      ],
+      "title": "ItemDeltaNotification",
+      "type": "object"
+    },
+    "ItemStartedNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/NovaWireItem"
+        },
+        "type": {
+          "enum": [
+            "item_started"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "item"
+      ],
+      "title": "ItemStartedNotification",
+      "type": "object"
+    },
+    "LabelEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "label"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "targetId",
+        "label"
+      ],
+      "title": "LabelEntry",
+      "type": "object"
+    },
+    "ListAgentsResult": {
+      "items": {
+        "$ref": "#/$defs/AgentListItem"
+      },
+      "type": "array"
+    },
+    "ListModelsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ModelListItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "title": "ListModelsResult",
+      "type": "object"
+    },
+    "ListPromptTemplatesResult": {
+      "additionalProperties": false,
+      "properties": {
+        "prompts": {
+          "items": {
+            "$ref": "#/$defs/PromptTemplateInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "prompts"
+      ],
+      "title": "ListPromptTemplatesResult",
+      "type": "object"
+    },
+    "ListScopedModelsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ScopedModelItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "title": "ListScopedModelsResult",
+      "type": "object"
+    },
+    "ListSessionsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "enum": [
+            "current",
+            "all"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "ListSessionsParams",
+      "type": "object"
+    },
+    "ListSessionsResult": {
+      "items": {
+        "$ref": "#/$defs/SessionListItem"
+      },
+      "type": "array"
+    },
+    "ListSkillsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "skills"
+      ],
+      "title": "ListSkillsResult",
+      "type": "object"
+    },
+    "ListUserToolsResult": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "LoginParams": {
+      "additionalProperties": false,
+      "properties": {
+        "authType": {
+          "enum": [
+            "api_key",
+            "oauth"
+          ],
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "LoginParams",
+      "type": "object"
+    },
+    "LoginResult": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "success",
+        "provider",
+        "type"
+      ],
+      "title": "LoginResult",
+      "type": "object"
+    },
+    "MessageEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/AgentMessage"
+        },
+        "type": {
+          "enum": [
+            "message_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "title": "MessageEndEvent",
+      "type": "object"
+    },
+    "MessageStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/AgentMessage"
+        },
+        "type": {
+          "enum": [
+            "message_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "title": "MessageStartEvent",
+      "type": "object"
+    },
+    "MessageUpdateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "assistantMessageEvent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartEvent"
+            },
+            {
+              "$ref": "#/$defs/TextStartEvent"
+            },
+            {
+              "$ref": "#/$defs/TextDeltaEvent"
+            },
+            {
+              "$ref": "#/$defs/TextEndEvent"
+            },
+            {
+              "$ref": "#/$defs/ThinkingStartEvent"
+            },
+            {
+              "$ref": "#/$defs/ThinkingDeltaEvent"
+            },
+            {
+              "$ref": "#/$defs/ThinkingEndEvent"
+            },
+            {
+              "$ref": "#/$defs/ToolCallStartEvent"
+            },
+            {
+              "$ref": "#/$defs/ToolCallDeltaEvent"
+            },
+            {
+              "$ref": "#/$defs/ToolCallEndEvent"
+            },
+            {
+              "$ref": "#/$defs/DoneEvent"
+            },
+            {
+              "$ref": "#/$defs/ErrorEvent"
+            }
+          ]
+        },
+        "message": {
+          "$ref": "#/$defs/AgentMessage"
+        },
+        "type": {
+          "enum": [
+            "message_update"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message",
+        "assistantMessageEvent"
+      ],
+      "title": "MessageUpdateEvent",
+      "type": "object"
+    },
+    "ModelChangeEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "model_change"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "provider",
+        "modelId"
+      ],
+      "title": "ModelChangeEntry",
+      "type": "object"
+    },
+    "ModelChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previousModel": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "model_changed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "model",
+        "previousModel",
+        "source"
+      ],
+      "title": "ModelChangedEvent",
+      "type": "object"
+    },
+    "ModelListItem": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "id",
+        "name",
+        "available",
+        "reasoning"
+      ],
+      "title": "ModelListItem",
+      "type": "object"
+    },
+    "ModelRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "id"
+      ],
+      "title": "ModelRef",
+      "type": "object"
+    },
+    "NavigateTreeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "options": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "targetId"
+      ],
+      "title": "NavigateTreeParams",
+      "type": "object"
+    },
+    "NewSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "sessionName"
+      ],
+      "title": "NewSessionResult",
+      "type": "object"
+    },
+    "NovaWireItem": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UserMessageItem"
+        },
+        {
+          "$ref": "#/$defs/AgentMessageItem"
+        },
+        {
+          "$ref": "#/$defs/ThinkingItem"
+        },
+        {
+          "$ref": "#/$defs/ToolCallItem"
+        },
+        {
+          "$ref": "#/$defs/CompactionItem"
+        },
+        {
+          "$ref": "#/$defs/BranchSummaryItem"
+        },
+        {
+          "$ref": "#/$defs/CustomItem"
+        }
+      ]
+    },
+    "OkResult": {
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "title": "OkResult",
+      "type": "object"
+    },
+    "PackageUpdateItem": {
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "displayName",
+        "type",
+        "scope"
+      ],
+      "title": "PackageUpdateItem",
+      "type": "object"
+    },
+    "PersonaEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "isOverride": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "scope",
+        "origin",
+        "isOverride"
+      ],
+      "title": "PersonaEntry",
+      "type": "object"
+    },
+    "PkgCheckUpdatesResult": {
+      "additionalProperties": false,
+      "properties": {
+        "updates": {
+          "items": {
+            "$ref": "#/$defs/PackageUpdateItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "updates"
+      ],
+      "title": "PkgCheckUpdatesResult",
+      "type": "object"
+    },
+    "PkgInstallParams": {
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "PkgInstallParams",
+      "type": "object"
+    },
+    "PkgNameParams": {
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "type": "boolean"
+        },
+        "nameOrSource": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nameOrSource"
+      ],
+      "title": "PkgNameParams",
+      "type": "object"
+    },
+    "PkgParams": {
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "title": "PkgParams",
+      "type": "object"
+    },
+    "PkgUninstallResult": {
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "messages"
+      ],
+      "title": "PkgUninstallResult",
+      "type": "object"
+    },
+    "PkgUpdateResult": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "PromptParams": {
+      "additionalProperties": false,
+      "properties": {
+        "expandPromptTemplates": {
+          "type": "boolean"
+        },
+        "images": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ImageContent"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "streamingBehavior": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "PromptParams",
+      "type": "object"
+    },
+    "PromptTemplateInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "argumentHint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "argumentHint",
+        "source"
+      ],
+      "title": "PromptTemplateInfo",
+      "type": "object"
+    },
+    "ProviderParams": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "ProviderParams",
+      "type": "object"
+    },
+    "ProviderResult": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "provider"
+      ],
+      "title": "ProviderResult",
+      "type": "object"
+    },
+    "QueueUpdateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "followUp": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steering": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "enum": [
+            "queue_update"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "steering",
+        "followUp"
+      ],
+      "title": "QueueUpdateEvent",
+      "type": "object"
+    },
+    "RenameSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name"
+      ],
+      "title": "RenameSessionParams",
+      "type": "object"
+    },
+    "RenameSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "sessionName"
+      ],
+      "title": "RenameSessionResult",
+      "type": "object"
+    },
+    "SaveAgentParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "SaveAgentParams",
+      "type": "object"
+    },
+    "SaveAgentResult": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "savedTo": {
+          "type": "string"
+        },
+        "shadowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "savedTo",
+        "shadowed"
+      ],
+      "title": "SaveAgentResult",
+      "type": "object"
+    },
+    "ScopedModelInput": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modelId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "modelId",
+        "id",
+        "thinkingLevel"
+      ],
+      "title": "ScopedModelInput",
+      "type": "object"
+    },
+    "ScopedModelItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "id",
+        "thinkingLevel"
+      ],
+      "title": "ScopedModelItem",
+      "type": "object"
+    },
+    "SessionHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentSession": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "session"
+          ],
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "id",
+        "timestamp",
+        "cwd",
+        "parentSession"
+      ],
+      "title": "SessionHeader",
+      "type": "object"
+    },
+    "SessionInfoChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "personaOverride": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "session_info_changed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "agent",
+        "personaOverride"
+      ],
+      "title": "SessionInfoChangedEvent",
+      "type": "object"
+    },
+    "SessionInfoEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "session_info"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "name"
+      ],
+      "title": "SessionInfoEntry",
+      "type": "object"
+    },
+    "SessionListItem": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "firstMessage": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageCount": {
+          "type": "number"
+        },
+        "modified": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path",
+        "modified",
+        "messageCount",
+        "firstMessage",
+        "cwd",
+        "parentSessionPath"
+      ],
+      "title": "SessionListItem",
+      "type": "object"
+    },
+    "SessionMessageEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserMessage"
+            },
+            {
+              "$ref": "#/$defs/AssistantMessage"
+            },
+            {
+              "$ref": "#/$defs/ToolResultMessage"
+            },
+            {
+              "$ref": "#/$defs/CustomMessage"
+            },
+            {
+              "$ref": "#/$defs/CustomAgentMessage"
+            }
+          ]
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "message"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "message"
+      ],
+      "title": "SessionMessageEntry",
+      "type": "object"
+    },
+    "SessionReloadedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "session_reloaded"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason"
+      ],
+      "title": "SessionReloadedEvent",
+      "type": "object"
+    },
+    "SessionReplacedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "session_replaced"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason"
+      ],
+      "title": "SessionReplacedEvent",
+      "type": "object"
+    },
+    "SessionStateResult": {
+      "additionalProperties": false,
+      "properties": {
+        "activeTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "agentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "allowedCommands": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "autoCompactionEnabled": {
+          "type": "boolean"
+        },
+        "autoRetryEnabled": {
+          "type": "boolean"
+        },
+        "availableThinkingLevels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capabilityReport": {
+          "items": {
+            "$ref": "#/$defs/CapabilitySelection"
+          },
+          "type": "array"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "disabledCommands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "followUpMessages": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "followUpMode": {
+          "type": "string"
+        },
+        "isCompacting": {
+          "type": "boolean"
+        },
+        "isRetrying": {
+          "type": "boolean"
+        },
+        "isStreaming": {
+          "type": "boolean"
+        },
+        "leafId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageCount": {
+          "type": "number"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pendingMessageCount": {
+          "type": "number"
+        },
+        "personaOverride": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectTrusted": {
+          "type": "boolean"
+        },
+        "sessionFile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steeringMessages": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steeringMode": {
+          "type": "string"
+        },
+        "supportsThinking": {
+          "type": "boolean"
+        },
+        "thinkingLevel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "sessionFile",
+        "sessionName",
+        "cwd",
+        "model",
+        "thinkingLevel",
+        "supportsThinking",
+        "availableThinkingLevels",
+        "activeTools",
+        "messageCount",
+        "pendingMessageCount",
+        "steeringMessages",
+        "followUpMessages",
+        "isStreaming",
+        "isCompacting",
+        "isRetrying",
+        "autoRetryEnabled",
+        "autoCompactionEnabled",
+        "steeringMode",
+        "followUpMode",
+        "projectTrusted",
+        "leafId",
+        "allowedCommands",
+        "disabledCommands",
+        "capabilityReport",
+        "agentName",
+        "personaOverride"
+      ],
+      "title": "SessionStateResult",
+      "type": "object"
+    },
+    "SessionStatsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "assistantMessages": {
+          "type": "number"
+        },
+        "cacheWaste": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost": {
+          "type": "number"
+        },
+        "sessionFile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenUsageSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toolCalls": {
+          "type": "number"
+        },
+        "toolResults": {
+          "type": "number"
+        },
+        "totalMessages": {
+          "type": "number"
+        },
+        "userMessages": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sessionId",
+        "sessionFile",
+        "userMessages",
+        "assistantMessages",
+        "toolCalls",
+        "toolResults",
+        "totalMessages",
+        "tokens",
+        "cost",
+        "cacheWaste"
+      ],
+      "title": "SessionStatsResult",
+      "type": "object"
+    },
+    "SetActiveToolsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "toolNames": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "SetActiveToolsParams",
+      "type": "object"
+    },
+    "SetActiveToolsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "activeTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "activeTools"
+      ],
+      "title": "SetActiveToolsResult",
+      "type": "object"
+    },
+    "SetApiKeyParams": {
+      "additionalProperties": false,
+      "properties": {
+        "apiKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "SetApiKeyParams",
+      "type": "object"
+    },
+    "SetAutoCompactionEnabledParams": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "SetAutoCompactionEnabledParams",
+      "type": "object"
+    },
+    "SetAutoCompactionEnabledResult": {
+      "additionalProperties": false,
+      "properties": {
+        "autoCompactionEnabled": {
+          "type": "boolean"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "autoCompactionEnabled"
+      ],
+      "title": "SetAutoCompactionEnabledResult",
+      "type": "object"
+    },
+    "SetAutoRetryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "SetAutoRetryParams",
+      "type": "object"
+    },
+    "SetAutoRetryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "autoRetryEnabled": {
+          "type": "boolean"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "autoRetryEnabled"
+      ],
+      "title": "SetAutoRetryResult",
+      "type": "object"
+    },
+    "SetExtensionFlagParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SetExtensionFlagParams",
+      "type": "object"
+    },
+    "SetExtensionFlagResult": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "success",
+        "name",
+        "value"
+      ],
+      "title": "SetExtensionFlagResult",
+      "type": "object"
+    },
+    "SetFollowUpModeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "all",
+            "one-at-a-time"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "SetFollowUpModeParams",
+      "type": "object"
+    },
+    "SetFollowUpModeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "followUpMode": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "followUpMode"
+      ],
+      "title": "SetFollowUpModeResult",
+      "type": "object"
+    },
+    "SetLabelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "entryId": {
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "entryId"
+      ],
+      "title": "SetLabelParams",
+      "type": "object"
+    },
+    "SetModelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "SetModelParams",
+      "type": "object"
+    },
+    "SetPersonaOverrideParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "SetPersonaOverrideParams",
+      "type": "object"
+    },
+    "SetPersonaOverrideResult": {
+      "additionalProperties": false,
+      "properties": {
+        "personaOverride": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "personaOverride"
+      ],
+      "title": "SetPersonaOverrideResult",
+      "type": "object"
+    },
+    "SetResourceExclusionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "resourceType": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resourceType",
+        "name"
+      ],
+      "title": "SetResourceExclusionParams",
+      "type": "object"
+    },
+    "SetResourceExclusionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "patterns"
+      ],
+      "title": "SetResourceExclusionResult",
+      "type": "object"
+    },
+    "SetScopedModelsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ScopedModelInput"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "title": "SetScopedModelsParams",
+      "type": "object"
+    },
+    "SetScopedModelsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "number"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "count"
+      ],
+      "title": "SetScopedModelsResult",
+      "type": "object"
+    },
+    "SetSessionNameParams": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SetSessionNameParams",
+      "type": "object"
+    },
+    "SetSessionNameResult": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "sessionName"
+      ],
+      "title": "SetSessionNameResult",
+      "type": "object"
+    },
+    "SetSteeringModeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "all",
+            "one-at-a-time"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "SetSteeringModeParams",
+      "type": "object"
+    },
+    "SetSteeringModeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "steeringMode": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "steeringMode"
+      ],
+      "title": "SetSteeringModeResult",
+      "type": "object"
+    },
+    "SetThinkingLevelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "title": "SetThinkingLevelParams",
+      "type": "object"
+    },
+    "SetThinkingLevelResult": {
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "thinkingLevel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "thinkingLevel"
+      ],
+      "title": "SetThinkingLevelResult",
+      "type": "object"
+    },
+    "ShortcutInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extensionPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shortcut": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "shortcut",
+        "description",
+        "extensionPath"
+      ],
+      "title": "ShortcutInfo",
+      "type": "object"
+    },
+    "SkillInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "filePath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "filePath",
+        "sourceLabel"
+      ],
+      "title": "SkillInfo",
+      "type": "object"
+    },
+    "SourceInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "baseDir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "enum": [
+            "package",
+            "top-level",
+            "local",
+            "auto"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "user",
+            "project",
+            "temporary"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "source",
+        "scope",
+        "origin",
+        "baseDir"
+      ],
+      "title": "SourceInfo",
+      "type": "object"
+    },
+    "StartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "partial"
+      ],
+      "title": "StartEvent",
+      "type": "object"
+    },
+    "SteerParams": {
+      "additionalProperties": false,
+      "properties": {
+        "images": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ImageContent"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SteerParams",
+      "type": "object"
+    },
+    "SwitchSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "title": "SwitchSessionParams",
+      "type": "object"
+    },
+    "SwitchSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "cancelled",
+        "sessionId",
+        "sessionName"
+      ],
+      "title": "SwitchSessionResult",
+      "type": "object"
+    },
+    "SyncSessionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "entriesLimit": {
+          "type": "number"
+        },
+        "entriesOffset": {
+          "type": "number"
+        },
+        "includeEntries": {
+          "type": "boolean"
+        },
+        "itemsLimit": {
+          "type": "number"
+        },
+        "itemsOffset": {
+          "type": "number"
+        }
+      },
+      "required": [],
+      "title": "SyncSessionParams",
+      "type": "object"
+    },
+    "SyncSessionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "entriesOffset": {
+          "type": "number"
+        },
+        "eventSeq": {
+          "type": "number"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/NovaWireItem"
+          },
+          "type": "array"
+        },
+        "itemsOffset": {
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionStateResult"
+        },
+        "total": {
+          "type": "number"
+        },
+        "totalItems": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "state",
+        "entries",
+        "total",
+        "entriesOffset",
+        "items",
+        "totalItems",
+        "itemsOffset",
+        "eventSeq"
+      ],
+      "title": "SyncSessionResult",
+      "type": "object"
+    },
+    "TextContent": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "textSignature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "text"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text",
+        "textSignature"
+      ],
+      "title": "TextContent",
+      "type": "object"
+    },
+    "TextDeltaEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "delta": {
+          "type": "string"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "text_delta"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "delta",
+        "partial"
+      ],
+      "title": "TextDeltaEvent",
+      "type": "object"
+    },
+    "TextEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "contentIndex": {
+          "type": "number"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "text_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "content",
+        "partial"
+      ],
+      "title": "TextEndEvent",
+      "type": "object"
+    },
+    "TextStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "text_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "partial"
+      ],
+      "title": "TextStartEvent",
+      "type": "object"
+    },
+    "ThinkingContent": {
+      "additionalProperties": false,
+      "properties": {
+        "redacted": {
+          "type": "boolean"
+        },
+        "thinking": {
+          "type": "string"
+        },
+        "thinkingSignature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "thinking"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "thinking",
+        "thinkingSignature",
+        "redacted"
+      ],
+      "title": "ThinkingContent",
+      "type": "object"
+    },
+    "ThinkingDeltaEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "delta": {
+          "type": "string"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "thinking_delta"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "delta",
+        "partial"
+      ],
+      "title": "ThinkingDeltaEvent",
+      "type": "object"
+    },
+    "ThinkingEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "contentIndex": {
+          "type": "number"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "thinking_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "content",
+        "partial"
+      ],
+      "title": "ThinkingEndEvent",
+      "type": "object"
+    },
+    "ThinkingItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "thinking"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "text"
+      ],
+      "title": "ThinkingItem",
+      "type": "object"
+    },
+    "ThinkingLevelChangeEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "thinking_level_change"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parentId",
+        "timestamp",
+        "type",
+        "thinkingLevel"
+      ],
+      "title": "ThinkingLevelChangeEntry",
+      "type": "object"
+    },
+    "ThinkingLevelChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "thinking_level_changed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "level"
+      ],
+      "title": "ThinkingLevelChangedEvent",
+      "type": "object"
+    },
+    "ThinkingStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "thinking_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "partial"
+      ],
+      "title": "ThinkingStartEvent",
+      "type": "object"
+    },
+    "TokenUsageSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "cacheRead": {
+          "type": "number"
+        },
+        "cacheWrite": {
+          "type": "number"
+        },
+        "inputTokens": {
+          "type": "number"
+        },
+        "outputTokens": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "cacheRead",
+        "cacheWrite",
+        "total"
+      ],
+      "title": "TokenUsageSummary",
+      "type": "object"
+    },
+    "ToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "partialArgs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "streamIndex": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thoughtSignature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "toolCall"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "name",
+        "arguments",
+        "thoughtSignature",
+        "partialArgs",
+        "streamIndex"
+      ],
+      "title": "ToolCall",
+      "type": "object"
+    },
+    "ToolCallDeltaEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "delta": {
+          "type": "string"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "toolcall_delta"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "delta",
+        "partial"
+      ],
+      "title": "ToolCallDeltaEvent",
+      "type": "object"
+    },
+    "ToolCallEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "toolCall": {
+          "$ref": "#/$defs/ToolCall"
+        },
+        "type": {
+          "enum": [
+            "toolcall_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "toolCall",
+        "partial"
+      ],
+      "title": "ToolCallEndEvent",
+      "type": "object"
+    },
+    "ToolCallItem": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {},
+        "argsComplete": {
+          "type": "boolean"
+        },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "partialResult": {},
+        "result": {},
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "toolCall"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "tool",
+        "args",
+        "argsComplete",
+        "result",
+        "partialResult",
+        "durationMs",
+        "error"
+      ],
+      "title": "ToolCallItem",
+      "type": "object"
+    },
+    "ToolCallStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "contentIndex": {
+          "type": "number"
+        },
+        "partial": {
+          "$ref": "#/$defs/AssistantMessage"
+        },
+        "type": {
+          "enum": [
+            "toolcall_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contentIndex",
+        "partial"
+      ],
+      "title": "ToolCallStartEvent",
+      "type": "object"
+    },
+    "ToolExecutionEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "isError": {
+          "type": "boolean"
+        },
+        "result": {},
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "tool_execution_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "toolName",
+        "result",
+        "isError"
+      ],
+      "title": "ToolExecutionEndEvent",
+      "type": "object"
+    },
+    "ToolExecutionStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {},
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "tool_execution_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "toolName",
+        "args"
+      ],
+      "title": "ToolExecutionStartEvent",
+      "type": "object"
+    },
+    "ToolExecutionUpdateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {},
+        "partialResult": {},
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "tool_execution_update"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "toolCallId",
+        "toolName",
+        "args",
+        "partialResult"
+      ],
+      "title": "ToolExecutionUpdateEvent",
+      "type": "object"
+    },
+    "ToolInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "promptGuidelines": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "promptSnippet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceInfo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourcePath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "parameters",
+        "promptSnippet",
+        "promptGuidelines",
+        "source",
+        "sourcePath",
+        "sourceInfo"
+      ],
+      "title": "ToolInfo",
+      "type": "object"
+    },
+    "ToolResultMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "addedToolNames": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextContent"
+              },
+              {
+                "$ref": "#/$defs/ImageContent"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "role": {
+          "enum": [
+            "toolResult"
+          ],
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "toolCallId",
+        "toolName",
+        "content",
+        "details",
+        "isError",
+        "addedToolNames",
+        "timestamp"
+      ],
+      "title": "ToolResultMessage",
+      "type": "object"
+    },
+    "TurnEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/AgentMessage"
+        },
+        "toolResults": {
+          "items": {
+            "$ref": "#/$defs/ToolResultMessage"
+          },
+          "type": "array"
+        },
+        "type": {
+          "enum": [
+            "turn_end"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message",
+        "toolResults"
+      ],
+      "title": "TurnEndEvent",
+      "type": "object"
+    },
+    "TurnStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "turn_start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "TurnStartEvent",
+      "type": "object"
+    },
+    "UpdateSettingsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "settings"
+      ],
+      "title": "UpdateSettingsParams",
+      "type": "object"
+    },
+    "UpdateSettingsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "settings": {
+          "type": "object"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success",
+        "settings"
+      ],
+      "title": "UpdateSettingsResult",
+      "type": "object"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "cacheRead": {
+          "type": "number"
+        },
+        "cacheWrite": {
+          "type": "number"
+        },
+        "cacheWrite1H": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost": {
+          "$ref": "#/$defs/Cost"
+        },
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totalTokens": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "cacheWrite1H",
+        "reasoning",
+        "totalTokens",
+        "cost"
+      ],
+      "title": "Usage",
+      "type": "object"
+    },
+    "UserMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TextContent"
+                  },
+                  {
+                    "$ref": "#/$defs/ImageContent"
+                  }
+                ]
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "role": {
+          "enum": [
+            "user"
+          ],
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "role",
+        "content",
+        "timestamp"
+      ],
+      "title": "UserMessage",
+      "type": "object"
+    },
+    "UserMessageItem": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextContent"
+              },
+              {
+                "$ref": "#/$defs/ImageContent"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed",
+                "declined",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "userMessage"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "source",
+        "ts",
+        "content"
+      ],
+      "title": "UserMessageItem",
+      "type": "object"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "contractVersionMajor": 1,
+  "contractVersionMinor": 0,
+  "methods": {
+    "abort": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/AbortResult"
+      }
+    },
+    "abortBranchSummary": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "abortCompaction": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "abortRetry": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "abortUserTool": {
+      "domain": "user_tools",
+      "params": {
+        "$ref": "#/$defs/AbortUserToolParams"
+      },
+      "result": {
+        "$ref": "#/$defs/AbortResult"
+      }
+    },
+    "appendEntry": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/AppendEntryParams"
+      },
+      "result": {
+        "$ref": "#/$defs/AppendEntryResult"
+      }
+    },
+    "cancelRequest": {
+      "domain": "system",
+      "params": {
+        "$ref": "#/$defs/CancelRequestParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CancelRequestResult"
+      }
+    },
+    "changeAgent": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/ChangeAgentParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ChangeAgentResult"
+      }
+    },
+    "clearQueue": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ClearQueueResult"
+      }
+    },
+    "cloneSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CloneSessionResult"
+      }
+    },
+    "compact": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/CompactParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CompactionResult"
+      }
+    },
+    "createSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/CreateSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CreateSessionResult"
+      }
+    },
+    "cycleModel": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/CycleModelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CycleModelResult"
+      }
+    },
+    "cycleThinkingLevel": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CycleThinkingLevelResult"
+      }
+    },
+    "deleteSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/DeleteSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/DeleteSessionResult"
+      }
+    },
+    "dispose": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "excludeResource": {
+      "domain": "settings",
+      "params": {
+        "$ref": "#/$defs/SetResourceExclusionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetResourceExclusionResult"
+      }
+    },
+    "exportSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/ExportSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExportSessionResult"
+      }
+    },
+    "followUp": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/FollowUpParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "fork": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/ForkParams"
+      },
+      "result": {}
+    },
+    "getAuthStatus": {
+      "domain": "auth",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetAuthStatusResult"
+      }
+    },
+    "getCommands": {
+      "domain": "system",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetCommandsResult"
+      }
+    },
+    "getContextUsage": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetContextUsageResult"
+      }
+    },
+    "getExtensionFlags": {
+      "domain": "system",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetExtensionFlagsResult"
+      }
+    },
+    "getPersonas": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetPersonasResult"
+      }
+    },
+    "getSessionAgents": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetAgentsResult"
+      }
+    },
+    "getSessionEntries": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/GetSessionEntriesParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetSessionEntriesResult"
+      }
+    },
+    "getSessionState": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SessionStateResult"
+      }
+    },
+    "getSessionStats": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SessionStatsResult"
+      }
+    },
+    "getSettings": {
+      "domain": "settings",
+      "params": {
+        "$ref": "#/$defs/GetSettingsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetSettingsResult"
+      }
+    },
+    "getShortcuts": {
+      "domain": "system",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetShortcutsResult"
+      }
+    },
+    "getTools": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetToolsResult"
+      }
+    },
+    "importSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/ImportSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ImportSessionResult"
+      }
+    },
+    "includeResource": {
+      "domain": "settings",
+      "params": {
+        "$ref": "#/$defs/SetResourceExclusionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetResourceExclusionResult"
+      }
+    },
+    "initialize": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InitializeResult"
+      }
+    },
+    "invokeShortcut": {
+      "domain": "system",
+      "params": {
+        "$ref": "#/$defs/InvokeShortcutParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "invokeUserTool": {
+      "domain": "user_tools",
+      "params": {
+        "$ref": "#/$defs/InvokeUserToolParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InvokeUserToolResult"
+      }
+    },
+    "listAgents": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListAgentsResult"
+      }
+    },
+    "listModels": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListModelsResult"
+      }
+    },
+    "listPromptTemplates": {
+      "domain": "resources",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListPromptTemplatesResult"
+      }
+    },
+    "listScopedModels": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListScopedModelsResult"
+      }
+    },
+    "listSessions": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/ListSessionsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListSessionsResult"
+      }
+    },
+    "listSkills": {
+      "domain": "resources",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListSkillsResult"
+      }
+    },
+    "listUserTools": {
+      "domain": "user_tools",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListUserToolsResult"
+      }
+    },
+    "login": {
+      "domain": "auth",
+      "params": {
+        "$ref": "#/$defs/LoginParams"
+      },
+      "result": {
+        "$ref": "#/$defs/LoginResult"
+      }
+    },
+    "logout": {
+      "domain": "auth",
+      "params": {
+        "$ref": "#/$defs/ProviderParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ProviderResult"
+      }
+    },
+    "navigateTree": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/NavigateTreeParams"
+      },
+      "result": {}
+    },
+    "newSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NewSessionResult"
+      }
+    },
+    "pkgCheckUpdates": {
+      "domain": "package",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PkgCheckUpdatesResult"
+      }
+    },
+    "pkgInfo": {
+      "domain": "package",
+      "params": {
+        "$ref": "#/$defs/PkgNameParams"
+      },
+      "result": {}
+    },
+    "pkgInstall": {
+      "domain": "package",
+      "params": {
+        "$ref": "#/$defs/PkgInstallParams"
+      },
+      "result": {}
+    },
+    "pkgList": {
+      "domain": "package",
+      "params": {
+        "$ref": "#/$defs/PkgParams"
+      },
+      "result": {}
+    },
+    "pkgUninstall": {
+      "domain": "package",
+      "params": {
+        "$ref": "#/$defs/PkgNameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PkgUninstallResult"
+      }
+    },
+    "pkgUpdate": {
+      "domain": "package",
+      "params": {
+        "$ref": "#/$defs/PkgNameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PkgUpdateResult"
+      }
+    },
+    "prompt": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/PromptParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "reload": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "renameSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/RenameSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/RenameSessionResult"
+      }
+    },
+    "saveAgent": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SaveAgentParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SaveAgentResult"
+      }
+    },
+    "setActiveTools": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetActiveToolsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetActiveToolsResult"
+      }
+    },
+    "setApiKey": {
+      "domain": "auth",
+      "params": {
+        "$ref": "#/$defs/SetApiKeyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ProviderResult"
+      }
+    },
+    "setAutoCompactionEnabled": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetAutoCompactionEnabledParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetAutoCompactionEnabledResult"
+      }
+    },
+    "setAutoRetry": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetAutoRetryParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetAutoRetryResult"
+      }
+    },
+    "setExtensionFlag": {
+      "domain": "system",
+      "params": {
+        "$ref": "#/$defs/SetExtensionFlagParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetExtensionFlagResult"
+      }
+    },
+    "setFollowUpMode": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetFollowUpModeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetFollowUpModeResult"
+      }
+    },
+    "setLabel": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetLabelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "setModel": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/SetModelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "setPersonaOverride": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetPersonaOverrideParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetPersonaOverrideResult"
+      }
+    },
+    "setScopedModels": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/SetScopedModelsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetScopedModelsResult"
+      }
+    },
+    "setSessionName": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetSessionNameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetSessionNameResult"
+      }
+    },
+    "setSteeringMode": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SetSteeringModeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetSteeringModeResult"
+      }
+    },
+    "setThinkingLevel": {
+      "domain": "model",
+      "params": {
+        "$ref": "#/$defs/SetThinkingLevelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SetThinkingLevelResult"
+      }
+    },
+    "shutdown": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/EmptyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "steer": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SteerParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    "switchSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SwitchSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SwitchSessionResult"
+      }
+    },
+    "syncSession": {
+      "domain": "session",
+      "params": {
+        "$ref": "#/$defs/SyncSessionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SyncSessionResult"
+      }
+    },
+    "updateSettings": {
+      "domain": "settings",
+      "params": {
+        "$ref": "#/$defs/UpdateSettingsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/UpdateSettingsResult"
+      }
+    }
+  },
+  "novaEvent": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AgentStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "agent_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AgentEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "agent_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/TurnStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "turn_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/TurnEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "turn_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/MessageStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "message_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/MessageUpdateEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "message_update"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/MessageEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "message_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ToolExecutionStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "tool_execution_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ToolExecutionUpdateEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "tool_execution_update"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ToolExecutionEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "tool_execution_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AgentSettledEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "agent_settled"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AutoCompactionStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "auto_compaction_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AutoCompactionEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "auto_compaction_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AutoRetryStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "auto_retry_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/AutoRetryEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "auto_retry_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ModelChangedEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "model_changed"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/QueueUpdateEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "queue_update"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/SessionInfoChangedEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "session_info_changed"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/SessionReloadedEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "session_reloaded"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/SessionReplacedEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "session_replaced"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ThinkingLevelChangedEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "thinking_level_changed"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/CompactionStartEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "compaction_start"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/CompactionEndEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "compaction_end"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/EntryAppendedEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "entry_appended"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/CacheMissEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "cache_miss"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ExtensionErrorEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "extension_error"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ItemStartedNotification"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "item_started"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ItemDeltaNotification"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "item_delta"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ItemCompletedNotification"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "item_completed"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "novaItem": {
+    "oneOf": [
+      {
+        "$ref": "#/$defs/UserMessageItem"
+      },
+      {
+        "$ref": "#/$defs/AgentMessageItem"
+      },
+      {
+        "$ref": "#/$defs/ThinkingItem"
+      },
+      {
+        "$ref": "#/$defs/ToolCallItem"
+      },
+      {
+        "$ref": "#/$defs/CompactionItem"
+      },
+      {
+        "$ref": "#/$defs/BranchSummaryItem"
+      },
+      {
+        "$ref": "#/$defs/CustomItem"
+      }
+    ]
+  },
+  "sessionEntry": {
+    "oneOf": [
+      {
+        "$ref": "#/$defs/SessionMessageEntry"
+      },
+      {
+        "$ref": "#/$defs/ThinkingLevelChangeEntry"
+      },
+      {
+        "$ref": "#/$defs/ModelChangeEntry"
+      },
+      {
+        "$ref": "#/$defs/CompactionEntry"
+      },
+      {
+        "$ref": "#/$defs/BranchSummaryEntry"
+      },
+      {
+        "$ref": "#/$defs/CustomEntry"
+      },
+      {
+        "$ref": "#/$defs/CustomMessageEntry"
+      },
+      {
+        "$ref": "#/$defs/LabelEntry"
+      },
+      {
+        "$ref": "#/$defs/SessionInfoEntry"
+      }
+    ]
+  },
+  "title": "NovaWireProtocol"
+}

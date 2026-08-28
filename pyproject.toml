@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Nova monorepo workspace"
 authors = [{ name = "Liujinming" }]
 license = { text = "MIT" }
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = []
 
 [build-system]
@@ -16,22 +16,27 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64", "win-64"]
 
 [tool.pixi.dependencies]
-python = ">=3.9,<3.13"
+python = ">=3.12,<3.14"
 
 [tool.pixi.pypi-dependencies]
 nova-ai = { path = "packages/nova_ai", editable = true }
 nova-agent = { path = "packages/nova_agent", editable = true }
-nova-harness = { path = "packages/nova_harness", editable = true }
+nova-harness = { path = "packages/nova-harness/backend", editable = true }
 nova-coding-agent = { path = "packages/nova_coding_agent", editable = true }
-openai = ">=1.109.1"
+nova-executor = { path = "packages/nova-executor-py", editable = true }
+websockets = ">=12.0"
+openai = ">=2.0"
+httpx = ">=0.27.0"
 pydantic = ">=2.0"
 json-repair = ">=0.58.4"
 jsonschema = ">=4.0"
 pyyaml = ">=6.0.1"
 filelock = ">=3.24.3"
 tomli = ">=2.0.1"
+uuid6 = ">=2024.7.10"
 setuptools = "*"
 pathspec = ">=0.12.1"
+pillow = ">=10.0"
 
 [tool.pixi.feature.dev.pypi-dependencies]
 black = ">=23.10.1"
@@ -48,8 +53,8 @@ dev = { features = ["dev"], solve-group = "default" }
 [tool.pixi.tasks]
 test-ai = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_ai" }
 test-agent = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_agent" }
-test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_harness" }
-test-coding = { cmd = "pytest tests", cwd = "packages/nova_coding_agent" }
+test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova-harness/backend" }
+test-coding = { cmd = "pytest tests", cwd = "packages/nova_coding_agent/backend" }
 test-all = { cmd = "pytest tests -m 'not integration'", depends-on = ["test-ai", "test-agent", "test-harness", "test-coding"] }
-format = "black packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_coding_agent/src packages/nova_coding_agent/tools && isort packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_coding_agent/src packages/nova_coding_agent/tools"
+format = "black packages/nova_ai/src packages/nova_agent/src packages/nova-harness/backend/src packages/nova_coding_agent/backend && isort packages/nova_ai/src packages/nova_agent/src packages/nova-harness/backend/src packages/nova_coding_agent/backend"
 nova = "nova-harness run"

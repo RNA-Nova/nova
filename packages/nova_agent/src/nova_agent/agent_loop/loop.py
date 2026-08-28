@@ -2,38 +2,36 @@
 Agent loop core: main loop and assistant streaming.
 """
 
-import asyncio
-import inspect
+import dataclasses
 from typing import List, Optional
 
 from nova_ai import (
+    AbortSignal,
     AssistantMessage,
     Context,
-    Message,
-    SimpleStreamOptions,
-    stream_simple,
+    builtin_models,
+    to_thinking_level,
 )
 
-from ..signal import AbortSignal
 from ..types import (
     AgentContext,
+    AgentEndEvent,
     AgentEventSink,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentMessage,
+    AgentStartEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
     StreamFn,
-    AgentStartEvent,
-    AgentEndEvent,
-    TurnStartEvent,
     TurnEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    MessageEndEvent,
+    TurnStartEvent,
 )
-
-from .tools import execute_tool_calls
+from ..utils import default_convert_to_llm, invoke_hook
+from .tools import execute_tool_calls, fail_tool_calls_from_truncated_message
 
 
 async def run_agent_loop(
@@ -105,8 +103,7 @@ async def _run_loop(
     first_turn = True
     turn_index = 0
     pending_messages: List[AgentMessage] = []
-    if config.get_steering_messages:
-        pending_messages = await config.get_steering_messages() or []
+    pending_messages = await invoke_hook(config.get_steering_messages, default=[]) or []
 
     while True:
         has_more_tool_calls = True
@@ -143,9 +140,21 @@ async def _run_loop(
             tool_results = []
             has_more_tool_calls = False
             if tool_calls:
-                executed_batch = await execute_tool_calls(
-                    current_context, assistant_msg, tool_calls, config, signal, emit
-                )
+                # "length" 停止意味着输出被 token 上限截断，该消息里每个 tool call
+                # 的参数都可能被截断。全部 fail，而不是执行可能残缺的调用。
+                if assistant_msg.stop_reason == "length":
+                    executed_batch = await fail_tool_calls_from_truncated_message(
+                        tool_calls, emit
+                    )
+                else:
+                    executed_batch = await execute_tool_calls(
+                        current_context,
+                        assistant_msg,
+                        tool_calls,
+                        config,
+                        signal,
+                        emit,
+                    )
                 tool_results = executed_batch.messages
                 has_more_tool_calls = not executed_batch.terminate
 
@@ -163,59 +172,54 @@ async def _run_loop(
                 new_messages=new_messages,
                 turn_index=turn_index,
             )
-            next_turn_snapshot = await _maybe_call_prepare_next_turn(
-                config, next_turn_context
+            next_turn_snapshot = await invoke_hook(
+                config.prepare_next_turn, next_turn_context
             )
             if next_turn_snapshot:
                 if next_turn_snapshot.context is not None:
                     current_context = next_turn_snapshot.context
-                if (
-                    next_turn_snapshot.model is not None
-                    or next_turn_snapshot.thinking_level is not None
-                ):
-                    config = config.model_copy(
-                        update={
-                            "model": (
-                                next_turn_snapshot.model
-                                if next_turn_snapshot.model is not None
-                                else config.model
-                            ),
-                            "reasoning": (
-                                (
-                                    None
-                                    if next_turn_snapshot.thinking_level == "off"
-                                    else next_turn_snapshot.thinking_level
-                                )
-                                if next_turn_snapshot.thinking_level is not None
-                                else config.reasoning
-                            ),
-                        }
+                stream_options = config.stream_options
+                model = config.model
+                if next_turn_snapshot.model is not None:
+                    model = next_turn_snapshot.model
+                if next_turn_snapshot.thinking_level is not None:
+                    # 状态侧级别 → 请求侧：OFF 时 reasoning=None（不发送）
+                    stream_options = dataclasses.replace(
+                        stream_options,
+                        reasoning=to_thinking_level(next_turn_snapshot.thinking_level),
                     )
+                config = dataclasses.replace(
+                    config, model=model, stream_options=stream_options
+                )
 
             # Graceful stop hook
-            should_stop = await _maybe_call_should_stop_after_turn(
-                config,
-                ShouldStopAfterTurnContext(
-                    message=assistant_msg,
-                    tool_results=tool_results,
-                    context=current_context,
-                    new_messages=new_messages,
-                    turn_index=turn_index,
-                ),
+            should_stop = bool(
+                await invoke_hook(
+                    config.should_stop_after_turn,
+                    ShouldStopAfterTurnContext(
+                        message=assistant_msg,
+                        tool_results=tool_results,
+                        context=current_context,
+                        new_messages=new_messages,
+                        turn_index=turn_index,
+                    ),
+                    default=False,
+                )
             )
             if should_stop:
                 await emit(AgentEndEvent(messages=new_messages))
                 return
 
             turn_index += 1
-            pending_messages = await _maybe_get_steering_messages(config)
+            pending_messages = (
+                await invoke_hook(config.get_steering_messages, default=[]) or []
+            )
 
         # Agent would stop here. Check for follow-up messages.
-        if config.get_follow_up_messages:
-            follow_up = await config.get_follow_up_messages() or []
-            if follow_up:
-                pending_messages = follow_up
-                continue
+        follow_up = await invoke_hook(config.get_follow_up_messages, default=[]) or []
+        if follow_up:
+            pending_messages = follow_up
+            continue
 
         # No more messages, exit
         break
@@ -223,44 +227,9 @@ async def _run_loop(
     await emit(AgentEndEvent(messages=new_messages))
 
 
-async def _maybe_call_prepare_next_turn(
-    config: AgentLoopConfig,
-    context: PrepareNextTurnContext,
-) -> Optional[AgentLoopTurnUpdate]:
-    if not config.prepare_next_turn:
-        return None
-    result = config.prepare_next_turn(context)
-    if asyncio.iscoroutine(result):
-        return await result
-    return result
-
-
-async def _maybe_call_should_stop_after_turn(
-    config: AgentLoopConfig,
-    context: ShouldStopAfterTurnContext,
-) -> bool:
-    if not config.should_stop_after_turn:
-        return False
-    result = config.should_stop_after_turn(context)
-    if asyncio.iscoroutine(result):
-        return await result
-    return result
-
-
-async def _maybe_get_steering_messages(config: AgentLoopConfig) -> List[AgentMessage]:
-    if not config.get_steering_messages:
-        return []
-    return await config.get_steering_messages() or []
-
-
 # ----------------------------------------------------------------------
 # Assistant response streaming
 # ----------------------------------------------------------------------
-
-
-async def _default_convert_to_llm(messages: List[AgentMessage]) -> List[Message]:
-    """Default converter: keep only LLM‑compatible messages."""
-    return [m for m in messages if m.role in ("user", "assistant", "toolResult")]
 
 
 async def _stream_assistant_response(
@@ -275,64 +244,41 @@ async def _stream_assistant_response(
     This is where AgentMessage[] gets transformed to Message[] for the LLM.
     """
     # Apply context transform if configured (AgentMessage[] → AgentMessage[])
-    messages = context.messages
-    if config.transform_context:
-        messages = await config.transform_context(messages, signal)
+    messages = await invoke_hook(
+        config.transform_context, context.messages, signal, default=context.messages
+    )
 
     # Convert to LLM-compatible messages (AgentMessage[] → Message[])
-    convert = config.convert_to_llm or _default_convert_to_llm
-    if inspect.iscoroutinefunction(convert):
-        llm_messages = await convert(messages)
-    else:
-        llm_messages = convert(messages)
+    convert = config.convert_to_llm or default_convert_to_llm
+    llm_messages = await invoke_hook(convert, messages)
 
     # Build LLM context
     llm_context = Context(
         system_prompt=context.system_prompt,
         messages=llm_messages,
-        tools=[t for t in (context.tools or [])],
+        tools=context.tools or [],
     )
 
-    stream_func = stream_fn or config.stream_fn or stream_simple
+    stream_func = stream_fn or builtin_models().stream_simple
 
     # Resolve API key (important for expiring tokens)
-    resolved_api_key = config.api_key
-    if config.get_api_key:
-        resolved = config.get_api_key(config.model.provider)
-        if asyncio.iscoroutine(resolved):
-            resolved = await resolved
-        if resolved:
-            resolved_api_key = resolved
+    resolved_api_key = config.stream_options.api_key
+    resolved = await invoke_hook(config.get_api_key, config.model.provider)
+    if resolved:
+        resolved_api_key = resolved
 
-    # Build SimpleStreamOptions from config, excluding agent-specific callbacks
-    stream_config = config.model_dump(
-        exclude={
-            "convert_to_llm",
-            "transform_context",
-            "get_api_key",
-            "get_steering_messages",
-            "get_follow_up_messages",
-            "should_stop_after_turn",
-            "prepare_next_turn",
-            "tool_execution",
-            "before_tool_call",
-            "after_tool_call",
-            "model",
-        }
+    # 不修改调用方传入的 stream_options，生成拷贝并注入本次调用的 api_key / signal
+    stream_options = dataclasses.replace(
+        config.stream_options, api_key=resolved_api_key, signal=signal
     )
-    stream_config["api_key"] = resolved_api_key
-    stream_config["signal"] = signal
-    stream_config["on_payload"] = config.on_payload
-    stream_config["on_response"] = config.on_response
 
     # Call the underlying streaming function (returns async iterator of events)
-    response = stream_func(
+    response = await invoke_hook(
+        stream_func,
         config.model,
         llm_context,
-        SimpleStreamOptions(**stream_config),
+        stream_options,
     )
-    if asyncio.iscoroutine(response):
-        response = await response
 
     partial_message: Optional[AssistantMessage] = None
     added_partial = False

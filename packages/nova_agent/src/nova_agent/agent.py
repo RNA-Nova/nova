@@ -5,58 +5,59 @@ Provides state management, event subscription, message queuing, and lifecycle co
 
 import asyncio
 import inspect
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Union
+import time
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from nova_ai import (
-    get_model,
-    TextContent,
+    AbortController,
+    AbortSignal,
+    AssistantMessage,
     ImageContent,
     Message,
-    UserMessage,
-    AssistantMessage,
     Model,
+    ModelThinkingLevel,
     ProviderResponse,
-    stream_simple,
+    SimpleStreamOptions,
+    TextContent,
     ThinkingBudgets,
     Transport,
     Usage,
-    Cost,
+    UserMessage,
+    builtin_models,
+    to_thinking_level,
 )
 
-from .signal import AbortSignal
+from .agent_loop import run_agent_loop, run_agent_loop_continue
 from .types import (
-    AgentMessage,
-    AgentContext,
-    AgentEvent,
-    AgentLoopConfig,
-    AgentState,
-    AgentTool,
-    StreamFn,
-    ThinkingLevel,
-    ToolExecutionMode,
-    QueueMode,
-    BeforeToolCallContext,
-    BeforeToolCallResult,
     AfterToolCallContext,
     AfterToolCallResult,
-    AgentLoopTurnUpdate,
-    PrepareNextTurnContext,
-    ShouldStopAfterTurnContext,
+    AgentContext,
     AgentEndEvent,
-    TurnEndEvent,
-    MessageStartEvent,
+    AgentEvent,
+    AgentLoopConfig,
+    AgentLoopTurnUpdate,
+    AgentMessage,
+    AgentState,
+    AgentTool,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
     MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    PrepareNextTurnContext,
+    QueueMode,
+    ShouldStopAfterTurnContext,
+    StreamFn,
+    ToolExecutionEndEvent,
+    ToolExecutionMode,
+    ToolExecutionStartEvent,
+    TurnEndEvent,
 )
-from .agent_loop import run_agent_loop, run_agent_loop_continue
+from .utils import default_convert_to_llm, invoke_hook
 
-Listener = Callable[[AgentEvent], None]
-AsyncListener = Callable[[AgentEvent], Awaitable[None]]
+Listener = Callable[[AgentEvent, Optional[AbortSignal]], None]
+AsyncListener = Callable[[AgentEvent, Optional[AbortSignal]], Awaitable[None]]
 AgentListener = Union[Listener, AsyncListener]
-
-
-async def _default_convert_to_llm(messages: List[AgentMessage]) -> List[Message]:
-    """Default converter: keep only LLM‑compatible messages."""
-    return [m for m in messages if m.role in ("user", "assistant", "toolResult")]
 
 
 class _PendingMessageQueue:
@@ -116,11 +117,11 @@ class Agent:
             Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]
         ] = None,
         thinking_budgets: Optional[ThinkingBudgets] = None,
-        transport: Transport = "sse",
+        transport: Transport = Transport.AUTO,
         max_retry_delay_ms: Optional[int] = None,
         timeout: Optional[float] = None,
         tool_execution: ToolExecutionMode = "parallel",
-        on_payload: Optional[Callable[[Any], Any]] = None,
+        on_payload: Optional[Callable[[Any, Model], Any]] = None,
         on_response: Optional[Callable[[ProviderResponse, Any], Any]] = None,
         before_tool_call: Optional[
             Callable[
@@ -136,7 +137,7 @@ class Agent:
         ] = None,
         prepare_next_turn: Optional[
             Callable[
-                [PrepareNextTurnContext],
+                [PrepareNextTurnContext, Optional[AbortSignal]],
                 Union[AgentLoopTurnUpdate, Awaitable[AgentLoopTurnUpdate], None],
             ]
         ] = None,
@@ -147,39 +148,55 @@ class Agent:
             ]
         ] = None,
     ):
-        # Default model (matching the TypeScript example)
-        default_model = get_model("volcengine", "deepseek-v3-2-251201")
-
-        # Normalise initial_state to a dict
+        # Initialise state. AgentState 是普通 class，不再走 Pydantic 校验；
+        # 这里只从 initial_state 提取配置字段，运行时字段统一重置。
         if isinstance(initial_state, AgentState):
-            state_dict = initial_state.model_dump()
+            # 拷贝一份，避免外部引用污染内部状态（与 TS createMutableAgentState 对齐）
+            self._state = AgentState(
+                system_prompt=initial_state.system_prompt,
+                model=initial_state.model,
+                thinking_level=initial_state.thinking_level,
+                tools=initial_state.tools,
+                messages=initial_state.messages,
+            )
         elif initial_state:
-            state_dict = dict(initial_state)
+            kwargs = dict(initial_state)
+            unknown_keys = set(kwargs) - {
+                "system_prompt",
+                "model",
+                "thinking_level",
+                "tools",
+                "messages",
+            }
+            if unknown_keys:
+                raise TypeError(
+                    f"Unknown initial_state keys: {sorted(unknown_keys)}. "
+                    "Allowed keys: system_prompt, model, thinking_level, tools, messages."
+                )
+            model_value = kwargs.get("model")
+            if isinstance(model_value, dict):
+                kwargs["model"] = Model.model_validate(model_value)
+            self._state = AgentState(
+                system_prompt=kwargs.get("system_prompt"),
+                model=kwargs.get("model"),
+                thinking_level=kwargs.get("thinking_level"),
+                tools=kwargs.get("tools"),
+                messages=kwargs.get("messages"),
+            )
         else:
-            state_dict = {}
+            self._state = AgentState()
 
-        # Initialise state
-        self._state = AgentState(
-            system_prompt=state_dict.get("system_prompt", "") or "",
-            model=state_dict.get("model", default_model) or default_model,
-            thinking_level=state_dict.get("thinking_level", None),
-            tools=state_dict.get("tools", []) or [],
-            messages=state_dict.get("messages", []) or [],
-            is_streaming=False,
-            streaming_message=None,
-            pending_tool_calls=set(),
-            error_message=None,
-        )
-
-        self._listeners: Set[AgentListener] = set()
-        self._abort_event: Optional[AbortSignal] = None
+        # 用 dict 保存监听器：保序（按订阅顺序派发）且天然去重，对齐 TS Set 语义
+        self._listeners: Dict[AgentListener, None] = {}
+        self._abort_controller: Optional[AbortController] = None
         self._running_task: Optional[asyncio.Task] = None
 
-        self.convert_to_llm = convert_to_llm or _default_convert_to_llm
+        self.convert_to_llm = convert_to_llm or default_convert_to_llm
         self.transform_context = transform_context
         self.steering_mode = steering_mode
         self.follow_up_mode = follow_up_mode
-        self.stream_fn = stream_fn or stream_simple
+        # 未注入 stream_fn 时惰性构造内置 Models（内存 store 为空 → auth 等价 env-only）
+        self.stream_fn = stream_fn or builtin_models().stream_simple
         self._session_id = session_id
         self.get_api_key = get_api_key
         self._thinking_budgets = thinking_budgets
@@ -233,16 +250,19 @@ class Agent:
     @property
     def signal(self) -> Optional[AbortSignal]:
         """Active abort signal for the current run, if any."""
-        return self._abort_event
+        return self._abort_controller.signal if self._abort_controller else None
 
     # ----------------------------------------------------------------------
     # Public API
     # ----------------------------------------------------------------------
 
     def subscribe(self, fn: AgentListener) -> Callable[[], None]:
-        """注册事件监听器（支持同步或异步函数）。返回取消订阅函数。"""
-        self._listeners.add(fn)
-        return lambda: self._listeners.discard(fn)
+        """注册事件监听器（支持同步或异步函数）。
+
+        监听器按订阅顺序逐个被 await（与 TS 对齐）。返回取消订阅函数。
+        """
+        self._listeners[fn] = None
+        return lambda: self._listeners.pop(fn, None)
 
     # State mutators
     def set_system_prompt(self, value: str) -> None:
@@ -251,7 +271,7 @@ class Agent:
     def set_model(self, model: Model) -> None:
         self._state.model = model
 
-    def set_thinking_level(self, level: ThinkingLevel) -> None:
+    def set_thinking_level(self, level: ModelThinkingLevel) -> None:
         self._state.thinking_level = level
 
     def set_steering_mode(self, mode: QueueMode) -> None:
@@ -303,13 +323,16 @@ class Agent:
 
     def abort(self) -> None:
         """Abort the currently running prompt."""
-        if self._abort_event is not None:
-            self._abort_event.set()
+        if self._abort_controller is not None:
+            self._abort_controller.abort()
 
     async def wait_for_idle(self) -> None:
-        """Wait until the agent finishes processing the current prompt."""
+        """Wait until the agent finishes processing the current prompt.
+
+        shield 保证等待方被取消时不会传染给正在运行的 run（对齐 TS 的独立 promise 语义）。
+        """
         if self._running_task:
-            await self._running_task
+            await asyncio.shield(self._running_task)
 
     def reset(self) -> None:
         """Reset the agent state (clears messages, queues, and errors)."""
@@ -337,8 +360,11 @@ class Agent:
                 "or wait for completion."
             )
 
-        if not self._state.model:
-            raise RuntimeError("No model configured")
+        if not self._state.has_configured_model():
+            raise RuntimeError(
+                "No model configured. Call set_model() or provide initial_state "
+                "with a model before prompt()."
+            )
 
         messages = self._normalize_prompt_input(input, images)
         await self._run_with_lifecycle(lambda: self._run_prompt_messages(messages))
@@ -400,7 +426,7 @@ class Agent:
             UserMessage(
                 role="user",
                 content=content,
-                timestamp=int(asyncio.get_event_loop().time() * 1000),
+                timestamp=int(time.time() * 1000),
             )
         ]
 
@@ -429,34 +455,32 @@ class Agent:
         async def prepare_next_turn_wrapper(
             context: PrepareNextTurnContext,
         ) -> Optional[AgentLoopTurnUpdate]:
-            if not self.prepare_next_turn:
-                return None
-            result = self.prepare_next_turn(context)
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
+            return await invoke_hook(self.prepare_next_turn, context, self.signal)
 
         async def should_stop_after_turn_wrapper(
             context: ShouldStopAfterTurnContext,
         ) -> bool:
-            if not self.should_stop_after_turn:
-                return False
-            result = self.should_stop_after_turn(context)
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
+            result = await invoke_hook(
+                self.should_stop_after_turn, context, default=False
+            )
+            return bool(result)
 
-        return AgentLoopConfig(
-            model=self._state.model,
-            reasoning=self._state.thinking_level,
+        stream_options = SimpleStreamOptions(
+            # 状态侧级别 → 请求侧：OFF 时 reasoning=None（不发送）
+            reasoning=to_thinking_level(self._state.thinking_level),
             session_id=self._session_id,
             transport=self._transport,
             thinking_budgets=self._thinking_budgets,
             max_retry_delay_ms=self.max_retry_delay_ms,
             timeout=self._timeout,
-            tool_execution=self.tool_execution,
             on_payload=self.on_payload,
             on_response=self.on_response,
+        )
+
+        return AgentLoopConfig(
+            stream_options=stream_options,
+            model=self._state.model,
+            tool_execution=self.tool_execution,
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
             prepare_next_turn=(
@@ -478,7 +502,7 @@ class Agent:
         if self._state.is_streaming:
             raise RuntimeError("Agent is already processing.")
 
-        self._abort_event = AbortSignal()
+        self._abort_controller = AbortController()
         self._state.is_streaming = True
         self._state.streaming_message = None
         self._state.error_message = None
@@ -510,7 +534,7 @@ class Agent:
             self._create_context_snapshot(),
             self._create_loop_config(skip_initial_steering_poll),
             self._process_event,
-            self._abort_event,
+            self.signal,
             self.stream_fn,
         )
 
@@ -519,36 +543,23 @@ class Agent:
             self._create_context_snapshot(),
             self._create_loop_config(),
             self._process_event,
-            self._abort_event,
+            self.signal,
             self.stream_fn,
         )
 
     async def _handle_run_failure(self, error: Exception) -> None:
-        aborted = self._abort_event is not None and self._abort_event.aborted
+        aborted = self.signal is not None and self.signal.aborted
         model = self._state.model
         failure_message = AssistantMessage(
             role="assistant",
             content=[TextContent(text="")],
-            api=model.api if model else "",
-            provider=model.provider if model else "",
-            model=model.id if model else "",
-            usage=Usage(
-                input=0,
-                output=0,
-                cache_read=0,
-                cache_write=0,
-                total_tokens=0,
-                cost=Cost(
-                    input=0,
-                    output=0,
-                    cache_read=0,
-                    cache_write=0,
-                    total=0,
-                ),
-            ),
+            api=model.api,
+            provider=model.provider,
+            model=model.id,
+            usage=Usage(),
             stop_reason="aborted" if aborted else "error",
             error_message=str(error),
-            timestamp=int(asyncio.get_event_loop().time() * 1000),
+            timestamp=int(time.time() * 1000),
         )
         await self._process_event(MessageStartEvent(message=failure_message))
         await self._process_event(MessageEndEvent(message=failure_message))
@@ -561,52 +572,42 @@ class Agent:
         self._state.is_streaming = False
         self._state.streaming_message = None
         self._state.pending_tool_calls.clear()
-        self._abort_event = None
+        self._abort_controller = None
 
     async def _process_event(self, event: AgentEvent) -> None:
         """Reduce internal state for a loop event, then await listeners."""
-        event_type = getattr(event, "type", None)
-
-        if event_type == "message_start":
+        if isinstance(event, MessageStartEvent):
             self._state.streaming_message = event.message
-        elif event_type == "message_update":
+        elif isinstance(event, MessageUpdateEvent):
             self._state.streaming_message = event.message
-        elif event_type == "message_end":
+        elif isinstance(event, MessageEndEvent):
             self._state.streaming_message = None
-            if event.message:
-                self.append_message(event.message)
-        elif event_type == "tool_execution_start":
-            if event.tool_call_id:
-                self._state.pending_tool_calls.add(event.tool_call_id)
-        elif event_type == "tool_execution_end":
-            if event.tool_call_id:
-                self._state.pending_tool_calls.discard(event.tool_call_id)
-        elif event_type == "turn_end":
-            if (
-                event.message
-                and event.message.role == "assistant"
-                and getattr(event.message, "error_message", None)
-            ):
+            self.append_message(event.message)
+        elif isinstance(event, ToolExecutionStartEvent):
+            self._state.pending_tool_calls.add(event.tool_call_id)
+        elif isinstance(event, ToolExecutionEndEvent):
+            self._state.pending_tool_calls.discard(event.tool_call_id)
+        elif isinstance(event, TurnEndEvent):
+            if event.message.role == "assistant" and event.message.error_message:
                 self._state.error_message = event.message.error_message
-        elif event_type == "agent_end":
+        elif isinstance(event, AgentEndEvent):
             self._state.streaming_message = None
 
         await self._emit(event)
 
     async def _emit(self, event: AgentEvent) -> None:
-        """带超时的异步事件分发"""
-        tasks = []
+        """异步事件分发。
 
-        for listener in self._listeners:
-            if inspect.iscoroutinefunction(listener):
-                task = asyncio.create_task(
-                    asyncio.wait_for(listener(event), timeout=120)
-                )
-                tasks.append(task)
-            else:
-                loop = asyncio.get_event_loop()
-                task = loop.run_in_executor(None, listener, event)
-                tasks.append(task)
-
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        与 TS 的 Agent 行为对齐：
+        - 按订阅顺序逐个 await listener；
+        - 把当前 run 的 abort signal 作为第二个参数传给 listener；
+        - 不设置硬编码超时，由 listener 自行通过 signal 响应取消。
+        """
+        signal = self.signal
+        if signal is None:
+            raise RuntimeError("Agent listener invoked outside active run")
+        # 迭代快照，允许 listener 在回调中订阅/退订而不打断本次派发
+        for listener in list(self._listeners):
+            result = listener(event, signal)
+            if inspect.isawaitable(result):
+                await result

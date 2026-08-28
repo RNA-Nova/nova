@@ -13,250 +13,62 @@ nova_agent 核心循环单元测试
 - Agent 生命周期方法（reset、并发保护、listener）
 """
 
-from typing import Any, Callable, List
+import asyncio
+import time
+from typing import Any, List
 
 import pytest
+from helpers import (
+    EchoTool,
+    RaisingTool,
+    SlowTool,
+    SquareTool,
+    TerminateTool,
+    UpdatingTool,
+    abortable_tool_call_stream,
+    final_stream,
+    make_assistant_message,
+    multi_tool_call_stream,
+    text_stream,
+    tool_call_stream,
+    tool_call_then_text_stream,
+)
+from nova_ai import (
+    AbortController,
+    AbortSignal,
+    AssistantMessage,
+    DoneEvent,
+    EventStream,
+    Model,
+    ModelThinkingLevel,
+    SimpleStreamOptions,
+    StartEvent,
+    TextContent,
+    ThinkingLevel,
+    ToolCall,
+    ToolCallEndEvent,
+    ToolResultMessage,
+    UserMessage,
+)
 
 from nova_agent import (
+    AfterToolCallContext,
+    AfterToolCallResult,
     Agent,
     AgentContext,
     AgentLoopConfig,
+    AgentLoopTurnUpdate,
     AgentTool,
     AgentToolResult,
-    AbortSignal,
-    AfterToolCallContext,
-    AfterToolCallResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
     CustomAgentMessage,
     MessageUpdateEvent,
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
-    AgentLoopTurnUpdate,
     ToolExecutionUpdateEvent,
 )
-from nova_ai import (
-    AssistantMessage,
-    DoneEvent,
-    EventStream,
-    Model,
-    StartEvent,
-    TextContent,
-    TextDeltaEvent,
-    TextEndEvent,
-    ToolCall,
-    ToolCallEndEvent,
-    ToolResultMessage,
-    UserMessage,
-)
 from nova_agent.agent_loop import run_agent_loop, run_agent_loop_continue
-
-
-class EchoTool(AgentTool):
-    """基础 echo 工具。"""
-
-    name: str = "echo"
-    description: str = "Echo the input message"
-    parameters: dict = {
-        "type": "object",
-        "properties": {"message": {"type": "string"}},
-        "required": ["message"],
-    }
-    label: str = "Echo"
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        return AgentToolResult(
-            content=[TextContent(text=f"echo: {params.get('message', '')}")],
-            details={"input": params.get("message", "")},
-        )
-
-
-class SquareTool(AgentTool):
-    """返回数字平方，测试 prepare_arguments。"""
-
-    name: str = "square"
-    description: str = "Return the square of a number"
-    parameters: dict = {
-        "type": "object",
-        "properties": {"x": {"type": "integer"}},
-        "required": ["x"],
-    }
-
-    def prepare_arguments(self, args: Any) -> Any:
-        if isinstance(args.get("x"), str):
-            args = dict(args)
-            args["x"] = int(args["x"])
-        return args
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        return AgentToolResult(
-            content=[TextContent(text=str(params["x"] ** 2))],
-            details={"result": params["x"] ** 2},
-        )
-
-
-class SlowTool(AgentTool):
-    """execution_mode 覆盖为 sequential 的工具。"""
-
-    name: str = "slow"
-    description: str = "A tool that must run sequentially"
-    parameters: dict = {
-        "type": "object",
-        "properties": {"value": {"type": "string"}},
-        "required": ["value"],
-    }
-    execution_mode: str = "sequential"
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        return AgentToolResult(
-            content=[TextContent(text=f"slow-{params['value']}")],
-            details={},
-        )
-
-
-class TerminateTool(AgentTool):
-    """返回 terminate=True 的工具。"""
-
-    name: str = "terminate"
-    description: str = "Terminate the agent run"
-    parameters: dict = {"type": "object", "properties": {}}
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        return AgentToolResult(
-            content=[TextContent(text="done")],
-            details={},
-            terminate=True,
-        )
-
-
-def _make_assistant_message(
-    model: Model, content: List[Any], stop_reason: str = "stop"
-) -> AssistantMessage:
-    return AssistantMessage(
-        role="assistant",
-        content=content,
-        api=model.api,
-        provider=model.provider,
-        model=model.id,
-        stop_reason=stop_reason,
-    )
-
-
-def _text_stream(model: Model, text: str) -> EventStream:
-    """构造一个只回复固定文本的 EventStream。"""
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
-
-    partial = _make_assistant_message(model, [TextContent(text=text)])
-    stream.push(StartEvent(partial=partial))
-    if text:
-        stream.push(TextDeltaEvent(delta=text, partial=partial))
-        stream.push(TextEndEvent(content=text, partial=partial))
-    stream.push(DoneEvent(reason="stop", message=partial))
-    stream.end()
-    return stream
-
-
-def _tool_call_stream(
-    model: Model, tool_name: str, arguments: dict, text_prefix: str = ""
-) -> EventStream:
-    """构造一个回复单个 tool call 的 EventStream。"""
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
-
-    content: List[Any] = []
-    if text_prefix:
-        content.append(TextContent(text=text_prefix))
-    tool_call = ToolCall(id="tc-1", name=tool_name, arguments=arguments)
-    content.append(tool_call)
-    partial = _make_assistant_message(model, content, stop_reason="toolUse")
-    stream.push(StartEvent(partial=partial))
-    if text_prefix:
-        stream.push(TextDeltaEvent(delta=text_prefix, partial=partial))
-        stream.push(TextEndEvent(content=text_prefix, partial=partial))
-    stream.push(
-        ToolCallEndEvent(
-            content_index=len(content) - 1,
-            tool_call=tool_call,
-            partial=partial,
-        )
-    )
-    stream.push(DoneEvent(reason="toolUse", message=partial))
-    stream.end()
-    return stream
-
-
-def _abortable_tool_call_stream(
-    tool_name: str, arguments: dict
-) -> Callable[[Model, Any, Any], EventStream]:
-    """第一次返回 tool call；若 signal 已 aborted，则返回 stop_reason='aborted' 的文本流。"""
-
-    def stream_fn(model: Model, context: Any, options: Any) -> EventStream:
-        signal = getattr(options, "signal", None)
-        if signal and signal.aborted:
-            return _final_stream(model, "aborted", stop_reason="aborted")
-        return _tool_call_stream(model, tool_name, arguments)
-
-    return stream_fn
-
-
-def _tool_call_then_text_stream(
-    tool_name: str, arguments: dict, text: str = "ok"
-) -> Callable[[Model, Any, Any], EventStream]:
-    """第一次返回 tool call，之后返回固定文本。"""
-    step = 0
-
-    def stream_fn(model: Model, context: Any, options: Any) -> EventStream:
-        nonlocal step
-        step += 1
-        if step == 1:
-            return _tool_call_stream(model, tool_name, arguments)
-        return _text_stream(model, text)
-
-    return stream_fn
-
-
-def _multi_tool_call_stream(model: Model, calls: List[tuple]) -> EventStream:
-    """构造一个回复多个 tool call 的 EventStream。calls: [(name, args)]"""
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
-
-    content: List[Any] = [
-        ToolCall(id=f"tc-{i}", name=name, arguments=args)
-        for i, (name, args) in enumerate(calls, 1)
-    ]
-    partial = _make_assistant_message(model, content, stop_reason="toolUse")
-    stream.push(StartEvent(partial=partial))
-    for idx, tc in enumerate(content):
-        stream.push(ToolCallEndEvent(content_index=idx, tool_call=tc, partial=partial))
-    stream.push(DoneEvent(reason="toolUse", message=partial))
-    stream.end()
-    return stream
-
-
-@pytest.fixture
-def dummy_model() -> Model:
-    from nova_ai import KnownApi, KnownProvider, ModelCost
-
-    return Model(
-        id="mock-model",
-        name="Mock Model",
-        api=KnownApi.OPENAI_COMPLETIONS,
-        provider=KnownProvider.OPENAI,
-        base_url="https://example.com",
-        max_tokens=4096,
-        context_window=8192,
-        input_types=["text"],
-        reasoning=False,
-        cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-    )
-
 
 # ----------------------------------------------------------------------
 # Basic prompt flow
@@ -265,11 +77,11 @@ def dummy_model() -> Model:
 
 @pytest.mark.asyncio
 async def test_prompt_basic(dummy_model):
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "hello"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "hello"))
     agent.set_model(dummy_model)
 
     events: List[str] = []
-    agent.subscribe(lambda e: events.append(e.type))
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
 
     await agent.prompt(UserMessage(role="user", content="hi"))
 
@@ -303,15 +115,15 @@ async def test_tool_call_flow(dummy_model):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
     agent.set_tools([EchoTool()])
 
     events: List[str] = []
-    agent.subscribe(lambda e: events.append(e.type))
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
 
     await agent.prompt(UserMessage(role="user", content="call echo"))
 
@@ -335,7 +147,7 @@ async def test_before_tool_call_block(dummy_model):
         return BeforeToolCallResult(block=True, reason="blocked by test")
 
     agent = Agent(
-        stream_fn=_tool_call_then_text_stream("echo", {"message": "world"}),
+        stream_fn=tool_call_then_text_stream("echo", {"message": "world"}),
         before_tool_call=before,
     )
     agent.set_model(dummy_model)
@@ -347,6 +159,32 @@ async def test_before_tool_call_block(dummy_model):
     tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
     assert tool_result.is_error is True
     assert "blocked by test" in tool_result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_before_tool_call_args_mutation_flows_to_execution(dummy_model):
+    """before_tool_call 原地修改 ctx.args 直送执行（对齐 pi 的 input 原地改参）。
+
+    链路契约：校验后的 args 与执行参数共享同一 dict（校验时已 deepcopy，
+    原地改不污染原始 tool_call）；修改后不再二次 schema 校验。
+    """
+
+    async def before(ctx: BeforeToolCallContext, signal):
+        ctx.args["message"] = "mutated"
+        return None
+
+    agent = Agent(
+        stream_fn=tool_call_then_text_stream("echo", {"message": "original"}),
+        before_tool_call=before,
+    )
+    agent.set_model(dummy_model)
+    agent.set_tools([EchoTool()])
+
+    await agent.prompt(UserMessage(role="user", content="call echo"))
+
+    tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
+    assert tool_result.content[0].text == "echo: mutated"
+    assert tool_result.is_error is not True
 
 
 @pytest.mark.asyncio
@@ -363,8 +201,8 @@ async def test_after_tool_call_override(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return text_stream(model, "ok")
 
     agent = Agent(
         stream_fn=stream_fn,
@@ -389,7 +227,7 @@ async def test_should_stop_after_turn(dummy_model):
         return True
 
     agent = Agent(
-        stream_fn=lambda m, c, o: _text_stream(m, "stop here"),
+        stream_fn=lambda m, c, o: text_stream(m, "stop here"),
         should_stop_after_turn=should_stop,
     )
     agent.set_model(dummy_model)
@@ -405,7 +243,7 @@ async def test_prepare_next_turn_updates_context(dummy_model):
     """prepare_next_turn 修改 context，应在下一轮请求中生效。"""
     calls = []
 
-    async def prepare(ctx: PrepareNextTurnContext):
+    async def prepare(ctx: PrepareNextTurnContext, signal=None):
         calls.append(True)
         ctx.context.system_prompt = "updated system prompt"
         return AgentLoopTurnUpdate()
@@ -416,8 +254,8 @@ async def test_prepare_next_turn_updates_context(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _text_stream(model, context.system_prompt)
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return text_stream(model, context.system_prompt)
 
     agent = Agent(
         stream_fn=stream_fn,
@@ -448,18 +286,18 @@ async def test_parallel_tool_execution(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _multi_tool_call_stream(
+            return multi_tool_call_stream(
                 model,
                 [("echo", {"message": "a"}), ("echo", {"message": "b"})],
             )
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn, tool_execution="parallel")
     agent.set_model(dummy_model)
     agent.set_tools([EchoTool()])
 
     events: List[str] = []
-    agent.subscribe(lambda e: events.append(e.type))
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
 
     await agent.prompt(UserMessage(role="user", content="call both"))
 
@@ -487,11 +325,11 @@ async def test_sequential_mode_forces_sequential(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _multi_tool_call_stream(
+            return multi_tool_call_stream(
                 model,
                 [("slow", {"value": "first"}), ("slow", {"value": "second"})],
             )
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn, tool_execution="parallel")
     agent.set_model(dummy_model)
@@ -515,8 +353,8 @@ async def test_prepare_arguments_converts_types(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "square", {"x": "5"})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "square", {"x": "5"})
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -537,8 +375,8 @@ async def test_terminate_stops_after_tool_batch(dummy_model):
         nonlocal second_call
         if not second_call:
             second_call = True
-            return _tool_call_stream(model, "terminate", {})
-        return _text_stream(model, "should not reach")
+            return tool_call_stream(model, "terminate", {})
+        return text_stream(model, "should not reach")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -554,12 +392,26 @@ async def test_terminate_stops_after_tool_batch(dummy_model):
 # ----------------------------------------------------------------------
 
 
+def test_agent_loop_config_holds_stream_options_separately(dummy_model):
+    """AgentLoopConfig 组合持有 SimpleStreamOptions，运行时字段不混入其中。"""
+    stream_options = SimpleStreamOptions(temperature=0.5, max_tokens=100)
+    config = AgentLoopConfig(
+        stream_options=stream_options,
+        model=dummy_model,
+    )
+    assert config.model == dummy_model
+    assert config.stream_options.temperature == 0.5
+    assert config.stream_options.max_tokens == 100
+    assert not hasattr(config.stream_options, "convert_to_llm")
+    assert not hasattr(config.stream_options, "model")
+
+
 @pytest.mark.asyncio
 async def test_run_agent_loop_api(dummy_model):
     context = AgentContext(system_prompt="sys", messages=[])
     config = AgentLoopConfig(
+        stream_options=SimpleStreamOptions(),
         model=dummy_model,
-        stream_fn=lambda m, c, o: _text_stream(m, "reply"),
     )
 
     async def emit(event):
@@ -570,6 +422,7 @@ async def test_run_agent_loop_api(dummy_model):
         context,
         config,
         emit,
+        stream_fn=lambda m, c, o: text_stream(m, "reply"),
     )
 
     assert any(m.role == "assistant" for m in new_messages)
@@ -579,53 +432,6 @@ async def test_run_agent_loop_api(dummy_model):
 # ==============================================================================
 # Additional comprehensive coverage
 # ==============================================================================
-
-import asyncio
-
-
-def _final_stream(
-    model: Model, text: str = "", stop_reason: str = "stop"
-) -> EventStream:
-    """构造一个以任意 stop_reason 结束的 EventStream。"""
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
-    content: List[Any] = [TextContent(text=text)] if text else []
-    partial = _make_assistant_message(model, content, stop_reason=stop_reason)
-    stream.push(StartEvent(partial=partial))
-    if text:
-        stream.push(TextDeltaEvent(delta=text, partial=partial))
-        stream.push(TextEndEvent(content=text, partial=partial))
-    stream.push(DoneEvent(reason=stop_reason, message=partial))
-    stream.end()
-    return stream
-
-
-class RaisingTool(AgentTool):
-    """execute 抛出异常的工具。"""
-
-    name: str = "raising"
-    description: str = "Always raises"
-    parameters: dict = {"type": "object", "properties": {}}
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        raise RuntimeError("boom")
-
-
-class UpdatingTool(AgentTool):
-    """会通过 on_update 发送中间结果的工具。"""
-
-    name: str = "updating"
-    description: str = "Sends an update"
-    parameters: dict = {"type": "object", "properties": {}}
-
-    async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        if on_update:
-            on_update(
-                AgentToolResult(content=[TextContent(text="partial")], details={})
-            )
-        return AgentToolResult(content=[TextContent(text="final")], details={})
 
 
 class UIMessage(CustomAgentMessage):
@@ -648,7 +454,7 @@ async def test_stop_reason_error_ends_agent(dummy_model):
     async def stream_fn(model, context, options):
         nonlocal calls
         calls += 1
-        return _final_stream(model, "oops", stop_reason="error")
+        return final_stream(model, "oops", stop_reason="error")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -663,7 +469,7 @@ async def test_stop_reason_error_ends_agent(dummy_model):
 async def test_stop_reason_aborted_ends_agent(dummy_model):
     """模型返回 stop_reason='aborted' 时应直接结束运行。"""
     agent = Agent(
-        stream_fn=lambda m, c, o: _final_stream(m, "stopped", stop_reason="aborted")
+        stream_fn=lambda m, c, o: final_stream(m, "stopped", stop_reason="aborted")
     )
     agent.set_model(dummy_model)
     await agent.prompt(UserMessage(role="user", content="hi"))
@@ -671,10 +477,137 @@ async def test_stop_reason_aborted_ends_agent(dummy_model):
     assert agent.state.messages[-1].stop_reason == "aborted"
 
 
+def _truncatedtool_call_stream(
+    model: Model, tool_name: str, arguments: dict
+) -> EventStream:
+    """构造一个带 tool call 但 stop_reason='length'（被 token 上限截断）的流。"""
+    stream = EventStream(
+        is_complete=lambda e: getattr(e, "type", None) == "done",
+        extract_result=lambda e: e.message,
+    )
+    tool_call = ToolCall(id="tc-1", name=tool_name, arguments=arguments)
+    partial = make_assistant_message(model, [tool_call], stop_reason="length")
+    stream.push(StartEvent(partial=partial))
+    stream.push(ToolCallEndEvent(content_index=0, tool_call=tool_call, partial=partial))
+    stream.push(DoneEvent(reason="length", message=partial))
+    stream.end()
+    return stream
+
+
+@pytest.mark.asyncio
+async def test_truncated_tool_calls_are_failed_not_executed(dummy_model):
+    """stop_reason='length' 的截断消息：tool call 不执行，全部产出 error 结果并让模型重试。"""
+    executed = 0
+    step = 0
+
+    class CountingTool(AgentTool):
+        name: str = "counting"
+        description: str = "Counts executions"
+        label: str = "Counting"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            nonlocal executed
+            executed += 1
+            return AgentToolResult(content=[TextContent(text="ran")], details={})
+
+    async def stream_fn(model, context, options):
+        nonlocal step
+        step += 1
+        if step == 1:
+            return _truncatedtool_call_stream(model, "counting", {"x": 1})
+        return text_stream(model, "retried ok")
+
+    agent = Agent(stream_fn=stream_fn)
+    agent.set_model(dummy_model)
+    agent.set_tools([CountingTool()])
+
+    events: List[str] = []
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
+
+    await agent.prompt(UserMessage(role="user", content="go"))
+
+    # 工具从未被执行
+    assert executed == 0
+    # 每个截断 tool call 都产生 error toolResult，提示重新发起
+    tool_results = [m for m in agent.state.messages if m.role == "toolResult"]
+    assert len(tool_results) == 1
+    assert tool_results[0].is_error is True
+    assert "output token limit" in tool_results[0].content[0].text
+    # 事件序列完整：start/end + toolResult 消息事件
+    assert "tool_execution_start" in events
+    assert "tool_execution_end" in events
+    # 循环继续，模型重新发起后正常收尾
+    assert step == 2
+    assert agent.state.messages[-1].role == "assistant"
+    assert agent.state.messages[-1].content[0].text == "retried ok"
+
+
+@pytest.mark.asyncio
+async def test_added_tool_names_propagated_to_tool_result(dummy_model):
+    """工具结果里的 added_tool_names 应透传到 ToolResultMessage。"""
+
+    class DeferredTool(AgentTool):
+        name: str = "deferred"
+        description: str = "Introduces new tools"
+        label: str = "Deferred"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            return AgentToolResult(
+                content=[TextContent(text="ok")],
+                details={},
+                added_tool_names=["new_tool_a", "new_tool_b"],
+            )
+
+    agent = Agent(stream_fn=tool_call_then_text_stream("deferred", {}))
+    agent.set_model(dummy_model)
+    agent.set_tools([DeferredTool()])
+
+    await agent.prompt(UserMessage(role="user", content="go"))
+
+    tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
+    assert tool_result.added_tool_names == ["new_tool_a", "new_tool_b"]
+
+
+@pytest.mark.asyncio
+async def test_after_tool_call_override_preserves_added_tool_names(dummy_model):
+    """after_tool_call 覆盖 content 时，added_tool_names 等其余字段必须保留。"""
+
+    class DeferredTool(AgentTool):
+        name: str = "deferred"
+        description: str = "Introduces new tools"
+        label: str = "Deferred"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            return AgentToolResult(
+                content=[TextContent(text="original")],
+                details={"k": "v"},
+                added_tool_names=["new_tool"],
+            )
+
+    def after(ctx, signal):
+        return AfterToolCallResult(content=[TextContent(text="override")])
+
+    agent = Agent(
+        stream_fn=tool_call_then_text_stream("deferred", {}),
+        after_tool_call=after,
+    )
+    agent.set_model(dummy_model)
+    agent.set_tools([DeferredTool()])
+
+    await agent.prompt(UserMessage(role="user", content="go"))
+
+    tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
+    assert tool_result.content[0].text == "override"
+    assert tool_result.added_tool_names == ["new_tool"]
+
+
 @pytest.mark.asyncio
 async def test_tool_not_found_produces_error_result(dummy_model):
     """assistant 调用了未注册的工具时应生成 error toolResult 并终止。"""
-    agent = Agent(stream_fn=_tool_call_then_text_stream("missing", {"x": 1}))
+    agent = Agent(stream_fn=tool_call_then_text_stream("missing", {"x": 1}))
     agent.set_model(dummy_model)
     agent.set_tools([EchoTool()])
 
@@ -695,8 +628,8 @@ async def test_tool_execute_raises_exception(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "raising", {})
-        return _text_stream(model, "recovered")
+            return tool_call_stream(model, "raising", {})
+        return text_stream(model, "recovered")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -719,8 +652,8 @@ async def test_before_tool_call_exception_becomes_error(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return text_stream(model, "ok")
 
     def before(ctx, signal):
         raise ValueError("before failed")
@@ -745,8 +678,8 @@ async def test_after_tool_call_exception_becomes_error(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return text_stream(model, "ok")
 
     def after(ctx, signal):
         raise ValueError("after failed")
@@ -766,7 +699,7 @@ async def test_after_tool_call_exception_becomes_error(dummy_model):
 async def test_after_tool_call_sets_terminate_and_is_error(dummy_model):
     """after_tool_call 可覆盖 terminate 与 is_error，直接终止批次。"""
     agent = Agent(
-        stream_fn=_abortable_tool_call_stream("echo", {"message": "world"}),
+        stream_fn=abortable_tool_call_stream("echo", {"message": "world"}),
         after_tool_call=lambda ctx, signal: AfterToolCallResult(
             content=[TextContent(text="forced error")],
             is_error=True,
@@ -786,15 +719,23 @@ async def test_after_tool_call_sets_terminate_and_is_error(dummy_model):
 
 @pytest.mark.asyncio
 async def test_abort_signal_terminates_tool_batch(dummy_model):
-    """AbortSignal 在准备阶段被设置时，当前工具调用应立即终止。"""
-    signal = AbortSignal()
+    """AbortSignal 在准备阶段被触发时，当前工具调用应立即终止。"""
+    controller = AbortController()
+    signal = controller.signal
 
     async def emit(event):
         pass
 
     async def before(ctx, signal):
-        signal.set()
+        # 等待外部任务触发 abort，模拟准备阶段被取消
+        await signal.wait()
         return None
+
+    async def abort_later():
+        await asyncio.sleep(0.01)
+        controller.abort()
+
+    asyncio.create_task(abort_later())
 
     step = 0
 
@@ -802,13 +743,17 @@ async def test_abort_signal_terminates_tool_batch(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _final_stream(model, "aborted", stop_reason="aborted")
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return final_stream(model, "aborted", stop_reason="aborted")
 
     new_messages = await run_agent_loop(
         [UserMessage(role="user", content="call")],
         AgentContext(system_prompt="sys", messages=[], tools=[EchoTool()]),
-        AgentLoopConfig(model=dummy_model, before_tool_call=before),
+        AgentLoopConfig(
+            stream_options=SimpleStreamOptions(),
+            model=dummy_model,
+            before_tool_call=before,
+        ),
         emit,
         signal=signal,
         stream_fn=stream_fn,
@@ -837,7 +782,7 @@ async def test_convert_to_llm_filters_and_transforms(dummy_model):
 
     async def stream_fn(model, context, options):
         seen_messages.extend(context.messages)
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(
         initial_state={
@@ -869,7 +814,7 @@ async def test_transform_context_prunes_messages(dummy_model):
 
     async def stream_fn(model, context, options):
         seen_messages.extend(context.messages)
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(
         initial_state={
@@ -896,7 +841,7 @@ async def test_get_api_key_used(dummy_model):
 
     async def stream_fn(model, context, options):
         seen_options.append(options)
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     async def emit(event):
         pass
@@ -904,7 +849,11 @@ async def test_get_api_key_used(dummy_model):
     await run_agent_loop(
         [UserMessage(role="user", content="hi")],
         AgentContext(system_prompt="sys", messages=[]),
-        AgentLoopConfig(model=dummy_model, get_api_key=lambda provider: "secret-key"),
+        AgentLoopConfig(
+            stream_options=SimpleStreamOptions(),
+            model=dummy_model,
+            get_api_key=lambda provider: "secret-key",
+        ),
         emit,
         stream_fn=stream_fn,
     )
@@ -926,9 +875,9 @@ async def test_steering_mode_one_at_a_time(dummy_model):
     async def stream_fn(model, context, options):
         nonlocal calls
         calls += 1
-        return _text_stream(model, f"turn-{calls}")
+        return text_stream(model, f"turn-{calls}")
 
-    async def prepare(ctx):
+    async def prepare(ctx, signal=None):
         nonlocal enqueued
         if not enqueued:
             enqueued = True
@@ -959,9 +908,9 @@ async def test_steering_mode_all(dummy_model):
     async def stream_fn(model, context, options):
         nonlocal calls
         calls += 1
-        return _text_stream(model, f"turn-{calls}")
+        return text_stream(model, f"turn-{calls}")
 
-    async def prepare(ctx):
+    async def prepare(ctx, signal=None):
         nonlocal enqueued
         if not enqueued:
             enqueued = True
@@ -989,7 +938,7 @@ async def test_follow_up_mode_one_at_a_time(dummy_model):
     async def stream_fn(model, context, options):
         nonlocal calls
         calls += 1
-        return _text_stream(model, f"turn-{calls}")
+        return text_stream(model, f"turn-{calls}")
 
     agent = Agent(stream_fn=stream_fn, follow_up_mode="one-at-a-time")
     agent.set_model(dummy_model)
@@ -1009,7 +958,7 @@ async def test_follow_up_mode_all(dummy_model):
     async def stream_fn(model, context, options):
         nonlocal calls
         calls += 1
-        return _text_stream(model, f"turn-{calls}")
+        return text_stream(model, f"turn-{calls}")
 
     agent = Agent(stream_fn=stream_fn, follow_up_mode="all")
     agent.set_model(dummy_model)
@@ -1032,18 +981,22 @@ async def test_prepare_next_turn_replaces_model(dummy_model):
     model2 = dummy_model.model_copy(update={"id": "model-2"})
     step = 0
     seen_models = []
+    seen_reasoning = []
 
     async def stream_fn(model, context, options):
         nonlocal step
         step += 1
         seen_models.append(model.id)
+        seen_reasoning.append(getattr(options, "reasoning", None))
         if step == 1:
-            return _tool_call_stream(model, "echo", {"message": "world"})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "echo", {"message": "world"})
+        return text_stream(model, "ok")
 
-    async def prepare(ctx):
+    async def prepare(ctx, signal=None):
         if step == 1:
-            return AgentLoopTurnUpdate(model=model2)
+            return AgentLoopTurnUpdate(
+                model=model2, thinking_level=ModelThinkingLevel.HIGH
+            )
         return AgentLoopTurnUpdate()
 
     agent = Agent(stream_fn=stream_fn, prepare_next_turn=prepare)
@@ -1053,6 +1006,8 @@ async def test_prepare_next_turn_replaces_model(dummy_model):
     await agent.prompt(UserMessage(role="user", content="run"))
 
     assert seen_models == ["mock-model", "model-2"]
+    # thinking_level 更新同样应在下一轮请求的 reasoning 中生效
+    assert seen_reasoning[1] == ThinkingLevel.HIGH
 
 
 # ------------------------------------------------------------------------------
@@ -1068,14 +1023,16 @@ async def test_run_agent_loop_continue_api(dummy_model):
         messages=[UserMessage(role="user", content="continue me")],
     )
     config = AgentLoopConfig(
+        stream_options=SimpleStreamOptions(),
         model=dummy_model,
-        stream_fn=lambda m, c, o: _text_stream(m, "continued"),
     )
 
     async def emit(event):
         pass
 
-    new_messages = await run_agent_loop_continue(context, config, emit)
+    new_messages = await run_agent_loop_continue(
+        context, config, emit, stream_fn=lambda m, c, o: text_stream(m, "continued")
+    )
 
     assert any(m.role == "assistant" for m in new_messages)
     assert context.messages[-1].role == "assistant"
@@ -1084,12 +1041,12 @@ async def test_run_agent_loop_continue_api(dummy_model):
 @pytest.mark.asyncio
 async def test_agent_continue_from_assistant_with_queued_steering(dummy_model):
     """Agent.continue_() 从 assistant 消息继续时会先处理 steering 队列。"""
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "reply"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "reply"))
     agent.set_model(dummy_model)
     agent.replace_messages(
         [
             UserMessage(role="user", content="hi"),
-            _make_assistant_message(dummy_model, [TextContent(text="ok")]),
+            make_assistant_message(dummy_model, [TextContent(text="ok")]),
         ]
     )
     agent.steer(UserMessage(role="user", content="steer"))
@@ -1103,12 +1060,12 @@ async def test_agent_continue_from_assistant_with_queued_steering(dummy_model):
 @pytest.mark.asyncio
 async def test_agent_continue_from_tool_result(dummy_model):
     """Agent.continue_() 能从 toolResult 消息继续。"""
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "reply"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "reply"))
     agent.set_model(dummy_model)
     agent.replace_messages(
         [
             UserMessage(role="user", content="hi"),
-            _make_assistant_message(
+            make_assistant_message(
                 dummy_model,
                 [ToolCall(id="tc-1", name="echo", arguments={})],
                 stop_reason="toolUse",
@@ -1135,11 +1092,11 @@ async def test_agent_continue_from_tool_result(dummy_model):
 @pytest.mark.asyncio
 async def test_prompt_with_multiple_messages(dummy_model):
     """Agent.prompt 支持传入多条初始消息。"""
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
 
     events: List[str] = []
-    agent.subscribe(lambda e: events.append(e.type))
+    agent.subscribe(lambda e, signal=None: events.append(e.type))
 
     await agent.prompt(
         [
@@ -1159,12 +1116,12 @@ async def test_sync_and_async_listeners(dummy_model):
     sync_events: List[str] = []
     async_events: List[str] = []
 
-    async def async_listener(event):
+    async def async_listener(event, signal=None):
         async_events.append(event.type)
 
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
-    agent.subscribe(lambda e: sync_events.append(e.type))
+    agent.subscribe(lambda e, signal=None: sync_events.append(e.type))
     agent.subscribe(async_listener)
 
     await agent.prompt(UserMessage(role="user", content="hi"))
@@ -1182,8 +1139,8 @@ async def test_tool_execution_update_event(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(model, "updating", {})
-        return _text_stream(model, "ok")
+            return tool_call_stream(model, "updating", {})
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
@@ -1191,7 +1148,7 @@ async def test_tool_execution_update_event(dummy_model):
 
     updates: List[ToolExecutionUpdateEvent] = []
 
-    def listener(event):
+    def listener(event, signal=None):
         if event.type == "tool_execution_update":
             updates.append(event)
 
@@ -1203,9 +1160,104 @@ async def test_tool_execution_update_event(dummy_model):
 
 
 @pytest.mark.asyncio
+async def test_on_update_from_worker_thread(dummy_model):
+    """on_update 从非事件循环线程调用（to_thread 工作线程）也能安全发射更新事件。"""
+
+    class ThreadedUpdatingTool(AgentTool):
+        name: str = "threaded-updating"
+        description: str = "Sends an update from a worker thread"
+        label: str = "ThreadedUpdating"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            def _blocking_work():
+                time.sleep(0.05)
+                on_update(
+                    AgentToolResult(content=[TextContent(text="partial")], details={})
+                )
+
+            await asyncio.to_thread(_blocking_work)
+            return AgentToolResult(content=[TextContent(text="final")], details={})
+
+    step = 0
+
+    async def stream_fn(model, context, options):
+        nonlocal step
+        step += 1
+        if step == 1:
+            return tool_call_stream(model, "threaded-updating", {})
+        return text_stream(model, "ok")
+
+    agent = Agent(stream_fn=stream_fn)
+    agent.set_model(dummy_model)
+    agent.set_tools([ThreadedUpdatingTool()])
+
+    events: List[str] = []
+    updates: List[ToolExecutionUpdateEvent] = []
+
+    def listener(event, signal=None):
+        events.append(event.type)
+        if event.type == "tool_execution_update":
+            updates.append(event)
+
+    agent.subscribe(listener)
+    await agent.prompt(UserMessage(role="user", content="call"))
+
+    assert len(updates) == 1
+    assert updates[0].partial_result.content[0].text == "partial"
+    # update 必须排在 tool_execution_end 之前
+    assert events.index("tool_execution_update") < events.index("tool_execution_end")
+
+
+@pytest.mark.asyncio
+async def test_parallel_tools_run_concurrently(dummy_model):
+    """两个阻塞型工具（to_thread sleep 0.2s）并行执行，墙钟时间应远小于串行总和。"""
+
+    class BlockingTool(AgentTool):
+        name: str = "blocking"
+        description: str = "Blocks in a worker thread"
+        label: str = "Blocking"
+        parameters: dict = {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+        }
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            await asyncio.to_thread(time.sleep, 0.2)
+            return AgentToolResult(
+                content=[TextContent(text=f"done-{params.get('value', '')}")],
+                details={},
+            )
+
+    step = 0
+
+    async def stream_fn(model, context, options):
+        nonlocal step
+        step += 1
+        if step == 1:
+            return multi_tool_call_stream(
+                model, [("blocking", {"value": "a"}), ("blocking", {"value": "b"})]
+            )
+        return text_stream(model, "ok")
+
+    agent = Agent(stream_fn=stream_fn, tool_execution="parallel")
+    agent.set_model(dummy_model)
+    agent.set_tools([BlockingTool()])
+
+    started_at = time.monotonic()
+    await agent.prompt(UserMessage(role="user", content="call both"))
+    elapsed = time.monotonic() - started_at
+
+    tool_results = [m for m in agent.state.messages if m.role == "toolResult"]
+    assert len(tool_results) == 2
+    # 串行需要 ~0.4s；真并发应在 0.35s 内完成（保留调度余量）
+    assert elapsed < 0.35
+
+
+@pytest.mark.asyncio
 async def test_reset_clears_state_and_queues(dummy_model):
     """Agent.reset() 应清空消息、steering/follow_up 队列与错误状态。"""
-    agent = Agent(stream_fn=lambda m, c, o: _text_stream(m, "ok"))
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
     agent.append_message(UserMessage(role="user", content="x"))
     agent.steer(UserMessage(role="user", content="s"))
@@ -1227,7 +1279,7 @@ async def test_concurrent_prompt_raises(dummy_model):
     async def slow_stream(model, context, options):
         started.set()
         await asyncio.sleep(0.2)
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=slow_stream)
     agent.set_model(dummy_model)
@@ -1250,17 +1302,17 @@ async def test_message_update_events_for_text_prefix(dummy_model):
         nonlocal step
         step += 1
         if step == 1:
-            return _tool_call_stream(
+            return tool_call_stream(
                 model, "echo", {"message": "world"}, text_prefix="thinking..."
             )
-        return _text_stream(model, "ok")
+        return text_stream(model, "ok")
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
 
     updates: List[MessageUpdateEvent] = []
 
-    def listener(event):
+    def listener(event, signal=None):
         if event.type == "message_update":
             updates.append(event)
 

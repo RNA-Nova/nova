@@ -65,11 +65,13 @@ async def after(ctx, signal):
 返回 `AgentLoopTurnUpdate` 可动态切换模型或调整上下文：
 
 ```python
+from nova_ai import ModelThinkingLevel
+
 async def prepare(ctx):
     return {
         "context": ctx.context,
         "model": cheaper_model,
-        "thinking_level": "off",
+        "thinking_level": ModelThinkingLevel.OFF,
     }
 ```
 

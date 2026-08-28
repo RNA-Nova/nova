@@ -9,18 +9,17 @@ async loop implementation in `loop.py`. It is not the API itself;
 import asyncio
 from typing import List, Optional
 
-from nova_ai import EventStream
+from nova_ai import AbortSignal, EventStream
 
-from ..signal import AbortSignal
 from ..types import (
     AgentContext,
+    AgentEndEvent,
     AgentEvent,
     AgentEventSink,
     AgentLoopConfig,
     AgentMessage,
     StreamFn,
 )
-
 from .loop import run_agent_loop, run_agent_loop_continue
 
 
@@ -28,13 +27,12 @@ class AgentEventStream(EventStream[AgentEvent, List[AgentMessage]]):
     """An asynchronous stream of AgentEvents."""
 
     def __init__(self):
-        def is_complete(event: AgentEvent) -> bool:
-            return getattr(event, "type", None) == "agent_end"
-
-        def extract_result(event: AgentEvent) -> List[AgentMessage]:
-            return getattr(event, "messages", []) or []
-
-        super().__init__(is_complete, extract_result)
+        super().__init__(
+            is_complete=lambda event: event.type == "agent_end",
+            extract_result=lambda event: (
+                event.messages if isinstance(event, AgentEndEvent) else []
+            ),
+        )
 
 
 def _stream_sink(stream: AgentEventStream) -> AgentEventSink:
@@ -58,14 +56,18 @@ def agent_loop(
     stream = AgentEventStream()
 
     async def _run():
-        await run_agent_loop(
-            prompts,
-            context,
-            config,
-            _stream_sink(stream),
-            signal,
-            stream_fn,
-        )
+        try:
+            messages = await run_agent_loop(
+                prompts,
+                context,
+                config,
+                _stream_sink(stream),
+                signal,
+                stream_fn,
+            )
+            stream.end(result=messages)
+        except Exception as exc:
+            stream.end(exc=exc)
 
     asyncio.create_task(_run())
     return stream
@@ -90,13 +92,17 @@ def agent_loop_continue(
     stream = AgentEventStream()
 
     async def _run():
-        await run_agent_loop_continue(
-            context,
-            config,
-            _stream_sink(stream),
-            signal,
-            stream_fn,
-        )
+        try:
+            messages = await run_agent_loop_continue(
+                context,
+                config,
+                _stream_sink(stream),
+                signal,
+                stream_fn,
+            )
+            stream.end(result=messages)
+        except Exception as exc:
+            stream.end(exc=exc)
 
     asyncio.create_task(_run())
     return stream

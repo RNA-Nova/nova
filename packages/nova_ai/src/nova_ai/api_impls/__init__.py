@@ -1,21 +1,22 @@
 """
 API 协议实现模块
-"""
-from typing import Union
 
-# 导出各个提供者的流式函数
+每个子模块对应一种 API 协议，导出 ``stream`` / ``stream_simple`` 两个函数，
+直接满足 ``ProviderStreams`` 契约（对齐 TS ``src/api/*.ts``）。
+"""
+
 from .openai_completions import (
-    stream_openai_completions,
-    stream_simple_openai_completions,
     OpenAICompletionsOptions,
+    stream,
+    stream_simple,
 )
 
-# 提供者流式选项联合类型
-ProviderStreamOptions = Union[OpenAICompletionsOptions]
+# 提供者流式选项类型（当前唯一实现；新增协议实现时改为 Union）
+ProviderStreamOptions = OpenAICompletionsOptions
 
 __all__ = [
-    "stream_openai_completions",
-    "stream_simple_openai_completions",
+    "stream",
+    "stream_simple",
     "OpenAICompletionsOptions",
     "ProviderStreamOptions",
 ]

@@ -14,23 +14,6 @@ import os
 from typing import Any, List, Optional
 
 import pytest
-
-from nova_agent import (
-    Agent,
-    AgentContext,
-    AgentLoopTurnUpdate,
-    AgentMessage,
-    AgentState,
-    AgentTool,
-    AgentToolResult,
-    AfterToolCallContext,
-    AfterToolCallResult,
-    BeforeToolCallContext,
-    BeforeToolCallResult,
-    PrepareNextTurnContext,
-    ShouldStopAfterTurnContext,
-    AbortSignal,
-)
 from nova_ai import (
     AssistantMessage,
     Model,
@@ -41,9 +24,25 @@ from nova_ai import (
     ToolResultMessage,
     UserMessage,
 )
-from nova_ai.models.volcengine import get_volcengine_model
-from nova_ai.registry import reset_registry
+from nova_ai.providers.volcengine import get_volcengine_model
 from nova_ai.types.enums import KnownApi, KnownProvider
+
+from nova_agent import (
+    AbortSignal,
+    AfterToolCallContext,
+    AfterToolCallResult,
+    Agent,
+    AgentContext,
+    AgentLoopTurnUpdate,
+    AgentMessage,
+    AgentState,
+    AgentTool,
+    AgentToolResult,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+    PrepareNextTurnContext,
+    ShouldStopAfterTurnContext,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -57,7 +56,6 @@ def _get_model(model_id: str):
     """获取真实 DeepSeek 模型，跳过测试如果未配置 API key。"""
     if not os.environ.get("VOLCENGINE_API_KEY"):
         pytest.skip("VOLCENGINE_API_KEY not set")
-    reset_registry()
     return get_volcengine_model(model_id)
 
 
@@ -155,7 +153,7 @@ async def test_agent_prompt_returns_assistant_message(model):
 
     events: List[str] = []
 
-    def listener(event):
+    def listener(event, signal=None):
         events.append(event.type)
 
     agent.subscribe(listener)
@@ -181,7 +179,7 @@ async def test_agent_stream_events_order(model):
 
     events: List[str] = []
 
-    def listener(event):
+    def listener(event, signal=None):
         events.append(event.type)
 
     agent.subscribe(listener)
@@ -320,7 +318,7 @@ class TestAgentToolsReal:
 
         events: List[str] = []
 
-        def listener(event):
+        def listener(event, signal=None):
             events.append(event.type)
 
         agent.subscribe(listener)
@@ -348,7 +346,7 @@ class TestAgentToolsReal:
         agent.set_tools([ErrorTool()])
 
         events: List[str] = []
-        agent.subscribe(lambda e: events.append(e.type))
+        agent.subscribe(lambda e, signal=None: events.append(e.type))
 
         async with asyncio.timeout(120):
             await agent.prompt("请调用 error_tool 工具。")
@@ -376,7 +374,7 @@ class TestAgentToolsReal:
         agent.set_tools([EchoTool()])
 
         events: List[str] = []
-        agent.subscribe(lambda e: events.append(e.type))
+        agent.subscribe(lambda e, signal=None: events.append(e.type))
 
         async with asyncio.timeout(120):
             await agent.prompt('请调用 echo 工具，参数 {"message": "hello"}。')
@@ -421,7 +419,7 @@ class TestAgentToolsReal:
 
         tool_names: List[str] = []
 
-        def listener(event):
+        def listener(event, signal=None):
             if event.type == "tool_execution_start":
                 tool_names.append(event.tool_name)
 
@@ -473,7 +471,7 @@ class TestAgentAbortReal:
         events: List[str] = []
         tool_started = asyncio.Event()
 
-        def listener(event):
+        def listener(event, signal=None):
             events.append(event.type)
             if event.type == "tool_execution_start":
                 tool_started.set()
@@ -577,7 +575,7 @@ class TestAgentHooksReal:
         payloads: List[Any] = []
         responses: List[ProviderResponse] = []
 
-        def on_payload(payload: Any):
+        def on_payload(payload: Any, _model: Any):
             payloads.append(payload)
 
         def on_response(resp: ProviderResponse, _model: Any):
@@ -674,7 +672,7 @@ class TestAgentContinueReal:
         )
 
         events: List[str] = []
-        agent.subscribe(lambda e: events.append(e.type))
+        agent.subscribe(lambda e, signal=None: events.append(e.type))
 
         async with asyncio.timeout(120):
             await agent.continue_()

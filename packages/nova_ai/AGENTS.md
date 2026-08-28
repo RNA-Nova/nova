@@ -6,7 +6,7 @@
 
 ## 项目概览
 
-`nova_ai` 是 Nova monorepo 的最底层子包，职责是为上层（`nova_agent`、`nova_harness` 等）提供**多厂商统一的流式调用接口**。它将 OpenAI、Anthropic、Google、Volcengine 等厂商的差异封装在内部，对外暴露一致的 `stream` / `complete` / `stream_simple` / `complete_simple` API。
+`nova_ai` 是 Nova monorepo 的最底层子包，职责是为上层（`nova_agent`、`nova_harness` 等）提供**多厂商统一的流式调用接口**。架构与 TypeScript 端 `pi/packages/ai` 对齐：以 `Models` 集合 + `Provider` 运行时单元 + API 协议实现（`api_impls/`）三层组织，对外暴露 `stream` / `complete` / `stream_simple` / `complete_simple` API。
 
 - **源码包名**：`nova_ai`
 - **版本**：`0.1.0`
@@ -22,147 +22,148 @@
 | 层级 | 技术 |
 |------|------|
 | 语言 | Python `>=3.9,<3.13` |
-| 包管理器 | **Poetry**（独立 `pyproject.toml`） |
+| 包管理器 | **pixi**（monorepo 根目录统一 workspace；Poetry 配置保留为兼容） |
 | 格式化 | `black`（目标语法版本 `py311`） |
 | Import 排序 | `isort`（`profile = "black"`） |
-| 序列化 | `pydantic`（`BaseModel`） |
+| 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
-| 开发依赖 | `pre-commit`、`pytest`、`sniffio` |
-| 关键运行时依赖 | `openai >= 1.109.1`、`pydantic >= 2.0`、`json-repair >= 0.58.4` |
+| 开发依赖 | `pytest`、`pytest-asyncio` |
+| 关键运行时依赖 | `openai >= 1.109.1`、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx` |
 
-**未使用** Pydantic、Mypy、Tox、Makefile、Docker 或 CI/CD。
+**未使用** Mypy、Tox、Makefile、Docker 或 CI/CD。
 
 ---
 
 ## 代码组织与模块划分
 
-源码位于 `src/nova_ai/`，按职责分为 8 个子包/模块：
+源码位于 `src/nova_ai/`：
 
 ```
 src/nova_ai/
-├── __init__.py              # 全量重新导出 + 初始化（HTTP代理、内置注册）
-├── core/                    # 基础类型定义
-│   ├── enums.py             # Api、Provider、StopReason、ThinkingLevel 等枚举
+├── __init__.py              # 全量重新导出（types / gateway / providers / auth / utils）
+├── gateway/                 # Models 网关层（对齐 TS models.ts + models-store.ts）
+│   ├── models.py            # Models 集合 + create_models + _lazy_stream（auth 网关 + provider 注册表）
+│   ├── provider.py          # Provider / _DynamicProvider / create_provider（模型目录宿主 + 协议路由）
+│   └── store.py             # ModelsStore / ProviderModelsStore 协议与 InMemory 实现
+├── streaming.py             # EventStream、AssistantMessageEventStream（异步迭代器 + result Future）
+├── signal.py                # AbortSignal / AbortController（对齐 TS AbortController 语义）
+├── types/                   # 全部共享类型定义（契约层，无运行时行为）
+│   ├── base_model.py        # NovaBaseModel（pydantic 基类，model_dump 默认 mode="json"）
+│   ├── aliases.py           # ProviderEnv / ProviderHeaders 别名
+│   ├── enums.py             # Api、ProviderId、StopReason、ThinkingLevel、ModelThinkingLevel 等
 │   ├── content.py           # TextContent、ThinkingContent、ToolCall、ImageContent
-│   ├── messages.py          # UserMessage、AssistantMessage、ToolResultMessage、Context
-│   ├── model.py             # Usage、Cost
-│   └── serialize.py         # content 字段的自定义序列化/反序列化函数
-├── models/                  # 厂商模型静态数据与查询
-│   ├── base.py              # Model、ModelCost、calculate_cost、supports_xhigh_thinking
-│   ├── openai.py            # OPENAI_MODELS 字典
-│   ├── anthropic.py         # ANTHROPIC_MODELS 字典
-│   ├── google.py            # GOOGLE_MODELS 字典
-│   └── volcengine.py        # VOLCENGINE_MODELS 字典
-├── apis/                    # API 协议实现
-│   ├── openai_completions.py # OpenAI Completions API 的流式处理（当前唯一完整实现）
-│   └── __init__.py          # ProviderStreamOptions 类型别名
-├── registry/                # 注册表（全局单例）
-│   ├── api_registry.py      # ApiRegistry：按 api 类型注册流式函数
-│   ├── model_registry.py    # ModelRegistry：按 provider + model_id 注册模型
-│   └── builtins.py          # 内置 API 提供者与模型的自动注册/重置
-├── streaming/               # 流式事件与高层 API
-│   ├── events.py            # StartEvent、TextDeltaEvent、ToolCallEndEvent、DoneEvent 等
-│   ├── event_stream.py      # EventStream、AssistantMessageEventStream（异步迭代器 + Future）
-│   └── api.py               # stream()、complete()、stream_simple()、complete_simple()
-├── auth/                    # 云厂商鉴权辅助（纯检测，不管理密钥）
-│   ├── bedrock.py           # 检测 AWS/Bedrock 多种凭证源
-│   └── vertex.py            # 检测 Google Vertex ADC 凭证
-├── compat/                  # 兼容性配置
-│   ├── openai.py            # OpenAICompletionsCompat、OpenAIResponsesCompat
-│   └── routing.py           # OpenRouterRouting、VercelGatewayRouting
+│   ├── messages.py          # UserMessage、AssistantMessage、ToolResultMessage、Tool、Context
+│   ├── model.py             # Model、ModelCost、Usage、Cost
+│   ├── stream_options.py    # StreamOptions、SimpleStreamOptions、ThinkingBudgets（dataclass）
+│   ├── events.py            # StartEvent、TextDeltaEvent、…、DoneEvent、ErrorEvent
+│   ├── compat.py            # OpenAICompletionsCompat、OpenAIResponsesCompat、AnthropicMessagesCompat
+│   └── auth.py              # Credential、CredentialStore、AuthContext、ApiKeyAuth、OAuthAuth 等
+├── api_impls/               # API 协议实现
+│   └── openai_completions.py # OpenAI Completions（当前唯一完整实现；模块即满足 ProviderStreams）
+├── providers/               # 内置 provider 工厂与静态模型目录（每个 provider 一个子目录）
+│   ├── all.py               # builtin_providers() / builtin_models()
+│   ├── kimi_coding/         # models.py + provider.py（apiKey + OAuth device code 双鉴权）
+│   ├── moonshotai/          # models.py + provider.py
+│   ├── moonshotai_cn/       # models.py + provider.py
+│   └── volcengine/          # models.py + provider.py
+├── auth/                    # 鉴权行为层（类型定义在 types/auth.py，此处重导出）
+│   ├── resolve.py           # resolve_provider_auth + ModelsError
+│   ├── credential_store.py  # InMemoryCredentialStore（按 provider 串行化写）
+│   ├── context.py           # DefaultAuthContext（env / 文件存在性）
+│   ├── helpers.py           # env_api_key_auth / lazy_oauth
+│   ├── oauth_page.py        # OAuth 回调成功/失败 HTML 页面
+│   └── oauth/               # pkce、device_code 轮询、kimi、openai_codex 登录流程
 └── utils/                   # 工具函数
-    ├── env.py               # 从环境变量读取各厂商 API key
-    ├── copilot.py           # GitHub Copilot 动态请求头构造
+    ├── env.py               # 按 provider 从环境变量读取 API key（映射与 TS 全量对齐）
+    ├── provider_env.py      # provider 级 env 覆盖读取
+    ├── error_body.py        # provider HTTP 错误标准化与格式化
+    ├── estimate.py          # 上下文 token 估算（usage 锚点 + 字符估算）
+    ├── model_utils.py       # calculate_cost、clamp/get_supported_thinking_levels 等
+    ├── simple_options.py    # build_base_options、clamp_max_tokens_to_context
+    ├── message_transformer.py # transform_messages（跨模型转换、孤儿工具调用补全）
     ├── json_parser.py       # 流式 JSON 片段解析（json-repair 封装）
-    ├── message_transformer.py # 跨厂商消息转换（思考块处理、工具调用ID规范化）
-    ├── stream_options.py    # StreamOptions、SimpleStreamOptions、ThinkingBudgets
     ├── surrogate.py         # Unicode 代理项清理
-    ├── overflow.py          # 上下文溢出检测
-    └── http_proxy.py        # HTTP/HTTPS 代理环境变量读取与配置
+    ├── overflow.py          # 上下文溢出检测（多厂商错误模式）
+    └── copilot.py           # GitHub Copilot 动态请求头构造
 ```
 
 ### 运行时架构要点
 
-1. **全局注册表**  
-   `api_registry.py` 与 `model_registry.py` 各维护一个全局单例（`_registry`、`_model_registry`）。包初始化时（`__init__.py`），`register_all_builtins()` 会将内置的 API 提供者与模型注册进去。上层代码通过 `stream(model, context)` 时，`api.py` 先查 `model.api` 对应的提供者记录，再调用其 `stream()` 函数。
+1. **Models 集合 + Provider 单元**  
+   不存在全局注册表。`Models`（`gateway/models.py`）持有按 id 注册的 `Provider` 实例，负责鉴权解析（`getAuth`）、动态模型刷新（`refresh`）、登录/登出（`login`/`logout`）与 stream 派发（`_apply_auth` 合并 auth/model/options 的 apiKey、headers、env 后调用 `provider.stream*()`）。`stream*()` 同步返回事件流，auth 在后台异步解析，失败以 error 事件结束（`lazy_stream`）。Provider 找不到 API 实现时同样返回 error 流而非抛异常（StreamFunction 契约）。
 
 2. **事件流模型**  
-   所有流式调用返回 `AssistantMessageEventStream`，它继承自通用 `EventStream[T, R]`。内部使用 `asyncio.Queue` 缓冲事件，消费者用 `async for` 迭代；同时内部持有一个 `asyncio.Future`，在收到 `DoneEvent` 或 `ErrorEvent` 时设置结果，支持 `await stream.result()` 获取最终 `AssistantMessage`。
+   所有流式调用返回 `AssistantMessageEventStream`（`streaming.py`）。生产者 `push(event)`，消费者 `async for` 迭代；收到 `DoneEvent` / `ErrorEvent` 时解析出最终 `AssistantMessage`，可用 `await stream.result()` 获取。`end()` 后不可再迭代。
 
 3. **OpenAI Completions 实现**  
-   当前唯一完整的 API 协议实现位于 `apis/openai_completions.py`。它使用官方 `openai.AsyncOpenAI` 客户端，将内部 `Message` / `Context` 转换为 `ChatCompletionMessageParam`，发送 `chat.completions.create(stream=True)`，然后把 SSE chunk 映射为标准事件推入 `AssistantMessageEventStream`。该模块同时承担了大量兼容性逻辑：
-   - 根据 `provider` 和 `base_url` 自动检测 `OpenAICompletionsCompat`（是否支持 `store`、`developer` 角色、`reasoning_effort`、Mistral 工具 ID 规范等）。
-   - 支持 OpenRouter 路由、`Vercel AI Gateway` 路由。
-   - 支持 reasoning 内容（`reasoning_content`、`reasoning`、`reasoning_text` 等字段）的增量提取。
-   - 工具调用参数的流式 JSON 解析（`parse_streaming_json`）。
+   当前唯一完整的协议实现位于 `api_impls/openai_completions.py`，使用官方 `openai.AsyncOpenAI` 客户端：
+   - `detect_compat` / `get_compat` 按 provider/base_url 自动检测兼容标志（`store`、`developer` 角色、`reasoning_effort`、max_tokens 字段名、strict 模式等），`model.compat` 显式配置优先。
+   - 流式 thinking/text 采用**双槽位合并**（整条流复用一个 thinking 块 + 一个 text 块，对齐 TS）。
+   - reasoning 参数按 `thinking_format` 分派（openai / deepseek / zai / together / openrouter / ant-ling / qwen / chat-template / string-thinking），支持 `thinking_level_map` 映射与 `off` 显式 null 语义。
+   - prompt 缓存：`prompt_cache_key` / `prompt_cache_retention: 24h` / Anthropic 风格 `cache_control` / DeepSeek 缓存统计。
+   - Kimi deferred tools（toolResult 的 `added_tool_names` → system 消息携带工具定义）。
+   - abort 通过看门狗任务（`signal.wait()` + `stream.close()`）实现与 TS fetch abort 同等的即时中断。
 
 4. **消息转换与跨模型兼容**  
-   `utils/message_transformer.py` 的 `transform_messages()` 会在请求前执行两趟处理：
-   - 第一趟：思考块保留/转文本、工具调用 ID 规范化（跨模型时删除 `thought_signature`）。
-   - 第二趟：为孤立的工具调用插入合成 `ToolResultMessage`；跳过 `stop_reason` 为 `ERROR` / `ABORTED` 的不完整助手消息。
+   `utils/message_transformer.py` 的 `transform_messages()` 两趟处理：思考块保留/转文本、跨模型删除 `thought_signature` 与工具调用 ID 规范化；为孤立工具调用插入合成 `ToolResultMessage`；跳过 `ERROR` / `ABORTED` 的不完整助手消息。重建消息一律用 `model_copy(update=...)` 保留未修改字段（如 `diagnostics`、`added_tool_names`）。
 
-5. **序列化层**  
-   所有数据类均继承 `mashumaro.mixins.json.DataClassJSONMixin`，可直接调用 `.to_dict()` / `.from_dict()` / `.to_json()` / `.from_json()`。`messages.py` 中 `UserMessage.content` 使用自定义 `serialize_content` / `deserialize_content` 处理 `str | List[TextContent|ImageContent]` 的联合类型。
+5. **序列化层约定（选型结果速查）**  
+   选型依据遵循根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项）。本包现有归类：
+   - **Pydantic（`NovaBaseModel`）**：需要 JSON parse/dump 的类型——`Model`/`Usage`（models.json、会话 JSONL）、messages/content（会话 + RPC）、events（RPC 事件流）、compat（models.json）、`ApiKeyCredential`/`OAuthCredential`（auth.json，`OAuthCredential` 用 `extra="allow"` 保留扩展字段）、`ModelsStoreEntry`。
+   - **dataclass**：纯代码构造、跨包传递的运行时容器，持 `Callable` 或服务实例——`StreamOptions` 家族（构造签名即契约，传错字段直接 `TypeError`）、`Provider`、`RefreshModelsContext`、`ApiKeyAuth`/`OAuthAuth`/`ProviderAuth`、`AuthResult`/`AuthCheck` 等。
+   - **TypedDict / Protocol**：`ModelAuth`（camelCase dict 形状透传）、`AuthContext`/`CredentialStore`/`AuthInteraction`/`ProviderStreams`/`ModelsStore`。
+
+6. **Auth 解析链**  
+   `auth/resolve.py` 的优先级：调用方 apiKey override → 已存储 credential（OAuth 过期时在 store 锁内刷新，防并发双刷）→ 环境变量等 ambient 来源。`Models.get_auth(model)` 额外合并 model 静态 headers；`transform_headers` 选项（`StreamOptions.transform_headers`）在 headers 合并完成后、provider 派发前最后运行，且不会派发给 provider。
 
 ---
 
 ## 构建与开发命令
 
-### 安装依赖
-
 ```bash
+# 在 monorepo 根目录
+pixi install -e dev
+
+# 运行本包测试（排除真实 API 集成测试）
 cd packages/nova_ai
-poetry install
-```
+pixi run -e dev pytest tests -m "not integration"
 
-### 格式化
-
-```bash
-poetry run black src/
-poetry run isort src/
-```
-
-### 构建与发布
-
-```bash
-poetry build      # 生成 wheel / sdist
-poetry publish    # 如需发布到 PyPI
+# 格式化
+pixi run -e dev black src tests
+pixi run -e dev isort src tests
 ```
 
 ---
 
 ## 代码风格指南
 
-- **类名**：`PascalCase`
-- **函数 / 变量**：`snake_case`
-- **常量**：`UPPER_CASE`
-- **导入排序**：使用 `isort`，配置为 `profile = "black"`、`multi_line_output = 3`、`include_trailing_comma = true`
-- **格式化**：`black`，目标版本 `py311`
-- **注释与文档字符串**：以**中文**为主，保持与现有代码一致
-- **数据建模**：优先使用 `pydantic.BaseModel` 做数据建模与 JSON 序列化
-- **类型注解**：代码中已大量使用类型注解，但未配置 `mypy` 静态检查
+- **类名**：`PascalCase`；**函数 / 变量**：`snake_case`；**常量**：`UPPER_CASE`
+- **导入排序**：`isort`（`profile = "black"`）；**格式化**：`black`（`py311`）
+- **注释与文档字符串**：以**中文**为主
+- **数据建模**：见上文"序列化层约定"与根 `AGENTS.md` 的"数据建模"决策顺序
+- **与 TS 对齐**：本包结构/行为对齐 `pi/packages/ai`；修改语义前先看 TS 侧实现，注释中标注"对齐 TS xxx"
 
 ---
 
 ## 测试说明
 
-- `pyproject.toml` 已将 `pytest` 声明为开发依赖。
-- **当前包内没有任何测试目录或测试文件**。
-- 如需补充测试，建议在包根目录新建 `tests/` 并按模块结构组织：
+测试位于 `tests/`：
 
 ```
 tests/
-├── test_core/
-├── test_streaming/
-└── test_providers/
+├── unit/            # 类型、compat、estimate、overflow、transformer、stream、Models 集合等
+├── providers/       # provider 工厂、动态刷新、stream 派发
+├── auth/            # resolve、credential store、kimi/codex oauth、Credential schema
+├── integration/     # 真实 API 集成测试（pytest.mark.integration，需 KIMI_API_KEY / VOLCENGINE_API_KEY）
+└── fixtures/        # 测试图片等资源
 ```
 
 运行方式：
 
 ```bash
 cd packages/nova_ai
-poetry run pytest
-poetry run pytest --cov=nova_ai --cov-report=html
+pixi run -e dev pytest tests -m "not integration"   # 跳过真实 API 调用
+pixi run -e dev pytest tests                        # 全部（需相应 API key 环境变量）
 ```
 
 ---
@@ -170,36 +171,29 @@ poetry run pytest --cov=nova_ai --cov-report=html
 ## 安全注意事项
 
 1. **API Key 来源**  
-   本包不持久化存储任何密钥，全部通过环境变量按 `provider` 名称映射读取。映射逻辑在 `utils/env.py`：`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`、`GITHUB_TOKEN` 等。特殊路径：
-   - GitHub Copilot 依次尝试 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`。
-   - Anthropic 优先 `ANTHROPIC_OAUTH_TOKEN`，其次 `ANTHROPIC_API_KEY`。
-   - Google Vertex 与 Amazon Bedrock 使用 ADC / AWS 配置文件，不通过单一环境变量密钥。
-
-2. **字符串安全**  
-   `utils/surrogate.py` 提供 `sanitize_surrogates()`，在将消息发送到 OpenAI API 前移除未配对的 Unicode 代理项对，避免请求体解析失败。
-
-3. **兼容性层的潜在风险**  
-   `models/openai_completions.py` 根据 `base_url` 子串自动推断兼容性标志（如 `volces.com`、`api.x.ai`、`mistral.ai` 等）。如果 URL 被恶意构造，可能诱导程序启用不安全的参数回退。虽然这属于使用层配置问题，但修改自动检测逻辑时需保持谨慎。
-
-4. **HTTP 代理**  
-   `utils/http_proxy.py` 在包导入时自动读取 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量并配置到 `AsyncOpenAI` 客户端。在敏感网络环境中，注意代理环境变量是否被意外设置。
+   本包不在磁盘持久化密钥（credential 持久化由上层注入的 `CredentialStore` 实现负责，如 nova_harness 的 `~/.nova/agent/auth.json`）。环境变量映射在 `utils/env.py`（与 TS `env-api-keys.ts` 全量对齐）；GitHub Copilot 依次尝试 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`；Anthropic 优先 `ANTHROPIC_OAUTH_TOKEN`。
+2. **OAuth 流程**  
+   `auth/oauth/` 实现 Kimi device code 与 OpenAI Codex（browser + device code）登录；回调页面模板在 `auth/oauth_page.py`。client_id 等常量硬编码在各自模块内，属公开客户端。
+3. **字符串安全**  
+   `utils/surrogate.py` 的 `sanitize_surrogates()` 在发送前移除未配对 Unicode 代理项，避免请求体解析失败。
+4. **兼容检测的潜在风险**  
+   `api_impls/openai_completions.py` 按 `base_url` 子串推断兼容标志（`volces.com`、`api.x.ai` 等）。URL 被恶意构造可能诱导不安全的参数回退；修改自动检测逻辑时保持谨慎。
 
 ---
 
 ## 开发惯例与给 AI Agent 的提示
 
-- **不要假设有测试**：当前没有测试覆盖，修改核心类型或流式逻辑后建议手动验证或补充测试。
-- **保持中文注释**：新增代码的 docstring 与行内注释请使用中文，与现有风格一致。
-- **序列化层**：若需新增数据类，请继承 `DataClassJSONMixin` 并放在对应模块（如 `core/content.py`）。
-- **依赖新增**：若引入新的第三方库，需在 `pyproject.toml` 的 `[tool.poetry.dependencies]` 中声明，并执行 `poetry lock`（如有 lock 文件）。
-- **新增厂商支持**：
-  1. 在 `core/enums.py` 的 `KnownApi` / `KnownProvider` 添加枚举值。
-  2. 在 `models/` 下新增模型字典（或直接在 `models/base.py` 动态注册）。
-  3. 在 `apis/` 下实现流式处理函数（必须返回 `AssistantMessageEventStream`）。
-  4. 在 `registry/builtins.py` 中条件导入并注册。
-  5. 在 `utils/env.py` 中添加环境变量映射。
-- **修改消息类型需谨慎**：`core/messages.py` 与 `core/content.py` 是整个 monorepo 的公共契约，字段增删可能影响 `nova_agent` 与 `nova_harness`。
-- **流式事件不可复用**：`AssistantMessageEventStream` 一旦 `end()` 或收到 `DoneEvent`/`ErrorEvent`，队列即关闭，不能重新开始迭代。
+- **先跑测试**：本包有完整非集成测试（`pixi run -e dev pytest tests -m "not integration"`），修改后必须通过。
+- **保持中文注释**：新增代码的 docstring 与行内注释请使用中文。
+- **新增类型先想选型**：按根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项）选定 `NovaBaseModel` / dataclass / TypedDict / Protocol。共享类型一律放 `types/`，不要在业务模块里重复定义。
+- **新增 provider**：
+  1. `providers/<name>/models.py` 写静态模型目录，`provider.py` 用 `create_provider()` + `env_api_key_auth()`（或自定义 auth）构造工厂；
+  2. `providers/all.py` 加入 `builtin_providers()`；
+  3. `utils/env.py` 补环境变量映射；
+  4. `nova_ai/__init__.py` 与 `providers/__init__.py` 补导出。
+- **新增 API 协议**：在 `api_impls/` 新建模块，导出 `stream` / `stream_simple`（模块即满足 `ProviderStreams` 契约），失败一律编码进返回的事件流而不是抛出。
+- **修改消息类型需谨慎**：`types/messages.py` 与 `types/content.py` 是整个 monorepo 的公共契约。
+- **流式事件不可复用**：`AssistantMessageEventStream` 收到 `DoneEvent`/`ErrorEvent` 或 `end()` 后队列即关闭。
 
 ---
 

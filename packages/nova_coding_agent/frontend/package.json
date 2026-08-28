@@ -1,0 +1,22 @@
+{
+  "name": "nova-coding-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nova coding agent — frontend half (TUI renderers/commands/themes)",
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pretty-ms": "^9.2.0",
+    "diff": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "nova-client": "file:../../nova-harness/frontend",
+    "@earendil-works/pi-tui": "^0.80.10"
+  }
+}
