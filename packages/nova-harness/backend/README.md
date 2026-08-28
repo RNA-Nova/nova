@@ -14,6 +14,10 @@
 ## 安装
 
 ```bash
+# 推荐：仓库根目录 pixi 统一环境（一把装全部子包）
+pixi install --environment dev
+
+# 兼容：子包独立 Poetry
 cd packages/nova-harness/backend
 poetry install
 ```
@@ -30,11 +34,11 @@ poetry install
 ## 运行测试
 
 ```bash
-# 单元测试
-PYTHONPATH=src:../nova_ai/src:../nova_agent/src python -m pytest tests/ -m "not integration"
+# 推荐：pixi 任务（仓库根目录）
+pixi run -e dev test-harness
 
-# 集成测试（需配置 VOLCENGINE_API_KEY）
-PYTHONPATH=src:../nova_ai/src:../nova_agent/src python -m pytest tests/ -m integration
+# 或在子包内直接跑（pixi 环境下）
+pixi run -e dev pytest packages/nova-harness/backend/tests -m "not integration"
 ```
 
 ## 示例

@@ -13,6 +13,10 @@
 ## 安装
 
 ```bash
+# 推荐：仓库根目录 pixi 统一环境（一把装全部子包）
+pixi install --environment dev
+
+# 兼容：子包独立 Poetry
 cd packages/nova_agent
 poetry install
 ```
@@ -20,7 +24,10 @@ poetry install
 ## 运行测试
 
 ```bash
-# 单元测试
+# 推荐：pixi 任务（仓库根目录）
+pixi run -e dev test-agent
+
+# 或在子包内直接跑
 pytest -m "not integration"
 
 # 真实模型集成测试（需配置 VOLCENGINE_API_KEY）

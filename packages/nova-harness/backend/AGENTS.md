@@ -16,22 +16,22 @@
 - **UI 反向原语**：`UIContext` 是**泛型 transport（零词汇）**——只定义 `capabilities` / `has_capability` / `request(method, params)`（需响应）/ `notify(method, params)`（fire-and-forget），所有 method 均为自由字符串，harness 不持有任何交互词汇（`STANDARD_UI_METHODS`、便捷方法、params schema 全部移出）。**词汇定义权归包**：官方 bundle 的 `nova_coding_agent.ui_primitives` 定义基线四件套（select/confirm/input/notify）并提供糖库（`select()`/`confirm()`/`input()`/`notify_message()`），第三方包可自定义原语经同一通道（设计见 `nova-client/docs/ui-primitives.md`）。无 UI 的运行模式（print/headless）使用 `NoOpUIContext` 降级；有 UI 的模式通过 JSON-RPC over stdio 实现（`modes/rpc/`，由终端/Web 前端使用）。抽象接口统一在 `core/types/ui/context.py`（唯一 ABC），`NoOpUIContext` 在 `core/types/ui/noop.py`，`UIResponse` 在 `core/types/ui/primitives.py`。正向 UI 操作（组件/状态栏/编辑器/主题）归 Node 层 UI 管线（架构 2.0，见 `examples/nova_architecture_2.0.md`）。
 - **Project Trust**：项目级信任门控，决定在加载 `<cwd>/.nova` 下的 settings、extensions、skills 等资源前是否信任该项目；支持 `--trust` 覆盖、扩展裁决、持久化记录、默认策略与 UI 弹窗确认。**trust 只存在于运行时**（会话启动决议 + `trust.json` 持久化 + resolver 读取门控）；包管理（`nova-pkg`）不介入信任决策——装/卸包是用户的主动行为，写操作不做 trust 检查。
 
-项目语言：**Python 3.9–3.12**，注释与文档主要使用**中文**。
+项目语言：**Python `>=3.12,<3.14`**，注释与文档主要使用**中文**。
 
 ---
 
 ## 技术栈与构建
 
 ### 包管理器
-使用 **Poetry** 管理依赖与构建。
+使用 **pixi**（monorepo 根目录统一 workspace）管理环境与依赖；Poetry 配置保留为兼容回退。
 
 ```bash
-# 安装依赖（包含 dev 依赖）
+# 安装开发环境（仓库根目录，一把装全部子包）
+pixi install --environment dev
+
+# 兼容：子包独立 Poetry
 cd packages/nova-harness/backend
 poetry install
-
-# 仅安装生产依赖
-poetry install --no-dev
 ```
 
 ### 构建与发布
