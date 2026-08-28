@@ -69,8 +69,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
-# PyBuilder
+# 构建产物（Rust target/ 等）
 target/
+*.tar.gz
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -136,7 +137,9 @@ poetry.lock
 sessions/
 *.session
 *.auth.json
-.nova/
+# .nova/ 是项目级资源目录（agents/skills/prompts/settings.json——可跟踪）；
+# 只挡运行时产物
+.nova/settings.json.lock
 
 # Node.js
 node_modules/
@@ -151,4 +154,3 @@ pnpm-lock.yaml
 # 依赖 vendor 化（离线打包用，不进库）
 vendor/
 .kimi/
-.nova/settings.json.lock
