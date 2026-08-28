@@ -11,10 +11,15 @@ updates:
     cooldown:
       default-days: 3
 
-  # Python：根 pixi workspace（pyproject.toml）+ 各子包
+  # Python：各子包（Poetry 格式 dependabot 认）+ executor-py（PEP 621 认）。
+  # 注：根 pyproject.toml 的依赖在 [tool.pixi.pypi-dependencies]（pixi 私有格式），
+  # dependabot 不识别——根目录依赖更新靠手工（pixi 统一求解）。
   - package-ecosystem: pip
     directories:
-      - "/"
+      - packages/nova_ai
+      - packages/nova_agent
+      - packages/nova-harness/backend
+      - packages/nova_coding_agent
       - packages/nova-executor-py
     schedule:
       interval: weekly
