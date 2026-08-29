@@ -6,6 +6,9 @@ use std::time::Duration;
 use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 
+/// 执行链路默认错误别名。
+pub type Result<T, E = CodexErr> = std::result::Result<T, E>;
+
 /// 沙箱执行链路的错误类型。
 #[derive(Error, Debug)]
 pub enum SandboxErr {
@@ -69,6 +72,12 @@ pub enum CodexErrorDetails {
     Io(#[from] io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    LandlockRuleset(#[from] landlock::RulesetError),
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    LandlockPathFd(#[from] landlock::PathFdError),
 }
 
 
@@ -110,6 +119,7 @@ impl CodexErr {
     );
 
     codex_err_tuple_constructors!(
+        Sandbox(error: SandboxErr),
         InvalidRequest(message: String),
         UnsupportedOperation(message: String),
         Fatal(message: String),
@@ -160,6 +170,20 @@ impl From<io::Error> for CodexErr {
 
 impl From<serde_json::Error> for CodexErr {
     fn from(error: serde_json::Error) -> Self {
+        CodexErrorDetails::from(error).into()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl From<landlock::RulesetError> for CodexErr {
+    fn from(error: landlock::RulesetError) -> Self {
+        CodexErrorDetails::from(error).into()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl From<landlock::PathFdError> for CodexErr {
+    fn from(error: landlock::PathFdError) -> Self {
         CodexErrorDetails::from(error).into()
     }
 }

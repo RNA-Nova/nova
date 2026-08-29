@@ -2070,10 +2070,10 @@ mod tests {
             vec![
                 PathBuf::from("/.git"),
                 PathBuf::from("/.agents"),
-                PathBuf::from("/.codex"),
+                PathBuf::from("/.nova"),
                 PathBuf::from("/dev/.git"),
                 PathBuf::from("/dev/.agents"),
-                PathBuf::from("/dev/.codex"),
+                PathBuf::from("/dev/.nova"),
             ]
         );
         assert_eq!(
@@ -2108,9 +2108,9 @@ mod tests {
                 "--perms".to_string(),
                 "555".to_string(),
                 "--tmpfs".to_string(),
-                "/.codex".to_string(),
+                "/.nova".to_string(),
                 "--remount-ro".to_string(),
-                "/.codex".to_string(),
+                "/.nova".to_string(),
                 "--ro-bind".to_string(),
                 path_to_string(&synthetic_mount_registry_root()),
                 path_to_string(&synthetic_mount_registry_root()),
@@ -2136,9 +2136,9 @@ mod tests {
                 "--perms".to_string(),
                 "555".to_string(),
                 "--tmpfs".to_string(),
-                "/dev/.codex".to_string(),
+                "/dev/.nova".to_string(),
                 "--remount-ro".to_string(),
-                "/dev/.codex".to_string(),
+                "/dev/.nova".to_string(),
             ]
         );
     }
