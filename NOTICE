@@ -1,0 +1,15 @@
+Nova
+Copyright 2026 Nova contributors
+
+This product includes software derived from OpenAI Codex
+(https://github.com/openai/codex), which is licensed under the Apache
+License, Version 2.0.
+
+Specifically, the packages/nova_executor directory (the Rust execution
+backend workspace) is derived from Codex's codex-rs and is distributed
+under the Apache License, Version 2.0 — see the LICENSE file in that
+directory. The periodic upstream alignment history is preserved in this
+repository's git history.
+
+All other code in this repository is licensed under the MIT License —
+see the LICENSE file at the repository root.

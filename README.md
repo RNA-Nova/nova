@@ -80,4 +80,10 @@ npm install && npm run build    # 或 npm run tui 直接跑 TUI
 
 ## 许可证
 
-MIT License
+本仓库采用双许可结构：
+
+- 根目录与其余子包：**MIT License**（见 [LICENSE](LICENSE)）
+- `packages/nova_executor`（Rust 执行后端）：**Apache License 2.0**——该
+  工作区派生自 [OpenAI Codex](https://github.com/openai/codex) 的
+  `codex-rs`，按其许可证要求沿用 Apache-2.0（见该目录下的
+  [LICENSE](packages/nova_executor/LICENSE) 与根目录 [NOTICE](NOTICE)）

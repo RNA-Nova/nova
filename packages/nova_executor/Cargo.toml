@@ -28,8 +28,8 @@ members = [
 
 [workspace.package]
 edition = "2024"
-license = "MIT"
-repository = "https://github.com/liujinming/nova"
+license = "Apache-2.0"
+repository = "https://github.com/RNA-Nova/nova"
 
 [workspace.dependencies]
 # 内部依赖
