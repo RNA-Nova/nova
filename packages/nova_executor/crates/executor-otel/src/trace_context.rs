@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 use std::sync::RwLock;
 
-use nova_executor_protocol_core::protocol::W3cTraceContext;
+use codex_protocol::protocol::W3cTraceContext;
 use opentelemetry::Context;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::TraceContextExt;
@@ -336,7 +336,7 @@ mod tests {
     use super::context_from_trace_headers;
     use super::context_from_w3c_trace_context;
     use super::current_span_trace_id;
-    use nova_executor_protocol_core::protocol::W3cTraceContext;
+    use codex_protocol::protocol::W3cTraceContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
     use opentelemetry::trace::TraceId;
