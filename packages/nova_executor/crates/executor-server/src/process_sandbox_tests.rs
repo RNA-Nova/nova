@@ -84,7 +84,7 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
     {
         assert_eq!(
             prepared.command.first(),
-            Some(&runtime_paths.nova / executor_self_exe.to_string_lossy().into_owned())
+            Some(&runtime_paths.executor_self_exe.to_string_lossy().into_owned())
         );
         let permission_profile_json = prepared
             .command

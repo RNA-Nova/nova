@@ -1,3 +1,6 @@
+// 重定向凭证剥离/日志净化的覆盖测试。
+// 注意：本文件的时限统一放宽为 10s（原 2s）——CI runner 负载高时 2s 内
+// TCP 连接未到达监听端会 panic/超时，属时序敏感的既有 flaky，与语义无关。
 use super::*;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -20,7 +23,7 @@ async fn route_aware_pool_strips_credentials_on_cross_origin_redirect() {
     );
 
     let response = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(10),
         pool.get(&initial_url)
             .header(AUTHORIZATION, "Bearer origin-secret")
             .header(COOKIE, "session=origin-secret")
@@ -63,7 +66,7 @@ async fn route_aware_pool_retains_credentials_for_same_origin_and_route() {
     );
 
     let response = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(10),
         pool.get(initial_url)
             .header(AUTHORIZATION, "Bearer origin-secret")
             .header(COOKIE, "session=origin-secret")
@@ -117,7 +120,7 @@ async fn route_aware_pool_sanitizes_redirected_failure_logs() {
 
     enabled_pool
         .get(&enabled_initial_url)
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(10))
         .send()
         .await
         .expect_err("redirect target should fail");
@@ -141,7 +144,7 @@ async fn route_aware_pool_sanitizes_redirected_failure_logs() {
 
     disabled_pool
         .get(&disabled_initial_url)
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(10))
         .send()
         .await
         .expect_err("redirect target should fail");
@@ -194,7 +197,7 @@ fn spawn_failing_listener() -> (std::net::SocketAddr, std::thread::JoinHandle<()
         .set_nonblocking(true)
         .expect("failing listener should become nonblocking");
     let thread = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(10);
         let (mut stream, _) = loop {
             match listener.accept() {
                 Ok(connection) => break connection,
@@ -209,7 +212,7 @@ fn spawn_failing_listener() -> (std::net::SocketAddr, std::thread::JoinHandle<()
             }
         };
         stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
+            .set_read_timeout(Some(Duration::from_secs(10)))
             .expect("failing stream should get a read timeout");
         read_http_message(&mut stream);
     });

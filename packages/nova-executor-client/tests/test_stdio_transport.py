@@ -173,7 +173,13 @@ async def test_env_overlay_and_cwd():
         info = await transport.send_request("envinfo")
         assert info["fakeVar"] == "fake-value"
         assert info["hasHome"] is True  # 继承环境未被整体替换
-        assert Path(info["cwd"]).resolve() == Path(tempfile.gettempdir()).resolve()
+        # Windows 路径比较要 normcase+realpath：GitHub runner 的 TEMP 可能是
+        # 8.3 短路径形式（RUNNER~1），realpath 展开后大小写/形式才一致
+        import os
+
+        assert os.path.normcase(os.path.realpath(info["cwd"])) == os.path.normcase(
+            os.path.realpath(tempfile.gettempdir())
+        )
     finally:
         await transport.disconnect()
 
