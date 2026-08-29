@@ -225,7 +225,7 @@ impl HttpClientBuilder {
             Ok(inner) => HttpClient::from_parts(inner, request_logging),
             Err(error) => {
                 tracing::event!(
-                    target: "codex_otel.log_only",
+                    target: "nova_executor_otel.log_only",
                     tracing::Level::WARN,
                     event.name = "codex.http_client.custom_ca_fallback",
                     "HTTP client fell back to system root certificates"
