@@ -187,3 +187,31 @@ impl From<landlock::PathFdError> for CodexErr {
         CodexErrorDetails::from(error).into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 兼容构造器生成的变体可经 Display 稳定呈现。
+    #[test]
+    fn compat_constructors_render_display() {
+        let err = CodexErr::Fatal("boom".to_string());
+        assert!(err.to_string().contains("Fatal error: boom"));
+        assert!(matches!(err.details(), CodexErrorDetails::Fatal(_)));
+    }
+
+    /// SandboxErr 经 From 自动归入 Sandbox 类别。
+    #[test]
+    fn sandbox_err_wraps_into_sandbox_category() {
+        let err = CodexErr::from(SandboxErr::LandlockRestrict);
+        assert!(matches!(err.details(), CodexErrorDetails::Sandbox(_)));
+        assert!(err.to_string().contains("Landlock"));
+    }
+
+    /// InvalidRequest 保留原始消息文本。
+    #[test]
+    fn invalid_request_keeps_message() {
+        let err = CodexErr::InvalidRequest("bad args".to_string());
+        assert_eq!(err.to_string(), "bad args");
+    }
+}
