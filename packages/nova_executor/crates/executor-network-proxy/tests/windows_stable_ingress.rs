@@ -300,8 +300,8 @@ async fn build_proxy(
     let (http_addr, socks_addr) = requested_addrs;
     let mut config = NetworkProxyConfig {
         enabled: true,
-        proxy_url: format!("http://{http_addr}"),
-        socks_url: format!("socks5://{socks_addr}"),
+        proxy_url: Some(format!("http://{http_addr}")),
+        socks_url: Some(format!("socks5://{socks_addr}")),
         enable_socks5,
         enable_socks5_udp: false,
         allow_local_binding: true,

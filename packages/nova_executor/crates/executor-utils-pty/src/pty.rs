@@ -143,8 +143,36 @@ pub async fn spawn_process(
 
     #[cfg(unix)]
     if !inherited_fds.is_empty() {
-        return spawn_process_preserving_fds(program, args, cwd, env, arg0, size, inherited_fds)
-            .await;
+        return spawn_process_preserving_fds(
+            program,
+            args,
+            cwd,
+            env,
+            arg0,
+            size,
+            inherited_fds,
+            crate::unix_io::StdinCloseBehavior::NoEof,
+        )
+        .await;
+    }
+
+    // unix 上 arg0 必须与真实 program 分离（std Command 的 arg0 语义）：
+    // portable-pty 的 CommandBuilder 让 args[0] 同时承担 argv0 与程序解析，
+    // 裸名 argv0（如 codex-linux-sandbox 重入哨兵）会被拿去 PATH 搜索——
+    // 搜不到则 spawn 失败，搜到同名恶意程序则被劫持。改走 StdCommand 路径。
+    #[cfg(unix)]
+    if arg0.is_some() {
+        return spawn_process_preserving_fds(
+            program,
+            args,
+            cwd,
+            env,
+            arg0,
+            size,
+            inherited_fds,
+            crate::unix_io::StdinCloseBehavior::SendEof,
+        )
+        .await;
     }
 
     spawn_process_portable(program, args, cwd, env, arg0, size).await
@@ -296,6 +324,7 @@ async fn spawn_process_preserving_fds(
     arg0: &Option<String>,
     size: TerminalSize,
     inherited_fds: &[RawFd],
+    stdin_close_behavior: crate::unix_io::StdinCloseBehavior,
 ) -> Result<SpawnedProcess> {
     let (master, slave) = open_unix_pty(size)?;
     let io = crate::unix_io::PtyIo::new(master.as_raw_fd())?;
@@ -372,11 +401,7 @@ async fn spawn_process_preserving_fds(
     let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>(128);
     let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>(128);
     let (_stderr_tx, stderr_rx) = mpsc::channel::<Vec<u8>>(1);
-    let (reader_handle, writer_handle) = io.spawn(
-        stdout_tx,
-        writer_rx,
-        crate::unix_io::StdinCloseBehavior::NoEof,
-    );
+    let (reader_handle, writer_handle) = io.spawn(stdout_tx, writer_rx, stdin_close_behavior);
 
     let (exit_tx, exit_rx) = oneshot::channel::<i32>();
     let exit_status = Arc::new(AtomicBool::new(false));
