@@ -29,7 +29,7 @@ use crate::token::get_current_token_for_restriction;
 use crate::token::get_logon_sid_bytes;
 use crate::workspace_acl::is_command_cwd_root;
 use crate::workspace_acl::protect_workspace_agents_dir;
-use crate::workspace_acl::protect_workspace_codex_dir;
+use crate::workspace_acl::protect_workspace_nova_dir;
 use anyhow::Context;
 use anyhow::Result;
 use nova_executor_protocol_core::models::PermissionProfile;
@@ -337,7 +337,7 @@ pub(crate) fn apply_legacy_session_acl_rules(
         {
             let canonical_cwd = canonicalize_path(current_dir);
             if is_command_cwd_root(&workspace_sid.root, &canonical_cwd) {
-                let _ = protect_workspace_codex_dir(current_dir, workspace_sid.sid.as_ptr());
+                let _ = protect_workspace_nova_dir(current_dir, workspace_sid.sid.as_ptr());
                 let _ = protect_workspace_agents_dir(current_dir, workspace_sid.sid.as_ptr());
             }
         }
@@ -646,7 +646,7 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let codex_home = temp.path().join("codex-home");
         let workspace = temp.path().join("workspace");
-        let protected_dir = workspace.join(".codex");
+        let protected_dir = workspace.join(".nova");
         let nested_root = protected_dir.join("nested-root");
         let unrelated_root = temp.path().join("unrelated-root");
         std::fs::create_dir_all(&codex_home).expect("create codex home");

@@ -7,9 +7,6 @@ mod otlp;
 mod targets;
 
 use crate::metrics::Result as MetricsResult;
-use nova_executor_protocol_core::auth::AuthMode;
-use serde::Serialize;
-use strum_macros::Display;
 
 pub use crate::config::OtelExporter;
 pub use crate::config::OtelHttpProtocol;
@@ -33,36 +30,6 @@ pub use crate::trace_context::traceparent_context_from_env;
 pub use crate::trace_context::validate_tracestate_entries;
 pub use crate::trace_context::validate_tracestate_member;
 pub use nova_executor_utils_string::sanitize_metric_tag_value;
-
-#[derive(Debug, Clone, Serialize, Display)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolDecisionSource {
-    AutomatedReviewer,
-    Config,
-    User,
-}
-
-/// Coarsens the authentication domain into the dimensions used by telemetry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
-pub enum TelemetryAuthMode {
-    ApiKey,
-    Chatgpt,
-}
-
-impl From<AuthMode> for TelemetryAuthMode {
-    fn from(mode: AuthMode) -> Self {
-        match mode {
-            AuthMode::ApiKey | AuthMode::BedrockApiKey => {
-                Self::ApiKey
-            }
-            AuthMode::Chatgpt
-            | AuthMode::ChatgptAuthTokens
-            | AuthMode::Headers
-            | AuthMode::AgentIdentity
-            | AuthMode::PersonalAccessToken => Self::Chatgpt,
-        }
-    }
-}
 
 /// Start a metrics timer using the globally installed metrics client.
 pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Timer> {

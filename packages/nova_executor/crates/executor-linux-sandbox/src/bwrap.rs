@@ -427,7 +427,7 @@ fn create_filesystem_args(
                 let project_subpath = Path::new(subpath);
                 if project_subpath != Path::new(".git")
                     && project_subpath != Path::new(".agents")
-                    && project_subpath != Path::new(".codex")
+                    && project_subpath != Path::new(".nova")
                 {
                     return None;
                 }
@@ -1592,7 +1592,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("temp dir");
         let logical_home = temp_dir.path().join("home");
         let real_codex = temp_dir.path().join("real-codex");
-        let logical_codex = logical_home.join(".codex");
+        let logical_codex = logical_home.join(".nova");
         let real_memories = real_codex.join("memories");
         let logical_memories = logical_codex.join("memories");
         std::fs::create_dir_all(&logical_home).expect("create logical home");
@@ -1775,7 +1775,7 @@ mod tests {
         assert_empty_file_bound_without_perms(&args.args, &blocked);
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".git"));
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
         assert_eq!(args.preserved_files.len(), 1);
         assert_eq!(
             synthetic_mount_target_paths(&args),
@@ -1783,7 +1783,7 @@ mod tests {
                 blocked.clone(),
                 workspace.join(".git"),
                 workspace.join(".agents"),
-                workspace.join(".codex"),
+                workspace.join(".nova"),
             ]
         );
         assert!(
@@ -1815,13 +1815,13 @@ mod tests {
 
         assert_empty_file_bound_without_perms(&args.args, &dot_git);
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
         assert_eq!(
             synthetic_mount_target_paths(&args),
             vec![
                 dot_git.clone(),
                 workspace.join(".agents"),
-                workspace.join(".codex"),
+                workspace.join(".nova"),
             ]
         );
         assert!(
@@ -1860,10 +1860,10 @@ mod tests {
             .expect("filesystem args");
         assert_empty_directory_mounted_read_only(&args.args, &dot_git);
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
         assert_eq!(
             synthetic_mount_target_paths(&args),
-            vec![workspace.join(".codex"), dot_git, workspace.join(".agents")],
+            vec![workspace.join(".nova"), dot_git, workspace.join(".agents")],
         );
         assert!(
             protected_create_target_paths(&args).is_empty(),
@@ -1898,10 +1898,10 @@ mod tests {
                 .expect("filesystem args");
         assert_empty_directory_mounted_read_only(&args.args, &dot_git);
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+        assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
         assert_eq!(
             synthetic_mount_target_paths(&args),
-            vec![workspace.join(".codex"), dot_git, workspace.join(".agents")],
+            vec![workspace.join(".nova"), dot_git, workspace.join(".agents")],
         );
         assert!(
             protected_create_target_paths(&args).is_empty(),
@@ -1977,7 +1977,7 @@ mod tests {
             },
             FileSystemSandboxEntry {
                 path: FileSystemPath::Special {
-                    value: FileSystemSpecialPath::project_roots(Some(".codex".into())),
+                    value: FileSystemSpecialPath::project_roots(Some(".nova".into())),
                 },
                 access: FileSystemAccessMode::Read,
                 missing_path_behavior: None,
@@ -1989,7 +1989,7 @@ mod tests {
                 .expect("filesystem args");
         let dot_git = path_to_string(&temp_dir.path().join(".git"));
         let dot_agents = path_to_string(&temp_dir.path().join(".agents"));
-        let dot_codex = path_to_string(&temp_dir.path().join(".codex"));
+        let dot_codex = path_to_string(&temp_dir.path().join(".nova"));
 
         assert_empty_directory_mounted_read_only(&args.args, Path::new(&dot_git));
         assert_empty_directory_mounted_read_only(&args.args, Path::new(&dot_agents));

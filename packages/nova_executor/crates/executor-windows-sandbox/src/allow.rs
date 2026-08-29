@@ -320,9 +320,9 @@ mod tests {
     fn denies_codex_and_agents_inside_writable_root() {
         let tmp = TempDir::new().expect("tempdir");
         let command_cwd = tmp.path().join("workspace");
-        let codex_dir = command_cwd.join(".codex");
+        let nova_dir = command_cwd.join(".nova");
         let agents_dir = command_cwd.join(".agents");
-        let _ = fs::create_dir_all(&codex_dir);
+        let _ = fs::create_dir_all(&nova_dir);
         let _ = fs::create_dir_all(&agents_dir);
 
         let permission_profile = workspace_write_profile(
@@ -342,7 +342,7 @@ mod tests {
             .into_iter()
             .collect();
         let expected_deny: HashSet<PathBuf> = [
-            dunce::canonicalize(&codex_dir).unwrap(),
+            dunce::canonicalize(&nova_dir).unwrap(),
             dunce::canonicalize(&agents_dir).unwrap(),
         ]
         .into_iter()
