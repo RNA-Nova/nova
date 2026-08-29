@@ -1,5 +1,3 @@
-mod chatgpt_cloudflare_cookies;
-mod chatgpt_hosts;
 mod client;
 mod client_builder;
 mod custom_ca;
@@ -10,8 +8,6 @@ mod route_aware_client_pool;
 mod route_aware_redirect;
 mod transport;
 
-pub use crate::chatgpt_cloudflare_cookies::with_chatgpt_cloudflare_cookie_store;
-pub use crate::chatgpt_hosts::is_allowed_chatgpt_host;
 pub use crate::client::HttpClient;
 pub use crate::client::HttpError;
 pub use crate::client::HttpResponse;

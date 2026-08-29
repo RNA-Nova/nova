@@ -47,9 +47,6 @@ tokio-tungstenite = { workspace = true }
 # TLS / 安全
 rustls = { workspace = true }
 
-# Noise 协议
-clatter = { workspace = true }
-prost = "0.14.3"
 arc-swap = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
@@ -89,9 +86,6 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 wiremock = { workspace = true }
 nova-executor-network-proxy = { workspace = true }
-
-# chatgpt_cloudflare_affinity 集成测试：自建 MITM 代理需要就地签发证书
-rcgen = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # 集成测试的 argv0 重入分派：landlock/bwrap 沙箱以 `codex-linux-sandbox`

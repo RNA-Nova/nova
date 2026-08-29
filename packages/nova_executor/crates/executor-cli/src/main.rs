@@ -1,16 +1,11 @@
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
-use clap::ValueEnum;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use nova_executor_server::ExecServerRuntimePaths;
-use nova_executor_server::RemoteEnvironmentConfig;
 use nova_executor_server::RequestDispatchMode;
-use nova_executor_server::SharedAuthProvider;
 use nova_executor_server::run_main_with_telemetry;
-use nova_executor_server::run_remote_environment_until_shutdown;
 
 /// nova-executor - 远程执行服务
 #[derive(Debug, Parser)]
@@ -27,26 +22,6 @@ struct Cli {
     #[arg(long, value_name = "COUNT", default_value = "32")]
     concurrent_requests: usize,
 
-    /// Register this executor as a remote environment using the given registry base URL.
-    #[arg(long, value_name = "URL", requires = "environment_id")]
-    remote: Option<String>,
-
-    /// Environment id to attach to when registering remotely.
-    #[arg(long, value_name = "ID")]
-    environment_id: Option<String>,
-
-    /// Human-readable environment name.
-    #[arg(long, value_name = "NAME")]
-    name: Option<String>,
-
-    /// Authentication mode for remote registry.
-    #[arg(long, value_enum, default_value_t = AuthMode::None)]
-    auth: AuthMode,
-
-    /// Bearer token for remote registry authentication.
-    #[arg(long, env = "NOVA_EXECUTOR_AUTH_TOKEN")]
-    auth_token: Option<String>,
-
     /// Path to the executor executable used to launch hidden helper modes.
     #[arg(long, value_name = "PATH")]
     executor_self_exe: Option<PathBuf>,
@@ -58,15 +33,6 @@ struct Cli {
     /// Enable telemetry (OpenTelemetry).
     #[arg(long)]
     telemetry: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum AuthMode {
-    /// No authentication (local mode only)
-    #[default]
-    None,
-    /// Bearer token authentication
-    Bearer,
 }
 
 fn main() -> Result<()> {
@@ -114,56 +80,18 @@ async fn run_server() -> Result<()> {
         }
     };
 
-    if let Some(base_url) = cli.remote {
-        // 远程模式
-        let environment_id = cli
-            .environment_id
-            .context("--environment-id is required when --remote is set")?;
-
-        let auth_provider = build_auth_provider(cli.auth, cli.auth_token)?;
-
-        let mut remote_config = RemoteEnvironmentConfig::new(
-            base_url,
-            environment_id,
-            auth_provider,
-            nova_executor_http_client::HttpClientFactory::new(
-                nova_executor_http_client::OutboundProxyPolicy::ReqwestDefault,
-            ),
-        )?;
-        if let Some(name) = cli.name {
-            remote_config.name = name;
-        }
-        remote_config.request_dispatch_mode = request_dispatch_mode;
-
-        run_remote_environment_until_shutdown(remote_config, runtime_paths, std::future::pending())
-            .await?;
-    } else {
-        // 本地模式：WS 回环 / stdio 承载，不做入站鉴权
-        //（--auth/--auth-token 仅供 --remote registry 出站调用使用）。
-        run_main_with_telemetry(
-            &cli.listen,
-            runtime_paths,
-            nova_executor_server::ExecServerTelemetry::default(),
-            nova_executor_http_client::HttpClientFactory::new(
-                nova_executor_http_client::OutboundProxyPolicy::ReqwestDefault,
-            ),
-            request_dispatch_mode,
-        )
-        .await
-        .map_err(|err| anyhow::anyhow!("{err}"))?;
-    }
+    // 本地模式：WS 回环 / stdio 承载，不做入站鉴权
+    run_main_with_telemetry(
+        &cli.listen,
+        runtime_paths,
+        nova_executor_server::ExecServerTelemetry::default(),
+        nova_executor_http_client::HttpClientFactory::new(
+            nova_executor_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
+        request_dispatch_mode,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     Ok(())
-}
-
-fn build_auth_provider(mode: AuthMode, token: Option<String>) -> Result<SharedAuthProvider> {
-    match mode {
-        AuthMode::None => Ok(Arc::new(nova_executor_server::NoopAuthProvider)),
-        AuthMode::Bearer => {
-            let token = token.context("--auth-token is required when --auth bearer is set")?;
-            Ok(Arc::new(
-                nova_executor_server::BearerTokenAuthProvider::new(token),
-            ))
-        }
-    }
 }

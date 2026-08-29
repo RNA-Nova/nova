@@ -27,10 +27,6 @@ use nova_executor_server::ExecServerTelemetry;
 use nova_executor_server::RequestDispatchMode;
 
 pub(crate) mod exec_server;
-// relay 测试专用的假 rendezvous/registry 原语（对位 codex test-support crate
-// 的 relay 模块，nova 折叠进测试 common；仅 relay 系列测试使用）。
-#[allow(dead_code)]
-pub(crate) mod test_support_relay;
 
 pub(crate) const DELAYED_OUTPUT_AFTER_EXIT_PARENT_ARG: &str =
     "--nova-test-delayed-output-after-exit-parent";
@@ -118,14 +114,28 @@ pub(crate) fn current_test_binary_helper_paths() -> anyhow::Result<(PathBuf, Opt
     Ok((current_exe, executor_linux_sandbox_exe))
 }
 
-/// 构建一个不带任何环境的 `EnvironmentManager`（对位 codex test-support crate
-/// 的 `environment_manager_without_environments`，nova 折叠进测试 common）。
+/// 构建一个不带任何环境的测试 helper 已随托管链删除；远程测试改用普通
+/// websocket 直连客户端接入 exec-server。
+///（并非每个测试二进制都用得到，允许未使用）
 #[allow(dead_code)]
-pub(crate) fn environment_manager_without_environments() -> nova_executor_server::EnvironmentManager
-{
-    nova_executor_server::EnvironmentManager::without_environments(HttpClientFactory::new(
-        OutboundProxyPolicy::ReqwestDefault,
-    ))
+pub(crate) async fn connect_remote_exec_client(
+    websocket_url: &str,
+) -> anyhow::Result<nova_executor_server::ExecServerClient> {
+    use std::time::Duration;
+
+    Ok(
+        nova_executor_server::ExecServerClient::connect_websocket(
+            nova_executor_server::RemoteExecServerConnectArgs {
+                websocket_url: websocket_url.to_string(),
+                client_name: "exec-server-test-client".to_string(),
+                connect_timeout: Duration::from_secs(10),
+                initialize_timeout: Duration::from_secs(10),
+                resume_session_id: None,
+                http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+            },
+        )
+        .await?,
+    )
 }
 
 fn next_release_path_arg(mut args: impl Iterator<Item = std::ffi::OsString>) -> PathBuf {

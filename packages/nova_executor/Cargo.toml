@@ -61,14 +61,6 @@ anyhow = "1"
 arc-swap = "1.9.0"
 base64 = "0.22.1"
 bytes = "1.10.1"
-clatter = { version = "2.2.0", default-features = false, features = [
-    "alloc",
-    "getrandom",
-    "use-25519",
-    "use-aes-gcm",
-    "use-rust-crypto-ml-kem",
-    "use-sha",
-] }
 dirs = "6"
 dunce = "1.0.4"
 futures = { version = "0.3", default-features = false }

@@ -10,7 +10,7 @@ use nova_executor_protocol_core::permissions::FileSystemSandboxEntry;
 use nova_executor_protocol_core::permissions::FileSystemSandboxPolicy;
 use nova_executor_protocol_core::permissions::FileSystemSpecialPath;
 use nova_executor_protocol_core::permissions::NetworkSandboxPolicy;
-use nova_executor_server::Environment;
+use nova_executor_server::RemoteFileSystem;
 use nova_executor_server::ExecServerRuntimePaths;
 use nova_executor_server::ExecutorFileSystem;
 use nova_executor_server::FileSystemSandboxContext;
@@ -63,10 +63,9 @@ pub(crate) async fn create_file_system_context(
         }
         FileSystemImplementation::Remote => {
             let server = exec_server().await?;
-            let environment =
-                Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
+            let client = crate::common::connect_remote_exec_client(server.websocket_url()).await?;
             Ok(FileSystemContext {
-                file_system: environment.get_filesystem(),
+                file_system: Arc::new(RemoteFileSystem::new(client)),
                 _helper_paths: None,
                 _server: Some(server),
             })

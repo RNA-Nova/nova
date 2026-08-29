@@ -21,36 +21,13 @@ const PROCESSES_FINISHED_TOTAL_DESCRIPTION: &str =
     "Total number of finished exec-server processes.";
 const PROCESS_DURATION_METRIC: &str = "exec_server_process_duration_seconds";
 const PROCESS_DURATION_DESCRIPTION: &str = "Duration of exec-server processes in seconds.";
-const REMOTE_REGISTRATION_METRICS: OperationMetrics = OperationMetrics {
-    total_name: "exec_server_remote_registration_total",
-    total_description: "Total number of remote exec-server registration attempts.",
-    duration_name: "exec_server_remote_registration_duration_seconds",
-    duration_description: "Duration of remote exec-server registration attempts in seconds.",
-};
-const REMOTE_RENDEZVOUS_METRICS: OperationMetrics = OperationMetrics {
-    total_name: "exec_server_remote_rendezvous_connect_total",
-    total_description: "Total number of remote exec-server rendezvous connection attempts.",
-    duration_name: "exec_server_remote_rendezvous_connect_duration_seconds",
-    duration_description: "Duration of remote exec-server rendezvous connection attempts in seconds.",
-};
-const REMOTE_RECONNECTS_TOTAL_METRIC: &str = "exec_server_remote_reconnects_total";
-const REMOTE_RECONNECTS_TOTAL_DESCRIPTION: &str = "Total number of remote exec-server reconnects.";
 // shell snapshot 捕获（executor 内缓存登录 shell 状态）——毫秒直方图 + 计数，
 // tags 携带 version=v2 / success / failure_reason，对齐上游 codex.shell_snapshot 语义
 const SHELL_SNAPSHOT_TOTAL_METRIC: &str = "exec_server_shell_snapshot_total";
 const SHELL_SNAPSHOT_DURATION_METRIC: &str = "exec_server_shell_snapshot_duration_ms";
 
 #[derive(Clone, Copy)]
-struct OperationMetrics {
-    total_name: &'static str,
-    total_description: &'static str,
-    duration_name: &'static str,
-    duration_description: &'static str,
-}
-
-#[derive(Clone, Copy)]
 pub(crate) enum ConnectionTransport {
-    Relay,
     Stdio,
     WebSocket,
 }
@@ -58,7 +35,6 @@ pub(crate) enum ConnectionTransport {
 impl ConnectionTransport {
     fn metric_tag(self) -> &'static str {
         match self {
-            Self::Relay => "relay",
             Self::Stdio => "stdio",
             Self::WebSocket => "websocket",
         }
@@ -77,7 +53,6 @@ struct ExecServerTelemetryInner {
 
 #[derive(Default)]
 struct ActiveCounts {
-    relay_connections: i64,
     stdio_connections: i64,
     websocket_connections: i64,
     processes: i64,
@@ -86,7 +61,6 @@ struct ActiveCounts {
 impl ActiveCounts {
     fn connections(&self, transport: ConnectionTransport) -> i64 {
         match transport {
-            ConnectionTransport::Relay => self.relay_connections,
             ConnectionTransport::Stdio => self.stdio_connections,
             ConnectionTransport::WebSocket => self.websocket_connections,
         }
@@ -174,24 +148,6 @@ impl ExecServerTelemetry {
         let _ = metrics.counter(SHELL_SNAPSHOT_TOTAL_METRIC, /*inc*/ 1, &tags);
     }
 
-    pub(crate) fn remote_registration_completed(&self, result: &'static str, duration: Duration) {
-        self.record_operation(REMOTE_REGISTRATION_METRICS, result, duration);
-    }
-
-    pub(crate) fn remote_rendezvous_completed(&self, result: &'static str, duration: Duration) {
-        self.record_operation(REMOTE_RENDEZVOUS_METRICS, result, duration);
-    }
-
-    pub(crate) fn remote_reconnect(&self, reason: &'static str) {
-        self.with_inner(|inner| {
-            inner.counter(
-                REMOTE_RECONNECTS_TOTAL_METRIC,
-                REMOTE_RECONNECTS_TOTAL_DESCRIPTION,
-                &[("reason", reason)],
-            );
-        });
-    }
-
     pub(crate) fn process_started(&self) -> ProcessMetricGuard {
         self.with_inner(|inner| {
             inner.adjust_process_count(/*delta*/ 1);
@@ -232,23 +188,6 @@ impl ExecServerTelemetry {
         }
     }
 
-    fn record_operation(
-        &self,
-        metrics: OperationMetrics,
-        result: &'static str,
-        duration: Duration,
-    ) {
-        self.with_inner(|inner| {
-            let tags = [("result", result)];
-            inner.counter(metrics.total_name, metrics.total_description, &tags);
-            inner.duration(
-                metrics.duration_name,
-                metrics.duration_description,
-                duration,
-                &tags,
-            );
-        });
-    }
 }
 
 impl Drop for ConnectionMetricGuard {
@@ -282,7 +221,6 @@ impl ExecServerTelemetryInner {
     fn adjust_connection_count(&self, transport: ConnectionTransport, delta: i64) {
         let mut active = self.active_counts();
         let count = match transport {
-            ConnectionTransport::Relay => &mut active.relay_connections,
             ConnectionTransport::Stdio => &mut active.stdio_connections,
             ConnectionTransport::WebSocket => &mut active.websocket_connections,
         };
@@ -316,11 +254,7 @@ impl ExecServerTelemetryInner {
 }
 
 fn register_active_gauges(metrics: &MetricsClient, active: &Arc<Mutex<ActiveCounts>>) {
-    for transport in [
-        ConnectionTransport::Relay,
-        ConnectionTransport::Stdio,
-        ConnectionTransport::WebSocket,
-    ] {
+    for transport in [ConnectionTransport::Stdio, ConnectionTransport::WebSocket] {
         register_active_gauge(
             metrics,
             active,

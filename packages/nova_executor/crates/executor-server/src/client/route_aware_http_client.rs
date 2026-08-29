@@ -59,17 +59,16 @@ pub(crate) struct RouteAwareHttpRequestRunner {
 impl RouteAwareHttpClient {
     pub fn new(http_client_factory: HttpClientFactory) -> Self {
         Self {
-            follow_redirects: RouteAwareClientPool::with_chatgpt_cloudflare_cookies_without_request_logging(
+            follow_redirects: RouteAwareClientPool::new_without_request_logging(
                 http_client_factory.clone(),
                 // Delegated HTTP targets arbitrary endpoints; route class only labels diagnostics.
                 ClientRouteClass::Other,
             ),
-            stop_redirects:
-                RouteAwareClientPool::with_chatgpt_cloudflare_cookies_without_redirects_or_request_logging(
-                    http_client_factory,
-                    // Proxy routing comes from the factory, not this diagnostic-only route class.
-                    ClientRouteClass::Other,
-                ),
+            stop_redirects: RouteAwareClientPool::new_without_redirects_or_request_logging(
+                http_client_factory,
+                // Proxy routing comes from the factory, not this diagnostic-only route class.
+                ClientRouteClass::Other,
+            ),
         }
     }
 

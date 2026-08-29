@@ -1,20 +1,15 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
 use nova_executor_http_client::HttpClientFactory;
-use tokio::sync::watch;
 
 use crate::ExecServerError;
 use crate::HttpRequestParams;
 use crate::HttpRequestResponse;
 use crate::HttpResponseBodyStream;
-use crate::NoiseChannelIdentity;
-use crate::NoiseChannelPublicKey;
 
-pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Connection options for any exec-server client transport.
@@ -36,44 +31,6 @@ pub struct RemoteExecServerConnectArgs {
     pub http_client_factory: HttpClientFactory,
 }
 
-/// Registry-authorized material for one Noise rendezvous connection attempt.
-///
-/// Treat this as an atomic, single-use bundle. The URL authorization, executor
-/// registration, pinned executor key, and harness-key authorization describe one
-/// physical connection attempt and must not be mixed with values from another
-/// registry response.
-pub struct NoiseRendezvousConnectBundle {
-    pub websocket_url: String,
-    pub environment_id: String,
-    pub executor_registration_id: String,
-    pub executor_public_key: NoiseChannelPublicKey,
-    pub harness_key_authorization: String,
-}
-
-/// Connection arguments for an authenticated Noise rendezvous exec-server.
-///
-/// `harness_identity` identifies the logical harness endpoint and may be reused
-/// across reconnects. In contrast, callers must supply a fresh
-/// [`NoiseRendezvousConnectBundle`] for each physical connection attempt.
-pub struct NoiseRendezvousConnectArgs {
-    pub bundle: NoiseRendezvousConnectBundle,
-    pub harness_identity: NoiseChannelIdentity,
-    pub client_name: String,
-    pub connect_timeout: Duration,
-    pub initialize_timeout: Duration,
-    pub resume_session_id: Option<String>,
-    pub http_client_factory: HttpClientFactory,
-}
-
-/// Supplies fresh registry-authorized material for Noise rendezvous connections.
-pub trait NoiseRendezvousConnectProvider: Send + Sync {
-    /// Fetch a bundle authorizing this harness key for one physical connection.
-    fn connect_bundle(
-        &self,
-        harness_public_key: NoiseChannelPublicKey,
-    ) -> BoxFuture<'_, Result<NoiseRendezvousConnectBundle, ExecServerError>>;
-}
-
 /// Stdio connection arguments for a command-backed exec-server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StdioExecServerConnectArgs {
@@ -85,33 +42,20 @@ pub(crate) struct StdioExecServerConnectArgs {
 
 /// Structured process command used to start an exec-server over stdio.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StdioExecServerCommand {
+pub struct StdioExecServerCommand {
     pub program: String,
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
     pub cwd: Option<PathBuf>,
 }
 
-pub(crate) type DeferredEnvironmentReadiness = watch::Receiver<Option<Result<(), String>>>;
-
-#[derive(Clone)]
-pub(crate) struct Deferred<T> {
-    pub readiness: DeferredEnvironmentReadiness,
-    pub transport: T,
-}
-
 /// Parameters used to connect to a remote exec-server environment.
 #[derive(Clone)]
-pub(crate) enum ExecServerTransportParams {
-    Deferred(Box<Deferred<ExecServerTransportParams>>),
+pub enum ExecServerTransportParams {
     WebSocketUrl {
         websocket_url: String,
         connect_timeout: Duration,
         initialize_timeout: Duration,
-    },
-    NoiseRendezvous {
-        provider: Arc<dyn NoiseRendezvousConnectProvider>,
-        identity: NoiseChannelIdentity,
     },
     #[allow(dead_code)]
     StdioCommand {
@@ -123,10 +67,6 @@ pub(crate) enum ExecServerTransportParams {
 impl std::fmt::Debug for ExecServerTransportParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Deferred(deferred) => f
-                .debug_struct("Deferred")
-                .field("transport", &deferred.transport)
-                .finish_non_exhaustive(),
             Self::WebSocketUrl {
                 websocket_url,
                 connect_timeout,
@@ -137,9 +77,6 @@ impl std::fmt::Debug for ExecServerTransportParams {
                 .field("connect_timeout", connect_timeout)
                 .field("initialize_timeout", initialize_timeout)
                 .finish(),
-            Self::NoiseRendezvous { .. } => {
-                f.debug_struct("NoiseRendezvous").finish_non_exhaustive()
-            }
             Self::StdioCommand {
                 command,
                 initialize_timeout,
@@ -153,7 +90,7 @@ impl std::fmt::Debug for ExecServerTransportParams {
 }
 
 impl ExecServerTransportParams {
-    pub(crate) fn websocket_url(websocket_url: String, connect_timeout: Duration) -> Self {
+    pub fn websocket_url(websocket_url: String, connect_timeout: Duration) -> Self {
         Self::WebSocketUrl {
             websocket_url,
             connect_timeout,

@@ -31,7 +31,6 @@ use nova_executor_protocol_core::permissions::FileSystemSpecialPath;
 #[cfg(unix)]
 use nova_executor_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_executor_protocol_core::protocol::SandboxPolicy;
-use nova_executor_server::Environment;
 use nova_executor_server::ExecBackend;
 #[cfg(unix)]
 use nova_executor_server::ExecEnvPolicy;
@@ -41,9 +40,11 @@ use nova_executor_server::ExecProcess;
 use nova_executor_server::ExecProcessEvent;
 #[cfg(any(unix, windows))]
 use nova_executor_server::FileSystemSandboxContext;
+use nova_executor_server::LocalProcess;
 use nova_executor_server::ProcessId;
 use nova_executor_server::ProcessSignal;
 use nova_executor_server::ReadResponse;
+use nova_executor_server::RemoteProcess;
 #[cfg(unix)]
 use nova_executor_server::ShellInfo;
 #[cfg(unix)]
@@ -88,15 +89,14 @@ enum ProcessEventSnapshot {
 async fn create_process_context(use_remote: bool) -> Result<ProcessContext> {
     if use_remote {
         let server = exec_server().await?;
-        let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
+        let client = common::connect_remote_exec_client(server.websocket_url()).await?;
         Ok(ProcessContext {
-            backend: environment.get_exec_backend(),
+            backend: Arc::new(RemoteProcess::new(client)),
             _server: Some(server),
         })
     } else {
-        let environment = Environment::create_for_tests(/*exec_server_url*/ None)?;
         Ok(ProcessContext {
-            backend: environment.get_exec_backend(),
+            backend: Arc::new(LocalProcess::default()),
             _server: None,
         })
     }
@@ -1416,8 +1416,8 @@ async fn assert_exec_process_preserves_queued_events_before_subscribe(
 async fn remote_exec_process_recovers_after_transport_disconnect() -> Result<()> {
     let server = exec_server().await?;
     let mut proxy = server.disconnectable_websocket_proxy().await?;
-    let environment = Environment::create_for_tests(Some(proxy.websocket_url().to_string()))?;
-    let backend = environment.get_exec_backend();
+    let client = common::connect_remote_exec_client(proxy.websocket_url()).await?;
+    let backend: Arc<dyn ExecBackend> = Arc::new(RemoteProcess::new(client));
     let temp_dir = TempDir::new()?;
     let gate_path = temp_dir.path().join("release-output");
     let emitted_path = temp_dir.path().join("output-emitted");

@@ -39,7 +39,6 @@ use crate::client_api::RemoteExecServerConnectArgs;
 use crate::client_api::StdioExecServerConnectArgs;
 use crate::client_transport::ExecServerReconnectStrategy;
 use crate::connection::JsonRpcConnection;
-use crate::environment::EnvironmentConnectionState;
 use crate::process::ExecProcessEvent;
 use crate::process::ExecProcessEventLog;
 use crate::process::ExecProcessEventReceiver;
@@ -134,6 +133,30 @@ use crate::rpc::RpcCallError;
 use crate::rpc::RpcClient;
 use crate::rpc_server_requests::MAX_IN_FLIGHT_SERVER_CALLS;
 use nova_executor_http_client::HttpClientFactory;
+
+/// 客户端与 exec-server 连接的状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentConnectionState {
+    /// An initialized exec-server connection is available.
+    Connected,
+    /// No initialized exec-server connection is currently available.
+    Disconnected,
+}
+
+/// 连接的观测状态：由只读探针（`LazyRemoteExecServerClient::status`）汇报，
+/// 不触发连接建立或恢复。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvironmentObservedStatus {
+    /// 现有连接应答了探针。
+    Ready,
+    /// 尚无可用的连接，也未观测到连接失败（含从未启动的惰性传输）。
+    Pending,
+    /// 连接尝试、既有连接或 fail-fast 探针观测到失败（不保证终态）。
+    Disconnected {
+        /// 失败原因的人类可读描述。
+        error: String,
+    },
+}
 
 pub(crate) mod http_client;
 #[path = "client_recovery.rs"]
@@ -349,8 +372,8 @@ type ConnectionResult = Result<ExecServerClient, Arc<ExecServerError>>;
 type ConnectionAttempt = OnceCell<ConnectionResult>;
 
 #[derive(Clone)]
-pub(crate) struct LazyRemoteExecServerClient {
-    pub(crate) transport_params: ExecServerTransportParams,
+pub struct LazyRemoteExecServerClient {
+    transport_params: ExecServerTransportParams,
     http_client_factory: HttpClientFactory,
     recovery_policy: RecoveryPolicy,
     // Saves the first startup result so callers share it and failures remain final.
@@ -362,7 +385,7 @@ pub(crate) struct LazyRemoteExecServerClient {
 }
 
 impl LazyRemoteExecServerClient {
-    pub(crate) fn new(
+    pub fn new(
         transport_params: ExecServerTransportParams,
         http_client_factory: HttpClientFactory,
     ) -> Self {
@@ -380,11 +403,11 @@ impl LazyRemoteExecServerClient {
         }
     }
 
-    pub(crate) fn subscribe_connection_state(&self) -> watch::Receiver<EnvironmentConnectionState> {
+    pub fn subscribe_connection_state(&self) -> watch::Receiver<EnvironmentConnectionState> {
         self.environment_connection_state_tx.subscribe()
     }
 
-    pub(crate) fn start_connecting(&self) -> Option<AbortOnDropHandle<()>> {
+    pub fn start_connecting(&self) -> Option<AbortOnDropHandle<()>> {
         // Stdio starts a process, so keep it lazy until the environment is used.
         if matches!(
             self.transport_params,
@@ -404,11 +427,11 @@ impl LazyRemoteExecServerClient {
         )))
     }
 
-    pub(crate) fn startup_finished(&self) -> bool {
+    pub fn startup_finished(&self) -> bool {
         self.startup.get().is_some()
     }
 
-    pub(crate) fn readiness_result(&self) -> Option<Result<(), ExecServerError>> {
+    pub fn readiness_result(&self) -> Option<Result<(), ExecServerError>> {
         if let Some(client) = self.cached_client() {
             return client.readiness_result();
         }
@@ -418,42 +441,42 @@ impl LazyRemoteExecServerClient {
         })
     }
 
-    pub(crate) async fn status(&self) -> crate::EnvironmentObservedStatus {
+    pub async fn status(&self) -> EnvironmentObservedStatus {
         // Fail-fast lookup preserves the non-mutating contract: never start or recover a client.
         let client = match self.fail_fast().get().await {
             Ok(client) => client,
             Err(error) => {
                 // Without a completed startup attempt, there is no exec-server connection to probe.
                 if self.cached_client().is_none() && self.startup.get().is_none() {
-                    return crate::EnvironmentObservedStatus::Pending;
+                    return EnvironmentObservedStatus::Pending;
                 }
                 // A known connection failure is reported without retrying it as part of status.
-                return crate::EnvironmentObservedStatus::Disconnected {
+                return EnvironmentObservedStatus::Disconnected {
                     error: error.to_string(),
                 };
             }
         };
         // Every callable client is probed so callers never receive a cached health result.
         match client.environment_status().await {
-            Ok(_) => crate::EnvironmentObservedStatus::Ready,
-            Err(error) => crate::EnvironmentObservedStatus::Disconnected {
+            Ok(_) => EnvironmentObservedStatus::Ready,
+            Err(error) => EnvironmentObservedStatus::Disconnected {
                 error: error.to_string(),
             },
         }
     }
 
-    pub(crate) fn fail_fast(&self) -> Self {
+    pub fn fail_fast(&self) -> Self {
         Self {
             recovery_policy: RecoveryPolicy::FailFast,
             ..self.clone()
         }
     }
 
-    pub(crate) async fn wait_until_ready(&self) -> Result<(), ExecServerError> {
+    pub async fn wait_until_ready(&self) -> Result<(), ExecServerError> {
         self.initial_client().await.map(drop)
     }
 
-    pub(crate) async fn get(&self) -> Result<ExecServerClient, ExecServerError> {
+    pub async fn get(&self) -> Result<ExecServerClient, ExecServerError> {
         if matches!(self.recovery_policy, RecoveryPolicy::FailFast) {
             let client = match self.cached_client() {
                 Some(client) => client,
@@ -563,9 +586,7 @@ impl LazyRemoteExecServerClient {
     fn can_reconnect(&self) -> bool {
         matches!(
             self.transport_params,
-            ExecServerTransportParams::Deferred(_)
-                | ExecServerTransportParams::WebSocketUrl { .. }
-                | ExecServerTransportParams::NoiseRendezvous { .. }
+            ExecServerTransportParams::WebSocketUrl { .. }
         )
     }
 
@@ -605,7 +626,7 @@ impl HttpClient for LazyRemoteExecServerClient {
 }
 
 impl LazyRemoteExecServerClient {
-    pub(crate) async fn environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
+    pub async fn environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
         self.get().await?.environment_info().await
     }
 }
@@ -636,24 +657,8 @@ pub enum ExecServerError {
     HttpRequest(String),
     #[error("exec-server protocol error: {0}")]
     Protocol(String),
-    #[error(
-        "environment `{environment_id}` is already registered with a different provisioning mode"
-    )]
-    ProvisioningModeConflict { environment_id: String },
     #[error("exec-server rejected request ({code}): {message}")]
     Server { code: i64, message: String },
-    #[error("environment registry request failed ({status}{code_suffix}): {message}", code_suffix = .code.as_ref().map(|code| format!(", {code}")).unwrap_or_default())]
-    EnvironmentRegistryHttp {
-        status: http::StatusCode,
-        code: Option<String>,
-        message: String,
-    },
-    #[error("environment registry configuration error: {0}")]
-    EnvironmentRegistryConfig(String),
-    #[error("environment registry authentication error: {0}")]
-    EnvironmentRegistryAuth(String),
-    #[error("environment registry request failed: {0}")]
-    EnvironmentRegistryRequest(#[from] nova_executor_http_client::RouteAwareRequestError),
     #[error("exec-server connection attempt failed: {0}")]
     ConnectionAttempt(#[source] Arc<ExecServerError>),
 }
@@ -1863,10 +1868,10 @@ mod tests {
     use tracing_subscriber::filter::filter_fn;
     use tracing_subscriber::prelude::*;
 
+    use super::EnvironmentObservedStatus;
     use super::ExecServerClient;
     use super::ExecServerClientConnectOptions;
     use super::LazyRemoteExecServerClient;
-    use crate::EnvironmentObservedStatus;
     use crate::ProcessId;
     #[cfg(not(windows))]
     use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT;

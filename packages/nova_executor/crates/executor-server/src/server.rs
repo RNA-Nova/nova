@@ -8,7 +8,6 @@ mod session_registry;
 mod transport;
 
 pub(crate) use handler::ExecServerHandler;
-pub(crate) use processor::ConnectionProcessor;
 pub use request_dispatcher::ConcurrentRequestLimit;
 pub use request_dispatcher::RequestDispatchMode;
 pub use transport::DEFAULT_LISTEN_URL;

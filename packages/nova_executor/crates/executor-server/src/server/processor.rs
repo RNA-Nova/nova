@@ -34,18 +34,6 @@ pub(crate) struct ConnectionProcessor {
 }
 
 impl ConnectionProcessor {
-    #[cfg(test)]
-    pub(crate) fn new(runtime_paths: ExecServerRuntimePaths) -> Self {
-        Self::new_with_telemetry(
-            runtime_paths,
-            ExecServerTelemetry::default(),
-            nova_executor_http_client::HttpClientFactory::new(
-                nova_executor_http_client::OutboundProxyPolicy::ReqwestDefault,
-            ),
-            RequestDispatchMode::Inline,
-        )
-    }
-
     pub(crate) fn new_with_telemetry(
         runtime_paths: ExecServerRuntimePaths,
         telemetry: ExecServerTelemetry,

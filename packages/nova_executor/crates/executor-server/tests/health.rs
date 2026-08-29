@@ -5,7 +5,7 @@ mod common;
 use common::exec_server::exec_server;
 use nova_executor_protocol::JSONRPCMessage;
 use nova_executor_protocol::JSONRPCResponse;
-use nova_executor_server::Environment;
+use nova_executor_server::EnvironmentInfo;
 use nova_executor_server::EnvironmentStatus;
 use nova_executor_server::EnvironmentStatusKind;
 use nova_executor_server::InitializeParams;
@@ -34,11 +34,11 @@ async fn exec_server_serves_readyz_alongside_websocket_endpoint() -> anyhow::Res
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_environment_fetches_info_from_exec_server() -> anyhow::Result<()> {
     let mut server = exec_server().await?;
-    let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
-    assert!(environment.is_remote());
+    let client = common::connect_remote_exec_client(server.websocket_url()).await?;
 
-    let remote_info = environment.info().await?;
-    let local_info = Environment::default_for_tests().info().await?;
+    // 远程 environment/info 应回放执行端本机元数据，与本地 EnvironmentInfo 等价
+    let remote_info = client.environment_info().await?;
+    let local_info = EnvironmentInfo::local();
     assert_eq!(remote_info, local_info);
 
     server.shutdown().await?;

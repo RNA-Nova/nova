@@ -5,7 +5,6 @@ use anyhow::Result;
 use futures::TryStreamExt;
 use nova_executor_http_client::HttpClientFactory;
 use nova_executor_http_client::OutboundProxyPolicy;
-use nova_executor_server::Environment;
 use nova_executor_server::ExecServerClient;
 use nova_executor_server::ExecServerError;
 use nova_executor_server::ExecutorFileSystem;
@@ -15,6 +14,7 @@ use nova_executor_server::FsReadBlockParams;
 use nova_executor_server::FsReadBlockResponse;
 use nova_executor_server::ReadFileOptions;
 use nova_executor_server::RemoteExecServerConnectArgs;
+use nova_executor_server::RemoteFileSystem;
 use nova_executor_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ const OPEN_FILE_LIMIT: usize = 128;
 #[tokio::test]
 async fn stream_stops_after_an_exact_block_boundary() -> Result<()> {
     let server = exec_server().await?;
-    let file_system = connect_file_system(server.websocket_url())?;
+    let file_system = connect_file_system(server.websocket_url()).await?;
     let tmp = TempDir::new()?;
     let path = tmp.path().join("exact-blocks.bin");
     std::fs::write(&path, vec![b'x'; BLOCK_SIZE * 2])?;
@@ -61,7 +61,7 @@ async fn stream_stops_after_an_exact_block_boundary() -> Result<()> {
 #[tokio::test]
 async fn completed_streams_release_handle_capacity() -> Result<()> {
     let server = exec_server().await?;
-    let file_system = connect_file_system(server.websocket_url())?;
+    let file_system = connect_file_system(server.websocket_url()).await?;
     let tmp = TempDir::new()?;
     let path = tmp.path().join("repeated.txt");
     std::fs::write(&path, b"repeated")?;
@@ -83,7 +83,7 @@ async fn completed_streams_release_handle_capacity() -> Result<()> {
 #[tokio::test]
 async fn file_reads_reject_fifo_without_waiting_for_a_writer() -> Result<()> {
     let server = exec_server().await?;
-    let file_system = connect_file_system(server.websocket_url())?;
+    let file_system = connect_file_system(server.websocket_url()).await?;
     let tmp = TempDir::new()?;
     let path = tmp.path().join("named-pipe");
     let output = std::process::Command::new("mkfifo").arg(&path).output()?;
@@ -124,7 +124,7 @@ async fn file_reads_reject_fifo_without_waiting_for_a_writer() -> Result<()> {
 #[tokio::test]
 async fn file_reads_reject_named_pipes() -> Result<()> {
     let server = exec_server().await?;
-    let file_system = connect_file_system(server.websocket_url())?;
+    let file_system = connect_file_system(server.websocket_url()).await?;
 
     let read_path = format!(r"\\.\pipe\codex-fs-read-{}", Uuid::new_v4());
     let _read_pipe = ServerOptions::new()
@@ -173,7 +173,7 @@ async fn file_reads_reject_named_pipes() -> Result<()> {
 #[tokio::test]
 async fn stream_keeps_reading_the_open_file_after_path_replacement() -> Result<()> {
     let server = exec_server().await?;
-    let file_system = connect_file_system(server.websocket_url())?;
+    let file_system = connect_file_system(server.websocket_url()).await?;
     let tmp = TempDir::new()?;
     let path = tmp.path().join("replaceable.bin");
     std::fs::write(&path, vec![b'a'; BLOCK_SIZE + 1])?;
@@ -361,9 +361,9 @@ async fn open_rejects_handle_ids_longer_than_32_bytes() -> Result<()> {
     Ok(())
 }
 
-fn connect_file_system(websocket_url: &str) -> Result<Arc<dyn ExecutorFileSystem>> {
-    let environment = Environment::create_for_tests(Some(websocket_url.to_string()))?;
-    Ok(environment.get_filesystem())
+async fn connect_file_system(websocket_url: &str) -> Result<Arc<dyn ExecutorFileSystem>> {
+    let client = common::connect_remote_exec_client(websocket_url).await?;
+    Ok(Arc::new(RemoteFileSystem::new(client)))
 }
 
 // Only the Unix stream tests above need this sandbox builder.

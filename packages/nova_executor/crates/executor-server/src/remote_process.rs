@@ -9,8 +9,8 @@ use crate::ExecBackendFuture;
 use crate::ExecProcess;
 use crate::ExecProcessEventReceiver;
 use crate::ExecProcessFuture;
+use crate::ExecServerClient;
 use crate::StartedExecProcess;
-use crate::client::LazyRemoteExecServerClient;
 use crate::client::Session;
 use crate::process::sandbox_type_from_protocol;
 use crate::protocol::ExecParams;
@@ -18,9 +18,11 @@ use crate::protocol::ProcessSignal;
 use crate::protocol::ReadResponse;
 use crate::protocol::WriteResponse;
 
+/// 以 [`ExecServerClient`] 为后座的 [`ExecBackend`] 适配：进程经 JSON-RPC 在
+/// 执行端运行，输出经连接级推送路由回流（会话注册表 + wake 通道）。
 #[derive(Clone)]
-pub(crate) struct RemoteProcess {
-    client: LazyRemoteExecServerClient,
+pub struct RemoteProcess {
+    client: ExecServerClient,
 }
 
 struct RemoteExecProcess {
@@ -28,7 +30,7 @@ struct RemoteExecProcess {
 }
 
 impl RemoteProcess {
-    pub(crate) fn new(client: LazyRemoteExecServerClient) -> Self {
+    pub fn new(client: ExecServerClient) -> Self {
         trace!("remote process new");
         Self { client }
     }
@@ -38,8 +40,7 @@ impl RemoteProcess {
         params: ExecParams,
         network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     ) -> Result<StartedExecProcess, crate::ExecServerError> {
-        let client = self.client.get().await?;
-        let session = client.start_process(params, network_policy_decider).await?;
+        let session = self.client.start_process(params, network_policy_decider).await?;
         let sandbox_type = sandbox_type_from_protocol(session.sandbox_type());
 
         Ok(StartedExecProcess {

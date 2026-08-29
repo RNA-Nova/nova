@@ -38,7 +38,7 @@ use nova_executor_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_executor_server::CopyOptions;
 use nova_executor_server::CreateDirectoryOptions;
 #[cfg(target_os = "linux")]
-use nova_executor_server::Environment;
+use nova_executor_server::RemoteFileSystem;
 use nova_executor_server::FileMetadata;
 use nova_executor_server::FileSystemSandboxContext;
 use nova_executor_server::GetMetadataOptions;
@@ -540,8 +540,10 @@ async fn sandboxed_file_system_helper_finds_bwrap_on_preserved_path() -> Result<
     let helper_path = std::env::join_paths(path_entries)?;
 
     let server = exec_server_with_env([("PATH", helper_path.as_os_str())], &[]).await?;
-    let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
-    let file_system = environment.get_filesystem();
+    let file_system: Arc<dyn nova_executor_server::ExecutorFileSystem> =
+        Arc::new(RemoteFileSystem::new(
+            common::connect_remote_exec_client(server.websocket_url()).await?,
+        ));
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace)?;
     let file_path = workspace.join("created.txt");

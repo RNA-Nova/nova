@@ -1,6 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -29,7 +26,6 @@ use super::disconnected_message;
 use super::fail_all_in_flight_work;
 use super::handle_server_notification;
 use super::is_transport_closed_error;
-use crate::client_transport::ExecServerReconnectStrategy;
 use crate::process::ExecProcessEvent;
 use crate::protocol::EXEC_READ_METHOD;
 use crate::protocol::EXEC_TERMINATE_METHOD;
@@ -59,8 +55,6 @@ const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 // client and server start their disconnect clocks independently.
 const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(25);
 const SESSION_RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-const REGISTRY_RECOVERY_INITIAL_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-const REGISTRY_RECOVERY_MAX_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const NETWORK_POLICY_DENIAL_REASON: &str = "not_allowed";
 
 impl SessionState {
@@ -363,11 +357,6 @@ impl Inner {
             self.fail(message).await;
             return;
         };
-        let uses_registry_backoff = matches!(
-            self.reconnect_strategy.as_ref(),
-            Some(ExecServerReconnectStrategy::NoiseRendezvous { .. })
-        );
-        let mut registry_retry_attempt = 0;
         let last_error = loop {
             match timeout_at(deadline, self.resume_once(&session_id)).await {
                 Ok(Ok(candidate)) => {
@@ -384,19 +373,11 @@ impl Inner {
                 }
             }
 
-            let retry_delay = if uses_registry_backoff {
-                let delay = registry_recovery_retry_delay(&session_id, registry_retry_attempt);
-                registry_retry_attempt = registry_retry_attempt.saturating_add(1);
-                delay
-            } else {
-                SESSION_RECOVERY_RETRY_INTERVAL
-            };
-
             let now = Instant::now();
             if now >= deadline {
                 break format!("recovery timed out after {SESSION_RECOVERY_TIMEOUT:?}");
             }
-            sleep(retry_delay.min(deadline - now)).await;
+            sleep(SESSION_RECOVERY_RETRY_INTERVAL.min(deadline - now)).await;
         };
 
         let message =
@@ -778,44 +759,11 @@ fn is_retryable_recovery_error(error: &ExecServerError) -> bool {
                 | ExecServerError::WebSocketConnect { .. }
                 | ExecServerError::InitializeTimedOut { .. }
         )
-        || is_retryable_registry_error(error)
         || matches!(
             error,
             ExecServerError::Server { code, .. }
                 if *code == SESSION_ALREADY_ATTACHED_ERROR_CODE
         )
-}
-
-fn is_retryable_registry_error(error: &ExecServerError) -> bool {
-    matches!(
-        error,
-        ExecServerError::EnvironmentRegistryRequest(error)
-            if error.is_connect() || error.is_timeout()
-    ) || matches!(
-        error,
-        ExecServerError::EnvironmentRegistryHttp { status, code, .. }
-            if status.is_server_error()
-                || *status == http::StatusCode::REQUEST_TIMEOUT
-                || *status == http::StatusCode::TOO_MANY_REQUESTS
-                // TODO: Replace this coarse retry with an explicit registry/presence
-                // recovery FSM so `environment_offline` is retried only while the
-                // executor is expected to reconnect.
-                || (*status == http::StatusCode::CONFLICT
-                    && code.as_deref() == Some("environment_offline"))
-    )
-}
-
-fn registry_recovery_retry_delay(session_id: &str, attempt: u32) -> Duration {
-    let multiplier = 1_u32.checked_shl(attempt.min(4)).unwrap_or(u32::MAX);
-    let base_delay = REGISTRY_RECOVERY_INITIAL_RETRY_INTERVAL
-        .saturating_mul(multiplier)
-        .min(REGISTRY_RECOVERY_MAX_RETRY_INTERVAL);
-    let base_millis = base_delay.as_millis() as u64;
-    let mut hasher = DefaultHasher::new();
-    session_id.hash(&mut hasher);
-    attempt.hash(&mut hasher);
-
-    Duration::from_millis(base_millis + hasher.finish() % (base_millis / 2 + 1))
 }
 
 #[cfg(test)]
