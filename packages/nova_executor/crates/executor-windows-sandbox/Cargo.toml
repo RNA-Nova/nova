@@ -85,5 +85,11 @@ features = [
 ]
 version = "0.52"
 
+# 把 setup 清单编成 .res 资源链接（绕开 mt.exe 的 verbatim 路径缺陷，见
+# build.rs）；不 target 门控——build.rs 在 host 上编译，门控会让非 Windows
+# host 上 build.rs 缺依赖编译失败
+[build-dependencies]
+embed-resource = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }

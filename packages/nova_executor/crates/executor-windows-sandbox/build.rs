@@ -14,11 +14,6 @@ fn main() -> Result<(), String> {
     let manifest_dir = env::var_os("CARGO_MANIFEST_DIR")
         .ok_or_else(|| "CARGO_MANIFEST_DIR should be set for build scripts".to_string())?;
     let manifest_path = PathBuf::from(manifest_dir).join(SETUP_MANIFEST);
-    let manifest_path = manifest_path.display().to_string();
-    // mt.exe 不认 \\?\ 扩展长度路径前缀（报 c1010070 "Failed to load and parse
-    // the manifest"）；链接器把 verbatim 形式透传给 mt 时会踩中，剥回常规形式。
-    // 工作区普通路径本来就不需要 verbatim 形式（无超长/保留名成分）。
-    let manifest_path = strip_verbatim_prefix(&manifest_path);
 
     // Keep this scoped to the setup helper so Codex binaries that link the
     // library do not inherit any resource metadata from this package.
@@ -27,26 +22,32 @@ fn main() -> Result<(), String> {
         env::var("CARGO_CFG_TARGET_ABI").as_deref(),
     ) {
         (Ok("msvc"), _) => {
-            println!("cargo:rustc-link-arg-bin={SETUP_BIN}=/MANIFEST:EMBED");
-            println!("cargo:rustc-link-arg-bin={SETUP_BIN}=/MANIFESTINPUT:{manifest_path}");
+            // 不走 /MANIFESTINPUT：VS18 工具链的 link.exe 会把清单路径规范化成
+            // \\?\ verbatim 形式再交给 mt.exe，而 mt.exe 不认该形式（报
+            // c1010070 "The system cannot find the file specified"）。改为把清单
+            // 作为 RT_MANIFEST 资源写进 .rc → rc.exe 编成 .res 直接链接，全程
+            // 不经 mt.exe；compile_for 只作用于 setup bin，作用域与原来一致。
+            let out_dir = env::var_os("OUT_DIR")
+                .ok_or_else(|| "OUT_DIR should be set for build scripts".to_string())?;
+            let rc_path = PathBuf::from(out_dir).join("codex-windows-sandbox-setup.rc");
+            // 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID，24 = RT_MANIFEST；
+            // rc 字符串里的路径用正斜杠（rc.exe 接受，免反斜杠转义）
+            let manifest_arg = manifest_path.display().to_string().replace('\\', "/");
+            std::fs::write(&rc_path, format!("1 24 \"{manifest_arg}\"\n"))
+                .map_err(|err| format!("failed to write {}: {err}", rc_path.display()))?;
+            embed_resource::compile_for(&rc_path, [SETUP_BIN], embed_resource::NONE)
+                .manifest_required()
+                .map_err(|err| format!("failed to compile manifest resource: {err}"))?;
         }
         (Ok("gnu"), Ok("llvm")) => {
             println!("cargo:rustc-link-arg-bin={SETUP_BIN}=-Wl,-Xlink=/manifest:embed");
             println!(
-                "cargo:rustc-link-arg-bin={SETUP_BIN}=-Wl,-Xlink=/manifestinput:{manifest_path}"
+                "cargo:rustc-link-arg-bin={SETUP_BIN}=-Wl,-Xlink=/manifestinput:{}",
+                manifest_path.display()
             );
         }
         _ => {}
     }
 
     Ok(())
-}
-
-/// 剥掉 Windows verbatim 路径前缀：`\\?\C:\x` → `C:\x`，`\\?\UNC\host\share`
-/// → `\\host\share`；非 verbatim 路径原样借用返回。
-fn strip_verbatim_prefix(path: &str) -> std::borrow::Cow<'_, str> {
-    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
-        return std::borrow::Cow::Owned(format!(r"\\{rest}"));
-    }
-    std::borrow::Cow::Borrowed(path.strip_prefix(r"\\?\").unwrap_or(path))
 }

@@ -61,7 +61,15 @@ static TEST_BINARY_DISPATCH: () = {
             name == nova_executor_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0
         });
         if is_linux_sandbox {
-            nova_executor_linux_sandbox::run_main();
+            // run_main 的 panic（如 bwrap 缺失）若穿出 ctor 的 extern "C" 边界
+            // 会变成无诊断信息的 SIGABRT；拦下换成可读错误再退出
+            if std::panic::catch_unwind(nova_executor_linux_sandbox::run_main).is_err() {
+                eprintln!("codex-linux-sandbox panicked (see panic message above)");
+                std::process::exit(101);
+            }
+            // run_main 正常路径不返回（内部 exec/exit）；走到这里说明实现变了
+            eprintln!("codex-linux-sandbox run_main returned unexpectedly");
+            std::process::exit(101);
         }
     }
     #[cfg(not(target_os = "linux"))]

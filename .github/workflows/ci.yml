@@ -28,6 +28,16 @@ jobs:
         with:
           workspaces: packages/nova_executor
 
+      # Linux fs 沙箱测试需要真实 bwrap：ubuntu-24.04 镜像不预装 bubblewrap，
+      # 且默认 kernel.apparmor_restrict_unprivileged_userns=1 会拦住非特权
+      # userns 创建（runner 为一次性 VM，sysctl 放开无残留影响）
+      - name: 安装 Linux 沙箱测试依赖
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: cargo build
         run: cargo build --workspace
 
