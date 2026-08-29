@@ -28,6 +28,23 @@ fn spawn_proxy_listener() -> (std::net::SocketAddr, std::thread::JoinHandle<Vec<
     ])
 }
 
+// 宿主环境设置了全局代理时（CI 代理出口、开发机抓包等），reqwest builder 的
+// 传输层默认会读取这些变量，把本组测试发往 127.0.0.1 listener 的请求改道到
+// 外部代理，"本地 listener 必须收到请求"的断言必然失败。本组测试只验证显式
+// 路由配置本身，与宿主全局代理无关，检测到即跳过。
+fn host_proxy_environment_detected() -> bool {
+    [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ]
+    .iter()
+    .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty()))
+}
+
 fn spawn_redirect_listener(
     location: &str,
 ) -> (std::net::SocketAddr, std::thread::JoinHandle<Vec<String>>) {
@@ -330,6 +347,10 @@ async fn async_resolution_uses_cached_route_before_global_permit() {
 
 #[tokio::test]
 async fn enabled_environment_proxy_routes_request_through_proxy() {
+    if host_proxy_environment_detected() {
+        eprintln!("skipping: host proxy environment would divert loopback requests");
+        return;
+    }
     let (proxy_addr, proxy_thread) = spawn_proxy_listener();
     let env = MapEnv {
         values: HashMap::from([("HTTP_PROXY".to_string(), format!("http://{proxy_addr}"))]),
@@ -365,6 +386,10 @@ async fn enabled_environment_proxy_routes_request_through_proxy() {
 
 #[tokio::test]
 async fn route_aware_builder_preserves_default_headers() {
+    if host_proxy_environment_detected() {
+        eprintln!("skipping: host proxy environment would divert loopback requests");
+        return;
+    }
     let (server_addr, server_thread) = spawn_proxy_listener();
     let request_url = format!("http://{server_addr}/builder-check");
     cache_system_proxy_decision(&request_url, SystemProxyDecision::Direct);
@@ -393,6 +418,10 @@ async fn route_aware_builder_preserves_default_headers() {
 
 #[tokio::test]
 async fn route_aware_pool_uses_respect_system_proxy_route_for_exact_url() {
+    if host_proxy_environment_detected() {
+        eprintln!("skipping: host proxy environment would divert loopback requests");
+        return;
+    }
     let (proxy_addr, proxy_thread) = spawn_proxy_listener();
     let request_url = "http://route-aware-proxy.test/proxy-check?pac=exact";
     cache_system_proxy_decision(
@@ -421,6 +450,10 @@ async fn route_aware_pool_uses_respect_system_proxy_route_for_exact_url() {
 
 #[tokio::test]
 async fn route_aware_pool_logs_only_the_final_redirect_outcome() {
+    if host_proxy_environment_detected() {
+        eprintln!("skipping: host proxy environment would divert loopback requests");
+        return;
+    }
     let (proxy_addr, proxy_thread) = spawn_proxy_listener();
     let redirected_url = "http://redirect-target.test/final?token=redirect-target-secret-value";
     let (redirect_addr, redirect_thread) = spawn_redirect_listener(redirected_url);

@@ -397,7 +397,10 @@ async fn conpty_ctrl_c_interrupts_powershell_foreground_child() -> anyhow::Resul
     wait_for_output_contains(&mut output_rx, "127.0.0.1", /*timeout_ms*/ 10_000).await?;
 
     writer.send(vec![0x03]).await?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    // Ctrl-C 后 PowerShell 需要终止 ping 并重建提示符；CI 慢机上这可能远超
+    // 固定 sleep 的时长，过早发送的命令会被吞掉（无回显、无执行）。等到
+    // 提示符重新出现（以 "> " 结尾）再发下一条命令。
+    wait_for_output_contains(&mut output_rx, "> ", /*timeout_ms*/ 10_000).await?;
     writer.send(b"cmd.exe /D /C ver\n".to_vec()).await?;
     let mut output = wait_for_output_contains(
         &mut output_rx,

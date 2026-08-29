@@ -194,17 +194,29 @@ impl ShellSnapshotCache {
         let shell_start = prepared.command.len() - params.argv.len();
         // Automatic startup files run before the restoration script and could
         // reintroduce environment variables that the snapshot already filtered.
-        let (shell_flag, startup) = match shell_type {
-            ShellType::Bash => ("-pc", "set +o privileged\n"),
-            ShellType::Zsh => ("-fc", "setopt RCS\n"),
-            ShellType::Sh => ("-c", ""),
+        // bash 需要 --norc：沙箱包装链的 stdin 是 socket，bash 的 rshd 检测会把
+        // 非交互非登录执行误判为 rshd 启动而自动 source ~/.bashrc，让用户 rc 中
+        // 的别名/函数重定义（如遮蔽 unset）污染快照恢复——恢复必须从纯净状态开始。
+        let (norc, shell_flag, startup) = match shell_type {
+            ShellType::Bash => (true, "-pc", "set +o privileged\n"),
+            ShellType::Zsh => (false, "-fc", "setopt RCS\n"),
+            ShellType::Sh => (false, "-c", ""),
             ShellType::PowerShell | ShellType::Cmd => unreachable!(),
         };
-        prepared.command[shell_start + 1] = shell_flag.to_string();
-        prepared.command[shell_start + 2] = format!(
+        let restore_script = format!(
             "{startup}if ! eval \"unset {state_variables}\n{state_expansion}\" >/dev/null; then printf 'failed to restore shell snapshot\\n' >&2; fi\n{}",
             params.argv[2]
         );
+        if norc {
+            prepared
+                .command
+                .insert(shell_start + 1, "--norc".to_string());
+            prepared.command[shell_start + 2] = shell_flag.to_string();
+            prepared.command[shell_start + 3] = restore_script;
+        } else {
+            prepared.command[shell_start + 1] = shell_flag.to_string();
+            prepared.command[shell_start + 2] = restore_script;
+        }
 
         Ok(())
     }
