@@ -2,6 +2,7 @@ use std::io;
 use std::path::Path;
 
 pub(crate) async fn open(path: &Path) -> io::Result<tokio::fs::File> {
+    reject_named_pipe(path)?;
     let mut options = tokio::fs::OpenOptions::new();
     options.read(true);
     configure_open(&mut options);
@@ -20,6 +21,7 @@ pub(crate) async fn open(path: &Path) -> io::Result<tokio::fs::File> {
 ///
 /// 已存在的路径必须是普通文件——拒绝向目录、设备或 FIFO 等特殊文件截断写入。
 pub(crate) async fn create(path: &Path) -> io::Result<tokio::fs::File> {
+    reject_named_pipe(path)?;
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     configure_open(&mut options);
@@ -32,6 +34,26 @@ pub(crate) async fn create(path: &Path) -> io::Result<tokio::fs::File> {
         ));
     }
     Ok(file)
+}
+
+#[cfg(windows)]
+fn reject_named_pipe(path: &Path) -> io::Result<()> {
+    // windows 命名管道不能当普通文件读写：客户端打开动作本身可能因 DACL/QoS
+    // 标志失败并映射为不可预测的错误类别，先行显式拒绝，保证与 unix 的 FIFO
+    // 拒绝一样稳定返回 InvalidInput。
+    let text = path.as_os_str().to_string_lossy();
+    if text.starts_with(r"\\.\pipe\") || text.starts_with(r"\\?\pipe\") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path `{}` is a named pipe", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn reject_named_pipe(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]

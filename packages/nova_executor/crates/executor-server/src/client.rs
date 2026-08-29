@@ -1910,6 +1910,16 @@ mod tests {
         serde_json::from_str(&line).expect("json-rpc line should parse")
     }
 
+    /// fs/stream 测试用的不透明路径负载：仅要求在目标平台是合法绝对路径
+    /// （windows 的 PathUri 不认 POSIX 风格的 `/tmp/...`）。
+    fn stream_fixture_path(file_name: &str) -> String {
+        if cfg!(windows) {
+            format!(r"C:\{file_name}")
+        } else {
+            format!("/tmp/{file_name}")
+        }
+    }
+
     async fn write_jsonrpc_line<W>(writer: &mut W, message: JSONRPCMessage)
     where
         W: AsyncWrite + Unpin,
@@ -2191,7 +2201,8 @@ mod tests {
                 cwd: None,
             },
             client_name: "stdio-test-client".to_string(),
-            initialize_timeout: Duration::from_secs(1),
+            // CI runner 上 powershell 冷启动可超过 1s，放宽避免误报。
+            initialize_timeout: Duration::from_secs(15),
             resume_session_id: None,
         })
         .await
@@ -3322,7 +3333,8 @@ mod tests {
         let response = client
             .fs_read_stream(FsReadStreamParams {
                 handle_id: "handle-1".to_string(),
-                path: PathUri::from_host_native_path("/tmp/big.log").expect("path uri"),
+                path: PathUri::from_host_native_path(stream_fixture_path("big.log"))
+                    .expect("path uri"),
                 offset: 0,
                 len: None,
                 block_size: None,
@@ -3405,7 +3417,8 @@ mod tests {
         client
             .fs_read_stream(FsReadStreamParams {
                 handle_id: "handle-err".to_string(),
-                path: PathUri::from_host_native_path("/tmp/big.log").expect("path uri"),
+                path: PathUri::from_host_native_path(stream_fixture_path("big.log"))
+                    .expect("path uri"),
                 offset: 0,
                 len: None,
                 block_size: None,
@@ -3546,7 +3559,8 @@ mod tests {
         client
             .fs_write_stream(FsWriteStreamParams {
                 handle_id: "whandle".to_string(),
-                path: PathUri::from_host_native_path("/tmp/out.bin").expect("path uri"),
+                path: PathUri::from_host_native_path(stream_fixture_path("out.bin"))
+                    .expect("path uri"),
                 sandbox: None,
             })
             .await

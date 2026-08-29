@@ -198,6 +198,17 @@ pub(crate) fn bundled_executable_path_for_exe(exe: &Path, file_name: &str) -> Op
         return Some(direct_candidate);
     }
 
+    // cargo 测试布局：测试二进制在 target/<profile>/deps/ 下，而配套 bin
+    // （如 codex-command-runner.exe）在上一级 target/<profile>/ 目录。
+    if dir.file_name() == Some(OsStr::new("deps"))
+        && let Some(target_dir) = dir.parent()
+    {
+        let candidate = target_dir.join(file_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
     if dir.file_name() == Some(OsStr::new(BIN_DIRNAME))
         && let Some(package_dir) = dir.parent()
     {

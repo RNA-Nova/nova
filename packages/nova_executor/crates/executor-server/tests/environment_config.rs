@@ -60,8 +60,17 @@ mode = "off"
     assert_eq!(id, read_id);
 
     // find_nova_executor_home 对 NOVA_EXECUTOR_HOME 做 canonicalize（macOS 上
-    // /var → /private/var），断言期望值同样规整后再比对。
-    let expected_home = server.nova_executor_home().canonicalize()?;
+    // /var → /private/var；windows 上会带 `\\?\` verbatim 前缀而服务端输出
+    // 不带），断言期望值同样规整后再比对。
+    #[allow(unused_mut)]
+    let mut expected_home = server.nova_executor_home().canonicalize()?;
+    #[cfg(windows)]
+    {
+        let text = expected_home.to_string_lossy();
+        if let Some(stripped) = text.strip_prefix(r"\\?\") {
+            expected_home = std::path::PathBuf::from(stripped);
+        }
+    }
     assert_eq!(
         result["executorHomeDir"],
         serde_json::json!(

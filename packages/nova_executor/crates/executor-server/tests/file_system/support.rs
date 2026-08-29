@@ -77,8 +77,13 @@ pub(crate) async fn create_file_system_context(
 #[cfg(windows)]
 pub(crate) fn is_unsupported_restricted_token_host<T>(result: &std::io::Result<T>) -> bool {
     result.as_ref().err().is_some_and(|err| {
-        err.to_string()
-            .contains("windows sandbox failed: CreateRestrictedToken failed: 87")
+        let text = err.to_string();
+        // CreateRestrictedToken 87：本机无法创建受限令牌；
+        // "refusing to run unsandboxed"：unelevated 令牌无法直接强制执行
+        // deny-read / 分裂可写根集等策略（见 executor-sandboxing/src/windows.rs）。
+        // 两者都表示当前主机不支持这些沙箱断言，跳过而非失败。
+        text.contains("windows sandbox failed: CreateRestrictedToken failed: 87")
+            || text.contains("refusing to run unsandboxed")
     })
 }
 

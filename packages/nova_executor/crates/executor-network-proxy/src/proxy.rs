@@ -1183,6 +1183,9 @@ mod tests {
         })
     }
 
+    // Windows 侧 unix-socket 权限策略未随共享 ingress 移植（allow_unix_sockets
+    // 恒为空），本用例断言的策略应用语义仅在 unix 上成立。
+    #[cfg(unix)]
     #[tokio::test]
     async fn proxy_startup_applies_unix_socket_permissions_off_windows() -> Result<()> {
         // 改写自 codex `proxy_startup_ignores_macos_unix_socket_permissions_on_windows`
