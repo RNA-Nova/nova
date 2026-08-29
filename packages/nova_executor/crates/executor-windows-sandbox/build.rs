@@ -14,6 +14,7 @@ fn main() -> Result<(), String> {
     let manifest_dir = env::var_os("CARGO_MANIFEST_DIR")
         .ok_or_else(|| "CARGO_MANIFEST_DIR should be set for build scripts".to_string())?;
     let manifest_path = PathBuf::from(manifest_dir).join(SETUP_MANIFEST);
+    let manifest_path = manifest_path.display();
 
     // Keep this scoped to the setup helper so Codex binaries that link the
     // library do not inherit any resource metadata from this package.
@@ -22,29 +23,13 @@ fn main() -> Result<(), String> {
         env::var("CARGO_CFG_TARGET_ABI").as_deref(),
     ) {
         (Ok("msvc"), _) => {
-            // 不走 /MANIFESTINPUT：VS18 工具链的 link.exe 会把清单路径规范化成
-            // \\?\ verbatim 形式再交给 mt.exe，而 mt.exe 不认该形式（报
-            // c1010070 "The system cannot find the file specified"）。改为把清单
-            // 作为 RT_MANIFEST 资源写进 .rc → rc.exe 编成 .res 直接链接，全程
-            // 不经 mt.exe；compile_for 只作用于 setup bin，作用域与原来一致。
-            let out_dir = env::var_os("OUT_DIR")
-                .ok_or_else(|| "OUT_DIR should be set for build scripts".to_string())?;
-            let rc_path = PathBuf::from(out_dir).join("codex-windows-sandbox-setup.rc");
-            // 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID，24 = RT_MANIFEST；
-            // rc 字符串按 C 规则转义：反斜杠写成 \\（rc.exe 不认正斜杠分隔符，
-            // 会报 RC2135 file not found）
-            let manifest_arg = manifest_path.display().to_string().replace('\\', "\\\\");
-            std::fs::write(&rc_path, format!("1 24 \"{manifest_arg}\"\n"))
-                .map_err(|err| format!("failed to write {}: {err}", rc_path.display()))?;
-            embed_resource::compile_for(&rc_path, [SETUP_BIN], embed_resource::NONE)
-                .manifest_required()
-                .map_err(|err| format!("failed to compile manifest resource: {err}"))?;
+            println!("cargo:rustc-link-arg-bin={SETUP_BIN}=/MANIFEST:EMBED");
+            println!("cargo:rustc-link-arg-bin={SETUP_BIN}=/MANIFESTINPUT:{manifest_path}");
         }
         (Ok("gnu"), Ok("llvm")) => {
             println!("cargo:rustc-link-arg-bin={SETUP_BIN}=-Wl,-Xlink=/manifest:embed");
             println!(
-                "cargo:rustc-link-arg-bin={SETUP_BIN}=-Wl,-Xlink=/manifestinput:{}",
-                manifest_path.display()
+                "cargo:rustc-link-arg-bin={SETUP_BIN}=-Wl,-Xlink=/manifestinput:{manifest_path}"
             );
         }
         _ => {}

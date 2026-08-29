@@ -29,6 +29,9 @@ MANIFEST
 
 # PyInstaller
 *.manifest
+# 例外：executor-windows-sandbox 的 Windows 应用清单是源码而非 PyInstaller 产物
+# （build.rs 以 /MANIFESTINPUT 引用；曾被忽略导致 CI 上 mt.exe 报文件缺失）
+!packages/nova_executor/crates/executor-windows-sandbox/codex-windows-sandbox-setup.manifest
 *.spec
 
 # Installer logs
