@@ -31,8 +31,9 @@ fn main() -> Result<(), String> {
                 .ok_or_else(|| "OUT_DIR should be set for build scripts".to_string())?;
             let rc_path = PathBuf::from(out_dir).join("codex-windows-sandbox-setup.rc");
             // 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID，24 = RT_MANIFEST；
-            // rc 字符串里的路径用正斜杠（rc.exe 接受，免反斜杠转义）
-            let manifest_arg = manifest_path.display().to_string().replace('\\', "/");
+            // rc 字符串按 C 规则转义：反斜杠写成 \\（rc.exe 不认正斜杠分隔符，
+            // 会报 RC2135 file not found）
+            let manifest_arg = manifest_path.display().to_string().replace('\\', "\\\\");
             std::fs::write(&rc_path, format!("1 24 \"{manifest_arg}\"\n"))
                 .map_err(|err| format!("failed to write {}: {err}", rc_path.display()))?;
             embed_resource::compile_for(&rc_path, [SETUP_BIN], embed_resource::NONE)
