@@ -14,6 +14,7 @@ chrono = { workspace = true }
 nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path" }
 nova-executor-utils-string = { path = "../executor-utils-string" }
 nova-executor-protocol-core = { path = "../executor-protocol-core" }
+nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path" }
 eventsource-stream = { workspace = true }
 gethostname = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs", "metrics", "trace"] }
