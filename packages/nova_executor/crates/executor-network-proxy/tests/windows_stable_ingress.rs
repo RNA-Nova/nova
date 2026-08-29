@@ -8,6 +8,7 @@
 // nova_executor_windows_sandbox；`NetworkMode::Full` → `NetworkMode::Proxy`。
 
 use nova_executor_windows_sandbox::ConsoleMode;
+use nova_executor_windows_sandbox::LaunchDesktop;
 use nova_executor_windows_sandbox::LocalSid;
 use nova_executor_windows_sandbox::create_process_as_user;
 use nova_executor_windows_sandbox::create_readonly_token_with_caps_and_user_from;
@@ -455,7 +456,9 @@ fn run_restricted_child_blocking(
             /*logs_base_dir*/ None,
             /*stdio*/ None,
             /*console_mode*/ ConsoleMode::Inherit,
-            /*use_private_desktop*/ false,
+            LaunchDesktop::prepare(
+                /*use_private_desktop*/ false, /*logs_base_dir*/ None,
+            )?,
         )?
     };
     let process = unsafe {
