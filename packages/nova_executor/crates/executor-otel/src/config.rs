@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use codex_utils_absolute_path::AbsolutePathBuf;
+use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 

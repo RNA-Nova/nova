@@ -1,5 +1,5 @@
 use crate::config::OtelTlsConfig;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use http::Uri;
 use opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT;
 use opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT;
