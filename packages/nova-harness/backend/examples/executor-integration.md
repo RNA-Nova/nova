@@ -22,7 +22,7 @@ Nova 工具链的执行后端，并让模型对当前执行环境有准确感知
 ## 二、前置（已完成）
 
 - executor 通用执行后端清洗（`packages/nova_executor`：删除 Codex agent
-  层，纯执行后端；`nova-executor-py` 回归薄客户端）；
+  层，纯执行后端；`nova-executor-client` 回归薄客户端）；
 - 工具并行门控（`nova_agent/agent_loop/execution_gate.py`：公平 FIFO
   读写门，sequential 工具不再毒化整批——codex `parallel.rs` 对位）。
 
@@ -129,7 +129,7 @@ pi/Claude Code 的标记块训练分布实证安全）；`<environment>` 标记�
 
 | 改什么 | 在哪 |
 |---|---|
-| 新增 `ExecutorBashOperations`（executor 后端实现，经 nova-executor-py 薄客户端） | `backend/nova_coding_agent/bash/`（`BashOperations` Protocol 本就定义在此） |
+| 新增 `ExecutorBashOperations`（executor 后端实现，经 nova-executor-client 薄客户端） | `backend/nova_coding_agent/bash/`（`BashOperations` Protocol 本就定义在此） |
 | bash 引擎改执行期解析后端（构造期定型 → 执行期读 runtime cell） | `backend/tools/bash.py` + `bash/engine.py` |
 | executor 客户端生命周期 + 本地 spawn（二进制解析链：env → nova bin → 本地构建路径 → PATH） | `backend/nova_coding_agent/executor/`（新模块） |
 | 新增 `executor_switch` 扩展（/executor 命令 + 条目持久化 + notice + 触发环境段重建） | `backend/extensions/executor_switch.py` |
@@ -149,7 +149,7 @@ pi/Claude Code 的标记块训练分布实证安全）；`<environment>` 标记�
 ### 不动的
 
 - `nova_executor`（Rust）：已清洗完，零改动；
-- `nova-executor-py`：薄客户端已就位，零改动；
+- `nova-executor-client`：薄客户端已就位，零改动；
 - 前端（nova-client/TUI）：notice 渲染是既有能力，零改动。
 
 ## 五、验收

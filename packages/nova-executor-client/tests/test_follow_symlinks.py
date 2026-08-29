@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fake_transport import FakeTransport
 
-from nova_executor.fs import FileSystemManager
+from nova_executor_client.fs import FileSystemManager
 
 
 def make_fs() -> tuple[FileSystemManager, FakeTransport]:

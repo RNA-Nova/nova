@@ -1,6 +1,6 @@
-# nova-executor-py
+# nova-executor-client
 
-`nova-executor-py` 是 `nova-executor` 的 Python SDK，让 Python 开发者能够方便地连接和使用远程执行服务。
+`nova-executor-client` 是 `nova-executor` 的 Python SDK，让 Python 开发者能够方便地连接和使用远程执行服务。
 
 ## 定位
 
@@ -84,6 +84,42 @@ async with ExecutorClient.from_stdio(connections=2) as client:
 
 `connections=1`（默认）即现状行为。更复杂的通道布局可直接构造 `TransportPool`（按通道持有传输 + 方法名路由表，`TransportPool(channels={"control": t0, "bulk": t1}, method_routes={"fs/walk": "bulk"})`）。注意服务端句柄状态随连接存活，故每通道一条连接，不做通道内轮询。
 
+## 断线重连与会话恢复
+
+默认开启：连接意外断开后，SDK 按 `ReconnectStrategy` 自动重连并在 `initialize`
+携带 `resumeSessionId` 恢复会话——进程表/输出缓冲/流式句柄随服务端会话存活
+（服务端保留窗 30s），恢复期间调用挂起等待、恢复成功后透明续用。
+
+```python
+from nova_executor import ExecutorClient, ReconnectStrategy
+
+# 默认策略（对齐 Rust 客户端）：100ms 固定间隔、25s 恢复总时限、时限内不限次
+async with ExecutorClient("ws://localhost:8080", token="t") as client:
+    ...
+
+# 自定义：0.5s 起 2 倍退避、封顶 5s、最多 10 次
+client = ExecutorClient(
+    "ws://localhost:8080", token="t",
+    reconnect=ReconnectStrategy(interval=0.5, backoff=2.0, max_interval=5.0, max_attempts=10),
+)
+
+# 关闭恢复：断线即失败（所有调用抛 ConnectionError）
+client = ExecutorClient("ws://localhost:8080", token="t", reconnect=None)
+
+# 显式恢复既有会话（首连即带 resumeSessionId）
+client = ExecutorClient("ws://localhost:8080", token="t", resume_session_id="<session-id>")
+```
+
+注意：
+
+- 每条连接各自恢复各自的会话（`connections=2` 时控制面/数据面互不影响）。
+- resume 命中未知/过期会话（-32600）或会话仍附着他处以外的协议错误时不可
+  重试，立即转失败；恢复失败后在途读流消费者收到 `FileSystemError`。
+- stdio 传输重连即重 spawn——新服务端进程没有旧会话，resume 一次失败即转
+  失败；该路径保证调用方拿到明确断线错误而非干等（WS 长驻服务端才是 resume
+  的真正受益者）。
+- `client.transport` 兼容属性在重连后自动指向新底层传输实例。
+
 ## 核心功能
 
 ### 进程管理
@@ -115,7 +151,8 @@ exit_code = await handle.wait()
 # 小文件读取
 content = await client.fs.read_file("file:///tmp/test.txt")
 
-# 大文件流式读取
+# 大文件流式读取（done 收尾校验：服务端报错/字节收不齐都会抛 FileSystemError；
+# 消费过慢触发背压断流同样报错，不静默截断）
 async for chunk in client.fs.read_stream("file:///tmp/large.log"):
     process(chunk)
 
@@ -175,6 +212,7 @@ from nova_executor import (
     ProcessError,
     FileSystemError,
     TimeoutError,
+    ProtocolError,
 )
 
 try:
@@ -183,6 +221,27 @@ except AuthError:
     print("认证失败")
 except ConnectionError:
     print("连接失败")
+```
+
+`ProtocolError` 结构化携带线上 `error.code`（`exc.code: int | None`），可按码
+分流；码表常量对位 Rust 服务端 rpc.rs：
+
+```python
+from nova_executor import (
+    ProtocolError,
+    JSON_RPC_INVALID_REQUEST,    # -32600 无效请求（含 resume 未知/过期会话）
+    JSON_RPC_METHOD_NOT_FOUND,   # -32601 方法不存在
+    JSON_RPC_INVALID_PARAMS,     # -32602 参数无效
+    JSON_RPC_INTERNAL_ERROR,     # -32603 服务端内部错误
+    EXECUTOR_NOT_FOUND,          # -32004 资源不存在
+    SESSION_ALREADY_ATTACHED,    # -32010 会话仍附着在别的连接上
+)
+
+try:
+    await client.fs.read_file("file:///missing")
+except ProtocolError as e:
+    if e.code == EXECUTOR_NOT_FOUND:
+        ...
 ```
 
 ## 部署说明

@@ -1,7 +1,7 @@
 """stdio 集成测试：spawn 真实 nova-executor 二进制（--listen stdio）。
 
 二进制定位顺序：环境变量 NOVA_EXECUTOR_BIN → 仓库内 cargo debug 产物
-（packages/nova_executor/target/debug/nova-executor）→ PATH。
+（packages/nova_executor_client/target/debug/nova-executor）→ PATH。
 找不到即整模块 skip（可用 `cargo build -p nova-executor-cli` 构建）。
 """
 
@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from nova_executor import ExecutorClient, ProcessError
+from nova_executor_client import ExecutorClient, ProcessError
 
 _REPO_TARGET = (
     Path(__file__).resolve().parents[2]
-    / "nova_executor"
+    / "nova_executor_client"
     / "target"
     / "debug"
     / "nova-executor"
@@ -95,7 +95,7 @@ async def test_stdio_process_stdin_write():
 async def test_stdio_write_stream_roundtrip():
     """fs/writeStream 全链路：分片推流写盘 → readFile 校验 → readStream 回读"""
     async with make_client() as client:
-        test_path = "file:///tmp/nova-executor-py-wstream.bin"
+        test_path = "file:///tmp/nova-executor-client-wstream.bin"
         # 1.5MB 随机数据，block_size 64KB → 24 块
         test_data = os.urandom(1024 * 1024 + 512 * 1024)
 
@@ -124,7 +124,7 @@ async def test_stdio_write_stream_roundtrip():
 async def test_stdio_write_stream_zero_bytes():
     """空流：写出一个 0 字节文件"""
     async with make_client() as client:
-        test_path = "file:///tmp/nova-executor-py-wstream-empty.bin"
+        test_path = "file:///tmp/nova-executor-client-wstream-empty.bin"
         try:
             total = await client.fs.write_stream(test_path, [])
             assert total == 0
@@ -139,10 +139,10 @@ async def test_stdio_write_stream_out_of_order_surfaces_at_done():
 
     客户端 write_stream 自身保证顺序，这里直接手发协议流量模拟乱序。
     """
-    from nova_executor import ProtocolError
+    from nova_executor_client import ProtocolError
 
     async with make_client() as client:
-        test_path = "file:///tmp/nova-executor-py-wstream-oops.bin"
+        test_path = "file:///tmp/nova-executor-client-wstream-oops.bin"
         transport = client.transport  # 单连接：控制面即全部
         await transport.send_request(
             "fs/writeStream", {"handleId": "oops", "path": test_path}
@@ -153,7 +153,7 @@ async def test_stdio_write_stream_out_of_order_surfaces_at_done():
         )
         with pytest.raises(ProtocolError, match="expected seq 0, got 1"):
             await transport.send_request("fs/writeStream/done", {"handleId": "oops"})
-        assert not Path("/tmp/nova-executor-py-wstream-oops.bin").exists()
+        assert not Path("/tmp/nova-executor-client-wstream-oops.bin").exists()
 
 
 @pytest.mark.asyncio

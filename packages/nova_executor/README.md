@@ -106,7 +106,7 @@ Options:
 是唯一产品，任何语言照协议可实现客户端。Nova 侧的接法是把它作为工具引擎后面的
 可插拔执行后端（本地 subprocess ↔ executor 同缝切换），工具契约不变。
 
-- Python SDK：`packages/nova-executor-py`（`ExecutorClient`，只做连接）
+- Python SDK：`packages/nova-executor-client`（`ExecutorClient`，只做连接）
 - 协议版本：`initialize` 响应携带 `protocolVersion`（major 不等即不兼容）
 
 ## 开发

@@ -20,7 +20,7 @@ updates:
       - packages/nova_agent
       - packages/nova-harness/backend
       - packages/nova_coding_agent
-      - packages/nova-executor-py
+      - packages/nova-executor-client
     schedule:
       interval: weekly
     cooldown:

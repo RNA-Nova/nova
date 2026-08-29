@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -65,52 +67,24 @@ class ProcessHandle:
 
     async def wait(self, timeout: float | None = None) -> int:
         """等待进程退出，返回退出码"""
-        start = asyncio.get_event_loop().time()
+        start = time.monotonic()
         while True:
             output = await self.read(wait_ms=1000)
             if output.exited and output.exit_code is not None:
                 return output.exit_code
-            if timeout and (asyncio.get_event_loop().time() - start) > timeout:
+            if timeout and (time.monotonic() - start) > timeout:
                 raise ProcessError(f"process {self.process_id} wait timed out")
             await asyncio.sleep(0.1)
 
     async def output(self) -> AsyncIterator[bytes]:
         """流式读取进程输出"""
-        after_seq = None
-        while True:
-            result = await self.client._transport.send_request(
-                PROCESS_READ,
-                ProcessReadParams(
-                    processId=self.process_id,
-                    afterSeq=after_seq,
-                    waitMs=1000,
-                ).model_dump(by_alias=True),
-            )
-            response = ProcessReadResponse.model_validate(result)
-            for chunk in response.chunks:
-                yield chunk.chunk
-                after_seq = chunk.seq
-            if response.exited:
-                break
+        async for chunk in self.client.iter_output(self.process_id):
+            yield chunk
 
     async def output_with_stream(self) -> AsyncIterator[tuple[str, bytes]]:
         """流式读取进程输出（带流标签——stdout/stderr 分离消费用）"""
-        after_seq = None
-        while True:
-            result = await self.client._transport.send_request(
-                PROCESS_READ,
-                ProcessReadParams(
-                    processId=self.process_id,
-                    afterSeq=after_seq,
-                    waitMs=1000,
-                ).model_dump(by_alias=True),
-            )
-            response = ProcessReadResponse.model_validate(result)
-            for chunk in response.chunks:
-                yield chunk.stream, chunk.chunk
-                after_seq = chunk.seq
-            if response.exited:
-                break
+        async for item in self.client.iter_output_with_stream(self.process_id):
+            yield item
 
 
 class ProcessManager:
@@ -133,8 +107,7 @@ class ProcessManager:
             raise ProcessError("argv cannot be empty")
 
         params = ProcessStartParams(
-            processId=process_id
-            or f"proc-{id(self)}-{asyncio.get_event_loop().time()}",
+            processId=process_id or f"proc-{uuid.uuid4().hex}",
             argv=argv,
             cwd=cwd,
             env=env or {},
@@ -172,12 +145,59 @@ class ProcessManager:
             closed=response.closed,
         )
 
+    async def iter_output(
+        self, process_id: str, wait_ms: int = 1000
+    ) -> AsyncIterator[bytes]:
+        """流式读取进程输出（afterSeq 逐块跟踪，exited 收尾）
+
+        断线恢复语义：恢复期间底层调用等待重连（recovery.ManagedTransport
+        的 Wait 策略），resume 成功后续拉不丢输出（服务端输出缓冲随会话
+        存活，afterSeq 由客户端跟踪）；恢复失败才向上抛 ConnectionError。
+        """
+        after_seq = None
+        while True:
+            result = await self._transport.send_request(
+                PROCESS_READ,
+                ProcessReadParams(
+                    processId=process_id,
+                    afterSeq=after_seq,
+                    waitMs=wait_ms,
+                ).model_dump(by_alias=True),
+            )
+            response = ProcessReadResponse.model_validate(result)
+            for chunk in response.chunks:
+                yield chunk.chunk
+                after_seq = chunk.seq
+            if response.exited:
+                break
+
+    async def iter_output_with_stream(
+        self, process_id: str, wait_ms: int = 1000
+    ) -> AsyncIterator[tuple[str, bytes]]:
+        """流式读取进程输出（带流标签——stdout/stderr 分离消费用）"""
+        after_seq = None
+        while True:
+            result = await self._transport.send_request(
+                PROCESS_READ,
+                ProcessReadParams(
+                    processId=process_id,
+                    afterSeq=after_seq,
+                    waitMs=wait_ms,
+                ).model_dump(by_alias=True),
+            )
+            response = ProcessReadResponse.model_validate(result)
+            for chunk in response.chunks:
+                yield chunk.stream, chunk.chunk
+                after_seq = chunk.seq
+            if response.exited:
+                break
+
     async def write(self, process_id: str, data: bytes) -> None:
         """写入进程 stdin"""
         params = ProcessWriteParams(
             processId=process_id,
             chunk=data,
-            writeId=f"w-{id(data)}",
+            writeId=f"w-{uuid.uuid4().hex}",
         )
         result = await self._transport.send_request(
             PROCESS_WRITE, params.model_dump(by_alias=True)
@@ -189,7 +209,14 @@ class ProcessManager:
             )
 
     async def terminate(self, process_id: str) -> None:
-        """终止进程"""
+        """终止进程
+
+        语义说明（既有行为，有意保持）：terminate 是请求-确认式——服务端
+        响应瞬间进程仍 running 即视为"终止未生效"抛 ProcessError。对长驻
+        进程（cat / 交互 shell）终止异步生效，响应时大概率仍 running，调用
+        方需容忍该错误（或先 signal 再轮询 read）；短进程与已退出进程不受
+        影响。会话随连接断开时服务端兜底清理进程。
+        """
         params = ProcessTerminateParams(processId=process_id)
         result = await self._transport.send_request(
             PROCESS_TERMINATE, params.model_dump(by_alias=True)

@@ -66,15 +66,26 @@ class TransportPool:
             else {method: CHANNEL_DATA for method in DATA_CHANNEL_METHODS}
         )
 
-    def _pick(self, method: str, channel: str | None) -> Transport:
-        """路由：显式 channel 优先，其次方法名路由表，兜底默认通道；
-        目标通道未配置时回退默认通道（单连接即全部落一条连接）"""
+    def resolve_channel(self, method: str, channel: str | None = None) -> str:
+        """解析方法落点通道名：显式 channel 优先，其次方法名路由表，兜底默认
+        通道；目标通道未配置时回退默认通道（单连接即全部落一条连接）。
+
+        通知分发层（notifications.NotificationRouter）按此给注册的流打通道
+        标签，连接恢复失败时按通道清扫。
+        """
         name = channel or self._method_routes.get(method) or self._default_channel
-        return self._channels.get(name) or self._channels[self._default_channel]
+        return name if name in self._channels else self._default_channel
+
+    def _pick(self, method: str, channel: str | None) -> Transport:
+        """按 resolve_channel 的通道名取传输实例"""
+        return self._channels[self.resolve_channel(method, channel)]
 
     def iter_transports(self) -> tuple[Transport, ...]:
-        """按通道声明顺序返回全部底层传输（客户端逐条做 initialize 握手用）"""
-        return tuple(self._channels.values())
+        """按通道声明顺序返回全部底层传输（诊断/检视用；恢复包装
+        （recovery.ManagedTransport）解包为其当前底层实例）"""
+        return tuple(
+            getattr(t, "current_transport", t) for t in self._channels.values()
+        )
 
     async def connect(self) -> None:
         """连接全部通道；任一失败回滚已连通道，避免半连接状态"""

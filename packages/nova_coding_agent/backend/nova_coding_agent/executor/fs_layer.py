@@ -23,7 +23,7 @@ from nova_coding_agent.tools_common.fs_layer import (
     WalkItem,
     WalkResult,
 )
-from nova_executor import ExecutorClient
+from nova_executor_client import ExecutorClient
 
 _URI_PREFIX = "file://"
 
@@ -97,7 +97,7 @@ class ExecutorFileSystemLayer:
         await client.fs.create_dir(_to_uri(path), recursive=True)
 
     async def walk(self, path: str, *, max_entries: int = 50_000) -> WalkResult:
-        from nova_executor.protocol import WalkOptions
+        from nova_executor_client.protocol import WalkOptions
 
         stat = await self.metadata(path)
         if not stat.exists:

@@ -176,5 +176,5 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 
 ## 客户端
 
-- Python SDK：`packages/nova-executor-py`（`ExecutorClient`——initialize 时
+- Python SDK：`packages/nova-executor-client`（`ExecutorClient`——initialize 时
   做 protocolVersion major 匹配，不等即 `ProtocolError`）

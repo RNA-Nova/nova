@@ -1,10 +1,21 @@
 """传输层：连接管理与 JSON-RPC 消息收发
 
-- `WebSocketTransport`：ws:// / wss:// 远程连接
+- `WebSocketTransport`：ws:// / wss:// 远程连接（websockets asyncio 新 API）
 - `StdioTransport`：spawn 子进程，stdin/stdout 承载 NDJSON JSON-RPC
   （本地 `nova-executor --listen stdio` 或 SSH 远程同一实现）
-- `Transport`：两种传输与连接池（pool.TransportPool）共同遵守的接口协议，
-  上层（client/各管理器）只面向它编程
+- `Transport`：两种传输与连接池（pool.TransportPool）、恢复包装
+  （recovery.ManagedTransport）共同遵守的接口协议，上层只面向它编程
+
+两种传输共享 `_JsonRpcTransport` 基类：pending 请求表、响应/通知分发、
+断线回调（`on_disconnect`——恢复层据此发起重连，对位 Rust 的
+RpcClientEvent::Disconnected 驱动 request_recovery）。
+
+边界处理（重写保留项，勿删）：
+- stdio 子进程 stderr 由独立任务持续消费，防缓冲填满死锁
+- stdio 断开逐级 reap：关 stdin 等 EOF 宽限 → terminate → kill
+- stdio 单条 NDJSON 消息 64MB 上限（对齐服务端 MAX_STDIO_JSONRPC_MESSAGE_LEN）
+- 写路径 drain 提供天然背压（对端读慢时发送方挂起而非内存膨胀）
+- 连接断开传播：pending 请求一律以 ConnectionError 收尾
 """
 
 from __future__ import annotations
@@ -13,11 +24,12 @@ import asyncio
 import json
 import logging
 import os
+from abc import abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-import websockets
-from websockets.client import WebSocketClientProtocol
+import websockets.asyncio.client
+import websockets.exceptions
 
 from .errors import (
     AuthError,
@@ -29,12 +41,19 @@ from .errors import (
 
 logger = logging.getLogger(__name__)
 
+#: 通知处理器 / 断线回调 / stderr 回调的签名
+NotificationHandler = Callable[[dict], Awaitable[None]]
+DisconnectHandler = Callable[[str | None], None]
+
 
 class Transport(Protocol):
     """传输层接口协议（结构化类型——实现类无需显式继承）。
 
     `channel` 参数只在连接池（TransportPool）上有路由意义；单传输实现
     接收但忽略它，保持接口统一。
+
+    `on_disconnect` 注册意外断线回调（主动 disconnect 不触发）——恢复层
+    （recovery.ManagedTransport）据此发起重连；不参与恢复的调用方可忽略。
     """
 
     async def connect(self) -> None: ...
@@ -57,75 +76,33 @@ class Transport(Protocol):
         channel: str | None = None,
     ) -> None: ...
 
-    def on_notification(self, handler: Callable[[dict], Awaitable[None]]) -> None: ...
+    def on_notification(self, handler: NotificationHandler) -> None: ...
+
+    def on_disconnect(self, handler: DisconnectHandler) -> None: ...
 
     @property
     def is_connected(self) -> bool: ...
 
 
-class WebSocketTransport:
-    """WebSocket 传输层，负责连接管理和 JSON-RPC 消息收发"""
+class _JsonRpcTransport:
+    """JSON-RPC 收发公共机械：pending 表、消息分发、断线传播。
 
-    def __init__(
-        self,
-        url: str,
-        token: str | None = None,
-        max_payload: int = 100 * 1024 * 1024,
-        request_timeout: float = 30.0,
-    ):
-        self.url = url
-        self.token = token
-        self.max_payload = max_payload
+    子类实现 `_send_message`（写线）并启动各自的接收循环；接收循环逐条
+    调 `_resolve_response` / `_run_notification_handlers`，意外结束时调
+    `_mark_disconnected`。
+    """
+
+    def __init__(self, request_timeout: float):
         self.request_timeout = request_timeout
-        self._ws: WebSocketClientProtocol | None = None
         self._request_id = 0
         self._pending: dict[int, asyncio.Future] = {}
-        self._notification_handlers: list[Callable[[dict], Awaitable[None]]] = []
-        self._receive_task: asyncio.Task | None = None
-        self._closed = False
+        self._notification_handlers: list[NotificationHandler] = []
+        self._disconnect_handlers: list[DisconnectHandler] = []
+        self._closed = True  # 未连接即关闭态
 
-    async def connect(self) -> None:
-        """建立 WebSocket 连接"""
-        headers = {}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-
-        try:
-            self._ws = await websockets.connect(
-                self.url,
-                additional_headers=headers,
-                max_size=self.max_payload,
-            )
-        except websockets.exceptions.InvalidStatusCode as e:
-            if e.status_code == 401:
-                raise AuthError(
-                    "authentication failed: invalid or missing token"
-                ) from e
-            raise ConnectionError(f"failed to connect to {self.url}: {e}") from e
-        except Exception as e:
-            raise ConnectionError(f"failed to connect to {self.url}: {e}") from e
-
-        self._closed = False
-        self._receive_task = asyncio.create_task(self._receive_loop())
-
-    async def disconnect(self) -> None:
-        """断开连接"""
-        self._closed = True
-        if self._receive_task:
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                pass
-        if self._ws:
-            await self._ws.close()
-            self._ws = None
-
-        # 取消所有 pending 请求
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(ConnectionError("connection closed"))
-        self._pending.clear()
+    # ------------------------------------------------------------------
+    # 发送
+    # ------------------------------------------------------------------
 
     async def send_request(
         self,
@@ -135,9 +112,6 @@ class WebSocketTransport:
         channel: str | None = None,
     ) -> Any:
         """发送 JSON-RPC 请求并等待响应（单传输忽略 channel——连接池路由参数）"""
-        if not self._ws:
-            raise ConnectionError("not connected")
-
         self._request_id += 1
         request_id = self._request_id
 
@@ -147,11 +121,11 @@ class WebSocketTransport:
             "params": params or {},
         }
 
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
 
         try:
-            await self._ws.send(json.dumps(message))
+            await self._send_message(message)
             return await asyncio.wait_for(future, timeout=self.request_timeout)
         except asyncio.TimeoutError:
             self._pending.pop(request_id, None)
@@ -172,67 +146,177 @@ class WebSocketTransport:
         channel: str | None = None,
     ) -> None:
         """发送 JSON-RPC 通知（无响应；单传输忽略 channel——连接池路由参数）"""
-        if not self._ws:
-            raise ConnectionError("not connected")
+        await self._send_message(
+            {
+                "method": method,
+                "params": params or {},
+            }
+        )
 
-        message = {
-            "method": method,
-            "params": params or {},
-        }
-        await self._ws.send(json.dumps(message))
+    @abstractmethod
+    async def _send_message(self, message: dict) -> None:
+        """把一条 JSON-RPC 消息写到线上（子类实现各自的线格式）"""
 
-    def on_notification(self, handler: Callable[[dict], Awaitable[None]]) -> None:
+    # ------------------------------------------------------------------
+    # 接收分发
+    # ------------------------------------------------------------------
+
+    def _resolve_response(self, message: dict) -> None:
+        """响应归 pending future：error 响应映射为带结构化 code 的 ProtocolError"""
+        request_id = message["id"]
+        future = self._pending.pop(request_id, None)
+        if future is None or future.done():
+            return
+        if "error" in message:
+            error = message["error"]
+            code = error.get("code")
+            future.set_exception(
+                ProtocolError(
+                    f"JSON-RPC error {code}: {error.get('message')}",
+                    code=code,
+                )
+            )
+        else:
+            future.set_result(message.get("result"))
+
+    async def _run_notification_handlers(self, message: dict) -> None:
+        """通知按序分发给全部处理器（异常逐条 logger.warning 留痕——
+        处理器错误不许炸掉接收循环，也不静默吞）"""
+        for handler in self._notification_handlers:
+            try:
+                await handler(message)
+            except Exception:
+                logger.warning(
+                    "notification handler raised on %s",
+                    message.get("method"),
+                    exc_info=True,
+                )
+
+    def on_notification(self, handler: NotificationHandler) -> None:
         """注册通知处理器"""
         self._notification_handlers.append(handler)
 
-    async def _receive_loop(self) -> None:
-        """接收消息循环"""
+    # ------------------------------------------------------------------
+    # 断线
+    # ------------------------------------------------------------------
+
+    def on_disconnect(self, handler: DisconnectHandler) -> None:
+        """注册意外断线回调（同步回调；主动 disconnect 不触发）"""
+        self._disconnect_handlers.append(handler)
+
+    def _mark_disconnected(self, reason: str | None) -> None:
+        """意外断线的统一收尾：pending 以 ConnectionError 收尾并触发
+        on_disconnect 回调（主动 disconnect 不走这里；多路径并发只生效一次）"""
+        if self._closed:
+            return
+        self._closed = True
+        self._fail_pending()
+        for handler in self._disconnect_handlers:
+            try:
+                handler(reason)
+            except Exception:
+                logger.warning("disconnect handler raised", exc_info=True)
+
+    def _fail_pending(self) -> None:
+        """连接断开收尾：取消所有 pending 请求（幂等）"""
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(ConnectionError("connection closed"))
+        self._pending.clear()
+
+
+class WebSocketTransport(_JsonRpcTransport):
+    """WebSocket 传输层，负责连接管理和 JSON-RPC 消息收发"""
+
+    def __init__(
+        self,
+        url: str,
+        token: str | None = None,
+        max_payload: int = 100 * 1024 * 1024,
+        request_timeout: float = 30.0,
+    ):
+        super().__init__(request_timeout)
+        self.url = url
+        self.token = token
+        self.max_payload = max_payload
+        self._ws: websockets.asyncio.client.ClientConnection | None = None
+        self._receive_task: asyncio.Task | None = None
+
+    async def connect(self) -> None:
+        """建立 WebSocket 连接"""
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
         try:
+            self._ws = await websockets.asyncio.client.connect(
+                self.url,
+                additional_headers=headers,
+                max_size=self.max_payload,
+            )
+        except websockets.exceptions.InvalidStatus as e:
+            if e.response.status_code == 401:
+                raise AuthError(
+                    "authentication failed: invalid or missing token"
+                ) from e
+            raise ConnectionError(f"failed to connect to {self.url}: {e}") from e
+        except Exception as e:
+            raise ConnectionError(f"failed to connect to {self.url}: {e}") from e
+
+        self._closed = False
+        self._receive_task = asyncio.create_task(self._receive_loop())
+
+    async def disconnect(self) -> None:
+        """断开连接（主动关闭——不触发 on_disconnect）"""
+        self._closed = True
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+        if self._ws:
+            await self._ws.close()
+            self._ws = None
+        self._fail_pending()
+
+    async def _send_message(self, message: dict) -> None:
+        if self._ws is None or self._closed:
+            raise ConnectionError("not connected")
+        await self._ws.send(json.dumps(message))
+
+    async def _receive_loop(self) -> None:
+        """接收消息循环；循环意外结束（对端关闭/读失败）即断线"""
+        reason: str | None = None
+        try:
+            assert self._ws is not None
             async for raw in self._ws:
                 if self._closed:
-                    break
+                    return  # 主动 disconnect：收尾归 disconnect()，不触发回调
                 try:
                     message = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-
                 if "id" in message and message["id"] is not None:
-                    # 响应
-                    request_id = message["id"]
-                    future = self._pending.pop(request_id, None)
-                    if future and not future.done():
-                        if "error" in message:
-                            error = message["error"]
-                            future.set_exception(
-                                ProtocolError(
-                                    f"JSON-RPC error {error.get('code')}: {error.get('message')}"
-                                )
-                            )
-                        else:
-                            future.set_result(message.get("result"))
+                    self._resolve_response(message)
                 elif "method" in message:
-                    # 通知
-                    for handler in self._notification_handlers:
-                        try:
-                            await handler(message)
-                        except Exception:
-                            pass
-        except websockets.exceptions.ConnectionClosed:
-            pass
+                    await self._run_notification_handlers(message)
+        except websockets.exceptions.ConnectionClosed as e:
+            reason = str(e)
+        except Exception as e:  # 读路径其他失败同样传播为断线
+            reason = str(e)
+            logger.warning("websocket receive loop failed: %s", e)
         finally:
-            self._closed = True
-            # 清理所有 pending
-            for future in self._pending.values():
-                if not future.done():
-                    future.set_exception(ConnectionError("connection closed"))
-            self._pending.clear()
+            if not self._closed:
+                self._mark_disconnected(reason)
 
     @property
     def is_connected(self) -> bool:
         return self._ws is not None and not self._closed
 
 
-class StdioTransport:
+class StdioTransport(_JsonRpcTransport):
     """stdio 传输层：spawn 子进程，stdin/stdout 承载 NDJSON JSON-RPC（一行一条消息）。
 
     command 参数化对齐 codex 的 `StdioExecServerCommand`（program + args + env + cwd），
@@ -242,7 +326,8 @@ class StdioTransport:
     - SSH：`StdioTransport(program="ssh", args=["user@host", "nova-executor", "--listen", "stdio"])`
 
     注意：stderr 由独立任务持续消费（打日志或回调），防止子进程 stderr
-    缓冲填满死锁；进程退出传播为连接断开（pending 请求以 ConnectionError 收尾）。
+    缓冲填满死锁；进程退出传播为连接断开（pending 请求以 ConnectionError 收尾，
+    并触发 on_disconnect——恢复层据此重 spawn）。
     """
 
     #: 默认命令：本地 nova-executor 的 stdio 监听模式
@@ -263,21 +348,17 @@ class StdioTransport:
         stderr_handler: Callable[[str], None] | None = None,
         max_message_size: int = MAX_MESSAGE_SIZE,
     ):
+        super().__init__(request_timeout)
         self.program = program
         self.args = list(args)
         self.env = dict(env) if env else None
         self.cwd = cwd
-        self.request_timeout = request_timeout
         self.stderr_handler = stderr_handler
         self.max_message_size = max_message_size
         self._process: asyncio.subprocess.Process | None = None
-        self._request_id = 0
-        self._pending: dict[int, asyncio.Future] = {}
-        self._notification_handlers: list[Callable[[dict], Awaitable[None]]] = []
         self._receive_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
         self._wait_task: asyncio.Task | None = None
-        self._closed = True  # 未连接即关闭态
 
     async def connect(self) -> None:
         """spawn 子进程并启动收发循环"""
@@ -307,7 +388,8 @@ class StdioTransport:
         self._wait_task = asyncio.create_task(self._wait_loop())
 
     async def disconnect(self) -> None:
-        """断开连接：关 stdin 让服务端自行退出，宽限后 terminate/kill 兜底"""
+        """断开连接：关 stdin 让服务端自行退出，宽限后 terminate/kill 兜底
+        （主动关闭——不触发 on_disconnect）"""
         self._closed = True
         for task in (self._receive_task, self._stderr_task, self._wait_task):
             if task:
@@ -357,56 +439,8 @@ class StdioTransport:
             return
         await process.wait()
 
-    async def send_request(
-        self,
-        method: str,
-        params: dict[str, Any] | None = None,
-        *,
-        channel: str | None = None,
-    ) -> Any:
-        """发送 JSON-RPC 请求并等待响应（单传输忽略 channel——连接池路由参数）"""
-        self._request_id += 1
-        request_id = self._request_id
-
-        message = {
-            "id": request_id,
-            "method": method,
-            "params": params or {},
-        }
-
-        future = asyncio.get_event_loop().create_future()
-        self._pending[request_id] = future
-
-        try:
-            await self._write_message(message)
-            return await asyncio.wait_for(future, timeout=self.request_timeout)
-        except asyncio.TimeoutError:
-            self._pending.pop(request_id, None)
-            raise TimeoutError(f"request {method} timed out") from None
-        except Exception as e:
-            self._pending.pop(request_id, None)
-            # 业务错误（JSON-RPC error 响应的 ProtocolError、连接已断）原样透传，
-            # 只把传输层发送失败包装为 ConnectionError
-            if isinstance(e, ExecutorError):
-                raise
-            raise ConnectionError(f"failed to send request {method}: {e}") from e
-
-    async def send_notification(
-        self,
-        method: str,
-        params: dict[str, Any] | None = None,
-        *,
-        channel: str | None = None,
-    ) -> None:
-        """发送 JSON-RPC 通知（无响应；单传输忽略 channel——连接池路由参数）"""
-        message = {
-            "method": method,
-            "params": params or {},
-        }
-        await self._write_message(message)
-
-    async def _write_message(self, message: dict) -> None:
-        """写一条 NDJSON 消息到子进程 stdin"""
+    async def _send_message(self, message: dict) -> None:
+        """写一条 NDJSON 消息到子进程 stdin（drain 提供背压）"""
         process = self._process
         if (
             process is None
@@ -426,22 +460,19 @@ class StdioTransport:
             process.stdin.write(line)
             await process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError) as e:
-            self._fail_pending()
-            self._closed = True
+            self._mark_disconnected(f"stdin write failed: {e}")
             raise ConnectionError(f"failed to write to process stdin: {e}") from e
-
-    def on_notification(self, handler: Callable[[dict], Awaitable[None]]) -> None:
-        """注册通知处理器"""
-        self._notification_handlers.append(handler)
 
     async def _receive_loop(self) -> None:
         """读子进程 stdout 的 NDJSON 消息循环"""
         process = self._process
         assert process is not None and process.stdout is not None
+        reason: str | None = None
         try:
             while not self._closed:
                 line = await process.stdout.readline()
                 if not line:
+                    reason = "process closed stdout"
                     break  # EOF：进程退出或管道关闭
                 line = line.strip()
                 if not line:
@@ -452,32 +483,17 @@ class StdioTransport:
                     continue
 
                 if "id" in message and message["id"] is not None:
-                    # 响应
-                    request_id = message["id"]
-                    future = self._pending.pop(request_id, None)
-                    if future and not future.done():
-                        if "error" in message:
-                            error = message["error"]
-                            future.set_exception(
-                                ProtocolError(
-                                    f"JSON-RPC error {error.get('code')}: {error.get('message')}"
-                                )
-                            )
-                        else:
-                            future.set_result(message.get("result"))
+                    # 响应同步归 future（接收循环不被处理器阻塞）
+                    self._resolve_response(message)
                 elif "method" in message:
-                    # 通知
-                    for handler in self._notification_handlers:
-                        try:
-                            await handler(message)
-                        except Exception:
-                            pass
+                    await self._run_notification_handlers(message)
         except (ValueError, OSError) as e:
             # ValueError：单行超过 max_message_size；OSError：管道读取失败
+            reason = str(e)
             logger.warning("stdio receive loop failed: %s", e)
         finally:
-            self._closed = True
-            self._fail_pending()
+            if not self._closed:
+                self._mark_disconnected(reason)
 
     async def _stderr_loop(self) -> None:
         """持续消费子进程 stderr，防止缓冲填满死锁"""
@@ -493,7 +509,7 @@ class StdioTransport:
                     try:
                         self.stderr_handler(text)
                     except Exception:
-                        pass
+                        logger.warning("stdio stderr handler raised", exc_info=True)
                 else:
                     logger.debug("nova-executor stdio stderr: %s", text)
         except (ValueError, OSError):
@@ -506,15 +522,7 @@ class StdioTransport:
         returncode = await process.wait()
         if not self._closed:
             logger.warning("nova-executor stdio process exited: %s", returncode)
-            self._closed = True
-            self._fail_pending()
-
-    def _fail_pending(self) -> None:
-        """连接断开收尾：取消所有 pending 请求（幂等）"""
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(ConnectionError("connection closed"))
-        self._pending.clear()
+            self._mark_disconnected(f"process exited with code {returncode}")
 
     @property
     def is_connected(self) -> bool:

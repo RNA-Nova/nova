@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from nova_executor import ExecutorClient
+from nova_executor_client import ExecutorClient
 
 EXECUTOR_URL = os.environ.get("NOVA_EXECUTOR_URL", "ws://127.0.0.1:28080")
 EXECUTOR_TOKEN = os.environ.get("NOVA_EXECUTOR_TOKEN", "test-secret-123")
@@ -38,7 +38,7 @@ async def test_process_echo():
 async def test_fs_write_read():
     """测试文件读写"""
     async with ExecutorClient(EXECUTOR_URL, token=EXECUTOR_TOKEN) as client:
-        test_path = "file:///tmp/nova-executor-py-integration.txt"
+        test_path = "file:///tmp/nova-executor-client-integration.txt"
         test_content = b"integration test content\n"
 
         await client.fs.write_file(test_path, test_content)
@@ -54,7 +54,7 @@ async def test_fs_stream_read():
     """测试流式读取"""
     async with ExecutorClient(EXECUTOR_URL, token=EXECUTOR_TOKEN) as client:
         # 创建 1MB 测试文件
-        test_path = "file:///tmp/nova-executor-py-stream.bin"
+        test_path = "file:///tmp/nova-executor-client-stream.bin"
         test_data = b"x" * (1024 * 1024)
         await client.fs.write_file(test_path, test_data)
 

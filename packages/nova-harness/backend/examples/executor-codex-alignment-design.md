@@ -114,7 +114,7 @@ readDirectory/walk 这类两方都用的方法不分裂——LLM 调走控制面
 - 两连接共享会话状态（进程/fs 状态 server 侧，连接注册表已有）
 - fs/writeStream 服务端实现（分片收 + 落盘 + 确认通知）
 
-### 客户端（nova-executor-py）
+### 客户端（nova-executor-client）
 
 - `ExecutorClient` 持两条连接（control + data）
 - readStream/writeStream/目录浏览路由 data 连接，其余 control

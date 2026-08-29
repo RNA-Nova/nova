@@ -3,7 +3,7 @@
 import pytest
 from fake_transport import FakeTransport
 
-from nova_executor import ExecutorClient
+from nova_executor_client import ExecutorClient
 
 ENVIRONMENT_INFO_PAYLOAD = {
     "shell": {"name": "zsh", "path": "/bin/zsh"},

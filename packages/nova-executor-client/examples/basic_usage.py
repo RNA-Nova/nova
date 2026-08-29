@@ -2,7 +2,7 @@
 
 import asyncio
 
-from nova_executor import ExecutorClient
+from nova_executor_client import ExecutorClient
 
 
 async def main():

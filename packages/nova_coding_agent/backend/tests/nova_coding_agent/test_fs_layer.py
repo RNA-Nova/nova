@@ -122,7 +122,7 @@ class _FakeFs:
         pass
 
     async def metadata(self, path):
-        from nova_executor.protocol import FileMetadata
+        from nova_executor_client.protocol import FileMetadata
 
         self._track(path)
         if path in self.files:
@@ -146,7 +146,7 @@ class _FakeFs:
         raise RuntimeError("not found")
 
     async def read_dir(self, path):
-        from nova_executor.protocol import DirEntry
+        from nova_executor_client.protocol import DirEntry
 
         self._track(path)
         return [
@@ -158,7 +158,7 @@ class _FakeFs:
         self._track(path)
 
     async def walk(self, path, options):
-        from nova_executor.protocol import WalkOutcome
+        from nova_executor_client.protocol import WalkOutcome
 
         self._track(path)
         assert options.max_entries == 123

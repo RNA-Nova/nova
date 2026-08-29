@@ -32,7 +32,7 @@ from nova_coding_agent.executor.provision import (
     parse_ssh_target,
     provision,
 )
-from nova_executor import ExecutorClient
+from nova_executor_client import ExecutorClient
 
 from nova_harness.core.config.defaults import get_agent_dir
 
@@ -53,7 +53,7 @@ def resolve_executor_binary() -> Optional[str]:
     # 开发态兜底：仓库内 cargo 构建产物
     repo = Path(__file__).resolve()
     for parent in repo.parents:
-        candidate = parent / "packages" / "nova_executor"
+        candidate = parent / "packages" / "nova_executor_client"
         if candidate.is_dir():
             for profile in ("release", "debug"):
                 built = candidate / "target" / profile / "nova-executor"

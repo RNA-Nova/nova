@@ -19,7 +19,7 @@ nova/
 │   ├── nova_executor/      # 通用执行后端（Rust：进程/文件系统/PTY + 三平台沙箱
 │   │                       # + 托管网络沙箱；JSON-RPC over stdio/WS/SSH；
 │   │                       # 协议即产品，线上契约见 packages/nova_executor/PROTOCOL.md）
-│   ├── nova-executor-py/   # executor 的 Python SDK（薄客户端：双传输 +
+│   ├── nova-executor-client/   # executor 的 Python SDK（薄客户端：双传输 +
 │   │                       # TransportPool 控制/数据面分离 + 版本协商）
 │   └── nova-agent-rs/      # agent 层 Rust 备件存档（审批引擎/命令判定——
 │                           #   executor 不管审批，等客户端层启用）

@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 # 方法常量
 # =============================================================================
 
-#: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配）
-PROTOCOL_VERSION = "1.0"
+#: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
+#: 跟随服务端 crates/executor-protocol/src/lib.rs::PROTOCOL_VERSION）
+PROTOCOL_VERSION = "1.4"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
@@ -100,6 +101,8 @@ class ByteChunk(BaseModel):
 
 class InitializeParams(BaseModel):
     client_name: str = Field(..., alias="clientName")
+    #: 恢复既有会话（进程/文件句柄随会话存活）；None = 不下发，开新会话
+    resume_session_id: str | None = Field(default=None, alias="resumeSessionId")
 
 
 class InitializeResponse(BaseModel):

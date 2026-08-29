@@ -45,7 +45,7 @@ nova/
 │   │   └── frontend/       # 前端运行时（TS 厚应用层 + 内置 TUI 宿主 modes/tui；npm 包名 `nova-client`）
 │   ├── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具
 │   ├── nova_executor/      # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over WS）
-│   ├── nova-executor-py/   # executor 的 Python SDK（只做连接的薄客户端）
+│   ├── nova-executor-client/   # executor 的 Python SDK（只做连接的薄客户端）
 │   ├── nova_team/          # 主从多智能体团队配置（早期 WIP，暂无 pyproject.toml）
 │   └── nova_web_ui/        # Web UI 占位目录（当前为空）
 ├── README.md
@@ -201,11 +201,11 @@ npm link        # 全局注册 `nova` 命令
 
 该包**没有 `pyproject.toml`**，也未声明 Poetry 依赖，属于早期开发状态。
 
-### `nova_executor`（Rust 通用执行后端）与 `nova-executor-py`（Python SDK）
+### `nova_executor`（Rust 通用执行后端）与 `nova-executor-client`（Python SDK）
 
 - **定位**：编程无绑定的通用执行后端——进程/文件系统/PTY + 三平台沙箱（macOS Seatbelt、Linux bwrap+landlock、Windows restricted token）+ managed network sandbox，JSON-RPC over stdio / WebSocket（stdio 为主：CLI/桌面/SSH 隧道场景；WS 用于回环与将来服务器托管）。fs 含大文件流式端点 `fs/readStream`（服务端推送，支持平台沙箱）/ `fs/writeStream`（客户端分片推）。**协议即产品**：线上契约在 `packages/nova_executor/PROTOCOL.md`（v1.0），任何语言照文档可实现客户端。
 - **边界（重要）**：executor 不知道 agent/模型/工具/会话概念。已移除：模型 API 层（原 executor-codex-api）、agent 配置体系（executor-config）、Rust 侧工具注册处（executor-extension-items）、`capabilityRoots/discoverV1` 端点。**不要在 executor 里重新引入这些概念**——工具契约在 Nova 包体系（Python），正确接法是在 `nova_coding_agent` 的 bash 引擎后面挂 executor 实现（本地 subprocess ↔ executor 同缝切换）。
-- **`nova-executor-py`**：`ExecutorClient` 薄客户端（process/fs/pty + errors），"只做连接"。initialize 时做 `protocolVersion` major 匹配。传输双形态：`WebSocketTransport` + `StdioTransport`（spawn 子进程 NDJSON，command 参数化——本地/SSH 同一实现）；`TransportPool` 多连接按通道路由（控制面/数据面分离，大文件流不阻塞工具调用）。已删除其自带的 Tool/Plugin/ExecutorBackend 三件套（与 Nova 契约冲突），不要恢复。
+- **`nova-executor-client`**：`ExecutorClient` 薄客户端（process/fs/pty + errors），"只做连接"。initialize 时做 `protocolVersion` major 匹配。传输双形态：`WebSocketTransport` + `StdioTransport`（spawn 子进程 NDJSON，command 参数化——本地/SSH 同一实现）；`TransportPool` 多连接按通道路由（控制面/数据面分离，大文件流不阻塞工具调用）。已删除其自带的 Tool/Plugin/ExecutorBackend 三件套（与 Nova 契约冲突），不要恢复。
 - 鉴权：executor 只做本地回环（stdio / WS 回环承载），**无入站鉴权**；对外暴露与鉴权归上层中继层（未落地），不归 executor。
 - 构建/测试：`cargo build --workspace` / `cargo test --workspace`（在 `packages/nova_executor` 下）。
 

@@ -51,7 +51,7 @@ jobs:
           python-version: "3.12"
 
       - name: 安装依赖并跑测试（非集成）
-        working-directory: packages/nova-executor-py
+        working-directory: packages/nova-executor-client
         run: |
           python -m pip install -e . pytest pytest-asyncio
           python -m pytest tests -q -m "not integration"

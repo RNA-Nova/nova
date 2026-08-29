@@ -9,6 +9,7 @@ class FakeTransport:
         self.notifications: list[tuple[str, dict, str | None]] = []
         self.responses = responses or {}
         self.handlers: list = []
+        self.disconnect_handlers: list = []
         self.connected = False
 
     async def connect(self) -> None:
@@ -29,6 +30,15 @@ class FakeTransport:
 
     def on_notification(self, handler) -> None:
         self.handlers.append(handler)
+
+    def on_disconnect(self, handler) -> None:
+        self.disconnect_handlers.append(handler)
+
+    def drop(self, reason: str | None = "test drop") -> None:
+        """模拟意外断线：触发断线回调（恢复测试用）"""
+        self.connected = False
+        for handler in self.disconnect_handlers:
+            handler(reason)
 
     @property
     def is_connected(self) -> bool:

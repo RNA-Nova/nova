@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from nova_executor import ConnectionError, ProtocolError, StdioTransport
+from nova_executor_client import ConnectionError, ProtocolError, StdioTransport
 
 FAKE_SERVER = str(Path(__file__).parent / "fake_executor_server.py")
 
@@ -63,12 +63,13 @@ async def test_connect_and_request_response():
 
 @pytest.mark.asyncio
 async def test_error_response_raises_protocol_error():
-    """JSON-RPC 错误响应映射为 ProtocolError"""
+    """JSON-RPC 错误响应映射为 ProtocolError，且结构化携带 error.code"""
     transport = make_transport()
     await transport.connect()
     try:
-        with pytest.raises(ProtocolError, match="boom"):
+        with pytest.raises(ProtocolError, match="boom") as exc_info:
             await transport.send_request("fail")
+        assert exc_info.value.code == -32600
     finally:
         await transport.disconnect()
 
@@ -101,7 +102,7 @@ async def test_notification_handler_receives_push():
 @pytest.mark.asyncio
 async def test_request_timeout():
     """请求超时映射为 TimeoutError，pending 清理后后续请求不受影响"""
-    from nova_executor import TimeoutError as ExecutorTimeoutError
+    from nova_executor_client import TimeoutError as ExecutorTimeoutError
 
     transport = make_transport(request_timeout=0.2)
     await transport.connect()
@@ -189,7 +190,7 @@ async def test_spawn_failure_raises_connection_error():
 @pytest.mark.asyncio
 async def test_client_over_stdio_full_handshake():
     """ExecutorClient 经 stdio 完成 initialize 握手（含版本检查）"""
-    from nova_executor import ExecutorClient
+    from nova_executor_client import ExecutorClient
 
     async with ExecutorClient(transport=make_transport()) as client:
         result = await client.transport.send_request("echo", {"ping": 1})
@@ -199,7 +200,7 @@ async def test_client_over_stdio_full_handshake():
 @pytest.mark.asyncio
 async def test_client_rejects_incompatible_protocol_version():
     """服务端 major 版本不等即拒绝连接"""
-    from nova_executor import ExecutorClient
+    from nova_executor_client import ExecutorClient
 
     client = ExecutorClient(
         transport=make_transport(env={"FAKE_PROTOCOL_VERSION": "2.0"})

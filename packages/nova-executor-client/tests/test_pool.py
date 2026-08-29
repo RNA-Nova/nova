@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 from fake_transport import FakeTransport
 
-from nova_executor import (
+from nova_executor_client import (
     ExecutorClient,
     StdioTransport,
     TransportPool,
     WebSocketTransport,
 )
-from nova_executor.pool import CHANNEL_CONTROL, CHANNEL_DATA
-from nova_executor.transport import Transport
+from nova_executor_client.pool import CHANNEL_CONTROL, CHANNEL_DATA
+from nova_executor_client.transport import Transport
 
 
 def make_pool() -> tuple[TransportPool, FakeTransport, FakeTransport]:

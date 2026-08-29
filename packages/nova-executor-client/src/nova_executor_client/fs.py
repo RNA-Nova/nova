@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
+import base64
+import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Iterable
 from dataclasses import dataclass
 
 from .errors import FileSystemError, ProtocolError
+from .notifications import NotificationRouter, ReadStreamEvent
 from .pool import CHANNEL_DATA
 from .protocol import (
     FS_CANONICALIZE,
@@ -19,8 +21,6 @@ from .protocol import (
     FS_READ_DIRECTORY,
     FS_READ_FILE,
     FS_READ_STREAM,
-    FS_READ_STREAM_CHUNK,
-    FS_READ_STREAM_DONE,
     FS_REMOVE,
     FS_WALK,
     FS_WRITE_FILE,
@@ -44,8 +44,6 @@ from .protocol import (
     FsReadDirectoryResponse,
     FsReadFileParams,
     FsReadFileResponse,
-    FsReadStreamChunkNotification,
-    FsReadStreamDoneNotification,
     FsReadStreamParams,
     FsReadStreamResponse,
     FsRemoveParams,
@@ -62,6 +60,13 @@ from .protocol import (
 from .transport import Transport
 
 
+def _new_handle_id(prefix: str) -> str:
+    """生成 fs 句柄 id：uuid4 随机（取代 id() 对象地址复用 + 时间戳模数的
+    碰撞面），截断保持全长 <= 32 字节（服务端 MAX_FILE_READ/WRITE_HANDLE_ID_BYTES
+    上限；120bit 随机量对会话内句柄足够）"""
+    return f"{prefix}-{uuid.uuid4().hex[:30]}"
+
+
 @dataclass
 class ReadStreamHandle:
     """流式读取句柄"""
@@ -71,31 +76,24 @@ class ReadStreamHandle:
 
 
 class FileSystemManager:
-    """文件系统管理器"""
+    """文件系统管理器
 
-    def __init__(self, transport: Transport):
+    `router`：统一通知分发器（notifications.NotificationRouter）——
+    client 装配时注入（全局单例，传输层通知统一经它按 handle_id 路由）；
+    独立使用时缺省自建并自挂到 transport.on_notification（旧行为兼容）。
+    """
+
+    def __init__(self, transport: Transport, router: NotificationRouter | None = None):
         self._transport = transport
-        self._stream_queues: dict[str, asyncio.Queue] = {}
-        self._stream_dones: dict[str, FsReadStreamDoneNotification] = {}
-        transport.on_notification(self._handle_stream_notification)
+        if router is None:
+            router = NotificationRouter()
+            transport.on_notification(router.dispatch)
+        self._router = router
 
-    async def _handle_stream_notification(self, message: dict) -> None:
-        """处理流式读取通知"""
-        method = message.get("method")
-        params = message.get("params", {})
-        handle_id = params.get("handleId")
-
-        if method == FS_READ_STREAM_CHUNK:
-            notification = FsReadStreamChunkNotification.model_validate(params)
-            queue = self._stream_queues.get(handle_id)
-            if queue:
-                await queue.put(notification)
-        elif method == FS_READ_STREAM_DONE:
-            notification = FsReadStreamDoneNotification.model_validate(params)
-            self._stream_dones[handle_id] = notification
-            queue = self._stream_queues.get(handle_id)
-            if queue:
-                await queue.put(None)  # 结束标记
+    def _stream_channel(self, method: str) -> str | None:
+        """解析流式方法的落点通道名（池化传输打标签用；裸传输无此概念归 None）"""
+        resolve = getattr(self._transport, "resolve_channel", None)
+        return resolve(method) if resolve is not None else None
 
     async def read_file(self, path: str, follow_symlinks: bool | None = None) -> bytes:
         """读取文件（小文件推荐）
@@ -117,10 +115,25 @@ class FileSystemManager:
         offset: int = 0,
         length: int | None = None,
     ) -> AsyncIterator[bytes]:
-        """流式读取文件（大文件推荐）"""
-        handle_id = f"s-{id(self) % 10000}-{int(asyncio.get_event_loop().time() * 1000) % 1000000}"
-        queue: asyncio.Queue = asyncio.Queue()
-        self._stream_queues[handle_id] = queue
+        """流式读取文件（大文件推荐）
+
+        协议序列：先注册推送路由再发 `fs/readStream` 请求（服务端响应后即开始
+        推送，注册不能比推送晚到）→ 逐块收 `fs/readStream/chunk` →
+        `fs/readStream/done` 收尾。
+
+        收尾校验（done 语义，缺一即 FileSystemError）：
+        - done 携带 error：服务端读失败（旧版静默吞掉的缺陷，已修）
+        - done 的 totalBytes 与实际收齐字节数不等：传输丢块/断线截断
+          （连接恢复窗口内推送丢失由此兜底，不静默产出截断数据）
+
+        背压：每流队列上限 READ_STREAM_QUEUE_CAPACITY 块——消费过慢宁可
+        断流报错（FileSystemError），不阻塞连接级通知分发（对位 Rust 的
+        try_send 断流语义）。
+        """
+        handle_id = _new_handle_id("s")
+        queue = self._router.register_stream(
+            handle_id, channel=self._stream_channel(FS_READ_STREAM)
+        )
 
         params = FsReadStreamParams(
             handleId=handle_id,
@@ -129,29 +142,40 @@ class FileSystemManager:
             len=length,
             blockSize=block_size,
         )
-        result = await self._transport.send_request(
-            FS_READ_STREAM, params.model_dump(by_alias=True)
-        )
+        try:
+            result = await self._transport.send_request(
+                FS_READ_STREAM, params.model_dump(by_alias=True)
+            )
+        except Exception:
+            # 开流失败即注销路由（对位 Rust open_push 的失败清理）
+            self._router.unregister_stream(handle_id)
+            raise
         FsReadStreamResponse.model_validate(result)
 
+        received = 0
         try:
             while True:
-                notification = await queue.get()
-                if notification is None:
+                event: ReadStreamEvent = await queue.get()
+                if event.kind == "failed":
+                    raise FileSystemError(
+                        f"read stream `{handle_id}` failed: {event.error}"
+                    )
+                if event.kind == "done":
+                    if received != event.total_bytes:
+                        raise FileSystemError(
+                            f"read stream `{handle_id}` incomplete: received "
+                            f"{received} bytes, server sent {event.total_bytes}"
+                        )
                     break
-                yield notification.chunk
-                if notification.eof:
-                    break
+                received += len(event.chunk)
+                yield event.chunk
         finally:
-            self._stream_queues.pop(handle_id, None)
-            self._stream_dones.pop(handle_id, None)
+            self._router.unregister_stream(handle_id)
 
     async def write_file(
         self, path: str, data: bytes, follow_symlinks: bool | None = None
     ) -> None:
         """写入文件；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）"""
-        import base64
-
         params = FsWriteFileParams(
             path=path,
             dataBase64=base64.b64encode(data).decode(),
@@ -176,6 +200,8 @@ class FileSystemManager:
         - 协议序列：`fs/writeStream` 请求开句柄（打开即创建/截断）→
           `fs/writeStream/chunk` 通知（seq 从 0 连续）→ 空块 `eof=True` 收尾 →
           `fs/writeStream/done` 请求确认
+        - 背压：chunk 通知逐条 await 写线（drain），服务端读慢时发送方
+          挂起而非内存膨胀
         - 中断语义：服务端中断不产生可见文件（中止/断连/乱序删半截）。
           本地异常时客户端发 `fs/close` 主动中止（须走数据面通道——句柄
           状态随连接）；chunk 通知无回执，服务端业务错误（乱序/超限/写盘
@@ -189,7 +215,7 @@ class FileSystemManager:
                 f"（服务端单块上限），收到 {block_size}"
             )
 
-        handle_id = f"w-{id(self) % 10000}-{int(asyncio.get_event_loop().time() * 1000) % 1000000}"
+        handle_id = _new_handle_id("w")
         params = FsWriteStreamParams(handleId=handle_id, path=path)
         result = await self._transport.send_request(
             FS_WRITE_STREAM, params.model_dump(by_alias=True)
@@ -297,7 +323,9 @@ class FileSystemManager:
         )
         await self._transport.send_request(FS_COPY, params.model_dump(by_alias=True))
 
-    async def metadata(self, path: str, follow_symlinks: bool | None = None) -> FileMetadata:
+    async def metadata(
+        self, path: str, follow_symlinks: bool | None = None
+    ) -> FileMetadata:
         """获取文件元数据；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）"""
         params = FsGetMetadataParams(path=path, followSymlinks=follow_symlinks)
         result = await self._transport.send_request(
@@ -317,7 +345,7 @@ class FileSystemManager:
     # 分块读取 API（兼容旧版）
     async def open(self, path: str, handle_id: str | None = None) -> str:
         """打开文件用于分块读取"""
-        handle_id = handle_id or f"block-{id(self)}-{asyncio.get_event_loop().time()}"
+        handle_id = handle_id or _new_handle_id("b")
         params = FsOpenParams(handleId=handle_id, path=path)
         result = await self._transport.send_request(
             FS_OPEN, params.model_dump(by_alias=True)

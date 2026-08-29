@@ -7,10 +7,10 @@ import base64
 import pytest
 from fake_transport import FakeTransport
 
-from nova_executor import FileSystemError, ProtocolError
-from nova_executor.fs import FileSystemManager
-from nova_executor.pool import CHANNEL_DATA
-from nova_executor.protocol import MAX_WRITE_STREAM_CHUNK_BYTES
+from nova_executor_client import FileSystemError, ProtocolError
+from nova_executor_client.fs import FileSystemManager
+from nova_executor_client.pool import CHANNEL_DATA
+from nova_executor_client.protocol import MAX_WRITE_STREAM_CHUNK_BYTES
 
 
 def make_fs(responses: dict | None = None) -> tuple[FileSystemManager, FakeTransport]:

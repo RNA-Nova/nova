@@ -2,7 +2,7 @@
 
 import base64
 
-from nova_executor.protocol import (
+from nova_executor_client.protocol import (
     FileMetadata,
     FsReadStreamParams,
     InitializeParams,
@@ -15,13 +15,26 @@ from nova_executor.protocol import (
 def test_initialize_params():
     """测试初始化参数序列化"""
     params = InitializeParams(clientName="test")
-    data = params.model_dump(by_alias=True)
-    assert data == {"clientName": "test"}
+    # 全量 dump 含 resumeSessionId=None；线上握手以 exclude_none 省略（不开新会话语义）
+    assert params.model_dump(by_alias=True) == {
+        "clientName": "test",
+        "resumeSessionId": None,
+    }
+    assert params.model_dump(by_alias=True, exclude_none=True) == {"clientName": "test"}
+
+
+def test_initialize_params_with_resume_session_id():
+    """resumeSessionId 显式携带（断线重连恢复会话 / 显式 resume 既有会话）"""
+    params = InitializeParams(clientName="test", resumeSessionId="session-1")
+    assert params.model_dump(by_alias=True, exclude_none=True) == {
+        "clientName": "test",
+        "resumeSessionId": "session-1",
+    }
 
 
 def test_initialize_response_with_environment_info():
     """initialize 响应捎带 environmentInfo（含新增三字段）的解析"""
-    from nova_executor.protocol import InitializeResponse
+    from nova_executor_client.protocol import InitializeResponse
 
     response = InitializeResponse.model_validate(
         {
@@ -48,7 +61,7 @@ def test_initialize_response_with_environment_info():
 
 def test_initialize_response_without_environment_info():
     """旧服务端缺省形态：无 environmentInfo 字段 → None（回退单次调用）"""
-    from nova_executor.protocol import InitializeResponse
+    from nova_executor_client.protocol import InitializeResponse
 
     response = InitializeResponse.model_validate(
         {"sessionId": "session-1", "protocolVersion": "1.0"}
@@ -110,7 +123,7 @@ def test_file_metadata():
 
 def test_walk_params_and_outcome():
     """fs/walk 参数序列化与结果反序列化（camelCase 对齐 Rust 契约）。"""
-    from nova_executor.protocol import FsWalkParams, WalkOptions, WalkOutcome
+    from nova_executor_client.protocol import FsWalkParams, WalkOptions, WalkOutcome
 
     params = FsWalkParams(
         path="file:///home/user",
@@ -145,7 +158,7 @@ def test_walk_params_and_outcome():
 
 def test_environment_config_read_params():
     """environmentConfig/read 请求参数序列化（camelCase 对齐 Rust 契约）"""
-    from nova_executor.protocol import EnvironmentConfigReadParams
+    from nova_executor_client.protocol import EnvironmentConfigReadParams
 
     params = EnvironmentConfigReadParams(
         cwd="file:///repo", configPaths=[["sandbox"], ["network", "mode"]]
@@ -158,7 +171,7 @@ def test_environment_config_read_params():
 
 def test_environment_config_read_response():
     """environmentConfig/read 响应解析（层栈 + error 字段 + 可选字段缺省）"""
-    from nova_executor.protocol import EnvironmentConfigReadResponse
+    from nova_executor_client.protocol import EnvironmentConfigReadResponse
 
     response = EnvironmentConfigReadResponse.model_validate(
         {
@@ -200,7 +213,7 @@ def test_environment_config_read_response():
 
 def test_environment_config_read_response_without_optional_fields():
     """可选字段（userHomeDir/hostname/error）缺省也能反序列化"""
-    from nova_executor.protocol import EnvironmentConfigReadResponse
+    from nova_executor_client.protocol import EnvironmentConfigReadResponse
 
     response = EnvironmentConfigReadResponse.model_validate(
         {
