@@ -4,6 +4,7 @@ use nova_executor_protocol_core::permissions::FileSystemPath;
 use nova_executor_protocol_core::permissions::FileSystemSandboxEntry;
 use nova_executor_protocol_core::permissions::FileSystemSandboxKind;
 use nova_executor_protocol_core::permissions::FileSystemSandboxPolicy;
+use nova_executor_protocol_core::permissions::FileSystemSpecialPath::Root;
 use nova_executor_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
@@ -106,6 +107,16 @@ impl ResolvedWindowsSandboxPermissions {
         self.file_system.has_full_disk_read_access()
     }
 
+    pub(crate) fn has_symbolic_root_read_access(&self, cwd: &Path) -> bool {
+        self.file_system.entries.iter().any(|entry| {
+            matches!(&entry.path, FileSystemPath::Special { value: Root })
+                && entry.access.can_read()
+        }) && cwd
+            .ancestors()
+            .last()
+            .is_some_and(|root| self.file_system.can_read_path_with_cwd(root, cwd))
+    }
+
     pub(crate) fn include_platform_defaults(&self) -> bool {
         self.file_system.include_platform_defaults()
     }
@@ -177,8 +188,7 @@ impl ResolvedWindowsSandboxPermissions {
                 matches!(
                     path,
                     FileSystemPath::Special {
-                        value:
-                            nova_executor_protocol_core::permissions::FileSystemSpecialPath::Tmpdir,
+                        value: nova_executor_protocol_core::permissions::FileSystemSpecialPath::Tmpdir,
                     }
                 ) && access.can_write()
             })
