@@ -51,11 +51,9 @@ static TEST_HOME_COUNTER: AtomicU64 = AtomicU64::new(0);
 static LEGACY_PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn legacy_process_test_guard() -> MutexGuard<'static, ()> {
-    // 各用例之间没有真正的共享状态，锁只用于串行化进程级操作；某个用例
-    // panic 后不应毒化互斥锁让后续用例连锁失败，因此忽略 poison 继续。
     LEGACY_PROCESS_TEST_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .expect("legacy Windows sandbox process test lock poisoned")
 }
 
 fn current_thread_runtime() -> tokio::runtime::Runtime {
@@ -608,15 +606,6 @@ fn runner_resizer_sends_resize_frame() {
 
 #[test]
 fn legacy_capture_emits_output_and_preserves_descendant_after_normal_exit() {
-    if std::env::var_os("CI").is_some() {
-        // GitHub Actions runner 的外层 job object 会让 legacy sandbox 的
-        // descendant 随 capture 进程一起被清理，"descendant 存活"断言在 CI
-        // 环境不可验证（本地 Windows 不受影响仍执行）。失败还会毒化
-        // legacy_process_test_guard，让同组其余 legacy 用例连锁 panic。
-        // TODO: 找到 CI 友好的 job object 嵌套/breakaway 方案后恢复。
-        eprintln!("skipping: CI job-object hierarchy kills sandbox descendants");
-        return;
-    }
     let Some(pwsh) = pwsh_path() else {
         return;
     };
@@ -688,15 +677,6 @@ fn legacy_capture_emits_output_and_preserves_descendant_after_normal_exit() {
 
 #[test]
 fn legacy_workspace_write_delete_is_limited_to_writable_roots() {
-    if std::env::var_os("CI").is_some() {
-        // 与 legacy_capture / legacy_tty_job 同族：GitHub Actions runner 的
-        // 服务环境下 legacy 沙箱行为系统性不可靠（本轮表现为可写根内的
-        // del 也被整体拒绝，workspace_write 删除限制语义无法验证；本地
-        // Windows 不受影响仍执行）。策略构造层语义由 setup.rs 单测覆盖。
-        // TODO: 找到 CI 友好的 job object/token 方案后恢复。
-        eprintln!("skipping: legacy sandbox delete semantics are unverifiable on CI runners");
-        return;
-    }
     let _guard = legacy_process_test_guard();
     let runtime = current_thread_runtime();
     runtime.block_on(async move {
@@ -986,15 +966,6 @@ async fn assert_legacy_tty_descendant_lifecycle(
 
 #[test]
 fn legacy_tty_job_terminates_and_preserves_descendants() {
-    if std::env::var_os("CI").is_some() {
-        // 与 legacy_capture 同根因：GitHub Actions runner 的外层 job object
-        // 干扰 legacy sandbox 的 descendant 生命周期（descendant 无法启动或
-        // 随 sandbox 进程一起被清理），CI 环境不可验证（本地 Windows 仍执行）。
-        // 失败还会毒化 legacy_process_test_guard，让同组其余 legacy 用例连锁
-        // panic。TODO: 找到 CI 友好的 job object 嵌套/breakaway 方案后恢复。
-        eprintln!("skipping: CI job-object hierarchy interferes with sandbox descendants");
-        return;
-    }
     let Some(pwsh) = pwsh_path() else {
         eprintln!("skipping sandbox ConPTY lifecycle test: PowerShell 7 is not installed");
         return;

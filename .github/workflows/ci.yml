@@ -38,11 +38,19 @@ jobs:
           sudo apt-get install -y bubblewrap
           sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
 
+      - name: 安装 cargo-nextest（对齐 codex 的测试 runner：每测试独立进程）
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+
       - name: cargo build
         run: cargo build --workspace
 
-      - name: cargo test
-        run: cargo test --workspace --no-fail-fast
+      # nextest 天然全量重跑（失败不中断后续用例），无需 --no-fail-fast；
+      # doc-tests 不在 nextest 覆盖范围（与 codex 一致）
+      - name: cargo nextest run
+        run: cargo nextest run --workspace
 
   # executor Python SDK
   executor-py:
