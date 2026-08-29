@@ -332,7 +332,12 @@ fn accept_with_timeout(listener: TcpListener, timeout: Duration) -> io::Result<T
     let deadline = Instant::now() + timeout;
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return Ok(stream),
+            Ok((stream, _)) => {
+                // macOS 的 accept 会继承 listener 的 O_NONBLOCK（Linux 不继承）：
+                // 显式回到阻塞模式，否则后续 read 在数据未到时立即 EAGAIN
+                stream.set_nonblocking(false)?;
+                return Ok(stream);
+            }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 if Instant::now() >= deadline {
                     return Err(io::Error::new(

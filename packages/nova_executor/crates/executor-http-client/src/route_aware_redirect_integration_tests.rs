@@ -98,6 +98,10 @@ fn spawn_response(
                 Err(error) => panic!("HTTP listener should accept: {error}"),
             }
         };
+        // macOS 的 accept 会继承 listener 的 O_NONBLOCK（Linux 不继承）：显式回到阻塞模式
+        stream
+            .set_nonblocking(false)
+            .expect("HTTP stream should become blocking");
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("read timeout");

@@ -2693,6 +2693,7 @@ dependencies = [
  "libc",
  "nova-executor-file-system",
  "nova-executor-http-client",
+ "nova-executor-linux-sandbox",
  "nova-executor-network-proxy",
  "nova-executor-otel",
  "nova-executor-protocol",

@@ -160,7 +160,7 @@ impl FileWriteHandleManager {
         };
         match state {
             FileWriteState::Failed { kind, error } => Err(io::Error::new(kind, error)),
-            FileWriteState::Active(active) => {
+            FileWriteState::Active(mut active) => {
                 if !active.eof_seen {
                     drop(active.file);
                     remove_partial_file(&active.path).await;
@@ -169,8 +169,20 @@ impl FileWriteHandleManager {
                         format!("file write stream `{handle_id}` finished without an eof chunk"),
                     ));
                 }
-                // tokio::fs::File 无用户态缓冲，drop 即关闭；不做 fsync，
-                // 与 fs/writeFile（tokio::fs::write）的落盘语义对齐。
+                // tokio::fs::File 的 write_all 返回只代表数据进了内部写管线——实际
+                // write 系统调用在阻塞线程池异步落定，写错误也延迟到下一次 poll 才
+                // 暴露。收尾前必须 flush 等在途写任务完成，否则 drop 后立即读文件
+                // 可能缺尾块；flush 同时把末块的延迟写错误按半截语义回报并清理。
+                // 不做 fsync，与 fs/writeFile（tokio::fs::write）的落盘语义对齐。
+                if let Err(err) = active.file.flush().await {
+                    let error = io::Error::new(
+                        err.kind(),
+                        format!("file write stream `{handle_id}` flush failed: {err}"),
+                    );
+                    drop(active.file);
+                    remove_partial_file(&active.path).await;
+                    return Err(error);
+                }
                 drop(active.file);
                 Ok(active.total_bytes)
             }

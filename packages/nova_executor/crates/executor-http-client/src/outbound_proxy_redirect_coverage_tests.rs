@@ -211,6 +211,10 @@ fn spawn_failing_listener() -> (std::net::SocketAddr, std::thread::JoinHandle<()
                 Err(error) => panic!("failing listener should accept: {error}"),
             }
         };
+        // macOS 的 accept 会继承 listener 的 O_NONBLOCK（Linux 不继承）：显式回到阻塞模式
+        stream
+            .set_nonblocking(false)
+            .expect("failing stream should become blocking");
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .expect("failing stream should get a read timeout");

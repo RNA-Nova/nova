@@ -44,7 +44,8 @@ def main() -> None:
             result = {
                 "fakeVar": os.environ.get("FAKE_VAR"),
                 "cwd": os.getcwd(),
-                "hasHome": "HOME" in os.environ,
+                # Windows 没有 HOME（家目录变量是 USERPROFILE），按平台回退检测
+                "hasHome": bool(os.environ.get("HOME") or os.environ.get("USERPROFILE")),
             }
         elif method == "fail":
             print(

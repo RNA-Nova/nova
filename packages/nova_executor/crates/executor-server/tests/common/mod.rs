@@ -1,10 +1,11 @@
 //! 集成测试共享夹具：测试二进制经 ctor 兼任 nova-executor 服务器与隐藏 helper。
 //!
-//! 对位 codex `exec-server/tests/common/mod.rs`，但做了两处简化：
+//! 对位 codex `exec-server/tests/common/mod.rs`，差异点：
 //! - 不引入 `codex-test-binary-support` / `codex-arg0` 的 PATH alias 机械
-//!   （那是 Bazel 下跨 crate 复用测试二进制的产物）；cargo 下直接按 argv1
-//!   哨兵分派即可，argv0 alias（`codex-linux-sandbox`）仅在 Linux landlock
-//!   场景需要，当前测试基座不覆盖。
+//!   （那是 Bazel 下跨 crate 复用测试二进制的产物）；cargo 下按 argv1 哨兵
+//!   分派即可。唯一的 argv0 分派是 Linux 的 `codex-linux-sandbox`：landlock/
+//!   bwrap 沙箱会以该 argv0 重入本二进制，须在此直接转给 linux sandbox 入口，
+//!   否则 `--sandbox-policy-cwd` 等参数会落进 libtest 的解析器（exit 101）。
 //! - 测试隔离的 home 目录不由 ctor 设置，改为夹具按子进程注入
 //!   `NOVA_EXECUTOR_HOME`（见 `exec_server.rs`）。
 
@@ -49,7 +50,23 @@ const NOVA_WINDOWS_SANDBOX_ARG1: &str = "--run-as-windows-sandbox";
 #[ctor]
 static TEST_BINARY_DISPATCH: () = {
     let mut args = env::args_os();
-    let _program = args.next();
+    let program = args.next();
+
+    // Linux：landlock/bwrap 沙箱把 fs helper 命令改写为以 argv0
+    // `codex-linux-sandbox` 重入本二进制（参数形如 `--sandbox-policy-cwd ...`）。
+    // 这里按 argv0 basename 转给真正的 linux sandbox 入口（run_main 不返回）。
+    #[cfg(target_os = "linux")]
+    if let Some(program) = program.as_deref() {
+        let is_linux_sandbox = Path::new(program).file_name().is_some_and(|name| {
+            name == nova_executor_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0
+        });
+        if is_linux_sandbox {
+            nova_executor_linux_sandbox::run_main();
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = program;
+
     let Some(argv1) = args.next() else {
         return;
     };

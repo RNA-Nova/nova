@@ -93,5 +93,10 @@ nova-executor-network-proxy = { workspace = true }
 # chatgpt_cloudflare_affinity 集成测试：自建 MITM 代理需要就地签发证书
 rcgen = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# 集成测试的 argv0 重入分派：landlock/bwrap 沙箱以 `codex-linux-sandbox`
+# 为 argv0 重入测试二进制，需要真正的 linux sandbox 入口（见 tests/common/mod.rs）
+nova-executor-linux-sandbox = { workspace = true }
+
 [target.'cfg(windows)'.dev-dependencies]
 nova-executor-windows-sandbox = { workspace = true }
