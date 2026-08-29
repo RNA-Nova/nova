@@ -34,7 +34,9 @@ use tokio_tungstenite::tungstenite::Message;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(25);
-const EVENT_TIMEOUT: Duration = Duration::from_secs(5);
+// CI 共享 runner 上并行测试二进制会让 exec-server 子进程短暂饿到数秒
+// （macos 腿已在 5s 超时下出现偶发失败），放宽到 30s 只影响真失败的等待时长。
+const EVENT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) struct ExecServerHarness {
     nova_executor_home: TempDir,
