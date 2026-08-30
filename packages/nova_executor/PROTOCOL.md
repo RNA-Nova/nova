@@ -119,7 +119,7 @@ shell 启动状态（`.zshrc`/`.bashrc` 求值结果：函数/别名/setopt/导�
 仅对 `<shell.path> -lc <command>` 形态的启动生效（其余 argv 原样放行）；
 命中缓存的后续启动跳过启动文件，改用 bash `-pc` / zsh `-fc`（sh 为 `-c`）
 加 eval 恢复脚本执行原命令——快照 state 切成 ≤60KB 的环境变量
-（`__CODEX_SHELL_SNAPSHOT_STATE_<n>`）传入子进程。首次执行时同步跑一次
+（`__NOVA_EXECUTOR_SHELL_SNAPSHOT_STATE_<n>`）传入子进程。首次执行时同步跑一次
 捕获（10s 超时、失败按 1s 退避最多 3 次、并发单飞），缓存上限 LRU 16 条、
 单条 512KB；捕获失败永远回退为原始 `shell -lc` 行为。快照环境在捕获后仍
 按当次 `envPolicy` 过滤，且剔除托管代理注入的代理变量与 `PWD`/`OLDPWD`。
