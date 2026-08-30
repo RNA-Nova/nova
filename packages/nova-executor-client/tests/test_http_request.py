@@ -131,3 +131,32 @@ async def test_http_request_stream_assembles_body_until_done():
         assert response.body.data == b"echo:GET:https://example.test/stream"
     finally:
         await client.disconnect()
+
+
+def test_http_header_value_env_var_wire_shape():
+    """HttpHeader 的 valueEnvVar 别名与 None 不出场（凭据不跨线委派 wire 形态）"""
+    from nova_executor_client import HttpHeader, HttpRequestParams
+
+    params = HttpRequestParams(
+        method="GET",
+        url="https://example.test",
+        headers=[
+            HttpHeader(name="authorization", value="Bearer ", valueEnvVar="MY_TOKEN")
+        ],
+        requestId="r1",
+    )
+    dumped = params.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["headers"] == [
+        {"name": "authorization", "value": "Bearer ", "valueEnvVar": "MY_TOKEN"}
+    ]
+
+    plain = HttpRequestParams(
+        method="GET",
+        url="https://example.test",
+        headers=[HttpHeader(name="x", value="y")],
+        requestId="r2",
+    )
+    assert (
+        "valueEnvVar"
+        not in plain.model_dump(by_alias=True, exclude_none=True)["headers"][0]
+    )

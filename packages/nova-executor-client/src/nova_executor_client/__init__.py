@@ -46,6 +46,7 @@ from .protocol import (
     HttpRequestResponse,
     ManagedNetworkSandboxContext,
     NetworkPolicyDecision,
+    NetworkPolicyDecisionNotification,
     NetworkPolicyRequestParams,
     NetworkPolicyRequestResponse,
     NetworkSandboxPolicy,
@@ -110,6 +111,7 @@ __all__ = [
     "EnvironmentConfigLayerStack",
     # 网络策略（托管网络沙箱裁决）
     "NetworkPolicyDecision",
+    "NetworkPolicyDecisionNotification",
     "NetworkPolicyRequestParams",
     "NetworkPolicyRequestResponse",
     "ExecServerNetworkProtocol",

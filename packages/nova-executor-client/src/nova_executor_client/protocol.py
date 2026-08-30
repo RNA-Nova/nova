@@ -642,9 +642,12 @@ class HttpRedirectPolicy(str, Enum):
 
 
 class HttpHeader(BaseModel):
+    """HTTP 头（value_env_var：由执行端环境变量填值——凭据不跨线委派）"""
+
     model_config = ConfigDict(populate_by_name=True)
     name: str
     value: str
+    value_env_var: str | None = Field(default=None, alias="valueEnvVar")
 
 
 class HttpRequestParams(BaseModel):
@@ -915,3 +918,26 @@ class NetworkPolicyRequestResponse(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
     decision: NetworkPolicyDecision
+
+
+class NetworkPolicyDecisionNotification(BaseModel):
+    """network/policyDecision 审计通知（裁决后的单向汇报，丢只影响审计完整性）
+
+    wire 形态对位 executor-protocol/src/network_policy.rs
+    NetworkPolicyDecisionNotification（camelCase；method/client 可缺席，
+    policyOverride 缺省 false）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    process_id: str = Field(..., alias="processId")
+    timestamp: str
+    scope: str
+    decision: str
+    source: str
+    reason: str
+    protocol: ExecServerNetworkProtocol
+    host: str
+    port: int
+    method: str | None = None
+    client: str | None = None
+    policy_override: bool = Field(default=False, alias="policyOverride")

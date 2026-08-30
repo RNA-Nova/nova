@@ -1082,7 +1082,9 @@ mod tests {
             let mut args = std::env::args_os();
             let _program = args.next();
             if args.next().as_deref()
-                == Some(std::ffi::OsStr::new(crate::fs_helper::NOVA_EXECUTOR_FS_HELPER_ARG1))
+                == Some(std::ffi::OsStr::new(
+                    crate::fs_helper::NOVA_EXECUTOR_FS_HELPER_ARG1,
+                ))
             {
                 crate::run_fs_helper_main();
             }
@@ -1329,7 +1331,9 @@ mod tests {
             let mut args = std::env::args_os();
             let _program = args.next();
             if args.next().as_deref()
-                == Some(std::ffi::OsStr::new(crate::fs_helper::NOVA_EXECUTOR_FS_HELPER_ARG1))
+                == Some(std::ffi::OsStr::new(
+                    crate::fs_helper::NOVA_EXECUTOR_FS_HELPER_ARG1,
+                ))
             {
                 crate::run_fs_helper_main();
             }

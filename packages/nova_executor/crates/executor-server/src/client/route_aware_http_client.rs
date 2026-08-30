@@ -35,6 +35,23 @@ use crate::protocol::MAX_HTTP_BODY_DELTA_BYTES;
 use crate::rpc::RpcNotificationSender;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
+use nova_executor_network_proxy::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
+
+/// http/request 的 valueEnvVar 保护名单（对位 codex HTTP_HEADER_ENV_DENYLIST）：
+/// 执行端本机的敏感环境变量不许经客户端点名的头代发——executor 侧凭据
+/// 不可跨线泄露给客户端。收 nova 自家 token + 通用云凭据 + 本仓供应商 key。
+const HTTP_HEADER_ENV_DENYLIST: &[&str] = &[
+    PROXY_ATTRIBUTION_TOKEN_ENV_KEY,
+    "VOLCENGINE_API_KEY",
+    "MOONSHOT_API_KEY",
+    "KIMI_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AZURE_CLIENT_SECRET",
+    "AZURE_FEDERATED_TOKEN_FILE",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+];
 
 /// HTTP capability implementation backed by the shared route-aware transport.
 #[derive(Clone)]
@@ -280,7 +297,35 @@ impl RouteAwareHttpRequestRunner {
             let name = HeaderName::from_bytes(header.name.as_bytes()).map_err(|error| {
                 invalid_params(format!("http/request header name is invalid: {error}"))
             })?;
-            let value = HeaderValue::from_str(&header.value).map_err(|error| {
+            let value = match header.value_env_var {
+                Some(env_var) => {
+                    // 执行端敏感变量拒代发（对位 codex build_headers）
+                    if HTTP_HEADER_ENV_DENYLIST
+                        .iter()
+                        .any(|denied| denied.eq_ignore_ascii_case(&env_var))
+                    {
+                        return Err(invalid_params(format!(
+                            "http/request header {} cannot use executor environment variable {env_var}",
+                            header.name
+                        )));
+                    }
+                    let env_value = std::env::var(&env_var).map_err(|_| {
+                        invalid_params(format!(
+                            "http/request header {} requires executor environment variable {env_var}",
+                            header.name
+                        ))
+                    })?;
+                    if env_value.is_empty() {
+                        return Err(invalid_params(format!(
+                            "http/request header {} requires a non-empty executor environment variable {env_var}",
+                            header.name
+                        )));
+                    }
+                    format!("{}{env_value}", header.value)
+                }
+                None => header.value,
+            };
+            let value = HeaderValue::from_str(&value).map_err(|error| {
                 invalid_params(format!(
                     "http/request header value is invalid for {}: {error}",
                     header.name
@@ -298,6 +343,7 @@ impl RouteAwareHttpRequestRunner {
                 Some(HttpHeader {
                     name: name.as_str().to_string(),
                     value: value.to_str().ok()?.to_string(),
+                    value_env_var: None,
                 })
             })
             .collect()

@@ -327,7 +327,7 @@ class ExecutorClient:
         method: str,
         url: str,
         *,
-        headers: list[tuple[str, str]] | None = None,
+        headers: list[tuple[str, str] | HttpHeader] | None = None,
         body: bytes | None = None,
         timeout_ms: int | None = None,
         redirect_policy: str = "follow",
@@ -340,11 +340,17 @@ class ExecutorClient:
         - stream_response=True：响应头先回、响应体经 `http/request/bodyDelta`
           通知推送——SDK 内部收集增量、done 后把拼装好的完整 body 放进响应
           （需要更早拿到增量可改用 notifications 路由器按 requestId 订阅）
+        - headers 元组为字面量头；需执行端环境变量填值（凭据不跨线委派）
+          时传 HttpHeader(name=..., value="前缀", valueEnvVar="变量名")——
+          执行端敏感变量有保护名单拦截（nova 自家 token/云凭据/供应商 key）
         """
         import uuid as _uuid
 
         rid = request_id or f"http-{_uuid.uuid4().hex}"
-        header_models = [HttpHeader(name=n, value=v) for n, v in (headers or [])]
+        header_models = [
+            h if isinstance(h, HttpHeader) else HttpHeader(name=h[0], value=h[1])
+            for h in (headers or [])
+        ]
         queue = (
             self._router.register_method(HTTP_REQUEST_BODY_DELTA)
             if stream_response

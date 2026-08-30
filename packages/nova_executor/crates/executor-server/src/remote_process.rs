@@ -40,7 +40,10 @@ impl RemoteProcess {
         params: ExecParams,
         network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     ) -> Result<StartedExecProcess, crate::ExecServerError> {
-        let session = self.client.start_process(params, network_policy_decider).await?;
+        let session = self
+            .client
+            .start_process(params, network_policy_decider)
+            .await?;
         let sandbox_type = sandbox_type_from_protocol(session.sandbox_type());
 
         Ok(StartedExecProcess {

@@ -159,6 +159,14 @@ NtCreateFile + OBJ_DONT_REPARSE）逐组件打开路径，任一组件是符号�
 | `http/request` | executor 代发 HTTP(S)：`method`、`url`、`headers`、`bodyBase64?`、`timeoutMs?`、`redirectPolicy`、`streamResponse?`、`requestId` |
 | → `http/request/bodyDelta` | 通知：流式响应体（`seq`、`deltaBase64`、`done`、`error?`） |
 
+`headers` 条目形态：`{name, value, valueEnvVar?}`。`valueEnvVar` 由执行端
+环境变量填值（`value` 作前缀，如 `value: "Bearer "`）——凭据不跨线委派：
+客户端点名变量名，值由发起 HTTP 的进程在服务端读取。**保护名单拦截**
+（对位 codex HTTP_HEADER_ENV_DENYLIST）：`NOVA_EXECUTOR_PROXY_ATTRIBUTION_TOKEN`、
+供应商 key（`VOLCENGINE_API_KEY`/`MOONSHOT_API_KEY`/`KIMI_API_KEY`）与通用云
+凭据（`AWS_*`/`AZURE_*`/`GOOGLE_APPLICATION_CREDENTIALS`）点名即
+`-32602 invalid_params` 拒绝（大小写不敏感）；变量缺失或空值同样 -32602。
+
 注：executor 本体代发无内置白名单/审计（对齐 codex）；出网管控归
 `process/start` 的托管网络段（见「托管网络」，v1.3 起）与将来的中继层，
 不归这个端点。

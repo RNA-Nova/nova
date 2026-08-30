@@ -20,10 +20,10 @@ use std::time::Duration;
 use ctor::ctor;
 use nova_executor_http_client::HttpClientFactory;
 use nova_executor_http_client::OutboundProxyPolicy;
-use nova_executor_server::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
-use nova_executor_server::NOVA_EXECUTOR_FS_HELPER_ARG1;
 use nova_executor_server::ExecServerRuntimePaths;
 use nova_executor_server::ExecServerTelemetry;
+use nova_executor_server::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
+use nova_executor_server::NOVA_EXECUTOR_FS_HELPER_ARG1;
 use nova_executor_server::RequestDispatchMode;
 
 pub(crate) mod exec_server;
@@ -123,19 +123,17 @@ pub(crate) async fn connect_remote_exec_client(
 ) -> anyhow::Result<nova_executor_server::ExecServerClient> {
     use std::time::Duration;
 
-    Ok(
-        nova_executor_server::ExecServerClient::connect_websocket(
-            nova_executor_server::RemoteExecServerConnectArgs {
-                websocket_url: websocket_url.to_string(),
-                client_name: "exec-server-test-client".to_string(),
-                connect_timeout: Duration::from_secs(10),
-                initialize_timeout: Duration::from_secs(10),
-                resume_session_id: None,
-                http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            },
-        )
-        .await?,
+    Ok(nova_executor_server::ExecServerClient::connect_websocket(
+        nova_executor_server::RemoteExecServerConnectArgs {
+            websocket_url: websocket_url.to_string(),
+            client_name: "exec-server-test-client".to_string(),
+            connect_timeout: Duration::from_secs(10),
+            initialize_timeout: Duration::from_secs(10),
+            resume_session_id: None,
+            http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+        },
     )
+    .await?)
 }
 
 fn next_release_path_arg(mut args: impl Iterator<Item = std::ffi::OsString>) -> PathBuf {

@@ -24,13 +24,13 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
 
 use super::prepare_exec_request;
-#[cfg(unix)]
-use crate::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
 use crate::ExecParams;
 #[cfg(any(unix, windows))]
 use crate::ExecServerRuntimePaths;
 #[cfg(any(unix, windows))]
 use crate::FileSystemSandboxContext;
+#[cfg(unix)]
+use crate::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
 use crate::ProcessId;
 
 #[cfg(unix)]
@@ -84,7 +84,12 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
     {
         assert_eq!(
             prepared.command.first(),
-            Some(&runtime_paths.executor_self_exe.to_string_lossy().into_owned())
+            Some(
+                &runtime_paths
+                    .executor_self_exe
+                    .to_string_lossy()
+                    .into_owned()
+            )
         );
         let permission_profile_json = prepared
             .command
@@ -164,7 +169,10 @@ async fn sandbox_request_routes_custom_arg0_to_inner_helper() {
         ]
     );
     #[cfg(target_os = "linux")]
-    assert_eq!(prepared.arg0, Some(NOVA_EXECUTOR_LINUX_SANDBOX_ARG0.to_string()));
+    assert_eq!(
+        prepared.arg0,
+        Some(NOVA_EXECUTOR_LINUX_SANDBOX_ARG0.to_string())
+    );
     #[cfg(target_os = "macos")]
     assert_eq!(prepared.arg0, None);
 }

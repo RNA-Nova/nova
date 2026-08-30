@@ -147,6 +147,29 @@ def main() -> None:
                         decision_seen = reply["result"]["decision"]
                     break
             result = {"saw": decision_seen}
+        elif method == "policy/audit":
+            # 审计推送测试：先回 result，再推一条 network/policyDecision 通知
+            print(json.dumps({"id": msg["id"], "result": {}}), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "method": "network/policyDecision",
+                        "params": {
+                            "processId": "p1",
+                            "timestamp": "2026-08-31T00:00:00Z",
+                            "scope": "process",
+                            "decision": "allow",
+                            "source": "allowlist",
+                            "reason": "listed domain",
+                            "protocol": "https_connect",
+                            "host": "pypi.org",
+                            "port": 443,
+                        },
+                    }
+                ),
+                flush=True,
+            )
+            continue
         else:
             result = {}
         print(json.dumps({"id": msg["id"], "result": result}), flush=True)

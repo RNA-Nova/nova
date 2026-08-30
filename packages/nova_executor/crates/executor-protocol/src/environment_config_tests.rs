@@ -12,9 +12,15 @@ use nova_executor_utils_path_uri::PathUri;
 /// 盘符绝对路径），URI 期望值从构造出的 PathUri 反推，保持跨平台一致。
 fn fixture_roots() -> (std::path::PathBuf, std::path::PathBuf) {
     if cfg!(windows) {
-        (std::path::PathBuf::from(r"C:\repo"), std::path::PathBuf::from(r"C:\home\u"))
+        (
+            std::path::PathBuf::from(r"C:\repo"),
+            std::path::PathBuf::from(r"C:\home\u"),
+        )
     } else {
-        (std::path::PathBuf::from("/repo"), std::path::PathBuf::from("/home/u"))
+        (
+            std::path::PathBuf::from("/repo"),
+            std::path::PathBuf::from("/home/u"),
+        )
     }
 }
 
@@ -67,8 +73,7 @@ fn environment_config_read_response_uses_stable_json_shape() {
                 },
                 EnvironmentConfigLayer {
                     source: format!("project:{}", project_settings.display()),
-                    base_dir: PathUri::from_host_native_path(repo.join(".nova"))
-                        .expect("base URI"),
+                    base_dir: PathUri::from_host_native_path(repo.join(".nova")).expect("base URI"),
                     format: EnvironmentConfigLayerFormat::Json,
                     content: String::new(),
                     error: Some(format!(
@@ -81,10 +86,12 @@ fn environment_config_read_response_uses_stable_json_shape() {
         },
     };
 
-    let executor_base_uri =
-        PathUri::from_host_native_path(&executor_home).expect("user base URI").to_string();
-    let project_base_uri =
-        PathUri::from_host_native_path(repo.join(".nova")).expect("base URI").to_string();
+    let executor_base_uri = PathUri::from_host_native_path(&executor_home)
+        .expect("user base URI")
+        .to_string();
+    let project_base_uri = PathUri::from_host_native_path(repo.join(".nova"))
+        .expect("base URI")
+        .to_string();
     let expected = serde_json::json!({
         "userHomeDir": user_home_uri.to_string(),
         "executorHomeDir": PathUri::from_host_native_path(&executor_home)

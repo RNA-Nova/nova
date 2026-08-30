@@ -181,7 +181,10 @@ impl ShellSnapshotCache {
                 end -= 1;
             }
             let (chunk, remaining) = state.split_at(end);
-            let name = format!("__NOVA_EXECUTOR_SHELL_SNAPSHOT_STATE_{}", state_variables.len());
+            let name = format!(
+                "__NOVA_EXECUTOR_SHELL_SNAPSHOT_STATE_{}",
+                state_variables.len()
+            );
             prepared.env.insert(name.clone(), chunk.to_string());
             state_variables.push(name);
             state = remaining;
