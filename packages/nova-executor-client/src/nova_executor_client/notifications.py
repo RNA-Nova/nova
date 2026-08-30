@@ -21,10 +21,12 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .protocol import (
+    HTTP_REQUEST_BODY_DELTA,
     FS_READ_STREAM_CHUNK,
     FS_READ_STREAM_DONE,
     FsReadStreamChunkNotification,
     FsReadStreamDoneNotification,
+    HttpRequestBodyDeltaNotification,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,21 @@ class NotificationRouter:
 
     def __init__(self) -> None:
         self._streams: dict[str, _StreamRegistration] = {}
+        #: 按方法名订阅的通用队列（http body delta、networkPolicyDecision 等）
+        self._method_queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
+
+    def register_method(self, method: str) -> asyncio.Queue[dict[str, Any]]:
+        """按方法名注册通用通知订阅（返回消费队列；重复注册追加新队列）"""
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=64)
+        self._method_queues.setdefault(method, []).append(queue)
+        return queue
+
+    def unregister_method_queue(self, method: str, queue: asyncio.Queue) -> None:
+        queues = self._method_queues.get(method, [])
+        if queue in queues:
+            queues.remove(queue)
+            if not queues:
+                self._method_queues.pop(method, None)
 
     def register_stream(
         self, handle_id: str, *, channel: str | None = None
@@ -99,8 +116,22 @@ class NotificationRouter:
                     message.get("params") or {}
                 )
                 self._finish_stream(params)
+            elif method == HTTP_REQUEST_BODY_DELTA:
+                params = HttpRequestBodyDeltaNotification.model_validate(
+                    message.get("params") or {}
+                )
+                event = {"method": method, "params": params.model_dump(by_alias=True)}
+                for queues in self._method_queues.values():
+                    for q in queues:
+                        q.put_nowait(event)
             else:
-                logger.debug("ignoring unknown executor notification: %s", method)
+                queues = self._method_queues.get(method or "")
+                if queues:
+                    event = {"method": method, "params": message.get("params") or {}}
+                    for q in queues:
+                        q.put_nowait(event)
+                else:
+                    logger.debug("ignoring unknown executor notification: %s", method)
         except Exception:
             # 通知载荷畸形不许炸掉传输接收循环——留痕后丢弃（对位 Rust
             # handle_server_notification 出错即断开连接的严格姿态，SDK 侧从宽）

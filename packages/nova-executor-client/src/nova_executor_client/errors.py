@@ -1,5 +1,7 @@
 """nova-executor SDK 异常定义"""
 
+from __future__ import annotations
+
 # =============================================================================
 # JSON-RPC 错误码常量（对位 Rust 服务端 rpc.rs 的码表——调用方按 code 分流用）
 # =============================================================================
@@ -22,8 +24,13 @@ class ExecutorError(Exception):
     """SDK 基础异常"""
 
 
-class ConnectionError(ExecutorError):
-    """连接错误"""
+class TransportError(ExecutorError):
+    """连接/传输错误（新名；`ConnectionError` 别名兼容保留——注意其遮蔽
+    内建同名异常，新代码请用 TransportError）"""
+
+
+#: 兼容别名（历史名遮蔽内建 ConnectionError，新代码用 TransportError）
+ConnectionError = TransportError
 
 
 class AuthError(ExecutorError):

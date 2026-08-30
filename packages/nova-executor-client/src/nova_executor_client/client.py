@@ -13,11 +13,19 @@ from .protocol import (
     ENVIRONMENT_CONFIG_READ,
     ENVIRONMENT_INFO,
     ENVIRONMENT_STATUS,
+    HTTP_REQUEST,
+    HTTP_REQUEST_BODY_DELTA,
     INITIALIZE,
     INITIALIZED,
     PROTOCOL_VERSION,
+    ByteChunk,
     EnvironmentConfigReadParams,
     EnvironmentConfigReadResponse,
+    HttpRequestBodyDeltaNotification,
+    HttpRequestParams,
+    HttpRequestResponse,
+    HttpHeader,
+    HttpRedirectPolicy,
     EnvironmentInfo,
     EnvironmentStatus,
     InitializeParams,
@@ -198,6 +206,13 @@ class ExecutorClient:
         """控制面会话 id（connect 握手成功后可用；resume/诊断用）"""
         return self._control.session_id
 
+    @property
+    def notifications(self) -> NotificationRouter:
+        """统一通知分发器（公共只读入口：http body delta /
+        networkPolicyDecision 等按方法订阅；fs read_stream 已由
+        FileSystemManager 内部接管，勿重复注册同名流）"""
+        return self._router
+
     async def _handshake(
         self, transport: Transport, resume_session_id: str | None
     ) -> InitializeResponse:
@@ -273,6 +288,69 @@ class ExecutorClient:
             ENVIRONMENT_CONFIG_READ, params.model_dump(by_alias=True)
         )
         return EnvironmentConfigReadResponse.model_validate(result)
+
+    async def http_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: list[tuple[str, str]] | None = None,
+        body: bytes | None = None,
+        timeout_ms: int | None = None,
+        redirect_policy: str = "follow",
+        stream_response: bool = False,
+        request_id: str | None = None,
+    ) -> HttpRequestResponse:
+        """经执行器代发 HTTP 请求（http/request）
+
+        - 默认缓冲模式：完整响应体随响应返回
+        - stream_response=True：响应头先回、响应体经 `http/request/bodyDelta`
+          通知推送——SDK 内部收集增量、done 后把拼装好的完整 body 放进响应
+          （需要更早拿到增量可改用 notifications 路由器按 requestId 订阅）
+        """
+        import uuid as _uuid
+
+        rid = request_id or f"http-{_uuid.uuid4().hex}"
+        header_models = [HttpHeader(name=n, value=v) for n, v in (headers or [])]
+        queue = (
+            self._router.register_method(HTTP_REQUEST_BODY_DELTA)
+            if stream_response
+            else None
+        )
+        params = HttpRequestParams(
+            method=method,
+            url=url,
+            headers=header_models,
+            body=ByteChunk(data=body) if body is not None else None,
+            timeoutMs=timeout_ms,
+            redirectPolicy=HttpRedirectPolicy(redirect_policy),
+            requestId=rid,
+            streamResponse=stream_response,
+        )
+        result = await self._pool.send_request(
+            HTTP_REQUEST, params.model_dump(by_alias=True, exclude_none=True)
+        )
+        response = HttpRequestResponse.model_validate(result)
+        if stream_response:
+            # bodyDelta 推送收集：done 或 error 终止，拼装完整响应体
+            chunks: list[bytes] = []
+            try:
+                while True:
+                    event = await queue.get()
+                    delta = HttpRequestBodyDeltaNotification.model_validate(
+                        event["params"]
+                    )
+                    if delta.error:
+                        raise ProtocolError(f"http body stream error: {delta.error}")
+                    chunks.append(delta.delta.data)
+                    if delta.done:
+                        break
+            finally:
+                self._router.unregister_method_queue(
+                    HTTP_REQUEST_BODY_DELTA, queue
+                )
+            response.body = ByteChunk(data=b"".join(chunks))
+        return response
 
     async def __aenter__(self) -> ExecutorClient:
         await self.connect()

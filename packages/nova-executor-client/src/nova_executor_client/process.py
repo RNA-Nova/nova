@@ -6,6 +6,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 from dataclasses import dataclass
 
 from .errors import ProcessError
@@ -17,9 +18,13 @@ from .protocol import (
     PROCESS_WRITE,
     ProcessReadParams,
     ProcessReadResponse,
+    ExecEnvPolicy,
+    ManagedNetworkSandboxContext,
     ProcessSignalParams,
     ProcessStartParams,
     ProcessStartResponse,
+    FileSystemSandboxContext,
+    ShellSnapshotRequest,
     ProcessTerminateParams,
     ProcessTerminateResponse,
     ProcessWriteParams,
@@ -101,8 +106,24 @@ class ProcessManager:
         tty: bool = False,
         process_id: str | None = None,
         pipe_stdin: bool = False,
+        *,
+        arg0: str | None = None,
+        env_policy: ExecEnvPolicy | dict[str, Any] | None = None,
+        shell_snapshot: ShellSnapshotRequest | dict[str, Any] | None = None,
+        sandbox: FileSystemSandboxContext | dict[str, Any] | None = None,
+        enforce_managed_network: bool = False,
+        managed_network: ManagedNetworkSandboxContext | dict[str, Any] | None = None,
+        network_proxy: dict[str, Any] | None = None,
     ) -> ProcessHandle:
-        """启动进程（pipe_stdin=True 才可用 write 写 stdin，否则服务端 stdinClosed）"""
+        """启动进程（pipe_stdin=True 才可用 write 写 stdin，否则服务端 stdinClosed）
+
+        沙箱与网络策略参数（wire：process/start 的 ExecParams 可选字段）：
+        - sandbox：文件系统沙箱上下文（见 protocol.FileSystemSandboxContext，
+          可用其 read_only/workspace_write 便捷构造）
+        - enforce_managed_network/managed_network：托管网络强制与 loopback
+          代理细节（fail-closed：无细节时服务端拒绝放行）
+        - env_policy/shell_snapshot/arg0：环境策略、shell 快照、argv[0] 覆盖
+        """
         if not argv:
             raise ProcessError("argv cannot be empty")
 
@@ -113,9 +134,16 @@ class ProcessManager:
             env=env or {},
             tty=tty,
             pipeStdin=pipe_stdin,
+            arg0=arg0,
+            envPolicy=env_policy,
+            shellSnapshot=shell_snapshot,
+            sandbox=sandbox,
+            enforceManagedNetwork=enforce_managed_network,
+            managedNetwork=managed_network,
+            networkProxy=network_proxy,
         )
         result = await self._transport.send_request(
-            PROCESS_START, params.model_dump(by_alias=True)
+            PROCESS_START, params.model_dump(by_alias=True, exclude_none=True)
         )
         response = ProcessStartResponse.model_validate(result)
         return ProcessHandle(process_id=response.process_id, client=self)

@@ -10,6 +10,7 @@
 - 环境变量 FAKE_STDERR=1 时每条消息向 stderr 写一行（stderr 消费测试）
 """
 
+import base64
 import json
 import os
 import sys
@@ -64,7 +65,38 @@ def main() -> None:
                 flush=True,
             )
             continue
-        elif method == "sleep":
+        elif method == "http/request":
+            params = msg.get("params") or {}
+            body = base64.b64encode(
+                f"echo:{params.get('method')}:{params.get('url')}".encode()
+            ).decode()
+            if params.get("streamResponse"):
+                result = {"status": 200, "headers": [], "body": ""}
+                print(
+                    json.dumps({"id": msg["id"], "result": result}),
+                    flush=True,
+                )
+                for seq, (delta, done) in enumerate(
+                    [(body[:4], False), (body[4:], True)], 1
+                ):
+                    print(
+                        json.dumps(
+                            {
+                                "method": "http/request/bodyDelta",
+                                "params": {
+                                    "requestId": params.get("requestId"),
+                                    "seq": seq,
+                                    "delta": {"data": delta},
+                                    "done": done,
+                                },
+                            }
+                        ),
+                        flush=True,
+                    )
+                continue
+            result = {"status": 200, "headers": [], "body": {"data": body}}
+        elif method == "sandbox_echo":
+            result = msg.get("params")
             # 延迟响应（客户端超时测试用）
             import time
 
