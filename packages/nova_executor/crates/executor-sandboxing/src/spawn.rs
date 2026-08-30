@@ -55,7 +55,7 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
                 nova_executor_windows_sandbox::WindowsSandboxSessionRequest {
                     permission_profile: windows.permission_profile,
                     workspace_roots: windows.workspace_roots,
-                    codex_home: executor_home.as_path(),
+                    sandbox_home: executor_home.as_path(),
                     command: request.command.to_vec(),
                     cwd: request.cwd,
                     env_map: request.env.clone(),
