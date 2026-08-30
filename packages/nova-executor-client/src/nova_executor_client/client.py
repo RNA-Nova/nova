@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from .errors import ProtocolError
 from .fs import FileSystemManager
@@ -17,6 +18,7 @@ from .protocol import (
     HTTP_REQUEST_BODY_DELTA,
     INITIALIZE,
     INITIALIZED,
+    NETWORK_POLICY_REQUEST,
     PROTOCOL_VERSION,
     ByteChunk,
     EnvironmentConfigReadParams,
@@ -30,6 +32,9 @@ from .protocol import (
     HttpRequestResponse,
     InitializeParams,
     InitializeResponse,
+    NetworkPolicyDecision,
+    NetworkPolicyRequestParams,
+    NetworkPolicyRequestResponse,
 )
 from .pty import PtyManager
 from .recovery import ManagedTransport, ReconnectStrategy
@@ -62,6 +67,13 @@ class ExecutorClient:
 
     `resume_session_id`：首连显式恢复既有会话（对位 Rust
     ExecServerClientConnectOptions.resume_session_id）；None = 开新会话。
+
+    `network_policy`：网络沙箱裁决回调（托管网络进程触碰 "ask" 域名时，
+    服务端反向请求 `network/policyRequest`，本回调收
+    `NetworkPolicyRequestParams`、回 `NetworkPolicyDecision`）。
+    None（默认）不注册处理器——服务端收到 METHOD_NOT_FOUND 并按
+    fail-closed 拒绝该访问（安全缺省）；回调超时/异常同样 fail-closed。
+    注册挂在控制面连接上，断线重连自动重挂。
     """
 
     def __init__(
@@ -77,6 +89,10 @@ class ExecutorClient:
         reconnect: ReconnectStrategy | None = ReconnectStrategy(),
         resume_session_id: str | None = None,
         client_name: str = DEFAULT_CLIENT_NAME,
+        network_policy: (
+            Callable[[NetworkPolicyRequestParams], Awaitable[NetworkPolicyDecision]]
+            | None
+        ) = None,
     ):
         if transport is None and transport_factory is None:
             if url is None:
@@ -152,6 +168,23 @@ class ExecutorClient:
         self.process = ProcessManager(self._pool)
         self.fs = FileSystemManager(self._pool, router=self._router)
         self.pty = PtyManager(self.process)
+
+        self._network_policy = network_policy
+        if network_policy is not None:
+            # 裁决处理器挂控制面（ManagedTransport 重连自动重挂）
+            self._control.register_request_handler(
+                NETWORK_POLICY_REQUEST, self._answer_network_policy
+            )
+
+    async def _answer_network_policy(self, params: dict[str, Any]) -> dict[str, Any]:
+        """裁决适配：线上载荷解析 → 用户回调 → 结果回线上形态（回调异常由
+        传输层转内部错误，服务端 fail-closed 拒决）"""
+        assert self._network_policy is not None
+        request = NetworkPolicyRequestParams.model_validate(params)
+        decision = await self._network_policy(request)
+        return NetworkPolicyRequestResponse(decision=decision).model_dump(
+            by_alias=True, exclude_none=True
+        )
 
     @classmethod
     def from_stdio(

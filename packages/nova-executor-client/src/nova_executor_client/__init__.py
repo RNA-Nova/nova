@@ -22,6 +22,8 @@ from .notifications import NotificationRouter, ReadStreamEvent
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, DATA_CHANNEL_METHODS, TransportPool
 from .process import ProcessHandle, ProcessManager, ProcessOutput
 from .protocol import (
+    NETWORK_POLICY_DECISION,
+    NETWORK_POLICY_REQUEST,
     EnvironmentCapabilities,
     EnvironmentConfigLayer,
     EnvironmentConfigLayerStack,
@@ -34,6 +36,8 @@ from .protocol import (
     ExecFileSystemSandboxEntry,
     ExecManagedFileSystemPermissions,
     ExecPermissionProfile,
+    ExecServerNetworkPolicyRequest,
+    ExecServerNetworkProtocol,
     FileSystemAccessMode,
     FileSystemSandboxContext,
     HttpHeader,
@@ -41,6 +45,9 @@ from .protocol import (
     HttpRequestParams,
     HttpRequestResponse,
     ManagedNetworkSandboxContext,
+    NetworkPolicyDecision,
+    NetworkPolicyRequestParams,
+    NetworkPolicyRequestResponse,
     NetworkSandboxPolicy,
     ShellSnapshotRequest,
     WindowsSandboxLevel,
@@ -101,6 +108,14 @@ __all__ = [
     "EnvironmentConfigReadResponse",
     "EnvironmentConfigLayer",
     "EnvironmentConfigLayerStack",
+    # 网络策略（托管网络沙箱裁决）
+    "NetworkPolicyDecision",
+    "NetworkPolicyRequestParams",
+    "NetworkPolicyRequestResponse",
+    "ExecServerNetworkProtocol",
+    "ExecServerNetworkPolicyRequest",
+    "NETWORK_POLICY_REQUEST",
+    "NETWORK_POLICY_DECISION",
     "JSON_RPC_INVALID_REQUEST",
     "JSON_RPC_METHOD_NOT_FOUND",
     "JSON_RPC_INVALID_PARAMS",

@@ -32,6 +32,8 @@ import websockets.asyncio.client
 import websockets.exceptions
 
 from .errors import (
+    JSON_RPC_INTERNAL_ERROR,
+    JSON_RPC_METHOD_NOT_FOUND,
     AuthError,
     ConnectionError,
     ExecutorError,
@@ -78,6 +80,10 @@ class Transport(Protocol):
 
     def on_notification(self, handler: NotificationHandler) -> None: ...
 
+    def register_request_handler(self, method: str, handler: RequestHandler) -> None:
+        """注册服务端反向请求处理器（可选能力；恢复层经 getattr 鸭式探测）"""
+        ...
+
     def on_disconnect(self, handler: DisconnectHandler) -> None: ...
 
     @property
@@ -98,6 +104,7 @@ class _JsonRpcTransport:
         self._pending: dict[int, asyncio.Future] = {}
         self._notification_handlers: list[NotificationHandler] = []
         self._disconnect_handlers: list[DisconnectHandler] = []
+        self._request_handlers: dict[str, RequestHandler] = {}
         self._closed = True  # 未连接即关闭态
 
     # ------------------------------------------------------------------
@@ -195,6 +202,59 @@ class _JsonRpcTransport:
     def on_notification(self, handler: NotificationHandler) -> None:
         """注册通知处理器"""
         self._notification_handlers.append(handler)
+
+    # ------------------------------------------------------------------
+    # 服务端反向请求（客户端当服务端：网络沙箱裁决等 method+id 消息）
+    # ------------------------------------------------------------------
+
+    def register_request_handler(self, method: str, handler: RequestHandler) -> None:
+        """注册服务端发起请求的处理器（按方法名路由；重复注册覆盖旧者）"""
+        self._request_handlers[method] = handler
+
+    def unregister_request_handler(self, method: str) -> None:
+        """注销服务端请求处理器（幂等）"""
+        self._request_handlers.pop(method, None)
+
+    async def _handle_server_request(self, message: dict) -> None:
+        """分发服务端反向请求并回写响应。
+
+        判别键是 method 存在与否——服务端请求的 id 空间与本端 pending 独立，
+        不会与响应混淆。纪律：裁决类请求绝不让服务端干等超时——无处理器回
+        METHOD_NOT_FOUND、处理器异常回内部错误（服务端均 fail-closed 拒决）。
+        """
+        message_id = message["id"]
+        method = message.get("method") or ""
+        handler = self._request_handlers.get(method)
+        if handler is None:
+            reply: dict = {
+                "id": message_id,
+                "error": {
+                    "code": JSON_RPC_METHOD_NOT_FOUND,
+                    "message": f"no handler for {method}",
+                },
+            }
+        else:
+            try:
+                result = await handler(message.get("params") or {})
+                reply = {
+                    "id": message_id,
+                    "result": result if result is not None else {},
+                }
+            except Exception as e:
+                logger.warning(
+                    "server request handler %s failed: %s", method, e, exc_info=True
+                )
+                reply = {
+                    "id": message_id,
+                    "error": {
+                        "code": JSON_RPC_INTERNAL_ERROR,
+                        "message": f"handler failed: {e}",
+                    },
+                }
+        try:
+            await self._send_message(reply)
+        except Exception as e:
+            logger.warning("failed to reply server request %s: %s", method, e)
 
     # ------------------------------------------------------------------
     # 断线
@@ -298,10 +358,13 @@ class WebSocketTransport(_JsonRpcTransport):
                     message = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                if "id" in message and message["id"] is not None:
+                if "method" in message:
+                    if message.get("id") is not None:
+                        await self._handle_server_request(message)
+                    else:
+                        await self._run_notification_handlers(message)
+                elif message.get("id") is not None:
                     self._resolve_response(message)
-                elif "method" in message:
-                    await self._run_notification_handlers(message)
         except websockets.exceptions.ConnectionClosed as e:
             reason = str(e)
         except Exception as e:  # 读路径其他失败同样传播为断线
@@ -482,11 +545,15 @@ class StdioTransport(_JsonRpcTransport):
                 except json.JSONDecodeError:
                     continue
 
-                if "id" in message and message["id"] is not None:
+                if "method" in message:
+                    if message.get("id") is not None:
+                        # 服务端反向请求（裁决等）：分发处理器并回写响应
+                        await self._handle_server_request(message)
+                    else:
+                        await self._run_notification_handlers(message)
+                elif message.get("id") is not None:
                     # 响应同步归 future（接收循环不被处理器阻塞）
                     self._resolve_response(message)
-                elif "method" in message:
-                    await self._run_notification_handlers(message)
         except (ValueError, OSError) as e:
             # ValueError：单行超过 max_message_size；OSError：管道读取失败
             reason = str(e)

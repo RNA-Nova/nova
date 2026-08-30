@@ -110,6 +110,43 @@ def main() -> None:
             # 先写一行非 JSON 再回正常结果（客户端坏帧容忍测试用）
             print("this-line-is-not-json", flush=True)
             result = {}
+        elif method == "policy/probe":
+            # 反向裁决测试：先向客户端发 network/policyRequest 并读回应答，
+            # 把客户端的裁决（或错误）装进自己的结果里
+            probe_id = "srv-policy-1"
+            print(
+                json.dumps(
+                    {
+                        "id": probe_id,
+                        "method": "network/policyRequest",
+                        "params": {
+                            "processId": "p1",
+                            "request": {
+                                "protocol": "https_connect",
+                                "host": "api.example.com",
+                                "port": 443,
+                            },
+                        },
+                    }
+                ),
+                flush=True,
+            )
+            decision_seen = None
+            for raw_line in sys.stdin:
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    reply = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                if reply.get("id") == probe_id:
+                    if "error" in reply:
+                        decision_seen = {"error": reply["error"]["message"]}
+                    else:
+                        decision_seen = reply["result"]["decision"]
+                    break
+            result = {"saw": decision_seen}
         else:
             result = {}
         print(json.dumps({"id": msg["id"], "result": result}), flush=True)

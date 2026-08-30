@@ -154,6 +154,7 @@ class ManagedTransport:
         self._state_changed = asyncio.Event()
         self._notification_handlers: list = []
         self._external_disconnect_handlers: list = []
+        self._request_handlers: dict = {}
         self._hooks_installed = False
 
     # ------------------------------------------------------------------
@@ -244,6 +245,12 @@ class ManagedTransport:
         if self._hooks_installed:
             self._transport.on_notification(handler)
 
+    def register_request_handler(self, method: str, handler) -> None:
+        """注册服务端反向请求处理器（重连后自动重挂到新底层传输）"""
+        self._request_handlers[method] = handler
+        if self._hooks_installed:
+            self._transport.register_request_handler(method, handler)
+
     def on_disconnect(self, handler) -> None:
         """对 ManagedTransport 自身状态的断线观察口（可选；恢复编排不经这里）"""
         # 底层断线回调由恢复编排消费；对外观察口另维护一份，断线时一并触发
@@ -288,9 +295,13 @@ class ManagedTransport:
             self._on_initialized(response)
 
     def _install_hooks(self, transport: Transport) -> None:
-        """把通知处理器与断线回调挂到（新）底层传输"""
+        """把通知处理器、反向请求处理器与断线回调挂到（新）底层传输"""
         for handler in self._notification_handlers:
             transport.on_notification(handler)
+        register = getattr(transport, "register_request_handler", None)
+        if register is not None:
+            for method, handler in self._request_handlers.items():
+                register(method, handler)
         on_disconnect = getattr(transport, "on_disconnect", None)
         if on_disconnect is not None:
             on_disconnect(

@@ -37,6 +37,8 @@ PROCESS_CLOSED = "process/closed"
 ENVIRONMENT_INFO = "environment/info"
 ENVIRONMENT_STATUS = "environment/status"
 ENVIRONMENT_CONFIG_READ = "environmentConfig/read"
+NETWORK_POLICY_REQUEST = "network/policyRequest"
+NETWORK_POLICY_DECISION = "network/policyDecision"
 FS_READ_FILE = "fs/readFile"
 FS_OPEN = "fs/open"
 FS_READ_BLOCK = "fs/readBlock"
@@ -848,3 +850,68 @@ def _file_url(path: str) -> str:
     from pathlib import Path
 
     return Path(path).resolve().as_uri()
+
+
+# =============================================================================
+# 网络策略（托管网络沙箱——服务端反向请求裁决 + 审计通知）
+# wire 形态对位 executor-protocol/src/network_policy.rs
+# =============================================================================
+
+
+class ExecServerNetworkProtocol(str, Enum):
+    """网络协议标识（wire：snake_case）"""
+
+    HTTP = "http"
+    HTTPS_CONNECT = "https_connect"
+    SOCKS5_TCP = "socks5_tcp"
+    SOCKS5_UDP = "socks5_udp"
+
+
+class ExecServerNetworkPolicyRequest(BaseModel):
+    """一次网络访问尝试（network/policyRequest 的 request 字段）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    protocol: ExecServerNetworkProtocol
+    host: str
+    port: int
+
+
+class NetworkPolicyRequestParams(BaseModel):
+    """network/policyRequest 反向请求参数（服务端进程发起，客户端裁决）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    process_id: str = Field(..., alias="processId")
+    request: ExecServerNetworkPolicyRequest
+
+
+class NetworkPolicyDecision(BaseModel):
+    """裁决结果（wire：internally-tagged type + reason——deny/ask 必带）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    type: Literal["allow", "deny", "ask"]
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _reason_required_for_deny_ask(self) -> "NetworkPolicyDecision":
+        if self.type in ("deny", "ask") and not self.reason:
+            raise ValueError(f"{self.type} 裁决必须携带 reason")
+        return self
+
+    @classmethod
+    def allow(cls) -> "NetworkPolicyDecision":
+        return cls(type="allow")
+
+    @classmethod
+    def deny(cls, reason: str) -> "NetworkPolicyDecision":
+        return cls(type="deny", reason=reason)
+
+    @classmethod
+    def ask(cls, reason: str) -> "NetworkPolicyDecision":
+        return cls(type="ask", reason=reason)
+
+
+class NetworkPolicyRequestResponse(BaseModel):
+    """network/policyRequest 的响应结果（结果只含 decision）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    decision: NetworkPolicyDecision
