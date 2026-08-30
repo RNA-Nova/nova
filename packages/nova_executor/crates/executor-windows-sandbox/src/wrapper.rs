@@ -17,7 +17,7 @@ use nova_executor_protocol_core::config_types::WindowsSandboxLevel;
 use nova_executor_protocol_core::models::PermissionProfile;
 use nova_executor_utils_absolute_path::AbsolutePathBuf;
 
-pub const CODEX_WINDOWS_SANDBOX_ARG1: &str = "--run-as-windows-sandbox";
+pub const NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1: &str = "--run-as-windows-sandbox";
 
 const COMMAND_CWD_FLAG: &str = "--command-cwd";
 const CODEX_HOME_FLAG: &str = "--codex-home";
@@ -59,7 +59,7 @@ pub fn create_windows_sandbox_command_args_for_permission_profile(
     let env_json = serde_json::to_string(env_map)
         .unwrap_or_else(|err| panic!("failed to serialize env: {err}"));
     let mut args = vec![
-        CODEX_WINDOWS_SANDBOX_ARG1.to_string(),
+        NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1.to_string(),
         CODEX_HOME_FLAG.to_string(),
         codex_home.to_string_lossy().into_owned(),
         COMMAND_CWD_FLAG.to_string(),

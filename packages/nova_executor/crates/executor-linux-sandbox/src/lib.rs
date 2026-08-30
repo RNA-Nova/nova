@@ -5,7 +5,7 @@
 //! - 基于 bubblewrap 的文件系统隔离。
 //!
 //! 二进制名保持 `codex-linux-sandbox`（argv0 互操作契约，见
-//! `nova_executor_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0`），与
+//! `nova_executor_sandboxing::landlock::NOVA_EXECUTOR_LINUX_SANDBOX_ARG0`），与
 //! executor-windows-sandbox 保留 helper 原名的先例一致。全部实现模块只面向
 //! Linux，经 `#[cfg(target_os = "linux")]` 门控；其他平台编译为 stub，
 //! `run_main()` 直接 panic。

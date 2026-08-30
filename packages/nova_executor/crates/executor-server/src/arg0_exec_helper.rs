@@ -1,7 +1,7 @@
 #[cfg(unix)]
 use std::process::Command;
 
-pub const CODEX_ARG0_EXEC_HELPER_ARG1: &str = "--codex-run-as-arg0-exec-helper";
+pub const NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1: &str = "--codex-run-as-arg0-exec-helper";
 
 #[cfg(unix)]
 pub fn main() -> ! {

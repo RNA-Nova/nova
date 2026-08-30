@@ -26,13 +26,13 @@ use crate::protocol::WritableRoot;
 
 const PROTECTED_METADATA_GIT_PATH_NAME: &str = ".git";
 const PROTECTED_METADATA_AGENTS_PATH_NAME: &str = ".agents";
-const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".nova";
+const PROTECTED_METADATA_NOVA_EXECUTOR_PATH_NAME: &str = ".nova";
 
 /// Top-level workspace metadata paths that stay protected under writable roots.
 pub const PROTECTED_METADATA_PATH_NAMES: &[&str] = &[
     PROTECTED_METADATA_GIT_PATH_NAME,
     PROTECTED_METADATA_AGENTS_PATH_NAME,
-    PROTECTED_METADATA_CODEX_PATH_NAME,
+    PROTECTED_METADATA_NOVA_EXECUTOR_PATH_NAME,
 ];
 
 /// Returns true when a path basename is one of the protected workspace metadata names.
@@ -2164,7 +2164,7 @@ pub(crate) fn default_read_only_subpaths_for_writable_root(
     // default. For the workspace root itself, protect it even before the
     // directory exists so first-time creation still goes through the
     // protected-path approval flow.
-    let top_level_codex = writable_root.join(PROTECTED_METADATA_CODEX_PATH_NAME);
+    let top_level_codex = writable_root.join(PROTECTED_METADATA_NOVA_EXECUTOR_PATH_NAME);
     if protect_missing_dot_codex || top_level_codex.as_path().is_dir() {
         subpaths.push(top_level_codex);
     }
@@ -2422,7 +2422,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[cfg(unix)]
-    const SYMLINKED_TMPDIR_TEST_ENV: &str = "CODEX_PROTOCOL_TEST_SYMLINKED_TMPDIR";
+    const SYMLINKED_TMPDIR_TEST_ENV: &str = "NOVA_EXECUTOR_PROTOCOL_TEST_SYMLINKED_TMPDIR";
 
     #[cfg(unix)]
     fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {

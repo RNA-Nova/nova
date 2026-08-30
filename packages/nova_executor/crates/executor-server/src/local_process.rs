@@ -698,13 +698,13 @@ fn child_env(params: &ExecParams) -> HashMap<String, String> {
     let mut env = match &params.env_policy {
         Some(env_policy) => {
             let policy = shell_environment_policy(env_policy);
-            let mut env = shell_environment::create_env(&policy, /*thread_id*/ None);
+            let mut env = shell_environment::create_env(&policy);
             env.extend(params.env.clone());
             env
         }
         None => params.env.clone(),
     };
-    env.remove(crate::CODEX_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR);
+    env.remove(crate::NOVA_EXECUTOR_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR);
     env.retain(|name, _| !shell_environment::is_non_inheritable_env_var(name));
     env
 }

@@ -31,10 +31,10 @@ mod telemetry;
 use nova_executor_protocol as protocol;
 
 /// Process-local opt-in for tying a remote executor to its parent's stdin pipe.
-pub const CODEX_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR: &str =
-    "CODEX_EXEC_SERVER_EXIT_ON_STDIN_CLOSE";
+pub const NOVA_EXECUTOR_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR: &str =
+    "NOVA_EXECUTOR_EXEC_SERVER_EXIT_ON_STDIN_CLOSE";
 
-pub use arg0_exec_helper::CODEX_ARG0_EXEC_HELPER_ARG1;
+pub use arg0_exec_helper::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
 pub use arg0_exec_helper::main as run_arg0_exec_helper_main;
 pub use client::EnvironmentObservedStatus;
 pub use client::ExecServerClient;
@@ -47,7 +47,7 @@ pub use client_api::ExecServerTransportParams;
 pub use client_api::HttpClient;
 pub use client_api::RemoteExecServerConnectArgs;
 pub use client_api::StdioExecServerCommand;
-pub use fs_helper::CODEX_FS_HELPER_ARG1;
+pub use fs_helper::NOVA_EXECUTOR_FS_HELPER_ARG1;
 pub use fs_helper_main::main as run_fs_helper_main;
 pub use local_file_system::LOCAL_FS;
 pub use local_file_system::LocalFileSystem;

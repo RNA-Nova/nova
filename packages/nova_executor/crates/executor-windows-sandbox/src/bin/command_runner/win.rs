@@ -77,7 +77,7 @@ use windows_sys::Win32::System::Threading::PROCESS_INFORMATION;
 use windows_sys::Win32::System::Threading::TerminateProcess;
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
-// Kept in sync with codex_exec_server::CODEX_FS_HELPER_ARG1 without introducing
+// Kept in sync with codex_exec_server::NOVA_EXECUTOR_FS_HELPER_ARG1 without introducing
 // a dependency cycle.
 const FS_HELPER_ARG: &str = "--codex-run-as-fs-helper";
 const READ_ACL_MUTEX_NAME: &str = "Local\\CodexSandboxReadAcl";

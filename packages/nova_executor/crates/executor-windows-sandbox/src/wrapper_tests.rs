@@ -9,7 +9,7 @@ use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 
 use super::CODEX_HOME_FLAG;
-use super::CODEX_WINDOWS_SANDBOX_ARG1;
+use super::NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1;
 use super::COMMAND_CWD_FLAG;
 use super::DENY_READ_PATHS_JSON_FLAG;
 use super::DENY_WRITE_PATHS_JSON_FLAG;
@@ -73,7 +73,7 @@ fn windows_wrapper_args_round_trip() {
         Path::new(r"C:\Users\me\.codex"),
     );
 
-    assert_eq!(args[0], CODEX_WINDOWS_SANDBOX_ARG1);
+    assert_eq!(args[0], NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1);
     assert!(args.contains(&CODEX_HOME_FLAG.to_string()));
     assert!(args.contains(&COMMAND_CWD_FLAG.to_string()));
     assert!(args.contains(&WORKSPACE_ROOT_FLAG.to_string()));

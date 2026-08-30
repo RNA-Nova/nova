@@ -253,7 +253,7 @@ fn snapshot_preserves_profile_exports_with_restrictive_inheritance() {
 fn snapshot_caches_only_unmanaged_proxy_state() {
     for (exports, expected) in [
         (
-            "PROFILE_ALLOWED=profile\0HTTP_PROXY=http://127.0.0.1:4321\0CODEX_NETWORK_PROXY_ACTIVE=1\0",
+            "PROFILE_ALLOWED=profile\0HTTP_PROXY=http://127.0.0.1:4321\0NOVA_EXECUTOR_NETWORK_PROXY_ACTIVE=1\0",
             HashMap::from([("PROFILE_ALLOWED".to_string(), "profile".to_string())]),
         ),
         (

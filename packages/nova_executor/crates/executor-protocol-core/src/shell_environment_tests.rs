@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 
-const CHILD_MODE_ENV_VAR: &str = "CODEX_SHELL_ENVIRONMENT_SCRUBBER_TEST_MODE";
+const CHILD_MODE_ENV_VAR: &str = "NOVA_EXECUTOR_SHELL_ENVIRONMENT_SCRUBBER_TEST_MODE";
 const TEST_NAME: &str =
     "shell_environment::tests::command_scrubber_removes_names_from_real_child_environment";
 
@@ -32,7 +32,7 @@ fn non_inheritable_environment_is_removed_after_policy_overrides() {
     };
 
     assert_eq!(
-        populate_env(vars, &policy, /*thread_id*/ None),
+        populate_env(vars, &policy),
         HashMap::from([("SAFE".to_string(), "override".to_string())])
     );
 }

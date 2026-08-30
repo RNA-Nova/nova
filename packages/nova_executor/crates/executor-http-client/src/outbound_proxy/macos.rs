@@ -103,7 +103,7 @@ pub(super) fn resolve(request_url: &str, origin: &RequestOrigin) -> SystemProxyD
 }
 
 fn system_proxy_settings() -> Option<CFDictionary<CFString, CFType>> {
-    let store = SCDynamicStoreBuilder::new("Codex").build()?;
+    let store = SCDynamicStoreBuilder::new("Nova").build()?;
     store.get_proxies()
 }
 

@@ -36,7 +36,7 @@ use nova_executor_protocol_core::protocol::FileSystemSandboxEntry;
 use nova_executor_protocol_core::protocol::FileSystemSandboxPolicy;
 use nova_executor_protocol_core::protocol::FileSystemSpecialPath;
 use nova_executor_protocol_core::protocol::NetworkSandboxPolicy;
-use nova_executor_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use nova_executor_sandboxing::landlock::NOVA_EXECUTOR_LINUX_SANDBOX_ARG0;
 
 static BWRAP_CHILD_PID: AtomicI32 = AtomicI32::new(0);
 static PENDING_FORWARDED_SIGNAL: AtomicI32 = AtomicI32::new(0);
@@ -467,7 +467,7 @@ fn build_bwrap_argv(
     })
 }
 
-fn exit_with_bwrap_build_error(err: nova_executor_protocol_core::error::CodexErr) -> ! {
+fn exit_with_bwrap_build_error(err: nova_executor_protocol_core::error::ExecErr) -> ! {
     eprintln!("error building bubblewrap command: {err}");
     std::process::exit(1);
 }
@@ -493,7 +493,7 @@ fn apply_inner_command_argv0_for_launcher(
     if supports_argv0 {
         argv.splice(
             command_separator_index..command_separator_index,
-            ["--argv0".to_string(), CODEX_LINUX_SANDBOX_ARG0.to_string()],
+            ["--argv0".to_string(), NOVA_EXECUTOR_LINUX_SANDBOX_ARG0.to_string()],
         );
         return;
     }

@@ -1207,11 +1207,11 @@ fn pty_terminate_reaps_child_when_waiter_is_queued() -> anyhow::Result<()> {
     runtime.block_on(async {
         let mut env_map: HashMap<String, String> = std::env::vars().collect();
         env_map.insert(
-            "CODEX_PTY_TEST_PID_FILE".to_string(),
+            "NOVA_EXECUTOR_PTY_TEST_PID_FILE".to_string(),
             pid_file.display().to_string(),
         );
         let (program, args) =
-            shell_command("printf '%s' \"$$\" > \"$CODEX_PTY_TEST_PID_FILE\"; sleep 60");
+            shell_command("printf '%s' \"$$\" > \"$NOVA_EXECUTOR_PTY_TEST_PID_FILE\"; sleep 60");
         let spawned = spawn_pty_process(
             &program,
             &args,

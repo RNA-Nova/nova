@@ -20,8 +20,8 @@ use std::time::Duration;
 use ctor::ctor;
 use nova_executor_http_client::HttpClientFactory;
 use nova_executor_http_client::OutboundProxyPolicy;
-use nova_executor_server::CODEX_ARG0_EXEC_HELPER_ARG1;
-use nova_executor_server::CODEX_FS_HELPER_ARG1;
+use nova_executor_server::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
+use nova_executor_server::NOVA_EXECUTOR_FS_HELPER_ARG1;
 use nova_executor_server::ExecServerRuntimePaths;
 use nova_executor_server::ExecServerTelemetry;
 use nova_executor_server::RequestDispatchMode;
@@ -54,7 +54,7 @@ static TEST_BINARY_DISPATCH: () = {
     #[cfg(target_os = "linux")]
     if let Some(program) = program.as_deref() {
         let is_linux_sandbox = Path::new(program).file_name().is_some_and(|name| {
-            name == nova_executor_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0
+            name == nova_executor_sandboxing::landlock::NOVA_EXECUTOR_LINUX_SANDBOX_ARG0
         });
         if is_linux_sandbox {
             // run_main 的 panic（如 bwrap 缺失）若穿出 ctor 的 extern "C" 边界
@@ -75,10 +75,10 @@ static TEST_BINARY_DISPATCH: () = {
         return;
     };
 
-    if argv1 == CODEX_ARG0_EXEC_HELPER_ARG1 {
+    if argv1 == NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1 {
         nova_executor_server::run_arg0_exec_helper_main();
     }
-    if argv1 == CODEX_FS_HELPER_ARG1 {
+    if argv1 == NOVA_EXECUTOR_FS_HELPER_ARG1 {
         nova_executor_server::run_fs_helper_main();
     }
     #[cfg(target_os = "windows")]

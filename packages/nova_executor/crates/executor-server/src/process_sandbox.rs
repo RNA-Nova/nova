@@ -31,7 +31,7 @@ use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use nova_executor_utils_path_uri::PathUri;
 
 #[cfg(unix)]
-use crate::CODEX_ARG0_EXEC_HELPER_ARG1;
+use crate::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1;
 use crate::ExecServerRuntimePaths;
 use crate::protocol::ExecParams;
 use crate::rpc::internal_error;
@@ -202,7 +202,7 @@ pub(crate) async fn prepare_exec_request(
         || (program.into(), args.to_vec()),
         |arg0| {
             let mut helper_args = Vec::with_capacity(params.argv.len() + 2);
-            helper_args.push(CODEX_ARG0_EXEC_HELPER_ARG1.to_string());
+            helper_args.push(NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1.to_string());
             helper_args.push(arg0.clone());
             helper_args.extend(params.argv.iter().cloned());
             (

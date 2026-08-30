@@ -223,8 +223,8 @@ fn bounded_shutdown_survives_worker_guard_page_failure() {
         .arg("--ignored")
         .arg("--nocapture")
         .arg("--test-threads=1")
-        .env("CODEX_OTEL_GUARD_PAGE_FAILURE_CHILD", "1")
-        .env("CODEX_OTEL_GUARD_PAGE_FAILURE_OBSERVED", &observed_path);
+        .env("NOVA_EXECUTOR_OTEL_GUARD_PAGE_FAILURE_CHILD", "1")
+        .env("NOVA_EXECUTOR_OTEL_GUARD_PAGE_FAILURE_OBSERVED", &observed_path);
 
     let output = subprocess
         .output()
@@ -254,7 +254,7 @@ fn bounded_shutdown_survives_worker_guard_page_failure() {
 // `--exact --ignored`, isolating fatal native-thread initialization failures.
 #[ignore]
 fn bounded_shutdown_survives_worker_guard_page_failure_child() {
-    if std::env::var_os("CODEX_OTEL_GUARD_PAGE_FAILURE_CHILD").is_none() {
+    if std::env::var_os("NOVA_EXECUTOR_OTEL_GUARD_PAGE_FAILURE_CHILD").is_none() {
         return;
     }
 
@@ -344,7 +344,7 @@ fn bounded_shutdown_survives_worker_guard_page_failure_child() {
         assert_eq!(unsafe { libc::munmap(mapped_page, page_size) }, 0);
     }
 
-    let observed_path = std::env::var_os("CODEX_OTEL_GUARD_PAGE_FAILURE_OBSERVED")
+    let observed_path = std::env::var_os("NOVA_EXECUTOR_OTEL_GUARD_PAGE_FAILURE_OBSERVED")
         .expect("guard-page fault observation path");
     std::fs::write(observed_path, "observed").expect("record guard-page fault injection");
 

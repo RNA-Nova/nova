@@ -360,8 +360,8 @@ pub const PROXY_URL_ENV_KEYS: &[&str] = &[
 ];
 
 pub const ALL_PROXY_ENV_KEYS: &[&str] = &["ALL_PROXY", "all_proxy"];
-pub const PROXY_ACTIVE_ENV_KEY: &str = "CODEX_NETWORK_PROXY_ACTIVE";
-pub const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "CODEX_NETWORK_ALLOW_LOCAL_BINDING";
+pub const PROXY_ACTIVE_ENV_KEY: &str = "NOVA_EXECUTOR_NETWORK_PROXY_ACTIVE";
+pub const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "NOVA_EXECUTOR_NETWORK_ALLOW_LOCAL_BINDING";
 const ELECTRON_GET_USE_PROXY_ENV_KEY: &str = "ELECTRON_GET_USE_PROXY";
 const NODE_USE_ENV_PROXY_ENV_KEY: &str = "NODE_USE_ENV_PROXY";
 #[cfg(any(target_os = "macos", test))]
@@ -369,7 +369,7 @@ const GIT_SSH_COMMAND_ENV_KEY: &str = "GIT_SSH_COMMAND";
 
 /// 由托管代理接管的环境变量全集（strip/注入对称性的单一事实源）。
 ///
-/// 相对 stub 快照补齐了 `CODEX_PROXY_ATTRIBUTION_TOKEN`、`ELECTRON_GET_USE_PROXY`、
+/// 相对 stub 快照补齐了 `NOVA_EXECUTOR_PROXY_ATTRIBUTION_TOKEN`、`ELECTRON_GET_USE_PROXY`、
 /// `NODE_USE_ENV_PROXY`——`apply_proxy_env_overrides` / `prepare_for_addrs` 会写入它们，
 /// `strip_managed_proxy_env` 必须能对称剥除。键值沿用 codex 线上取值（子进程 env 契约，
 /// 与 executor-otel 保留 `codex.*` 遥测名的先例一致）。
@@ -457,10 +457,10 @@ pub const DEFAULT_NO_PROXY_VALUE: &str = concat!(
 );
 
 #[cfg(target_os = "macos")]
-pub const NOVA_PROXY_GIT_SSH_COMMAND_MARKER: &str = "CODEX_PROXY_GIT_SSH_COMMAND=1 ";
+pub const NOVA_PROXY_GIT_SSH_COMMAND_MARKER: &str = "NOVA_EXECUTOR_PROXY_GIT_SSH_COMMAND=1 ";
 #[cfg(target_os = "macos")]
 const NOVA_PROXY_GIT_SSH_COMMAND_PREFIX: &str =
-    "CODEX_PROXY_GIT_SSH_COMMAND=1 ssh -o ProxyCommand='nc -X 5 -x ";
+    "NOVA_EXECUTOR_PROXY_GIT_SSH_COMMAND=1 ssh -o ProxyCommand='nc -X 5 -x ";
 #[cfg(target_os = "macos")]
 const NOVA_PROXY_GIT_SSH_COMMAND_SUFFIX: &str = " %h %p'";
 
@@ -1693,7 +1693,7 @@ mod tests {
         assert_eq!(
             env.get(GIT_SSH_COMMAND_ENV_KEY),
             Some(
-                &"CODEX_PROXY_GIT_SSH_COMMAND=1 ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'"
+                &"NOVA_EXECUTOR_PROXY_GIT_SSH_COMMAND=1 ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'"
                     .to_string()
             )
         );
@@ -1794,7 +1794,7 @@ mod tests {
         assert_eq!(
             env.get(GIT_SSH_COMMAND_ENV_KEY),
             Some(
-                &"CODEX_PROXY_GIT_SSH_COMMAND=1 ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'"
+                &"NOVA_EXECUTOR_PROXY_GIT_SSH_COMMAND=1 ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'"
                     .to_string()
             )
         );

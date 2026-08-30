@@ -7,7 +7,7 @@ use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 
 /// 执行链路默认错误别名。
-pub type Result<T, E = CodexErr> = std::result::Result<T, E>;
+pub type Result<T, E = ExecErr> = std::result::Result<T, E>;
 
 /// 沙箱执行链路的错误类型。
 #[derive(Error, Debug)]
@@ -45,17 +45,17 @@ pub enum SandboxErr {
     LandlockRestrict,
 }
 
-pub struct CodexErr {
-    details: CodexErrorDetails,
+pub struct ExecErr {
+    details: ExecErrorDetails,
     retry_delay: Option<Duration>,
 }
 
 #[derive(Error, Debug, EnumDiscriminants)]
-#[strum_discriminants(name(CodexErrKind))]
+#[strum_discriminants(name(ExecErrKind))]
 #[strum_discriminants(derive(serde::Serialize))]
 #[strum_discriminants(serde(rename_all = "snake_case"))]
 #[strum_discriminants(doc = "The payload-free semantic category used for analytics.")]
-pub enum CodexErrorDetails {
+pub enum ExecErrorDetails {
     /// Invalid request.
     #[error("{0}")]
     InvalidRequest(String),
@@ -81,44 +81,44 @@ pub enum CodexErrorDetails {
 }
 
 
-// 兼容宏：让调用方以 CodexErr::Variant 形态构造错误（同 codex 上游）。
-macro_rules! codex_err_unit_constructors {
+// 兼容宏：让调用方以 ExecErr::Variant 形态构造错误（同 codex 上游）。
+macro_rules! exec_err_unit_constructors {
     ($($variant:ident),* $(,)?) => {
         $(
             #[doc(hidden)]
             #[allow(non_upper_case_globals)]
             pub const $variant: Self = Self {
-                details: CodexErrorDetails::$variant,
+                details: ExecErrorDetails::$variant,
                 retry_delay: None,
             };
         )*
     };
 }
 
-macro_rules! codex_err_tuple_constructors {
+macro_rules! exec_err_tuple_constructors {
     ($($(#[$attr:meta])* $variant:ident($value:ident: $value_type:ty)),* $(,)?) => {
         $(
             $(#[$attr])*
             #[doc(hidden)]
             #[allow(non_snake_case)]
             pub fn $variant($value: $value_type) -> Self {
-                CodexErrorDetails::$variant($value).into()
+                ExecErrorDetails::$variant($value).into()
             }
         )*
     };
 }
 
-impl CodexErr {
+impl ExecErr {
     /// 底层错误类别（供外部按类别分流）。
-    pub fn details(&self) -> &CodexErrorDetails {
+    pub fn details(&self) -> &ExecErrorDetails {
         &self.details
     }
 
-    codex_err_unit_constructors!(
+    exec_err_unit_constructors!(
         LandlockSandboxExecutableNotProvided,
     );
 
-    codex_err_tuple_constructors!(
+    exec_err_tuple_constructors!(
         Sandbox(error: SandboxErr),
         InvalidRequest(message: String),
         UnsupportedOperation(message: String),
@@ -126,65 +126,65 @@ impl CodexErr {
     );
 }
 
-impl From<&CodexErr> for CodexErrKind {
-    fn from(error: &CodexErr) -> Self {
+impl From<&ExecErr> for ExecErrKind {
+    fn from(error: &ExecErr) -> Self {
         error.details().into()
     }
 }
 
-impl fmt::Debug for CodexErr {
+impl fmt::Debug for ExecErr {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.details, formatter)
     }
 }
 
-impl fmt::Display for CodexErr {
+impl fmt::Display for ExecErr {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.details, formatter)
     }
 }
 
-impl std::error::Error for CodexErr {
+impl std::error::Error for ExecErr {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.details.source()
     }
 }
 
-impl From<CodexErrorDetails> for CodexErr {
-    fn from(details: CodexErrorDetails) -> Self {
+impl From<ExecErrorDetails> for ExecErr {
+    fn from(details: ExecErrorDetails) -> Self {
         Self { details, retry_delay: None }
     }
 }
 
-impl From<SandboxErr> for CodexErr {
+impl From<SandboxErr> for ExecErr {
     fn from(error: SandboxErr) -> Self {
-        CodexErrorDetails::from(error).into()
+        ExecErrorDetails::from(error).into()
     }
 }
 
-impl From<io::Error> for CodexErr {
+impl From<io::Error> for ExecErr {
     fn from(error: io::Error) -> Self {
-        CodexErrorDetails::from(error).into()
+        ExecErrorDetails::from(error).into()
     }
 }
 
-impl From<serde_json::Error> for CodexErr {
+impl From<serde_json::Error> for ExecErr {
     fn from(error: serde_json::Error) -> Self {
-        CodexErrorDetails::from(error).into()
+        ExecErrorDetails::from(error).into()
     }
 }
 
 #[cfg(target_os = "linux")]
-impl From<landlock::RulesetError> for CodexErr {
+impl From<landlock::RulesetError> for ExecErr {
     fn from(error: landlock::RulesetError) -> Self {
-        CodexErrorDetails::from(error).into()
+        ExecErrorDetails::from(error).into()
     }
 }
 
 #[cfg(target_os = "linux")]
-impl From<landlock::PathFdError> for CodexErr {
+impl From<landlock::PathFdError> for ExecErr {
     fn from(error: landlock::PathFdError) -> Self {
-        CodexErrorDetails::from(error).into()
+        ExecErrorDetails::from(error).into()
     }
 }
 
@@ -195,23 +195,23 @@ mod tests {
     /// 兼容构造器生成的变体可经 Display 稳定呈现。
     #[test]
     fn compat_constructors_render_display() {
-        let err = CodexErr::Fatal("boom".to_string());
+        let err = ExecErr::Fatal("boom".to_string());
         assert!(err.to_string().contains("Fatal error: boom"));
-        assert!(matches!(err.details(), CodexErrorDetails::Fatal(_)));
+        assert!(matches!(err.details(), ExecErrorDetails::Fatal(_)));
     }
 
     /// SandboxErr 经 From 自动归入 Sandbox 类别。
     #[test]
     fn sandbox_err_wraps_into_sandbox_category() {
-        let err = CodexErr::from(SandboxErr::LandlockRestrict);
-        assert!(matches!(err.details(), CodexErrorDetails::Sandbox(_)));
+        let err = ExecErr::from(SandboxErr::LandlockRestrict);
+        assert!(matches!(err.details(), ExecErrorDetails::Sandbox(_)));
         assert!(err.to_string().contains("Landlock"));
     }
 
     /// InvalidRequest 保留原始消息文本。
     #[test]
     fn invalid_request_keeps_message() {
-        let err = CodexErr::InvalidRequest("bad args".to_string());
+        let err = ExecErr::InvalidRequest("bad args".to_string());
         assert_eq!(err.to_string(), "bad args");
     }
 }

@@ -506,7 +506,7 @@ impl RpcClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.request",
+        name = "nova.executor.request",
         level = "info",
         skip_all,
         fields(
@@ -540,7 +540,7 @@ impl RpcClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.request",
+        name = "nova.executor.request",
         level = "info",
         skip_all,
         fields(

@@ -1085,13 +1085,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn local_environment_info_resolves_relative_temporary_directory() {
-        if std::env::var_os("CODEX_TEST_RELATIVE_TMPDIR").is_none() {
+        if std::env::var_os("NOVA_EXECUTOR_TEST_RELATIVE_TMPDIR").is_none() {
             let status = std::process::Command::new(std::env::current_exe().expect("test binary"))
                 .arg("--exact")
                 .arg(
                     "protocol::tests::local_environment_info_resolves_relative_temporary_directory",
                 )
-                .env("CODEX_TEST_RELATIVE_TMPDIR", "1")
+                .env("NOVA_EXECUTOR_TEST_RELATIVE_TMPDIR", "1")
                 .env("TMPDIR", "relative-temp")
                 .status()
                 .expect("run relative TMPDIR subprocess");

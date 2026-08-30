@@ -320,7 +320,7 @@ impl RemoteNetworkProxyConfig {
 }
 
 /// 可信网桥 attribution 帧的 env 键（跨进程契约，取值不变）。
-pub const PROXY_ATTRIBUTION_TOKEN_ENV_KEY: &str = "CODEX_PROXY_ATTRIBUTION_TOKEN";
+pub const PROXY_ATTRIBUTION_TOKEN_ENV_KEY: &str = "NOVA_EXECUTOR_PROXY_ATTRIBUTION_TOKEN";
 
 /// 被阻止的请求
 #[derive(Clone, Debug, Serialize)]

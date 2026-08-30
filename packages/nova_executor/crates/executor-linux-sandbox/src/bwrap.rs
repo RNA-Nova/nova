@@ -3,7 +3,7 @@
 //! This module mirrors the semantics used by the macOS Seatbelt sandbox:
 //! - the filesystem is read-only by default,
 //! - explicit writable roots are layered on top, and
-//! - sensitive subpaths such as `.git`, `.agents`, and `.codex` remain
+//! - sensitive subpaths such as `.git`, `.agents`, and `.nova` remain
 //!   read-only even when their parent root is writable.
 //!
 //! The overall Linux sandbox is composed of:
@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::linux_run_main::synthetic_mount_registry_root;
-use nova_executor_protocol_core::error::CodexErr;
+use nova_executor_protocol_core::error::ExecErr;
 use nova_executor_protocol_core::error::Result;
 use nova_executor_protocol_core::permissions::is_protected_metadata_name;
 use nova_executor_protocol_core::protocol::FileSystemAccessMode;
@@ -419,7 +419,7 @@ fn create_filesystem_args(
                 };
                 // Automatic repo-metadata read masks are skipped here so the
                 // metadata handling below can apply the root-scoped
-                // protection consistently for `.git`, `.agents`, and `.codex`.
+                // protection consistently for `.git`, `.agents`, and `.nova`.
                 // User-authored `read` rules for other subpaths and `none`
                 // rules should keep their normal bwrap behavior, which can mask
                 // the first missing component to prevent creation under writable
@@ -710,7 +710,7 @@ fn expand_unreadable_globs_with_ripgrep(
     let mut patterns_by_search_root: BTreeMap<AbsolutePathBuf, Vec<String>> = BTreeMap::new();
     for pattern in patterns {
         let Some((search_root, glob)) = split_pattern_for_ripgrep(pattern, cwd) else {
-            return Err(CodexErr::Fatal(format!(
+            return Err(ExecErr::Fatal(format!(
                 "unreadable glob `{pattern}` cannot be safely expanded; use a pattern with a non-root directory prefix"
             )));
         };
@@ -733,7 +733,7 @@ fn expand_unreadable_globs_with_ripgrep(
             }
             expanded_paths.insert(path);
             if expanded_paths.len() > MAX_UNREADABLE_GLOB_MATCHES {
-                return Err(CodexErr::Fatal(format!(
+                return Err(ExecErr::Fatal(format!(
                     "unreadable glob expansion for {} matched more than {MAX_UNREADABLE_GLOB_MATCHES} paths",
                     search_root.display()
                 )));
@@ -852,7 +852,7 @@ fn ripgrep_files(
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CodexErr::Fatal(format!(
+        return Err(ExecErr::Fatal(format!(
             "ripgrep unreadable glob scan failed for {}: {stderr}",
             search_root.display()
         )));
@@ -887,7 +887,7 @@ fn glob_files(
             .allow_unclosed_class(true)
             .build()
             .map_err(|err| {
-                CodexErr::Fatal(format!(
+                ExecErr::Fatal(format!(
                     "unreadable glob pattern is invalid for {}: {err}",
                     search_root.display()
                 ))
@@ -895,7 +895,7 @@ fn glob_files(
         builder.add(glob);
     }
     let glob_set = builder.build().map_err(|err| {
-        CodexErr::Fatal(format!(
+        ExecErr::Fatal(format!(
             "unreadable glob matcher failed for {}: {err}",
             search_root.display()
         ))
@@ -1031,7 +1031,7 @@ fn append_read_only_subpath_args(
          * only protect a startup-time snapshot; the sandboxed process could
          * replace the writable symlink before it reads through the logical path.
          */
-        return Err(CodexErr::Fatal(format!(
+        return Err(ExecErr::Fatal(format!(
             "cannot enforce sandbox read-only path {} because it crosses writable symlink {}",
             subpath.display(),
             symlink.display()
@@ -1152,7 +1152,7 @@ fn append_unreadable_root_args(
          * protect the old target while the logical path could later point
          * somewhere else.
          */
-        return Err(CodexErr::Fatal(format!(
+        return Err(ExecErr::Fatal(format!(
             "cannot enforce sandbox deny-read path {} because it crosses writable symlink {}",
             unreadable_root.display(),
             symlink.display()

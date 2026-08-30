@@ -15,7 +15,7 @@ use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-const CONVERSATION_TURN_COUNT_METRIC: &str = "codex.conversation.turn.count";
+const CONVERSATION_TURN_COUNT_METRIC: &str = "nova.conversation.turn.count";
 
 // Metrics intentionally not sent through Codex's built-in Statsig route.
 // Keep this as an exact-name list so custom OTLP exporters still receive them.

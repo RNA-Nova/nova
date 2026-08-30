@@ -30,7 +30,7 @@ use tokio::process::Command;
 
 use crate::ExecServerRuntimePaths;
 use crate::FileSystemSandboxContext;
-use crate::fs_helper::CODEX_FS_HELPER_ARG1;
+use crate::fs_helper::NOVA_EXECUTOR_FS_HELPER_ARG1;
 use crate::fs_helper::FsHelperPayload;
 use crate::fs_helper::FsHelperRequest;
 use crate::fs_helper::FsHelperResponse;
@@ -214,7 +214,7 @@ impl FileSystemSandboxRunner {
         }
         let command = SandboxCommand {
             program: helper.as_path().as_os_str().to_owned(),
-            args: vec![CODEX_FS_HELPER_ARG1.to_string()],
+            args: vec![NOVA_EXECUTOR_FS_HELPER_ARG1.to_string()],
             cwd: cwd.uri.clone(),
             env: self.helper_env.clone(),
             managed_network: None,

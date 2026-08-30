@@ -54,7 +54,7 @@ use tracing::warn;
 const MAX_BLOCKED_EVENTS: usize = 200;
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// 违规日志行前缀（日志管线契约，沿用 codex 取值；nova 遥测命名先例见 executor-otel）。
-const NETWORK_POLICY_VIOLATION_PREFIX: &str = "CODEX_NETWORK_POLICY_VIOLATION";
+const NETWORK_POLICY_VIOLATION_PREFIX: &str = "NOVA_EXECUTOR_NETWORK_POLICY_VIOLATION";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostBlockReason {
@@ -1270,7 +1270,7 @@ mod tests {
 
         assert_eq!(
             blocked_request_violation_log_line(&entry),
-            r#"CODEX_NETWORK_POLICY_VIOLATION {"host":"google.com","reason":"not_allowed","client":"127.0.0.1","method":"GET","mode":"proxy","protocol":"http","decision":"ask","source":"decider","port":80,"timestamp":1735689600}"#
+            r#"NOVA_EXECUTOR_NETWORK_POLICY_VIOLATION {"host":"google.com","reason":"not_allowed","client":"127.0.0.1","method":"GET","mode":"proxy","protocol":"http","decision":"ask","source":"decider","port":80,"timestamp":1735689600}"#
         );
     }
 

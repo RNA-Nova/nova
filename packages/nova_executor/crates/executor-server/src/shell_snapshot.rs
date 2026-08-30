@@ -181,7 +181,7 @@ impl ShellSnapshotCache {
                 end -= 1;
             }
             let (chunk, remaining) = state.split_at(end);
-            let name = format!("__CODEX_SHELL_SNAPSHOT_STATE_{}", state_variables.len());
+            let name = format!("__NOVA_EXECUTOR_SHELL_SNAPSHOT_STATE_{}", state_variables.len());
             prepared.env.insert(name.clone(), chunk.to_string());
             state_variables.push(name);
             state = remaining;
@@ -318,7 +318,7 @@ fn parse_snapshot(
         Some(policy) => {
             let mut policy = shell_environment_policy(policy);
             policy.inherit = ShellEnvironmentPolicyInherit::All;
-            shell_environment::create_env_from_vars(environment, &policy, /*thread_id*/ None)
+            shell_environment::create_env_from_vars(environment, &policy)
         }
         None => environment,
     };

@@ -3,8 +3,6 @@ use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyInherit;
 use std::collections::HashMap;
 
-pub const CODEX_SESSION_ID_ENV_VAR: &str = "CODEX_SESSION_ID";
-pub const CODEX_THREAD_ID_ENV_VAR: &str = "CODEX_THREAD_ID";
 pub const OPENAI_FEDERATION_RULE_ID_ENV_VAR: &str = "OPENAI_FEDERATION_RULE_ID";
 pub const OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR: &str = "OPENAI_IDENTITY_TOKEN_FILE";
 
@@ -46,22 +44,18 @@ pub fn scrub_non_inheritable_env_vars(command: &mut std::process::Command) {
 
 /// Construct a shell environment from the supplied process environment and
 /// shell-environment policy.
-pub fn create_env(
-    policy: &ShellEnvironmentPolicy,
-    thread_id: Option<&str>,
-) -> HashMap<String, String> {
-    create_env_from_vars(std::env::vars(), policy, thread_id)
+pub fn create_env(policy: &ShellEnvironmentPolicy) -> HashMap<String, String> {
+    create_env_from_vars(std::env::vars(), policy)
 }
 
 pub fn create_env_from_vars<I>(
     vars: I,
     policy: &ShellEnvironmentPolicy,
-    thread_id: Option<&str>,
 ) -> HashMap<String, String>
 where
     I: IntoIterator<Item = (String, String)>,
 {
-    let mut env_map = populate_env(vars, policy, thread_id);
+    let mut env_map = populate_env(vars, policy);
 
     if cfg!(target_os = "windows") {
         // This is a workaround to address the failures we are seeing in the
@@ -85,8 +79,7 @@ where
 pub fn populate_env<I>(
     vars: I,
     policy: &ShellEnvironmentPolicy,
-    thread_id: Option<&str>,
-) -> HashMap<String, String>
+    ) -> HashMap<String, String>
 where
     I: IntoIterator<Item = (String, String)>,
 {
@@ -141,9 +134,6 @@ where
     }
 
     // Step 6 - Populate the thread ID environment variable when provided.
-    if let Some(thread_id) = thread_id {
-        env_map.insert(CODEX_THREAD_ID_ENV_VAR.to_string(), thread_id.to_string());
-    }
 
     // Restricted launch context cannot be restored through user-provided shell
     // environment overrides.
@@ -225,7 +215,7 @@ mod windows_tests {
         };
 
         // Check a few sample vars instead of the full Windows core list.
-        let result = populate_env(vars, &policy, /*thread_id*/ None);
+        let result = populate_env(vars, &policy);
         let expected = HashMap::from([
             (
                 "Shell".to_string(),
@@ -251,7 +241,7 @@ mod windows_tests {
             ..Default::default()
         };
 
-        let result = create_env_from_vars(Vec::new(), &policy, /*thread_id*/ None);
+        let result = create_env_from_vars(Vec::new(), &policy);
         let expected = HashMap::from([("PATHEXT".to_string(), ".COM;.EXE;.BAT;.CMD".to_string())]);
 
         assert_eq!(result, expected);
@@ -285,7 +275,7 @@ mod non_windows_tests {
             ..Default::default()
         };
 
-        let result = populate_env(vars, &policy, /*thread_id*/ None);
+        let result = populate_env(vars, &policy);
         let expected = HashMap::from([
             ("path".to_string(), "/usr/bin".to_string()),
             ("home".to_string(), "/home/codex".to_string()),

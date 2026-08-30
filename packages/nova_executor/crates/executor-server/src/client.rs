@@ -590,7 +590,7 @@ impl LazyRemoteExecServerClient {
         )
     }
 
-    #[tracing::instrument(name = "codex.exec_server.remote.connect", skip_all)]
+    #[tracing::instrument(name = "nova.executor.remote.connect", skip_all)]
     async fn connect_once(&self) -> ConnectionResult {
         let result = ExecServerClient::connect_for_transport(
             self.transport_params.clone(),

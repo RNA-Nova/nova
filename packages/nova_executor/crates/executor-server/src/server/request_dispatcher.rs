@@ -329,7 +329,7 @@ pub(super) enum RequestTaskResult {
 fn request_span(span_name: &str, request: &JSONRPCRequest) -> tracing::Span {
     let method = request.method.as_str();
     let span = tracing::info_span!(
-        "codex.exec_server.request",
+        "nova.executor.request",
         otel.kind = "server",
         otel.name = span_name,
         method,

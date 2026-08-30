@@ -79,7 +79,7 @@ impl Drop for ProtectedDirectory {
 #[test]
 fn protected_directory_does_not_discard_accessible_deny_matches() {
     #[cfg(windows)]
-    if let Some(root) = std::env::var_os("CODEX_TEST_DENY_READ_RESTRICTED_ROOT") {
+    if let Some(root) = std::env::var_os("NOVA_EXECUTOR_TEST_DENY_READ_RESTRICTED_ROOT") {
         assert_accessible_deny_matches(Path::new(&root));
         return;
     }
@@ -105,7 +105,7 @@ fn protected_directory_does_not_discard_accessible_deny_matches() {
         let cwd = AbsolutePathBuf::from_absolute_path(temp.path()).expect("workspace");
         let mut env = std::collections::HashMap::from([
             (
-                "CODEX_TEST_DENY_READ_RESTRICTED_ROOT".to_string(),
+                "NOVA_EXECUTOR_TEST_DENY_READ_RESTRICTED_ROOT".to_string(),
                 cwd.display().to_string(),
             ),
             ("TEMP".to_string(), cwd.display().to_string()),

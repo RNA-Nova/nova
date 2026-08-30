@@ -12,17 +12,17 @@ pub const SESSION_SOURCE_TAG: &str = "session_source";
 
 const OTHER_ORIGINATOR_TAG_VALUE: &str = "other";
 const KNOWN_ORIGINATOR_TAG_VALUES: &[&str] = &[
-    "codex_desktop",
-    "codex-app-server",
-    "codex_mcp_server",
-    "codex_cli_rs",
-    "codex-tui",
-    "codex_vscode",
+    "nova_desktop",
+    "nova-app-server",
+    "nova_mcp_server",
+    "nova_cli_rs",
+    "nova-tui",
+    "nova_vscode",
     "none",
-    "codex_exec",
-    "codex-cli",
-    "codex_sdk_ts",
-    "codex-app-server-sdk",
+    "nova_exec",
+    "nova-cli",
+    "nova_sdk_ts",
+    "nova-app-server-sdk",
 ];
 
 /// Return a known low-cardinality originator tag value, or `other`.
@@ -87,7 +87,7 @@ mod tests {
         let tags = SessionMetricTagValues {
             auth_mode: Some("api_key"),
             session_source: "cli",
-            originator: "codex_cli",
+            originator: "nova_cli",
             service_name: Some("desktop_app"),
             model: "gpt-5.1",
             app_version: "1.2.3",
@@ -100,7 +100,7 @@ mod tests {
             vec![
                 (AUTH_MODE_TAG, "api_key"),
                 (SESSION_SOURCE_TAG, "cli"),
-                (ORIGINATOR_TAG, "codex_cli"),
+                (ORIGINATOR_TAG, "nova_cli"),
                 (SERVICE_NAME_TAG, "desktop_app"),
                 (MODEL_TAG, "gpt-5.1"),
                 (APP_VERSION_TAG, "1.2.3"),
@@ -113,7 +113,7 @@ mod tests {
         let tags = SessionMetricTagValues {
             auth_mode: None,
             session_source: "exec",
-            originator: "codex_exec",
+            originator: "nova_exec",
             service_name: None,
             model: "gpt-5.1",
             app_version: "1.2.3",
@@ -125,7 +125,7 @@ mod tests {
             tags,
             vec![
                 (SESSION_SOURCE_TAG, "exec"),
-                (ORIGINATOR_TAG, "codex_exec"),
+                (ORIGINATOR_TAG, "nova_exec"),
                 (MODEL_TAG, "gpt-5.1"),
                 (APP_VERSION_TAG, "1.2.3"),
             ]

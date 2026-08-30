@@ -111,9 +111,9 @@ fn is_executable_file(path: &Path) -> bool {
 fn expected_sha256() -> Option<[u8; 32]> {
     static EXPECTED: OnceLock<Option<[u8; 32]>> = OnceLock::new();
     *EXPECTED.get_or_init(|| {
-        let raw_digest = option_env!("CODEX_BWRAP_SHA256")?;
+        let raw_digest = option_env!("NOVA_EXECUTOR_BWRAP_SHA256")?;
         let digest = parse_sha256_hex(raw_digest)
-            .unwrap_or_else(|err| panic!("invalid CODEX_BWRAP_SHA256 value: {err}"));
+            .unwrap_or_else(|err| panic!("invalid NOVA_EXECUTOR_BWRAP_SHA256 value: {err}"));
         (digest != NULL_SHA256_DIGEST).then_some(digest)
     })
 }

@@ -38,10 +38,10 @@ use std::time::Duration;
 use std::time::Instant;
 use tempfile::TempDir;
 
-const CODEX_CA_CERT_ENV: &str = "CODEX_CA_CERTIFICATE";
-const PROBE_PROXY_ENV: &str = "CODEX_CUSTOM_CA_PROBE_PROXY";
-const PROBE_TLS13_ENV: &str = "CODEX_CUSTOM_CA_PROBE_TLS13";
-const PROBE_URL_ENV: &str = "CODEX_CUSTOM_CA_PROBE_URL";
+const NOVA_EXECUTOR_CA_CERT_ENV: &str = "NOVA_EXECUTOR_CA_CERTIFICATE";
+const PROBE_PROXY_ENV: &str = "NOVA_EXECUTOR_CUSTOM_CA_PROBE_PROXY";
+const PROBE_TLS13_ENV: &str = "NOVA_EXECUTOR_CUSTOM_CA_PROBE_TLS13";
+const PROBE_URL_ENV: &str = "NOVA_EXECUTOR_CUSTOM_CA_PROBE_URL";
 const SSL_CERT_FILE_ENV: &str = "SSL_CERT_FILE";
 const PROXY_ENV_VARS: &[&str] = &[
     "HTTP_PROXY",
@@ -93,7 +93,7 @@ fn probe_command() -> Command {
     );
     // `Command` inherits the parent environment by default, so scrub CA-related variables first or
     // these tests can accidentally pass/fail based on the developer shell or CI runner.
-    cmd.env_remove(CODEX_CA_CERT_ENV);
+    cmd.env_remove(NOVA_EXECUTOR_CA_CERT_ENV);
     cmd.env_remove(PROBE_PROXY_ENV);
     cmd.env_remove(PROBE_TLS13_ENV);
     cmd.env_remove(PROBE_URL_ENV);
@@ -397,7 +397,7 @@ fn uses_codex_ca_cert_env() {
     let temp_dir = TempDir::new().expect("tempdir");
     let cert_path = write_cert_file(&temp_dir, "ca.pem", TEST_CERT_1);
 
-    let output = run_probe(&[(CODEX_CA_CERT_ENV, cert_path.as_path())]);
+    let output = run_probe(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())]);
 
     assert!(output.status.success());
 }
@@ -419,7 +419,7 @@ fn prefers_codex_ca_cert_over_ssl_cert_file() {
     let bad_path = write_cert_file(&temp_dir, "bad.pem", "");
 
     let output = run_probe(&[
-        (CODEX_CA_CERT_ENV, cert_path.as_path()),
+        (NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path()),
         (SSL_CERT_FILE_ENV, bad_path.as_path()),
     ]);
 
@@ -432,7 +432,7 @@ fn handles_multi_certificate_bundle() {
     let bundle = format!("{TEST_CERT_1}\n{TEST_CERT_2}");
     let cert_path = write_cert_file(&temp_dir, "bundle.pem", &bundle);
 
-    let output = run_probe(&[(CODEX_CA_CERT_ENV, cert_path.as_path())]);
+    let output = run_probe(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())]);
 
     assert!(output.status.success());
 }
@@ -444,7 +444,7 @@ fn posts_to_tls13_server_using_custom_ca_bundle() {
     let cert_path = write_cert_file(&temp_dir, "tls-ca.pem", &server.ca_cert_pem);
 
     let output =
-        run_probe_posting_to_tls13_server(&[(CODEX_CA_CERT_ENV, cert_path.as_path())], &server.url);
+        run_probe_posting_to_tls13_server(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())], &server.url);
     let server_result = server.request_rx.recv_timeout(Duration::from_secs(5));
 
     assert!(
@@ -467,7 +467,7 @@ fn posts_to_token_origin_through_tls_intercepting_proxy_with_custom_ca_bundle() 
     let cert_path = write_cert_file(&temp_dir, "proxy-ca.pem", &proxy.ca_cert_pem);
 
     let output = run_probe_posting_through_tls_intercepting_proxy(
-        &[(CODEX_CA_CERT_ENV, cert_path.as_path())],
+        &[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())],
         &origin.url,
         &proxy.url,
     );
@@ -495,12 +495,12 @@ fn rejects_empty_pem_file_with_hint() {
     let temp_dir = TempDir::new().expect("tempdir");
     let cert_path = write_cert_file(&temp_dir, "empty.pem", "");
 
-    let output = run_probe(&[(CODEX_CA_CERT_ENV, cert_path.as_path())]);
+    let output = run_probe(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())]);
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no certificates found in PEM file"));
-    assert!(stderr.contains("CODEX_CA_CERTIFICATE"));
+    assert!(stderr.contains("NOVA_EXECUTOR_CA_CERTIFICATE"));
     assert!(stderr.contains("SSL_CERT_FILE"));
 }
 
@@ -513,12 +513,12 @@ fn rejects_malformed_pem_with_hint() {
         "-----BEGIN CERTIFICATE-----\nMIIBroken",
     );
 
-    let output = run_probe(&[(CODEX_CA_CERT_ENV, cert_path.as_path())]);
+    let output = run_probe(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())]);
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("failed to parse PEM file"));
-    assert!(stderr.contains("CODEX_CA_CERTIFICATE"));
+    assert!(stderr.contains("NOVA_EXECUTOR_CA_CERTIFICATE"));
     assert!(stderr.contains("SSL_CERT_FILE"));
 }
 
@@ -527,7 +527,7 @@ fn accepts_openssl_trusted_certificate() {
     let temp_dir = TempDir::new().expect("tempdir");
     let cert_path = write_cert_file(&temp_dir, "trusted.pem", TRUSTED_TEST_CERT);
 
-    let output = run_probe(&[(CODEX_CA_CERT_ENV, cert_path.as_path())]);
+    let output = run_probe(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())]);
 
     assert!(output.status.success());
 }
@@ -539,7 +539,7 @@ fn accepts_bundle_with_crl() {
     let bundle = format!("{TEST_CERT_1}\n{crl}");
     let cert_path = write_cert_file(&temp_dir, "bundle_crl.pem", &bundle);
 
-    let output = run_probe(&[(CODEX_CA_CERT_ENV, cert_path.as_path())]);
+    let output = run_probe(&[(NOVA_EXECUTOR_CA_CERT_ENV, cert_path.as_path())]);
 
     assert!(output.status.success());
 }

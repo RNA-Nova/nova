@@ -43,11 +43,11 @@ fn main() -> Result<()> {
     let mut args = std::env::args_os();
     let _program = args.next();
     match args.next().as_deref() {
-        Some(arg) if arg == std::ffi::OsStr::new(nova_executor_server::CODEX_FS_HELPER_ARG1) => {
+        Some(arg) if arg == std::ffi::OsStr::new(nova_executor_server::NOVA_EXECUTOR_FS_HELPER_ARG1) => {
             nova_executor_server::run_fs_helper_main();
         }
         Some(arg)
-            if arg == std::ffi::OsStr::new(nova_executor_server::CODEX_ARG0_EXEC_HELPER_ARG1) =>
+            if arg == std::ffi::OsStr::new(nova_executor_server::NOVA_EXECUTOR_ARG0_EXEC_HELPER_ARG1) =>
         {
             nova_executor_server::run_arg0_exec_helper_main();
         }

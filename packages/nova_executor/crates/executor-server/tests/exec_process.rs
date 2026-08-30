@@ -214,7 +214,7 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
         ("profile_helper; ", "helper")
     };
     let command = format!(
-        "export PATH='{}':\"$PATH\"; {command_prefix}printf '|%s|%s|%s|%s|%s|%s' \"$PROFILE_ALLOWED\" \"${{PROFILE_SECRET-missing}}\" \"${{PROFILE_DENIED-missing}}\" \"$PATH\" \"${{__CODEX_SHELL_SNAPSHOT_STATE_0-missing}}\" \"${{__CODEX_SHELL_SNAPSHOT_STATE_1-missing}}\"",
+        "export PATH='{}':\"$PATH\"; {command_prefix}printf '|%s|%s|%s|%s|%s|%s' \"$PROFILE_ALLOWED\" \"${{PROFILE_SECRET-missing}}\" \"${{PROFILE_DENIED-missing}}\" \"$PATH\" \"${{__NOVA_EXECUTOR_SHELL_SNAPSHOT_STATE_0-missing}}\" \"${{__NOVA_EXECUTOR_SHELL_SNAPSHOT_STATE_1-missing}}\"",
         runtime_path_entry.display(),
     );
     let expected_stdout = format!(
@@ -277,7 +277,7 @@ async fn shell_snapshot_v2_remote_managed_proxy_uses_prepared_execution_context(
     let cwd = PathUri::from_host_native_path(home.path())?;
     std::fs::write(
         home.path().join(".bashrc"),
-        "printf '%s\\n' \"$HTTP_PROXY\" >> \"$HOME/captures\"\ntest \"$CODEX_NETWORK_PROXY_ACTIVE\" = 1 || exit 41\nexport PROFILE_ALLOWED=profile\nprofile_helper() { printf helper; }\n",
+        "printf '%s\\n' \"$HTTP_PROXY\" >> \"$HOME/captures\"\ntest \"$NOVA_EXECUTOR_NETWORK_PROXY_ACTIVE\" = 1 || exit 41\nexport PROFILE_ALLOWED=profile\nprofile_helper() { printf helper; }\n",
     )?;
     let policy = ExecEnvPolicy {
         inherit: ShellEnvironmentPolicyInherit::All,
@@ -307,7 +307,7 @@ async fn shell_snapshot_v2_remote_managed_proxy_uses_prepared_execution_context(
                 argv: vec![
                     "/bin/bash".to_string(),
                     "-lc".to_string(),
-                    "profile_helper; printf '|%s|%s|%s' \"$PROFILE_ALLOWED\" \"$CODEX_NETWORK_PROXY_ACTIVE\" \"$HTTP_PROXY\"".to_string(),
+                    "profile_helper; printf '|%s|%s|%s' \"$PROFILE_ALLOWED\" \"$NOVA_EXECUTOR_NETWORK_PROXY_ACTIVE\" \"$HTTP_PROXY\"".to_string(),
                 ],
                 cwd: cwd.clone(),
                 env_policy: Some(policy.clone()),
@@ -513,7 +513,7 @@ async fn remote_sandboxed_process_preserves_custom_arg0() -> Result<()> {
             argv: vec![
                 "/bin/sh".to_string(),
                 "-c".to_string(),
-                "printf '%s' \"$0\"; if /bin/cat \"$CODEX_TEST_DENIED_FILE\" >/dev/null 2>&1; then exit 42; fi"
+                "printf '%s' \"$0\"; if /bin/cat \"$NOVA_EXECUTOR_TEST_DENIED_FILE\" >/dev/null 2>&1; then exit 42; fi"
                     .to_string(),
             ],
             cwd,
@@ -522,7 +522,7 @@ async fn remote_sandboxed_process_preserves_custom_arg0() -> Result<()> {
             env: HashMap::from([
                 ("PATH".to_string(), std::env::var("PATH")?),
                 (
-                    "CODEX_TEST_DENIED_FILE".to_string(),
+                    "NOVA_EXECUTOR_TEST_DENIED_FILE".to_string(),
                     denied_file.to_string_lossy().into_owned(),
                 ),
             ]),

@@ -1,4 +1,3 @@
-pub mod capabilities;
 pub mod config_types;
 pub mod error;
 pub mod exec_output;

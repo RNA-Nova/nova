@@ -272,7 +272,7 @@ struct WinHttpSession(*mut c_void);
 
 impl WinHttpSession {
     fn open() -> Option<Self> {
-        let agent = wide_null("Codex");
+        let agent = wide_null("Nova");
         let handle = unsafe {
             WinHttpOpen(
                 agent.as_ptr(),

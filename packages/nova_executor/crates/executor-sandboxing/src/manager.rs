@@ -2,7 +2,7 @@
 use crate::bwrap::WSL1_BWRAP_WARNING;
 #[cfg(target_os = "linux")]
 use crate::bwrap::is_wsl1;
-use crate::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use crate::landlock::NOVA_EXECUTOR_LINUX_SANDBOX_ARG0;
 use crate::landlock::allow_network_for_proxy;
 use crate::landlock::create_linux_sandbox_command_args_for_permission_profile;
 use crate::policy_transforms::effective_permission_profile;
@@ -723,10 +723,10 @@ fn os_string_to_command_component(value: OsString) -> String {
 }
 
 fn linux_sandbox_arg0_override(exe: &Path) -> String {
-    if exe.file_name().and_then(|name| name.to_str()) == Some(CODEX_LINUX_SANDBOX_ARG0) {
+    if exe.file_name().and_then(|name| name.to_str()) == Some(NOVA_EXECUTOR_LINUX_SANDBOX_ARG0) {
         os_string_to_command_component(exe.as_os_str().to_owned())
     } else {
-        CODEX_LINUX_SANDBOX_ARG0.to_string()
+        NOVA_EXECUTOR_LINUX_SANDBOX_ARG0.to_string()
     }
 }
 
