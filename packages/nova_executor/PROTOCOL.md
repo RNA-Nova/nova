@@ -95,7 +95,7 @@ Linux bubblewrap+landlock / Windows restricted token）。**策略在客户端�
 携带 `networkProxy`（RemoteNetworkProxyLaunchConfig）时，executor 在进程
 启动前拉起一个进程级本地网络代理（HTTP CONNECT + SOCKS5，监听 loopback
 临时端口），并向子进程注入代理环境变量（`HTTP_PROXY`/`HTTPS_PROXY`/
-`ALL_PROXY` 等 + `CODEX_NETWORK_PROXY_ACTIVE=1`）；同次启动带 `sandbox`
+`ALL_PROXY` 等 + `NOVA_EXECUTOR_NETWORK_PROXY_ACTIVE=1`）；同次启动带 `sandbox`
 时，沙箱网络段断直连（默认拒绝出网，仅放行代理 loopback 端口），全部出网
 流量被迫经代理接受域名白名单裁决。代理生命周期随进程：进程句柄
 `process/closed` 时代理一并关闭（继承输出流的后台子进程存续期间代理保持
