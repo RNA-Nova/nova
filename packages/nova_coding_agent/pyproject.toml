@@ -105,3 +105,10 @@ binary_dependencies = { rg = "ripgrep==15.1.0" }
 # 场景（find_type="directory"）。安装时按 pin 版本 + sha256 下载到 nova bin。
 binary_managed_dependencies = ["fd"]
 
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests that call real APIs (deselect with '-m \"not integration\"')",
+]
+# 单测挂死保险丝：超时即转储全线程栈并判红（不配死锁会冻结整条流水线）
+faulthandler_timeout = 120

@@ -282,3 +282,37 @@ class TestGrepRunnerDispatch:
         result = _run(ops.grep("/w", GrepOptions(pattern="foo")))
         assert result.match_count == 1
         assert runner.spawned == []  # 未走 rg 链
+
+
+# ---------------------------------------------------------------------------
+# 停读+杀 竞态回归 pin（_LocalSession.wait 轮询兜底）
+# ---------------------------------------------------------------------------
+
+
+def test_local_session_wait_survives_early_stop_and_kill():
+    """回归 pin：消费端停读后 terminate/wait 不再永久挂起。
+
+    大输出子进程只读一行即终止——管道写满 + 暂停态传输 + kill 的退出
+    通知相撞时，修复前实测（Python 3.12 macOS）~1/10 概率 wait 丢唤
+    永久挂起；修复后 returncode 轮询兜底必能在期限内返回。"""
+    import os
+    import sys
+
+    runner = LocalProcessRunner()
+    argv = [
+        sys.executable,
+        "-c",
+        "import sys\nwhile True:\n    sys.stdout.write('x' * 200 + '\\n')\n"
+        "    sys.stdout.flush()\n",
+    ]
+
+    async def scenario():
+        session = await runner.spawn(argv, cwd=os.getcwd())
+        first_line = await asyncio.wait_for(session.stdout_lines().__anext__(), 5)
+        assert first_line.startswith("x")
+        await session.terminate()
+        # 修复前此处 ~1/10 概率永久挂起（wait_for 让竞态表现为红而非冻结）
+        return await asyncio.wait_for(session.wait(), 5)
+
+    rc = asyncio.run(asyncio.wait_for(scenario(), 15))
+    assert isinstance(rc, int)

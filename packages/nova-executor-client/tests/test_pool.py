@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fake_transport import FakeTransport
 
@@ -249,3 +251,40 @@ async def test_dual_connection_fs_streams_use_data_channel():
         assert not any(m.startswith("fs/writeStream") for m in control_methods)
     finally:
         await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_control_request_completes_while_data_request_in_flight():
+    """控制面活性（对位 codex keeps_control_requests_live_during_long_reads）：
+    数据面请求长时间在途时，控制面请求仍立即完成——双连接存在的意义"""
+    control = FakeTransport()
+    release = asyncio.Event()
+
+    class _LongReadTransport(FakeTransport):
+        """数据面请求挂起直到放行（模拟长读占用数据面连接）"""
+
+        async def send_request(self, method, params=None, *, channel=None):
+            await super().send_request(method, params, channel=channel)
+            if method == "fs/readStream":
+                await release.wait()
+            return {}
+
+    data = _LongReadTransport()
+    pool = TransportPool({CHANNEL_CONTROL: control, CHANNEL_DATA: data})
+
+    read_task = asyncio.ensure_future(
+        pool.send_request("fs/readStream", {"handleId": "h"})
+    )
+    await asyncio.sleep(0)
+    assert not read_task.done()  # 数据面确实在途
+
+    # 数据面挂死期间，控制面请求照常完成
+    result = await asyncio.wait_for(
+        pool.send_request("process/terminate", {"processId": "p"}), 2
+    )
+    assert result == {}
+    assert [m for m, _, _ in control.requests] == ["process/terminate"]
+    assert [m for m, _, _ in data.requests] == ["fs/readStream"]
+
+    release.set()
+    assert await asyncio.wait_for(read_task, 2) == {}

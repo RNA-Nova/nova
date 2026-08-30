@@ -74,6 +74,26 @@ jobs:
           python -m pip install -e . pytest pytest-asyncio
           python -m pytest tests -q -m "not integration"
 
+  # nova_coding_agent 单元测试（bash 引擎/工具链/executor 接入/策略面）
+  coding-agent-py:
+    name: coding-agent-py / ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # 依赖按兄弟包 editable 逐个装（镜像根 pyproject 的 pixi pypi-dependencies
+      # 清单——子包 pyproject 不声明兄弟 path 依赖，pip 需显式列出）
+      - name: 安装依赖并跑测试（非集成）
+        run: |
+          python -m pip install -e packages/nova-executor-client packages/nova_ai packages/nova_agent packages/nova-harness/backend packages/nova_coding_agent
+          python -m pip install pytest pytest-asyncio websockets
+          python -m pytest packages/nova_coding_agent/backend/tests -q -m "not integration" -o faulthandler_timeout=120
+
   # 仓库卫生：大二进制/产物文件门禁（防污染回归——白名单见内）
   blob-size:
     name: blob-size 门禁

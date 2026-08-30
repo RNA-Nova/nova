@@ -214,3 +214,30 @@ async def test_client_rejects_incompatible_protocol_version():
     with pytest.raises(ProtocolError, match="协议版本不兼容"):
         await client.connect()
     assert not client.transport.is_connected
+
+
+@pytest.mark.asyncio
+async def test_send_request_before_connect_raises_connection_error():
+    """客户端纪律：未 connect 就发请求 → 干净的 ConnectionError
+
+    （对位 codex rejects_pipelined_requests_before_initialized 的客户端侧
+    ——初始化握手前不发业务请求是调用方纪律，SDK 以明确错误表达）"""
+    transport = StdioTransport(program=sys.executable, args=[FAKE_SERVER])
+    with pytest.raises(ConnectionError, match="not connected"):
+        await transport.send_request("echo", {"x": 1})
+
+
+@pytest.mark.asyncio
+async def test_malformed_line_does_not_kill_connection():
+    """坏帧容忍（对位 codex reports_malformed_websocket_json_and_keeps_running）：
+    服务端写出一行非 JSON，客户端丢弃该帧且连接继续可用"""
+    transport = make_transport()
+    await transport.connect()
+    try:
+        result = await transport.send_request("garbage", {})
+        assert result == {}
+        # 坏帧之后连接照常服务
+        result = await transport.send_request("echo", {"ok": True})
+        assert result == {"ok": True}
+    finally:
+        await transport.disconnect()

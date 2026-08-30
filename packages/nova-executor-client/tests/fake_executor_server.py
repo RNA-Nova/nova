@@ -7,6 +7,7 @@
 - fail → error {code: -32600, message: "boom"}
 - notify → 先回 result，再主动推一条 {method: "fake/notice"} 通知
 - sleep → 延迟 params.ms 毫秒后回 {"slept": true}（客户端超时测试用）
+- garbage → 先写一行非 JSON 再回 {}（客户端坏帧容忍测试用）
 - http/request → 回 {status, headers, bodyBase64}；streamResponse 时先回包再推 bodyDelta 通知流
 - exit → 不回包直接以退出码 3 退出（进程死亡传播测试）
 - 环境变量 FAKE_STDERR=1 时每条消息向 stderr 写一行（stderr 消费测试）
@@ -105,6 +106,10 @@ def main() -> None:
 
             time.sleep((msg.get("params") or {}).get("ms", 1000) / 1000)
             result = {"slept": True}
+        elif method == "garbage":
+            # 先写一行非 JSON 再回正常结果（客户端坏帧容忍测试用）
+            print("this-line-is-not-json", flush=True)
+            result = {}
         else:
             result = {}
         print(json.dumps({"id": msg["id"], "result": result}), flush=True)
