@@ -3184,7 +3184,7 @@ mod tests {
         let cwd = TempDir::new().expect("tempdir");
         let dot_git_config = cwd.path().join(".git").join("config");
         let dot_agents_config = cwd.path().join(".agents").join("config");
-        let dot_codex_config = cwd.path().join(".nova").join("config.toml");
+        let dot_nova_config = cwd.path().join(".nova").join("config.toml");
         let root = AbsolutePathBuf::from_absolute_path(cwd.path()).expect("absolute cwd");
         let file_system_policy =
             FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
@@ -3195,7 +3195,7 @@ mod tests {
 
         assert!(!file_system_policy.can_write_path_with_cwd(&dot_git_config, cwd.path()));
         assert!(!file_system_policy.can_write_path_with_cwd(&dot_agents_config, cwd.path()));
-        assert!(!file_system_policy.can_write_path_with_cwd(&dot_codex_config, cwd.path()));
+        assert!(!file_system_policy.can_write_path_with_cwd(&dot_nova_config, cwd.path()));
 
         let writable_roots = file_system_policy.get_writable_roots_with_cwd(cwd.path());
         assert_eq!(writable_roots.len(), 1);
@@ -3209,7 +3209,7 @@ mod tests {
         );
         assert!(!writable_roots[0].is_path_writable(&dot_git_config));
         assert!(!writable_roots[0].is_path_writable(&dot_agents_config));
-        assert!(!writable_roots[0].is_path_writable(&dot_codex_config));
+        assert!(!writable_roots[0].is_path_writable(&dot_nova_config));
     }
 
     #[test]

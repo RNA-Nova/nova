@@ -83,7 +83,7 @@ mod tests {
                 "invalid",
                 ExecServerRuntimePaths::new(
                     std::env::current_exe().expect("current executable"),
-                    /*codex_linux_sandbox_exe*/ None,
+                    /*nova_linux_sandbox_exe*/ None,
                 )
                 .expect("runtime paths"),
                 ExecServerTelemetry::default(),

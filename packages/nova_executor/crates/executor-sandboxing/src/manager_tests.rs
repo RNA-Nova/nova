@@ -105,7 +105,7 @@ fn unsandboxed_transform_preserves_foreign_cwd_and_unrestricted_file_system_poli
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            codex_linux_sandbox_exe: None,
+            nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             windows_sandbox_private_desktop: false,
@@ -162,7 +162,7 @@ fn symlinked_workspace_reports_seatbelt_preparation_error() {
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &workspace_uri,
-            codex_linux_sandbox_exe: None,
+            nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             windows_sandbox_private_desktop: false,
@@ -217,7 +217,7 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            codex_linux_sandbox_exe: None,
+            nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             windows_sandbox_private_desktop: false,
@@ -290,7 +290,7 @@ fn transform_additional_permissions_preserves_denied_entries() {
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            codex_linux_sandbox_exe: None,
+            nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             windows_sandbox_private_desktop: false,
@@ -372,7 +372,7 @@ fn managed_mitm_ca_bundle_becomes_readable_for_restricted_sandbox() {
 
 #[cfg(target_os = "linux")]
 fn transform_linux_seccomp_request(
-    codex_linux_sandbox_exe: &std::path::Path,
+    nova_linux_sandbox_exe: &std::path::Path,
 ) -> super::SandboxExecRequest {
     let manager = SandboxManager::new();
     let cwd = AbsolutePathBuf::current_dir().expect("current dir");
@@ -394,7 +394,7 @@ fn transform_linux_seccomp_request(
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            codex_linux_sandbox_exe: Some(codex_linux_sandbox_exe),
+            nova_linux_sandbox_exe: Some(nova_linux_sandbox_exe),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             windows_sandbox_private_desktop: false,
@@ -476,20 +476,20 @@ fn wsl1_allows_non_bubblewrap_linux_paths() {
 #[cfg(target_os = "linux")]
 #[test]
 fn transform_linux_seccomp_preserves_helper_path_in_arg0_when_available() {
-    let codex_linux_sandbox_exe = std::path::PathBuf::from("/tmp/nova-linux-sandbox");
-    let exec_request = transform_linux_seccomp_request(&codex_linux_sandbox_exe);
+    let nova_linux_sandbox_exe = std::path::PathBuf::from("/tmp/nova-linux-sandbox");
+    let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe);
 
     assert_eq!(
         exec_request.arg0,
-        Some(codex_linux_sandbox_exe.to_string_lossy().into_owned())
+        Some(nova_linux_sandbox_exe.to_string_lossy().into_owned())
     );
 }
 
 #[cfg(target_os = "linux")]
 #[test]
 fn transform_linux_seccomp_uses_helper_alias_when_launcher_is_not_helper_path() {
-    let codex_linux_sandbox_exe = std::path::PathBuf::from("/tmp/codex");
-    let exec_request = transform_linux_seccomp_request(&codex_linux_sandbox_exe);
+    let nova_linux_sandbox_exe = std::path::PathBuf::from("/tmp/codex");
+    let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe);
 
     assert_eq!(exec_request.arg0, Some("nova-linux-sandbox".to_string()));
 }
@@ -591,7 +591,7 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
                     environment_id: None,
                     network: None,
                     sandbox_policy_cwd: &cwd_uri,
-                    codex_linux_sandbox_exe: None,
+                    nova_linux_sandbox_exe: None,
                     use_legacy_landlock: false,
                     windows_sandbox_level: WindowsSandboxLevel::Elevated,
                     windows_sandbox_private_desktop: false,

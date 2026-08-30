@@ -1340,7 +1340,7 @@ fn create_seatbelt_args_allowlists_explicit_unix_socket_paths_without_proxy() {
         &SandboxPolicy::new_read_only_policy(),
         cwd.path(),
     );
-    let extra_allow_unix_sockets = vec![absolute_path("/tmp/codex-browser-use")];
+    let extra_allow_unix_sockets = vec![absolute_path("/tmp/nova-browser-use")];
     let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
         command: vec!["/usr/bin/true".to_string()],
         file_system_sandbox_policy: &file_system_policy,
@@ -1365,7 +1365,7 @@ fn create_seatbelt_args_allowlists_explicit_unix_socket_paths_without_proxy() {
         ),
         "policy should allow outbound AF_UNIX traffic for explicit socket paths:\n{policy}"
     );
-    let expected_socket_root = normalize_path_for_sandbox(Path::new("/tmp/codex-browser-use"))
+    let expected_socket_root = normalize_path_for_sandbox(Path::new("/tmp/nova-browser-use"))
         .expect("socket root should normalize")
         .to_string_lossy()
         .into_owned();
@@ -1388,7 +1388,7 @@ fn create_seatbelt_args_preserves_full_network_with_explicit_unix_socket_paths()
         &SandboxPolicy::new_read_only_policy(),
         cwd.path(),
     );
-    let extra_allow_unix_sockets = vec![absolute_path("/tmp/codex-browser-use")];
+    let extra_allow_unix_sockets = vec![absolute_path("/tmp/nova-browser-use")];
     let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
         command: vec!["/usr/bin/true".to_string()],
         file_system_sandbox_policy: &file_system_policy,

@@ -41,7 +41,7 @@ pub struct WebSocketConnector {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WebSocketTlsMode {
     /// Build an explicit TLS configuration from native roots and configured Codex custom CAs.
-    ExplicitCodexTls,
+    ExplicitNovaTls,
     /// Let Tungstenite build its default TLS configuration when the target requires TLS.
     TungsteniteDefault,
 }
@@ -57,7 +57,7 @@ impl WebSocketConnector {
     pub fn new(
         http_client_factory: &HttpClientFactory,
     ) -> Result<Self, BuildCustomCaTransportError> {
-        Self::new_with_tls_mode(http_client_factory, WebSocketTlsMode::ExplicitCodexTls)
+        Self::new_with_tls_mode(http_client_factory, WebSocketTlsMode::ExplicitNovaTls)
     }
 
     /// Creates a connector with explicit Codex TLS or the transport's existing TLS defaults.
@@ -69,7 +69,7 @@ impl WebSocketConnector {
         tls_mode: WebSocketTlsMode,
     ) -> Result<Self, BuildCustomCaTransportError> {
         let tls_config = match tls_mode {
-            WebSocketTlsMode::ExplicitCodexTls => {
+            WebSocketTlsMode::ExplicitNovaTls => {
                 Some(build_rustls_client_config_with_custom_ca()?)
             }
             WebSocketTlsMode::TungsteniteDefault => None,

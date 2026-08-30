@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn find_nova_executor_home_env_missing_path_is_fatal() {
         let temp_home = TempDir::new().expect("temp home");
-        let missing = temp_home.path().join("missing-codex-home");
+        let missing = temp_home.path().join("missing-sandbox-home");
         let missing_str = missing
             .to_str()
             .expect("missing codex home path should be valid utf-8");
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn find_nova_executor_home_env_file_path_is_fatal() {
         let temp_home = TempDir::new().expect("temp home");
-        let file_path = temp_home.path().join("codex-home.txt");
+        let file_path = temp_home.path().join("sandbox-home.txt");
         fs::write(&file_path, "not a directory").expect("write temp file");
         let file_str = file_path
             .to_str()

@@ -28,7 +28,7 @@ use crate::launcher::exec_bwrap;
 use crate::launcher::preferred_bwrap_supports_argv0;
 use crate::proxy_routing::activate_proxy_routes_in_netns;
 use crate::proxy_routing::prepare_host_proxy_route_spec;
-use nova_executor_protocol_core::error::Result as CodexResult;
+use nova_executor_protocol_core::error::Result as NovaResult;
 use nova_executor_protocol_core::models::PermissionProfile;
 use nova_executor_protocol_core::protocol::FileSystemAccessMode;
 use nova_executor_protocol_core::protocol::FileSystemPath;
@@ -448,7 +448,7 @@ fn build_bwrap_argv(
     sandbox_policy_cwd: &Path,
     command_cwd: &Path,
     options: BwrapOptions,
-) -> CodexResult<crate::bwrap::BwrapArgs> {
+) -> NovaResult<crate::bwrap::BwrapArgs> {
     let bwrap_args = create_bwrap_command_args(
         inner,
         file_system_sandbox_policy,
@@ -512,7 +512,7 @@ fn current_process_argv0() -> String {
     }
 }
 
-fn preflight_proc_mount_support(network_mode: BwrapNetworkMode) -> CodexResult<bool> {
+fn preflight_proc_mount_support(network_mode: BwrapNetworkMode) -> NovaResult<bool> {
     let preflight_argv = build_preflight_bwrap_argv(network_mode)?;
     let stderr = run_bwrap_in_child_capture_stderr(preflight_argv);
     Ok(!is_proc_mount_failure(stderr.as_str()))
@@ -520,7 +520,7 @@ fn preflight_proc_mount_support(network_mode: BwrapNetworkMode) -> CodexResult<b
 
 fn build_preflight_bwrap_argv(
     network_mode: BwrapNetworkMode,
-) -> CodexResult<crate::bwrap::BwrapArgs> {
+) -> NovaResult<crate::bwrap::BwrapArgs> {
     let file_system_sandbox_policy =
         FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Special {

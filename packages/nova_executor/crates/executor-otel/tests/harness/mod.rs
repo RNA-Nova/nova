@@ -15,7 +15,7 @@ pub(crate) fn build_metrics_with_defaults(
     let exporter = InMemoryMetricExporter::default();
     let mut config = MetricsConfig::in_memory(
         "test",
-        "codex-cli",
+        "nova-cli",
         env!("CARGO_PKG_VERSION"),
         exporter.clone(),
     );

@@ -166,7 +166,7 @@ async fn write_jsonrpc_line(writer: &mut tokio::io::DuplexStream, message: &JSON
 fn test_runtime_paths() -> ExecServerRuntimePaths {
     ExecServerRuntimePaths::new(
         std::env::current_exe().expect("current exe"),
-        /*codex_linux_sandbox_exe*/ None,
+        /*nova_linux_sandbox_exe*/ None,
     )
     .expect("runtime paths")
 }

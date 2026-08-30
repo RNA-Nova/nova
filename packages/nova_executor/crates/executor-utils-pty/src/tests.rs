@@ -219,7 +219,7 @@ async fn wait_for_python_repl_ready_via_probe(
     newline: &str,
 ) -> anyhow::Result<Vec<u8>> {
     let mut collected = Vec::new();
-    let marker = "__codex_pty_ready__";
+    let marker = "__nova_pty_ready__";
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);
     let probe_window = tokio::time::Duration::from_millis(if cfg!(windows) { 750 } else { 250 });
 
@@ -347,7 +347,7 @@ async fn pty_python_repl_emits_output_and_exits() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let ready_marker = "__codex_pty_ready__";
+    let ready_marker = "__nova_pty_ready__";
     let args = vec![
         "-i".to_string(),
         "-q".to_string(),
@@ -892,7 +892,7 @@ fn assert_pty_shutdown_with_detached_child(
         .enable_all()
         .build()?;
     let (session, child_pid) = runtime.block_on(async {
-        let marker = "__codex_detached_pid:";
+        let marker = "__nova_detached_pid:";
         // The detached child retains the slave descriptors but outlives the
         // original process group. Its alarm bounds a regressed runtime drop.
         let script = format!(
@@ -905,7 +905,7 @@ if os.fork() == 0:
     tty.setraw(0)
     print('{marker}' + str(os.getpid()), flush=True)
     select.select([0], [], [])
-    print('__codex_input_ready__', flush=True)
+    print('__nova_input_ready__', flush=True)
     time.sleep(10)
     os._exit(0)
 time.sleep(10)
@@ -931,7 +931,7 @@ time.sleep(10)
         // exceeds terminal capacity, so the second chunk must remain queued.
         wait_for_output_contains(
             &mut output_rx,
-            "__codex_input_ready__",
+            "__nova_input_ready__",
             /*timeout_ms*/ 2_000,
         )
         .await?;
@@ -1273,7 +1273,7 @@ fn pty_terminate_reaps_child_when_waiter_is_queued() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pty_terminate_kills_background_children_in_same_process_group() -> anyhow::Result<()> {
     let env_map: HashMap<String, String> = std::env::vars().collect();
-    let marker = "__codex_bg_pid:";
+    let marker = "__nova_bg_pid:";
     let script = format!("sleep 1000 & bg=$!; echo {marker}$bg; wait");
     let (program, args) = shell_command(&script);
     let spawned = spawn_pty_process(
@@ -1419,7 +1419,7 @@ async fn pty_preserving_inherited_fds_keeps_python_repl_running() -> anyhow::Res
         newline,
     )
     .await?;
-    let marker = "__codex_preserved_py_pid:";
+    let marker = "__nova_preserved_py_pid:";
     writer
         .send(format!("import os; print('{marker}' + str(os.getpid())){newline}").into_bytes())
         .await?;

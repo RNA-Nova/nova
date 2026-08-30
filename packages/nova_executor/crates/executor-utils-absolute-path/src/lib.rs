@@ -419,14 +419,14 @@ mod tests {
         std::env::current_dir().expect_err("current dir should be unavailable");
 
         let path = AbsolutePathBuf::from_absolute_path(test_path_buf(
-            "/tmp/codex/../codex-home/plugins/cache",
+            "/tmp/codex/../sandbox-home/plugins/cache",
         ))
         .expect("absolute path should not require current dir");
 
         std::env::set_current_dir(original_cwd).expect("restore cwd");
         assert_eq!(
             path.as_path(),
-            test_path_buf("/tmp/codex-home/plugins/cache")
+            test_path_buf("/tmp/sandbox-home/plugins/cache")
         );
     }
 

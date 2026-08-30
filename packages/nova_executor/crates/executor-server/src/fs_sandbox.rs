@@ -233,7 +233,7 @@ impl FileSystemSandboxRunner {
                     environment_id: None,
                     network: None,
                     sandbox_policy_cwd: &cwd.uri,
-                    codex_linux_sandbox_exe: self
+                    nova_linux_sandbox_exe: self
                         .runtime_paths
                         .executor_linux_sandbox_exe
                         .as_deref(),

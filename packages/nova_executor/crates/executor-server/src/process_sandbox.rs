@@ -235,7 +235,7 @@ pub(crate) async fn prepare_exec_request(
             environment_id: None,
             network: None,
             sandbox_policy_cwd,
-            codex_linux_sandbox_exe: runtime_paths.executor_linux_sandbox_exe.as_deref(),
+            nova_linux_sandbox_exe: runtime_paths.executor_linux_sandbox_exe.as_deref(),
             use_legacy_landlock: sandbox_context.use_legacy_landlock,
             windows_sandbox_level: sandbox_context.windows_sandbox_level,
             windows_sandbox_private_desktop: sandbox_context.windows_sandbox_private_desktop,
