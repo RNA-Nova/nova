@@ -21,9 +21,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .protocol import (
-    HTTP_REQUEST_BODY_DELTA,
     FS_READ_STREAM_CHUNK,
     FS_READ_STREAM_DONE,
+    HTTP_REQUEST_BODY_DELTA,
     FsReadStreamChunkNotification,
     FsReadStreamDoneNotification,
     HttpRequestBodyDeltaNotification,

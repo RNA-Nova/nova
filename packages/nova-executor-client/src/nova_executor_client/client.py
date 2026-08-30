@@ -21,13 +21,13 @@ from .protocol import (
     ByteChunk,
     EnvironmentConfigReadParams,
     EnvironmentConfigReadResponse,
+    EnvironmentInfo,
+    EnvironmentStatus,
+    HttpHeader,
+    HttpRedirectPolicy,
     HttpRequestBodyDeltaNotification,
     HttpRequestParams,
     HttpRequestResponse,
-    HttpHeader,
-    HttpRedirectPolicy,
-    EnvironmentInfo,
-    EnvironmentStatus,
     InitializeParams,
     InitializeResponse,
 )
@@ -346,9 +346,7 @@ class ExecutorClient:
                     if delta.done:
                         break
             finally:
-                self._router.unregister_method_queue(
-                    HTTP_REQUEST_BODY_DELTA, queue
-                )
+                self._router.unregister_method_queue(HTTP_REQUEST_BODY_DELTA, queue)
             response.body = ByteChunk(data=b"".join(chunks))
         return response
 

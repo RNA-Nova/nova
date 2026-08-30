@@ -40,9 +40,7 @@ def test_workspace_write_sandbox_serializes_roots_and_network():
 
 def test_workspace_write_network_enabled():
     ctx = FileSystemSandboxContext.workspace_write("/tmp/proj")
-    assert (
-        ctx.permissions.network == NetworkSandboxPolicy.ENABLED
-    )
+    assert ctx.permissions.network == NetworkSandboxPolicy.ENABLED
 
 
 def test_start_params_sandbox_passes_through_camel_case():
@@ -72,7 +70,9 @@ def test_windows_sandbox_level_kebab_case():
 
 
 def test_exec_permission_profile_external_variant():
-    profile = ExecPermissionProfile(type="external", network=NetworkSandboxPolicy.ENABLED)
+    profile = ExecPermissionProfile(
+        type="external", network=NetworkSandboxPolicy.ENABLED
+    )
     wire = profile.model_dump(by_alias=True)
     # external 变体带默认 file_system 字段（pydantic 含默认值字段照常序列化）
     assert wire == {

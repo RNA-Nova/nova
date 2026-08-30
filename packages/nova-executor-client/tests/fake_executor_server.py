@@ -6,6 +6,8 @@
 - envinfo → result {fakeVar, cwd, hasHome}（验证 env 叠加与 cwd 传递）
 - fail → error {code: -32600, message: "boom"}
 - notify → 先回 result，再主动推一条 {method: "fake/notice"} 通知
+- sleep → 延迟 params.ms 毫秒后回 {"slept": true}（客户端超时测试用）
+- http/request → 回 {status, headers, bodyBase64}；streamResponse 时先回包再推 bodyDelta 通知流
 - exit → 不回包直接以退出码 3 退出（进程死亡传播测试）
 - 环境变量 FAKE_STDERR=1 时每条消息向 stderr 写一行（stderr 消费测试）
 """
@@ -46,7 +48,9 @@ def main() -> None:
                 "fakeVar": os.environ.get("FAKE_VAR"),
                 "cwd": os.getcwd(),
                 # Windows 没有 HOME（家目录变量是 USERPROFILE），按平台回退检测
-                "hasHome": bool(os.environ.get("HOME") or os.environ.get("USERPROFILE")),
+                "hasHome": bool(
+                    os.environ.get("HOME") or os.environ.get("USERPROFILE")
+                ),
             }
         elif method == "fail":
             print(
@@ -71,7 +75,7 @@ def main() -> None:
                 f"echo:{params.get('method')}:{params.get('url')}".encode()
             ).decode()
             if params.get("streamResponse"):
-                result = {"status": 200, "headers": [], "body": ""}
+                result = {"status": 200, "headers": [], "bodyBase64": ""}
                 print(
                     json.dumps({"id": msg["id"], "result": result}),
                     flush=True,
@@ -86,7 +90,7 @@ def main() -> None:
                                 "params": {
                                     "requestId": params.get("requestId"),
                                     "seq": seq,
-                                    "delta": {"data": delta},
+                                    "deltaBase64": delta,
                                     "done": done,
                                 },
                             }
@@ -94,9 +98,8 @@ def main() -> None:
                         flush=True,
                     )
                 continue
-            result = {"status": 200, "headers": [], "body": {"data": body}}
-        elif method == "sandbox_echo":
-            result = msg.get("params")
+            result = {"status": 200, "headers": [], "bodyBase64": body}
+        elif method == "sleep":
             # 延迟响应（客户端超时测试用）
             import time
 

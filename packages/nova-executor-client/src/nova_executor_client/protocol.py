@@ -6,7 +6,15 @@ import base64
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 # =============================================================================
 # 方法常量
@@ -85,8 +93,18 @@ class JsonRpcNotification(BaseModel):
 
 
 class ByteChunk(BaseModel):
+    """透明字节块（对位 Rust `#[serde(transparent)] ByteChunk`）——线上即裸 base64 字符串"""
+
     model_config = ConfigDict(populate_by_name=True)
     data: bytes
+
+    @model_validator(mode="before")
+    @classmethod
+    def _unwrap_transparent(cls, v: Any) -> Any:
+        """透明形态出入：线上裸 base64 字符串先解包为 {"data": ...} 再进字段校验"""
+        if isinstance(v, str):
+            return {"data": v}
+        return v
 
     @field_validator("data", mode="before")
     @classmethod
@@ -95,8 +113,10 @@ class ByteChunk(BaseModel):
             return base64.b64decode(v)
         return v
 
-    def model_dump(self, **kwargs) -> dict[str, Any]:
-        return {"data": base64.b64encode(self.data).decode()}
+    @model_serializer
+    def _to_base64(self) -> str:
+        """序列化为裸 base64 字符串（透明形态），非 {"data": ...} 包装对象"""
+        return base64.b64encode(self.data).decode()
 
 
 # =============================================================================
@@ -643,14 +663,14 @@ class HttpRequestResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     status: int
     headers: list[HttpHeader] = Field(default_factory=list)
-    body: ByteChunk
+    body: ByteChunk = Field(alias="bodyBase64")
 
 
 class HttpRequestBodyDeltaNotification(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     request_id: str = Field(..., alias="requestId")
     seq: int
-    delta: ByteChunk
+    delta: ByteChunk = Field(alias="deltaBase64")
     done: bool = False
     error: str | None = None
 
@@ -697,9 +717,7 @@ class ExecFileSystemSandboxEntry(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     path: ExecFileSystemPath
     access: FileSystemAccessMode
-    missing_path_behavior: str | None = Field(
-        default=None, alias="missingPathBehavior"
-    )
+    missing_path_behavior: str | None = Field(default=None, alias="missingPathBehavior")
 
 
 class ExecManagedFileSystemPermissions(BaseModel):
@@ -708,9 +726,7 @@ class ExecManagedFileSystemPermissions(BaseModel):
 
     type: Literal["restricted", "unrestricted"] = "restricted"
     entries: list[ExecFileSystemSandboxEntry] = Field(default_factory=list)
-    glob_scan_max_depth: int | None = Field(
-        default=None, alias="globScanMaxDepth"
-    )
+    glob_scan_max_depth: int | None = Field(default=None, alias="globScanMaxDepth")
 
 
 class ExecPermissionProfile(BaseModel):
@@ -758,9 +774,7 @@ class FileSystemSandboxContext(BaseModel):
                     type="restricted",
                     entries=[
                         ExecFileSystemSandboxEntry(
-                            path=ExecFileSystemPath(
-                                type="path", path=_file_url(cwd)
-                            ),
+                            path=ExecFileSystemPath(type="path", path=_file_url(cwd)),
                             access=FileSystemAccessMode.READ,
                         )
                     ],
