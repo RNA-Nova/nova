@@ -236,8 +236,8 @@ fn effective_cwd(req_cwd: &Path, log_dir: Option<&Path>) -> PathBuf {
 }
 
 fn spawn_ipc_process(req: &SpawnRequest) -> Result<IpcSpawnedProcess> {
-    let log_dir = req.codex_home.clone();
-    hide_current_user_profile_dir(req.codex_home.as_path());
+    let log_dir = req.sandbox_home.clone();
+    hide_current_user_profile_dir(req.sandbox_home.as_path());
     let token_mode = token_mode_for_permission_profile(
         &req.permission_profile,
         &req.workspace_roots,

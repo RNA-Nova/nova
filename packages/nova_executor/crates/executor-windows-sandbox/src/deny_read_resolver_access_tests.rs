@@ -101,7 +101,7 @@ fn protected_directory_does_not_discard_accessible_deny_matches() {
         // this fixture's ACL. Restrict a separate process, including its rg child,
         // rather than changing the shared test process's privileges. The parent
         // owns ACL setup and cleanup, which the restricted child cannot perform.
-        let codex_home = TempDir::new().expect("restricted codex home");
+        let sandbox_home = TempDir::new().expect("restricted codex home");
         let cwd = AbsolutePathBuf::from_absolute_path(temp.path()).expect("workspace");
         let mut env = std::collections::HashMap::from([
             (
@@ -119,7 +119,7 @@ fn protected_directory_does_not_discard_accessible_deny_matches() {
         let result = crate::run_windows_sandbox_capture(
             &nova_executor_protocol_core::models::PermissionProfile::workspace_write(),
             std::slice::from_ref(&cwd),
-            codex_home.path(),
+            sandbox_home.path(),
             vec![
                 std::env::current_exe()
                     .expect("test binary")

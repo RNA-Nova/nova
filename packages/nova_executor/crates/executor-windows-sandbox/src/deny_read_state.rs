@@ -30,12 +30,12 @@ struct PersistentDenyReadAclState {
 /// # Safety
 /// Caller must pass a valid SID pointer matching `principal_sid`.
 pub unsafe fn sync_persistent_deny_read_acls(
-    codex_home: &Path,
+    sandbox_home: &Path,
     principal_sid: &str,
     desired_paths: &[PathBuf],
     psid: *mut c_void,
 ) -> Result<Vec<PathBuf>> {
-    let state_path = sandbox_dir(codex_home).join(DENY_READ_ACL_STATE_FILE);
+    let state_path = sandbox_dir(sandbox_home).join(DENY_READ_ACL_STATE_FILE);
     let mut state = load_state(&state_path)?;
     let previous_paths = state
         .principals

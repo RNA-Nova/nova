@@ -25,7 +25,7 @@ fn find_git_worktree_root_for_safe_directory(start: &Path) -> Option<std::path::
 }
 
 /// Ensure the sandbox codex home directory exists.
-pub fn ensure_codex_home_exists(p: &Path) -> Result<()> {
+pub fn ensure_sandbox_home_exists(p: &Path) -> Result<()> {
     std::fs::create_dir_all(p)?;
     Ok(())
 }

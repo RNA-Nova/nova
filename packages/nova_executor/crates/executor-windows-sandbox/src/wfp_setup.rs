@@ -36,7 +36,7 @@ fn panic_payload_to_string(panic_payload: Box<dyn std::any::Any + Send>) -> Stri
 }
 
 fn build_wfp_metrics_provider(
-    codex_home: &Path,
+    sandbox_home: &Path,
     otel: Option<&StatsigMetricsSettings>,
 ) -> Result<Option<OtelProvider>> {
     let Some(otel) = otel else {
@@ -50,7 +50,7 @@ fn build_wfp_metrics_provider(
         environment: otel.environment.clone(),
         service_name: WFP_SETUP_SERVICE_NAME.to_string(),
         service_version: env!("CARGO_PKG_VERSION").to_string(),
-        codex_home: codex_home.to_path_buf(),
+        sandbox_home: sandbox_home.to_path_buf(),
         exporter: OtelExporter::None,
         trace_exporter: OtelExporter::None,
         metrics_exporter: OtelExporter::Statsig,
@@ -62,11 +62,11 @@ fn build_wfp_metrics_provider(
 }
 
 fn emit_wfp_setup_metric(
-    codex_home: &Path,
+    sandbox_home: &Path,
     otel: Option<&StatsigMetricsSettings>,
     metric: &WfpSetupMetric,
 ) -> Result<()> {
-    let Some(provider) = build_wfp_metrics_provider(codex_home, otel)? else {
+    let Some(provider) = build_wfp_metrics_provider(sandbox_home, otel)? else {
         return Ok(());
     };
     if let Some(metrics) = provider.metrics() {
@@ -98,7 +98,7 @@ fn emit_wfp_setup_metric(
 }
 
 fn emit_wfp_setup_metric_safely<F>(
-    codex_home: &Path,
+    sandbox_home: &Path,
     otel: Option<&StatsigMetricsSettings>,
     offline_username: &str,
     metric: &WfpSetupMetric,
@@ -107,7 +107,7 @@ fn emit_wfp_setup_metric_safely<F>(
     F: FnMut(&str),
 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        emit_wfp_setup_metric(codex_home, otel, metric)
+        emit_wfp_setup_metric(sandbox_home, otel, metric)
     }));
     match result {
         Ok(Ok(())) => {}
@@ -124,7 +124,7 @@ fn emit_wfp_setup_metric_safely<F>(
 }
 
 pub fn install_wfp_filters<F>(
-    codex_home: &Path,
+    sandbox_home: &Path,
     offline_username: &str,
     otel: Option<&StatsigMetricsSettings>,
     mut log: F,
@@ -171,5 +171,5 @@ pub fn install_wfp_filters<F>(
         }
     };
 
-    emit_wfp_setup_metric_safely(codex_home, otel, offline_username, &metric, &mut log);
+    emit_wfp_setup_metric_safely(sandbox_home, otel, offline_username, &metric, &mut log);
 }

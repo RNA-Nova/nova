@@ -68,7 +68,7 @@ pub fn resolve_sandbox_users_group_sid() -> Result<Vec<u8>> {
 }
 
 pub fn provision_sandbox_users(
-    codex_home: &Path,
+    sandbox_home: &Path,
     offline_username: &str,
     online_username: &str,
     log: &mut dyn Write,
@@ -83,7 +83,7 @@ pub fn provision_sandbox_users(
     ensure_sandbox_user(offline_username, &offline_password, log)?;
     ensure_sandbox_user(online_username, &online_password, log)?;
     write_secrets(
-        codex_home,
+        sandbox_home,
         offline_username,
         &offline_password,
         online_username,
@@ -403,13 +403,13 @@ struct SetupMarker {
 }
 
 fn write_secrets(
-    codex_home: &Path,
+    sandbox_home: &Path,
     offline_user: &str,
     offline_pwd: &str,
     online_user: &str,
     online_pwd: &str,
 ) -> Result<()> {
-    let secrets_dir = sandbox_secrets_dir(codex_home);
+    let secrets_dir = sandbox_secrets_dir(sandbox_home);
     std::fs::create_dir_all(&secrets_dir).map_err(|err| {
         anyhow::Error::new(SetupFailure::new(
             SetupErrorCode::HelperUsersFileWriteFailed,
@@ -465,8 +465,8 @@ fn write_secrets(
 // intentionally fails readiness checks while setup is in progress, and sandbox users cannot read,
 // modify, or replace it. Once every setup step succeeds, `commit_setup_marker` writes the valid
 // marker contents without changing the file's ACL.
-pub(super) fn prepare_setup_marker(codex_home: &Path, real_user: &str) -> Result<()> {
-    let marker_path = sandbox_dir(codex_home).join("setup_marker.json");
+pub(super) fn prepare_setup_marker(sandbox_home: &Path, real_user: &str) -> Result<()> {
+    let marker_path = sandbox_dir(sandbox_home).join("setup_marker.json");
     match std::fs::remove_file(&marker_path) {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -549,7 +549,7 @@ pub(super) fn prepare_setup_marker(codex_home: &Path, real_user: &str) -> Result
 }
 
 pub(super) fn commit_setup_marker(
-    codex_home: &Path,
+    sandbox_home: &Path,
     offline_user: &str,
     online_user: &str,
     proxy_ports: &[u16],
@@ -565,7 +565,7 @@ pub(super) fn commit_setup_marker(
         read_roots: Vec::new(),
         write_roots: Vec::new(),
     };
-    let marker_path = sandbox_dir(codex_home).join("setup_marker.json");
+    let marker_path = sandbox_dir(sandbox_home).join("setup_marker.json");
     let marker_json = serde_json::to_vec_pretty(&marker).map_err(|err| {
         anyhow::Error::new(SetupFailure::new(
             SetupErrorCode::HelperSetupMarkerWriteFailed,

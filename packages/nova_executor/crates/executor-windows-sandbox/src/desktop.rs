@@ -111,7 +111,7 @@ impl DesktopPolicy {
                 request.command_cwd,
                 request.permissions,
                 request.env_map,
-                request.codex_home,
+                request.sandbox_home,
             )
         });
         let (read_roots, write_roots) = build_payload_roots(&request, &overrides);

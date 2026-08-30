@@ -310,7 +310,7 @@ fn connect_pipe_with_timeout(
 }
 
 pub(crate) fn spawn_runner_transport(
-    codex_home: &Path,
+    sandbox_home: &Path,
     cwd: &Path,
     sandbox_creds: &SandboxCreds,
     log_dir: Option<&Path>,
@@ -326,7 +326,7 @@ pub(crate) fn spawn_runner_transport(
     let h_pipe_out =
         create_named_pipe(&pipe_out_name, PIPE_ACCESS_INBOUND, &sandbox_creds.username)?;
 
-    let runner_exe = find_runner_exe(codex_home, log_dir);
+    let runner_exe = find_runner_exe(sandbox_home, log_dir);
     let runner_cmdline = runner_exe
         .to_str()
         .map(str::to_owned)

@@ -315,7 +315,7 @@ fn resize_conpty_handle(hpc: &Arc<StdMutex<Option<HANDLE>>>, size: TerminalSize)
 pub(crate) async fn spawn_windows_sandbox_session_legacy(
     permission_profile: &PermissionProfile,
     workspace_roots: &[AbsolutePathBuf],
-    codex_home: &Path,
+    sandbox_home: &Path,
     command: Vec<String>,
     cwd: &Path,
     mut env_map: HashMap<String, String>,
@@ -329,7 +329,7 @@ pub(crate) async fn spawn_windows_sandbox_session_legacy(
     let common = prepare_legacy_spawn_context(
         permission_profile,
         workspace_roots,
-        codex_home,
+        sandbox_home,
         cwd,
         &mut env_map,
         &command,
@@ -354,11 +354,11 @@ pub(crate) async fn spawn_windows_sandbox_session_legacy(
         &common.permissions,
         &common.current_dir,
         &env_map,
-        codex_home,
+        sandbox_home,
     );
     let security = prepare_legacy_session_security(
         common.uses_write_capabilities,
-        codex_home,
+        sandbox_home,
         cwd,
         capability_roots,
     )?;
@@ -366,7 +366,7 @@ pub(crate) async fn spawn_windows_sandbox_session_legacy(
 
     apply_legacy_session_acl_rules(
         &common.permissions,
-        codex_home,
+        sandbox_home,
         &common.current_dir,
         &env_map,
         &[],

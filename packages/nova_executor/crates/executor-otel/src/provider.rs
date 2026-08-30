@@ -773,7 +773,7 @@ mod tests {
             environment: "test".to_string(),
             service_name: "nova-test".to_string(),
             service_version: "0.0.0".to_string(),
-            codex_home: PathBuf::from("."),
+            sandbox_home: PathBuf::from("."),
             exporter: OtelExporter::None,
             trace_exporter: OtelExporter::None,
             metrics_exporter: OtelExporter::None,

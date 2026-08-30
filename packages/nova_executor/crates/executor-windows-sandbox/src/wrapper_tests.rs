@@ -8,7 +8,7 @@ use nova_executor_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 
-use super::CODEX_HOME_FLAG;
+use super::NOVA_HOME_FLAG;
 use super::NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1;
 use super::COMMAND_CWD_FLAG;
 use super::DENY_READ_PATHS_JSON_FLAG;
@@ -74,7 +74,7 @@ fn windows_wrapper_args_round_trip() {
     );
 
     assert_eq!(args[0], NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1);
-    assert!(args.contains(&CODEX_HOME_FLAG.to_string()));
+    assert!(args.contains(&NOVA_HOME_FLAG.to_string()));
     assert!(args.contains(&COMMAND_CWD_FLAG.to_string()));
     assert!(args.contains(&WORKSPACE_ROOT_FLAG.to_string()));
     assert!(args.contains(&PERMISSION_PROFILE_FLAG.to_string()));

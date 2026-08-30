@@ -20,7 +20,7 @@ use windows_sys::Win32::Foundation::ERROR_NO_SUCH_LOGON_SESSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SpawnObservation {
-    codex_home: PathBuf,
+    sandbox_home: PathBuf,
     cwd: PathBuf,
     username: String,
     password: String,
@@ -33,7 +33,7 @@ struct RefreshObservation {
     permissions: ResolvedWindowsSandboxPermissions,
     cwd: PathBuf,
     env_map: HashMap<String, String>,
-    codex_home: PathBuf,
+    sandbox_home: PathBuf,
     read_roots_override: Option<Vec<PathBuf>>,
     read_roots_include_platform_defaults: bool,
     write_roots_override: Option<Vec<PathBuf>>,
@@ -63,7 +63,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
     ]);
     let request = RunnerTransportRequest {
         permissions: permissions.clone(),
-        codex_home: PathBuf::from(r"C:\Users\codex"),
+        sandbox_home: PathBuf::from(r"C:\Users\codex"),
         cwd: PathBuf::from(r"C:\workspace"),
         env_map: env_map.clone(),
         logs_base_dir: Some(PathBuf::from(r"C:\Users\codex\.sandbox")),
@@ -73,8 +73,8 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
             env: env_map.clone(),
             permission_profile,
             workspace_roots: vec![workspace_root],
-            codex_home: PathBuf::from(r"C:\Users\codex\.sandbox"),
-            real_codex_home: PathBuf::from(r"C:\Users\codex"),
+            sandbox_home: PathBuf::from(r"C:\Users\codex\.sandbox"),
+            real_sandbox_home: PathBuf::from(r"C:\Users\codex"),
             cap_sids: vec!["S-1-15-3-1024-1".to_string()],
             network_proxy_restricting_sid: Some("S-1-5-21-100-200-300-400".to_string()),
             timeout_ms: Some(5_000),
@@ -97,7 +97,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
         permissions,
         cwd: request.cwd.clone(),
         env_map,
-        codex_home: request.codex_home.clone(),
+        sandbox_home: request.sandbox_home.clone(),
         read_roots_override: request.read_roots_override.clone(),
         read_roots_include_platform_defaults: true,
         write_roots_override: request.write_roots_override.clone(),
@@ -116,9 +116,9 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
             password: "old".to_string(),
         },
         &request,
-        |codex_home, cwd, sandbox_creds, logs_base_dir, spawn_request| {
+        |sandbox_home, cwd, sandbox_creds, logs_base_dir, spawn_request| {
             spawn_observations.borrow_mut().push(SpawnObservation {
-                codex_home: codex_home.to_path_buf(),
+                sandbox_home: sandbox_home.to_path_buf(),
                 cwd: cwd.to_path_buf(),
                 username: sandbox_creds.username.clone(),
                 password: sandbox_creds.password.clone(),
@@ -136,7 +136,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
         |permissions,
          cwd,
          env_map,
-         codex_home,
+         sandbox_home,
          read_roots_override,
          read_roots_include_platform_defaults,
          write_roots_override,
@@ -148,7 +148,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
                 permissions: permissions.clone(),
                 cwd: cwd.to_path_buf(),
                 env_map: env_map.clone(),
-                codex_home: codex_home.to_path_buf(),
+                sandbox_home: sandbox_home.to_path_buf(),
                 read_roots_override: read_roots_override.map(<[PathBuf]>::to_vec),
                 read_roots_include_platform_defaults,
                 write_roots_override: write_roots_override.map(<[PathBuf]>::to_vec),
@@ -172,7 +172,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
     assert_eq!(
         vec![
             SpawnObservation {
-                codex_home: request.codex_home.clone(),
+                sandbox_home: request.sandbox_home.clone(),
                 cwd: request.cwd.clone(),
                 username: "stale".to_string(),
                 password: "old".to_string(),
@@ -180,7 +180,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
                 spawn_request: expected_spawn_request.clone(),
             },
             SpawnObservation {
-                codex_home: request.codex_home.clone(),
+                sandbox_home: request.sandbox_home.clone(),
                 cwd: request.cwd.clone(),
                 username: "refreshed".to_string(),
                 password: "new".to_string(),
