@@ -16,9 +16,10 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from nova_coding_agent.tools_common.path_utils import normalize_input, resolve_path
-
 from nova_harness.core.types.config.settings import ExecutorSettings
+
+from nova_coding_agent.executor.policy import SpawnPolicy, resolve_spawn_policy
+from nova_coding_agent.tools_common.path_utils import normalize_input, resolve_path
 
 
 @dataclass
@@ -31,6 +32,8 @@ class BackendSelection:
     remote_cwd: Optional[str] = None
     # SSH 远程家目录（~ 展开用）
     remote_home: Optional[str] = None
+    # 随 process/start 下发的沙箱/网络策略（策略归 Nova 设置，执行归 executor）
+    spawn_policy: Optional[SpawnPolicy] = None
 
 
 # 当前生效选择（进程级——后端进程即会话作用域）
@@ -40,11 +43,20 @@ _current: Optional[BackendSelection] = None
 def get_backend_selection(
     settings: Optional[ExecutorSettings] = None,
 ) -> BackendSelection:
-    """读取当前生效后端（未显式切换过时按 settings 默认）。"""
+    """读取当前生效后端（未显式切换过时按 settings 默认）。
+
+    settings 带沙箱档位且默认后端为 executor 时，按本地 cwd 组装策略
+    （本地回环 executor 的执行目录就是本机 cwd）。
+    """
     global _current
     if _current is not None:
         return _current
     default = (settings.default_backend if settings else None) or "local"
+    if default == "executor":
+        return BackendSelection(
+            backend=default,
+            spawn_policy=resolve_spawn_policy(settings, os.getcwd()),
+        )
     return BackendSelection(backend=default)
 
 
@@ -96,7 +108,9 @@ def backend_process_runner(context: Any):
     from nova_coding_agent.executor.manager import get_executor_manager
     from nova_coding_agent.executor.process_runner import ExecutorProcessRunner
 
-    return ExecutorProcessRunner(get_executor_manager(), selection.url)
+    return ExecutorProcessRunner(
+        get_executor_manager(), selection.url, policy=selection.spawn_policy
+    )
 
 
 def resolve_backend_path(path: str, context: Any) -> str:

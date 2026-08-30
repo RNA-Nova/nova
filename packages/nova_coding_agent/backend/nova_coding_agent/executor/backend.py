@@ -8,7 +8,8 @@ accumulator + on_chunk，abort 经 terminate 升级。
 - 环境变量只传 ``env_extra``（调用方显式给的）——本地 ``os.environ`` 不往
   远程灌（路径语义不同）；
 - cwd 以 ``file://`` URI 传递（executor 按主机规则解释）；
-- 沙箱参数经 ``sandbox`` 字段下发（策略归 Nova 设置，执行归 executor）。
+- 沙箱/网络策略经 ``policy``（SpawnPolicy）下发——策略归 Nova 设置组装，
+  执行归 executor，本层零理解纯透传。
 """
 
 from __future__ import annotations
@@ -48,12 +49,12 @@ class ExecutorBashOperations:
         self,
         manager: ExecutorClientManager,
         url: Optional[str] = None,
-        sandbox: Optional[Dict[str, Any]] = None,
+        policy: Optional[Any] = None,
         remote_cwd: Optional[str] = None,
     ) -> None:
         self._manager = manager
         self._url = url
-        self._sandbox = sandbox
+        self._policy = policy
         self._remote_cwd = remote_cwd
 
     async def execute(
@@ -101,8 +102,8 @@ class ExecutorBashOperations:
             "cwd": f"file://{effective_cwd}",
             "env": env_extra or {},
         }
-        if self._sandbox is not None:
-            start_params["sandbox"] = self._sandbox
+        if self._policy is not None:
+            start_params.update(self._policy.start_kwargs())
 
         try:
             handle = await client.process.start(**start_params)

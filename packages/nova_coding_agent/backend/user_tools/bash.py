@@ -15,6 +15,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from nova_harness.core.types.extensions.process import SpawnHook
+from nova_harness.core.types.resources.user_tools import UserToolEventCallback
+from nova_harness.server.types.items import ItemStatus
+
 from nova_coding_agent.bash.engine import (
     BashOperations,
     compose_spawn_hooks,
@@ -27,10 +31,6 @@ from nova_coding_agent.executor import (
     get_backend_selection,
     get_executor_manager,
 )
-
-from nova_harness.core.types.extensions.process import SpawnHook
-from nova_harness.core.types.resources.user_tools import UserToolEventCallback
-from nova_harness.server.types.items import ItemStatus
 
 
 def _result_field(result: Any, *names: str) -> Any:
@@ -111,6 +111,7 @@ class UserTool:
                 operations = ExecutorBashOperations(
                     get_executor_manager(),
                     url=selection.url,
+                    policy=selection.spawn_policy,
                     remote_cwd=selection.remote_cwd,
                 )
             else:

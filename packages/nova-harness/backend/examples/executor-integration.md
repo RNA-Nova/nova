@@ -309,3 +309,42 @@ async），六个 operations 实现参数化在它上面**——本地与远程�
   `<root>…/workspaces/…</root>`（系统提示词注入 + roots 跟随后端实证）→
   模型经 write/read 工具在远程工作区建文件并读回（服务器侧 `cat`
   实证内容精确）→ /executor local 热切回本地。
+
+## 八、阶段四：执行策略面（SpawnPolicy，已落地）
+
+定案：**策略归 Nova 设置组装，执行归 executor**——executor 收到什么执行
+什么，不理解 nova 语义（纯执行后端纪律的策略侧对偶）。
+
+### 结构
+
+- **`executor/policy.py`**：`SpawnPolicy`（frozen dataclass）——`sandbox`
+  / `network_proxy` / `enforce_managed_network` / `managed_network` 四旋钮，
+  `start_kwargs()` 转 `process/start` 的 camel wire 额外参数（None 项不出场）；
+  `resolve_spawn_policy(settings, effective_cwd)` 从 settings 档位组装。
+- **`BackendSelection.spawn_policy`**：策略挂在模式格上随后端切换生效；
+  bash 引擎（`ExecutorBashOperations.policy`）与 process_runner 同缝透传，
+  执行层零理解纯转发。
+- **settings `executor.sandbox` 档位**：`read-only`（cwd 只读 + 网络受限）
+  / `workspace-write`（cwd 可写 + 网络放行）——SDK `FileSystemSandboxContext`
+  工厂直出 wire 形态，executor 三平台沙箱（macOS Seatbelt / Linux
+  bwrap+landlock / Windows restricted token）执行。
+
+### 策略作用目录三态（`executor_switch._attach_policy` 统一解析）
+
+| 后端形态 | effective_cwd | 说明 |
+|---|---|---|
+| SSH 远程 | `remote_cwd`（会话隔离工作区） | 沙箱圈住工作区，出圈即拦 |
+| 本地回环 executor（url 空） | 本地 cwd | 执行目录就是本机 cwd |
+| ws:// 直连 | 无 → v1 不沙箱 | 远程 cwd 未知（登记限制） |
+
+`/executor` 切换（`_switch_to`）与分支恢复（`_restore`）两处都过
+`_attach_policy`——切换与恢复策略一致。
+
+### 挂账（策略面续）
+
+- **networkProxy settings 语义**：线上结构（`RemoteNetworkProxyLaunchConfig`
+  深层嵌套）已可经 `SpawnPolicy.network_proxy` 承载，但 settings 键的格式
+  等网络沙箱批次一起定（不对 stub 臆造配置格式）；
+- **审批策略化 + 沙箱升级重试**：触发条件"沙箱档真实启用"已就位一半
+  （fs 档已通，网络档待网络批次）；
+- **ws 直连端点的沙箱**：等 remote_cwd 语义覆盖 ws 端点再放开。

@@ -10,7 +10,6 @@ from typing import Any, Literal, Optional, Union
 
 from nova_ai import ModelThinkingLevel
 from nova_ai.types.base_model import NovaBaseModel
-
 from nova_harness.core.types.compaction import CompactionSettings
 
 
@@ -98,6 +97,10 @@ class ExecutorSettings(NovaBaseModel):
 
     default_backend: Optional[Literal["local", "executor"]] = None
     endpoints: Optional[list[ExecutorEndpoint]] = None
+    # fs 沙箱档位：随 process/start 下发给 executor 后端（None = 不沙箱）。
+    # 策略归 Nova 设置、执行归 executor——read-only 只读 cwd，workspace-write
+    # cwd 可写 + 网络放行（SSH 远程作用域 = 会话隔离工作区）
+    sandbox: Optional[Literal["read-only", "workspace-write"]] = None
 
 
 PackageSourceSpec = Union[

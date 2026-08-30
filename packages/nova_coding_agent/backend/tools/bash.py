@@ -14,6 +14,13 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
+from nova_harness.core.types.extensions.process import SpawnHook
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+
 from nova_coding_agent.bash.engine import (
     BashOperations,
     create_local_bash_operations,
@@ -31,13 +38,6 @@ from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
     format_size,
-)
-
-from nova_harness.core.types.extensions.process import SpawnHook
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
 )
 
 # 对齐 pi bash.ts：timeout 上限（毫秒）。超过即参数非法，显式报错反馈给 LLM。
@@ -153,6 +153,7 @@ class Tool:
         self._executor_operations: Optional[ExecutorBashOperations] = None
         self._executor_url: Optional[str] = None
         self._executor_remote_cwd: Optional[str] = None
+        self._executor_policy: Any = None
 
     def set_spawn_hook(self, hook: Optional[SpawnHook]) -> None:
         """注入外部 spawn hook（ToolsManager 聚合的扩展 hook）。"""
@@ -172,14 +173,17 @@ class Tool:
             self._executor_operations is None
             or self._executor_url != selection.url
             or self._executor_remote_cwd != selection.remote_cwd
+            or self._executor_policy is not selection.spawn_policy
         ):
             self._executor_operations = ExecutorBashOperations(
                 get_executor_manager(),
                 url=selection.url,
+                policy=selection.spawn_policy,
                 remote_cwd=selection.remote_cwd,
             )
             self._executor_url = selection.url
             self._executor_remote_cwd = selection.remote_cwd
+            self._executor_policy = selection.spawn_policy
         return self._executor_operations
 
     async def execute(

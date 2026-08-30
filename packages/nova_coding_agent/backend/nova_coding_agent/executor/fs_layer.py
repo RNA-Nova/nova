@@ -17,13 +17,14 @@ import errno
 import os
 from typing import List, Optional
 
+from nova_executor_client import ExecutorClient
+
 from nova_coding_agent.tools_common.fs_layer import (
     FsEntry,
     FsStat,
     WalkItem,
     WalkResult,
 )
-from nova_executor_client import ExecutorClient
 
 _URI_PREFIX = "file://"
 
