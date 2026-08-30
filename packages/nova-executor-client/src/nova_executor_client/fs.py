@@ -67,14 +67,6 @@ def _new_handle_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:30]}"
 
 
-@dataclass
-class ReadStreamHandle:
-    """流式读取句柄"""
-
-    handle_id: str
-    client: FileSystemManager
-
-
 class FileSystemManager:
     """文件系统管理器
 

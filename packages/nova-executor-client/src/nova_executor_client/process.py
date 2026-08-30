@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -71,15 +70,18 @@ class ProcessHandle:
         await self.client.signal(self.process_id, signal)
 
     async def wait(self, timeout: float | None = None) -> int:
-        """等待进程退出，返回退出码"""
+        """等待进程退出，返回退出码
+
+        轮询粒度自适应单次 read 的阻塞时长（read 最多等 wait_ms 毫秒），
+        timeout 计时含阻塞期；None（默认）无限等。"""
         start = time.monotonic()
         while True:
             output = await self.read(wait_ms=1000)
             if output.exited and output.exit_code is not None:
                 return output.exit_code
-            if timeout and (time.monotonic() - start) > timeout:
+            elapsed = time.monotonic() - start
+            if timeout is not None and elapsed > timeout:
                 raise ProcessError(f"process {self.process_id} wait timed out")
-            await asyncio.sleep(0.1)
 
     async def output(self) -> AsyncIterator[bytes]:
         """流式读取进程输出"""

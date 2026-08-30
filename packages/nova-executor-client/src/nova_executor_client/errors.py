@@ -63,6 +63,8 @@ class ProtocolError(ExecutorError):
     - `SESSION_ALREADY_ATTACHED`（-32010）：会话仍附着在别的连接上
     """
 
-    def __init__(self, message: str, code: int | None = None):
+    code: int | None
+
+    def __init__(self, message: str, code: int | None = None) -> None:
         super().__init__(message)
         self.code = code

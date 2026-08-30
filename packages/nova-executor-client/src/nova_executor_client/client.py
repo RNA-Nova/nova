@@ -151,7 +151,7 @@ class ExecutorClient:
         self._control: ManagedTransport = channels[CHANNEL_CONTROL]  # type: ignore[assignment]
         self.process = ProcessManager(self._pool)
         self.fs = FileSystemManager(self._pool, router=self._router)
-        self.pty = PtyManager(self._pool, self.process)
+        self.pty = PtyManager(self.process)
 
     @classmethod
     def from_stdio(

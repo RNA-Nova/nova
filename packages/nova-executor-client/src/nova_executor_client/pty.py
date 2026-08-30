@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from .process import ProcessHandle, ProcessManager
-from .transport import Transport
 
 
 @dataclass
@@ -36,10 +35,9 @@ class PtyHandle:
 
 
 class PtyManager:
-    """PTY 管理器"""
+    """PTY 管理器（复用进程管理器——PTY 即 tty=True 的进程）"""
 
-    def __init__(self, transport: Transport, process_manager: ProcessManager):
-        self._transport = transport
+    def __init__(self, process_manager: ProcessManager):
         self._process_manager = process_manager
 
     async def spawn(
