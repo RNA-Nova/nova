@@ -943,7 +943,7 @@ async fn sandboxed_file_operations_cannot_read_helper_siblings() -> Result<()> {
     std::fs::hard_link(&helper_paths.executor_exe, &helper)
         .or_else(|_| std::fs::copy(&helper_paths.executor_exe, &helper).map(|_| ()))?;
     let linux_sandbox = if helper_paths.executor_linux_sandbox_exe.is_some() {
-        let alias = runtime_dir.join("codex-linux-sandbox");
+        let alias = runtime_dir.join("nova-linux-sandbox");
         std::fs::hard_link(&helper, &alias)
             .or_else(|_| std::fs::copy(&helper, &alias).map(|_| ()))?;
         Some(alias)

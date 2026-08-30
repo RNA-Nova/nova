@@ -20,7 +20,7 @@ use nova_executor_utils_absolute_path::AbsolutePathBuf;
 pub const NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1: &str = "--run-as-windows-sandbox";
 
 const COMMAND_CWD_FLAG: &str = "--command-cwd";
-const CODEX_HOME_FLAG: &str = "--codex-home";
+const CODEX_HOME_FLAG: &str = "--nova-home";
 const DENY_READ_PATHS_JSON_FLAG: &str = "--deny-read-paths-json";
 const DENY_WRITE_PATHS_JSON_FLAG: &str = "--deny-write-paths-json";
 const ENV_JSON_FLAG: &str = "--env-json";

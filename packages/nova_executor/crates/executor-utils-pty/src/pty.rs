@@ -158,7 +158,7 @@ pub async fn spawn_process(
 
     // unix 上 arg0 必须与真实 program 分离（std Command 的 arg0 语义）：
     // portable-pty 的 CommandBuilder 让 args[0] 同时承担 argv0 与程序解析，
-    // 裸名 argv0（如 codex-linux-sandbox 重入哨兵）会被拿去 PATH 搜索——
+    // 裸名 argv0（如 nova-linux-sandbox 重入哨兵）会被拿去 PATH 搜索——
     // 搜不到则 spawn 失败，搜到同名恶意程序则被劫持。改走 StdCommand 路径。
     #[cfg(unix)]
     if arg0.is_some() {

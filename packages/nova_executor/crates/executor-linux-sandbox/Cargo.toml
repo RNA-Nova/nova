@@ -13,7 +13,7 @@ doctest = false
 # CODEX_LINUX_SANDBOX_ARG0 按此名字自我 re-exec），照 executor-windows-sandbox
 # 保留 helper 原名的先例。
 [[bin]]
-name = "codex-linux-sandbox"
+name = "nova-linux-sandbox"
 path = "src/main.rs"
 
 # 实现为 Linux-only（bubblewrap + landlock + seccomp），依赖全部按 target

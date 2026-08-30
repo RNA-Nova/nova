@@ -1075,7 +1075,7 @@ mod tests {
         use crate::rpc::RpcServerOutboundMessage;
 
         /// `cargo test` 二进制同时充当沙箱 fs helper 的执行体：
-        /// FileSystemSandboxRunner 以 current_exe + `--codex-run-as-fs-helper`
+        /// FileSystemSandboxRunner 以 current_exe + `--nova-run-as-fs-helper`
         /// 重启本进程，这里在 libtest 启动前接管进入 helper 主流程（不返回）。
         #[ctor::ctor]
         fn dispatch_embedded_fs_helper() {
@@ -1322,7 +1322,7 @@ mod tests {
         use crate::ByteChunk;
 
         /// `cargo test` 二进制同时充当沙箱 fs helper 的执行体（与读流模块同一
-        /// 分派）：FileSystemSandboxRunner 以 current_exe + `--codex-run-as-fs-helper`
+        /// 分派）：FileSystemSandboxRunner 以 current_exe + `--nova-run-as-fs-helper`
         /// 重启本进程，这里在 libtest 启动前接管进入 helper 主流程（不返回）。
         #[ctor::ctor]
         fn dispatch_embedded_fs_helper_for_write() {

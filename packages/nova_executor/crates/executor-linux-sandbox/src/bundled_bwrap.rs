@@ -90,9 +90,9 @@ fn legacy_candidates_for_exe(exe: &Path) -> Vec<PathBuf> {
     };
 
     let mut candidates = Vec::new();
-    candidates.push(exe_dir.join("codex-resources").join("bwrap"));
+    candidates.push(exe_dir.join("nova-resources").join("bwrap"));
     if let Some(package_target_dir) = exe_dir.parent() {
-        candidates.push(package_target_dir.join("codex-resources").join("bwrap"));
+        candidates.push(package_target_dir.join("nova-resources").join("bwrap"));
     }
     candidates.push(exe_dir.join("bwrap"));
     if let Some(path) = bazel_bwrap::candidate() {
@@ -193,7 +193,7 @@ mod tests {
     fn finds_legacy_standalone_bundled_bwrap_next_to_exe_resources() {
         let temp_dir = tempdir().expect("temp dir");
         let exe = temp_dir.path().join("codex");
-        let expected_bwrap = temp_dir.path().join("codex-resources").join("bwrap");
+        let expected_bwrap = temp_dir.path().join("nova-resources").join("bwrap");
         write_executable(&exe);
         write_executable(&expected_bwrap);
 
@@ -208,7 +208,7 @@ mod tests {
         let temp_dir = tempdir().expect("temp dir");
         let target_dir = temp_dir.path().join("vendor/x86_64-unknown-linux-musl");
         let exe = target_dir.join("codex").join("codex");
-        let expected_bwrap = target_dir.join("codex-resources").join("bwrap");
+        let expected_bwrap = target_dir.join("nova-resources").join("bwrap");
         write_executable(&exe);
         write_executable(&expected_bwrap);
 

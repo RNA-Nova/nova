@@ -54,7 +54,7 @@ fn windows_wrapper_args_round_trip() {
     let args = create_windows_sandbox_command_args_for_permission_profile(
         vec![
             "codex.exe".to_string(),
-            "--codex-run-as-fs-helper".to_string(),
+            "--nova-run-as-fs-helper".to_string(),
         ],
         &command_cwd,
         workspace_roots.as_slice(),
@@ -95,7 +95,7 @@ fn windows_wrapper_args_round_trip() {
 
     assert_eq!(
         parsed.command,
-        vec!["codex.exe", "--codex-run-as-fs-helper"]
+        vec!["codex.exe", "--nova-run-as-fs-helper"]
     );
     assert_eq!(parsed.command_cwd, command_cwd);
     assert_eq!(parsed.workspace_roots, workspace_roots);

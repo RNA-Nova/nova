@@ -13,11 +13,11 @@ doctest = false
 # 二进制名保持 codex 原样：helper_materialization 按文件名查找/落盘这两个
 # helper（与 executor-sandboxing 保留 CODEX_LINUX_SANDBOX_ARG0 等 argv 契约一致）。
 [[bin]]
-name = "codex-windows-sandbox-setup"
+name = "nova-windows-sandbox-setup"
 path = "src/bin/setup_main/main.rs"
 
 [[bin]]
-name = "codex-command-runner"
+name = "nova-command-runner"
 path = "src/bin/command_runner/main.rs"
 
 [dependencies]

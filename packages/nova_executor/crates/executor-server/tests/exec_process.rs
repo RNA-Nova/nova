@@ -651,7 +651,7 @@ async fn remote_tty_process_uses_configured_sandbox_helper_with_hostile_path() -
     let workspace = TempDir::new()?;
     let file = workspace.path().join("allowed.txt");
     std::fs::write(&file, b"allowed")?;
-    let hostile_helper = workspace.path().join("codex-linux-sandbox");
+    let hostile_helper = workspace.path().join("nova-linux-sandbox");
     std::fs::write(&hostile_helper, b"#!/bin/sh\nprintf hostile")?;
     let mut permissions = std::fs::metadata(&hostile_helper)?.permissions();
     permissions.set_mode(0o755);

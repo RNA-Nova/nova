@@ -1042,7 +1042,7 @@ mod tests {
     fn helper_permissions_include_only_linux_sandbox_alias_executable() {
         let root = tempfile::tempdir().expect("temp dir");
         let executor_self_exe = root.path().join("bin").join("codex");
-        let executor_linux_sandbox_exe = root.path().join("aliases").join("codex-linux-sandbox");
+        let executor_linux_sandbox_exe = root.path().join("aliases").join("nova-linux-sandbox");
         let runtime_paths =
             ExecServerRuntimePaths::new(executor_self_exe, Some(executor_linux_sandbox_exe))
                 .expect("runtime paths");

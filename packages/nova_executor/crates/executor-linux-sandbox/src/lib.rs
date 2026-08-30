@@ -1,10 +1,10 @@
 //! Linux 沙箱 helper 入口（移植自 codex-rs/linux-sandbox）。
 //!
-//! 在 Linux 上，`codex-linux-sandbox` helper 施加两层限制：
+//! 在 Linux 上，`nova-linux-sandbox` helper 施加两层限制：
 //! - 进程内限制（`no_new_privs` + seccomp），以及
 //! - 基于 bubblewrap 的文件系统隔离。
 //!
-//! 二进制名保持 `codex-linux-sandbox`（argv0 互操作契约，见
+//! 二进制名保持 `nova-linux-sandbox`（argv0 互操作契约，见
 //! `nova_executor_sandboxing::landlock::NOVA_EXECUTOR_LINUX_SANDBOX_ARG0`），与
 //! executor-windows-sandbox 保留 helper 原名的先例一致。全部实现模块只面向
 //! Linux，经 `#[cfg(target_os = "linux")]` 门控；其他平台编译为 stub，
@@ -41,5 +41,5 @@ pub fn run_main() -> ! {
 
 #[cfg(not(target_os = "linux"))]
 pub fn run_main() -> ! {
-    panic!("codex-linux-sandbox is only supported on Linux");
+    panic!("nova-linux-sandbox is only supported on Linux");
 }

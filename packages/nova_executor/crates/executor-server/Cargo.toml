@@ -88,7 +88,7 @@ wiremock = { workspace = true }
 nova-executor-network-proxy = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-# 集成测试的 argv0 重入分派：landlock/bwrap 沙箱以 `codex-linux-sandbox`
+# 集成测试的 argv0 重入分派：landlock/bwrap 沙箱以 `nova-linux-sandbox`
 # 为 argv0 重入测试二进制，需要真正的 linux sandbox 入口（见 tests/common/mod.rs）
 nova-executor-linux-sandbox = { workspace = true }
 

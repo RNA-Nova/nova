@@ -3,7 +3,7 @@
 //! 对位 codex `exec-server/tests/common/mod.rs`，差异点：
 //! - 不引入 `codex-test-binary-support` / `codex-arg0` 的 PATH alias 机械
 //!   （那是 Bazel 下跨 crate 复用测试二进制的产物）；cargo 下按 argv1 哨兵
-//!   分派即可。唯一的 argv0 分派是 Linux 的 `codex-linux-sandbox`：landlock/
+//!   分派即可。唯一的 argv0 分派是 Linux 的 `nova-linux-sandbox`：landlock/
 //!   bwrap 沙箱会以该 argv0 重入本二进制，须在此直接转给 linux sandbox 入口，
 //!   否则 `--sandbox-policy-cwd` 等参数会落进 libtest 的解析器（exit 101）。
 //! - 测试隔离的 home 目录不由 ctor 设置，改为夹具按子进程注入
@@ -49,7 +49,7 @@ static TEST_BINARY_DISPATCH: () = {
     let program = args.next();
 
     // Linux：landlock/bwrap 沙箱把 fs helper 命令改写为以 argv0
-    // `codex-linux-sandbox` 重入本二进制（参数形如 `--sandbox-policy-cwd ...`）。
+    // `nova-linux-sandbox` 重入本二进制（参数形如 `--sandbox-policy-cwd ...`）。
     // 这里按 argv0 basename 转给真正的 linux sandbox 入口（run_main 不返回）。
     #[cfg(target_os = "linux")]
     if let Some(program) = program.as_deref() {
@@ -60,11 +60,11 @@ static TEST_BINARY_DISPATCH: () = {
             // run_main 的 panic（如 bwrap 缺失）若穿出 ctor 的 extern "C" 边界
             // 会变成无诊断信息的 SIGABRT；拦下换成可读错误再退出
             if std::panic::catch_unwind(nova_executor_linux_sandbox::run_main).is_err() {
-                eprintln!("codex-linux-sandbox panicked (see panic message above)");
+                eprintln!("nova-linux-sandbox panicked (see panic message above)");
                 std::process::exit(101);
             }
             // run_main 正常路径不返回（内部 exec/exit）；走到这里说明实现变了
-            eprintln!("codex-linux-sandbox run_main returned unexpectedly");
+            eprintln!("nova-linux-sandbox run_main returned unexpectedly");
             std::process::exit(101);
         }
     }

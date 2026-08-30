@@ -3,7 +3,7 @@ use std::path::Path;
 
 /// Basename used when the Codex executable self-invokes as the Linux sandbox
 /// helper.
-pub const NOVA_EXECUTOR_LINUX_SANDBOX_ARG0: &str = "codex-linux-sandbox";
+pub const NOVA_EXECUTOR_LINUX_SANDBOX_ARG0: &str = "nova-linux-sandbox";
 
 pub fn allow_network_for_proxy(enforce_managed_network: bool) -> bool {
     // When managed network requirements are active, request proxy-only
@@ -13,7 +13,7 @@ pub fn allow_network_for_proxy(enforce_managed_network: bool) -> bool {
 }
 
 /// Converts the permission profile into the CLI invocation for
-/// `codex-linux-sandbox`.
+/// `nova-linux-sandbox`.
 ///
 /// The helper performs the actual sandboxing (bubblewrap by default + seccomp)
 /// after parsing these arguments. The profile JSON flag is emitted before
@@ -60,7 +60,7 @@ pub fn create_linux_sandbox_command_args_for_permission_profile(
 }
 
 /// Converts the sandbox cwd and execution options into the CLI invocation for
-/// `codex-linux-sandbox`.
+/// `nova-linux-sandbox`.
 #[cfg_attr(not(test), allow(dead_code))]
 fn create_linux_sandbox_command_args(
     command: Vec<String>,

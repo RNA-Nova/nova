@@ -1,7 +1,9 @@
-# codex-protocol
+# nova-executor-protocol-core
 
-This crate defines the "types" for the protocol used by Codex CLI, which includes both "internal types" for communication between `codex-core` and `codex-tui`, as well as "external types" used with `codex app-server`.
+执行语义类型库（零运行时行为的契约层）：沙箱策略（`SandboxPolicy`/
+`FileSystemSandboxPolicy`）、权限档（`PermissionProfile` 族）、shell 环境策略、
+执行输出与错误分类。被 sandboxing / server / 协议 wire 层共同依赖，
+单点定义保证线上契约不漂移。
 
-This crate should have minimal dependencies.
-
-Ideally, we should avoid "material business logic" in this crate, as we can always introduce `Ext`-style traits to add functionality to types in other crates.
+派生自 OpenAI Codex 的 `codex-protocol`（Apache-2.0）；agent 会话面类型
+（thread/auth/mcp/items 等）已按 nova 纯度边界移出至 nova-agent-rs 存档。
