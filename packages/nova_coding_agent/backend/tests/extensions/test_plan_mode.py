@@ -254,7 +254,6 @@ def test_context_filters_stale_plan_messages_when_disabled():
     ctx = _fake_ctx()
 
     from nova_ai import UserMessage
-
     from nova_harness.core.types.messages import CustomMessage
 
     stale = CustomMessage(

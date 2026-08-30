@@ -4,17 +4,17 @@ from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+
 from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.file_queue import with_file_write_lock
 from nova_coding_agent.tools_common.operations import (
     WriteOperations,
     create_local_write_operations,
-)
-
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
 )
 
 

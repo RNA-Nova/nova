@@ -9,6 +9,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
 from nova_coding_agent.executor.process_runner import (
     ExecutorProcessRunner,
     LocalProcessRunner,

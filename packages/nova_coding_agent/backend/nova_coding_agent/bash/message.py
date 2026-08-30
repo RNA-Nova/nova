@@ -11,9 +11,9 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from nova_agent import CustomAgentMessage
-from nova_coding_agent.bash.item import BashExecutionItem
-
 from nova_harness.server.types.items import ItemStatus
+
+from nova_coding_agent.bash.item import BashExecutionItem
 
 
 class BashExecutionMessage(CustomAgentMessage):

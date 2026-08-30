@@ -290,12 +290,12 @@ def test_grep_nonexistent_path_raises_path_not_found(tmpdir):
 
 def test_grep_rg_bad_regex_surfaces_stderr(tmpdir):
     """rg 退出码 2（坏正则）：stderr 透出为 RuntimeError。"""
+    from nova_harness.core.utils.binaries import resolve_binary
+
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
     )
-
-    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("rg"):
         pytest.skip("rg 不可用")
@@ -306,12 +306,12 @@ def test_grep_rg_bad_regex_surfaces_stderr(tmpdir):
 
 def test_grep_rg_bad_glob_surfaces_stderr(tmpdir):
     """rg 退出码 2（坏 glob）：stderr 透出为 RuntimeError。"""
+    from nova_harness.core.utils.binaries import resolve_binary
+
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
     )
-
-    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("rg"):
         pytest.skip("rg 不可用")

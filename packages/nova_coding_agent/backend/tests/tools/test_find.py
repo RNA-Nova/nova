@@ -132,12 +132,12 @@ def test_find_empty_pattern_matches_all(tmpdir):
 
 def test_find_full_path_pattern(tmpdir):
     """带 / 的 pattern（如 sub/*.py）经 --full-path 正确匹配（fd 可用时）。"""
+    from nova_harness.core.utils.binaries import resolve_binary
+
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
-
-    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("fd"):
         pytest.skip("fd 不可用")
@@ -217,12 +217,12 @@ def test_find_does_not_block_event_loop(tmpdir):
 
 def test_find_with_rg_tier(tmpdir):
     """rg --files 层：相对化输出、glob、limit 截断。"""
+    from nova_harness.core.utils.binaries import resolve_binary
+
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
-
-    from nova_harness.core.utils.binaries import resolve_binary
 
     rg_path = resolve_binary("rg")
     if not rg_path:
@@ -309,12 +309,12 @@ def test_find_nonexistent_path_raises_path_not_found(tmpdir):
 
 def test_find_fd_bad_glob_surfaces_stderr(tmpdir):
     """fd 错误退出码为 1（与 rg 不同）：坏 glob 时 stderr 透出为 RuntimeError。"""
+    from nova_harness.core.utils.binaries import resolve_binary
+
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
-
-    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("fd"):
         pytest.skip("fd 不可用")
@@ -324,12 +324,12 @@ def test_find_fd_bad_glob_surfaces_stderr(tmpdir):
 
 def test_find_rg_tier_bad_glob_surfaces_stderr(tmpdir):
     """rg --files 层退出码 2（坏 glob）：stderr 透出为 RuntimeError。"""
+    from nova_harness.core.utils.binaries import resolve_binary
+
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
-
-    from nova_harness.core.utils.binaries import resolve_binary
 
     rg_path = resolve_binary("rg")
     if not rg_path:

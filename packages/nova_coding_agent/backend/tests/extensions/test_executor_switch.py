@@ -8,9 +8,9 @@ import asyncio
 import importlib.util
 import os
 
-from nova_coding_agent.executor import get_backend_selection, reset_backend_selection
-
 from nova_harness.core.types.ui.primitives import UIResponse
+
+from nova_coding_agent.executor import get_backend_selection, reset_backend_selection
 
 
 def _load_extension():

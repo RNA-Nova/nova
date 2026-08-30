@@ -6,6 +6,7 @@ import asyncio
 import errno
 
 import pytest
+
 from nova_coding_agent.executor import (
     BackendSelection,
     reset_backend_selection,

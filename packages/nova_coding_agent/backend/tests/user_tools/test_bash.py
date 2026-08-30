@@ -88,7 +88,10 @@ async def test_bash_user_tool_end_to_end(tmp_path: Path):
     assert item.type == "bashExecution"
     assert item.command == "echo e2e"
     assert item.status.value == "running"
-    assert any(iid == item.id and "e2e" in d.get("output", "") for iid, d in session.item_deltas)
+    assert any(
+        iid == item.id and "e2e" in d.get("output", "")
+        for iid, d in session.item_deltas
+    )
     assert message.item_id == item.id
 
 

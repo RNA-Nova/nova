@@ -6,6 +6,7 @@
 import asyncio
 
 import pytest
+
 from nova_coding_agent.executor import (
     ExecutorBashOperations,
     get_executor_manager,

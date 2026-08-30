@@ -20,10 +20,10 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from nova_coding_agent.ui_primitives import notify_message, select
-
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import ToolCallEventResult
+
+from nova_coding_agent.ui_primitives import notify_message, select
 
 # bash 危险命令模式（pi permission-gate.ts 同款三条）
 _DANGEROUS_PATTERNS = [
@@ -56,7 +56,9 @@ def extension(nova: NovaExtensionAPI) -> None:
     # 会话级 Always 记忆：精确命令串（闭包状态，随扩展实例生命周期）
     allowed_commands: set[str] = set()
 
-    def _record(ctx: Any, tool: str, target: str, decision: str, reason: str = "") -> None:
+    def _record(
+        ctx: Any, tool: str, target: str, decision: str, reason: str = ""
+    ) -> None:
         """审批留痕（问记分离——dialog 负责问，item 负责记）。
 
         custom 条目通道：转录卡片 + 持久化 + 恢复同形，结构性不进 LLM 上下文
@@ -70,7 +72,9 @@ def extension(nova: NovaExtensionAPI) -> None:
                 "target": target,
                 "decision": decision,
                 "reason": reason,
-                "scope": ctx.get_current_scope() if hasattr(ctx, "get_current_scope") else "",
+                "scope": (
+                    ctx.get_current_scope() if hasattr(ctx, "get_current_scope") else ""
+                ),
             },
         )
 

@@ -15,13 +15,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from nova_coding_agent.ui_primitives import confirm
-
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (
     SessionBeforeForkResult,
     SessionBeforeSwitchResult,
 )
+
+from nova_coding_agent.ui_primitives import confirm
 
 # before_switch reason → 动作文案（fork 走独立事件，文案固定）
 _ACTION_LABELS = {"new": "新建会话", "resume": "切换会话"}

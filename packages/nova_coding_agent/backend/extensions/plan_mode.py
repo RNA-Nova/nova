@@ -26,9 +26,6 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from nova_coding_agent.ui_primitives import input as ui_input
-from nova_coding_agent.ui_primitives import notify_message, select, set_status
-
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (
     BeforeAgentStartEventResult,
@@ -36,6 +33,9 @@ from nova_harness.core.types.events.results import (
     ToolCallEventResult,
 )
 from nova_harness.core.types.messages import CustomMessage
+
+from nova_coding_agent.ui_primitives import input as ui_input
+from nova_coding_agent.ui_primitives import notify_message, select, set_status
 
 # ---------------------------------------------------------------------------
 # bash 安全判定（pi plan-mode/utils.ts 原文移植：危险否决 + 白名单放行）
