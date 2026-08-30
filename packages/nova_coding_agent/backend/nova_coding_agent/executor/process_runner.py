@@ -18,9 +18,9 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator, List, Optional, Protocol
 
-from nova_coding_agent.executor.provision import is_ssh_url, parse_ssh_target
-
 from nova_harness.core.utils.binaries import resolve_binary
+
+from nova_coding_agent.executor.provision import is_ssh_url, parse_ssh_target
 
 
 class ProcessSession(Protocol):
@@ -87,7 +87,23 @@ class _LocalSession:
                 pass
 
     async def wait(self) -> int:
-        return await self._proc.wait()
+        """等退出码（杀后停读竞态兜底——见下）。
+
+        消费端读到 limit 中途 break → 下游管道传输停在暂停态 → kill 后
+        进程退出通知的管道收尾（EOF/唤醒）与之相撞时实测（Python 3.12
+        macOS，~1/10）可能永久丢失唤醒，而 returncode 由 watcher 线程
+        waitpid 落地不受影响——短轮询 returncode 兜底。
+        """
+        for _ in range(250):  # 5s：returncode 已落地即取，不依赖唤醒
+            if self._proc.returncode is not None:
+                return self._proc.returncode
+            await asyncio.sleep(0.02)
+        if self._proc.returncode is None:
+            self._proc.kill()  # 兜底补刀
+        try:
+            return await asyncio.wait_for(self._proc.wait(), 2)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError("subprocess reap timed out after kill") from exc
 
     async def stderr_text(self) -> str:
         return self._stderr.decode("utf-8", errors="replace").strip()
@@ -154,11 +170,13 @@ class ExecutorProcessRunner:
 
     ``rg_path`` 来自 SSH 供给探测（``command -v rg``）随句柄缓存；
     非 SSH 端点（ws:// 直连）与未探测到时回 None（上层落便携引擎）。
+    ``policy``（SpawnPolicy）随 spawn 透传——与 bash 引擎同一策略缝。
     """
 
-    def __init__(self, manager, url: str) -> None:
+    def __init__(self, manager, url: str, policy: Optional[Any] = None) -> None:
         self._manager = manager
         self._url = url
+        self._policy = policy
         self._target = parse_ssh_target(url) if is_ssh_url(url) else None
 
     async def _client(self):
@@ -176,5 +194,8 @@ class ExecutorProcessRunner:
 
     async def spawn(self, argv: List[str], cwd: str) -> ProcessSession:
         client = await self._client()
-        handle = await client.process.start(argv=argv, cwd=f"file://{cwd}", env={})
+        extra = self._policy.start_kwargs() if self._policy is not None else {}
+        handle = await client.process.start(
+            argv=argv, cwd=f"file://{cwd}", env={}, **extra
+        )
         return _ExecutorSession(handle)
