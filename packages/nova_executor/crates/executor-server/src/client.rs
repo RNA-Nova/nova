@@ -1937,11 +1937,13 @@ mod tests {
     }
 
     // 进程内并行的固有污染：本测试的 span callsite 会被并发用例"命中即缓存"
-    // 为不感兴趣（无需 rebuild——命中本身就写全局 callsite 兴趣缓存），
-    // outbound span 拿不到新 otel span id（与父相同 → assert_ne 挂）。
-    // 这类 otel 全局态测试要求进程隔离：CI 走 nextest（每测试独立进程）常跑；
-    // 本地验证用 `cargo test -p nova-executor-server --lib -- --ignored` 单跑。
-    #[ignore = "requires process isolation for otel callsite state; CI runs it via nextest"]
+    // 并行固有限制：span callsite 的兴趣缓存是全局的，并发用例在本测试
+    // rebuild 与建 span 之间会把"禁用"重新写回（进程内无解；Dispatch+
+    // with_subscriber 修法已采用，对位 codex test_support——但它只保证
+    // 事件捕获类断言，本测试断言 outbound span 拿到**新** span id 更严格）。
+    // CI 的 nextest（每测试独立进程）常跑；本地单跑：
+    // `cargo test -p nova-executor-server --lib -- --ignored <测试名>`
+    #[ignore = "otel callsite interest races under in-process parallelism; CI runs it via nextest"]
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn process_start_propagates_caller_trace_context_across_background_task() {
         let (client_stdin, server_reader) = duplex(1 << 20);
@@ -2016,8 +2018,11 @@ mod tests {
                     nova_executor_otel::OtelProvider::trace_export_filter,
                 )),
         );
-        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+        let dispatch = tracing::Dispatch::new(subscriber);
         tracing::callsite::rebuild_interest_cache();
+        // Dispatch 版 set_default，避开单订阅者 fast-path（对位 codex 修法）；
+        // 订阅者先生效，span 后创建（顺序反了父 span 拿不到 otel 上下文）
+        let _subscriber_guard = tracing::dispatcher::set_default(&dispatch);
         let parent_span = tracing::info_span!("process-start-parent");
         let expected_trace = nova_executor_otel::span_w3c_trace_context(&parent_span)
             .expect("parent span should have trace context");

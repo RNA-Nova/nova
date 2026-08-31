@@ -827,6 +827,7 @@ mod tests {
     use tokio::task::JoinSet;
     use tokio::time::timeout;
     use tracing::Instrument;
+    use tracing::instrument::WithSubscriber;
     use tracing_subscriber::filter::filter_fn;
     use tracing_subscriber::prelude::*;
 
@@ -1128,12 +1129,13 @@ mod tests {
         }
     }
 
-    // 进程内并行的固有污染：本测试的 span callsite 会被并发用例"命中即缓存"
-    // 为不感兴趣（命中即写全局 callsite 兴趣缓存，无需 rebuild），outbound
-    // span 拿不到新 otel span id（与父相同 → assert_ne 挂）。这类 otel 全局态
-    // 测试要求进程隔离：CI 走 nextest（每测试独立进程）常跑；本地验证用
-    // `cargo test -p nova-executor-server --lib -- --ignored` 单跑。
-    #[ignore = "requires process isolation for otel callsite state; CI runs it via nextest"]
+    // 并行固有限制：span callsite 的兴趣缓存是全局的，并发用例在本测试
+    // rebuild 与建 span 之间会把"禁用"重新写回（进程内无解；Dispatch+
+    // with_subscriber 修法已采用，对位 codex test_support——但它只保证
+    // 事件捕获类断言，本测试断言 outbound span 拿到**新** span id 更严格）。
+    // CI 的 nextest（每测试独立进程）常跑；本地单跑：
+    // `cargo test -p nova-executor-server --lib -- --ignored <测试名>`
+    #[ignore = "otel callsite interest races under in-process parallelism; CI runs it via nextest"]
     #[tokio::test(flavor = "current_thread")]
     async fn rpc_client_propagates_current_trace_context() {
         let span_exporter = InMemorySpanExporter::default();
@@ -1148,51 +1150,55 @@ mod tests {
                     nova_executor_otel::OtelProvider::trace_export_filter,
                 )),
         );
-        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+        let dispatch = tracing::Dispatch::new(subscriber);
         tracing::callsite::rebuild_interest_cache();
-        let parent_span = tracing::info_span!("outbound-parent");
-        let expected_trace = nova_executor_otel::span_w3c_trace_context(&parent_span)
-            .expect("parent span should have trace context");
+        async move {
+            let parent_span = tracing::info_span!("outbound-parent");
+            let expected_trace = nova_executor_otel::span_w3c_trace_context(&parent_span)
+                .expect("parent span should have trace context");
 
-        let (client_stdin, server_reader) = tokio::io::duplex(4096);
-        let (mut server_writer, client_stdout) = tokio::io::duplex(4096);
-        let connection =
-            JsonRpcConnection::from_stdio(client_stdout, client_stdin, "test-rpc".to_string());
-        let (client, _events_rx) = RpcClient::new(connection);
+            let (client_stdin, server_reader) = tokio::io::duplex(4096);
+            let (mut server_writer, client_stdout) = tokio::io::duplex(4096);
+            let connection =
+                JsonRpcConnection::from_stdio(client_stdout, client_stdin, "test-rpc".to_string());
+            let (client, _events_rx) = RpcClient::new(connection);
 
-        let server = tokio::spawn(async move {
-            let mut lines = BufReader::new(server_reader).lines();
-            let request = match read_jsonrpc_line(&mut lines).await {
-                JSONRPCMessage::Request(request) => request,
-                other => panic!("expected JSON-RPC request, got {other:?}"),
-            };
-            write_jsonrpc_line(
-                &mut server_writer,
-                JSONRPCMessage::Response(JSONRPCResponse {
-                    id: request.id.clone(),
-                    result: serde_json::json!({}),
-                }),
-            )
-            .await;
-            request.trace
-        });
+            let server = tokio::spawn(async move {
+                let mut lines = BufReader::new(server_reader).lines();
+                let request = match read_jsonrpc_line(&mut lines).await {
+                    JSONRPCMessage::Request(request) => request,
+                    other => panic!("expected JSON-RPC request, got {other:?}"),
+                };
+                write_jsonrpc_line(
+                    &mut server_writer,
+                    JSONRPCMessage::Response(JSONRPCResponse {
+                        id: request.id.clone(),
+                        result: serde_json::json!({}),
+                    }),
+                )
+                .await;
+                request.trace
+            });
 
-        let response = client
-            .call::<_, serde_json::Value>("traced", &serde_json::json!({}))
-            .instrument(parent_span)
-            .await
-            .expect("RPC response");
-        assert_eq!(response, serde_json::json!({}));
-        let trace = server.await.expect("server task").expect("trace context");
-        let expected_traceparent = expected_trace
-            .traceparent
-            .as_deref()
-            .expect("parent traceparent");
-        let traceparent = trace.traceparent.as_deref().expect("request traceparent");
-        let expected_parts = expected_traceparent.split('-').collect::<Vec<_>>();
-        let parts = traceparent.split('-').collect::<Vec<_>>();
-        assert_eq!(parts[1], expected_parts[1]);
-        assert_ne!(parts[2], expected_parts[2]);
-        assert_eq!(trace.tracestate, expected_trace.tracestate);
+            let response = client
+                .call::<_, serde_json::Value>("traced", &serde_json::json!({}))
+                .instrument(parent_span)
+                .await
+                .expect("RPC response");
+            assert_eq!(response, serde_json::json!({}));
+            let trace = server.await.expect("server task").expect("trace context");
+            let expected_traceparent = expected_trace
+                .traceparent
+                .as_deref()
+                .expect("parent traceparent");
+            let traceparent = trace.traceparent.as_deref().expect("request traceparent");
+            let expected_parts = expected_traceparent.split('-').collect::<Vec<_>>();
+            let parts = traceparent.split('-').collect::<Vec<_>>();
+            assert_eq!(parts[1], expected_parts[1]);
+            assert_ne!(parts[2], expected_parts[2]);
+            assert_eq!(trace.tracestate, expected_trace.tracestate);
+        }
+        .with_subscriber(dispatch)
+        .await
     }
 }
