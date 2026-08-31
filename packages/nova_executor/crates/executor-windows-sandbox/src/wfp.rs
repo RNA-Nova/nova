@@ -62,17 +62,18 @@ use filter_specs::FilterSpec;
 
 const SESSION_NAME: &str = "Nova Windows Sandbox WFP";
 const PROVIDER_NAME: &str = "Nova Windows Sandbox WFP";
-const PROVIDER_DESCRIPTION: &str = "Persistent WFP provider for Codex Windows sandbox filters";
+const PROVIDER_DESCRIPTION: &str = "Persistent WFP provider for Nova Windows sandbox filters";
 const SUBLAYER_NAME: &str = "Nova Windows Sandbox WFP";
-const SUBLAYER_DESCRIPTION: &str = "Persistent WFP sublayer for Codex Windows sandbox filters";
+const SUBLAYER_DESCRIPTION: &str = "Persistent WFP sublayer for Nova Windows sandbox filters";
 
 // WFP identifies persistent providers, sublayers, and filters by stable GUIDs.
-// These values are Codex-owned identities; do not regenerate them unless we
+// Nova-owned identities（与 codex 的 WFP 命名空间完全独立——GUID 故意重新
+// 生成，两个产品同机共存互不误删）；do not regenerate them unless we
 // intentionally want to orphan old objects and create a new WFP namespace.
-const PROVIDER_KEY: GUID = GUID::from_u128(0x2e31d31c_3948_4753_9117_e5d1a6496f41);
-const SUBLAYER_KEY: GUID = GUID::from_u128(0xe65054fd_4d32_4c7c_95ef_621f0cf6431a);
+const PROVIDER_KEY: GUID = GUID::from_u128(0x3028da2e_05ba_4f33_997f_e7d374a8bfbd);
+const SUBLAYER_KEY: GUID = GUID::from_u128(0xd7e5b056_095a_486f_89c4_c1780c171403);
 
-/// Installs the persistent Codex WFP filters for `account`.
+/// Installs the persistent Nova WFP filters for `account`.
 ///
 /// This is intended to run from the already-elevated setup helper. Callers
 /// should treat any returned error as non-fatal to the rest of setup.

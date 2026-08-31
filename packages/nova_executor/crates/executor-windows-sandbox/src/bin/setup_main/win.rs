@@ -70,7 +70,6 @@ const WRITE_ROOT_ALLOW_MASK: u32 =
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE;
 
 mod sandbox_users;
-mod setup_runtime_bin;
 use no_reparse_dir::open_or_create_no_reparse;
 use read_acl_mutex::acquire_read_acl_mutex;
 use read_acl_mutex::read_acl_mutex_exists;
@@ -832,14 +831,6 @@ fn run_setup_full(payload: &Payload, log: &mut dyn Write, sbx_dir: &Path) -> Res
         }
     }
 
-    if refresh_only {
-        setup_runtime_bin::ensure_codex_app_runtime_paths_readable(
-            sandbox_group_psid,
-            &mut refresh_errors,
-            log,
-        )?;
-    }
-
     let mut grant_tasks: Vec<(PathBuf, String)> = Vec::new();
 
     let mut seen_deny_paths: HashSet<PathBuf> = HashSet::new();
@@ -949,7 +940,7 @@ fn run_setup_full(payload: &Payload, log: &mut dyn Write, sbx_dir: &Path) -> Res
 
         // These are deny-write carveouts, not deny-read paths. They may come from explicit
         // read-only-under-a-writable-root carveouts in the transformed sandbox policy, or from
-        // legacy protected children such as `.git`, `.codex`, and `.agents`.
+        // legacy protected children such as `.git` and `.nova`.
         //
         // Deny ACEs attach to filesystem objects; if an explicit policy carveout does not exist
         // during setup, the sandbox could otherwise create it later under a writable parent and
@@ -1079,7 +1070,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let sandbox_home = temp.path().join("sandbox-home");
         let workspace = temp.path().join("workspace");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create nova home");
         fs::create_dir_all(&workspace).expect("create workspace");
 
         let sid = workspace_write_cap_sid_for_root(&sandbox_home, &workspace, &workspace)
@@ -1110,7 +1101,7 @@ mod tests {
         let sandbox_home = temp.path().join("sandbox-home");
         let workspace = temp.path().join("workspace");
         let other_root = temp.path().join("other-root");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create nova home");
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::create_dir_all(&other_root).expect("create other root");
 
@@ -1151,7 +1142,7 @@ mod tests {
         let sandbox_home = temp.path().join("sandbox-home");
         let parent = temp.path().join("parent");
         let workspace = parent.join("workspace");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create nova home");
         fs::create_dir_all(&workspace).expect("create workspace");
 
         let sid = workspace_write_cap_sid_for_root(&sandbox_home, &workspace, &workspace)
@@ -1202,7 +1193,7 @@ mod tests {
         let active_root = temp.path().join("active-root");
         let stale_root = temp.path().join("stale-root");
         let deny_path = active_root.join("protected");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create nova home");
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::create_dir_all(&active_root).expect("create active root");
         fs::create_dir_all(&stale_root).expect("create stale root");
@@ -1238,7 +1229,7 @@ mod tests {
         let active_root = temp.path().join("active-root");
         let stale_root = temp.path().join("stale-root");
         let deny_path = temp.path().join("outside-deny");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create nova home");
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::create_dir_all(&active_root).expect("create active root");
         fs::create_dir_all(&stale_root).expect("create stale root");
@@ -1274,7 +1265,7 @@ mod tests {
         let workspace = temp.path().join("workspace");
         let protected_dir = workspace.join(".nova");
         let nested_root = protected_dir.join("nested-root");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create nova home");
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::create_dir_all(&nested_root).expect("create nested root");
 

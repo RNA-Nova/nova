@@ -574,7 +574,7 @@ mod tests {
         let sandbox_home = tmp.path().join("sandbox-home");
         let workspace_root = tmp.path().join("workspace");
         let command_cwd = workspace_root.join("subdir");
-        std::fs::create_dir_all(&sandbox_home).expect("create codex home");
+        std::fs::create_dir_all(&sandbox_home).expect("create nova home");
         std::fs::create_dir_all(&command_cwd).expect("create command cwd");
 
         let permission_profile = workspace_profile(
@@ -611,7 +611,7 @@ mod tests {
         let workspace = temp.path().join("workspace");
         let active_root = temp.path().join("active-root");
         let stale_root = temp.path().join("stale-root");
-        std::fs::create_dir_all(&sandbox_home).expect("create codex home");
+        std::fs::create_dir_all(&sandbox_home).expect("create nova home");
         std::fs::create_dir_all(&workspace).expect("create workspace");
         std::fs::create_dir_all(&active_root).expect("create active root");
         std::fs::create_dir_all(&stale_root).expect("create stale root");
@@ -649,7 +649,7 @@ mod tests {
         let protected_dir = workspace.join(".nova");
         let nested_root = protected_dir.join("nested-root");
         let unrelated_root = temp.path().join("unrelated-root");
-        std::fs::create_dir_all(&sandbox_home).expect("create codex home");
+        std::fs::create_dir_all(&sandbox_home).expect("create nova home");
         std::fs::create_dir_all(&workspace).expect("create workspace");
         std::fs::create_dir_all(&nested_root).expect("create nested root");
         std::fs::create_dir_all(&unrelated_root).expect("create unrelated root");
@@ -684,7 +684,7 @@ mod tests {
         let workspace = temp.path().join("workspace");
         let active_root = temp.path().join("active-root");
         let sandbox_root = sandbox_home.join(".sandbox");
-        std::fs::create_dir_all(&sandbox_home).expect("create codex home");
+        std::fs::create_dir_all(&sandbox_home).expect("create nova home");
         std::fs::create_dir_all(&workspace).expect("create workspace");
         std::fs::create_dir_all(&active_root).expect("create active root");
         std::fs::create_dir_all(&sandbox_root).expect("create sandbox root");

@@ -150,7 +150,7 @@ mod tests {
     fn equivalent_cwd_spellings_share_workspace_sid_key() {
         let temp = tempfile::tempdir().expect("tempdir");
         let sandbox_home = temp.path().join("sandbox-home");
-        std::fs::create_dir_all(&sandbox_home).expect("create codex home");
+        std::fs::create_dir_all(&sandbox_home).expect("create nova home");
 
         let workspace = temp.path().join("WorkspaceRoot");
         std::fs::create_dir_all(&workspace).expect("create workspace root");
@@ -178,7 +178,7 @@ mod tests {
     fn write_roots_get_path_scoped_sids() {
         let temp = tempfile::tempdir().expect("tempdir");
         let sandbox_home = temp.path().join("sandbox-home");
-        std::fs::create_dir_all(&sandbox_home).expect("create codex home");
+        std::fs::create_dir_all(&sandbox_home).expect("create nova home");
 
         let workspace = temp.path().join("workspace");
         let extra_root = temp.path().join("extra-root");

@@ -77,10 +77,10 @@ use windows_sys::Win32::System::Threading::PROCESS_INFORMATION;
 use windows_sys::Win32::System::Threading::TerminateProcess;
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
-// Kept in sync with codex_exec_server::NOVA_EXECUTOR_FS_HELPER_ARG1 without introducing
+// Kept in sync with nova_executor_server::NOVA_EXECUTOR_FS_HELPER_ARG1 without introducing
 // a dependency cycle.
 const FS_HELPER_ARG: &str = "--nova-run-as-fs-helper";
-const READ_ACL_MUTEX_NAME: &str = "Local\\CodexSandboxReadAcl";
+const READ_ACL_MUTEX_NAME: &str = "Local\\NovaSandboxReadAcl";
 const TERMINATION_WAIT_MS: u32 = 5_000;
 const WAIT_TIMEOUT: u32 = 0x0000_0102;
 
