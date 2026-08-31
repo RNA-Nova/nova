@@ -84,7 +84,7 @@ rama-http-backend = { version = "=0.3.0-alpha.4", features = ["tls"] }
 rama-net = { version = "=0.3.0-alpha.4", features = ["http", "tls"] }
 rama-socks5 = "=0.3.0-alpha.4"
 rama-tcp = { version = "=0.3.0-alpha.4", features = ["http"] }
-rama-tls-rustls = { version = "=0.3.0-alpha.4", features = ["http"] }
+rama-tls-rustls = { version = "=0.4.0", features = ["http"] }
 rama-unix = "=0.3.0-alpha.4"
 
 # 进程与 PTY
