@@ -14,11 +14,9 @@ doctest = false
 [dependencies]
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-nova-executor-async-utils = { path = "../executor-async-utils"  }
 nova-executor-http-client = { path = "../executor-http-client"  }
 nova-executor-network-proxy = { path = "../executor-network-proxy"  }
 nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path"  }
-nova-executor-utils-image = { path = "../executor-utils-image"  }
 nova-executor-utils-path-uri = { path = "../executor-utils-path-uri"  }
 nova-executor-utils-string = { path = "../executor-utils-string"  }
 encoding_rs = { workspace = true }

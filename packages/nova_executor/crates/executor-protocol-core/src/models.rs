@@ -19,7 +19,6 @@ use crate::permissions::NetworkSandboxPolicy;
 use crate::permissions::RawFileSystemSandboxEntry;
 use crate::protocol::SandboxPolicy;
 use nova_executor_utils_absolute_path::AbsolutePathBuf;
-use nova_executor_utils_image::ImageProcessingError;
 use nova_executor_utils_path_uri::PathUri;
 use schemars::JsonSchema;
 

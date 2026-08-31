@@ -12,12 +12,9 @@ members = [
     "crates/executor-utils-path-uri",
     "crates/executor-utils-home-dir",
     "crates/executor-utils-rustls-provider",
-    "crates/executor-async-utils",
     "crates/executor-http-client",
-    "crates/executor-utils-image",
     "crates/executor-utils-string",
     "crates/executor-utils-cargo-bin",
-    "crates/executor-utils-cache",
     "crates/executor-utils-pty",
     "crates/executor-sandboxing",
     "crates/executor-windows-sandbox",
@@ -43,12 +40,9 @@ nova-executor-utils-absolute-path = { path = "crates/executor-utils-absolute-pat
 nova-executor-utils-path-uri = { path = "crates/executor-utils-path-uri" }
 nova-executor-utils-home-dir = { path = "crates/executor-utils-home-dir" }
 nova-executor-utils-rustls-provider = { path = "crates/executor-utils-rustls-provider" }
-nova-executor-async-utils = { path = "crates/executor-async-utils" }
 nova-executor-http-client = { path = "crates/executor-http-client" }
-nova-executor-utils-image = { path = "crates/executor-utils-image" }
 nova-executor-utils-string = { path = "crates/executor-utils-string" }
 nova-executor-utils-cargo-bin = { path = "crates/executor-utils-cargo-bin" }
-nova-executor-utils-cache = { path = "crates/executor-utils-cache" }
 nova-executor-utils-pty = { path = "crates/executor-utils-pty" }
 nova-executor-sandboxing = { path = "crates/executor-sandboxing" }
 nova-executor-windows-sandbox = { path = "crates/executor-windows-sandbox" }
