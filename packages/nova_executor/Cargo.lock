@@ -2165,6 +2165,7 @@ dependencies = [
  "nova-executor-protocol-core",
  "nova-executor-sandboxing",
  "nova-executor-utils-absolute-path",
+ "nova-executor-utils-path-uri",
  "pretty_assertions",
  "rustix",
  "seccompiler",
@@ -2173,6 +2174,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "test-case",
+ "tokio",
  "url",
 ]
 

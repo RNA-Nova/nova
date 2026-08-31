@@ -37,3 +37,6 @@ url = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 test-case = "3.3.1"
+# landlock/managed-proxy 集成套件的测试驱动依赖（移植自 codex 套件）
+nova-executor-utils-path-uri = { path = "../executor-utils-path-uri" }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "time"] }

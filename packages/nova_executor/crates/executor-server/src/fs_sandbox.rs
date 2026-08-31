@@ -596,7 +596,7 @@ pub(crate) async fn wait_for_helper_output(
 
 /// 读取 helper stdout 的一行响应帧（Windows 开门路径：helper 回完响应行后
 /// 仍保活句柄等待 ack，不能 wait 退出再读）。
-#[cfg(windows)]
+#[cfg(any(unix, windows))]
 pub(crate) async fn read_helper_response(
     stdout: impl tokio::io::AsyncRead + Unpin,
 ) -> Result<Vec<u8>, JSONRPCErrorError> {
@@ -614,7 +614,7 @@ pub(crate) async fn read_helper_response(
 }
 
 /// helper stderr 的后台限量排空（超出上限丢弃余量但继续排到 EOF，仅作诊断）。
-#[cfg(windows)]
+#[cfg(any(unix, windows))]
 pub(crate) fn drain_helper_stderr(
     child: &mut tokio::process::Child,
 ) -> tokio::task::JoinHandle<Result<Vec<u8>, std::io::Error>> {
@@ -634,7 +634,7 @@ pub(crate) fn drain_helper_stderr(
 
 /// 响应读取完毕后回收 helper（Windows 开门路径：ack 已发，helper 应立即退出；
 /// 超时不退则强杀收尸），并按退出状态把 helper 失败归为内部错误。
-#[cfg(windows)]
+#[cfg(any(unix, windows))]
 pub(crate) async fn reap_helper_after_response(
     mut child: tokio::process::Child,
     stderr: tokio::task::JoinHandle<Result<Vec<u8>, std::io::Error>>,
@@ -721,6 +721,12 @@ fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
         "failed to encode or decode fs sandbox helper message: {err}"
     ))
 }
+
+// 沙箱化 fs helper 的边界行为测试（移植自 codex exec-server 的
+// fs_sandbox_windows_tests.rs——前三个用例跨平台跑，后两个 cfg(windows)）
+#[cfg(all(test, any(unix, windows)))]
+#[path = "fs_sandbox_windows_tests.rs"]
+mod helper_boundary_tests;
 
 #[cfg(test)]
 mod tests {
