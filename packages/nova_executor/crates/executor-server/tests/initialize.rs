@@ -32,10 +32,15 @@ async fn exec_server_accepts_initialize() -> anyhow::Result<()> {
     let initialize_response: InitializeResponse = serde_json::from_value(result)?;
     Uuid::parse_str(&initialize_response.session_id)?;
     // nova 协议在 initialize 响应里携带 protocol_version（客户端据此做 major
-    // 匹配），替代 codex 的 environment_info 捎带。
+    // 匹配）；environment_info 捎带照常存在（PROTOCOL.md 生命周期节成文，
+    // 客户端缓存省一次往返）。
     assert_eq!(
         initialize_response.protocol_version,
         nova_executor_protocol::PROTOCOL_VERSION
+    );
+    assert!(
+        initialize_response.environment_info.is_some(),
+        "initialize 必须捎带 environment_info"
     );
 
     server.shutdown().await?;

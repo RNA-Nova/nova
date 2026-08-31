@@ -40,8 +40,9 @@ nova/
 ├── packages/
 │   ├── nova_ai/            # 统一的 LLM 提供商抽象层
 │   ├── nova_agent/         # 事件驱动的异步 Agent 框架（源码包名为 nova_agent）
-│   ├── nova-harness/       # 运行时伞目录（前后端两半区同居）
-│   │   ├── backend/        # 高阶 Agent SDK（会话、压缩、工具链、RPC 服务器、Project Trust、UI 桥接；py dist `nova-harness`，import `nova_harness`）
+│   ├── nova-harness/       # 运行时伞目录（三半区同居：运行时 SDK / RPC 宿主 / 前端）
+│   │   ├── backend/        # 高阶 Agent SDK（会话、压缩、工具链、Project Trust、UI 桥接；py dist `nova-harness`，import `nova_harness`）
+│   │   ├── server/         # JSON-RPC 服务器宿主独立包（protocol/transport/reduction/rpc 装配；py dist `nova-harness-server`，import `nova_harness_server`；= codex `app-server` 对位）
 │   │   └── frontend/       # 前端运行时（TS 厚应用层 + 内置 TUI 宿主 modes/tui；npm 包名 `nova-client`）
 │   ├── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具
 │   ├── nova_executor/      # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over WS）
@@ -104,21 +105,31 @@ nova/
 
 位于 `packages/nova-harness/backend/src/nova_harness/`：
 
-- `cli/` —— 所有 CLI 入口：`nova-harness`（`main.py`）、`nova-pkg`（`package.py`）
-- `modes/` —— 运行模式
+- `app/` —— 宿主形态层：CLI 入口与非 RPC 运行模式
+  - `entry.py` / `package.py` —— `nova-harness` 与 `nova-pkg` CLI 入口
   - `print/` —— 非交互式命令行运行模式（`nova-harness run`）
-  - `rpc/` —— JSON-RPC 服务器运行模式（装配入口 `cli.py`；服务器本体归 `server/`：`RpcServer` + 连接层 `Connection`/`ConnectionRegistry` + `RoutingUIContext` + `MethodRegistry` + 归约层 `reduction/`，传输经 `StdioTransport` 接入，`OutputGuard` 归 `core/utils/`）
+- `server/` —— **JSON-RPC 服务器宿主**（独立发行包 `nova-harness-server`，对位 codex `app-server` crate）
+  - `server.py` —— `RpcServer` + 连接层 `Connection`/`ConnectionRegistry`
+  - `protocol/` —— methods（auth/model/package/resources/session/settings/system/state/user_tools）+ `shapes.py`（wire 契约，签名推导）+ router + jsonrpc + serialize + `schema_export.py`（前端 gen 工件导出）
+  - `reduction/` —— 事件 → wire 条目归约；`transport/` —— stdio / WebSocket / memory（WS 鉴权三守则见 `transport/websocket.py`）
+  - `types/` —— wire 条目词汇（`items.py` 的 `NovaItem` 判别联合等）；`ui_context.py` —— `RoutingUIContext`（跨连接反向原语路由）
+  - `rpc/` —— `nova-harness-rpc` CLI 装配入口
 
-  （**WS 接入已翻案归 Python** `rpc`——连接化重构后 stdio/WS 同为连接来源，鉴权三守则见 `transport/websocket.py`；设计修订记录见 `packages/nova-harness/backend/examples/nova_architecture_2.0.md` 文首）
-- `core/agent_session/` —— `AgentSession` 运行时核心、`AgentSessionRuntime`、`AgentSessionServices`、领域控制器（user_tools、compaction、events、model、queue、retry、stats、tools、tree）
-- `core/harness/` —— 高阶能力：会话持久化与树管理、上下文压缩、系统提示词构建、skills、Project Trust、用户工具（`user_tools/`：仅 UserToolManager 注册中心——框架不内置任何用户工具，具体工具由包经 `[tool.nova] user_tools` 类目分发；消息回载注册表在 `harness/session/message_types.py`；设计见 `examples/user_tools_design.md`）
-- `core/resources/` —— 资源发现与加载（`loader.py` 与 `loaders/` 下的 agent_config、extensions、prompt_templates、skills、tools）
-- `package/` —— Agent / tool / bundle / skill / extension 包管理器核心（manager facade + install/ 安装世界 + resolve/ 运行时世界 + source/ source 领域 + manifest / validation / scaffold / utils）。安装事实以 `*.dist-info/`（PEP 610 风格）为权威快照，副本推导兜底
-- `core/config/` —— settings、auth storage、路径默认值、配置解析
-- `core/model/` —— 模型域：注册表运行时（`ModelRuntime`、store/composer）、模型解析（`resolver.py`）、provider attribution
-- `core/types/` —— 统一 Pydantic / dataclass 类型层
-- `core/utils/` —— 通用工具（含遥测、HTTP 空闲超时、二进制解析）
-- `core/extensions/` —— 扩展系统：API、loader、runner、wrapper、types
+  （**WS 接入已翻案归 Python**——连接化重构后 stdio/WS 同为连接来源；设计修订记录见 `packages/nova-harness/backend/examples/nova_architecture_2.0.md` 文首）
+- `core/` —— **agent 域**（对位 codex `core` crate：跑 agent 需要的一切收在此，其余域独立在外）
+  - `agent_session/` —— `AgentSession` 运行时核心、`AgentSessionRuntime`、`AgentSessionServices`、`factory.py`、`input.py`（用户输入解析）与领域控制器 `controllers/`（events、model、queue、retry、stats、tree + compaction/tools/user_tools 的编排入口）
+  - `compaction/` —— 上下文压缩与分支摘要（含 `types.py`）
+  - `tools/` `user_tools/` —— 工具裁决与动态工具（`user_tools/`：仅 UserToolManager 注册中心——框架不内置任何用户工具，具体工具由包经 `[tool.nova] user_tools` 类目分发；设计见 `examples/user_tools_design.md`）
+  - `agents/` `persona/` `system_prompt/` `skills.py` —— 多 agent、人格与提示词装配
+  - `utils/` —— agent 域通用工具
+- `sessions/` —— 会话**持久化账本**域（对位 codex `rollout` crate）：`manager.py`、listing/builders、消息回载注册表 `message_types.py`；与 `core/` 运行时会话分离（运行时归 core，账本归 sessions）
+- `types/` —— 共享词汇层（对位 codex `codex_protocol` crate）：跨域契约 `protocols.py`、自定义消息 `messages.py`、各域类型子包（`events/` `session/` `ui/` `resources/` `extensions/` `package/` `config/` `model/` `compaction/` `project_trust.py`）。领域私有类型就近放各域，不在此聚合
+- `resources/` —— 资源发现与加载（`loader.py` 与 `loaders/` 下的 agent_config、extensions、personas、prompt_templates、skills、tools、user_tools、context_files）+ Project Trust 门控（`project_trust/`：信任决策、resolver 读取门控、`trust_store.py` 持久化）
+- `package/` —— Agent / tool / bundle / skill / extension 包管理器核心（manager facade + install/ 安装世界 + resolve/ 运行时世界 + source/ source 领域 + manifest / validation / scaffold / utils + `types/`）。安装事实以 `*.dist-info/`（PEP 610 风格）为权威快照，副本推导兜底
+- `config/` —— settings、auth storage、路径默认值、配置解析（含 `types/`）
+- `model/` —— 模型域：注册表运行时（`ModelRuntime`、store/composer）、模型解析（`resolver.py`）、provider attribution（含 `types.py`；= codex `models-manager` 对位）
+- `utils/` —— 通用工具（含遥测、HTTP 空闲超时、二进制解析）
+- `extensions/` —— 扩展系统：API、loader、runner、wrapper、`types/`
 
 ### `nova_coding_agent`（bundle + Python 包）
 
@@ -203,7 +214,7 @@ npm link        # 全局注册 `nova` 命令
 
 ### `nova_executor`（Rust 通用执行后端）与 `nova-executor-client`（Python SDK）
 
-- **定位**：编程无绑定的通用执行后端——进程/文件系统/PTY + 三平台沙箱（macOS Seatbelt、Linux bwrap+landlock、Windows restricted token）+ managed network sandbox，JSON-RPC over stdio / WebSocket（stdio 为主：CLI/桌面/SSH 隧道场景；WS 用于回环与将来服务器托管）。fs 含大文件流式端点 `fs/readStream`（服务端推送，支持平台沙箱）/ `fs/writeStream`（客户端分片推）。**协议即产品**：线上契约在 `packages/nova_executor/PROTOCOL.md`（v1.0），任何语言照文档可实现客户端。
+- **定位**：编程无绑定的通用执行后端——进程/文件系统/PTY + 三平台沙箱（macOS Seatbelt、Linux bwrap+landlock、Windows restricted token）+ managed network sandbox，JSON-RPC over stdio / WebSocket（stdio 为主：CLI/桌面/SSH 隧道场景；WS 用于回环与将来服务器托管）。fs 含大文件流式端点 `fs/readStream`（服务端推送，支持平台沙箱）/ `fs/writeStream`（客户端分片推）。**协议即产品**：线上契约在 `packages/nova_executor/PROTOCOL.md`（v1.4），任何语言照文档可实现客户端。
 - **边界（重要）**：executor 不知道 agent/模型/工具/会话概念。已移除：模型 API 层（原 executor-codex-api）、agent 配置体系（executor-config）、Rust 侧工具注册处（executor-extension-items）、`capabilityRoots/discoverV1` 端点。**不要在 executor 里重新引入这些概念**——工具契约在 Nova 包体系（Python），正确接法是在 `nova_coding_agent` 的 bash 引擎后面挂 executor 实现（本地 subprocess ↔ executor 同缝切换）。
 - **`nova-executor-client`**：`ExecutorClient` 薄客户端（process/fs/pty + errors），"只做连接"。initialize 时做 `protocolVersion` major 匹配。传输双形态：`WebSocketTransport` + `StdioTransport`（spawn 子进程 NDJSON，command 参数化——本地/SSH 同一实现）；`TransportPool` 多连接按通道路由（控制面/数据面分离，大文件流不阻塞工具调用）。已删除其自带的 Tool/Plugin/ExecutorBackend 三件套（与 Nova 契约冲突），不要恢复。
 - 鉴权：executor 只做本地回环（stdio / WS 回环承载），**无入站鉴权**；对外暴露与鉴权归上层中继层（未落地），不归 executor。
@@ -353,7 +364,7 @@ npm link           # 全局注册 `nova` 命令
   - `packages/nova-harness/frontend/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
   - `packages/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
-- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 458 个、`nova_agent` 105 个、`nova_harness` 1303 个、`nova_coding_agent` 236 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
+- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 458 个、`nova_agent` 105 个、`nova_harness` 1303 个、`nova_coding_agent` 528 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
 
 运行方式：
 
