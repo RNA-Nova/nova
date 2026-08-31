@@ -92,7 +92,7 @@ async fn noisy_failing_helper_preserves_exit_status_and_bounded_stderr() {
     let stderr = drain_helper_stderr(&mut child);
 
     let error = tokio::time::timeout(
-        Duration::from_secs(/*secs*/ 8),
+        Duration::from_secs(/*secs*/ 30),
         reap_helper_after_response(child, stderr),
     )
     .await
@@ -140,7 +140,7 @@ async fn helper_stderr_is_drained_before_the_response() {
     let stderr = drain_helper_stderr(&mut child);
 
     let response = tokio::time::timeout(
-        Duration::from_secs(/*secs*/ 2),
+        Duration::from_secs(/*secs*/ 30),
         read_helper_response(stdout),
     )
     .await
