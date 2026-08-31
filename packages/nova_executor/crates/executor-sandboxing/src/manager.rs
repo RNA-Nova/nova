@@ -134,7 +134,7 @@ pub struct SandboxTransformRequest<'a> {
     pub sandbox: SandboxType,
     pub enforce_managed_network: bool,
     pub environment_id: Option<&'a str>,
-    // TODO(viyatb): Evaluate switching this to Option<Arc<NetworkProxy>>
+    // TODO(nova): Evaluate switching this to Option<Arc<NetworkProxy>>
     // to make shared ownership explicit across runtime/sandbox plumbing.
     pub network: Option<&'a NetworkProxy>,
     pub sandbox_policy_cwd: &'a PathUri,
@@ -155,7 +155,7 @@ pub struct SandboxDirectSpawnTransformRequest<'a> {
     pub windows_sandbox_proxy_settings_mode: crate::WindowsSandboxProxySettingsMode,
 }
 
-// TODO(anp): Revisit this preparation type once this module's PathUri migration is complete.
+// TODO(nova): Revisit this preparation type once this module's PathUri migration is complete.
 struct PendingSandboxedExecRequest {
     native_command_cwd: AbsolutePathBuf,
     native_sandbox_policy_cwd: AbsolutePathBuf,
@@ -169,7 +169,7 @@ impl PendingSandboxedExecRequest {
         effective_permission_profile: PermissionProfile,
         managed_mitm_ca_trust_bundle_path: Option<&AbsolutePathBuf>,
     ) -> Result<Self, SandboxTransformError> {
-        // TODO(anp): Move PathUri conversion into the platform sandbox implementations.
+        // TODO(nova): Move PathUri conversion into the platform sandbox implementations.
         let native_command_cwd = command_cwd.to_abs_path().map_err(|source| {
             SandboxTransformError::InvalidCommandCwd {
                 cwd: command_cwd.clone(),
@@ -526,7 +526,7 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
     executor_home: &Path,
     proxy_settings_mode: crate::WindowsSandboxProxySettingsMode,
 ) -> Result<(), SandboxTransformError> {
-    // TODO(anp): Keep PathUri through the Windows sandbox wrapper boundary.
+    // TODO(nova): Keep PathUri through the Windows sandbox wrapper boundary.
     let native_cwd =
         request
             .cwd

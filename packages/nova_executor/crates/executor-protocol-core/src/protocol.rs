@@ -250,7 +250,7 @@ impl SandboxPolicy {
 
                 // Always include defaults: cwd, /tmp (if present on Unix), and
                 // on macOS, the per-user TMPDIR unless explicitly excluded.
-                // TODO(mbolin): cwd param should be AbsolutePathBuf.
+                // TODO(nova): cwd param should be AbsolutePathBuf.
                 let cwd_absolute = AbsolutePathBuf::from_absolute_path(cwd);
                 match cwd_absolute {
                     Ok(cwd) => {

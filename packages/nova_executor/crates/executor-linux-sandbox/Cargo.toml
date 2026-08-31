@@ -9,9 +9,8 @@ name = "nova_executor_linux_sandbox"
 path = "src/lib.rs"
 doctest = false
 
-# 二进制名保持 codex 原样：argv0 互操作契约（executor-sandboxing 的
-# CODEX_LINUX_SANDBOX_ARG0 按此名字自我 re-exec），照 executor-windows-sandbox
-# 保留 helper 原名的先例。
+# 二进制名 nova-linux-sandbox：argv0 互操作契约（executor-sandboxing 的
+# NOVA_EXECUTOR_LINUX_SANDBOX_ARG0 按此名字自我 re-exec）。
 [[bin]]
 name = "nova-linux-sandbox"
 path = "src/main.rs"

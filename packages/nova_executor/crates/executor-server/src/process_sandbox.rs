@@ -123,7 +123,7 @@ pub(crate) async fn prepare_exec_request(
         .unwrap_or_default();
     let runtime_paths = runtime_paths
         .ok_or_else(|| invalid_params("sandbox runtime paths are not configured".to_string()))?;
-    // TODO(jif): Transport permissions before orchestrator-local paths are materialized,
+    // TODO(nova): Transport permissions before orchestrator-local paths are materialized,
     // then resolve executor-local helper and workspace paths here.
     let permissions: PermissionProfile = sandbox_context
         .permissions

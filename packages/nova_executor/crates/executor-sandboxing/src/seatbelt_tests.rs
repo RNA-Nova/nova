@@ -2559,7 +2559,7 @@ fn populate_tmpdir(tmp: &Path) -> PopulatedTmp {
     let vulnerable_root = tmp.join("vulnerable_root");
     fs::create_dir_all(&vulnerable_root).expect("create vulnerable_root");
 
-    // TODO(mbolin): Should also support the case where `.git` is a file
+    // TODO(nova): Should also support the case where `.git` is a file
     // with a gitdir: ... line.
     Command::new("git")
         .arg("init")

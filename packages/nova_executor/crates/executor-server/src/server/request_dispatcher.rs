@@ -180,7 +180,7 @@ impl RequestDispatcher {
                 .send(RpcServerOutboundMessage::Error {
                     request_id: request.id,
                     error: method_not_found(format!(
-                        "exec-server stub does not implement `{}` yet",
+                        "executor does not implement method `{}`",
                         request.method
                     )),
                 })
@@ -253,7 +253,7 @@ impl RequestDispatcher {
             Arc::clone(ordinary)
         };
 
-        // TODO(anp) bound queued request bytes without blocking later responses or cleanup.
+        // TODO(nova) bound queued request bytes without blocking later responses or cleanup.
         self.tasks.spawn(async move {
             let Ok(_permit) = admission.acquire_owned().await else {
                 return RequestTaskResult::ConnectionClosed;

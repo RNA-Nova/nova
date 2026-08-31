@@ -10,8 +10,9 @@ name = "nova_executor_windows_sandbox"
 path = "src/lib.rs"
 doctest = false
 
-# 二进制名保持 codex 原样：helper_materialization 按文件名查找/落盘这两个
-# helper（与 executor-sandboxing 保留 CODEX_LINUX_SANDBOX_ARG0 等 argv 契约一致）。
+# 二进制名 nova-windows-sandbox-setup / nova-command-runner：
+# helper_materialization 按文件名查找/落盘这两个 helper（argv 契约常量为
+# NOVA_EXECUTOR_* 系）。
 [[bin]]
 name = "nova-windows-sandbox-setup"
 path = "src/bin/setup_main/main.rs"

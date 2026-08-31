@@ -6,16 +6,11 @@ pub(crate) mod trace_context;
 mod otlp;
 mod targets;
 
-use crate::metrics::Result as MetricsResult;
-
 pub use crate::config::OtelExporter;
 pub use crate::config::OtelHttpProtocol;
 pub use crate::config::OtelSettings;
 pub use crate::config::OtelTlsConfig;
 pub use crate::config::validate_span_attributes;
-pub use crate::metrics::runtime_metrics::RuntimeMetricTotals;
-pub use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
-pub use crate::metrics::timer::Timer;
 pub use crate::metrics::*;
 pub use crate::provider::OtelProvider;
 pub use crate::trace_context::context_from_w3c_trace_context;
@@ -25,15 +20,6 @@ pub use crate::trace_context::inject_span_w3c_trace_headers;
 pub use crate::trace_context::set_parent_from_context;
 pub use crate::trace_context::set_parent_from_w3c_trace_context;
 pub use crate::trace_context::span_w3c_trace_context;
-pub use crate::trace_context::traceparent_context_from_env;
 pub use crate::trace_context::validate_tracestate_entries;
 pub use crate::trace_context::validate_tracestate_member;
 pub use nova_executor_utils_string::sanitize_metric_tag_value;
-
-/// Start a metrics timer using the globally installed metrics client.
-pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Timer> {
-    let Some(metrics) = crate::metrics::global() else {
-        return Err(MetricsError::ExporterDisabled);
-    };
-    metrics.start_timer(name, tags)
-}

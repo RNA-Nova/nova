@@ -227,7 +227,7 @@ impl PathUri {
     /// an absolute Windows UTF-16LE prefix. `None` is returned when their
     /// payload does not identify either convention.
     ///
-    /// TODO(anp): Once `PathUri` carries an environment identifier, prefer the
+    /// TODO(nova): Once `PathUri` carries an environment identifier, prefer the
     /// environment's declared convention over this spelling-based heuristic.
     pub fn infer_path_convention(&self) -> Option<PathConvention> {
         if let Some(path_bytes) = self.opaque_fallback_bytes() {

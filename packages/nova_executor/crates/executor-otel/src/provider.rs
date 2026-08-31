@@ -313,10 +313,6 @@ impl OtelProvider {
             ))
     }
 
-    pub fn nova_export_filter(meta: &tracing::Metadata<'_>) -> bool {
-        Self::log_export_filter(meta)
-    }
-
     pub fn log_export_filter(meta: &tracing::Metadata<'_>) -> bool {
         is_log_export_target(meta.target())
     }
@@ -704,7 +700,6 @@ mod tests {
             environment: "test".to_string(),
             service_name: "nova-test".to_string(),
             service_version: "0.0.0".to_string(),
-            sandbox_home: PathBuf::from("."),
             exporter: OtelExporter::None,
             trace_exporter: OtelExporter::None,
             metrics_exporter: OtelExporter::None,

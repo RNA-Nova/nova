@@ -108,10 +108,8 @@ fn record_duration_seconds_uses_fractional_seconds_and_scaled_buckets() -> Resul
 fn timer_result_records_success() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
 
-    {
-        let timer = metrics.start_timer("codex.request_latency", &[("route", "chat")]);
-        assert!(timer.is_ok());
-    }
+    // Timer API 已随死面清扫移除——等价覆盖：直接 record_duration 验证直方图记录
+    metrics.record_duration("codex.request_latency", std::time::Duration::from_millis(12), &[("route", "chat")])?;
 
     metrics.shutdown()?;
 

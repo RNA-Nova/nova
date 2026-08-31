@@ -19,7 +19,6 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRACEPARENT_ENV_VAR: &str = "TRACEPARENT";
 const TRACESTATE_ENV_VAR: &str = "TRACESTATE";
-static TRACEPARENT_CONTEXT: OnceLock<Option<Context>> = OnceLock::new();
 
 // Trace context propagation can happen outside the provider object, so configured
 // tracestate lives beside the process-global tracer provider.
@@ -120,12 +119,6 @@ pub fn set_parent_from_context(span: &Span, context: Context) {
     let _ = span.set_parent(context);
 }
 
-pub fn traceparent_context_from_env() -> Option<Context> {
-    TRACEPARENT_CONTEXT
-        .get_or_init(load_traceparent_context)
-        .clone()
-}
-
 pub(crate) fn context_from_trace_headers(
     traceparent: Option<&str>,
     tracestate: Option<&str>,
@@ -144,21 +137,6 @@ pub(crate) fn context_from_trace_headers(
     Some(context)
 }
 
-fn load_traceparent_context() -> Option<Context> {
-    let traceparent = env::var(TRACEPARENT_ENV_VAR).ok()?;
-    let tracestate = env::var(TRACESTATE_ENV_VAR).ok();
-
-    match context_from_trace_headers(Some(&traceparent), tracestate.as_deref()) {
-        Some(context) => {
-            debug!("TRACEPARENT detected; continuing trace from parent context");
-            Some(context)
-        }
-        None => {
-            warn!("TRACEPARENT is set but invalid; ignoring trace context");
-            None
-        }
-    }
-}
 
 fn tracestate_entries() -> &'static RwLock<BTreeMap<String, BTreeMap<String, String>>> {
     TRACESTATE_ENTRIES.get_or_init(|| RwLock::new(BTreeMap::new()))

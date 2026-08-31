@@ -554,7 +554,7 @@ impl TryFrom<FileSystemSandboxPolicy> for RawFileSystemSandboxPolicy {
     }
 }
 
-const PROJECT_ROOTS_GLOB_PATTERN_PREFIX: &str = "codex-project-roots://";
+const PROJECT_ROOTS_GLOB_PATTERN_PREFIX: &str = "nova-project-roots://";
 
 pub fn project_roots_glob_pattern(subpath: &Path) -> String {
     format!("{PROJECT_ROOTS_GLOB_PATTERN_PREFIX}{}", subpath.display())
@@ -795,7 +795,7 @@ impl FileSystemSandboxPolicy {
         for writable_root in writable_roots {
             for protected_path in default_read_only_subpaths_for_writable_root(
                 writable_root,
-                /*protect_missing_dot_codex*/ false,
+                /*protect_missing_dot_nova*/ false,
             ) {
                 append_default_read_only_path_if_no_explicit_rule(&mut entries, protected_path);
             }
@@ -816,7 +816,7 @@ impl FileSystemSandboxPolicy {
         if let SandboxPolicy::WorkspaceWrite { writable_roots, .. } = sandbox_policy {
             if let Ok(cwd_root) = AbsolutePathBuf::from_absolute_path(cwd) {
                 for protected_path in default_read_only_subpaths_for_writable_root(
-                    &cwd_root, /*protect_missing_dot_codex*/ true,
+                    &cwd_root, /*protect_missing_dot_nova*/ true,
                 ) {
                     append_default_read_only_path_if_no_explicit_rule(
                         &mut file_system_policy.entries,
@@ -827,7 +827,7 @@ impl FileSystemSandboxPolicy {
             for writable_root in writable_roots {
                 for protected_path in default_read_only_subpaths_for_writable_root(
                     writable_root,
-                    /*protect_missing_dot_codex*/ false,
+                    /*protect_missing_dot_nova*/ false,
                 ) {
                     append_default_read_only_path_if_no_explicit_rule(
                         &mut file_system_policy.entries,
@@ -1330,7 +1330,7 @@ impl FileSystemSandboxPolicy {
             }
 
             for protected_path in default_read_only_subpaths_for_writable_root(
-                path, /*protect_missing_dot_codex*/ false,
+                path, /*protect_missing_dot_nova*/ false,
             ) {
                 append_default_read_only_path_if_no_explicit_rule(
                     &mut self.entries,
@@ -1462,11 +1462,11 @@ impl FileSystemSandboxPolicy {
                 .collect();
             let protected_metadata_names =
                 protected_metadata_names_for_writable_root(self, &root, &raw_writable_roots, cwd);
-            let protect_missing_dot_codex = AbsolutePathBuf::from_absolute_path(cwd)
+            let protect_missing_dot_nova = AbsolutePathBuf::from_absolute_path(cwd)
                 .ok()
                 .is_some_and(|cwd| path_resolution.resolve(cwd) == root);
             let mut read_only_subpaths: Vec<AbsolutePathBuf> =
-                default_read_only_subpaths_for_writable_root(&root, protect_missing_dot_codex)
+                default_read_only_subpaths_for_writable_root(&root, protect_missing_dot_nova)
                     .into_iter()
                     .filter(|path| !has_explicit_resolved_path_entry(&resolved_entries, path))
                     .collect();
@@ -2135,7 +2135,7 @@ fn normalize_trusted_top_level_alias(path: AbsolutePathBuf) -> AbsolutePathBuf {
 
 pub(crate) fn default_read_only_subpaths_for_writable_root(
     writable_root: &AbsolutePathBuf,
-    protect_missing_dot_codex: bool,
+    protect_missing_dot_nova: bool,
 ) -> Vec<AbsolutePathBuf> {
     let mut subpaths: Vec<AbsolutePathBuf> = Vec::new();
     let top_level_git = writable_root.join(PROTECTED_METADATA_GIT_PATH_NAME);
@@ -2164,9 +2164,9 @@ pub(crate) fn default_read_only_subpaths_for_writable_root(
     // default. For the workspace root itself, protect it even before the
     // directory exists so first-time creation still goes through the
     // protected-path approval flow.
-    let top_level_codex = writable_root.join(PROTECTED_METADATA_NOVA_EXECUTOR_PATH_NAME);
-    if protect_missing_dot_codex || top_level_codex.as_path().is_dir() {
-        subpaths.push(top_level_codex);
+    let top_level_nova = writable_root.join(PROTECTED_METADATA_NOVA_EXECUTOR_PATH_NAME);
+    if protect_missing_dot_nova || top_level_nova.as_path().is_dir() {
+        subpaths.push(top_level_nova);
     }
 
     dedup_absolute_paths(subpaths, /*normalize_effective_paths*/ false)
@@ -2233,7 +2233,7 @@ fn legacy_runtime_file_system_policy_for_cwd(
 
     if let Ok(cwd_root) = AbsolutePathBuf::from_absolute_path(cwd) {
         for protected_path in default_read_only_subpaths_for_writable_root(
-            &cwd_root, /*protect_missing_dot_codex*/ true,
+            &cwd_root, /*protect_missing_dot_nova*/ true,
         ) {
             append_default_read_only_path_if_no_explicit_rule(&mut entries, protected_path);
         }
@@ -2241,7 +2241,7 @@ fn legacy_runtime_file_system_policy_for_cwd(
     for writable_root in writable_roots {
         for protected_path in default_read_only_subpaths_for_writable_root(
             writable_root,
-            /*protect_missing_dot_codex*/ false,
+            /*protect_missing_dot_nova*/ false,
         ) {
             append_default_read_only_path_if_no_explicit_rule(&mut entries, protected_path);
         }
@@ -2944,7 +2944,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn writable_roots_proactively_protect_missing_dot_codex() {
+    fn writable_roots_proactively_protect_missing_dot_nova() {
         let cwd = TempDir::new().expect("tempdir");
         let expected_root = AbsolutePathBuf::from_absolute_path(
             cwd.path().canonicalize().expect("canonicalize cwd"),
@@ -3129,13 +3129,13 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn writable_roots_skip_default_dot_codex_when_explicit_user_rule_exists() {
+    fn writable_roots_skip_default_dot_nova_when_explicit_user_rule_exists() {
         let cwd = TempDir::new().expect("tempdir");
         let expected_root = AbsolutePathBuf::from_absolute_path(
             cwd.path().canonicalize().expect("canonicalize cwd"),
         )
         .expect("absolute canonical root");
-        let explicit_dot_codex = expected_root.join(".nova");
+        let explicit_dot_nova = expected_root.join(".nova");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -3147,7 +3147,7 @@ mod tests {
             },
             FileSystemSandboxEntry {
                 path: FileSystemPath::Path {
-                    path: explicit_dot_codex.clone().into(),
+                    path: explicit_dot_nova.clone().into(),
                 },
                 access: FileSystemAccessMode::Write,
                 missing_path_behavior: None,
@@ -3168,12 +3168,12 @@ mod tests {
         assert!(
             !workspace_root
                 .read_only_subpaths
-                .contains(&explicit_dot_codex),
+                .contains(&explicit_dot_nova),
             "explicit .nova rule should win over the default protected carveout"
         );
         assert!(
             policy.can_write_path_with_cwd(
-                explicit_dot_codex.join("config.toml").as_path(),
+                explicit_dot_nova.join("config.toml").as_path(),
                 cwd.path()
             )
         );
@@ -3258,7 +3258,7 @@ mod tests {
         expected_entries.extend(
             default_read_only_subpaths_for_writable_root(
                 &expected_root,
-                /*protect_missing_dot_codex*/ true,
+                /*protect_missing_dot_nova*/ true,
             )
             .into_iter()
             .map(|path| {
@@ -3311,7 +3311,7 @@ mod tests {
         let link_blocked = link_root.join("blocked");
         let expected_root = link_root.clone();
         let expected_blocked = link_blocked.clone();
-        let expected_codex = link_root.join(".nova");
+        let expected_nova = link_root.join(".nova");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -3342,7 +3342,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_codex)
+                .contains(&expected_nova)
         );
     }
 
@@ -3367,7 +3367,7 @@ mod tests {
             AbsolutePathBuf::from_absolute_path(&link_root).expect("absolute symlinked root");
         let expected_blocked = link_blocked.clone();
         let expected_agents = expected_root.join(".agents");
-        let expected_codex = expected_root.join(".nova");
+        let expected_nova = expected_root.join(".nova");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -3416,7 +3416,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_codex)
+                .contains(&expected_nova)
         );
     }
 
@@ -3425,10 +3425,10 @@ mod tests {
     fn writable_roots_preserve_symlinked_protected_subpaths() {
         let cwd = TempDir::new().expect("tempdir");
         let root = cwd.path().join("root");
-        let decoy = root.join("decoy-codex");
-        let dot_codex = root.join(".nova");
+        let decoy = root.join("decoy-nova");
+        let dot_nova = root.join(".nova");
         fs::create_dir_all(&decoy).expect("create decoy");
-        symlink_dir(&decoy, &dot_codex).expect("create .nova symlink");
+        symlink_dir(&decoy, &dot_nova).expect("create .nova symlink");
 
         let root = AbsolutePathBuf::from_absolute_path(&root).expect("absolute root");
         let expected_dot_nova = AbsolutePathBuf::from_absolute_path(
@@ -3629,7 +3629,7 @@ mod tests {
         let expected_root =
             AbsolutePathBuf::from_absolute_path(&link_tmpdir).expect("absolute symlinked tmpdir");
         let expected_blocked = link_blocked.clone();
-        let expected_codex = expected_root.join(".nova");
+        let expected_nova = expected_root.join(".nova");
 
         unsafe {
             std::env::set_var("TMPDIR", &link_tmpdir);
@@ -3666,7 +3666,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_codex)
+                .contains(&expected_nova)
         );
     }
 

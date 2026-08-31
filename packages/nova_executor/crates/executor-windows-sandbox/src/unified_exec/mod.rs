@@ -23,7 +23,7 @@ use std::path::PathBuf;
 ///
 /// Callers should parse their own input shape first, then use this request to
 /// share the elevated-vs-legacy backend selection and session launch path.
-// TODO(anp): Reconcile Windows backend and desktop copies with the supplied sandbox
+// TODO(nova): Reconcile Windows backend and desktop copies with the supplied sandbox
 // context (TurnEnvironment::sandbox_context for turns), preserving this launch snapshot.
 pub struct WindowsSandboxSessionRequest<'a> {
     pub permission_profile: &'a PermissionProfile,

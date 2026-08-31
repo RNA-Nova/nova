@@ -4,7 +4,6 @@ use crate::metrics::MetricsError;
 use crate::metrics::Result;
 use crate::metrics::config::MetricsConfig;
 use crate::metrics::config::MetricsExporter;
-use crate::metrics::timer::Timer;
 use crate::metrics::validation::validate_metric_name;
 use crate::metrics::validation::validate_tag_key;
 use crate::metrics::validation::validate_tag_value;
@@ -484,14 +483,6 @@ impl MetricsClient {
             SECOND_DURATION_BOUNDARIES,
             tags,
         )
-    }
-
-    pub fn start_timer(
-        &self,
-        name: &str,
-        tags: &[(&str, &str)],
-    ) -> std::result::Result<Timer, MetricsError> {
-        Ok(Timer::new(name, tags, self))
     }
 
     /// Collect a runtime metrics snapshot without shutting down the provider.
