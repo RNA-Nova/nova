@@ -345,3 +345,51 @@ async fn policy_requests_use_process_decider_and_cancel_on_unregister() {
         .expect("policy routing should finish")
         .expect("server task should finish");
 }
+
+/// 伪造/未知 process_id 的 fail-closed pin（对位 codex forged 用例的 nova 半边——
+/// 可信元数据半边按设计不存在：审计元数据恒 None）：进程表里没有的 id 收到
+/// policyRequest 必须 deny（not_allowed），不许触达任何 decider。
+#[tokio::test]
+async fn policy_request_with_forged_process_id_fails_closed() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let websocket_url = format!(
+        "ws://{}",
+        listener.local_addr().expect("listener should have address")
+    );
+    let server = tokio::spawn(async move {
+        let mut websocket = accept_websocket(&listener).await;
+        complete_websocket_initialize(
+            &mut websocket,
+            "forged-session",
+            /*expected_resume_session_id*/ None,
+        )
+        .await;
+        write_jsonrpc_websocket(
+            &mut websocket,
+            policy_request(0, ProcessId::from("forged-process"), "api.example.com"),
+        )
+        .await;
+        assert_eq!(
+            read_decision(&mut websocket, 0).await,
+            ExecServerNetworkPolicyDecision::Deny {
+                reason: "not_allowed".to_string(),
+            }
+        );
+    });
+
+    // 客户端连接但**不注册任何进程**（进程表为空）
+    let _client = LazyRemoteExecServerClient::new(
+        ExecServerTransportParams::WebSocketUrl {
+            websocket_url,
+            connect_timeout: Duration::from_secs(1),
+            initialize_timeout: Duration::from_secs(1),
+        },
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    )
+    .get()
+    .await
+    .expect("client should connect");
+    server.await.expect("server task should complete");
+}

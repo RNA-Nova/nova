@@ -1936,11 +1936,13 @@ mod tests {
             .expect("json-rpc line should write");
     }
 
+    // 进程内并行的固有污染：本测试的 span callsite 会被并发用例"命中即缓存"
+    // 为不感兴趣（无需 rebuild——命中本身就写全局 callsite 兴趣缓存），
+    // outbound span 拿不到新 otel span id（与父相同 → assert_ne 挂）。
+    // 这类 otel 全局态测试要求进程隔离：CI 走 nextest（每测试独立进程）常跑；
+    // 本地验证用 `cargo test -p nova-executor-server --lib -- --ignored` 单跑。
+    #[ignore = "requires process isolation for otel callsite state; CI runs it via nextest"]
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    // 单跑通过、全量 lib 套件内确定性失败（span id 与父 span 相同）——套件内其他
-    // 用例的全局 tracing/otel 状态污染了 callsite 兴趣缓存，与网络代理接线无关，
-    // 留待 trace 链路专项排查。
-    #[ignore = "trace context propagation differs under full-suite tracing state"]
     async fn process_start_propagates_caller_trace_context_across_background_task() {
         let (client_stdin, server_reader) = duplex(1 << 20);
         let (mut server_writer, client_stdout) = duplex(1 << 20);

@@ -1038,6 +1038,125 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::os::unix::fs::symlink;
 
+    fn walk_options() -> WalkOptions {
+        WalkOptions {
+            max_depth: 8,
+            max_directories: 64,
+            max_entries: 64,
+            follow_directory_symlinks: false,
+            prune_hidden_directories: false,
+        }
+    }
+
+    async fn walk_root(root: &std::path::Path, options: WalkOptions) -> WalkOutcome {
+        let root_uri = PathUri::from_host_native_path(root).expect("root uri");
+        UnsandboxedFileSystem::default()
+            .walk(&root_uri, options, None)
+            .await
+            .expect("walk")
+    }
+
+    /// 对位 codex sync_walk_response_budget_counts_entries_and_errors（sync_walk
+    /// 重构为 trait 默认实现 walk_via_directory_reads 后补的等价 pin）：
+    /// 条目/目录限额命中即 truncated，错误计入结果且不中断遍历。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn walk_enforces_entry_and_directory_limits() -> io::Result<()> {
+        let temp_dir = tempfile::TempDir::new()?;
+        let root = temp_dir.path();
+        for dir in ["a", "b", "c"] {
+            std::fs::create_dir_all(root.join(dir))?;
+            std::fs::write(root.join(dir).join("file.txt"), b"x")?;
+        }
+
+        let mut options = walk_options();
+        options.max_entries = 3;
+        let outcome = walk_root(root, options).await;
+        assert!(outcome.truncated, "max_entries 命中必须置 truncated");
+        assert_eq!(outcome.entries.len(), 3);
+
+        let mut options = walk_options();
+        options.max_directories = 2; // 根 + 一个子目录
+        let outcome = walk_root(root, options).await;
+        assert!(outcome.truncated, "max_directories 命中必须置 truncated");
+
+        let mut options = walk_options();
+        options.max_depth = 0; // 只扫根目录内容
+        let outcome = walk_root(root, options).await;
+        assert!(!outcome.truncated);
+        assert_eq!(outcome.entries.len(), 3); // 三个子目录条目在，但不深入
+        Ok(())
+    }
+
+    /// 错误收集：子目录读失败进 errors、遍历继续、响应字节预算兜住
+    /// （预算耗尽时错误也计字节——对位 reserve_walk_response_bytes 语义）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn walk_collects_errors_and_keeps_walking() -> io::Result<()> {
+        let temp_dir = tempfile::TempDir::new()?;
+        let root = temp_dir.path();
+        std::fs::create_dir_all(root.join("good"))?;
+        std::fs::write(root.join("good").join("ok.txt"), b"x")?;
+        let bad = root.join("bad");
+        std::fs::create_dir_all(&bad)?;
+        // 读不了的目录（unix 权限位；root 跑测试时 chmod 不拦——CI 非 root）
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o000))?;
+
+        let outcome = walk_root(root, walk_options()).await;
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o755))?;
+        assert!(
+            outcome.errors.iter().any(|e| e.path.to_string().contains("bad")),
+            "读失败的目录必须进 errors：{:?}",
+            outcome.errors
+        );
+        assert!(
+            outcome
+                .entries
+                .iter()
+                .any(|e| e.path.to_string().contains("ok.txt")),
+            "好目录的内容必须照常遍历"
+        );
+        Ok(())
+    }
+
+    /// 符号链接环：follow 开启时 visited 集合防无限循环；关闭时不跟。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn walk_symlink_loop_does_not_hang() -> io::Result<()> {
+        let temp_dir = tempfile::TempDir::new()?;
+        let root = temp_dir.path().join("root");
+        std::fs::create_dir_all(root.join("inner"))?;
+        symlink(&root, root.join("inner").join("loop"))?;
+
+        let mut options = walk_options();
+        options.follow_directory_symlinks = false;
+        let outcome = walk_root(&root, options).await;
+        assert!(!outcome.entries.is_empty());
+
+        let mut options = walk_options();
+        options.follow_directory_symlinks = true;
+        let outcome = walk_root(&root, options).await;
+        let loops = outcome
+            .entries
+            .iter()
+            .filter(|e| e.path.to_string().contains("loop"))
+            .count();
+        assert_eq!(loops, 1, "环只能被访问一次（visited 去重）");
+        Ok(())
+    }
+
+    /// 取消安全 pin：创建后未驱动即 drop 不得做任何 IO/副作用
+    /// （对位 codex sync_walk_cancellation_stops_before_io 的存活语义）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn walk_future_drop_before_poll_is_inert() -> io::Result<()> {
+        let temp_dir = tempfile::TempDir::new()?;
+        std::fs::write(temp_dir.path().join("x.txt"), b"x")?;
+        let root_uri = PathUri::from_host_native_path(temp_dir.path())?;
+        let fs = UnsandboxedFileSystem::default();
+        let future = fs.walk(&root_uri, walk_options(), None);
+        drop(future); // 未 poll 即 drop：不得 panic/泄漏
+        assert!(temp_dir.path().join("x.txt").exists());
+        Ok(())
+    }
+
     #[test]
     fn resolve_existing_path_handles_symlink_parent_dotdot_escape() -> io::Result<()> {
         let temp_dir = tempfile::TempDir::new()?;
