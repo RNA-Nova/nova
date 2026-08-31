@@ -127,7 +127,7 @@ async fn tungstenite_default_tls_mode_ignores_invalid_custom_ca_in_a_subprocess(
         command
             .env(
                 "NOVA_EXECUTOR_CA_CERTIFICATE",
-                "/codex-websocket-client-nonexistent-custom-ca.pem",
+                "/nova-websocket-client-nonexistent-custom-ca.pem",
             )
             .env("NOVA_EXECUTOR_WEBSOCKET_DEFAULT_TLS_PROBE_URL", target_url)
             .output()
@@ -153,7 +153,7 @@ async fn tungstenite_default_tls_mode_subprocess_probe() {
     let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
     assert!(
         WebSocketConnector::new(&factory).is_err(),
-        "explicit Codex TLS should reject the invalid custom CA"
+        "explicit Nova TLS should reject the invalid custom CA"
     );
     let connector =
         WebSocketConnector::new_with_tls_mode(&factory, WebSocketTlsMode::TungsteniteDefault)
@@ -164,7 +164,7 @@ async fn tungstenite_default_tls_mode_subprocess_probe() {
     let (mut websocket, _) = connector
         .connect(request, WebSocketConfig::default())
         .await
-        .expect("WebSocket should connect without constructing Codex TLS");
+        .expect("WebSocket should connect without constructing Nova TLS");
     let expected = Message::Text("Tungstenite default TLS".into());
     websocket
         .send(expected.clone())

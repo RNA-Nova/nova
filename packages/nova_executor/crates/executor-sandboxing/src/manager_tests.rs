@@ -488,7 +488,7 @@ fn transform_linux_seccomp_preserves_helper_path_in_arg0_when_available() {
 #[cfg(target_os = "linux")]
 #[test]
 fn transform_linux_seccomp_uses_helper_alias_when_launcher_is_not_helper_path() {
-    let nova_linux_sandbox_exe = std::path::PathBuf::from("/tmp/codex");
+    let nova_linux_sandbox_exe = std::path::PathBuf::from("/tmp/nova-executor");
     let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe);
 
     assert_eq!(exec_request.arg0, Some("nova-linux-sandbox".to_string()));
@@ -533,7 +533,7 @@ fn transform_for_direct_spawn_windows_preserves_only_wrapper_setup_identity() {
 fn transform_for_direct_spawn_windows_materializes_inner_helper() {
     let executor_home = tempfile::TempDir::new().expect("executor home");
     let helper_dir = tempfile::TempDir::new().expect("helper dir");
-    let configured_helper = helper_dir.path().join("configured-codex-helper.exe");
+    let configured_helper = helper_dir.path().join("configured-test-helper.exe");
     std::fs::write(&configured_helper, b"helper").expect("write configured helper");
     let cwd = AbsolutePathBuf::from_absolute_path(helper_dir.path()).expect("absolute cwd");
     let cwd_uri = PathUri::from_abs_path(&cwd);

@@ -2,7 +2,7 @@ use dirs::home_dir;
 use nova_executor_utils_absolute_path::AbsolutePathBuf;
 use std::path::PathBuf;
 
-/// Returns the path to the Codex configuration directory, which can be
+/// Returns the path to the Nova executor configuration directory, which can be
 /// specified by the `NOVA_EXECUTOR_HOME` environment variable. If not set, defaults to
 /// `~/.nova/executor`.
 ///
@@ -82,7 +82,7 @@ mod tests {
         let missing = temp_home.path().join("missing-sandbox-home");
         let missing_str = missing
             .to_str()
-            .expect("missing codex home path should be valid utf-8");
+            .expect("missing nova executor home path should be valid utf-8");
 
         let err = find_nova_executor_home_from_env(Some(missing_str))
             .expect_err("missing NOVA_EXECUTOR_HOME");
@@ -100,7 +100,7 @@ mod tests {
         fs::write(&file_path, "not a directory").expect("write temp file");
         let file_str = file_path
             .to_str()
-            .expect("file codex home path should be valid utf-8");
+            .expect("file nova executor home path should be valid utf-8");
 
         let err =
             find_nova_executor_home_from_env(Some(file_str)).expect_err("file NOVA_EXECUTOR_HOME");
@@ -117,7 +117,7 @@ mod tests {
         let temp_str = temp_home
             .path()
             .to_str()
-            .expect("temp codex home path should be valid utf-8");
+            .expect("temp nova executor home path should be valid utf-8");
 
         let resolved =
             find_nova_executor_home_from_env(Some(temp_str)).expect("valid NOVA_EXECUTOR_HOME");

@@ -4,7 +4,7 @@
 name = "nova-agent-shell-command-tools"
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 # 依赖 nova-executor-shell-command 的 shell_detect（ShellType/detect_shell_type）

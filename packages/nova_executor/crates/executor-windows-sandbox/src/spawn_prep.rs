@@ -691,7 +691,7 @@ mod tests {
 
         let writable_roots = vec![
             AbsolutePathBuf::try_from(active_root.as_path()).expect("active root"),
-            AbsolutePathBuf::try_from(sandbox_home.as_path()).expect("codex home"),
+            AbsolutePathBuf::try_from(sandbox_home.as_path()).expect("sandbox home"),
             AbsolutePathBuf::try_from(sandbox_root.as_path()).expect("sandbox root"),
         ];
         let permission_profile = workspace_profile(
@@ -713,7 +713,7 @@ mod tests {
 
         assert!(roots.contains(&dunce::canonicalize(&workspace).expect("workspace")));
         assert!(roots.contains(&dunce::canonicalize(&active_root).expect("active root")));
-        assert!(!roots.contains(&dunce::canonicalize(&sandbox_home).expect("codex home")));
+        assert!(!roots.contains(&dunce::canonicalize(&sandbox_home).expect("sandbox home")));
         assert!(!roots.contains(&dunce::canonicalize(&sandbox_root).expect("sandbox root")));
     }
 }

@@ -1,4 +1,4 @@
-//! Internal `codex.exe --run-as-windows-sandbox` wrapper.
+//! Internal `nova-executor --run-as-windows-sandbox` wrapper.
 //!
 //! This gives direct-spawn callers an argv-shaped Windows sandbox launcher,
 //! analogous to the macOS seatbelt and Linux sandbox wrapper paths. The wrapper

@@ -1,7 +1,7 @@
 use nova_executor_protocol_core::models::PermissionProfile;
 use std::path::Path;
 
-/// Basename used when the Codex executable self-invokes as the Linux sandbox
+/// Basename used when the nova-executor executable self-invokes as the Linux sandbox
 /// helper.
 pub const NOVA_EXECUTOR_LINUX_SANDBOX_ARG0: &str = "nova-linux-sandbox";
 

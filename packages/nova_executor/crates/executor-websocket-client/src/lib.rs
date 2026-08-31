@@ -1,4 +1,4 @@
-//! Proxy-aware WebSocket connection setup shared by Codex API clients.
+//! Proxy-aware WebSocket connection setup shared by Nova executor clients.
 
 mod dialer;
 
@@ -37,10 +37,10 @@ pub struct WebSocketConnector {
     tcp_nodelay: TcpNodelay,
 }
 
-/// Selects whether WebSocket TLS follows Codex custom-CA policy or Tungstenite defaults.
+/// Selects whether WebSocket TLS follows Nova custom-CA policy or Tungstenite defaults.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WebSocketTlsMode {
-    /// Build an explicit TLS configuration from native roots and configured Codex custom CAs.
+    /// Build an explicit TLS configuration from native roots and configured Nova custom CAs.
     ExplicitNovaTls,
     /// Let Tungstenite build its default TLS configuration when the target requires TLS.
     TungsteniteDefault,
@@ -53,16 +53,16 @@ pub(crate) enum TcpNodelay {
 }
 
 impl WebSocketConnector {
-    /// Creates a connector using native roots and any configured Codex custom CA bundle.
+    /// Creates a connector using native roots and any configured Nova custom CA bundle.
     pub fn new(
         http_client_factory: &HttpClientFactory,
     ) -> Result<Self, BuildCustomCaTransportError> {
         Self::new_with_tls_mode(http_client_factory, WebSocketTlsMode::ExplicitNovaTls)
     }
 
-    /// Creates a connector with explicit Codex TLS or the transport's existing TLS defaults.
+    /// Creates a connector with explicit Nova TLS or the transport's existing TLS defaults.
     ///
-    /// HTTPS proxy connections still build Codex TLS configuration when they establish their
+    /// HTTPS proxy connections still build Nova TLS configuration when they establish their
     /// proxy tunnel; default-mode target connections otherwise remain entirely with Tungstenite.
     pub fn new_with_tls_mode(
         http_client_factory: &HttpClientFactory,

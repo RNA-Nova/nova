@@ -235,7 +235,7 @@ fn filesystem_helper_platform_defaults_do_not_grant_applications_directory() {
 #[test]
 fn process_platform_defaults_allow_scratch_without_granting_it_to_filesystem_helpers() {
     let workspace = tempfile::Builder::new()
-        .prefix("codex-seatbelt-approved-project-")
+        .prefix("nova-seatbelt-approved-project-")
         .tempdir_in("/private/tmp")
         .expect("approved project directory");
     let approved_file = workspace.path().join("approved.txt");
@@ -325,7 +325,7 @@ fn process_platform_defaults_allow_scratch_without_granting_it_to_filesystem_hel
 
     for scratch_root in ["/private/tmp", "/private/var/tmp"] {
         let scratch = tempfile::Builder::new()
-            .prefix("codex-seatbelt-process-scratch-")
+            .prefix("nova-seatbelt-process-scratch-")
             .tempdir_in(scratch_root)
             .expect("scratch directory");
         let scratch_file = scratch.path().join("scratch.txt");
@@ -463,7 +463,7 @@ fn dynamic_network_policy_allows_tls_without_darwin_user_cache_write() {
 
 #[test]
 fn explicit_unreadable_paths_are_excluded_from_full_disk_read_and_write_access() {
-    let unreadable = absolute_path("/tmp/codex-unreadable");
+    let unreadable = absolute_path("/tmp/nova-unreadable");
     let file_system_policy = FileSystemSandboxPolicy::restricted(vec![
         FileSystemSandboxEntry {
             path: FileSystemPath::Special {
@@ -773,8 +773,8 @@ fn prepared_managed_network_context_allows_only_its_proxy_ports() {
 
 #[test]
 fn explicit_unreadable_paths_are_excluded_from_readable_roots() {
-    let root = absolute_path("/tmp/codex-readable");
-    let unreadable = absolute_path("/tmp/codex-readable/private");
+    let root = absolute_path("/tmp/nova-readable");
+    let unreadable = absolute_path("/tmp/nova-readable/private");
     let file_system_policy = FileSystemSandboxPolicy::restricted(vec![
         FileSystemSandboxEntry {
             path: root.into(),
@@ -960,7 +960,7 @@ fn preferences_access_requires_unrestricted_reads() {
     )]);
     let mut denied_path = full_read.clone();
     denied_path.entries.push(FileSystemSandboxEntry::new(
-        absolute_path("/tmp/codex-private").into(),
+        absolute_path("/tmp/nova-private").into(),
         FileSystemAccessMode::Deny,
     ));
     let mut denied_glob = full_read.clone();
@@ -1028,18 +1028,18 @@ fn restricted_reads_cannot_read_preferences_outside_allowed_roots() {
     }
 
     let workspace = tempfile::Builder::new()
-        .prefix("codex-prefs-")
+        .prefix("nova-prefs-")
         .tempdir()
         .expect("temp workspace");
     let domain = PreferenceDomain(format!(
-        "com.openai.codex.{}",
+        "com.nova.executor.{}",
         workspace
             .path()
             .file_name()
             .expect("workspace name")
             .to_string_lossy()
     ));
-    let marker = "codex-preferences-read-canary";
+    let marker = "nova-preferences-read-canary";
     // Bazel gives tests a temporary HOME, but preferences use the account home.
     // Use caller-owned storage because tests can query the account concurrently.
     let mut passwd = MaybeUninit::<libc::passwd>::uninit();
@@ -1539,7 +1539,7 @@ fn create_seatbelt_args_full_network_with_proxy_is_still_proxy_only() {
 }
 
 #[test]
-fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
+fn create_seatbelt_args_with_read_only_git_and_nova_subpaths() {
     // Create a temporary workspace with two writable roots: one containing
     // top-level workspace metadata paths and one without them.
     let tmp = TempDir::new().expect("tempdir");
@@ -1548,7 +1548,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         vulnerable_root_canonical,
         dot_git_canonical,
         dot_agents_canonical: _,
-        dot_codex_canonical,
+        dot_nova_canonical,
         empty_root,
         empty_root_canonical,
     } = populate_tmpdir(tmp.path());
@@ -1574,7 +1574,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         "-c",
         "echo 'sandbox_mode = \"danger-full-access\"' > \"$1\"",
         "bash",
-        dot_codex_canonical
+        dot_nova_canonical
             .join("config.toml")
             .to_string_lossy()
             .as_ref(),
@@ -1667,7 +1667,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         ),
         format!(
             "-DWRITABLE_ROOT_1_EXCLUDED_1={}",
-            dot_codex_canonical.to_string_lossy()
+            dot_nova_canonical.to_string_lossy()
         ),
         format!(
             "-DWRITABLE_ROOT_2={}",
@@ -1691,7 +1691,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
 
     // Verify that .nova/config.toml cannot be modified under the generated
     // Seatbelt policy.
-    let config_toml = dot_codex_canonical.join("config.toml");
+    let config_toml = dot_nova_canonical.join("config.toml");
     let output = Command::new(MACOS_PATH_TO_SEATBELT_EXECUTABLE)
         .args(&args)
         .current_dir(&cwd)
@@ -1747,7 +1747,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
     );
     assert_seatbelt_denied(&output.stderr, &pre_commit_hook);
 
-    // Verify that writing a file to the folder containing .git and .codex is allowed.
+    // Verify that writing a file to the folder containing .git and .nova is allowed.
     let allowed_file = vulnerable_root_canonical.join("allowed.txt");
     let shell_command_allowed: Vec<String> = [
         "bash",
@@ -2227,11 +2227,11 @@ fn seatbelt_protects_resolved_target_of_symlinked_metadata_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let writable_root = tmp.path().join("workspace");
     let actual_config = writable_root.join("actual-config");
-    let dot_codex = writable_root.join(".nova");
+    let dot_nova = writable_root.join(".nova");
     let config_toml = actual_config.join("config.toml");
     fs::create_dir_all(&actual_config).expect("create actual config directory");
     fs::write(&config_toml, "original").expect("write config");
-    symlink(&actual_config, &dot_codex).expect("create .codex symlink");
+    symlink(&actual_config, &dot_nova).expect("create .nova symlink");
     let policy = restricted_write_policy(&[writable_root.as_path()]);
     let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
         command: vec![
@@ -2260,7 +2260,7 @@ fn seatbelt_protects_resolved_target_of_symlinked_metadata_directory() {
 
     assert!(
         !output.status.success(),
-        "resolved .codex target should remain read-only"
+        "resolved .nova target should remain read-only"
     );
     assert_eq!(
         fs::read_to_string(&config_toml).expect("read config"),
@@ -2269,7 +2269,7 @@ fn seatbelt_protects_resolved_target_of_symlinked_metadata_directory() {
 }
 
 #[test]
-fn create_seatbelt_args_block_first_time_dot_codex_creation_with_metadata_name_regex() {
+fn create_seatbelt_args_block_first_time_dot_nova_creation_with_metadata_name_regex() {
     let tmp = TempDir::new().expect("tempdir");
     let repo_root = tmp.path().join("repo");
     fs::create_dir_all(&repo_root).expect("create repo root");
@@ -2281,8 +2281,8 @@ fn create_seatbelt_args_block_first_time_dot_codex_creation_with_metadata_name_r
         .output()
         .expect("git init .");
 
-    let dot_codex = repo_root.join(".nova");
-    let config_toml = dot_codex.join("config.toml");
+    let dot_nova = repo_root.join(".nova");
+    let config_toml = dot_nova.join("config.toml");
     let policy = SandboxPolicy::WorkspaceWrite {
         writable_roots: vec![repo_root.as_path().try_into().expect("absolute repo root")],
         network_access: false,
@@ -2295,7 +2295,7 @@ fn create_seatbelt_args_block_first_time_dot_codex_creation_with_metadata_name_r
         "-c",
         "mkdir -p \"$1\" && echo 'sandbox_mode = \"danger-full-access\"' > \"$2\"",
         "bash",
-        dot_codex.to_string_lossy().as_ref(),
+        dot_nova.to_string_lossy().as_ref(),
         config_toml.to_string_lossy().as_ref(),
     ]
     .iter()
@@ -2428,7 +2428,7 @@ fn create_seatbelt_args_for_cwd_as_git_repo() {
         vulnerable_root_canonical,
         dot_git_canonical,
         dot_agents_canonical,
-        dot_codex_canonical,
+        dot_nova_canonical,
         ..
     } = populate_tmpdir(tmp.path());
 
@@ -2447,7 +2447,7 @@ fn create_seatbelt_args_for_cwd_as_git_repo() {
         "-c",
         "echo 'sandbox_mode = \"danger-full-access\"' > \"$1\"",
         "bash",
-        dot_codex_canonical
+        dot_nova_canonical
             .join("config.toml")
             .to_string_lossy()
             .as_ref(),
@@ -2509,7 +2509,7 @@ fn create_seatbelt_args_for_cwd_as_git_repo() {
     );
     let expected_dot_nova = format!(
         "-DWRITABLE_ROOT_0_EXCLUDED_1={}",
-        dot_codex_canonical.to_string_lossy()
+        dot_nova_canonical.to_string_lossy()
     );
     assert!(
         args.contains(&expected_dot_nova),
@@ -2547,7 +2547,7 @@ struct PopulatedTmp {
     vulnerable_root_canonical: PathBuf,
     dot_git_canonical: PathBuf,
     dot_agents_canonical: PathBuf,
-    dot_codex_canonical: PathBuf,
+    dot_nova_canonical: PathBuf,
 
     /// Path without protected metadata subfolders.
     empty_root: PathBuf,
@@ -2568,7 +2568,7 @@ fn populate_tmpdir(tmp: &Path) -> PopulatedTmp {
         .output()
         .expect("git init .");
 
-    fs::create_dir_all(vulnerable_root.join(".nova")).expect("create .codex");
+    fs::create_dir_all(vulnerable_root.join(".nova")).expect("create .nova");
     fs::write(
         vulnerable_root.join(".nova").join("config.toml"),
         "sandbox_mode = \"read-only\"\n",
@@ -2584,14 +2584,14 @@ fn populate_tmpdir(tmp: &Path) -> PopulatedTmp {
         .expect("canonicalize vulnerable_root");
     let dot_git_canonical = vulnerable_root_canonical.join(".git");
     let dot_agents_canonical = vulnerable_root_canonical.join(".agents");
-    let dot_codex_canonical = vulnerable_root_canonical.join(".nova");
+    let dot_nova_canonical = vulnerable_root_canonical.join(".nova");
     let empty_root_canonical = empty_root.canonicalize().expect("canonicalize empty_root");
     PopulatedTmp {
         vulnerable_root,
         vulnerable_root_canonical,
         dot_git_canonical,
         dot_agents_canonical,
-        dot_codex_canonical,
+        dot_nova_canonical,
         empty_root,
         empty_root_canonical,
     }

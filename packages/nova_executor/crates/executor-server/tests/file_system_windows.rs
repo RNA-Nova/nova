@@ -296,7 +296,7 @@ async fn file_system_no_follow_operations_reject_named_pipes(
     implementation: FileSystemImplementation,
 ) -> Result<()> {
     let context = create_file_system_context(implementation).await?;
-    let pipe_name = format!("codex-fs-no-follow-{}", Uuid::new_v4());
+    let pipe_name = format!("nova-fs-no-follow-{}", Uuid::new_v4());
     let server_path = format!(r"\\.\pipe\{pipe_name}");
     let client_path = format!(r"\\localhost\pipe\{pipe_name}");
     let _pipe = ServerOptions::new()
@@ -318,7 +318,7 @@ async fn file_system_no_follow_operations_reject_named_pipes(
     .expect_err("strict named-pipe read must be rejected");
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
 
-    let pipe_name = format!("codex-fs-no-follow-write-{}", Uuid::new_v4());
+    let pipe_name = format!("nova-fs-no-follow-write-{}", Uuid::new_v4());
     let server_path = format!(r"\\.\pipe\{pipe_name}");
     let client_path = format!(r"\\localhost\pipe\{pipe_name}");
     let _pipe = ServerOptions::new()

@@ -101,7 +101,7 @@ fn protected_directory_does_not_discard_accessible_deny_matches() {
         // this fixture's ACL. Restrict a separate process, including its rg child,
         // rather than changing the shared test process's privileges. The parent
         // owns ACL setup and cleanup, which the restricted child cannot perform.
-        let sandbox_home = TempDir::new().expect("restricted codex home");
+        let sandbox_home = TempDir::new().expect("restricted sandbox home");
         let cwd = AbsolutePathBuf::from_absolute_path(temp.path()).expect("workspace");
         let mut env = std::collections::HashMap::from([
             (

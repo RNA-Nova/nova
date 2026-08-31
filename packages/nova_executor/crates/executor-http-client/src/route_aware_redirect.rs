@@ -1,7 +1,7 @@
 //! Redirect semantics for requests whose proxy route is selected from the complete URL.
 //!
 //! Reqwest normally follows redirects inside one `Client::execute` call. That is safe for
-//! `ReqwestDefault`, where reqwest owns proxy selection, but not for `RespectSystemProxy`: Codex
+//! `ReqwestDefault`, where reqwest owns proxy selection, but not for `RespectSystemProxy`: Nova
 //! resolves PAC and operating-system proxy settings before building a client pinned to the
 //! resulting direct or concrete-proxy route. An internal reqwest redirect would reuse that client
 //! for the new URL without giving [`crate::RouteAwareClientPool`] an opportunity to resolve the

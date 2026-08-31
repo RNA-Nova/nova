@@ -1,7 +1,7 @@
 //! JSON-RPC wire envelopes used by exec-server.
 //!
-//! Exec-server uses the Codex JSON-RPC dialect, which omits the
-//! `"jsonrpc": "2.0"` field on the wire.
+//! Exec-server uses the Nova executor JSON-RPC dialect (inherited from Codex),
+//! which omits the `"jsonrpc": "2.0"` field on the wire.
 
 use std::fmt;
 

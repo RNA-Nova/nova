@@ -39,7 +39,7 @@ const BAD_PATH_URI_PREFIX: &str = "file:///%00/bad/path/";
 /// Only the `file:` scheme is currently accepted. Construction validates the
 /// URL, and the URI cannot be mutated after construction. [`Self::basename`],
 /// [`Self::parent`], and [`Self::join`] operate on URI path segments without
-/// interpreting them using the operating system running Codex. Fallback URIs
+/// interpreting them using the operating system running the executor. Fallback URIs
 /// created by [`Self::from_abs_path`] are opaque to these lexical operations.
 ///
 /// `file:` paths retain their URI spelling so they can be parsed independently

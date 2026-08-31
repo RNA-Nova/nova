@@ -226,7 +226,7 @@ fn generate_tls13_material() -> Tls13Material {
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
     let mut ca_distinguished_name = DistinguishedName::new();
-    ca_distinguished_name.push(DnType::CommonName, "codex test CA");
+    ca_distinguished_name.push(DnType::CommonName, "nova test CA");
     ca_params.distinguished_name = ca_distinguished_name;
     let ca_key_pair =
         KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("test CA key pair should generate");
@@ -393,7 +393,7 @@ fn assert_token_exchange_request(request: &str) {
 }
 
 #[test]
-fn uses_codex_ca_cert_env() {
+fn uses_nova_ca_cert_env() {
     let temp_dir = TempDir::new().expect("tempdir");
     let cert_path = write_cert_file(&temp_dir, "ca.pem", TEST_CERT_1);
 
@@ -413,7 +413,7 @@ fn falls_back_to_ssl_cert_file() {
 }
 
 #[test]
-fn prefers_codex_ca_cert_over_ssl_cert_file() {
+fn prefers_nova_ca_cert_over_ssl_cert_file() {
     let temp_dir = TempDir::new().expect("tempdir");
     let cert_path = write_cert_file(&temp_dir, "ca.pem", TEST_CERT_1);
     let bad_path = write_cert_file(&temp_dir, "bad.pem", "");

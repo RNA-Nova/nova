@@ -23,7 +23,7 @@ struct GlobScanPlan {
 
 /// Resolve split filesystem `None` read entries into concrete Windows ACL targets.
 ///
-/// Windows ACLs do not understand Codex filesystem glob patterns directly. Exact
+/// Windows ACLs do not understand the executor's filesystem glob patterns directly. Exact
 /// unreadable roots can be passed through as-is, including paths that do not
 /// exist yet. Glob entries are snapshot-expanded to the files/directories that
 /// already exist under their literal scan root; future exact paths are handled

@@ -2,8 +2,8 @@
 name = "nova-executor-execpolicy"
 version = "0.1.0"
 edition.workspace = true
-license.workspace = true
-description = "Codex exec policy: prefix-based Starlark rules for command decisions."
+license = "Apache-2.0"
+description = "Exec policy engine: prefix-based Starlark rules for command decisions (derived from Codex execpolicy)."
 
 [lib]
 name = "nova_executor_execpolicy"

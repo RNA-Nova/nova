@@ -827,7 +827,7 @@ mod tests {
         let env = helper_env_from_vars(
             [
                 ("PATH", "/usr/bin:/bin"),
-                ("TMPDIR", "/tmp/codex"),
+                ("TMPDIR", "/tmp/nova-tmp"),
                 ("TMP", "/tmp"),
                 ("TEMP", "/tmp"),
                 ("HOME", "/home/user"),
@@ -841,7 +841,7 @@ mod tests {
             env,
             HashMap::from([
                 ("PATH".to_string(), "/usr/bin:/bin".to_string()),
-                ("TMPDIR".to_string(), "/tmp/codex".to_string()),
+                ("TMPDIR".to_string(), "/tmp/nova-tmp".to_string()),
                 ("TMP".to_string(), "/tmp".to_string()),
                 ("TEMP".to_string(), "/tmp".to_string()),
             ])
@@ -1047,7 +1047,7 @@ mod tests {
     #[test]
     fn helper_permissions_include_only_linux_sandbox_alias_executable() {
         let root = tempfile::tempdir().expect("temp dir");
-        let executor_self_exe = root.path().join("bin").join("codex");
+        let executor_self_exe = root.path().join("bin").join("nova-executor");
         let executor_linux_sandbox_exe = root.path().join("aliases").join("nova-linux-sandbox");
         let runtime_paths =
             ExecServerRuntimePaths::new(executor_self_exe, Some(executor_linux_sandbox_exe))
@@ -1055,10 +1055,10 @@ mod tests {
         let cwd = AbsolutePathBuf::from_absolute_path(std::env::temp_dir().as_path())
             .expect("absolute cwd");
         let mut policy = restricted_policy(Vec::new());
-        let codex_parent = runtime_paths
+        let executor_parent = runtime_paths
             .executor_self_exe
             .parent()
-            .expect("codex parent");
+            .expect("executor parent");
         let alias = runtime_paths
             .executor_linux_sandbox_exe
             .as_ref()
@@ -1075,7 +1075,7 @@ mod tests {
             policy.can_read_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
         );
         assert!(policy.can_read_path_with_cwd(alias.as_path(), cwd.as_path()));
-        assert!(!policy.can_read_path_with_cwd(codex_parent.as_path(), cwd.as_path()));
+        assert!(!policy.can_read_path_with_cwd(executor_parent.as_path(), cwd.as_path()));
         assert!(!policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
     }
 

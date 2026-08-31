@@ -12,7 +12,7 @@ use thiserror::Error;
 use ts_rs::TS;
 
 /// A UTF-8 path for preserving raw path compatibility at the app-server API
-/// boundary while Codex migrates to [`PathUri`].
+/// boundary while the executor migrates to [`PathUri`].
 ///
 /// Supports storing arbitrary strings read from the API and converting to and
 /// from [`PathUri`] using an explicitly selected native path convention.

@@ -287,7 +287,7 @@ impl MetricsClientInner {
     }
 }
 
-/// OpenTelemetry metrics client used by Codex.
+/// OpenTelemetry metrics client used by Nova executor.
 #[derive(Clone, Debug)]
 pub struct MetricsClient {
     // Keep the original provider so its owner only shuts down its own exporter.

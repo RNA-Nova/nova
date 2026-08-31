@@ -999,7 +999,7 @@ async fn file_system_sandboxed_write_allows_explicit_alias_roots(
     let file_system = context.file_system;
 
     let tmp = tempfile::Builder::new()
-        .prefix("codex-fs-sandbox-alias-")
+        .prefix("nova-fs-sandbox-alias-")
         .tempdir_in(&alias_root)?;
     let file_path = tmp.path().join("note.txt");
     let sandbox = workspace_write_sandbox(alias_root.clone());

@@ -14,7 +14,7 @@ fn bash_snapshot_filters_invalid_exports() -> Result<()> {
         .env("BASH_ENV", "/dev/null")
         .env("VALID_NAME", "ok")
         .env("PWD", "/tmp/stale")
-        .env("NEXTEST_BIN_EXE_codex-write-config-schema", "/path/to/bin")
+        .env("NEXTEST_BIN_EXE_nova-write-config-schema", "/path/to/bin")
         .env("BAD-NAME", "broken")
         .output()?;
 
@@ -23,7 +23,7 @@ fn bash_snapshot_filters_invalid_exports() -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("VALID_NAME"));
     assert!(!stdout.contains("PWD=/tmp/stale"));
-    assert!(!stdout.contains("NEXTEST_BIN_EXE_codex-write-config-schema"));
+    assert!(!stdout.contains("NEXTEST_BIN_EXE_nova-write-config-schema"));
     assert!(!stdout.contains("BAD-NAME"));
 
     Ok(())
@@ -138,7 +138,7 @@ fn zsh_snapshot_restores_tied_path() -> Result<()> {
     let readonly_restored = Command::new("/bin/zsh")
         .arg("-f")
         .arg("-c")
-        .arg("set -e; . \"$1\"; export PATH='/codex-path':\"$PATH\"; print -r -- \"$PATH\"")
+        .arg("set -e; . \"$1\"; export PATH='/nova-path':\"$PATH\"; print -r -- \"$PATH\"")
         .arg("zsh")
         .arg(&snapshot_path)
         .env_clear()
@@ -147,7 +147,7 @@ fn zsh_snapshot_restores_tied_path() -> Result<()> {
     assert!(readonly_restored.status.success());
     assert_eq!(
         String::from_utf8(readonly_restored.stdout)?.trim_end(),
-        "/codex-path:/usr/bin:/bin"
+        "/nova-path:/usr/bin:/bin"
     );
 
     let readonly_snapshot = String::from_utf8(readonly_snapshot.stdout)?;

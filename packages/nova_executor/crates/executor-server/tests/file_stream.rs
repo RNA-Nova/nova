@@ -126,7 +126,7 @@ async fn file_reads_reject_named_pipes() -> Result<()> {
     let server = exec_server().await?;
     let file_system = connect_file_system(server.websocket_url()).await?;
 
-    let read_path = format!(r"\\.\pipe\codex-fs-read-{}", Uuid::new_v4());
+    let read_path = format!(r"\\.\pipe\nova-fs-read-{}", Uuid::new_v4());
     let _read_pipe = ServerOptions::new()
         .first_pipe_instance(true)
         .create(&read_path)?;
@@ -142,7 +142,7 @@ async fn file_reads_reject_named_pipes() -> Result<()> {
     .expect("reading a named pipe should not hang")
     .expect_err("reading a named pipe should be rejected");
 
-    let stream_path = format!(r"\\.\pipe\codex-fs-stream-{}", Uuid::new_v4());
+    let stream_path = format!(r"\\.\pipe\nova-fs-stream-{}", Uuid::new_v4());
     let _stream_pipe = ServerOptions::new()
         .first_pipe_instance(true)
         .create(&stream_path)?;

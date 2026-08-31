@@ -214,7 +214,7 @@ fn bounded_shutdown_survives_worker_guard_page_failure() {
         .expect("current time follows Unix epoch")
         .as_nanos();
     let temporary_directory = std::env::temp_dir().join(format!(
-        "codex-otel-guard-page-{}-{unique_suffix}",
+        "nova-otel-guard-page-{}-{unique_suffix}",
         std::process::id()
     ));
     std::fs::create_dir(&temporary_directory).expect("create fault injector directory");

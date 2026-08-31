@@ -2,7 +2,7 @@
 //!
 //! These helpers centralize small pieces of setup logic used across both legacy and
 //! elevated paths, including unified_exec sessions and capture flows. They cover
-//! codex home directory creation and git safe.directory injection so sandboxed
+//! sandbox home directory creation and git safe.directory injection so sandboxed
 //! users can run git inside a repo owned by the primary user.
 
 use anyhow::Result;
@@ -24,7 +24,7 @@ fn find_git_worktree_root_for_safe_directory(start: &Path) -> Option<std::path::
     }
 }
 
-/// Ensure the sandbox codex home directory exists.
+/// Ensure the sandbox home directory exists.
 pub fn ensure_sandbox_home_exists(p: &Path) -> Result<()> {
     std::fs::create_dir_all(p)?;
     Ok(())
@@ -99,7 +99,7 @@ mod tests {
         fs::create_dir_all(&nested).expect("create nested dir");
         fs::write(
             repo.join(".git"),
-            "gitdir: C:/Users/example/repo/.git/worktrees/codex3\n",
+            "gitdir: C:/Users/example/repo/.git/worktrees/nova3\n",
         )
         .expect("write .git file");
 

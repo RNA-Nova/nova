@@ -1198,7 +1198,7 @@ fn pty_terminate_reaps_child_when_waiter_is_queued() -> anyhow::Result<()> {
     blocker_started_rx.recv_timeout(std::time::Duration::from_secs(2))?;
 
     let pid_file = std::env::temp_dir().join(format!(
-        "codex-pty-reap-{}-{}",
+        "nova-pty-reap-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?

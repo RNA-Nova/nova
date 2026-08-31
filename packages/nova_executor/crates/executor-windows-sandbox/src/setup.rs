@@ -1741,9 +1741,9 @@ mod tests {
         let resources_dir = package_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = bin_dir.join("codex.exe");
+        let exe = bin_dir.join("app.exe");
         let setup_exe = resources_dir.join("nova-windows-sandbox-setup.exe");
-        fs::write(&exe, b"codex").expect("write exe");
+        fs::write(&exe, b"app").expect("write exe");
         fs::write(&setup_exe, b"setup").expect("write setup");
 
         let resolved = find_setup_exe_for_current_exe(&exe).expect("setup exe");
@@ -2019,7 +2019,7 @@ mod tests {
         let user_profile = tmp.path().join("user-profile");
         let sandbox_home = user_profile.join("SandboxHome");
         let documents = user_profile.join("Documents");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create sandbox home");
         fs::create_dir_all(&documents).expect("create documents");
 
         let mut roots =
@@ -2176,7 +2176,7 @@ mod tests {
         let command_cwd = tmp.path().join("workspace");
         let extra_root = tmp.path().join("extra-root");
         let sandbox_root = super::sandbox_dir(&sandbox_home);
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create sandbox home");
         fs::create_dir_all(&command_cwd).expect("create workspace");
         fs::create_dir_all(&extra_root).expect("create extra root");
         fs::create_dir_all(&sandbox_root).expect("create sandbox root");
@@ -2219,7 +2219,7 @@ mod tests {
 
         let expected_workspace = dunce::canonicalize(&command_cwd).expect("canonical workspace");
         let expected_extra = dunce::canonicalize(&extra_root).expect("canonical extra root");
-        let forbidden_sandbox_home = dunce::canonicalize(&sandbox_home).expect("canonical codex home");
+        let forbidden_sandbox_home = dunce::canonicalize(&sandbox_home).expect("canonical sandbox home");
         let forbidden_sandbox = dunce::canonicalize(&sandbox_root).expect("canonical sandbox root");
         assert_eq!(effective_write_roots, payload_write_roots);
         assert!(effective_write_roots.contains(&expected_workspace));
@@ -2234,7 +2234,7 @@ mod tests {
         let sandbox_home = tmp.path().join("sandbox-home");
         let workspace_root = tmp.path().join("workspace");
         let command_cwd = workspace_root.join("subdir");
-        fs::create_dir_all(&sandbox_home).expect("create codex home");
+        fs::create_dir_all(&sandbox_home).expect("create sandbox home");
         fs::create_dir_all(&command_cwd).expect("create command cwd");
 
         let permission_profile = workspace_write_profile(
@@ -2269,7 +2269,7 @@ mod tests {
         let extra_nova = extra_write_root.join(".nova");
         let explicit_deny = tmp.path().join("explicit-deny");
         fs::create_dir_all(&command_git).expect("create command .git");
-        fs::create_dir_all(&extra_nova).expect("create extra .codex");
+        fs::create_dir_all(&extra_nova).expect("create extra .nova");
         let writable_roots = vec![
             AbsolutePathBuf::from_absolute_path(&extra_write_root).expect("absolute writable root"),
         ];
@@ -2294,7 +2294,7 @@ mod tests {
         assert_eq!(
             [
                 dunce::canonicalize(&command_git).expect("canonical command .git"),
-                dunce::canonicalize(&extra_nova).expect("canonical extra .codex"),
+                dunce::canonicalize(&extra_nova).expect("canonical extra .nova"),
                 explicit_deny,
             ]
             .into_iter()

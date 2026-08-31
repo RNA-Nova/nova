@@ -1,4 +1,4 @@
-//! Errors returned by the shared Codex HTTP transport.
+//! Errors returned by the shared executor HTTP transport.
 
 use crate::client::HttpError;
 use http::HeaderMap;

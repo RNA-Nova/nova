@@ -310,7 +310,7 @@ async fn namespace_reaper_collects_orphaned_descendants() {
 
 #[tokio::test]
 async fn unsupported_system_bwrap_falls_back_to_bundled_bwrap() {
-    if option_env!("CODEX_BWRAP_SHA256")
+    if option_env!("NOVA_BWRAP_SHA256")
         .is_some_and(|digest| digest.chars().any(|character| character != '0'))
     {
         eprintln!("skipping system bwrap fallback test: bundled binaries require a release digest");
@@ -417,7 +417,7 @@ async fn managed_proxy_full_filesystem_uses_minimal_dev_nodes() {
     env.insert("HTTP_PROXY".to_string(), "http://127.0.0.1:9".to_string());
     if let Some(file) = &shared_memory_file {
         env.insert(
-            "CODEX_TEST_SHM_PATH".to_string(),
+            "NOVA_TEST_SHM_PATH".to_string(),
             file.path().to_string_lossy().into_owned(),
         );
     }
@@ -435,9 +435,9 @@ async fn managed_proxy_full_filesystem_uses_minimal_dev_nodes() {
                 "if command -v python3 >/dev/null 2>&1; then ",
                 "python3 -c 'import os; assert len(os.urandom(16)) == 16'; ",
                 "fi; ",
-                "if [ -n \"${CODEX_TEST_SHM_PATH:-}\" ]; then ",
-                "test \"$(cat \"$CODEX_TEST_SHM_PATH\")\" = host-before; ",
-                "printf sandbox-after >\"$CODEX_TEST_SHM_PATH\"; ",
+                "if [ -n \"${NOVA_TEST_SHM_PATH:-}\" ]; then ",
+                "test \"$(cat \"$NOVA_TEST_SHM_PATH\")\" = host-before; ",
+                "printf sandbox-after >\"$NOVA_TEST_SHM_PATH\"; ",
                 "fi; ",
                 "stat -c '%d:%i' /dev",
             ),

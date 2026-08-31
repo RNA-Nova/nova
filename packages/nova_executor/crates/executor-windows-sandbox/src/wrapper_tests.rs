@@ -53,7 +53,7 @@ fn windows_wrapper_args_round_trip() {
 
     let args = create_windows_sandbox_command_args_for_permission_profile(
         vec![
-            "codex.exe".to_string(),
+            "app.exe".to_string(),
             "--nova-run-as-fs-helper".to_string(),
         ],
         &command_cwd,
@@ -70,7 +70,7 @@ fn windows_wrapper_args_round_trip() {
         Some(write_roots_override.as_slice()),
         deny_read_paths_override.as_slice(),
         deny_write_paths_override.as_slice(),
-        Path::new(r"C:\Users\me\.codex"),
+        Path::new(r"C:\Users\me\.nova"),
     );
 
     assert_eq!(args[0], NOVA_EXECUTOR_WINDOWS_SANDBOX_ARG1);
@@ -95,7 +95,7 @@ fn windows_wrapper_args_round_trip() {
 
     assert_eq!(
         parsed.command,
-        vec!["codex.exe", "--nova-run-as-fs-helper"]
+        vec!["app.exe", "--nova-run-as-fs-helper"]
     );
     assert_eq!(parsed.command_cwd, command_cwd);
     assert_eq!(parsed.workspace_roots, workspace_roots);

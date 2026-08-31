@@ -133,7 +133,7 @@ fn file_exists(path: &std::path::Path) -> Option<PathBuf> {
 }
 
 // Store PowerShell can be inaccessible to the elevated sandbox account;
-// WindowsApps also contains valid Codex frameworks.
+// WindowsApps also contains valid frameworks.
 fn is_inaccessible_windows_apps_powershell_path(path: &std::path::Path) -> bool {
     path.as_os_str()
         .to_string_lossy()

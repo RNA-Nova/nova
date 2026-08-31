@@ -435,10 +435,10 @@ mod tests {
 
     #[test]
     fn helper_bin_dir_is_under_sandbox_bin() {
-        let sandbox_home = Path::new(r"C:\Users\example\.codex");
+        let sandbox_home = Path::new(r"C:\Users\example\.nova");
 
         assert_eq!(
-            PathBuf::from(r"C:\Users\example\.codex\.sandbox-bin"),
+            PathBuf::from(r"C:\Users\example\.nova\.sandbox-bin"),
             helper_bin_dir(sandbox_home)
         );
     }
@@ -473,9 +473,9 @@ mod tests {
         let release_dir = tmp.path().join("release");
         let resources_dir = release_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = release_dir.join("codex.exe");
+        let exe = release_dir.join("app.exe");
         let helper = resources_dir.join("nova-command-runner.exe");
-        fs::write(&exe, b"codex").expect("write exe");
+        fs::write(&exe, b"app").expect("write exe");
         fs::write(&helper, b"runner").expect("write helper");
 
         let resolved =
@@ -493,9 +493,9 @@ mod tests {
         let resources_dir = package_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = bin_dir.join("codex.exe");
+        let exe = bin_dir.join("app.exe");
         let helper = resources_dir.join("nova-command-runner.exe");
-        fs::write(&exe, b"codex").expect("write exe");
+        fs::write(&exe, b"app").expect("write exe");
         fs::write(&helper, b"runner").expect("write helper");
 
         let resolved =
@@ -515,7 +515,7 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&resources_dir).expect("create resources dir");
         fs::create_dir_all(&install_dir).expect("create install dir");
-        fs::write(bin_dir.join("codex.exe"), b"codex").expect("write exe");
+        fs::write(bin_dir.join("app.exe"), b"app").expect("write exe");
         let helper = resources_dir.join("nova-windows-sandbox-setup.exe");
         fs::write(&helper, b"setup").expect("write helper");
 
@@ -530,7 +530,7 @@ mod tests {
 
         assert_eq!(
             bundled_executable_path_for_exe(
-                &junction.join("codex.exe"),
+                &junction.join("app.exe"),
                 /*file_name*/ "nova-windows-sandbox-setup.exe"
             ),
             Some(dunce::canonicalize(&helper).expect("canonical helper"))
@@ -546,10 +546,10 @@ mod tests {
         let bin_resources_dir = bin_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&package_resources_dir).expect("create package resources dir");
         fs::create_dir_all(&bin_resources_dir).expect("create bin resources dir");
-        let exe = bin_dir.join("codex.exe");
+        let exe = bin_dir.join("app.exe");
         let package_helper = package_resources_dir.join("nova-command-runner.exe");
         let bin_helper = bin_resources_dir.join("nova-command-runner.exe");
-        fs::write(&exe, b"codex").expect("write exe");
+        fs::write(&exe, b"app").expect("write exe");
         fs::write(&package_helper, b"package runner").expect("write package helper");
         fs::write(&bin_helper, b"bin runner").expect("write bin helper");
 
@@ -566,10 +566,10 @@ mod tests {
         let release_dir = tmp.path().join("release");
         let resources_dir = release_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = release_dir.join("codex.exe");
+        let exe = release_dir.join("app.exe");
         let sibling_helper = release_dir.join("nova-command-runner.exe");
         let resource_helper = resources_dir.join("nova-command-runner.exe");
-        fs::write(&exe, b"codex").expect("write exe");
+        fs::write(&exe, b"app").expect("write exe");
         fs::write(&sibling_helper, b"sibling runner").expect("write sibling helper");
         fs::write(&resource_helper, b"resource runner").expect("write resource helper");
 
