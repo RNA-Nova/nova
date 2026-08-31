@@ -324,8 +324,9 @@ async），六个 operations 实现参数化在它上面**——本地与远程�
 - **`BackendSelection.spawn_policy`**：策略挂在模式格上随后端切换生效；
   bash 引擎（`ExecutorBashOperations.policy`）与 process_runner 同缝透传，
   执行层零理解纯转发。
-- **settings `executor.sandbox` 档位**：`read-only`（cwd 只读 + 网络受限）
-  / `workspace-write`（cwd 可写 + 网络放行）——SDK `FileSystemSandboxContext`
+- **settings `executor.sandbox` 档位**：`read-only`（codex 套餐语义：全盘可读、
+  无处可写、网络受限）/ `workspace-write`（项目根可写 + /tmp 可写 +
+  网络默认受限，放行归 network_proxy 名单）——SDK `FileSystemSandboxContext`
   工厂直出 wire 形态，executor 三平台沙箱（macOS Seatbelt / Linux
   bwrap+landlock / Windows restricted token）执行。
 

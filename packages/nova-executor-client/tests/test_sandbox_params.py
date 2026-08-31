@@ -15,32 +15,61 @@ from nova_executor_client.protocol import (
 
 
 def test_read_only_sandbox_serializes_wire_shape():
+    """codex `:read-only` 套餐 wire 形态：全盘可读（符号 :root）、无处可写、
+    网络受限"""
     ctx = FileSystemSandboxContext.read_only("/tmp/proj")
-    data = ctx.model_dump(by_alias=True)
+    # exclude_none 对齐 process/start 的真实出货路径（None 项不上线）
+    data = ctx.model_dump(by_alias=True, exclude_none=True)
     assert data["permissions"]["type"] == "managed"
     assert data["permissions"]["fileSystem"]["type"] == "restricted"
     entries = data["permissions"]["fileSystem"]["entries"]
-    assert entries[0]["access"] == "read"
-    assert entries[0]["path"]["type"] == "path"
-    assert entries[0]["path"]["path"].startswith("file:///")
+    assert entries == [
+        {"path": {"type": "special", "value": {"kind": "root"}}, "access": "read"}
+    ]
+    assert data["permissions"]["network"] == "restricted"
+    assert data["cwd"] == "/tmp/proj"  # cwd 是执法上下文，不进条目
     assert data["windowsSandboxLevel"] == "disabled"
     assert data["useLegacyLandlock"] is False
 
 
 def test_workspace_write_sandbox_serializes_roots_and_network():
-    ctx = FileSystemSandboxContext.workspace_write(
-        "/tmp/proj", ["/tmp/extra"], network_enabled=False
-    )
-    profile = ctx.model_dump(by_alias=True)["permissions"]
+    """codex `:workspace` 套餐 wire 形态：只读基座 + 项目根写 + 临时目录写 +
+    用户附加根写 + 元数据降只读；网络默认受限"""
+    ctx = FileSystemSandboxContext.workspace_write("/tmp/proj", ["/tmp/extra"])
+    profile = ctx.model_dump(by_alias=True, exclude_none=True)["permissions"]
     assert profile["network"] == "restricted"
     entries = profile["fileSystem"]["entries"]
-    accesses = [e["access"] for e in entries]
-    assert accesses == ["write", "write"]
+    # _file_url 会 resolve 真实路径（macOS /tmp → /private/tmp），按同规则算期望
+    from pathlib import Path
+
+    extra_uri = Path("/tmp/extra").resolve().as_uri()
+    assert [(e["path"], e["access"]) for e in entries] == [
+        ({"type": "special", "value": {"kind": "root"}}, "read"),
+        ({"type": "special", "value": {"kind": "project_roots"}}, "write"),
+        ({"type": "special", "value": {"kind": "slash_tmp"}}, "write"),
+        ({"type": "special", "value": {"kind": "tmpdir"}}, "write"),
+        ({"type": "path", "path": extra_uri}, "write"),
+        (
+            {"type": "special", "value": {"kind": "project_roots", "subpath": ".git"}},
+            "read",
+        ),
+        (
+            {"type": "special", "value": {"kind": "project_roots", "subpath": ".nova"}},
+            "read",
+        ),
+    ]
 
 
-def test_workspace_write_network_enabled():
-    ctx = FileSystemSandboxContext.workspace_write("/tmp/proj")
+def test_workspace_write_network_enabled_opt_in():
+    """网络放行是显式参数（档位默认受限——放行归 network_proxy 名单）"""
+    ctx = FileSystemSandboxContext.workspace_write(
+        "/tmp/proj", network=NetworkSandboxPolicy.ENABLED
+    )
     assert ctx.permissions.network == NetworkSandboxPolicy.ENABLED
+    assert (
+        FileSystemSandboxContext.workspace_write("/tmp/proj").permissions.network
+        == NetworkSandboxPolicy.RESTRICTED
+    )
 
 
 def test_start_params_sandbox_passes_through_camel_case():

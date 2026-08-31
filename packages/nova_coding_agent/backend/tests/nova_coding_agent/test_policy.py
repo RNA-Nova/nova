@@ -101,14 +101,19 @@ def test_resolve_read_only_wire_shape():
 
 
 def test_resolve_workspace_write_wire_shape():
+    """workspace-write 档位 → codex :workspace 展开（网络默认受限，基座+项目根）"""
     policy = resolve_spawn_policy(_Settings(sandbox="workspace-write"), "/tmp/proj")
     assert policy is not None
     sandbox = policy.sandbox
     assert sandbox is not None
     permissions = sandbox["permissions"]
-    assert permissions["network"] == "enabled"
+    assert permissions["network"] == "restricted"
     entries = permissions["fileSystem"]["entries"]
-    assert entries[0]["access"] == "write"
+    # codex 形态：第 1 条是全盘只读基座（符号 :root），第 2 条项目根可写
+    assert entries[0]["access"] == "read"
+    assert entries[0]["path"]["value"]["kind"] == "root"
+    assert entries[1]["access"] == "write"
+    assert entries[1]["path"]["value"]["kind"] == "project_roots"
 
 
 def test_sandbox_tiers_are_known():

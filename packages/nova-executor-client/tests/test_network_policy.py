@@ -99,3 +99,31 @@ async def test_handler_exception_turns_into_error_reply():
         assert "boom" in result[PROBE_SAW]["error"]
     finally:
         await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_policy_decision_audit_notification_reaches_subscriber():
+    """审计通知经通用订阅送达且可按类型解析（对位 rust client.rs 的
+    NETWORK_POLICY_DECISION 分发分支 + 类型化 parse——无 SDK 糖，通用订阅即达）"""
+    import asyncio
+
+    from nova_executor_client import (
+        NETWORK_POLICY_DECISION,
+        NetworkPolicyDecisionNotification,
+    )
+
+    transport = StdioTransport(program=sys.executable, args=[FAKE_SERVER])
+    client = ExecutorClient(transport=transport)
+    queue = client.notifications.register_method(NETWORK_POLICY_DECISION)
+    await client.connect()
+    try:
+        await client.transport.send_request("policy/audit", {})
+        event = await asyncio.wait_for(queue.get(), 5)
+        decision = NetworkPolicyDecisionNotification.model_validate(event["params"])
+        assert decision.host == "pypi.org"
+        assert decision.decision == "allow"
+        assert decision.protocol.value == "https_connect"
+        assert decision.port == 443
+        assert decision.policy_override is False
+    finally:
+        await client.disconnect()

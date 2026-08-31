@@ -708,21 +708,79 @@ class WindowsSandboxProxySettingsMode(str, Enum):
     PRESERVE = "preserve"
 
 
-class ExecFileSystemPath(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """沙箱条目路径（wire：internally-tagged "type"）"""
+class ExecFileSystemSpecialPath(BaseModel):
+    """沙箱符号路径（wire：tag "kind"，snake_case——对位 executor-protocol-core
+    FileSystemSpecialPath；执法时由服务端按 cwd 解析，不进套餐展开的具体路径）"""
 
+    model_config = ConfigDict(populate_by_name=True)
+    kind: Literal["root", "minimal", "project_roots", "tmpdir", "slash_tmp", "unknown"]
+    subpath: str | None = None
+    #: kind=unknown 时的原始 token（前向兼容——新配置的旧运行时降级而非拒载）
+    path: str | None = None
+
+
+class ExecFileSystemPath(BaseModel):
+    """沙箱条目路径（wire：internally-tagged "type"）
+
+    type=path → `path`（file:// URI）；type=glob_pattern → `pattern`（仅 deny
+    语义）；type=special → `value`（符号路径，执法时解析）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
     type: Literal["path", "glob_pattern", "special"]
     path: str | None = None
     pattern: str | None = None
-    special: str | None = None
+    value: ExecFileSystemSpecialPath | None = None
+
+    @model_validator(mode="after")
+    def _variant_field_required(self) -> "ExecFileSystemPath":
+        required = {"path": "path", "glob_pattern": "pattern", "special": "value"}[
+            self.type
+        ]
+        if getattr(self, required) is None:
+            raise ValueError(f"type={self.type} 需要 {required} 字段")
+        return self
+
+    @classmethod
+    def of_path(cls, path: str) -> "ExecFileSystemPath":
+        """具体路径（自动归一为 file:// URI）"""
+        return cls(type="path", path=_file_url(path))
+
+    @classmethod
+    def of_special(cls, kind: str, subpath: str | None = None) -> "ExecFileSystemPath":
+        return cls(
+            type="special", value=ExecFileSystemSpecialPath(kind=kind, subpath=subpath)
+        )
+
+    @classmethod
+    def root(cls) -> "ExecFileSystemPath":
+        return cls.of_special("root")
+
+    @classmethod
+    def project_roots(cls, subpath: str | None = None) -> "ExecFileSystemPath":
+        return cls.of_special("project_roots", subpath)
+
+    @classmethod
+    def tmpdir(cls) -> "ExecFileSystemPath":
+        return cls.of_special("tmpdir")
+
+    @classmethod
+    def slash_tmp(cls) -> "ExecFileSystemPath":
+        return cls.of_special("slash_tmp")
+
+    @classmethod
+    def glob(cls, pattern: str) -> "ExecFileSystemPath":
+        return cls(type="glob_pattern", pattern=pattern)
 
 
 class ExecFileSystemSandboxEntry(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     path: ExecFileSystemPath
     access: FileSystemAccessMode
-    missing_path_behavior: str | None = Field(default=None, alias="missingPathBehavior")
+    #: 路径不存在时的行为（wire 现仅 "skip"）
+    missing_path_behavior: Literal["skip"] | None = Field(
+        default=None, alias="missingPathBehavior"
+    )
 
 
 class ExecManagedFileSystemPermissions(BaseModel):
@@ -769,8 +827,12 @@ class FileSystemSandboxContext(BaseModel):
     use_legacy_landlock: bool = Field(default=False, alias="useLegacyLandlock")
 
     @classmethod
-    def read_only(cls, cwd: str) -> "FileSystemSandboxContext":
-        """cwd 及其内容只读（mac seatbelt / linux landlock+seccomp 生效）"""
+    def read_only(cls, cwd: str | None = None) -> "FileSystemSandboxContext":
+        """codex `:read-only` 套餐逐字段对位：全盘可读、无处可写、网络受限。
+
+        `cwd` 只作执法上下文（服务端符号解析的基准）——可读范围走符号
+        `:root`，不把路径烤进条目。
+        """
         return cls(
             cwd=cwd,
             permissions=ExecPermissionProfile(
@@ -779,7 +841,7 @@ class FileSystemSandboxContext(BaseModel):
                     type="restricted",
                     entries=[
                         ExecFileSystemSandboxEntry(
-                            path=ExecFileSystemPath(type="path", path=_file_url(cwd)),
+                            path=ExecFileSystemPath.root(),
                             access=FileSystemAccessMode.READ,
                         )
                     ],
@@ -791,20 +853,48 @@ class FileSystemSandboxContext(BaseModel):
     @classmethod
     def workspace_write(
         cls,
-        cwd: str,
+        cwd: str | None = None,
         writable_roots: list[str] | None = None,
         *,
-        network_enabled: bool = True,
+        network: NetworkSandboxPolicy = NetworkSandboxPolicy.RESTRICTED,
     ) -> "FileSystemSandboxContext":
-        """cwd 可写 + 额外可写根；网络默认放行"""
-        roots = [cwd, *(writable_roots or [])]
+        """codex `:workspace`（workspace-write）套餐逐字段对位：
+
+        全盘只读基座 + 项目根可写（符号 `:project_roots`，执法时按服务端
+        cwd 解析——远程场景即 remote_cwd）+ /tmp 与 $TMPDIR 可写 + 用户
+        附加根可写 + 项目根下 `.git`/`.nova` 降只读（元数据保护，对位
+        codex 的 .git/.agents/.codex）；**网络默认受限**（放行归
+        network_proxy 名单，不靠档位默认开）。
+        """
         entries = [
             ExecFileSystemSandboxEntry(
-                path=ExecFileSystemPath(type="path", path=_file_url(root)),
+                path=ExecFileSystemPath.root(), access=FileSystemAccessMode.READ
+            ),
+            ExecFileSystemSandboxEntry(
+                path=ExecFileSystemPath.project_roots(),
                 access=FileSystemAccessMode.WRITE,
-            )
-            for root in roots
+            ),
+            ExecFileSystemSandboxEntry(
+                path=ExecFileSystemPath.slash_tmp(), access=FileSystemAccessMode.WRITE
+            ),
+            ExecFileSystemSandboxEntry(
+                path=ExecFileSystemPath.tmpdir(), access=FileSystemAccessMode.WRITE
+            ),
         ]
+        entries.extend(
+            ExecFileSystemSandboxEntry(
+                path=ExecFileSystemPath.of_path(root), access=FileSystemAccessMode.WRITE
+            )
+            for root in (writable_roots or [])
+        )
+        # 元数据保护：项目根下的 .git/.nova 在可写基座上降只读
+        entries.extend(
+            ExecFileSystemSandboxEntry(
+                path=ExecFileSystemPath.project_roots(name),
+                access=FileSystemAccessMode.READ,
+            )
+            for name in (".git", ".nova")
+        )
         return cls(
             cwd=cwd,
             permissions=ExecPermissionProfile(
@@ -812,11 +902,7 @@ class FileSystemSandboxContext(BaseModel):
                 file_system=ExecManagedFileSystemPermissions(
                     type="restricted", entries=entries
                 ),
-                network=(
-                    NetworkSandboxPolicy.ENABLED
-                    if network_enabled
-                    else NetworkSandboxPolicy.RESTRICTED
-                ),
+                network=network,
             ),
         )
 

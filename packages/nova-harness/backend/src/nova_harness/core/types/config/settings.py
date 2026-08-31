@@ -98,8 +98,9 @@ class ExecutorSettings(NovaBaseModel):
     default_backend: Optional[Literal["local", "executor"]] = None
     endpoints: Optional[list[ExecutorEndpoint]] = None
     # fs 沙箱档位：随 process/start 下发给 executor 后端（None = 不沙箱）。
-    # 策略归 Nova 设置、执行归 executor——read-only 只读 cwd，workspace-write
-    # cwd 可写 + 网络放行（SSH 远程作用域 = 会话隔离工作区）
+    # 策略归 Nova 设置、执行归 executor——codex 套餐语义：read-only 全盘可读
+    # 无处可写；workspace-write 项目根可写 + 网络默认受限（放行归 network_proxy
+    # 名单）。SSH 远程作用域 = 会话隔离工作区
     sandbox: Optional[Literal["read-only", "workspace-write"]] = None
 
 
