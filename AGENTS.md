@@ -44,11 +44,12 @@ nova/
 │   │   ├── backend/        # 高阶 Agent SDK（会话、压缩、工具链、Project Trust、UI 桥接；py dist `nova-harness`，import `nova_harness`）
 │   │   ├── server/         # JSON-RPC 服务器宿主独立包（protocol/transport/reduction/rpc 装配；py dist `nova-harness-server`，import `nova_harness_server`；= codex `app-server` 对位）
 │   │   └── frontend/       # 前端运行时（TS 厚应用层 + 内置 TUI 宿主 modes/tui；npm 包名 `nova-client`）
-│   ├── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具
 │   ├── nova_executor/      # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over WS）
 │   ├── nova-executor-client/   # executor 的 Python SDK（只做连接的薄客户端）
 │   ├── nova_team/          # 主从多智能体团队配置（早期 WIP，暂无 pyproject.toml）
 │   └── nova_web_ui/        # Web UI 占位目录（当前为空）
+├── bundles/
+│   └── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具（官方包住 bundles/，框架住 packages/）
 ├── README.md
 ├── CHANGELOG.md
 ├── .gitignore
@@ -133,7 +134,7 @@ nova/
 
 ### `nova_coding_agent`（bundle + Python 包）
 
-位于 `packages/nova_coding_agent/`，三段式结构（素材/组合分层）：**Python 半区在 `backend/`**（执行体 + 文本素材），**TS 半区在 `frontend/`**（自含 TS 子包），**组合层在 `agents/`**（角色选配 yaml，与两半区平级）：
+位于 `bundles/nova_coding_agent/`，三段式结构（素材/组合分层）：**Python 半区在 `backend/`**（执行体 + 文本素材），**TS 半区在 `frontend/`**（自含 TS 子包），**组合层在 `agents/`**（角色选配 yaml，与两半区平级）：
 
 - `agents/coding_agent.yaml` —— **Agent 组合声明**（纯选配零内容附着）：元数据（name 缺省=文件名）+ `persona`（人格条目列表——能相对 yaml 解析为文件/目录的按路径装配（文件逐列或目录递归字典序展开），否则按注册名查 persona 注册表；顺序即组装顺序，会话期由 PersonaManager 装配）+ 能力名单（`tools` 激活集、`extensions`/`user_tools` 白名单（空=全允许）、`commands` 命令允许集（空=全放）、`skills` 包内裁剪名单（空=全放、非空仅裁包内）——名单字段统一三态：键缺席=全放、显式空列表=全禁、支持 `!` 排除）。`model:` 字段 = 人格默认模型（初始模型解析链 tier 4：CLI/scoped 之后、settings 默认之前；无鉴权/未知 provider 静默落回）。同目录另有 **subagent 四件套**组合声明：`scout.yaml`（侦察）/ `planner.yaml`（只读规划）/ `reviewer.yaml`（评审）/ `worker.yaml`（全能力执行——显式不含 subagent 防递归），供 `subagent` 工具按名调用。**只有 agents，没有 subagents**——yaml 的 `subagents` 死字段已删除，可委派名单即会话注册表全量（无主从划分）
 - `backend/personas/` —— 人格文本资源（persona 升格后为正式资源类目：`coding/core.md` 主人格 + `subagents/{scout,planner,reviewer,worker}.md` 子代理人格；命名 = 相对 personas 根去 .md，如 `coding/core`；经 `[tool.nova] personas` 类目分发，与 `prompts/` 用户模板分源——身份文本 vs 命令宏不同概念）
@@ -273,8 +274,8 @@ pixi run -e dev isort packages/<子包名>/src/
 
 对于 `nova_coding_agent`，Python 代码全部位于 `backend/` 半区，整体格式化：
 ```bash
-pixi run -e dev black packages/nova_coding_agent/backend
-pixi run -e dev isort packages/nova_coding_agent/backend
+pixi run -e dev black bundles/nova_coding_agent/backend
+pixi run -e dev isort bundles/nova_coding_agent/backend
 ```
 
 ### 构建与发布
@@ -359,10 +360,10 @@ npm link           # 全局注册 `nova` 命令
   - `packages/nova_ai/tests/`
   - `packages/nova_agent/tests/`
   - `packages/nova-harness/backend/tests/`
-  - `packages/nova_coding_agent/backend/tests/`
+  - `bundles/nova_coding_agent/backend/tests/`
 - **TS 测试（node:test + tsx）**：统一收在包根 `tests/`（**镜像 src 子路径**——`tests/modes/tui/controllers/keymap.test.ts` ↔ `src/modes/tui/controllers/keymap.ts`）——
   - `packages/nova-harness/frontend/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
-  - `packages/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
+  - `bundles/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
 - 已通过 pixi 安装 dev 环境并验证：`nova_ai` 458 个、`nova_agent` 105 个、`nova_harness` 1303 个、`nova_coding_agent` 528 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
 

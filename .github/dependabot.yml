@@ -18,8 +18,9 @@ updates:
     directories:
       - packages/nova_ai
       - packages/nova_agent
-      - packages/nova-harness/backend
-      - packages/nova_coding_agent
+      - packages/nova_harness
+      - packages/nova_server
+      - bundles/nova_coding_agent
       - packages/nova-executor-client
     schedule:
       interval: weekly

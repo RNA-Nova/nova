@@ -90,9 +90,9 @@ jobs:
       # 清单——子包 pyproject 不声明兄弟 path 依赖，pip 需显式列出）
       - name: 安装依赖并跑测试（非集成）
         run: |
-          python -m pip install -e packages/nova-executor-client packages/nova_ai packages/nova_agent packages/nova-harness/backend packages/nova_coding_agent
+          python -m pip install -e packages/nova-executor-client packages/nova_ai packages/nova_agent packages/nova_harness packages/nova_server bundles/nova_coding_agent
           python -m pip install pytest pytest-asyncio websockets ripgrep==15.1.0
-          python -m pytest packages/nova_coding_agent/backend/tests -q -m "not integration" -o faulthandler_timeout=120
+          python -m pytest bundles/nova_coding_agent/backend/tests -q -m "not integration" -o faulthandler_timeout=120
 
   # 仓库卫生：大二进制/产物文件门禁（防污染回归——白名单见内）
   blob-size:

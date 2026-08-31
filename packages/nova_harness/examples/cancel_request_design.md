@@ -161,7 +161,7 @@ nova_ai 的 device code 轮询**早就支持 signal 取消**：
 ### 2.5 断点一：signal 的源头是 None
 
 `/login` handler 构造 UIAuthInteraction 的地方
-（`packages/nova_coding_agent/extensions/session_commands.py:277-279`）：
+（`bundles/nova_coding_agent/backend/extensions/session_commands.py:277-279`）：
 
 ```python
 credential = await ctx.model_runtime.login(

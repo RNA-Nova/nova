@@ -21,8 +21,9 @@ python = ">=3.12,<3.14"
 [tool.pixi.pypi-dependencies]
 nova-ai = { path = "packages/nova_ai", editable = true }
 nova-agent = { path = "packages/nova_agent", editable = true }
-nova-harness = { path = "packages/nova-harness/backend", editable = true }
-nova-coding-agent = { path = "packages/nova_coding_agent", editable = true }
+nova-harness = { path = "packages/nova_harness", editable = true }
+nova-server = { path = "packages/nova_server", editable = true }
+nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
 nova-executor-client = { path = "packages/nova-executor-client", editable = true }
 websockets = ">=12.0"
 openai = ">=2.0"
@@ -42,6 +43,7 @@ pillow = ">=10.0"
 black = ">=23.10.1"
 isort = ">=5.12.0"
 pre-commit = ">=3.5.0"
+pyright = ">=1.1.400"
 pytest = ">=7.4.0"
 pytest-asyncio = ">=0.21.0"
 sniffio = ">=1.3.0"
@@ -53,8 +55,12 @@ dev = { features = ["dev"], solve-group = "default" }
 [tool.pixi.tasks]
 test-ai = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_ai" }
 test-agent = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_agent" }
-test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova-harness/backend" }
-test-coding = { cmd = "pytest tests", cwd = "packages/nova_coding_agent/backend" }
-test-all = { cmd = "pytest tests -m 'not integration'", depends-on = ["test-ai", "test-agent", "test-harness", "test-coding"] }
-format = "black packages/nova_ai/src packages/nova_agent/src packages/nova-harness/backend/src packages/nova_coding_agent/backend && isort packages/nova_ai/src packages/nova_agent/src packages/nova-harness/backend/src packages/nova_coding_agent/backend"
+test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_harness" }
+test-server = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_server" }
+test-coding = { cmd = "pytest tests", cwd = "bundles/nova_coding_agent/backend" }
+test-all = { cmd = "pytest tests -m 'not integration'", depends-on = ["test-ai", "test-agent", "test-harness", "test-server", "test-coding"] }
+generate-models = { cmd = "python scripts/generate_models.py", cwd = "packages/nova_ai" }
+check-model-data = { cmd = "python scripts/check_model_data.py", cwd = "packages/nova_ai" }
+format = "black packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend && isort packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend"
+typecheck = "pyright packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent"
 nova = "nova-harness run"
