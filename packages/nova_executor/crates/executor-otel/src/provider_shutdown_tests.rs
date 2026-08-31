@@ -57,7 +57,7 @@ unsafe extern "C" fn fault_injected_mprotect(
         } == 0
             && unsafe { std::ffi::CStr::from_ptr(thread_name.as_ptr()) }
                 .to_bytes()
-                .starts_with(b"codex-otel-shut");
+                .starts_with(b"nova-otel-shut");
 
         if named_shutdown_worker {
             GUARD_PAGE_INJECTION_OBSERVED.store(/*val*/ true, Ordering::Relaxed);
@@ -203,11 +203,10 @@ async fn bounded_shutdown_does_not_flush_when_worker_creation_fails() {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-/// mprotect interposer 注入对 macOS 版本/安全策略敏感：在 GH 托管 runner
-/// 与部分开发机上 interposer 不会触发（OBSERVED 永不置位）。上游 codex
-/// 在自管 runner 运行本测试；本机验证通过后可用 `cargo test -- --ignored`
-/// 手动执行。TODO(nova): 调查 interposer 触发条件后摘除。
-#[ignore]
+/// mprotect interposer 靠 shutdown worker 线程名识别：此前线程已改名
+/// nova-otel-shutdown 而 interposer 仍匹配旧前缀 codex-otel-shut，导致
+/// OBSERVED 永不置位（曾被误诊为 GH runner/安全策略问题并 #[ignore]）。
+/// 前缀修正后恢复常跑。
 #[test]
 fn bounded_shutdown_survives_worker_guard_page_failure() {
     let unique_suffix = std::time::SystemTime::now()

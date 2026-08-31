@@ -146,7 +146,7 @@ where
         http_client_factory,
         request_dispatch_mode,
     );
-    tracing::info!("codex-exec-server listening on stdio");
+    tracing::info!("nova-executor listening on stdio");
     processor
         .run_connection(
             JsonRpcConnection::from_stdio(reader, writer, "exec-server stdio".to_string()),
@@ -173,7 +173,7 @@ async fn run_websocket_listener(
         http_client_factory,
         request_dispatch_mode,
     );
-    info!("codex-exec-server listening on ws://{local_addr}");
+    info!("nova-executor listening on ws://{local_addr}");
     println!("ws://{local_addr}");
     std::io::stdout().flush()?;
 

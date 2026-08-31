@@ -174,7 +174,7 @@ const MAX_PENDING_PROCESS_EVENT_BYTES: usize = 1024 * 1024;
 impl Default for ExecServerClientConnectOptions {
     fn default() -> Self {
         Self {
-            client_name: "codex-core".to_string(),
+            client_name: "nova-executor".to_string(),
             initialize_timeout: INITIALIZE_TIMEOUT,
             resume_session_id: None,
         }

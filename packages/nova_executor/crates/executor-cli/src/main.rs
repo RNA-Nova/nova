@@ -12,7 +12,8 @@ use nova_executor_server::run_main_with_telemetry;
 #[command(name = "nova-executor")]
 #[command(about = "Nova remote executor service")]
 struct Cli {
-    /// Transport endpoint URL. Supported values: `ws://IP:PORT` (default), `wss://IP:PORT`.
+    /// Transport endpoint URL. Supported values: `ws://IP:PORT` (default), `stdio`/`stdio://`.
+    /// （wss 不支持：服务端只做回环承载，TLS 归上层隧道/中继层）
     #[arg(long, value_name = "URL", default_value = "ws://127.0.0.1:8080")]
     listen: String,
 

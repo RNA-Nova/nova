@@ -4,7 +4,9 @@
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
 > 不含 agent、模型、会话等上层概念。
 
-- 传输：JSON-RPC 2.0 over WebSocket（`ws://` / `wss://`）
+- 传输：JSON-RPC 2.0 over WebSocket 回环（`ws://`）或 stdio 管道
+  （`--listen stdio`，CLI/桌面/SSH 隧道场景；`wss://` 不支持——服务端
+  只做回环承载，TLS 归上层隧道/中继层）
 - 版本协商：`initialize` 响应携带 `protocolVersion`（`"major.minor"`）；
   **major 不等即不兼容**（客户端应拒绝连接），minor 只增不减（新能力新字段）
 - 服务端版本常量：`crates/executor-protocol/src/lib.rs::PROTOCOL_VERSION`
@@ -26,6 +28,14 @@ client → initialized（notification）
   `environment/info` 往返；旧服务端缺省该字段时，客户端在首次需要时回退
   单次 `environment/info` 调用并缓存（serde 向后兼容，两形态互通）。
 - 连接断开：该连接启动的进程被清理（会话级生命周期）。
+- 服务端行为约定（实现实况）：
+  - `initialize` 每连接仅一次（重复调用报错）；
+  - 未知方法报 method_not_found；**未知通知直接关闭连接**（严格姿态）；
+  - `http/request` 的 `requestId` 在活跃期内必须唯一；
+  - 控制面预留容量：environment/info|status、process/signal|terminate、
+    fs/close 在大流量数据面（读流/写流）饱和时仍可通行；
+  - `fs/writeStream/chunk` 在 initialize 完成前到达只告警忽略；
+  - `/readyz`：WS 监听上另挂一个无鉴权 HTTP readiness 端点。
 
 ## 方法一览
 
@@ -105,8 +115,9 @@ Linux bubblewrap+landlock / Windows restricted token）。**策略在客户端�
 - `networkProxy.policyDecisionTimeoutMs`（可选，非零）：开启服务端→客户端
   反向裁决回调。基线策略未覆盖的目标经 `network/policyRequest`（请求，
   `{processId, request: {protocol, host, port}}`）询问控制端，控制端回
-  `{decision: {type: allow|deny|ask, reason?}}`；超时/连接断开一律按
-  deny 处理。启用回调时 `processId` 必须非空且 ≤256 字节。
+  `{decision: {...}}`——`{type: "allow"}`（无 reason 字段）/
+  `{type: "deny", reason}` / `{type: "ask", reason}`（reason 必填）；
+  超时/连接断开一律按 deny 处理。启用回调时 `processId` 必须非空且 ≤256 字节。
 - → `network/policyDecision`（通知，best-effort 可丢）：代理每次最终裁决
   （allow/deny/ask）后向控制端发审计事件
   `{processId, timestamp, scope, decision, source, reason, protocol, host,
@@ -156,7 +167,7 @@ NtCreateFile + OBJ_DONT_REPARSE）逐组件打开路径，任一组件是符号�
 
 | 方法 | 说明 |
 |---|---|
-| `http/request` | executor 代发 HTTP(S)：`method`、`url`、`headers`、`bodyBase64?`、`timeoutMs?`、`redirectPolicy`、`streamResponse?`、`requestId` |
+| `http/request` | executor 代发 HTTP(S)：`method`、`url`、`requestId` 必填；`headers?`、`bodyBase64?`、`timeoutMs?`、`redirectPolicy?`（默认 follow）、`streamResponse?`（默认 false）可选 |
 | → `http/request/bodyDelta` | 通知：流式响应体（`seq`、`deltaBase64`、`done`、`error?`） |
 
 `headers` 条目形态：`{name, value, valueEnvVar?}`。`valueEnvVar` 由执行端
@@ -164,7 +175,9 @@ NtCreateFile + OBJ_DONT_REPARSE）逐组件打开路径，任一组件是符号�
 客户端点名变量名，值由发起 HTTP 的进程在服务端读取。**保护名单拦截**
 （对位 codex HTTP_HEADER_ENV_DENYLIST）：`NOVA_EXECUTOR_PROXY_ATTRIBUTION_TOKEN`、
 供应商 key（`VOLCENGINE_API_KEY`/`MOONSHOT_API_KEY`/`KIMI_API_KEY`）与通用云
-凭据（`AWS_*`/`AZURE_*`/`GOOGLE_APPLICATION_CREDENTIALS`）点名即
+凭据（`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`/
+`AZURE_CLIENT_SECRET`/`AZURE_FEDERATED_TOKEN_FILE`/`GOOGLE_APPLICATION_CREDENTIALS`
+——具名清单，`AWS_PROFILE` 等不在面内）点名即
 `-32602 invalid_params` 拒绝（大小写不敏感）；变量缺失或空值同样 -32602。
 
 注：executor 本体代发无内置白名单/审计（对齐 codex）；出网管控归
@@ -181,6 +194,23 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 - `capabilityRoots/discoverV1`（agent 插件/技能发现——不属于执行后端）
 - `EnvironmentCapabilities.capabilityDiscoverySandbox` 字段
 - 模型 API / 会话 / compact / memories 等 Codex agent 端点（随 `executor-codex-api` 整 crate 移除）
+
+## 环境变量清单（用户/部署可见）
+
+- `NOVA_EXECUTOR_HOME` — executor 家目录（`~/.nova/executor`）覆盖
+- `NOVA_EXECUTOR_CA_CERTIFICATE` / `SSL_CERT_FILE` — 自定义 CA 证书路径
+  （企业自签场景；影响 `http/request` 与 WS TLS 信任链）
+- `NOVA_EXECUTOR_EXEC_SERVER_EXIT_ON_STDIN_CLOSE` — stdio 托管 spawn 时父进程
+  管道关闭即退出（父死子随）
+- `NOVA_EXECUTOR_NETWORK_PROXY_ACTIVE` — 打进沙箱进程环境：标记"活在托管
+  网络代理里"（executor 自设，勿手设）
+- `NOVA_EXECUTOR_PROXY_ATTRIBUTION_TOKEN` — 代理归因 token（审计归属；executor 自设）
+- `NOVA_EXECUTOR_NETWORK_ALLOW_LOCAL_BINDING` — 网络沙箱内允许绑本地端口
+  （内部 wire 标记）
+- `NOVA_EXECUTOR_WINDOWS_SANDBOX_PROXY_PORTS` — Windows 沙箱回环代理端口清单
+  （内部 wire 标记）
+- 构建期：`NOVA_EXECUTOR_BWRAP_SHA256`（bundled bwrap 的 pin 校验——当前无
+  生产者，休眠链路）
 
 ## 客户端
 
