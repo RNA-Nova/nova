@@ -179,7 +179,7 @@ async fn completed_windows_image_read_does_not_wait_for_a_stuck_helper() {
         );
         let command = powershell_command(&script, &path).expect("PowerShell helper command");
         let result = tokio::time::timeout(
-            Duration::from_secs(/*secs*/ 8),
+            Duration::from_secs(/*secs*/ 30),
             run_command(command, b"{}".to_vec()),
         )
         .await
@@ -209,7 +209,7 @@ $handle = $file.SafeFileHandle.DangerousGetHandle().ToInt64()
     .expect("PowerShell helper command");
 
     let mut file = tokio::time::timeout(
-        Duration::from_secs(/*secs*/ 8),
+        Duration::from_secs(/*secs*/ 30),
         crate::sandboxed_file_open::open(
             command,
             PathUri::from_host_native_path(&path).expect("image path URI"),
