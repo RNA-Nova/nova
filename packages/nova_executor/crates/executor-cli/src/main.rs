@@ -31,9 +31,32 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     executor_linux_sandbox_exe: Option<PathBuf>,
 
-    /// Enable telemetry (OpenTelemetry).
-    #[arg(long)]
-    telemetry: bool,
+    /// 父死子随：WS 托管 spawn 场景下，父进程持有的 stdin 管道关闭即退出
+    /// （对位 codex --exit-on-stdin-close / ParentLifetime::StdinPipe）。
+    /// stdio 形态下 stdin 本就是传输线，EOF 自然结束服务，此旗标为 no-op。
+    #[arg(long, env = "NOVA_EXECUTOR_EXEC_SERVER_EXIT_ON_STDIN_CLOSE")]
+    exit_on_stdin_close: bool,
+}
+
+/// 安装最小 stderr 日志（EnvFilter 读 RUST_LOG，默认 warn）——此前服务端全部
+/// tracing 日志在生产被静默丢弃（无任何 subscriber），这是补齐而非新特性。
+fn install_stderr_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init(); // 重复 init（测试嵌入场景）不报错
+}
+
+/// 父死子随监视线程：父进程持有的 stdin 管道 EOF 即退出（对位 codex 的
+/// io::copy(stdin→sink) 完成语义——copy 返回时父已死）。
+fn spawn_stdin_lifetime_leash() {
+    std::thread::spawn(|| {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        tracing::info!("parent stdin pipe closed; exiting");
+        std::process::exit(0);
+    });
 }
 
 fn main() -> Result<()> {
@@ -59,7 +82,14 @@ fn main() -> Result<()> {
 
 #[tokio::main]
 async fn run_server() -> Result<()> {
+    install_stderr_logging();
     let cli = Cli::parse();
+
+    // 父死子随：WS 托管场景挂 stdin 监视（stdio 形态 stdin 是传输线，
+    // EOF 已由传输层自然结束服务）
+    if cli.exit_on_stdin_close && !cli.listen.starts_with("stdio") {
+        spawn_stdin_lifetime_leash();
+    }
 
     // 构建 runtime paths
     let executor_self_exe = cli

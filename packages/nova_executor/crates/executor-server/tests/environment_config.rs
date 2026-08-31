@@ -123,3 +123,50 @@ mode = "off"
     server.shutdown().await?;
     Ok(())
 }
+
+/// 空选择器拒绝（对位 codex environment_config_read_rejects_empty_selectors）：
+/// 空 configPaths 与空键段（`[[]]`）都必须过线回 -32602（不允许整文档读取）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_server_environment_config_read_rejects_empty_selectors() -> anyhow::Result<()> {
+    let mut server = exec_server().await?;
+    let initialize_id = server
+        .send_request("initialize", serde_json::json!({"clientName": "test"}))
+        .await?;
+    let JSONRPCMessage::Response(JSONRPCResponse { id, .. }) = server.next_event().await? else {
+        panic!("expected initialize response");
+    };
+    assert_eq!(id, initialize_id);
+    server
+        .send_notification("initialized", serde_json::json!({}))
+        .await?;
+
+    let cwd = nova_executor_utils_path_uri::PathUri::from_host_native_path(
+        &std::env::temp_dir(),
+    )?;
+    for config_paths in [
+        serde_json::json!([]),
+        serde_json::json!([[]]),
+        serde_json::json!([["sandbox"], []]),
+    ] {
+        let request_id = server
+            .send_request(
+                "environmentConfig/read",
+                serde_json::json!({
+                    "cwd": cwd.to_string(),
+                    "configPaths": config_paths,
+                }),
+            )
+            .await?;
+        let JSONRPCMessage::Error(nova_executor_protocol::JSONRPCError {
+            id, error, ..
+        }) = server.next_event().await?
+        else {
+            panic!("expected JSON-RPC error response");
+        };
+        assert_eq!(id, request_id);
+        assert_eq!(error.code, -32602, "configPaths={config_paths}");
+    }
+
+    server.shutdown().await?;
+    Ok(())
+}

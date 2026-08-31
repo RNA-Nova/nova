@@ -31,6 +31,8 @@ SSH 远程场景不需要公网监听：远程 executor 只回环监听，经 SS
 ```
 --listen <URL>                     传输端点：ws://IP:PORT（默认 ws://127.0.0.1:8080）或 stdio
 --concurrent-requests <COUNT>      单连接并发请求数 [默认 32；1 = 串行模式]
+--exit-on-stdin-close              父死子随：WS 托管 spawn 时父进程 stdin 管道
+                                   关闭即退出（stdio 形态下 EOF 本就结束服务）
 --executor-self-exe <PATH>         executor 可执行文件路径（隐藏 helper 模式用）
 --executor-linux-sandbox-exe <PATH> Linux 沙箱 helper 路径
 ```
