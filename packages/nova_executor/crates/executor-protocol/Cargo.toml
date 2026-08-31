@@ -13,7 +13,10 @@ doctest = false
 base64 = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# arbitrary_precision/raw_value：rpc.rs 的节点上限遍历要为 serde_json 的
+# 合成 token（$serde_json::private::Number/RawValue）写专门臂——对位 codex
+# exec-server-protocol 的 feature 声明
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 thiserror = { workspace = true }
 schemars = { workspace = true }
 ts-rs = { workspace = true }

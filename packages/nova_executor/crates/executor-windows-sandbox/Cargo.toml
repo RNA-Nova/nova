@@ -27,7 +27,6 @@ chrono = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
 glob = "0.3"
-nova-executor-otel = { path = "../executor-otel" }
 nova-executor-protocol-core = { path = "../executor-protocol-core" }
 nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path" }
 nova-executor-utils-pty = { path = "../executor-utils-pty" }

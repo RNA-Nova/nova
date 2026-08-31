@@ -12,7 +12,6 @@ pub use crate::config::OtelExporter;
 pub use crate::config::OtelHttpProtocol;
 pub use crate::config::OtelSettings;
 pub use crate::config::OtelTlsConfig;
-pub use crate::config::StatsigMetricsSettings;
 pub use crate::config::validate_span_attributes;
 pub use crate::metrics::runtime_metrics::RuntimeMetricTotals;
 pub use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
@@ -37,10 +36,4 @@ pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Ti
         return Err(MetricsError::ExporterDisabled);
     };
     metrics.start_timer(name, tags)
-}
-
-/// Returns the resolved Statsig metrics settings for the globally installed
-/// OTEL metrics client, if the active metrics exporter is Statsig.
-pub fn global_statsig_metrics_settings() -> Option<StatsigMetricsSettings> {
-    crate::metrics::global_statsig_settings()
 }

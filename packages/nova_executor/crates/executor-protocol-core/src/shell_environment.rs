@@ -125,6 +125,10 @@ where
 
     // Step 4 - Apply user-provided overrides.
     for (key, val) in &policy.r#set {
+        // Windows 环境变量名大小写不敏感：插入前剔除仅大小写不同的既有键，
+        // 防子进程 env 块出现重复定义（对位 codex Step 4）
+        #[cfg(windows)]
+        env_map.retain(|existing, _| !existing.eq_ignore_ascii_case(key));
         env_map.insert(key.clone(), val.clone());
     }
 
@@ -157,6 +161,7 @@ pub const WINDOWS_CORE_ENV_VARS: &[&str] = &[
     "SHELL",
     "COMSPEC",
     "SYSTEMROOT",
+    "WINDIR",
     "SYSTEMDRIVE",
     // User context and profiles
     "USERNAME",

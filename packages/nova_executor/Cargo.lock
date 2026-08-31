@@ -2702,7 +2702,6 @@ dependencies = [
  "dirs",
  "dunce",
  "glob",
- "nova-executor-otel",
  "nova-executor-protocol-core",
  "nova-executor-utils-absolute-path",
  "nova-executor-utils-pty",
