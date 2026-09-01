@@ -7,6 +7,7 @@ warn-and-ignore、坏文件响亮报错、executor home 覆盖链。
 
 import json
 import logging
+import re
 
 import pytest
 
@@ -73,7 +74,8 @@ class TestUserLayer:
     def test_malformed_toml_raises_with_path(self, home):
         bad = home / "config.toml"
         bad.write_text("not = [valid", encoding="utf-8")
-        with pytest.raises(ConfigError, match=str(bad)):
+        # match 是正则——Windows 路径含反斜杠，必须 re.escape
+        with pytest.raises(ConfigError, match=re.escape(str(bad))):
             load_executor_config(executor_home=home)
 
     def test_env_override(self, home, monkeypatch):
