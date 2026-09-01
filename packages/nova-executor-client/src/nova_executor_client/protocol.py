@@ -254,8 +254,11 @@ class ProcessStartParams(BaseModel):
     enforce_managed_network: bool = Field(default=False, alias="enforceManagedNetwork")
     #: 托管网络细节（loopback 代理端口 + 本地绑定许可）
     managed_network: dict[str, Any] | None = Field(default=None, alias="managedNetwork")
-    #: executor 本地代理启动配置（透传 dict，wire：RemoteNetworkProxyLaunchConfig）
-    network_proxy: dict[str, Any] | None = Field(default=None, alias="networkProxy")
+    #: executor 本地代理启动配置（wire：RemoteNetworkProxyLaunchConfig；
+    #: 历史透传 dict 会被 pydantic 按模型校验——畸形配置尽早报错）
+    network_proxy: RemoteNetworkProxyLaunchConfig | None = Field(
+        default=None, alias="networkProxy"
+    )
 
 
 class ProcessStartResponse(BaseModel):
@@ -1027,3 +1030,85 @@ class NetworkPolicyDecisionNotification(BaseModel):
     method: str | None = None
     client: str | None = None
     policy_override: bool = Field(default=False, alias="policyOverride")
+
+
+# ---------------------------------------------------------------------------
+# 托管网络代理启动配置（process/start 的 networkProxy 参数 wire 形态，
+# 对位 executor-network-proxy/src/lib.rs 的 RemoteNetworkProxyLaunchConfig 族）
+# ---------------------------------------------------------------------------
+
+
+class NetworkMode(str, Enum):
+    """托管网络模式（wire：camelCase——对位 rust NetworkMode）"""
+
+    NONE = "none"
+    PROXY = "proxy"
+
+
+class NetworkDomainPermission(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+
+
+class NetworkDomainPermissionEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    domain: str
+    permission: NetworkDomainPermission
+
+
+class NetworkDomainPermissions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    entries: list[NetworkDomainPermissionEntry] = Field(default_factory=list)
+
+
+class NetworkUnixSocketPermissionEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    path: str
+    permission: NetworkDomainPermission
+
+
+class NetworkUnixSocketPermissions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    entries: list[NetworkUnixSocketPermissionEntry] = Field(default_factory=list)
+
+
+class NetworkProxyAuditMetadata(BaseModel):
+    """审计元数据（随 policyDecision 通知原样回显；全字段可缺省）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    conversation_id: str | None = Field(default=None, alias="conversationId")
+    turn_id: str | None = Field(default=None, alias="turnId")
+
+
+class RemoteNetworkProxyConfig(BaseModel):
+    """代理本体配置（wire：RemoteNetworkProxyConfig）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    enabled: bool = False
+    enable_socks5: bool = Field(default=False, alias="enableSocks5")
+    enable_socks5_udp: bool = Field(default=False, alias="enableSocks5Udp")
+    allow_upstream_proxy: bool = Field(default=False, alias="allowUpstreamProxy")
+    dangerously_allow_all_unix_sockets: bool = Field(
+        default=False, alias="dangerouslyAllowAllUnixSockets"
+    )
+    mode: NetworkMode = NetworkMode.NONE
+    domains: NetworkDomainPermissions | None = None
+    unix_sockets: NetworkUnixSocketPermissions | None = Field(
+        default=None, alias="unixSockets"
+    )
+    allow_local_binding: bool = Field(default=False, alias="allowLocalBinding")
+
+
+class RemoteNetworkProxyLaunchConfig(BaseModel):
+    """process/start 的 networkProxy 参数（wire：RemoteNetworkProxyLaunchConfig）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    proxy: RemoteNetworkProxyConfig
+    audit_metadata: NetworkProxyAuditMetadata = Field(
+        default_factory=NetworkProxyAuditMetadata, alias="auditMetadata"
+    )
+    environment_id: str | None = Field(default=None, alias="environmentId")
+    execution_id: str | None = Field(default=None, alias="executionId")
+    policy_decision_timeout_ms: int | None = Field(
+        default=None, alias="policyDecisionTimeoutMs"
+    )

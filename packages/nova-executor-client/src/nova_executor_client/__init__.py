@@ -1,6 +1,16 @@
 """nova-executor Python SDK"""
 
 from .client import ExecutorClient
+from .config import (
+    NOVA_EXECUTOR_HOME_ENV,
+    ApprovalPolicy,
+    ExecutorConfig,
+    NetworkProxySettings,
+    SandboxMode,
+    SandboxWorkspaceWriteConfig,
+    default_executor_home,
+    load_executor_config,
+)
 from .errors import (
     EXECUTOR_NOT_FOUND,
     JSON_RPC_INTERNAL_ERROR,
@@ -9,6 +19,7 @@ from .errors import (
     JSON_RPC_METHOD_NOT_FOUND,
     SESSION_ALREADY_ATTACHED,
     AuthError,
+    ConfigError,
     ConnectionError,
     ExecutorError,
     FileSystemError,
@@ -19,6 +30,13 @@ from .errors import (
 )
 from .fs import FileSystemManager
 from .notifications import NotificationRouter, ReadStreamEvent
+from .policy import (
+    ResolvedExecutionPolicy,
+    resolve_ask_behavior,
+    resolve_execution_policy,
+    resolve_file_system_sandbox,
+    resolve_network_proxy,
+)
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, DATA_CHANNEL_METHODS, TransportPool
 from .process import ProcessHandle, ProcessManager, ProcessOutput
 from .protocol import (
@@ -46,11 +64,18 @@ from .protocol import (
     HttpRequestParams,
     HttpRequestResponse,
     ManagedNetworkSandboxContext,
+    NetworkDomainPermission,
+    NetworkDomainPermissionEntry,
+    NetworkDomainPermissions,
+    NetworkMode,
     NetworkPolicyDecision,
     NetworkPolicyDecisionNotification,
     NetworkPolicyRequestParams,
     NetworkPolicyRequestResponse,
+    NetworkProxyAuditMetadata,
     NetworkSandboxPolicy,
+    RemoteNetworkProxyConfig,
+    RemoteNetworkProxyLaunchConfig,
     ShellSnapshotRequest,
     WindowsSandboxLevel,
     WindowsSandboxProxySettingsMode,
@@ -65,6 +90,7 @@ __all__ = [
     "ConnectionError",
     "TransportError",
     "AuthError",
+    "ConfigError",
     "ProcessError",
     "FileSystemError",
     "ProtocolError",
@@ -118,8 +144,30 @@ __all__ = [
     "NetworkPolicyRequestResponse",
     "ExecServerNetworkProtocol",
     "ExecServerNetworkPolicyRequest",
+    # 托管网络代理启动配置（wire 类型族）
+    "NetworkMode",
+    "NetworkDomainPermission",
+    "NetworkDomainPermissionEntry",
+    "NetworkDomainPermissions",
+    "NetworkProxyAuditMetadata",
+    "RemoteNetworkProxyConfig",
+    "RemoteNetworkProxyLaunchConfig",
     "NETWORK_POLICY_REQUEST",
     "NETWORK_POLICY_DECISION",
+    # executor 配置根（发现+物化——执行词汇归 executor 栈自持）
+    "load_executor_config",
+    "default_executor_home",
+    "ExecutorConfig",
+    "SandboxMode",
+    "SandboxWorkspaceWriteConfig",
+    "NetworkProxySettings",
+    "ApprovalPolicy",
+    "NOVA_EXECUTOR_HOME_ENV",
+    "resolve_execution_policy",
+    "resolve_file_system_sandbox",
+    "resolve_network_proxy",
+    "resolve_ask_behavior",
+    "ResolvedExecutionPolicy",
     "JSON_RPC_INVALID_REQUEST",
     "JSON_RPC_METHOD_NOT_FOUND",
     "JSON_RPC_INVALID_PARAMS",

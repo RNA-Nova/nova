@@ -1,24 +1,26 @@
 # nova-executor-client
 
-`nova-executor-client` 是 `nova-executor` 的 Python SDK，让 Python 开发者能够方便地连接和使用远程执行服务。
+`nova-executor-client` 是 `nova-executor` 的 Python SDK——**executor 栈的客户端运行时**（对位 codex `codex-exec-server` crate 的客户端半边）。
 
 ## 定位
 
-- **只做连接**：负责 WebSocket / stdio 连接、JSON-RPC 调用、进程/文件系统/PTY 管理
+- **连接与协议**：WebSocket / stdio 连接、JSON-RPC 调用（initialize 时做 `protocolVersion` major 匹配）、进程/文件系统/PTY 管理、断线重连与会话恢复、多连接通道分离
+- **发现与物化**：读取 executor 配置根（user 层 `~/.nova/executor/config.toml` + 项目层 `<cwd>/.nova/settings.json` 的 `executor` 段，trust 门控），把套餐档/网络代理/审批档**物化展开**成线上协议对象——套餐名与配置词汇永不上线
 - **不做部署**：不负责上传、安装、启动 nova-executor 到服务器
+- **不做裁决交互**：网络/命令裁决只返回结果（allow/deny/ask），弹窗回路归调用方（如 nova 的 bundle 扩展）
 - **通用**：不绑定 Nova，可用于任何 Python 项目
 
 ## 安装
 
 ```sh
-pip install nova-executor
+pip install nova-executor-client
 ```
 
 ## 快速开始
 
 ```python
 import asyncio
-from nova_executor import ExecutorClient
+from nova_executor_client import ExecutorClient
 
 async def main():
     async with ExecutorClient("ws://localhost:8080", token="your-token") as client:
@@ -62,7 +64,7 @@ async with ExecutorClient.from_stdio(
     ...
 
 # 完全自定义命令用 StdioTransport 直传
-from nova_executor import StdioTransport
+from nova_executor_client import StdioTransport
 client = ExecutorClient(transport=StdioTransport(program="/path/to/nova-executor"))
 ```
 
@@ -84,6 +86,48 @@ async with ExecutorClient.from_stdio(connections=2) as client:
 
 `connections=1`（默认）即现状行为。更复杂的通道布局可直接构造 `TransportPool`（按通道持有传输 + 方法名路由表，`TransportPool(channels={"control": t0, "bulk": t1}, method_routes={"fs/walk": "bulk"})`）。注意服务端句柄状态随连接存活，故每通道一条连接，不做通道内轮询。
 
+## 配置与物化（executor 配置根）
+
+执行策略词汇（沙箱套餐/网络代理/审批档）归 executor 栈自持，不进任何 agent
+框架的 settings。SDK 负责发现并**物化展开**成协议对象——executor daemon
+只收展开结果，不理解配置词汇。
+
+配置层栈（对位 PROTOCOL v1.4 `environmentConfig/read` 层栈）：
+
+- **user 层**：`~/.nova/executor/config.toml`（TOML；`NOVA_EXECUTOR_HOME` 可覆盖根）
+- **project 层**：`<cwd>/.nova/settings.json` 的 `executor` 段（JSON；**仅在
+  `project_trusted=True` 时读取**——Project Trust 裁决归调用方）
+
+```toml
+# ~/.nova/executor/config.toml
+sandbox_mode = "workspace-write"        # 或 "read-only"；缺席 = 不沙箱
+approval_policy = "on-request"          # on-request / on-failure / never
+
+[sandbox_workspace_write]               # 微调旋钮（对位 codex 同名件）
+writable_roots = ["/data"]
+network_access = false                  # 网络默认受限；放行归 network_proxy 名单
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+
+[network_proxy]
+enabled = true
+mode = "proxy"                          # 经代理按名单放行
+allowed_domains = ["*.example.com"]
+denied_domains = ["evil.example.com"]   # 展开时 deny 在前（拒绝优先）
+```
+
+```python
+from nova_executor_client import load_executor_config, resolve_execution_policy
+
+config = load_executor_config(cwd="/path/to/project", project_trusted=True)
+policy = resolve_execution_policy(config, cwd="/path/to/project")
+# policy.sandbox / policy.network_proxy 即为可直接下发 process/start 的展开对象
+# （套餐名永不上线）；policy.approval_policy 供裁决方做 ask 降级判断
+```
+
+合并语义（对位 codex `merge.rs`）：表按键深合并，列表与标量由高层整体覆盖
+（不追加）。未知键 warn-and-ignore；坏文件抛 `ConfigError`（带路径）。
+
 ## 断线重连与会话恢复
 
 默认开启：连接意外断开后，SDK 按 `ReconnectStrategy` 自动重连并在 `initialize`
@@ -91,7 +135,7 @@ async with ExecutorClient.from_stdio(connections=2) as client:
 （服务端保留窗 30s），恢复期间调用挂起等待、恢复成功后透明续用。
 
 ```python
-from nova_executor import ExecutorClient, ReconnectStrategy
+from nova_executor_client import ExecutorClient, ReconnectStrategy
 
 # 默认策略（对齐 Rust 客户端）：100ms 固定间隔、25s 恢复总时限、时限内不限次
 async with ExecutorClient("ws://localhost:8080", token="t") as client:
@@ -205,7 +249,7 @@ async for chunk in pty.read():
 ## 错误处理
 
 ```python
-from nova_executor import (
+from nova_executor_client import (
     ExecutorError,
     ConnectionError,
     AuthError,
@@ -227,7 +271,7 @@ except ConnectionError:
 分流；码表常量对位 Rust 服务端 rpc.rs：
 
 ```python
-from nova_executor import (
+from nova_executor_client import (
     ProtocolError,
     JSON_RPC_INVALID_REQUEST,    # -32600 无效请求（含 resume 未知/过期会话）
     JSON_RPC_METHOD_NOT_FOUND,   # -32601 方法不存在

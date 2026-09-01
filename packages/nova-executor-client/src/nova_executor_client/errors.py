@@ -37,6 +37,10 @@ class AuthError(ExecutorError):
     """认证错误"""
 
 
+class ConfigError(ExecutorError):
+    """配置错误（executor 配置根解析/校验失败——用户资产，响亮报错）"""
+
+
 class ProcessError(ExecutorError):
     """进程错误"""
 
