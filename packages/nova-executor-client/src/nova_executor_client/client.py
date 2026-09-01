@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from .errors import ProtocolError
@@ -18,6 +18,7 @@ from .protocol import (
     HTTP_REQUEST_BODY_DELTA,
     INITIALIZE,
     INITIALIZED,
+    NETWORK_POLICY_DECISION,
     NETWORK_POLICY_REQUEST,
     PROTOCOL_VERSION,
     ByteChunk,
@@ -33,6 +34,7 @@ from .protocol import (
     InitializeParams,
     InitializeResponse,
     NetworkPolicyDecision,
+    NetworkPolicyDecisionNotification,
     NetworkPolicyRequestParams,
     NetworkPolicyRequestResponse,
 )
@@ -245,6 +247,34 @@ class ExecutorClient:
         networkPolicyDecision 等按方法订阅；fs read_stream 已由
         FileSystemManager 内部接管，勿重复注册同名流）"""
         return self._router
+
+    async def on_policy_decision(
+        self, *, process_id: str | None = None
+    ) -> AsyncIterator[NetworkPolicyDecisionNotification]:
+        """network/policyDecision 审计通知的类型化订阅（糖 API）。
+
+        executor 每次做出网络裁决都推一条审计通知（丢只影响审计完整性，
+        不影响裁决本身）。`process_id` 可选过滤指定进程。用法：
+
+        ```python
+        async for event in client.on_policy_decision():
+            print(event.host, event.decision, event.reason)
+        ```
+
+        取消/退出迭代即自动注销订阅（不再收到后续通知）。
+        """
+        queue = self._router.register_method(NETWORK_POLICY_DECISION)
+        try:
+            while True:
+                message = await queue.get()
+                notification = NetworkPolicyDecisionNotification.model_validate(
+                    message.get("params") or {}
+                )
+                if process_id is not None and notification.process_id != process_id:
+                    continue
+                yield notification
+        finally:
+            self._router.unregister_method_queue(NETWORK_POLICY_DECISION, queue)
 
     async def _handshake(
         self, transport: Transport, resume_session_id: str | None

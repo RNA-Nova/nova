@@ -29,6 +29,7 @@ from .errors import (
     TransportError,
 )
 from .fs import FileSystemManager
+from .gate import AskOutcome, NetworkPolicyGate
 from .notifications import NotificationRouter, ReadStreamEvent
 from .policy import (
     ResolvedExecutionPolicy,
@@ -168,6 +169,9 @@ __all__ = [
     "resolve_network_proxy",
     "resolve_ask_behavior",
     "ResolvedExecutionPolicy",
+    # 网络裁决门（policyRequest 回调底座：会话记忆 + ask 注入 + fail-closed）
+    "NetworkPolicyGate",
+    "AskOutcome",
     "JSON_RPC_INVALID_REQUEST",
     "JSON_RPC_METHOD_NOT_FOUND",
     "JSON_RPC_INVALID_PARAMS",

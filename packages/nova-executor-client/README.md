@@ -128,6 +128,30 @@ policy = resolve_execution_policy(config, cwd="/path/to/project")
 合并语义（对位 codex `merge.rs`）：表按键深合并，列表与标量由高层整体覆盖
 （不追加）。未知键 warn-and-ignore；坏文件抛 `ConfigError`（带路径）。
 
+## 网络沙箱裁决（policyRequest 回调底座）
+
+executor 托管代理对**未列名**主机发起 `network/policyRequest` 反向裁决
+（静态 allow/deny 名单由服务端按 `networkProxy` 配置自行评估）。SDK 提供
+可复用裁决门——会话记忆 + ask 注入点 + fail-closed 兜底，UI 弹窗归调用方：
+
+```python
+from nova_executor_client import ExecutorClient, NetworkPolicyGate, AskOutcome
+
+async def my_ui_ask(params) -> AskOutcome:   # 调用方实现交互（弹窗等）
+    host = params.request.host
+    ...  # AskOutcome.ALLOW / DENY / ALLOW_REMEMBER / DENY_REMEMBER
+
+gate = NetworkPolicyGate(on_ask=my_ui_ask)   # approval_policy=never 或无 on_ask
+client = ExecutorClient(url, network_policy=gate.decide)  # 时一律 deny（fail-closed）
+```
+
+审计通知（executor 每次裁决单向汇报）经类型化糖 API 订阅：
+
+```python
+async for event in client.on_policy_decision():   # 可按 process_id 过滤
+    print(event.host, event.decision, event.reason)
+```
+
 ## 断线重连与会话恢复
 
 默认开启：连接意外断开后，SDK 按 `ReconnectStrategy` 自动重连并在 `initialize`
