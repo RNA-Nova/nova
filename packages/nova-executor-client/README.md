@@ -152,6 +152,38 @@ async for event in client.on_policy_decision():   # 可按 process_id 过滤
     print(event.host, event.decision, event.reason)
 ```
 
+## 多 executor（环境注册表）
+
+executor 环境（执行机）注册表对位 codex `environments.toml`——词汇合并在
+同一 `config.toml` 的 `[[environments]]`：
+
+```toml
+default_environment = "dev-box"   # "none" 禁用默认；缺席按 include_local 落 local
+include_local = true              # 内建 local 环境（本机 stdio 缺省 spawn）
+
+[[environments]]
+id = "dev-box"
+program = "ssh"                   # stdio spawn（SSH 承载同一形态）
+args = ["user@host", "nova-executor", "--listen", "stdio"]
+connect_timeout_sec = 5
+
+[[environments]]
+id = "server"
+url = "wss://example.internal:8443"
+```
+
+```python
+from nova_executor_client import load_executor_config, resolve_environment, ExecutorClient
+
+config = load_executor_config()
+env = resolve_environment(config)            # 默认解析链；或 resolve_environment(config, "server")
+async with ExecutorClient.from_environment(env) as client:
+    ...
+```
+
+校验（对位 codex）：`url`/`program` 二选一、url 必须 ws(s)://、id 唯一且 ≤64
+字符、`default_environment` 必须已注册或为 "none"。选择/切换编排归调用方。
+
 ## 断线重连与会话恢复
 
 默认开启：连接意外断开后，SDK 按 `ReconnectStrategy` 自动重连并在 `initialize`

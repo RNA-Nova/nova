@@ -49,6 +49,9 @@ PROJECT_CONFIG_DIR_NAME = ".nova"
 PROJECT_CONFIG_FILE_NAME = "settings.json"
 PROJECT_SECTION_KEY = "executor"
 
+#: 端点 id 最大长度（对位 codex MAX_ENVIRONMENT_ID_LEN）
+MAX_ENVIRONMENT_ID_LENGTH = 64
+
 
 class SandboxMode(str, Enum):
     """文件系统沙箱套餐名（配置词汇，永不上线——上线的是展开对象）"""
@@ -85,12 +88,36 @@ class ApprovalPolicy(str, Enum):
     NEVER = "never"
 
 
+class ExecutorEnvironment(BaseModel):
+    """`[[environments]]` 条目（逐字段对位 codex environments.toml 的
+    EnvironmentToml——executor 环境注册表条目）。
+
+    `url` 与 `program` 必须二选一（codex：must set exactly one of url or
+    program）：url = WS 环境（ws:// 或 wss://）；program = stdio spawn
+    命令（SSH 承载同款：`program = "ssh"`, `args = ["host", ...]`）。
+    """
+
+    id: str
+    url: str | None = None
+    program: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    #: 连接超时（秒；from_environment 接线为 connect 总时限）
+    connect_timeout_sec: float | None = None
+    #: codex 对位字段（initialize 等待）——我们的握手随 connect 完成，
+    #: 无独立阶段，收下保留兼容但暂不接消费
+    initialize_timeout_sec: float | None = None
+
+
 class ExecutorConfig(BaseModel):
     """合并后的有效 executor 配置（物化层的输入）。
 
     词汇平铺对位 codex config.toml：`sandbox_mode` / `[sandbox_workspace_write]`
-    / `approval_policy`（+ nova 自有的 `[network_proxy]`）。project 层
-    （`.nova/settings.json` 的 `executor` 段）内为同一平铺词汇的 JSON 形态。
+    / `approval_policy`（+ nova 自有的 `[network_proxy]`）；`[[environments]]`
+    注册表对位 codex environments.toml（我们合并在同一 config.toml——层栈
+    已定单文件）。project 层（`.nova/settings.json` 的 `executor` 段）内为
+    同一词汇的 JSON 形态。
     """
 
     #: 沙箱套餐档（缺席 = 不物化、不下发——保持 nova 现状：未配置不沙箱，
@@ -102,6 +129,12 @@ class ExecutorConfig(BaseModel):
     )
     network_proxy: NetworkProxySettings | None = None
     approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
+    #: 默认环境 id（对位 codex default；"none"（大小写不敏感）= 禁用默认；
+    #: 缺席时按 include_local 落 local）
+    default_environment: str | None = None
+    #: 是否包含内建 local 环境（对位 codex include_local）
+    include_local: bool = True
+    environments: list[ExecutorEnvironment] = Field(default_factory=list)
 
 
 def default_executor_home() -> Path:
@@ -199,7 +232,39 @@ def _validate(merged: dict[str, Any], *, sources: list[str]) -> ExecutorConfig:
         raise ConfigError(
             f"executor 配置校验失败（层来源：{', '.join(sources)}）：{error}"
         ) from error
+    _validate_environments(config)
     return config
+
+
+def _validate_environments(config: ExecutorConfig) -> None:
+    """环境注册表校验（逐条对位 codex environment_toml.rs 的校验规则）"""
+    seen: set[str] = set()
+    for environment in config.environments:
+        eid = environment.id
+        if eid != eid.strip() or not eid:
+            raise ConfigError(f"环境 id `{eid}` 为空或含首尾空白")
+        if len(eid) > MAX_ENVIRONMENT_ID_LENGTH:
+            raise ConfigError(f"环境 id `{eid}` 超长（>{MAX_ENVIRONMENT_ID_LENGTH}）")
+        if eid in seen:
+            raise ConfigError(f"环境 id 重复：`{eid}`")
+        seen.add(eid)
+        if (environment.url is None) == (environment.program is None):
+            raise ConfigError(f"环境 `{eid}` 必须且只能设置 url 或 program 之一")
+        if environment.url is not None:
+            url = environment.url.strip()
+            if not url.startswith(("ws://", "wss://")):
+                raise ConfigError(f"环境 `{eid}` 的 url 必须是 ws:// 或 wss://")
+        if environment.program is not None and not environment.program.strip():
+            raise ConfigError(f"环境 `{eid}` 的 program 不能为空")
+    default = config.default_environment
+    if default is not None:
+        stripped = default.strip()
+        if not stripped:
+            raise ConfigError("default_environment 不能为空串")
+        if stripped.lower() != "none" and stripped not in seen:
+            raise ConfigError(
+                f"default_environment `{stripped}` 未在 environments 中注册"
+            )
 
 
 def _warn_unknown_keys(

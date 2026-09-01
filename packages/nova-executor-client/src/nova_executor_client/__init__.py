@@ -5,11 +5,17 @@ from .config import (
     NOVA_EXECUTOR_HOME_ENV,
     ApprovalPolicy,
     ExecutorConfig,
+    ExecutorEnvironment,
     NetworkProxySettings,
     SandboxMode,
     SandboxWorkspaceWriteConfig,
     default_executor_home,
     load_executor_config,
+)
+from .environments import (
+    LOCAL_ENVIRONMENT_ID,
+    ResolvedEnvironment,
+    resolve_environment,
 )
 from .errors import (
     EXECUTOR_NOT_FOUND,
@@ -172,6 +178,11 @@ __all__ = [
     # 网络裁决门（policyRequest 回调底座：会话记忆 + ask 注入 + fail-closed）
     "NetworkPolicyGate",
     "AskOutcome",
+    # 环境注册表（多 executor——对位 codex environments 体系）
+    "ExecutorEnvironment",
+    "ResolvedEnvironment",
+    "resolve_environment",
+    "LOCAL_ENVIRONMENT_ID",
     "JSON_RPC_INVALID_REQUEST",
     "JSON_RPC_METHOD_NOT_FOUND",
     "JSON_RPC_INVALID_PARAMS",

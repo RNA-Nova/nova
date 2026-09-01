@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
+from .environments import ResolvedEnvironment
 from .errors import ProtocolError
 from .fs import FileSystemManager
 from .notifications import NotificationRouter
@@ -178,6 +180,9 @@ class ExecutorClient:
                 NETWORK_POLICY_REQUEST, self._answer_network_policy
             )
 
+        #: 环境声明的连接总时限（from_environment 注入；None = 不限制）
+        self._connect_timeout: float | None = None
+
     async def _answer_network_policy(self, params: dict[str, Any]) -> dict[str, Any]:
         """裁决适配：线上载荷解析 → 用户回调 → 结果回线上形态（回调异常由
         传输层转内部错误，服务端 fail-closed 拒决）"""
@@ -200,6 +205,10 @@ class ExecutorClient:
         stderr_handler: Callable[[str], None] | None = None,
         reconnect: ReconnectStrategy | None = ReconnectStrategy(),
         resume_session_id: str | None = None,
+        network_policy: (
+            Callable[[NetworkPolicyRequestParams], Awaitable[NetworkPolicyDecision]]
+            | None
+        ) = None,
     ) -> ExecutorClient:
         """以 stdio 命令创建客户端（本地 nova-executor 或 SSH 远程同一形态）。
 
@@ -228,7 +237,56 @@ class ExecutorClient:
             connections=connections,
             reconnect=reconnect,
             resume_session_id=resume_session_id,
+            network_policy=network_policy,
         )
+
+    @classmethod
+    def from_environment(
+        cls,
+        environment: ResolvedEnvironment,
+        *,
+        connections: int = 1,
+        reconnect: ReconnectStrategy | None = ReconnectStrategy(),
+        resume_session_id: str | None = None,
+        network_policy: (
+            Callable[[NetworkPolicyRequestParams], Awaitable[NetworkPolicyDecision]]
+            | None
+        ) = None,
+    ) -> ExecutorClient:
+        """按解析后的环境创建客户端（对位 codex EnvironmentToml → 传输参数）。
+
+        `environment.connect_timeout_sec` 接线为 connect 总时限；其余语义与
+        构造器/from_stdio 一致（未连接状态返回，`async with`/`connect()` 连）。
+        """
+        if environment.kind == "ws":
+            assert environment.url is not None
+            client = cls(
+                environment.url,
+                connections=connections,
+                reconnect=reconnect,
+                resume_session_id=resume_session_id,
+                network_policy=network_policy,
+            )
+        elif environment.kind == "stdio":
+            client = cls.from_stdio(
+                program=environment.program or StdioTransport.DEFAULT_PROGRAM,
+                args=environment.args,
+                env=environment.env,
+                cwd=environment.cwd,
+                connections=connections,
+                reconnect=reconnect,
+                resume_session_id=resume_session_id,
+                network_policy=network_policy,
+            )
+        else:  # local：内建环境 = 本机 stdio 缺省 spawn
+            client = cls.from_stdio(
+                connections=connections,
+                reconnect=reconnect,
+                resume_session_id=resume_session_id,
+                network_policy=network_policy,
+            )
+        client._connect_timeout = environment.connect_timeout_sec
+        return client
 
     @property
     def transport(self) -> Transport:
@@ -301,7 +359,11 @@ class ExecutorClient:
     async def connect(self) -> None:
         """连接并初始化（每条连接各自握手，协议版本 major 不等即拒绝）"""
         try:
-            await self._pool.connect()
+            if self._connect_timeout is not None:
+                # 环境声明的连接总时限（config 的 connect_timeout_sec）
+                await asyncio.wait_for(self._pool.connect(), self._connect_timeout)
+            else:
+                await self._pool.connect()
         except Exception:
             # 任一连接握手失败即整体断开，避免半连接状态
             await self.disconnect()
