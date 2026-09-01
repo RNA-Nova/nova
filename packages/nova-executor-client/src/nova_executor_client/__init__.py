@@ -14,6 +14,9 @@ from .config import (
 )
 from .environments import (
     LOCAL_ENVIRONMENT_ID,
+    EnvironmentConnectionState,
+    EnvironmentManager,
+    EnvironmentStatus,
     ResolvedEnvironment,
     resolve_environment,
 )
@@ -183,6 +186,9 @@ __all__ = [
     "ResolvedEnvironment",
     "resolve_environment",
     "LOCAL_ENVIRONMENT_ID",
+    "EnvironmentManager",
+    "EnvironmentConnectionState",
+    "EnvironmentStatus",
     "JSON_RPC_INVALID_REQUEST",
     "JSON_RPC_METHOD_NOT_FOUND",
     "JSON_RPC_INVALID_PARAMS",

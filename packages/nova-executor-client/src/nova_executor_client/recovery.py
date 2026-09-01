@@ -176,6 +176,11 @@ class ManagedTransport:
         return self._state
 
     @property
+    def failure_message(self) -> str | None:
+        """最近一次连接失败的原因（诊断用；无失败为 None）"""
+        return self._failure_message
+
+    @property
     def is_connected(self) -> bool:
         return self._state == "connected" and self._transport.is_connected
 

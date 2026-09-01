@@ -184,6 +184,20 @@ async with ExecutorClient.from_environment(env) as client:
 校验（对位 codex）：`url`/`program` 二选一、url 必须 ws(s)://、id 唯一且 ≤64
 字符、`default_environment` 必须已注册或为 "none"。选择/切换编排归调用方。
 
+需要同时持有多台 executor 的活连接时，用管理器（对位 codex
+`EnvironmentManager`：懒创建 + 缓存 + 状态观察 + 清扫）：
+
+```python
+from nova_executor_client import EnvironmentManager
+
+manager = EnvironmentManager(config)             # network_policy=gate.decide 可传入
+client = await manager.get_client("dev-box")     # 不传名走默认解析链
+manager.status("dev-box")                        # connected / disconnected / pending
+await manager.upsert_environment(...)            # 运行时增删（写回配置归调用方）
+await manager.remove_environment("dev-box")
+await manager.close_all()
+```
+
 ## 断线重连与会话恢复
 
 默认开启：连接意外断开后，SDK 按 `ReconnectStrategy` 自动重连并在 `initialize`
