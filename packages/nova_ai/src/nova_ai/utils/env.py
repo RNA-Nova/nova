@@ -4,8 +4,7 @@
 """
 
 import os
-from typing import Optional, Dict
-from ..types.enums import KnownProvider
+from typing import Optional
 
 
 def get_env_api_key(provider: str) -> Optional[str]:
@@ -34,64 +33,43 @@ def get_env_api_key(provider: str) -> Optional[str]:
             "ANTHROPIC_API_KEY"
         )
 
-    # 标准API密钥映射
+    # 标准API密钥映射（与 TS env-api-keys.ts 对齐；即使 Python 暂未内置
+    # 某些 provider，自定义 models.json 也可能用到这些 provider id）
     env_map = {
+        "ant-ling": "ANT_LING_API_KEY",
         "openai": "OPENAI_API_KEY",
         "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+        "nvidia": "NVIDIA_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
         "google": "GEMINI_API_KEY",
+        "google-vertex": "GOOGLE_CLOUD_API_KEY",
         "groq": "GROQ_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
         "xai": "XAI_API_KEY",
+        "radius": "RADIUS_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
         "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
         "zai": "ZAI_API_KEY",
+        "zai-coding-cn": "ZAI_CODING_CN_API_KEY",
         "mistral": "MISTRAL_API_KEY",
         "minimax": "MINIMAX_API_KEY",
         "minimax-cn": "MINIMAX_CN_API_KEY",
+        "moonshotai": "MOONSHOT_API_KEY",
+        "moonshotai-cn": "MOONSHOT_API_KEY",
         "huggingface": "HF_TOKEN",
+        "fireworks": "FIREWORKS_API_KEY",
+        "together": "TOGETHER_API_KEY",
         "opencode": "OPENCODE_API_KEY",
+        "opencode-go": "OPENCODE_API_KEY",
         "kimi-coding": "KIMI_API_KEY",
+        "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
+        "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+        "xiaomi": "XIAOMI_API_KEY",
+        "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+        "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+        "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
         "volcengine": "VOLCENGINE_API_KEY",
     }
 
     env_var = env_map.get(provider)
     return os.environ.get(env_var) if env_var else None
-
-
-def get_env_api_key_typed(provider: KnownProvider) -> Optional[str]:
-    """类型化的 get_env_api_key 版本"""
-    return get_env_api_key(provider.value if hasattr(provider, "value") else provider)
-
-
-def get_all_env_api_keys() -> Dict[str, Optional[str]]:
-    """获取所有已知提供商的环境变量值"""
-    providers = [
-        "github-copilot",
-        "anthropic",
-        "openai",
-        "azure-openai-responses",
-        "google",
-        "groq",
-        "cerebras",
-        "xai",
-        "openrouter",
-        "vercel-ai-gateway",
-        "zai",
-        "mistral",
-        "minimax",
-        "minimax-cn",
-        "huggingface",
-        "opencode",
-        "kimi-coding",
-        "volcengine",
-    ]
-
-    result = {}
-    for provider in providers:
-        value = get_env_api_key(provider)
-        if value:
-            result[provider] = "<set>"
-        else:
-            result[provider] = None
-
-    return result

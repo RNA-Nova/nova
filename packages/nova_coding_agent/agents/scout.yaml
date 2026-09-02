@@ -1,0 +1,20 @@
+# scout —— 快速代码侦察子代理（subagent 工具调用）。
+# 返回压缩后的结构化发现，供未读过文件的下游代理直接使用。
+name: scout
+version: "1.0.0"
+description: Fast codebase recon that returns compressed context for handoff to other agents
+author: nova
+# 人格默认模型（初始模型解析链的一层，CLI/scoped 之后、settings 默认之前）。
+# 侦察类任务适合便宜快速的模型，按需启用：
+# model: volcengine/doubao-flash
+
+persona:
+  - ../backend/personas/subagents/scout.md
+
+# 只读侦察工具集（bash 用于 git log 等只读探查）
+tools:
+  - read
+  - grep
+  - find
+  - ls
+  - bash

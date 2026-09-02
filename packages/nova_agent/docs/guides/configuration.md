@@ -100,7 +100,9 @@ agent = Agent(session_id="session-123")
 ## Reasoning / Thinking
 
 ```python
-agent.set_thinking_level("medium")
+from nova_ai import ModelThinkingLevel
+
+agent.set_thinking_level(ModelThinkingLevel.MEDIUM)
 ```
 
 thinking level 会透传给 provider，具体支持取决于模型。
@@ -116,4 +118,4 @@ thinking level 会透传给 provider，具体支持取决于模型。
 | `steering_mode` | `"one-at-a-time"` / `"all"` | steering 队列出队模式 |
 | `follow_up_mode` | `"one-at-a-time"` / `"all"` | follow_up 队列出队模式 |
 | `session_id` | `str` | 缓存会话 ID |
-| `max_retry_delay_ms` | `int` | provider 请求最大重试等待 |
+| `max_retry_delay_ms` | `int` | 单次重试等待上限（毫秒），透传给 `nova_ai`；需 provider 实现自有重试循环才会被消费 |

@@ -1,0 +1,38 @@
+# coding_agent —— 官方编程智能体的组合声明（纯选配，零内容附着）
+#
+# 三层模型：backend/ 与 frontend/ 是素材海，本文件是组合层——
+# 选人格文本（persona，顺序即组装顺序）、选能力（tools/extensions/…）。
+name: coding_agent
+version: "1.0.0"
+description: Nova coding agent definition with local file system tools
+author: nova
+model: openai/gpt-4o
+
+# 人格文本素材（相对本文件解析——本文件位于 <包根>/agents/ 下，故先向上一级）
+persona:
+  - ../backend/personas/coding/core.md
+
+# 能力选配（三态：键缺席 = 全放；显式空列表 = 全禁；名单支持 ! 排除）
+tools:
+  - read
+  - write
+  - edit
+  - bash
+  - grep
+  - find
+  - ls
+  - subagent
+  - todo
+  - question
+extensions:
+  - session_commands
+  - permission_gate
+  - plan_mode
+  - tools_panel
+  - interactive_shell
+  - confirm_destructive
+  - subagent_gate
+  - executor_switch
+user_tools:
+  - bash
+# commands / skills 未声明 = 全放（文本类资源不做角色裁剪）

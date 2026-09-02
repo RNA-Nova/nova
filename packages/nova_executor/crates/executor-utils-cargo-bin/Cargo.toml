@@ -1,0 +1,16 @@
+[package]
+name = "nova-executor-utils-cargo-bin"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+
+
+[dependencies]
+assert_cmd = { workspace = true }
+runfiles = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+test = false
+doctest = false

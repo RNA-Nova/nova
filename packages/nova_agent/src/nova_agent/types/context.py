@@ -2,12 +2,10 @@
 Agent 上下文与循环配置类型定义。
 """
 
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, List, Optional, Union
 
-from pydantic import Field
-
-from nova_ai import Message, Model, SimpleStreamOptions
-from nova_ai.types.base_model import NovaBaseModel
+from nova_ai import AbortSignal, Message, Model, SimpleStreamOptions
 
 from .base import AgentMessage, ToolExecutionMode
 from .hooks import (
@@ -19,28 +17,41 @@ from .hooks import (
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
 )
+from .tool import AgentTool
 
 
-class AgentContext(NovaBaseModel):
-    """Agent context similar to SimpleStreamOptions but using AgentMessage."""
+@dataclass
+class AgentContext:
+    """Agent context similar to SimpleStreamOptions but using AgentMessage.
+
+    运行时快照，不由 Pydantic 校验；构造后会被循环原地 mutate（如 messages.append）。
+    """
 
     system_prompt: Optional[str] = ""
-    messages: List[AgentMessage] = Field(default_factory=list)
-    tools: Optional[List[Any]] = Field(default=None)
+    messages: List[AgentMessage] = field(default_factory=list)
+    tools: Optional[List[AgentTool]] = None
 
 
-class AgentLoopConfig(SimpleStreamOptions):
+@dataclass(frozen=True)
+class AgentLoopConfig:
+    """Configuration for the agent loop.
+
+    使用组合持有 ``SimpleStreamOptions``（给 ``nova_ai`` 的纯数据选项），
+    其余字段为运行时 callbacks 与策略开关。避免继承 Pydantic 导致的
+    ``model_dump / model_validate`` hack。
+
+    配置构造后不可变：循环内的更新一律走 ``dataclasses.replace`` 产生新实例。
     """
-    Configuration for the agent loop.
-    Inherits all fields from SimpleStreamOptions and adds agent‑specific ones.
-    """
+
+    stream_options: SimpleStreamOptions
+    """传给 ``nova_ai`` 的流式选项（model、api_key、signal 等数据字段）。"""
 
     model: Model
     """The LLM model to use."""
 
     convert_to_llm: Optional[
         Callable[[List[AgentMessage]], Union[List[Message], Awaitable[List[Message]]]]
-    ] = Field(default=None, exclude=True)
+    ] = None
     """
     Converts AgentMessage[] to LLM‑compatible Message[] before each LLM call.
     Each AgentMessage must be converted to a UserMessage, AssistantMessage,
@@ -49,8 +60,10 @@ class AgentLoopConfig(SimpleStreamOptions):
     """
 
     transform_context: Optional[
-        Callable[[List[AgentMessage], Optional[Any]], Awaitable[List[AgentMessage]]]
-    ] = Field(default=None, exclude=True)
+        Callable[
+            [List[AgentMessage], Optional[AbortSignal]], Awaitable[List[AgentMessage]]
+        ]
+    ] = None
     """
     Optional transform applied to the context before `convert_to_llm`.
     Use this for operations that work at the AgentMessage level:
@@ -60,7 +73,7 @@ class AgentLoopConfig(SimpleStreamOptions):
 
     get_api_key: Optional[
         Callable[[str], Union[Optional[str], Awaitable[Optional[str]]]]
-    ] = Field(default=None, exclude=True)
+    ] = None
     """
     Resolves an API key dynamically for each LLM call.
     Useful for short‑lived OAuth tokens that may expire during long‑running tool execution.
@@ -68,7 +81,7 @@ class AgentLoopConfig(SimpleStreamOptions):
 
     should_stop_after_turn: Optional[
         Callable[[ShouldStopAfterTurnContext], Union[bool, Awaitable[bool]]]
-    ] = Field(default=None, exclude=True)
+    ] = None
     """
     Called after each turn fully completes and `turn_end` has been emitted.
     If it returns true, the loop emits `agent_end` and exits before polling steering or follow-up queues.
@@ -79,15 +92,13 @@ class AgentLoopConfig(SimpleStreamOptions):
             [PrepareNextTurnContext],
             Union[AgentLoopTurnUpdate, Awaitable[AgentLoopTurnUpdate], None],
         ]
-    ] = Field(default=None, exclude=True)
+    ] = None
     """
     Called after `turn_end` and before the loop decides whether another provider request should start.
     Return replacement context/model/thinking state to affect the next turn in this run.
     """
 
-    get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = (
-        Field(default=None, exclude=True)
-    )
+    get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None
     """
     Returns steering messages to inject into the conversation mid‑run.
     Called after each tool execution to check for user interruptions.
@@ -95,11 +106,9 @@ class AgentLoopConfig(SimpleStreamOptions):
     are added to the context before the next LLM call.
     """
 
-    get_follow_up_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = (
-        Field(default=None, exclude=True)
-    )
+    get_follow_up_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None
     """
-    Returns follow‑up messages to process after the agent would otherwise stop.
+    Returns follow-up messages to process after the agent would otherwise stop.
     Called when the agent has no more tool calls and no steering messages.
     If messages are returned, they're added to the context and the agent continues.
     """
@@ -113,10 +122,10 @@ class AgentLoopConfig(SimpleStreamOptions):
 
     before_tool_call: Optional[
         Callable[
-            [BeforeToolCallContext, Optional[Any]],
+            [BeforeToolCallContext, Optional[AbortSignal]],
             Union[BeforeToolCallResult, Awaitable[BeforeToolCallResult], None],
         ]
-    ] = Field(default=None, exclude=True)
+    ] = None
     """
     Called before a tool is executed, after arguments have been validated.
     Return BeforeToolCallResult(block=True) to prevent execution.
@@ -124,19 +133,13 @@ class AgentLoopConfig(SimpleStreamOptions):
 
     after_tool_call: Optional[
         Callable[
-            [AfterToolCallContext, Optional[Any]],
+            [AfterToolCallContext, Optional[AbortSignal]],
             Union[AfterToolCallResult, Awaitable[AfterToolCallResult], None],
         ]
-    ] = Field(default=None, exclude=True)
+    ] = None
     """
     Called after a tool finishes executing, before `tool_execution_end` and tool-result message events are emitted.
     Return an AfterToolCallResult to override parts of the executed tool result.
-    """
-
-    stream_fn: Optional[Any] = Field(default=None, exclude=True)
-    """
-    Optional LLM stream function override.
-    If provided, used instead of the default `stream_simple` from nova_ai.
     """
 
 

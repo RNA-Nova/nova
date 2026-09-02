@@ -73,7 +73,7 @@ Nova 的核心抽象围绕**事件驱动的 Agent 生命周期**：
 - **`Agent`**（`nova_agent/agent.py`）：状态管理、事件订阅、消息队列、生命周期。
 - **`agent_loop`**（`nova_agent/agent_loop/`）：异步循环，负责工具执行、模型调用、事件发布。
 - **`AgentSession`**（`nova_harness/core/agent_session/`）：运行时核心，包含树、队列、工具、压缩等控制器。
-- **`ToolDefinition` / `ToolExecutor`**：工具定义与执行分离，工具以 bundle 形式通过 `nova-pkg` 安装。
+- **`ToolDefinition` / `Tool`**：工具定义与执行分离，工具以 bundle 形式通过 `nova-pkg` 安装。
 - **`ExtensionUIContext`**：UI 桥接，支持前后端通过事件交互。
 
 Nova 强调：

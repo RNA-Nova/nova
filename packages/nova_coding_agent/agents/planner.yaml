@@ -1,0 +1,17 @@
+# planner —— 实施计划子代理（只读，零改动）。
+# 接收 scout 的上下文与需求，产出可逐条执行的计划。
+name: planner
+version: "1.0.0"
+description: Creates implementation plans from context and requirements
+author: nova
+# model: volcengine/doubao-pro  # 规划是重推理任务，按需指定强模型
+
+persona:
+  - ../backend/personas/subagents/planner.md
+
+# 纯只读工具集——人格承诺"不做任何改动"由工具面兜底
+tools:
+  - read
+  - grep
+  - find
+  - ls

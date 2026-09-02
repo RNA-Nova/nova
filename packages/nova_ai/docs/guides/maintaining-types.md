@@ -79,7 +79,7 @@ types/
 ├── model.py           # 模型定义（Model, ModelCost, Usage, Cost）
 ├── stream_options.py  # 流选项（StreamOptions, SimpleStreamOptions）
 ├── compat.py          # 兼容性配置
-├── enums.py           # 枚举（Api, KnownProvider, StopReason, ThinkingLevel 等）
+├── enums.py           # 枚举（Api, KnownProvider, StopReason, ThinkingLevel, ModelThinkingLevel 等）
 └── api_adapter.py     # ApiAdapter Protocol
 ```
 

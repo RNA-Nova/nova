@@ -1,0 +1,17 @@
+# reviewer —— 代码评审子代理（质量/安全/可维护性）。
+name: reviewer
+version: "1.0.0"
+description: Code review specialist for quality and security analysis
+author: nova
+# model: volcengine/doubao-pro  # 评审是重推理任务，按需指定强模型
+
+persona:
+  - ../backend/personas/subagents/reviewer.md
+
+# 只读评审工具集（bash 限 git diff/log/show 等只读命令——人格层约束）
+tools:
+  - read
+  - grep
+  - find
+  - ls
+  - bash

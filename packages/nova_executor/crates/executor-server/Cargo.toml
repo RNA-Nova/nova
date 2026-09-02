@@ -1,0 +1,75 @@
+[package]
+name = "nova-executor-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_executor_server"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+toml = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+nova-executor-protocol = { workspace = true }
+nova-executor-file-system = { workspace = true }
+nova-executor-sandboxing = { workspace = true }
+nova-executor-utils-absolute-path = { workspace = true }
+nova-executor-utils-path-uri = { workspace = true }
+nova-executor-utils-pty = { workspace = true }
+nova-executor-protocol-core = { workspace = true }
+nova-executor-network-proxy = { workspace = true }
+nova-executor-utils-home-dir = { workspace = true }
+nova-executor-utils-rustls-provider = { workspace = true }
+nova-executor-http-client = { workspace = true }
+nova-executor-utils-cargo-bin = { workspace = true }
+nova-executor-websocket-client = { workspace = true }
+nova-executor-otel = { workspace = true }
+
+# WebSocket server
+axum = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+# TLS / 安全
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+sha2 = { workspace = true }
+
+# Noise 协议
+clatter = { workspace = true }
+prost = "0.14.3"
+arc-swap = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+ctor = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+serial_test = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+wiremock = { workspace = true }

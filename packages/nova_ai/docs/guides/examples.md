@@ -137,7 +137,7 @@ asyncio.run(main())
 from nova_ai import SimpleStreamOptions, ThinkingLevel
 
 options = SimpleStreamOptions(
-    reasoning=ThinkingLevel.HIGH,  # off | minimal | low | medium | high | xhigh
+    reasoning=ThinkingLevel.HIGH,  # minimal | low | medium | high | xhigh；关闭思考用 None
 )
 
 event_stream = stream(model, context, options)
@@ -151,7 +151,7 @@ async for event in event_stream:
 
 **注意**：
 - 只有 `reasoning=True` 的模型支持推理模式
-- `xhigh` 级别需要模型显式支持（通过 `supports_xhigh_thinking()` 检查）
+- `xhigh` 级别需要模型在 `thinking_level_map` 中显式声明（可用 `get_supported_thinking_levels()` 检查）
 - 模型不支持 reasoning 时，`ThinkingLevel` 会被忽略
 
 ---

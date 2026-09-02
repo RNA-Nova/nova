@@ -3,10 +3,15 @@
 提供商特定的 API 兼容性设置
 """
 
-from typing import Optional, List, Literal
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import ConfigDict
+
 from .base_model import NovaBaseModel
 from .enums import ThinkingFormat
+
+SessionAffinityFormat = Literal["openai", "openai-nosession", "openrouter"]
+DeferredToolsMode = Literal["kimi"]
 
 
 class OpenRouterRouting(NovaBaseModel):
@@ -71,11 +76,13 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # 思考块是否需要转换为带<thinking>分隔符的文本块。默认：基于URL自动检测
     requires_thinking_as_text: Optional[bool] = None
 
-    # 工具调用ID是否需要规范化为Mistral格式（正好9个字母数字字符）。默认：基于URL自动检测
-    requires_mistral_tool_ids: Optional[bool] = None
-
     # 推理/思考参数的格式。默认：None（由自动检测决定）
     thinking_format: Optional[ThinkingFormat] = None
+
+    # thinking_format 为 "chat-template" 时发送的 chat_template_kwargs。
+    # 值可以是字面量，也可以是 {"$var": "thinking.enabled"|"thinking.effort", "omitWhenOff": bool}
+    # 的变量引用，由 pi 按当前思考级别解析。默认：{}
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
     # 是否支持工具定义中的 `strict` 字段。默认：true
     supports_strict_mode: Optional[bool] = None
@@ -83,14 +90,23 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # DeepSeek 是否要求在 assistant 消息上提供 reasoning_content 字段
     requires_reasoning_content_on_assistant_messages: Optional[bool] = None
 
-    # 是否发送会话亲和性头部（session_id, x-client-request-id, x-session-affinity）
+    # 是否发送会话亲和性头部
     send_session_affinity_headers: Optional[bool] = None
+
+    # 会话亲和性头部格式
+    # - openai: session_id + x-client-request-id + x-session-affinity
+    # - openai-nosession: x-client-request-id + x-session-affinity
+    # - openrouter: x-session-id
+    session_affinity_format: Optional[SessionAffinityFormat] = None
 
     # 是否支持长缓存保留（long cache retention）
     supports_long_cache_retention: Optional[bool] = None
 
     # Z.ai 提供商是否使用 tool_stream 参数
     zai_tool_stream: Optional[bool] = None
+
+    # 延迟工具注册模式（当前仅 Kimi）
+    deferred_tools_mode: Optional[DeferredToolsMode] = None
 
     # 缓存控制格式（例如 "anthropic"）。默认：None
     cache_control_format: Optional[str] = None
@@ -107,8 +123,47 @@ class OpenAIResponsesCompat(NovaBaseModel):
     OpenAI Responses API 兼容性设置
     """
 
-    # 是否在启用缓存时发送 OpenAI session_id 缓存亲和性头部
-    send_session_id_header: Optional[bool] = None
+    # 是否支持 `developer` 角色（vs `system`）。默认：true
+    supports_developer_role: Optional[bool] = None
+
+    # 会话亲和性头部格式
+    session_affinity_format: Optional[SessionAffinityFormat] = None
 
     # 是否支持长缓存保留（prompt_cache_retention: "24h"）
     supports_long_cache_retention: Optional[bool] = None
+
+    # 是否支持客户端工具搜索（deferred tools）
+    supports_tool_search: Optional[bool] = None
+
+    # 是否在启用缓存时发送 OpenAI session_id 缓存亲和性头部
+    send_session_id_header: Optional[bool] = None
+
+
+class AnthropicMessagesCompat(NovaBaseModel):
+    """
+    Anthropic Messages API 兼容性设置
+    """
+
+    # 是否接受 per-tool eager_input_streaming。默认：true
+    supports_eager_tool_input_streaming: Optional[bool] = None
+
+    # 是否支持 Anthropic 长缓存保留（cache_control.ttl: "1h"）。默认：true
+    supports_long_cache_retention: Optional[bool] = None
+
+    # 是否发送 x-session-affinity 头部。默认：false
+    send_session_affinity_headers: Optional[bool] = None
+
+    # 是否支持 tool params 上的 cache_control。默认：true
+    supports_cache_control_on_tools: Optional[bool] = None
+
+    # 是否接受 temperature 字段。默认：true
+    supports_temperature: Optional[bool] = None
+
+    # 是否强制 adaptive thinking。默认：false
+    force_adaptive_thinking: Optional[bool] = None
+
+    # 是否允许空 thinking signature。默认：false
+    allow_empty_signature: Optional[bool] = None
+
+    # 是否支持 deferred tools 的 tool_reference。默认：按模型判断
+    supports_tool_references: Optional[bool] = None

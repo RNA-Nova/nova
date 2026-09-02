@@ -1,0 +1,28 @@
+[package]
+name = "nova-executor-protocol"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_executor_protocol"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+base64 = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+ts-rs = { workspace = true }
+url = { workspace = true }
+nova-executor-file-system = { workspace = true }
+nova-executor-network-proxy = { workspace = true }
+nova-executor-protocol-core = { workspace = true }
+nova-executor-shell-command = { workspace = true }
+nova-executor-utils-path-uri = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

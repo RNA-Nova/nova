@@ -2,30 +2,34 @@
 Hook 上下文与结果类型定义。
 """
 
-from typing import Any, List, Optional, TYPE_CHECKING, Union
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, List, Optional, Union
 
 from nova_ai import (
     AssistantMessage,
     ImageContent,
     Model,
+    ModelThinkingLevel,
     TextContent,
-    ThinkingLevel,
     ToolResultMessage,
 )
-from nova_ai.types.base_model import NovaBaseModel
 
 from .base import AgentMessage, AgentToolCall
 from .tool import AgentToolResult
 
 
-class BeforeToolCallResult(NovaBaseModel):
+@dataclass(frozen=True)
+class BeforeToolCallResult:
     """Result returned from beforeToolCall."""
 
     block: Optional[bool] = None
     reason: Optional[str] = None
 
 
-class AfterToolCallResult(NovaBaseModel):
+@dataclass(frozen=True)
+class AfterToolCallResult:
     """Partial override returned from afterToolCall."""
 
     content: Optional[List[Union[TextContent, ImageContent]]] = None
@@ -34,16 +38,18 @@ class AfterToolCallResult(NovaBaseModel):
     terminate: Optional[bool] = None
 
 
-class BeforeToolCallContext(NovaBaseModel):
+@dataclass(frozen=True)
+class BeforeToolCallContext:
     """Context passed to beforeToolCall."""
 
     assistant_message: AssistantMessage
     tool_call: AgentToolCall
     args: Any
-    context: "AgentContext"
+    context: AgentContext
 
 
-class AfterToolCallContext(NovaBaseModel):
+@dataclass(frozen=True)
+class AfterToolCallContext:
     """Context passed to afterToolCall."""
 
     assistant_message: AssistantMessage
@@ -51,35 +57,34 @@ class AfterToolCallContext(NovaBaseModel):
     args: Any
     result: AgentToolResult[Any]
     is_error: bool
-    context: "AgentContext"
+    context: AgentContext
 
 
-class ShouldStopAfterTurnContext(NovaBaseModel):
+@dataclass(frozen=True)
+class ShouldStopAfterTurnContext:
     """Context passed to shouldStopAfterTurn."""
 
     message: AssistantMessage
     tool_results: List[ToolResultMessage]
-    context: "AgentContext"
+    context: AgentContext
     new_messages: List[AgentMessage]
     turn_index: int = 0
 
 
-class AgentLoopTurnUpdate(NovaBaseModel):
+@dataclass(frozen=True)
+class AgentLoopTurnUpdate:
     """Replacement runtime state used by the agent loop before starting another provider request."""
 
-    context: Optional["AgentContext"] = None
+    context: Optional[AgentContext] = None
     model: Optional[Model] = None
-    thinking_level: Optional[ThinkingLevel] = None
+    thinking_level: Optional[ModelThinkingLevel] = None
 
 
+@dataclass(frozen=True)
 class PrepareNextTurnContext(ShouldStopAfterTurnContext):
     """Context passed to prepareNextTurn."""
 
     pass
-
-
-if TYPE_CHECKING:
-    from .context import AgentContext
 
 
 __all__ = [

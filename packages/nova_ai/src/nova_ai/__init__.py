@@ -1,160 +1,230 @@
+"""nova_ai —— 统一的 LLM 提供商抽象层
+
+以 ``Models`` 集合 + ``Provider`` 运行时单元 + API 协议实现三层组织，
+对外暴露一致的 ``stream`` / ``complete`` / ``stream_simple`` /
+``complete_simple`` API。架构对齐 TypeScript ``pi/packages/ai``。
 """
-Assistant Message 模块
-提供助手消息相关的类型定义和事件流处理
-"""
-
-# 重新导出 types 模块
-from .types import (
-    # enums
-    Api,
-    KnownApi,
-    Provider,
-    KnownProvider,
-    StopReason,
-    ThinkingLevel,
-    CacheRetention,
-    Transport,
-    ThinkingFormat,
-    ThinkingLevelMap,
-    # content
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    ImageContent,
-    ContentUnion,
-    # usage
-    Usage,
-    Cost,
-    # messages
-    UserMessage,
-    AssistantMessage,
-    ToolResultMessage,
-    Message,
-    Tool,
-    Context,
-    # stream_options
-    ThinkingBudgets,
-    StreamOptions,
-    SimpleStreamOptions,
-    ProviderResponse,
-    # events
-    AssistantMessageEvent,
-    StartEvent,
-    TextStartEvent,
-    TextDeltaEvent,
-    TextEndEvent,
-    ThinkingStartEvent,
-    ThinkingDeltaEvent,
-    ThinkingEndEvent,
-    ToolCallStartEvent,
-    ToolCallDeltaEvent,
-    ToolCallEndEvent,
-    DoneEvent,
-    ErrorEvent,
-    # compat
-    OpenAICompletionsCompat,
-    OpenAIResponsesCompat,
-    OpenRouterRouting,
-    VercelGatewayRouting,
-)
-
-# 重新导出 streaming 模块
-from .streaming import (
-    # 事件流
-    EventStream,
-    AssistantMessageEventStream,
-    create_assistant_message_event_stream,
-    # 主要API函数
-    stream,
-    complete,
-    stream_simple,
-    complete_simple,
-)
-
-# 重新导出registry模块
-from .registry import (
-    # API注册表
-    register_api_adapter,
-    get_api_adapter,
-    list_api_adapters,
-    unregister_api_adapter,
-    has_api_adapter,
-    clear_api_adapters,
-    # 模型注册表
-    register_model,
-    get_model,
-    get_models_by_provider,
-    list_providers,
-    list_all_models,
-    find_model_by_id,
-    register_models_from_dict,
-    # 内置注册
-    register_builtin_api_adapters,
-    register_builtin_models,
-    register_all_builtins,
-    reset_api_adapter_registry,
-    reset_model_registry,
-    reset_registry,
-)
 
 # 重新导出 apis 模块（API 协议实现）
-from .api_impls import (
-    # 各 API 协议的流式函数
-    stream_openai_completions,
-    stream_simple_openai_completions,
+from .api_impls import (  # 各 API 协议的选项类型
     OpenAICompletionsOptions,
     ProviderStreamOptions,
 )
 
+# 重新导出 auth 模块（行为层；类型定义在 .types）
+from .auth import (
+    AuthResolutionOverrides,
+    DefaultAuthContext,
+    DeviceCodePollOptions,
+    DeviceCodePollResult,
+    InMemoryCredentialStore,
+    ModelsError,
+    ModelsErrorCode,
+    default_provider_auth_context,
+    env_api_key_auth,
+    generate_pkce,
+    kimi_oauth,
+    lazy_oauth,
+    oauth_error_html,
+    oauth_success_html,
+    openai_codex_oauth,
+    poll_oauth_device_code_flow,
+    resolve_provider_auth,
+)
+
+# 重新导出 ModelsStore
+# 重新导出 Models 集合
+# 重新导出 Models 集合与 Provider 运行时单元
+from .gateway import (
+    InMemoryModelsStore,
+    Models,
+    ModelsStore,
+    ModelsStoreEntry,
+    Provider,
+    ProviderStreams,
+    RefreshModelsContext,
+    create_models,
+    create_provider,
+)
+
+# 重新导出 providers 模块（内置 provider 工厂 + 模型数据）
+from .providers import (
+    KIMI_CODING_MODELS,
+    MOONSHOTAI_CN_MODELS,
+    MOONSHOTAI_MODELS,
+    VOLCENGINE_MODELS,
+    builtin_models,
+    builtin_providers,
+    get_builtin_model,
+    get_builtin_models,
+    get_kimi_coding_model,
+    get_moonshotai_cn_model,
+    get_moonshotai_model,
+    get_volcengine_model,
+    kimi_coding_provider,
+    list_kimi_coding_models,
+    list_moonshotai_cn_models,
+    list_moonshotai_models,
+    list_volcengine_models,
+    moonshotai_cn_provider,
+    moonshotai_provider,
+    volcengine_provider,
+)
+
+# 重新导出 signal 模块
+from .signal import AbortController, AbortSignal
+
+# 重新导出 streaming 模块
+from .streaming import (  # 事件流
+    AssistantMessageEventStream,
+    EventStream,
+    create_assistant_message_event_stream,
+)
+
+# 重新导出 types 模块
+from .types import (  # enums; content; usage; messages; stream_options; events; compat; auth
+    AnthropicMessagesCompat,
+    Api,
+    ApiKeyAuth,
+    ApiKeyCredential,
+    AssistantMessage,
+    AssistantMessageEvent,
+    AuthCheck,
+    AuthContext,
+    AuthEvent,
+    AuthInfoLink,
+    AuthInteraction,
+    AuthPrompt,
+    AuthPromptOption,
+    AuthResult,
+    AuthType,
+    CacheRetention,
+    ContentUnion,
+    Context,
+    Cost,
+    Credential,
+    CredentialInfo,
+    CredentialStore,
+    DoneEvent,
+    ErrorEvent,
+    ImageContent,
+    KnownApi,
+    KnownProvider,
+    Message,
+    Model,
+    ModelAuth,
+    ModelCost,
+    ModelCostRates,
+    ModelCostTier,
+    ModelThinkingLevel,
+    OAuthAuth,
+    OAuthCredential,
+    OpenAICompletionsCompat,
+    OpenAIResponsesCompat,
+    OpenRouterRouting,
+    ProviderAuth,
+    ProviderEnv,
+    ProviderHeaders,
+    ProviderId,
+    ProviderResponse,
+    SimpleStreamOptions,
+    StartEvent,
+    StopReason,
+    StreamOptions,
+    TextContent,
+    TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
+    ThinkingBudgets,
+    ThinkingContent,
+    ThinkingDeltaEvent,
+    ThinkingEndEvent,
+    ThinkingFormat,
+    ThinkingLevel,
+    ThinkingLevelMap,
+    ThinkingStartEvent,
+    Tool,
+    ToolCall,
+    ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
+    ToolResultMessage,
+    Transport,
+    Usage,
+    UserMessage,
+    VercelGatewayRouting,
+)
+
 # 重新导出utils模块
-from .utils import (
-    # 环境变量
-    get_env_api_key,
-    get_env_api_key_typed,
-    get_all_env_api_keys,
-    # Copilot
-    infer_copilot_initiator,
-    has_copilot_vision_input,
+from .utils import (  # 环境变量; Copilot; JSON解析; 字符串处理; 流选项; 消息转换; 溢出检测
+    build_base_options,
     build_copilot_dynamic_headers,
     build_copilot_headers_from_messages,
-    # JSON解析
-    parse_streaming_json,
-    # 字符串处理
-    sanitize_surrogates,
-    # 流选项
-    build_base_options,
-    clamp_reasoning,
-    # 消息转换
-    transform_messages,
-    # 溢出检测
-    is_context_overflow,
-)
-
-# 重新导出 models 模块（仅数据）
-from .models import (
-    Model,
-    ModelCost,
-    VOLCENGINE_MODELS,
-    get_volcengine_model,
-    list_volcengine_models,
-)
-from .utils import (
     calculate_cost,
-    supports_xhigh_thinking,
+    clamp_thinking_level,
+    get_env_api_key,
     get_supported_thinking_levels,
+    has_api,
+    has_copilot_vision_input,
+    infer_copilot_initiator,
+    is_context_overflow,
+    models_are_equal,
+    parse_streaming_json,
+    sanitize_surrogates,
+    to_thinking_level,
+    transform_messages,
 )
-
-# 注册所有内置组件
-register_all_builtins()
 
 __all__ = [
+    # signal
+    "AbortController",
+    "AbortSignal",
+    # auth
+    "ApiKeyAuth",
+    "ApiKeyCredential",
+    "AuthCheck",
+    "AuthContext",
+    "AuthEvent",
+    "AuthInfoLink",
+    "AuthInteraction",
+    "AuthPrompt",
+    "AuthPromptOption",
+    "AuthResolutionOverrides",
+    "AuthResult",
+    "AuthType",
+    "Credential",
+    "CredentialInfo",
+    "CredentialStore",
+    "DefaultAuthContext",
+    "DeviceCodePollOptions",
+    "DeviceCodePollResult",
+    "InMemoryCredentialStore",
+    "ModelAuth",
+    "ModelsError",
+    "ModelsErrorCode",
+    "OAuthAuth",
+    "OAuthCredential",
+    "ProviderAuth",
+    "ProviderEnv",
+    "ProviderHeaders",
+    "default_provider_auth_context",
+    "env_api_key_auth",
+    "generate_pkce",
+    "kimi_oauth",
+    "lazy_oauth",
+    "oauth_success_html",
+    "oauth_error_html",
+    "openai_codex_oauth",
+    "poll_oauth_device_code_flow",
+    "resolve_provider_auth",
     # types.enums
     "Api",
     "KnownApi",
-    "Provider",
+    "ProviderId",
     "KnownProvider",
     "StopReason",
     "ThinkingLevel",
+    "ModelThinkingLevel",
     "CacheRetention",
     "Transport",
     "ThinkingFormat",
@@ -177,6 +247,8 @@ __all__ = [
     # types.models
     "Model",
     "ModelCost",
+    "ModelCostRates",
+    "ModelCostTier",
     # types.events
     "AssistantMessageEvent",
     "StartEvent",
@@ -195,46 +267,18 @@ __all__ = [
     "EventStream",
     "AssistantMessageEventStream",
     "create_assistant_message_event_stream",
-    # streaming.invoke
-    "stream",
-    "complete",
-    "stream_simple",
-    "complete_simple",
-    # types.api_adapter
-    "ApiAdapter",
-    # registry.api_registry
-    "ApiRegistry",
-    "register_api_adapter",
-    "get_api_adapter",
-    "list_api_adapters",
-    "unregister_api_adapter",
-    "has_api_adapter",
-    "clear_api_adapters",
-    # registry.model_registry
-    "ModelRegistry",
-    "register_model",
-    "get_model",
-    "get_models_by_provider",
-    "list_providers",
-    "list_all_models",
-    "find_model_by_id",
-    "register_models_from_dict",
-    # registry.builtins
-    "register_builtin_api_adapters",
-    "register_builtin_models",
-    "register_all_builtins",
-    "reset_api_adapter_registry",
-    "reset_model_registry",
-    "reset_registry",
+    # nova_ai.models
+    "Models",
+    "create_models",
+    # nova_ai.models_store
+    "InMemoryModelsStore",
+    "ModelsStore",
+    "ModelsStoreEntry",
     # apis（API 协议实现）
-    "stream_openai_completions",
-    "stream_simple_openai_completions",
     "OpenAICompletionsOptions",
     "ProviderStreamOptions",
     # utils.env
     "get_env_api_key",
-    "get_env_api_key_typed",
-    "get_all_env_api_keys",
     # utils.copilot
     "infer_copilot_initiator",
     "has_copilot_vision_input",
@@ -249,14 +293,14 @@ __all__ = [
     "StreamOptions",
     "SimpleStreamOptions",
     "ProviderResponse",
-    # utils.stream_options
+    # utils.simple_options
     "build_base_options",
-    "clamp_reasoning",
     # utils.message_transformer
     "transform_messages",
     # utils.overflow
     "is_context_overflow",
     # types.compat
+    "AnthropicMessagesCompat",
     "OpenAICompletionsCompat",
     "OpenAIResponsesCompat",
     "OpenRouterRouting",
@@ -264,9 +308,33 @@ __all__ = [
     "ThinkingLevelMap",
     # utils.model_utils
     "calculate_cost",
-    "supports_xhigh_thinking",
+    "clamp_thinking_level",
     "get_supported_thinking_levels",
-    # models.data
+    "to_thinking_level",
+    "has_api",
+    "models_are_equal",
+    # providers
+    "Provider",
+    "ProviderStreams",
+    "RefreshModelsContext",
+    "create_provider",
+    "builtin_providers",
+    "builtin_models",
+    "get_builtin_model",
+    "get_builtin_models",
+    "kimi_coding_provider",
+    "KIMI_CODING_MODELS",
+    "get_kimi_coding_model",
+    "list_kimi_coding_models",
+    "moonshotai_provider",
+    "MOONSHOTAI_MODELS",
+    "get_moonshotai_model",
+    "list_moonshotai_models",
+    "moonshotai_cn_provider",
+    "MOONSHOTAI_CN_MODELS",
+    "get_moonshotai_cn_model",
+    "list_moonshotai_cn_models",
+    "volcengine_provider",
     "VOLCENGINE_MODELS",
     "get_volcengine_model",
     "list_volcengine_models",

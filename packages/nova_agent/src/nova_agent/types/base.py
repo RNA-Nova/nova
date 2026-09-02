@@ -2,10 +2,13 @@
 基础类型与类型别名。
 """
 
-from typing import Any, Awaitable, Callable, Literal, Protocol, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol, Union
 
-from nova_ai import Message, ThinkingLevel, ToolCall
+from nova_ai import Message, ModelThinkingLevel, ToolCall
 from nova_ai.types.base_model import NovaBaseModel
+
+if TYPE_CHECKING:
+    from nova_ai import AssistantMessageEventStream, Context, Model, SimpleStreamOptions
 
 
 class CustomAgentMessage(NovaBaseModel):
@@ -22,11 +25,19 @@ AgentToolCall = ToolCall
 
 
 class StreamFn(Protocol):
-    """Stream function signature – can be sync or async (returns a Promise in TS)."""
+    """
+    Stream function signature — 与 ``Models.stream_simple`` 保持一致，
+    允许同步或异步返回 ``AssistantMessageEventStream``。
+    """
 
-    def __call__(self, *args: Any) -> Union[Any, Awaitable[Any]]:
-        """Matches the signature of streamSimple from nova_ai."""
-        ...
+    def __call__(
+        self,
+        model: "Model",
+        context: "Context",
+        options: "SimpleStreamOptions",
+    ) -> Union[
+        "AssistantMessageEventStream", Awaitable["AssistantMessageEventStream"]
+    ]: ...
 
 
 if TYPE_CHECKING:
@@ -48,7 +59,7 @@ __all__ = [
     "AgentMessage",
     "AgentToolCall",
     "StreamFn",
-    "ThinkingLevel",
+    "ModelThinkingLevel",
     "ToolExecutionMode",
     "QueueMode",
 ]

@@ -1,94 +1,91 @@
 """
 OpenAI Completions API 流式处理实现
+
+对齐 TypeScript ``src/api/openai-completions.ts``。
 """
 
+import asyncio
 import inspect
 import json
 import re
 import time
-from typing import List, Dict, Optional, Any, Union, Tuple
-import asyncio
 from copy import deepcopy
-
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import openai
 from openai import AsyncOpenAI
 from openai.types.chat import (
-    ChatCompletionMessageParam,
     ChatCompletionAssistantMessageParam,
+    ChatCompletionMessageParam,
     ChatCompletionToolMessageParam,
 )
 
-from ..types.enums import StopReason, KnownApi
-from ..types.messages import Message, AssistantMessage, Context, Tool
+from ..streaming import AssistantMessageEventStream
+from ..types.compat import OpenAICompletionsCompat
 from ..types.content import (
     TextContent,
     ThinkingContent,
     ToolCall,
 )
-from ..types.model import Model
-from ..types.model import Usage, Cost
-from ..utils.env import get_env_api_key
-from ..utils.json_parser import parse_streaming_json
-from ..utils.surrogate import sanitize_surrogates
-from ..utils.copilot import has_copilot_vision_input, build_copilot_dynamic_headers
-from ..types.stream_options import StreamOptions, SimpleStreamOptions, ProviderResponse
-from ..utils.stream_options import build_base_options, clamp_reasoning
-from ..utils.message_transformer import transform_messages
-from ..utils import calculate_cost, supports_xhigh_thinking
+from ..types.enums import KnownApi, ModelThinkingLevel, StopReason
 from ..types.events import (
-    StartEvent,
-    TextStartEvent,
-    TextDeltaEvent,
-    TextEndEvent,
-    ThinkingStartEvent,
-    ThinkingDeltaEvent,
-    ThinkingEndEvent,
-    ToolCallStartEvent,
-    ToolCallDeltaEvent,
-    ToolCallEndEvent,
     DoneEvent,
     ErrorEvent,
+    StartEvent,
+    TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
+    ThinkingDeltaEvent,
+    ThinkingEndEvent,
+    ThinkingStartEvent,
+    ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
 )
-from ..streaming import AssistantMessageEventStream
-from ..types.compat import OpenAICompletionsCompat
+from ..types.messages import AssistantMessage, Context, Message, Tool
+from ..types.model import Cost, Model, Usage
+from ..types.stream_options import ProviderResponse, SimpleStreamOptions, StreamOptions
+from ..utils import calculate_cost
+from ..utils.copilot import build_copilot_dynamic_headers, has_copilot_vision_input
+from ..utils.error_body import format_provider_error, normalize_provider_error
+from ..utils.json_parser import parse_streaming_json
+from ..utils.message_transformer import transform_messages
+from ..utils.model_utils import clamp_thinking_level
+from ..utils.simple_options import build_base_options
+from ..utils.surrogate import sanitize_surrogates
+
+# API 协议标识（对齐 TS Provider.api 自描述）
+api = KnownApi.OPENAI_COMPLETIONS
 
 
+@dataclass
 class OpenAICompletionsOptions(StreamOptions):
-    """OpenAI Completions 特定选项"""
+    """OpenAI Completions 特定选项（对齐 TS OpenAICompletionsOptions）。"""
 
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     reasoning_effort: Optional[str] = None
     parallel_tool_calls: Optional[bool] = None
 
 
-def normalize_mistral_tool_id(id: str) -> str:
-    """
-    规范化工具调用ID以适应Mistral
+# ---------------------------------------------------------------------------
+# 基础工具
+# ---------------------------------------------------------------------------
 
-    Mistral要求工具ID正好是9个字母数字字符（a-z, A-Z, 0-9）
-    """
-    # 移除非字母数字字符
-    normalized = "".join(c for c in id if c.isalnum())
 
-    # Mistral要求正好9个字符
-    if len(normalized) < 9:
-        # 基于原始ID使用确定性字符填充以确保匹配
-        padding = "ABCDEFGHI"
-        normalized = normalized + padding[: 9 - len(normalized)]
-    elif len(normalized) > 9:
-        normalized = normalized[:9]
-
-    return normalized
+def _has_header(headers: Optional[Dict[str, Optional[str]]], name: str) -> bool:
+    """检查 headers 中是否已存在非空指定头部（对齐 TS hasHeader）。"""
+    if not headers:
+        return False
+    expected = name.lower()
+    for key, value in headers.items():
+        if key.lower() == expected and value is not None and value.strip():
+            return True
+    return False
 
 
 def has_tool_history(messages: List[Message]) -> bool:
-    """
-    检查对话消息是否包含工具调用或工具结果
-
-    因为Anthropic（通过代理）要求在消息包含tool_calls或tool角色消息时
-    必须提供tools参数
-    """
+    """检查对话消息是否包含工具调用或工具结果（对齐 TS hasToolHistory）。"""
     for msg in messages:
         if msg.role == "toolResult":
             return True
@@ -98,43 +95,183 @@ def has_tool_history(messages: List[Message]) -> bool:
     return False
 
 
-def map_stop_reason(reason: Optional[str]) -> Tuple[StopReason, Optional[str]]:
-    """映射OpenAI的finish_reason到标准StopReason
+def get_deferred_tool_names(messages: List[Message]) -> Set[str]:
+    """收集 toolResult 消息中新增注册的工具名（对齐 TS getDeferredToolNames）。"""
+    names: Set[str] = set()
+    for message in messages:
+        if message.role == "toolResult":
+            for name in getattr(message, "added_tool_names", None) or []:
+                names.add(name)
+    return names
 
-    返回 (stop_reason, error_message)，其中 error_message 在异常 finish_reason 时提供。
+
+def get_tools_by_name(tools: Optional[List[Tool]], names: Set[str]) -> List[Tool]:
+    """按名称查找工具定义（对齐 TS getToolsByName）。"""
+    if not tools:
+        return []
+    tools_by_name = {tool.name: tool for tool in tools}
+    return [tools_by_name[name] for name in names if name in tools_by_name]
+
+
+def _is_encrypted_reasoning_detail(detail: Any) -> bool:
+    """判断是否为加密的 reasoning detail（对齐 TS isEncryptedReasoningDetail）。"""
+    if not isinstance(detail, dict):
+        return False
+    return (
+        detail.get("type") == "reasoning.encrypted"
+        and isinstance(detail.get("id"), str)
+        and len(detail["id"]) > 0
+        and isinstance(detail.get("data"), str)
+        and len(detail["data"]) > 0
+    )
+
+
+# ---------------------------------------------------------------------------
+# 缓存保留策略
+# ---------------------------------------------------------------------------
+
+
+def resolve_cache_retention(
+    cache_retention: Optional[str], env: Optional[Dict[str, str]] = None
+) -> str:
+    """解析缓存保留策略（对齐 TS resolveCacheRetention）。
+
+    环境变量只认 ``NOVA_CACHE_RETENTION``。
     """
-    if reason is None:
-        return StopReason.STOP, None
+    if cache_retention:
+        return cache_retention
+    env_value = None
+    if env:
+        env_value = env.get("NOVA_CACHE_RETENTION")
+    if env_value is None:
+        import os
 
-    if reason in ("stop", "end"):
-        return StopReason.STOP, None
-    elif reason == "length":
-        return StopReason.LENGTH, None
-    elif reason in ("function_call", "tool_calls"):
-        return StopReason.TOOL_USE, None
-    elif reason == "content_filter":
-        return StopReason.ERROR, "Provider finish_reason: content_filter"
-    elif reason == "network_error":
-        return StopReason.ERROR, "Provider finish_reason: network_error"
-    else:
-        return StopReason.ERROR, f"Provider finish_reason: {reason}"
+        env_value = os.environ.get("NOVA_CACHE_RETENTION")
+    return "long" if env_value == "long" else "short"
+
+
+# ---------------------------------------------------------------------------
+# prompt cache key
+# ---------------------------------------------------------------------------
+
+OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64
+
+
+def clamp_openai_prompt_cache_key(key: Optional[str]) -> Optional[str]:
+    """截断 prompt_cache_key 到最大长度（对齐 TS clampOpenAIPromptCacheKey）。
+
+    按 Unicode code point 截断，避免截断多字节字符。
+    """
+    if key is None:
+        return None
+    chars = list(key)
+    if len(chars) <= OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH:
+        return key
+    return "".join(chars[:OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH])
+
+
+# ---------------------------------------------------------------------------
+# Anthropic 风格 cache_control
+# ---------------------------------------------------------------------------
+
+
+def _get_compat_cache_control(
+    compat: OpenAICompletionsCompat, cache_retention: str
+) -> Optional[Dict[str, Any]]:
+    """根据 compat 和 cache retention 构造 cache_control（对齐 TS getCompatCacheControl）。"""
+    if compat.cache_control_format != "anthropic" or cache_retention == "none":
+        return None
+    control: Dict[str, Any] = {"type": "ephemeral"}
+    if cache_retention == "long" and compat.supports_long_cache_retention:
+        control["ttl"] = "1h"
+    return control
+
+
+def _add_cache_control_to_text_content(
+    message: Dict[str, Any], cache_control: Dict[str, Any]
+) -> bool:
+    """给消息的文本内容添加 cache_control。"""
+    content = message.get("content")
+    if isinstance(content, str):
+        if not content:
+            return False
+        message["content"] = [
+            {"type": "text", "text": content, "cache_control": cache_control}
+        ]
+        return True
+    if not isinstance(content, list):
+        return False
+    for part in reversed(content):
+        if isinstance(part, dict) and part.get("type") == "text":
+            part["cache_control"] = cache_control
+            return True
+    return False
+
+
+def _add_cache_control_to_system_prompt(
+    messages: List[ChatCompletionMessageParam], cache_control: Dict[str, Any]
+) -> None:
+    """给第一条 system/developer 消息加 cache_control。"""
+    for msg in messages:
+        role = msg.get("role")
+        if role in ("system", "developer"):
+            _add_cache_control_to_text_content(msg, cache_control)
+            return
+
+
+def _add_cache_control_to_last_conversation_message(
+    messages: List[ChatCompletionMessageParam], cache_control: Dict[str, Any]
+) -> None:
+    """给最后一条 user/assistant 消息加 cache_control。"""
+    for msg in reversed(messages):
+        role = msg.get("role")
+        if role in ("user", "assistant"):
+            if _add_cache_control_to_text_content(msg, cache_control):
+                return
+
+
+def _add_cache_control_to_last_tool(
+    tools: Optional[List[Dict[str, Any]]], cache_control: Dict[str, Any]
+) -> None:
+    """给最后一条 tool 定义加 cache_control。"""
+    if not tools:
+        return
+    tools[-1]["cache_control"] = cache_control
+
+
+def _apply_anthropic_cache_control(
+    messages: List[ChatCompletionMessageParam],
+    tools: Optional[List[Dict[str, Any]]],
+    cache_control: Dict[str, Any],
+) -> None:
+    """应用 Anthropic 风格缓存标记（system + 最后 tool + 最后对话消息）。"""
+    _add_cache_control_to_system_prompt(messages, cache_control)
+    _add_cache_control_to_last_tool(tools, cache_control)
+    _add_cache_control_to_last_conversation_message(messages, cache_control)
+
+
+# ---------------------------------------------------------------------------
+# 兼容性检测
+# ---------------------------------------------------------------------------
 
 
 def detect_compat(model: Model) -> OpenAICompletionsCompat:
-    """
-    从提供商和baseUrl检测兼容性设置
-
-    提供商优先于基于URL的检测，因为它是显式配置的
-    """
+    """从提供商和 baseUrl 检测兼容性设置（对齐 TS detectCompat）。"""
     provider = model.provider
     base_url = model.base_url
 
-    is_zai = provider == "zai" or "api.z.ai" in base_url
+    is_zai = (
+        provider == "zai"
+        or provider == "zai-coding-cn"
+        or "api.z.ai" in base_url
+        or "open.bigmodel.cn" in base_url
+    )
     is_together = (
         provider == "together"
         or "api.together.ai" in base_url
         or "api.together.xyz" in base_url
     )
+    is_ant_ling = provider == "ant-ling" or "api.ant-ling.com" in base_url
     is_moonshot = (
         provider == "moonshotai"
         or provider == "moonshotai-cn"
@@ -146,6 +283,7 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
     is_cloudflare_ai_gateway = (
         provider == "cloudflare-ai-gateway" or "gateway.ai.cloudflare.com" in base_url
     )
+    is_nvidia = provider == "nvidia" or "integrate.api.nvidia.com" in base_url
 
     is_non_standard = (
         provider == "volcengine"
@@ -155,8 +293,6 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         or "cerebras.ai" in base_url
         or provider == "xai"
         or "api.x.ai" in base_url
-        or provider == "mistral"
-        or "mistral.ai" in base_url
         or "chutes.ai" in base_url
         or "deepseek.com" in base_url
         or is_zai
@@ -166,15 +302,17 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         or is_moonshot
         or is_cloudflare_workers_ai
         or is_cloudflare_ai_gateway
+        or is_ant_ling
+        or is_nvidia
     )
 
     use_max_tokens = (
-        provider == "mistral"
-        or "mistral.ai" in base_url
-        or "chutes.ai" in base_url
+        "chutes.ai" in base_url
         or is_moonshot
         or is_cloudflare_ai_gateway
         or is_together
+        or is_ant_ling
+        or is_nvidia
     )
 
     is_grok = provider == "xai" or "api.x.ai" in base_url
@@ -183,8 +321,10 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         or "deepseek.com" in base_url
         or (provider == "volcengine" and model.id.startswith("deepseek"))
     )
-    is_mistral = provider == "mistral" or "mistral.ai" in base_url
-
+    is_openrouter = provider == "openrouter" or "openrouter.ai" in base_url
+    is_openrouter_developer_role_model = is_openrouter and (
+        model.id.startswith("anthropic/") or model.id.startswith("openai/")
+    )
     cache_control_format = (
         "anthropic"
         if (provider == "openrouter" and model.id.startswith("anthropic/"))
@@ -198,54 +338,63 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         thinking_format = "zai"
     elif is_together:
         thinking_format = "together"
-    elif provider == "openrouter" or "openrouter.ai" in base_url:
+    elif is_ant_ling:
+        thinking_format = "ant-ling"
+    elif is_openrouter:
         thinking_format = "openrouter"
 
     return OpenAICompletionsCompat(
         supports_store=not is_non_standard,
-        supports_developer_role=not is_non_standard,
+        supports_developer_role=(
+            is_openrouter_developer_role_model
+            or (not is_non_standard and not is_openrouter)
+        ),
         supports_reasoning_effort=not (
-            is_grok or is_zai or is_moonshot or is_together or is_cloudflare_ai_gateway
+            is_grok
+            or is_zai
+            or is_moonshot
+            or is_together
+            or is_cloudflare_ai_gateway
+            or is_ant_ling
+            or is_nvidia
         ),
         supports_usage_in_streaming=True,
         max_tokens_field="max_tokens" if use_max_tokens else "max_completion_tokens",
-        requires_tool_result_name=is_mistral,
+        requires_tool_result_name=False,
         requires_assistant_after_tool_result=False,
-        requires_thinking_as_text=is_mistral,
-        requires_mistral_tool_ids=is_mistral,
+        requires_thinking_as_text=False,
         requires_reasoning_content_on_assistant_messages=is_deepseek,
         thinking_format=thinking_format,
         open_router_routing={},
         vercel_gateway_routing={},
+        chat_template_kwargs={},
         zai_tool_stream=False,
         supports_strict_mode=not (
-            is_moonshot or is_together or is_cloudflare_ai_gateway
+            is_moonshot or is_together or is_cloudflare_ai_gateway or is_nvidia
         ),
         cache_control_format=cache_control_format,
         send_session_affinity_headers=False,
+        deferred_tools_mode=None,
+        session_affinity_format="openrouter" if is_openrouter else "openai",
         supports_long_cache_retention=not (
-            is_together or is_cloudflare_workers_ai or is_cloudflare_ai_gateway
+            is_together
+            or is_cloudflare_workers_ai
+            or is_cloudflare_ai_gateway
+            or is_nvidia
+            or is_ant_ling
         ),
     )
 
 
 def get_compat(model: Model) -> OpenAICompletionsCompat:
-    """
-    获取模型的解析后兼容性设置
-
-    如果提供了model.compat则使用，否则自动检测。
-    若model.compat为OpenAIResponsesCompat（不适用于completions API），则忽略并返回自动检测结果。
-    """
+    """获取模型的解析后兼容性设置（对齐 TS getCompat）。"""
     detected = detect_compat(model)
     if model.compat is None:
         return detected
-
-    # model.compat 可能是 OpenAIResponsesCompat，不适用于 completions API
     if not isinstance(model.compat, OpenAICompletionsCompat):
         return detected
 
     compat = model.compat
-
     return OpenAICompletionsCompat(
         supports_store=(
             compat.supports_store
@@ -283,11 +432,6 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             if compat.requires_thinking_as_text is not None
             else detected.requires_thinking_as_text
         ),
-        requires_mistral_tool_ids=(
-            compat.requires_mistral_tool_ids
-            if compat.requires_mistral_tool_ids is not None
-            else detected.requires_mistral_tool_ids
-        ),
         requires_reasoning_content_on_assistant_messages=(
             compat.requires_reasoning_content_on_assistant_messages
             if compat.requires_reasoning_content_on_assistant_messages is not None
@@ -297,6 +441,11 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
         open_router_routing=compat.open_router_routing or detected.open_router_routing,
         vercel_gateway_routing=compat.vercel_gateway_routing
         or detected.vercel_gateway_routing,
+        chat_template_kwargs=(
+            compat.chat_template_kwargs
+            if compat.chat_template_kwargs is not None
+            else detected.chat_template_kwargs
+        ),
         zai_tool_stream=(
             compat.zai_tool_stream
             if compat.zai_tool_stream is not None
@@ -314,62 +463,39 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             if compat.send_session_affinity_headers is not None
             else detected.send_session_affinity_headers
         ),
+        session_affinity_format=(
+            compat.session_affinity_format
+            if compat.session_affinity_format is not None
+            else detected.session_affinity_format
+        ),
         supports_long_cache_retention=(
             compat.supports_long_cache_retention
             if compat.supports_long_cache_retention is not None
             else detected.supports_long_cache_retention
         ),
+        deferred_tools_mode=(
+            compat.deferred_tools_mode
+            if compat.deferred_tools_mode is not None
+            else detected.deferred_tools_mode
+        ),
     )
 
 
-def maybe_add_openrouter_anthropic_cache_control(
-    model: Model, messages: List[ChatCompletionMessageParam]
-) -> None:
-    """为OpenRouter上的Anthropic模型添加缓存控制"""
-    if model.provider != "openrouter" or not model.id.startswith("anthropic/"):
-        return
-
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if msg["role"] not in ["user", "assistant"]:
-            continue
-
-        content = msg.get("content")
-        if isinstance(content, str):
-            msg["content"] = [
-                {
-                    "type": "text",
-                    "text": content,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-            return
-
-        if not isinstance(content, list):
-            continue
-
-        for j in range(len(content) - 1, -1, -1):
-            part = content[j]
-            if isinstance(part, dict) and part.get("type") == "text":
-                part["cache_control"] = {"type": "ephemeral"}
-                return
+# ---------------------------------------------------------------------------
+# 消息转换
+# ---------------------------------------------------------------------------
 
 
 def convert_messages(
     model: Model, context: Context, compat: OpenAICompletionsCompat
 ) -> List[ChatCompletionMessageParam]:
-    """将标准消息转换为OpenAI格式"""
-    params: List[ChatCompletionMessageParam] = []
+    """把内部消息列表转换为 OpenAI Chat Completions 参数（对齐 TS convertMessages）。"""
 
     def normalize_tool_call_id(id: str) -> str:
-        """规范化工具调用ID"""
-        if compat.requires_mistral_tool_ids:
-            return normalize_mistral_tool_id(id)
-
+        """规范化工具调用 ID（对齐 TS normalizeToolCallId）。"""
         if "|" in id:
             call_id = id.split("|")[0]
             return re.sub(r"[^a-zA-Z0-9_-]", "_", call_id)[:40]
-
         if model.provider == "openai":
             return id[:40] if len(id) > 40 else id
         return id
@@ -377,6 +503,8 @@ def convert_messages(
     transformed_messages = transform_messages(
         context.messages, model, lambda id, m, src: normalize_tool_call_id(id)
     )
+
+    params: List[ChatCompletionMessageParam] = []
 
     if context.system_prompt:
         use_developer_role = model.reasoning and compat.supports_developer_role
@@ -386,7 +514,6 @@ def convert_messages(
         )
 
     last_role: Optional[str] = None
-
     i = 0
     while i < len(transformed_messages):
         msg = transformed_messages[i]
@@ -422,19 +549,13 @@ def convert_messages(
                                 },
                             }
                         )
-                if "image" not in model.input_types:
-                    content = [c for c in content if c.get("type") != "image_url"]
-
                 if not content:
-                    # 如果过滤后内容为空（例如纯图片消息但模型不支持图片），
-                    # 至少保留一个占位文本，避免消息完全丢失破坏角色交替
-                    content = [{"type": "text", "text": "(image)"}]
-
+                    i += 1
+                    continue
                 params.append({"role": "user", "content": content})
 
         elif msg.role == "assistant":
             assistant_msg = msg
-
             assistant_param: ChatCompletionAssistantMessageParam = {
                 "role": "assistant",
                 "content": "" if compat.requires_assistant_after_tool_result else None,
@@ -455,7 +576,6 @@ def convert_messages(
 
             if non_empty_thinking:
                 if compat.requires_thinking_as_text:
-                    # 将思考块转换为纯文本（不带标签，避免模型模仿）
                     thinking_text = "\n\n".join(
                         sanitize_surrogates(b.thinking) for b in non_empty_thinking
                     )
@@ -464,18 +584,16 @@ def convert_messages(
                         *assistant_text_parts,
                     ]
                 else:
-                    # 始终将助手内容作为纯字符串发送（OpenAI Chat Completions API 标准格式）
                     if assistant_text:
                         assistant_param["content"] = assistant_text
-
-                    # 使用第一个思考块的签名（用于 llama.cpp server + gpt-oss）
                     signature = non_empty_thinking[0].thinking_signature
+                    if model.provider == "opencode-go" and signature == "reasoning":
+                        signature = "reasoning_content"
                     if signature and len(signature) > 0:
                         assistant_param[signature] = "\n".join(
                             b.thinking for b in non_empty_thinking
                         )
             elif assistant_text:
-                # 始终将助手内容作为纯字符串发送（OpenAI Chat Completions API 标准格式）
                 assistant_param["content"] = assistant_text
 
             tool_calls = [b for b in assistant_msg.content if b.type == "toolCall"]
@@ -491,7 +609,6 @@ def convert_messages(
                     }
                     for tc in tool_calls
                 ]
-
                 reasoning_details = []
                 for tc in tool_calls:
                     if tc.thought_signature:
@@ -502,7 +619,6 @@ def convert_messages(
                 if reasoning_details:
                     assistant_param["reasoning_details"] = reasoning_details
 
-            # DeepSeek 要求 assistant 消息上有 reasoning_content 字段
             if (
                 compat.requires_reasoning_content_on_assistant_messages
                 and model.reasoning
@@ -518,11 +634,11 @@ def convert_messages(
             if not has_content and "tool_calls" not in assistant_param:
                 i += 1
                 continue
-
             params.append(assistant_param)
 
         elif msg.role == "toolResult":
             image_blocks = []
+            deferred_tool_names: Set[str] = set()
 
             j = i
             while (
@@ -537,17 +653,24 @@ def convert_messages(
                 has_images = any(c.type == "image" for c in curr.content)
 
                 has_text = len(text_result) > 0
+                if has_text:
+                    tool_result_text = text_result
+                elif has_images:
+                    tool_result_text = "(see attached image)"
+                else:
+                    tool_result_text = "(no tool output)"
                 tool_result_param: ChatCompletionToolMessageParam = {
                     "role": "tool",
-                    "content": sanitize_surrogates(
-                        text_result if has_text else "(see attached image)"
-                    ),
+                    "content": sanitize_surrogates(tool_result_text),
                     "tool_call_id": curr.tool_call_id,
                 }
                 if compat.requires_tool_result_name and curr.tool_name:
-                    tool_result_param.name = curr.tool_name
-
+                    tool_result_param["name"] = curr.tool_name  # type: ignore[typeddict-unknown-key]
                 params.append(tool_result_param)
+
+                if compat.deferred_tools_mode == "kimi":
+                    for name in getattr(curr, "added_tool_names", None) or []:
+                        deferred_tool_names.add(name)
 
                 if has_images and "image" in model.input_types:
                     for block in curr.content:
@@ -560,7 +683,6 @@ def convert_messages(
                                     },
                                 }
                             )
-
                 j += 1
 
             i = j - 1
@@ -573,7 +695,6 @@ def convert_messages(
                             "content": "I have processed the tool results.",
                         }
                     )
-
                 params.append(
                     {
                         "role": "user",
@@ -590,6 +711,16 @@ def convert_messages(
             else:
                 last_role = "toolResult"
 
+            if compat.deferred_tools_mode == "kimi" and deferred_tool_names:
+                deferred_tools = get_tools_by_name(context.tools, deferred_tool_names)
+                if deferred_tools:
+                    params.append(
+                        {
+                            "role": "system",
+                            "tools": convert_tools(deferred_tools, compat),
+                        }
+                    )
+
             i += 1
             continue
 
@@ -602,7 +733,7 @@ def convert_messages(
 def convert_tools(
     tools: List[Tool], compat: OpenAICompletionsCompat
 ) -> List[Dict[str, Any]]:
-    """转换工具定义为OpenAI格式"""
+    """转换工具定义为 OpenAI 格式（对齐 TS convertTools）。"""
     result = []
     for tool in tools:
         tool_dict = {
@@ -615,31 +746,28 @@ def convert_tools(
         }
         if compat.supports_strict_mode is not False:
             tool_dict["function"]["strict"] = False
-
         result.append(tool_dict)
-
     return result
+
+
+# ---------------------------------------------------------------------------
+# 客户端创建
+# ---------------------------------------------------------------------------
 
 
 def create_client(
     model: Model,
     context: Context,
     api_key: Optional[str] = None,
-    options_headers: Optional[Dict[str, str]] = None,
+    options_headers: Optional[Dict[str, Optional[str]]] = None,
     session_id: Optional[str] = None,
     compat: Optional[OpenAICompletionsCompat] = None,
     max_retries: Optional[int] = None,
 ) -> AsyncOpenAI:
-    """创建OpenAI客户端"""
-    if not api_key:
-        api_key = get_env_api_key(model.provider)
-        if not api_key:
-            raise ValueError(
-                "OpenAI API key is required. Set OPENAI_API_KEY environment variable "
-                "or pass it as an argument."
-            )
+    """创建 OpenAI 客户端（对齐 TS createClient）。"""
+    resolved_compat = compat or get_compat(model)
 
-    headers = {}
+    headers: Dict[str, Optional[str]] = {}
     if model.headers:
         headers.update(model.headers)
 
@@ -648,18 +776,32 @@ def create_client(
         copilot_headers = build_copilot_dynamic_headers(context.messages, has_images)
         headers.update(copilot_headers)
 
-    resolved_compat = compat or get_compat(model)
     if session_id and resolved_compat.send_session_affinity_headers:
-        headers["session_id"] = session_id
-        headers["x-client-request-id"] = session_id
-        headers["x-session-affinity"] = session_id
+        fmt = resolved_compat.session_affinity_format or "openai"
+        if fmt == "openrouter":
+            headers["x-session-id"] = session_id
+        else:
+            if fmt == "openai":
+                headers["session_id"] = session_id
+            headers["x-client-request-id"] = session_id
+            headers["x-session-affinity"] = session_id
 
     if options_headers:
         headers.update(options_headers)
 
+    if (
+        not api_key
+        and not _has_header(headers, "authorization")
+        and not _has_header(headers, "cf-aig-authorization")
+    ):
+        # 对齐 TS getClientApiKey：协议层不读环境变量，api key 必须由上游
+        # （Models.applyAuth / 调用方 options）注入；headers 自带 auth 时经
+        # client_kwargs 的 "unused" 占位放行。
+        raise ValueError(f"No API key for provider: {model.provider}")
+
     # Cloudflare AI Gateway 特殊鉴权头部
     if model.provider == "cloudflare-ai-gateway":
-        default_headers = {
+        default_headers: Dict[str, Optional[str]] = {
             **headers,
             "Authorization": headers.get("Authorization") or "",
             "cf-aig-authorization": f"Bearer {api_key}",
@@ -667,23 +809,19 @@ def create_client(
     else:
         default_headers = headers
 
-    return AsyncOpenAI(
-        api_key=api_key,
-        base_url=model.base_url,
-        default_headers=default_headers,
-        max_retries=max_retries if max_retries is not None else 2,
-    )
+    client_kwargs: Dict[str, Any] = {
+        "api_key": api_key or "unused",
+        "base_url": model.base_url,
+        "default_headers": {k: v for k, v in default_headers.items() if v is not None},
+        "max_retries": max_retries if max_retries is not None else 0,
+    }
+
+    return AsyncOpenAI(**client_kwargs)
 
 
-def _resolve_cache_retention(options: Optional[OpenAICompletionsOptions]) -> str:
-    """解析缓存保留策略"""
-    if options and options.cache_retention:
-        return options.cache_retention
-    import os
-
-    if os.environ.get("PI_CACHE_RETENTION") == "long":
-        return "long"
-    return "short"
+# ---------------------------------------------------------------------------
+# 请求参数构建
+# ---------------------------------------------------------------------------
 
 
 def build_params(
@@ -693,66 +831,80 @@ def build_params(
     compat: Optional[OpenAICompletionsCompat] = None,
     cache_retention: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """构建OpenAI API请求体参数
-
-    所有与请求体相关的参数（包括消息转换、缓存控制、工具、推理等）
-    都集中在此函数内处理。调用层负责传入已解析的 compat 和 cache_retention，
-    避免重复计算。
-    """
-    resolved_compat = compat or get_compat(model)
-    resolved_cache_retention = cache_retention or _resolve_cache_retention(options)
-
-    # 函数签名中的 compat/cache_retention 已由调用层解析，避免重复计算。
-    # 下面统一用简短名称 compat/cache_retention 指代解析后的值。
-    compat = resolved_compat
-    cache_retention = resolved_cache_retention
+    """构建 OpenAI API 请求体参数（对齐 TS buildParams）。"""
+    compat = compat or get_compat(model)
+    cache_retention = cache_retention or resolve_cache_retention(
+        options.cache_retention if options else None,
+        options.env if options else None,
+    )
 
     messages = convert_messages(model, context, compat)
-    maybe_add_openrouter_anthropic_cache_control(model, messages)
+    cache_control = _get_compat_cache_control(compat, cache_retention)
 
-    reasoning_effort = options.reasoning_effort if options else None
+    reasoning_effort = getattr(options, "reasoning_effort", None) if options else None
     enabled = bool(reasoning_effort and reasoning_effort != "off")
 
     def _map_reasoning_effort(effort: Optional[str]) -> Optional[str]:
-        """通过 thinking_level_map 映射 reasoning_effort"""
         if effort and model.thinking_level_map and effort in model.thinking_level_map:
             mapped = model.thinking_level_map[effort]
             if mapped is not None:
                 return mapped
         return effort
 
-    def _get_reasoning_effort() -> Optional[str]:
-        """获取最终应发送的 reasoning_effort 值"""
-        mapped = _map_reasoning_effort(reasoning_effort)
-        if mapped:
-            return mapped
-        off = _map_reasoning_effort("off")
-        return off if isinstance(off, str) else None
+    def _off_mapped_value() -> Optional[str]:
+        if model.thinking_level_map:
+            off = model.thinking_level_map.get("off")
+            if isinstance(off, str):
+                return off
+        return None
 
-    final_reasoning_effort = _get_reasoning_effort()
-
-    use_prompt_cache_key = (
-        options
-        and options.session_id
-        and (
-            ("api.openai.com" in model.base_url and cache_retention != "none")
-            or (cache_retention == "long" and compat.supports_long_cache_retention)
+    def _off_is_explicitly_null() -> bool:
+        return (
+            model.thinking_level_map is not None
+            and "off" in model.thinking_level_map
+            and model.thinking_level_map["off"] is None
         )
-    )
-    use_prompt_cache_retention = (
-        cache_retention == "long" and compat.supports_long_cache_retention
+
+    def _map_reasoning_effort_strict(effort: Optional[str]) -> Optional[str]:
+        if not effort or not model.thinking_level_map:
+            return effort
+        if effort not in model.thinking_level_map:
+            return effort
+        return model.thinking_level_map[effort]
+
+    _OMIT = object()
+
+    def _resolve_chat_kwarg_value(value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        if not reasoning_effort and value.get("omitWhenOff"):
+            return _OMIT
+        if value.get("$var") == "thinking.enabled":
+            return bool(reasoning_effort)
+        level_map = model.thinking_level_map or {}
+        key = reasoning_effort if reasoning_effort else "off"
+        if key not in level_map:
+            return reasoning_effort if reasoning_effort else _OMIT
+        mapped = level_map[key]
+        return mapped if isinstance(mapped, str) else _OMIT
+
+    def _build_chat_template_kwargs() -> Optional[Dict[str, Any]]:
+        kwargs: Dict[str, Any] = {}
+        for key, value in (compat.chat_template_kwargs or {}).items():
+            resolved = _resolve_chat_kwarg_value(value)
+            if resolved is not _OMIT:
+                kwargs[key] = resolved
+        return kwargs or None
+
+    final_reasoning_effort = (
+        _map_reasoning_effort(reasoning_effort) if enabled else None
     )
 
     params: Dict[str, Any] = {
         "model": model.id,
         "messages": messages,
         "stream": True,
-        "prompt_cache_key": options.session_id if use_prompt_cache_key else None,
-        "prompt_cache_retention": "24h" if use_prompt_cache_retention else None,
     }
-
-    # 所有 provider-specific / 非标准字段都通过 extra_body 传递
-    extra_body: Dict[str, Any] = {}
 
     if compat.supports_usage_in_streaming is not False:
         params["stream_options"] = {"include_usage": True}
@@ -772,24 +924,61 @@ def build_params(
     if options and options.temperature is not None:
         params["temperature"] = options.temperature
 
+    deferred_tool_names: Set[str] = set()
+    if compat.deferred_tools_mode == "kimi":
+        deferred_tool_names = get_deferred_tool_names(context.messages)
+
+    active_tools = None
     if context.tools:
-        params["tools"] = convert_tools(context.tools, compat)
+        active_tools = [
+            tool for tool in context.tools if tool.name not in deferred_tool_names
+        ]
+
+    if active_tools:
+        params["tools"] = convert_tools(active_tools, compat)
         if compat.zai_tool_stream:
-            extra_body["tool_stream"] = True
-        if options and options.parallel_tool_calls is not None:
+            params["tool_stream"] = True
+        if options and getattr(options, "parallel_tool_calls", None) is not None:
             params["parallel_tool_calls"] = options.parallel_tool_calls
     elif has_tool_history(context.messages):
         params["tools"] = []
 
-    if options and options.tool_choice:
+    if options and getattr(options, "tool_choice", None):
         params["tool_choice"] = options.tool_choice
 
+    if cache_control:
+        _apply_anthropic_cache_control(messages, params.get("tools"), cache_control)
+
+    # 非标准字段统一走 extra_body
+    extra_body: Dict[str, Any] = {}
+
+    use_prompt_cache_key = (
+        options
+        and options.session_id
+        and (
+            ("api.openai.com" in model.base_url and cache_retention != "none")
+            or (cache_retention == "long" and compat.supports_long_cache_retention)
+        )
+    )
+    if use_prompt_cache_key:
+        extra_body["prompt_cache_key"] = clamp_openai_prompt_cache_key(
+            options.session_id
+        )
+
+    if cache_retention == "long" and compat.supports_long_cache_retention:
+        extra_body["prompt_cache_retention"] = "24h"
+
     # 推理/思考参数格式处理
-    # 注意：所有 provider-specific 的 thinking 参数都通过 extra_body 传递，
-    # 因为 OpenAI Python SDK 不直接支持这些关键字参数。
     if model.reasoning:
         if compat.thinking_format == "zai":
-            extra_body["enable_thinking"] = enabled
+            if enabled:
+                extra_body["thinking"] = {"type": "enabled", "clear_thinking": False}
+            else:
+                extra_body["thinking"] = {"type": "disabled"}
+            if enabled and compat.supports_reasoning_effort:
+                effort = _map_reasoning_effort_strict(reasoning_effort)
+                if effort is not None:
+                    params["reasoning_effort"] = effort
         elif compat.thinking_format == "qwen":
             extra_body["enable_thinking"] = enabled
         elif compat.thinking_format == "qwen-chat-template":
@@ -797,24 +986,55 @@ def build_params(
                 "enable_thinking": enabled,
                 "preserve_thinking": True,
             }
+        elif compat.thinking_format == "chat-template":
+            chat_kwargs = _build_chat_template_kwargs()
+            if chat_kwargs:
+                extra_body["chat_template_kwargs"] = chat_kwargs
         elif compat.thinking_format == "deepseek":
-            extra_body["thinking"] = {"type": "enabled" if enabled else "disabled"}
             if enabled:
+                extra_body["thinking"] = {"type": "enabled"}
+            elif not _off_is_explicitly_null():
+                extra_body["thinking"] = {"type": "disabled"}
+            if enabled and compat.supports_reasoning_effort:
                 params["reasoning_effort"] = final_reasoning_effort
         elif compat.thinking_format == "openrouter":
-            extra_body["reasoning"] = {"effort": final_reasoning_effort or "none"}
+            if enabled:
+                extra_body["reasoning"] = {"effort": final_reasoning_effort}
+            elif not _off_is_explicitly_null():
+                extra_body["reasoning"] = {"effort": _off_mapped_value() or "none"}
+        elif compat.thinking_format == "ant-ling":
+            if enabled and model.thinking_level_map:
+                effort = model.thinking_level_map.get(reasoning_effort)
+                if isinstance(effort, str):
+                    extra_body["reasoning"] = {"effort": effort}
         elif compat.thinking_format == "together":
             extra_body["reasoning"] = {"enabled": enabled}
             if enabled and compat.supports_reasoning_effort:
                 params["reasoning_effort"] = final_reasoning_effort
-        elif compat.supports_reasoning_effort:
+        elif compat.thinking_format == "string-thinking":
+            if enabled:
+                extra_body["thinking"] = final_reasoning_effort
+            elif not _off_is_explicitly_null():
+                extra_body["thinking"] = _off_mapped_value() or "none"
+        elif enabled and compat.supports_reasoning_effort:
             params["reasoning_effort"] = final_reasoning_effort
+        elif compat.supports_reasoning_effort:
+            off_value = _off_mapped_value()
+            if off_value is not None:
+                params["reasoning_effort"] = off_value
 
-    if "openrouter.ai" in model.base_url and compat.open_router_routing:
-        extra_body["provider"] = compat.open_router_routing.model_dump()
+    # OpenRouter / Vercel 路由偏好：以模型自身 compat 为准（对齐 TS），
+    # 不额外要求 base_url 匹配，自定义网关/代理也可用。
+    model_compat = (
+        model.compat if isinstance(model.compat, OpenAICompletionsCompat) else None
+    )
+    if model_compat and model_compat.open_router_routing:
+        extra_body["provider"] = model_compat.open_router_routing.model_dump(
+            exclude_none=True
+        )
 
-    if "ai-gateway.vercel.sh" in model.base_url and compat.vercel_gateway_routing:
-        routing = compat.vercel_gateway_routing
+    if model_compat and model_compat.vercel_gateway_routing:
+        routing = model_compat.vercel_gateway_routing
         if routing.only or routing.order:
             gateway_options: Dict[str, Any] = {}
             if routing.only:
@@ -823,28 +1043,31 @@ def build_params(
                 gateway_options["order"] = routing.order
             extra_body["providerOptions"] = {"gateway": gateway_options}
 
-    # 清理 None 值，避免把 null 传给 SDK
     params = {k: v for k, v in params.items() if v is not None}
-
     if extra_body:
         params["extra_body"] = extra_body
 
     return params
 
 
-def _apply_chunk_usage(output: AssistantMessage, usage: Any, model: Model) -> None:
-    """将单个 chunk 的 usage 信息应用到输出消息上"""
-    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+# ---------------------------------------------------------------------------
+# usage 解析
+# ---------------------------------------------------------------------------
 
-    prompt_tokens_details = getattr(usage, "prompt_tokens_details", None)
-    reported_cached = (
+
+def parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
+    """解析 chunk 中的 usage 信息（对齐 TS parseChunkUsage）。"""
+    prompt_tokens = getattr(raw_usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(raw_usage, "completion_tokens", 0) or 0
+
+    prompt_tokens_details = getattr(raw_usage, "prompt_tokens_details", None)
+    cache_read_tokens = (
         (getattr(prompt_tokens_details, "cached_tokens", 0) or 0)
         if prompt_tokens_details
         else 0
     )
-    prompt_cache_hit = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
-    reported_cached = reported_cached or prompt_cache_hit
+    prompt_cache_hit = getattr(raw_usage, "prompt_cache_hit_tokens", 0) or 0
+    cache_read_tokens = cache_read_tokens or prompt_cache_hit
 
     cache_write_tokens = (
         (getattr(prompt_tokens_details, "cache_write_tokens", 0) or 0)
@@ -852,35 +1075,66 @@ def _apply_chunk_usage(output: AssistantMessage, usage: Any, model: Model) -> No
         else 0
     )
 
-    # 兼容 OpenRouter：cached_tokens 可能包含了 cache_write，需要减去
-    cache_read_tokens = (
-        max(0, reported_cached - cache_write_tokens)
-        if cache_write_tokens > 0
-        else reported_cached
-    )
-
     input_tokens = max(0, prompt_tokens - cache_read_tokens - cache_write_tokens)
-    # OpenAI 的 completion_tokens 已经包含了 reasoning_tokens
     output_tokens = completion_tokens
 
-    output.usage.input = input_tokens
-    output.usage.output = output_tokens
-    output.usage.cache_read = cache_read_tokens
-    output.usage.cache_write = cache_write_tokens
-    output.usage.total_tokens = (
-        input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
+    completion_tokens_details = getattr(raw_usage, "completion_tokens_details", None)
+    reasoning_tokens = (
+        (getattr(completion_tokens_details, "reasoning_tokens", 0) or 0)
+        if completion_tokens_details
+        else 0
     )
 
-    calculate_cost(model, output.usage)
+    usage = Usage(
+        input=input_tokens,
+        output=output_tokens,
+        cache_read=cache_read_tokens,
+        cache_write=cache_write_tokens,
+        reasoning=reasoning_tokens,
+        total_tokens=input_tokens
+        + output_tokens
+        + cache_read_tokens
+        + cache_write_tokens,
+        cost=Cost(),
+    )
+    calculate_cost(model, usage)
+    return usage
 
 
-def stream_openai_completions(
+# ---------------------------------------------------------------------------
+# stop reason 映射
+# ---------------------------------------------------------------------------
+
+
+def map_stop_reason(reason: Optional[str]) -> Tuple[StopReason, Optional[str]]:
+    """映射 OpenAI finish_reason 到标准 StopReason（对齐 TS mapStopReason）。"""
+    if reason is None:
+        return StopReason.STOP, None
+    if reason in ("stop", "end"):
+        return StopReason.STOP, None
+    if reason == "length":
+        return StopReason.LENGTH, None
+    if reason in ("function_call", "tool_calls"):
+        return StopReason.TOOL_USE, None
+    if reason == "content_filter":
+        return StopReason.ERROR, "Provider finish_reason: content_filter"
+    if reason == "network_error":
+        return StopReason.ERROR, "Provider finish_reason: network_error"
+    return StopReason.ERROR, f"Provider finish_reason: {reason}"
+
+
+# ---------------------------------------------------------------------------
+# 流式调用
+# ---------------------------------------------------------------------------
+
+
+def stream(
     model: Model, context: Context, options: Optional[OpenAICompletionsOptions] = None
 ) -> AssistantMessageEventStream:
-    """OpenAI Completions 流式处理主函数"""
-    stream = AssistantMessageEventStream()
+    """OpenAI Completions 流式处理主函数（对齐 TS stream）。"""
+    event_stream = AssistantMessageEventStream()
 
-    async def process_stream():
+    async def process_stream() -> None:
         output = AssistantMessage(
             role="assistant",
             content=[],
@@ -898,11 +1152,156 @@ def stream_openai_completions(
             stop_reason=StopReason.STOP,
             timestamp=int(time.time() * 1000),
         )
+        abort_watcher: Optional[asyncio.Task] = None
+        # 提前绑定，保证请求阶段的早期异常也能走 finish_all_blocks 收尾
+        blocks = output.content
+        text_block: Optional[TextContent] = None
+        thinking_block: Optional[ThinkingContent] = None
+        has_finish_reason = False
+        tool_call_blocks_by_index: Dict[int, ToolCall] = {}
+        tool_call_blocks_by_id: Dict[str, ToolCall] = {}
+        pending_reasoning_details_by_tool_call_id: Dict[str, str] = {}
+
+        def get_content_index(block) -> int:
+            # 按引用相等查找（对齐 JS indexOf）：pydantic 的 __eq__ 是按值比较，
+            # 值相等的不同块对象会拿错 index，破坏 start/end 配对
+            for i, b in enumerate(blocks):
+                if b is block:
+                    return i
+            return -1
+
+        # 已发 end 事件的块，保证任何终止路径下 end 不重不漏
+        finished_content_indexes: Set[int] = set()
+
+        def finish_block(block) -> None:
+            if block is None:
+                return
+            content_index = get_content_index(block)
+            if content_index == -1 or content_index in finished_content_indexes:
+                return
+            finished_content_indexes.add(content_index)
+            if block.type == "text":
+                event_stream.push(
+                    TextEndEvent(
+                        content_index=content_index,
+                        content=block.text,
+                        partial=deepcopy(output),
+                    )
+                )
+            elif block.type == "thinking":
+                event_stream.push(
+                    ThinkingEndEvent(
+                        content_index=content_index,
+                        content=block.thinking,
+                        partial=deepcopy(output),
+                    )
+                )
+            elif block.type == "toolCall":
+                parsed = parse_streaming_json(block.partial_args)
+                if isinstance(parsed, dict):
+                    block.arguments = parsed
+                block.partial_args = None
+                block.stream_index = None
+                event_stream.push(
+                    ToolCallEndEvent(
+                        content_index=content_index,
+                        tool_call=block,
+                        partial=deepcopy(output),
+                    )
+                )
+
+        def finish_all_blocks() -> None:
+            """为所有未闭合的块补发 end 事件（幂等）。"""
+            for block in blocks:
+                finish_block(block)
+
+        def ensure_text_block() -> TextContent:
+            nonlocal text_block
+            if text_block is None:
+                text_block = TextContent(type="text", text="")
+                blocks.append(text_block)
+                event_stream.push(
+                    TextStartEvent(
+                        content_index=get_content_index(text_block),
+                        partial=deepcopy(output),
+                    )
+                )
+            return text_block
+
+        def ensure_thinking_block(thinking_signature: str) -> ThinkingContent:
+            nonlocal thinking_block
+            if thinking_block is None:
+                thinking_block = ThinkingContent(
+                    type="thinking",
+                    thinking="",
+                    thinking_signature=thinking_signature,
+                )
+                blocks.append(thinking_block)
+                event_stream.push(
+                    ThinkingStartEvent(
+                        content_index=get_content_index(thinking_block),
+                        partial=deepcopy(output),
+                    )
+                )
+            return thinking_block
+
+        def _apply_pending_reasoning_detail(block: ToolCall) -> None:
+            if not block.id:
+                return
+            pending = pending_reasoning_details_by_tool_call_id.get(block.id)
+            if pending is not None:
+                block.thought_signature = pending
+                del pending_reasoning_details_by_tool_call_id[block.id]
+
+        def ensure_tool_call_block(tool_call_delta) -> ToolCall:
+            stream_index = getattr(tool_call_delta, "index", None)
+            if isinstance(stream_index, int):
+                block = tool_call_blocks_by_index.get(stream_index)
+            else:
+                block = None
+
+            tool_call_id = getattr(tool_call_delta, "id", None)
+            if not block and tool_call_id:
+                block = tool_call_blocks_by_id.get(tool_call_id)
+
+            if not block:
+                func = getattr(tool_call_delta, "function", None)
+                block = ToolCall(
+                    type="toolCall",
+                    id=tool_call_id or "",
+                    name=getattr(func, "name", "") if func else "",
+                    arguments={},
+                    partial_args="",
+                    stream_index=stream_index,
+                )
+                if isinstance(stream_index, int):
+                    tool_call_blocks_by_index[stream_index] = block
+                if tool_call_id:
+                    tool_call_blocks_by_id[tool_call_id] = block
+                blocks.append(block)
+                event_stream.push(
+                    ToolCallStartEvent(
+                        content_index=get_content_index(block),
+                        partial=deepcopy(output),
+                    )
+                )
+
+            if isinstance(stream_index, int) and block.stream_index is None:
+                block.stream_index = stream_index
+                tool_call_blocks_by_index[stream_index] = block
+            if tool_call_id:
+                tool_call_blocks_by_id[tool_call_id] = block
+
+            _apply_pending_reasoning_detail(block)
+            return block
 
         try:
             api_key = options.api_key if options else None
             compat = get_compat(model)
-            cache_retention = _resolve_cache_retention(options)
+            cache_retention = resolve_cache_retention(
+                options.cache_retention if options else None,
+                options.env if options else None,
+            )
             cache_session_id = (
                 None
                 if cache_retention == "none"
@@ -920,7 +1319,7 @@ def stream_openai_completions(
             params = build_params(model, context, options, compat, cache_retention)
 
             if options and options.on_payload:
-                payload_result = options.on_payload(params)
+                payload_result = options.on_payload(params, model)
                 if inspect.isawaitable(payload_result):
                     payload_result = await payload_result
                 params = payload_result or params
@@ -929,13 +1328,13 @@ def stream_openai_completions(
             request_timeout = timeout if timeout is not None else openai.NOT_GIVEN
 
             signal = options.signal if options else None
-            if signal and getattr(signal, "aborted", False):
+            if signal and signal.aborted:
                 raise Exception("Request was aborted")
 
+            raw_response = await client.chat.completions.with_raw_response.create(
+                **params, timeout=request_timeout
+            )
             if options and options.on_response:
-                raw_response = await client.chat.completions.with_raw_response.create(
-                    **params, timeout=request_timeout
-                )
                 response_result = options.on_response(
                     ProviderResponse(
                         status=raw_response.status_code,
@@ -945,153 +1344,32 @@ def stream_openai_completions(
                 )
                 if inspect.isawaitable(response_result):
                     await response_result
-                openai_stream = raw_response.parse()
-            else:
-                openai_stream = await client.chat.completions.create(
-                    **params, timeout=request_timeout
-                )
+            openai_stream = raw_response.parse()
 
-            stream.push(StartEvent(partial=deepcopy(output)))
+            # TS 的 OpenAI SDK 支持 fetch 级 signal abort；Python SDK 不支持，
+            # 用看门狗任务在 abort 时主动关闭流，达到同等的即时中断效果。
+            signal_wait = getattr(signal, "wait", None) if signal is not None else None
+            if callable(signal_wait):
 
-            current_block = None
-            current_block_index = -1
-            tool_call_blocks_by_index: Dict[int, ToolCall] = {}
-            tool_call_blocks_by_id: Dict[str, ToolCall] = {}
-            blocks = output.content
+                async def _watch_abort() -> None:
+                    try:
+                        await signal_wait()
+                        await openai_stream.close()
+                    except Exception:
+                        pass
 
-            def get_content_index(block) -> int:
-                try:
-                    return blocks.index(block)
-                except ValueError:
-                    return -1
+                abort_watcher = asyncio.create_task(_watch_abort())
 
-            def finish_block(block):
-                if block is None:
-                    return
-                content_index = get_content_index(block)
-                if content_index == -1:
-                    return
-                if block.type == "text":
-                    stream.push(
-                        TextEndEvent(
-                            content_index=content_index,
-                            content=block.text,
-                            partial=deepcopy(output),
-                        )
-                    )
-                elif block.type == "thinking":
-                    stream.push(
-                        ThinkingEndEvent(
-                            content_index=content_index,
-                            content=block.thinking,
-                            partial=deepcopy(output),
-                        )
-                    )
-                elif block.type == "toolCall":
-                    parsed = parse_streaming_json(block.partial_args)
-                    if isinstance(parsed, dict):
-                        block.arguments = parsed
-                    # 清理流式解析时的临时字段，避免持久化
-                    block.partial_args = None
-                    block.stream_index = None
-                    stream.push(
-                        ToolCallEndEvent(
-                            content_index=content_index,
-                            tool_call=block,
-                            partial=deepcopy(output),
-                        )
-                    )
-
-            def ensure_text_block():
-                nonlocal current_block, current_block_index
-                if not current_block or current_block.type != "text":
-                    current_block = TextContent(type="text", text="")
-                    blocks.append(current_block)
-                    current_block_index = len(blocks) - 1
-                    stream.push(
-                        TextStartEvent(
-                            content_index=current_block_index, partial=deepcopy(output)
-                        )
-                    )
-                return current_block
-
-            def ensure_thinking_block(thinking_signature: str):
-                nonlocal current_block, current_block_index
-                if not current_block or current_block.type != "thinking":
-                    current_block = ThinkingContent(
-                        type="thinking",
-                        thinking="",
-                        thinking_signature=thinking_signature,
-                    )
-                    blocks.append(current_block)
-                    current_block_index = len(blocks) - 1
-                    stream.push(
-                        ThinkingStartEvent(
-                            content_index=current_block_index, partial=deepcopy(output)
-                        )
-                    )
-                return current_block
-
-            def ensure_tool_call_block(tool_call_delta):
-                nonlocal current_block, current_block_index
-                stream_index = getattr(tool_call_delta, "index", None)
-                if isinstance(stream_index, int):
-                    block = tool_call_blocks_by_index.get(stream_index)
-                else:
-                    block = None
-
-                tool_call_id = getattr(tool_call_delta, "id", None)
-                if not block and tool_call_id:
-                    block = tool_call_blocks_by_id.get(tool_call_id)
-
-                if not block:
-                    func = getattr(tool_call_delta, "function", None)
-                    block = ToolCall(
-                        type="toolCall",
-                        id=tool_call_id or "",
-                        name=getattr(func, "name", "") if func else "",
-                        arguments={},
-                        partial_args="",
-                        stream_index=stream_index,
-                    )
-                    if isinstance(stream_index, int):
-                        tool_call_blocks_by_index[stream_index] = block
-                    if tool_call_id:
-                        tool_call_blocks_by_id[tool_call_id] = block
-                    blocks.append(block)
-                    current_block = block
-                    current_block_index = len(blocks) - 1
-                    stream.push(
-                        ToolCallStartEvent(
-                            content_index=current_block_index, partial=deepcopy(output)
-                        )
-                    )
-                else:
-                    if current_block != block:
-                        current_block = block
-                        current_block_index = get_content_index(block)
-
-                if isinstance(stream_index, int) and block.stream_index is None:
-                    block.stream_index = stream_index
-                    tool_call_blocks_by_index[stream_index] = block
-                if tool_call_id:
-                    tool_call_blocks_by_id[tool_call_id] = block
-
-                return block
+            event_stream.push(StartEvent(partial=deepcopy(output)))
 
             async for chunk in openai_stream:
-                if signal and getattr(signal, "aborted", False):
+                if signal and signal.aborted:
                     await openai_stream.close()
                     break
 
-                if (
-                    not chunk
-                    or not isinstance(chunk, dict)
-                    and not hasattr(chunk, "choices")
-                ):
+                if not chunk or not hasattr(chunk, "choices"):
                     continue
 
-                # OpenAI 文档规定 ChatCompletionChunk.id 是每个完成的唯一标识符
                 if hasattr(chunk, "id") and chunk.id and not output.response_id:
                     output.response_id = chunk.id
 
@@ -1105,22 +1383,22 @@ def stream_openai_completions(
                     output.response_model = chunk.model
 
                 if chunk.usage:
-                    _apply_chunk_usage(output, chunk.usage, model)
+                    output.usage = parse_chunk_usage(chunk.usage, model)
 
                 if not chunk.choices:
                     continue
 
                 choice = chunk.choices[0]
 
-                # Fallback: 某些提供商（如 Moonshot）在 choice.usage 中返回 usage
                 if not chunk.usage and hasattr(choice, "usage") and choice.usage:
-                    _apply_chunk_usage(output, choice.usage, model)
+                    output.usage = parse_chunk_usage(choice.usage, model)
 
                 if choice.finish_reason:
                     stop_reason, error_message = map_stop_reason(choice.finish_reason)
                     output.stop_reason = stop_reason
                     if error_message:
                         output.error_message = error_message
+                    has_finish_reason = True
 
                 if choice.delta:
                     delta = choice.delta
@@ -1128,9 +1406,9 @@ def stream_openai_completions(
                     if delta.content and len(delta.content) > 0:
                         block = ensure_text_block()
                         block.text += delta.content
-                        stream.push(
+                        event_stream.push(
                             TextDeltaEvent(
-                                content_index=current_block_index,
+                                content_index=get_content_index(block),
                                 delta=delta.content,
                                 partial=deepcopy(output),
                             )
@@ -1145,7 +1423,6 @@ def stream_openai_completions(
                         "reasoning_text",
                     ]
                     found_reasoning = None
-
                     for field in reasoning_fields:
                         value = delta_dict.get(field)
                         if isinstance(value, str) and len(value) > 0:
@@ -1153,12 +1430,18 @@ def stream_openai_completions(
                             break
 
                     if found_reasoning:
-                        block = ensure_thinking_block(found_reasoning)
+                        thinking_signature = (
+                            "reasoning_content"
+                            if model.provider == "opencode-go"
+                            and found_reasoning == "reasoning"
+                            else found_reasoning
+                        )
+                        block = ensure_thinking_block(thinking_signature)
                         delta_text = delta_dict[found_reasoning]
                         block.thinking += delta_text
-                        stream.push(
+                        event_stream.push(
                             ThinkingDeltaEvent(
-                                content_index=current_block_index,
+                                content_index=get_content_index(block),
                                 delta=delta_text,
                                 partial=deepcopy(output),
                             )
@@ -1187,7 +1470,7 @@ def stream_openai_completions(
 
                             content_index = get_content_index(block)
                             if content_index != -1:
-                                stream.push(
+                                event_stream.push(
                                     ToolCallDeltaEvent(
                                         content_index=content_index,
                                         delta=delta_args,
@@ -1202,22 +1485,17 @@ def stream_openai_completions(
                         reasoning_details = delta_dict["reasoning_details"]
                         if isinstance(reasoning_details, list):
                             for detail in reasoning_details:
-                                if (
-                                    isinstance(detail, dict)
-                                    and detail.get("type") == "reasoning.encrypted"
-                                    and detail.get("id")
-                                    and detail.get("data")
-                                ):
-                                    for block in output.content:
-                                        if (
-                                            block.type == "toolCall"
-                                            and block.id == detail.id
-                                        ):
-                                            block.thought_signature = json.dumps(detail)
-                                            break
+                                if _is_encrypted_reasoning_detail(detail):
+                                    serialized = json.dumps(detail)
+                                    block = tool_call_blocks_by_id.get(detail["id"])
+                                    if block is not None:
+                                        block.thought_signature = serialized
+                                    else:
+                                        pending_reasoning_details_by_tool_call_id[
+                                            detail["id"]
+                                        ] = serialized
 
-            for block in blocks:
-                finish_block(block)
+            finish_all_blocks()
 
             if (
                 options
@@ -1233,58 +1511,72 @@ def stream_openai_completions(
                 raise Exception(
                     output.error_message or "Provider returned an error stop reason"
                 )
+            if not has_finish_reason:
+                raise Exception("Stream ended without finish_reason")
 
-            stream.push(DoneEvent(reason=output.stop_reason, message=deepcopy(output)))
-            stream.end()
+            event_stream.push(
+                DoneEvent(reason=output.stop_reason, message=deepcopy(output))
+            )
+            event_stream.end()
 
         except Exception as e:
-            for block in output.content:
-                if hasattr(block, "partial_args"):
-                    block.partial_args = None
-                if hasattr(block, "stream_index"):
-                    block.stream_index = None
+            # 任何异常路径也要先闭合所有未闭合的块（end 不重不漏），
+            # 再推送 ErrorEvent 终止流
+            finish_all_blocks()
 
-            output.stop_reason = (
-                StopReason.ABORTED
-                if (options and options.signal and options.signal.aborted)
-                else StopReason.ERROR
-            )
-            output.error_message = str(e)
+            is_aborted = bool(options and options.signal and options.signal.aborted)
+            output.stop_reason = StopReason.ABORTED if is_aborted else StopReason.ERROR
 
+            normalized = normalize_provider_error(e)
+            output.error_message = format_provider_error(normalized)
+
+            raw_metadata = None
+            try:
+                raw_metadata = e.error.metadata.raw
+            except Exception:
+                pass
             if (
-                hasattr(e, "error")
-                and hasattr(e.error, "metadata")
-                and hasattr(e.error.metadata, "raw")
+                isinstance(raw_metadata, str)
+                and raw_metadata not in output.error_message
             ):
-                output.error_message += f"\n{e.error.metadata.raw}"
+                output.error_message += f"\n{raw_metadata}"
 
-            stream.push(ErrorEvent(reason=output.stop_reason, error=deepcopy(output)))
-            stream.end()
+            event_stream.push(
+                ErrorEvent(reason=output.stop_reason, error=deepcopy(output))
+            )
+            event_stream.end()
+        finally:
+            if abort_watcher is not None:
+                abort_watcher.cancel()
 
     asyncio.create_task(process_stream())
-    return stream
+    return event_stream
 
 
-def stream_simple_openai_completions(
+def stream_simple(
     model: Model, context: Context, options: Optional[SimpleStreamOptions] = None
 ) -> AssistantMessageEventStream:
-    """简化的OpenAI Completions流式处理"""
+    """简化的 OpenAI Completions 流式处理（对齐 TS streamSimple）。"""
     api_key = options.api_key if options else None
-    if not api_key:
-        api_key = get_env_api_key(model.provider)
-    if api_key is None:
-        raise RuntimeError(
-            f"No API key configured for provider {getattr(model, 'provider', 'unknown')}. "
-            "Please set the API key via environment variable or configuration."
-        )
-    base = build_base_options(model, options, api_key)
+    headers = options.headers if options else None
+    if (
+        not api_key
+        and not _has_header(headers, "authorization")
+        and not _has_header(headers, "cf-aig-authorization")
+    ):
+        # 对齐 TS getClientApiKey：fail-fast 守卫——headers 自带 auth 时放行
+        # （api_key 保持 None，由 headers 说话），否则报错，协议层不读环境变量。
+        raise ValueError(f"No API key for provider: {model.provider}")
+
+    base = build_base_options(model, context, options, api_key)
 
     reasoning_effort = None
-    if supports_xhigh_thinking(model) and options and options.reasoning:
-        reasoning_effort = options.reasoning.value
-    elif options and options.reasoning:
-        clamped = clamp_reasoning(options.reasoning)
-        reasoning_effort = clamped.value if clamped else None
+    if options and options.reasoning:
+        clamped = clamp_thinking_level(
+            model, ModelThinkingLevel(options.reasoning.value)
+        )
+        if clamped != ModelThinkingLevel.OFF:
+            reasoning_effort = clamped.value
 
     tool_choice = getattr(options, "tool_choice", None) if options else None
 
@@ -1297,40 +1589,15 @@ def stream_simple_openai_completions(
         cache_retention=base.cache_retention,
         session_id=base.session_id,
         headers=base.headers,
+        env=base.env,
         on_payload=base.on_payload,
         on_response=base.on_response,
         metadata=base.metadata,
         timeout=base.timeout,
+        websocket_connect_timeout_ms=base.websocket_connect_timeout_ms,
         max_retries=base.max_retries,
+        max_retry_delay_ms=base.max_retry_delay_ms,
         tool_choice=tool_choice,
         reasoning_effort=reasoning_effort,
     )
-    return stream_openai_completions(model, context, openai_options)
-
-
-class OpenAICompletionsAdapter:
-    """
-    OpenAI Completions API 适配器
-
-    实现 ApiAdapter Protocol，提供 stream 和 stream_simple 方法。
-    """
-
-    api = KnownApi.OPENAI_COMPLETIONS
-
-    def stream(
-        self,
-        model: Model,
-        context: Context,
-        options: Optional[OpenAICompletionsOptions] = None,
-    ) -> AssistantMessageEventStream:
-        """流式调用"""
-        return stream_openai_completions(model, context, options)
-
-    def stream_simple(
-        self,
-        model: Model,
-        context: Context,
-        options: Optional[SimpleStreamOptions] = None,
-    ) -> AssistantMessageEventStream:
-        """简化的流式调用"""
-        return stream_simple_openai_completions(model, context, options)
+    return stream(model, context, openai_options)

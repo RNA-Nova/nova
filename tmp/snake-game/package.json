@@ -1,0 +1,9 @@
+{
+  "name": "snake-game",
+  "version": "1.0.0",
+  "description": "经典贪吃蛇小游戏",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  }
+}

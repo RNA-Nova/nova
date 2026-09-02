@@ -69,7 +69,7 @@ asyncio.run(main())
 ## 事件订阅
 
 ```python
-def listener(event):
+def listener(event, signal=None):
     if event.type == "message_update":
         print(".", end="", flush=True)
     elif event.type == "tool_execution_end":

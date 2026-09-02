@@ -1,0 +1,33 @@
+[package]
+name = "nova-executor-execpolicy"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Codex exec policy: prefix-based Starlark rules for command decisions."
+
+[lib]
+name = "nova_executor_execpolicy"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "nova-executor-execpolicy"
+path = "src/main.rs"
+
+
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path"  }
+multimap = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+shlex = { workspace = true }
+starlark = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

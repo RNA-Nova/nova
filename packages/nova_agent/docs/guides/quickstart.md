@@ -45,7 +45,7 @@ async def main():
     agent.set_model(...)          # 设置 nova_ai Model
     agent.set_tools([EchoTool()])
 
-    agent.subscribe(lambda e: print(e.type))
+    agent.subscribe(lambda e, signal=None: print(e.type))
 
     await agent.prompt("请调用 echo 工具，参数 message=hello")
     print(agent.state.messages[-1])
@@ -56,7 +56,7 @@ asyncio.run(main())
 ## 事件订阅
 
 ```python
-def listener(event):
+def listener(event, signal=None):
     if event.type == "message_end":
         print(event.message)
 

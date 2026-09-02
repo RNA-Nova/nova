@@ -1,0 +1,19 @@
+# worker —— 全能力通用子代理（隔离上下文执行委派任务）。
+name: worker
+version: "1.0.0"
+description: General-purpose subagent with full capabilities, isolated context
+author: nova
+
+persona:
+  - ../backend/personas/subagents/worker.md
+
+# 显式列出基础工具集：不含 subagent（防止子代理无限递归派生），
+# 不含 todo（子代理会话是一次性的，清单状态无处消费）。
+tools:
+  - read
+  - write
+  - edit
+  - bash
+  - grep
+  - find
+  - ls

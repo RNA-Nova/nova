@@ -1,0 +1,19 @@
+[package]
+name = "nova-executor-file-system"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+
+
+[dependencies]
+bytes = { workspace = true }
+nova-executor-protocol-core = { path = "../executor-protocol-core"  }
+nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path"  }
+nova-executor-utils-path-uri = { path = "../executor-utils-path-uri"  }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+[lib]
+test = false
+doctest = false
