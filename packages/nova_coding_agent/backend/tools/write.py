@@ -10,12 +10,12 @@ from nova_harness.core.types.resources.tools import (
     ToolExecContext,
 )
 
-from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.file_queue import with_file_write_lock
 from nova_coding_agent.tools_common.operations import (
     WriteOperations,
     create_local_write_operations,
 )
+from nova_coding_agent.tools_common.path_utils import resolve_path
 
 
 class Tool:
@@ -47,16 +47,6 @@ class Tool:
     ):
         self._context = context
         self.operations = operations or create_local_write_operations()
-        self._remote_cache = None
-
-    def _resolve_operations(self) -> WriteOperations:
-        """执行期解析 operations（远程 executor 后端换远程 fs 层版）。"""
-        layer = backend_file_layer(self._context)
-        if layer is None:
-            return self.operations
-        if self._remote_cache is None or self._remote_cache[0] is not layer:
-            self._remote_cache = (layer, type(self.operations)(layer))
-        return self._remote_cache[1]
 
     async def execute(
         self,
@@ -100,8 +90,8 @@ class Tool:
                 is_error=True,
             )
 
-        path = resolve_backend_path(path, self._context)
-        operations = self._resolve_operations()
+        path = resolve_path(path, getattr(self._context, "cwd", None))
+        operations = self.operations
 
         def _throw_if_aborted() -> None:
             # 对齐 pi write.ts：abort 检查全部在写锁内逐步进行，锁持有到

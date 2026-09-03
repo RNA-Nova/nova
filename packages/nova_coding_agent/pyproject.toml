@@ -78,7 +78,6 @@ personas = [
 ]
 extensions = [
     "./backend/extensions/confirm_destructive.py",
-    "./backend/extensions/executor_switch.py",
     "./backend/extensions/interactive_shell.py",
     "./backend/extensions/permission_gate.py",
     "./backend/extensions/plan_mode.py",

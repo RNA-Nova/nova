@@ -15,16 +15,12 @@ from nova_harness.core.types.resources.tools import (
     ToolExecContext,
 )
 
-from nova_coding_agent.executor import (
-    backend_file_layer,
-    backend_process_runner,
-    resolve_backend_path,
-)
 from nova_coding_agent.tools_common.operations import (
     GrepOperations,
     GrepOptions,
     create_local_grep_operations,
 )
+from nova_coding_agent.tools_common.path_utils import resolve_path
 
 DEFAULT_LIMIT = 100
 
@@ -80,18 +76,6 @@ class Tool:
     ):
         self._context = context
         self.operations = operations or create_local_grep_operations()
-        self._remote_cache = None
-
-    def _resolve_operations(self) -> GrepOperations:
-        """执行期解析 operations（远程 executor 后端换远程 fs 层 +
-        远程 ProcessRunner 版）。"""
-        layer = backend_file_layer(self._context)
-        if layer is None:
-            return self.operations
-        if self._remote_cache is None or self._remote_cache[0] is not layer:
-            runner = backend_process_runner(self._context)
-            self._remote_cache = (layer, type(self.operations)(layer, runner))
-        return self._remote_cache[1]
 
     async def execute(
         self,
@@ -114,10 +98,10 @@ class Tool:
                 is_error=True,
             )
 
-        path = resolve_backend_path(params.get("path") or ".", self._context)
+        path = resolve_path(params.get("path") or ".", getattr(self._context, "cwd", None))
 
         try:
-            result = await self._resolve_operations().grep(
+            result = await self.operations.grep(
                 path,
                 GrepOptions(
                     pattern=pattern,

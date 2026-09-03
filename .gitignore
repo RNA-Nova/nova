@@ -147,3 +147,6 @@ pnpm-lock.yaml
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# 开发期临时产物（agent 试运行输出）
+tmp/

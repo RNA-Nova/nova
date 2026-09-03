@@ -1,19 +1,17 @@
 """文件系统层（FileSystemLayer）：六个 fs 工具 operations 的统一原语底。
 
-设计（executor 接入定案）：
+设计：
 
 - read/write/edit/ls/find/grep 六个工具的 operations 实现**参数化在本层
-  之上**——本地与远程是同一实现类，远程切换只是注入不同的 layer；
-- 全 async：远程实现是 WS 调用，本地实现经 ``asyncio.to_thread`` 挪出
-  事件循环（并行工具执行不冻结 loop，与 operations.py 的并发约定一致）；
-- 语义按工具真实用法收敛（不是 executor SDK 的照抄）：
+  之上**；
+- 全 async：本地实现经 ``asyncio.to_thread`` 挪出事件循环（并行工具执行
+  不冻结 loop，与 operations.py 的并发约定一致）；
+- 语义按工具真实用法收敛：
   ``metadata`` 不存在时回 ``FsStat(exists=False)`` 而非抛错；
   ``list_dir`` 对不存在/非目录抛 ``FileNotFoundError``/``NotADirectoryError``
-  （双实现同语义，工具侧按异常类型给文案）。
+  （工具侧按异常类型给文案）。
 
-实现：``LocalFileSystemLayer``（os/pathlib）；远程实现
-``ExecutorFileSystemLayer`` 在 ``nova_coding_agent/executor/fs_layer.py``
-（避免 tools_common → executor 的反向依赖）。
+实现：``LocalFileSystemLayer``（os/pathlib）。
 """
 
 from __future__ import annotations

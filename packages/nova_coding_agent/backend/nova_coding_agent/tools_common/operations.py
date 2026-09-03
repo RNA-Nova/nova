@@ -3,13 +3,11 @@
 与 TypeScript ``core/tools/{bash,read,write,edit,grep,find,ls}.ts`` 中的
 ``*Operations`` 接口对齐。
 
-**后端切换架构（executor 接入定案）**：六个 fs 工具的实现类全部参数化
-在 ``tools_common/fs_layer.FileSystemLayer`` 之上——本地与远程是同一
-实现类，``create_local_*_operations`` 缺省注入本地 layer；远程 executor
-后端时由工具执行期解析（``executor.backend_file_layer``）换注入
-``ExecutorFileSystemLayer``，实现体零分叉。grep/find 的本机二进制加速
-（fd/rg 子进程）归 layer 的 ``accelerates_search`` 裁决，便携引擎
-（walk + read + 正则/匹配）双后端共用。
+**架构**：六个 fs 工具的实现类全部参数化在
+``tools_common/fs_layer.FileSystemLayer`` 之上，
+``create_local_*_operations`` 缺省注入本地 layer。grep/find 的本机二进制
+加速（fd/rg 子进程）归 layer 的 ``accelerates_search`` 裁决，便携引擎
+（walk + read + 正则/匹配）兜底。
 
 并发约定：agent loop 的 parallel 模式靠 asyncio 并发驱动多个工具，任何
 阻塞调用都会冻结整个事件循环（其他工具的执行、on_update 流式推送、
@@ -649,7 +647,7 @@ def create_local_grep_operations(
 ) -> GrepOperations:
     """本地缺省：本机 layer + 本机 ProcessRunner（rg 三级解析）。"""
     if runner is None:
-        from nova_coding_agent.executor.process_runner import LocalProcessRunner
+        from nova_coding_agent.tools_common.process_runner import LocalProcessRunner
 
         runner = LocalProcessRunner()
     return LocalGrepOperations(fs, runner)
@@ -840,7 +838,7 @@ def create_local_find_operations(
 ) -> FindOperations:
     """本地缺省：本机 layer + 本机 ProcessRunner（fd/rg 三级解析）。"""
     if runner is None:
-        from nova_coding_agent.executor.process_runner import LocalProcessRunner
+        from nova_coding_agent.tools_common.process_runner import LocalProcessRunner
 
         runner = LocalProcessRunner()
     return LocalFindOperations(fs, runner)

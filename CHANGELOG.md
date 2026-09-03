@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [Unreleased]
+## [0.1.0] - 2026-09-03
+
+> 首个封版。说明：executor 相关（`nova_executor` / `nova-executor-py` 包与
+> bundle 的 executor 接入/`/executor` 切换扩展）已从本发布线移除——执行后端的
+> 演进在 main 分支独立进行中。本线为纯本地执行的框架 + 官方 bundle 形态。
 
 ### Added
 - **入站背压 + 事件循环滞后观测（连接化 P3 收官）**：每连接在飞 handler 上限（`max_inflight` 默认 256）——超限对请求立即回 `-32004 overloaded`（码位避让：-32001 已是 SESSION_NOT_FOUND）、对通知静默丢弃，读泵不再无界派生 task（codex `-32001` 对位，本地可信客户端场景下是防呆而非防攻击）；`RpcServer` 内置 **loop-lag 探针**（周期任务测漂移，超 100ms 打 stderr → `rpc-stderr.log`——单循环的三类卡顿源（CPU 占住/同步阻塞/队头阻塞）全部表现为"周期任务不准时"，一个探针把三类都变成可观测数据），包级 AGENTS.md 同步写入"RPC 循环线程三禁"纪律。
@@ -507,7 +511,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
   - **write**：`content` 缺参显式报错（此前静默写入空串）；
   - 删除 `is_path_traversal` 半透检查（挡正当的 `../sibling` 却放绝对路径，pi 不做限制）；`resolve_path` 支持 `~` 展开。
 
-## [0.1.0] - 2026-04-14
+### 早期雏形（2026-04，当时未封版）
 
 ### Added
 - nova_ai：LLM 统一抽象层、流式接口、模型注册表、内置厂商支持（OpenAI、Anthropic、Google、Volcengine）。

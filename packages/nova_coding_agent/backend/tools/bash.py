@@ -25,11 +25,6 @@ from nova_coding_agent.bash.engine import (
     BashOperations,
     create_local_bash_operations,
 )
-from nova_coding_agent.executor import (
-    ExecutorBashOperations,
-    get_backend_selection,
-    get_executor_manager,
-)
 from nova_coding_agent.tools_common.output_accumulator import (
     OutputAccumulator,
     OutputAccumulatorOptions,
@@ -44,14 +39,6 @@ from nova_coding_agent.tools_common.truncate import (
 MAX_TIMEOUT_MS = 2_147_483_647
 MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000
 BASH_UPDATE_THROTTLE_MS = 100
-
-
-def _executor_settings(context: ToolContext) -> Optional[Any]:
-    """读取 settings 的 executor 节（老视图无该方法时安全回退 None）。"""
-    getter = getattr(context.settings, "get_executor_settings", None)
-    if getter is None:
-        return None
-    return getter()
 
 
 def _resolve_timeout_seconds(timeout: Any) -> Tuple[Optional[float], Optional[str]]:
@@ -146,41 +133,18 @@ class Tool:
         # 构造期读取 settings（对齐 pi 装配期注入）：shell 路径与命令前缀。
         # 工具随资源 reload 重建，settings 变更在重建后生效。
         self._command_prefix = context.settings.get_shell_command_prefix()
-        # 本地后端仍是默认；executor 后端的构造在执行期（settings 可能热更）
+        # 本地后端是唯一执行面（executor 集成已从本线切除）
         self._local_operations = create_local_bash_operations(
             shell_path=context.settings.get_shell_path()
         )
-        self._executor_operations: Optional[ExecutorBashOperations] = None
-        self._executor_url: Optional[str] = None
-        self._executor_remote_cwd: Optional[str] = None
 
     def set_spawn_hook(self, hook: Optional[SpawnHook]) -> None:
         """注入外部 spawn hook（ToolsManager 聚合的扩展 hook）。"""
         self._spawn_hook = hook
 
     def _resolve_operations(self) -> BashOperations:
-        """执行期解析执行后端（设计定案 R3：工具直读真值，不经上下文）。
-
-        当前生效后端来自 runtime 模式格（/executor 切换翻转），缺省按
-        settings ``executor.default_backend``。本地为缺省零开销路径；
-        executor 后端按 url 构造一次复用。
-        """
-        selection = get_backend_selection(_executor_settings(self._context))
-        if selection.backend != "executor":
-            return self._local_operations
-        if (
-            self._executor_operations is None
-            or self._executor_url != selection.url
-            or self._executor_remote_cwd != selection.remote_cwd
-        ):
-            self._executor_operations = ExecutorBashOperations(
-                get_executor_manager(),
-                url=selection.url,
-                remote_cwd=selection.remote_cwd,
-            )
-            self._executor_url = selection.url
-            self._executor_remote_cwd = selection.remote_cwd
-        return self._executor_operations
+        """执行期解析执行后端（本地引擎——executor 集成已从本线切除）。"""
+        return self._local_operations
 
     async def execute(
         self,

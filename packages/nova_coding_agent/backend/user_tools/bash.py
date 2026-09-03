@@ -25,11 +25,6 @@ from nova_coding_agent.bash.engine import (
     create_local_bash_operations,
 )
 from nova_coding_agent.bash.message import BashExecutionMessage
-from nova_coding_agent.executor import (
-    ExecutorBashOperations,
-    get_backend_selection,
-    get_executor_manager,
-)
 
 
 def _result_field(result: Any, *names: str) -> Any:
@@ -97,22 +92,14 @@ class UserTool:
 
         operations: BashOperations = params.get("operations")
         if operations is None:
-            # 与 LLM bash 工具同一执行后端解析（设计定案 R3——直读 runtime 格）；
+            # 本地引擎是唯一执行面（executor 集成已从本线切除）；
             # 显式 params["operations"] 注入仍优先（调用方自定后端）
-            selection = get_backend_selection()
-            if selection.backend == "executor":
-                operations = ExecutorBashOperations(
-                    get_executor_manager(),
-                    url=selection.url,
-                    remote_cwd=selection.remote_cwd,
-                )
-            else:
-                operations = create_local_bash_operations(
-                    shell_path=shell_path,
-                    spawn_hook=(
-                        compose_spawn_hooks(spawn_hooks) if spawn_hooks else None
-                    ),
-                )
+            operations = create_local_bash_operations(
+                shell_path=shell_path,
+                spawn_hook=(
+                    compose_spawn_hooks(spawn_hooks) if spawn_hooks else None
+                ),
+            )
 
         def _emit(event_name: str, data: Dict[str, Any]) -> None:
             """进度事件发射（fire-and-forget）：异常/协程回调都不阻塞执行。"""

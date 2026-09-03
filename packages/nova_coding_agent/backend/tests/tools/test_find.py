@@ -249,7 +249,7 @@ def test_find_with_rg_tier(tmpdir):
 
 def test_find_three_tier_fallback_order(tmpdir, monkeypatch):
     """无 fd 有 rg 时 find 走 rg 层；皆无时走便携引擎。"""
-    import nova_coding_agent.executor.process_runner as runner_mod
+    import nova_coding_agent.tools_common.process_runner as runner_mod
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         LocalFindOperations,

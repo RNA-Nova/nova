@@ -19,7 +19,6 @@ from nova_harness.core.types.resources.tools import (
     ToolExecContext,
 )
 
-from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.edit_engine import (
     Edit,
     apply_edits_to_normalized_content,
@@ -35,6 +34,7 @@ from nova_coding_agent.tools_common.operations import (
     EditOperations,
     create_local_edit_operations,
 )
+from nova_coding_agent.tools_common.path_utils import resolve_path
 
 
 def _throw_if_aborted(signal: Optional[AbortSignal]) -> None:
@@ -140,16 +140,6 @@ class Tool:
     ):
         self._context = context
         self.operations = operations or create_local_edit_operations()
-        self._remote_cache = None
-
-    def _resolve_operations(self) -> EditOperations:
-        """执行期解析 operations（远程 executor 后端换远程 fs 层版）。"""
-        layer = backend_file_layer(self._context)
-        if layer is None:
-            return self.operations
-        if self._remote_cache is None or self._remote_cache[0] is not layer:
-            self._remote_cache = (layer, type(self.operations)(layer))
-        return self._remote_cache[1]
 
     async def execute(
         self,
@@ -186,8 +176,8 @@ class Tool:
                 is_error=True,
             )
 
-        path = resolve_backend_path(path, self._context)
-        operations = self._resolve_operations()
+        path = resolve_path(path, getattr(self._context, "cwd", None))
+        operations = self.operations
 
         try:
             async with with_file_write_lock(path):

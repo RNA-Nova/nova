@@ -13,12 +13,12 @@ from nova_harness.core.types.resources.tools import (
     ToolExecContext,
 )
 
-from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.image import process_image
 from nova_coding_agent.tools_common.operations import (
     ReadOperations,
     create_local_read_operations,
 )
+from nova_coding_agent.tools_common.path_utils import resolve_path
 from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     format_size,
@@ -67,16 +67,6 @@ class Tool:
     ):
         self._context = context
         self.operations = operations or create_local_read_operations()
-        self._remote_cache = None
-
-    def _resolve_operations(self) -> ReadOperations:
-        """执行期解析 operations（远程 executor 后端换远程 fs 层版）。"""
-        layer = backend_file_layer(self._context)
-        if layer is None:
-            return self.operations
-        if self._remote_cache is None or self._remote_cache[0] is not layer:
-            self._remote_cache = (layer, type(self.operations)(layer))
-        return self._remote_cache[1]
 
     def _non_vision_image_note(self, ctx: ToolExecContext) -> Optional[str]:
         """当前模型不支持图片输入时返回提示（对齐 pi ``getNonVisionImageNote``）。"""
@@ -112,8 +102,8 @@ class Tool:
                 is_error=True,
             )
 
-        path = resolve_backend_path(path, self._context)
-        operations = self._resolve_operations()
+        path = resolve_path(path, getattr(self._context, "cwd", None))
+        operations = self.operations
 
         if not await operations.exists(path):
             return AgentToolResult(

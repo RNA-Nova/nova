@@ -215,16 +215,30 @@ def test_grep_does_not_block_event_loop(tmpdir):
     """grep 执行期间事件循环必须保持响应（parallel 工具与流式更新不被冻结）。
 
     旧的同步 subprocess.run 实现会让 ticker 一次都跑不到（ticks == 0）。
+
+    强制便携引擎（runner 无 rg/fd）——本测试断言的是"执行期间 loop 在
+    yield"，不经子进程 spawn（macOS 多 event loop 下 asyncio 子进程在套件
+    上下文中有挂起的已知风险，与本断言无关）。
     """
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
     )
 
+    class _PortableOnlyRunner:
+        async def rg_path(self):
+            return None
+
+        async def fd_path(self):
+            return None
+
+        async def spawn(self, argv, cwd):  # pragma: no cover - 不应到达
+            raise AssertionError("便携引擎路径不应 spawn 子进程")
+
     _populate_files(tmpdir)
 
     async def scenario():
-        ops = create_local_grep_operations()
+        ops = create_local_grep_operations(runner=_PortableOnlyRunner())
         ticks = 0
         stop = False
 
