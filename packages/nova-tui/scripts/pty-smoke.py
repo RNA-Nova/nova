@@ -177,6 +177,8 @@ def main() -> int:
 
     tui = TuiSession(args.cwd)
     tui._drain(STARTUP_WAIT)
+    # 首次配置引导（无默认模型时弹出）会让路吞输入——先 ESC 关掉
+    tui.send("\x1b", 1.0)
 
     failures: list[tuple[str, str]] = []
     for case in cases:
