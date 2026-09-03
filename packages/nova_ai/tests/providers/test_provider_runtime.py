@@ -209,7 +209,7 @@ class TestVolcengineProvider:
     def test_get_volcengine_model(self):
         from nova_ai.providers.volcengine import get_volcengine_model
 
-        m = get_volcengine_model("deepseek-v3-2-251201")
+        m = get_volcengine_model("deepseek-v4-flash-260425")
         assert m is not None
         assert m.provider == "volcengine"
 

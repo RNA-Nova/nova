@@ -564,14 +564,14 @@ async def _refresh(
 
 
 async def _to_auth(credential: OAuthCredential) -> ModelAuth:
-    return ModelAuth(apiKey=credential.access)
+    return ModelAuth(api_key=credential.access)
 
 
 openai_codex_oauth = OAuthAuth(
     name="OpenAI (ChatGPT Plus/Pro)",
     login=_login,
     refresh=_refresh,
-    toAuth=_to_auth,
+    to_auth=_to_auth,
 )
 
 

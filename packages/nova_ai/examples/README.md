@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- Python >= 3.9
+- Python >= 3.12, < 3.14
 - 已安装 `nova_ai`（pixi workspace 或 `pip install -e packages/nova_ai`）
 
 ## 示例列表

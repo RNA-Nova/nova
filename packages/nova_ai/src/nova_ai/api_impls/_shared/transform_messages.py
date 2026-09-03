@@ -7,10 +7,10 @@ import time
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional, Set
 
-from ..types.content import ContentUnion, TextContent, ToolCall
-from ..types.enums import StopReason
-from ..types.messages import AssistantMessage, Message, ToolResultMessage
-from ..types.model import Model
+from ...types.content import ContentUnion, TextContent, ToolCall
+from ...types.enums import StopReason
+from ...types.messages import AssistantMessage, Message, ToolResultMessage
+from ...types.model import Model
 
 NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)"
 NON_VISION_TOOL_IMAGE_PLACEHOLDER = (

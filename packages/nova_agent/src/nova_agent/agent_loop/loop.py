@@ -9,16 +9,15 @@ from nova_ai import (
     AbortSignal,
     AssistantMessage,
     Context,
-    builtin_models,
     to_thinking_level,
 )
 
+from ..stream_fn import builtin_fallback_stream_fn, get_default_stream_fn
 from ..types import (
     AgentContext,
     AgentEndEvent,
     AgentEventSink,
     AgentLoopConfig,
-    AgentLoopTurnUpdate,
     AgentMessage,
     AgentStartEvent,
     MessageEndEvent,
@@ -102,7 +101,6 @@ async def _run_loop(
     config = initial_config
     first_turn = True
     turn_index = 0
-    pending_messages: List[AgentMessage] = []
     pending_messages = await invoke_hook(config.get_steering_messages, default=[]) or []
 
     while True:
@@ -259,7 +257,7 @@ async def _stream_assistant_response(
         tools=context.tools or [],
     )
 
-    stream_func = stream_fn or builtin_models().stream_simple
+    stream_func = stream_fn or get_default_stream_fn() or builtin_fallback_stream_fn()
 
     # Resolve API key (important for expiring tokens)
     resolved_api_key = config.stream_options.api_key

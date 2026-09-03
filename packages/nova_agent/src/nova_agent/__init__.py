@@ -13,6 +13,7 @@ from .agent_loop import (
     run_agent_loop,
     run_agent_loop_continue,
 )
+from .stream_fn import get_default_stream_fn, set_default_stream_fn
 from .types import (  # 事件类型; 核心类型; 类型别名与枚举; 钩子上下文与结果
     AfterToolCallContext,
     AfterToolCallResult,
@@ -58,6 +59,8 @@ __version__ = "0.1.0"
 __all__ = [
     # 主要类
     "Agent",
+    "set_default_stream_fn",
+    "get_default_stream_fn",
     "AgentEventStream",
     # 核心函数
     "agent_loop",

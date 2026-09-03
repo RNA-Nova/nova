@@ -25,10 +25,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Union
 from nova_ai import Model, Provider, builtin_models, create_models
 from nova_ai.auth.resolve import AuthResolutionOverrides
 from nova_ai.gateway.store import InMemoryModelsStore
+from nova_ai.providers.all import get_builtin_model_data_generated_at
+from nova_ai.providers.remote_catalog import with_remote_catalog
 from nova_ai.signal import AbortSignal
 from nova_ai.types.auth import AuthCheck, AuthResult, AuthType, CredentialInfo
 from nova_ai.types.messages import AssistantMessage, Context
 from nova_ai.types.stream_options import SimpleStreamOptions, StreamOptions
+
 from nova_harness.core.config.auth.storage import AuthStorage
 from nova_harness.core.config.defaults import (
     MODELS_FILE_NAME,
@@ -42,6 +45,7 @@ from nova_harness.core.config.resolve import (
     is_config_value_configured,
     resolve_headers_or_throw,
 )
+from nova_harness.core.utils.json import strip_json_comments
 from nova_harness.core.model.composer import (
     compose_provider,
     validate_extension_provider,
@@ -53,7 +57,9 @@ from nova_harness.core.types.model import (
     ModelsConfig,
     ProviderConfigInput,
 )
-from nova_harness.core.utils.json import strip_json_comments
+
+# 无远程数据源的内置 provider（订阅制单模型，目录静态）
+_STATIC_CATALOG_PROVIDERS = {"kimi-coding"}
 
 
 class ModelRuntime:
@@ -80,9 +86,18 @@ class ModelRuntime:
         self.load_error: Optional[str] = None
 
         self._config: Optional[ModelsConfig] = None
-        self._builtins: Dict[str, Provider] = {
-            p.id: p for p in builtin_models().get_providers()
-        }
+        # 内置 provider 叠加远程目录物化包装（对齐 TS withRemoteCatalog）：
+        # 基线 = 包内生成种子；运行时刷新物化到 ~/.nova/agent/models-store.json。
+        # kimi-coding 无远程数据源（订阅制单模型），保持静态。
+        self._builtins: Dict[str, Provider] = {}
+        for _provider in builtin_models().get_providers():
+            self._builtins[_provider.id] = (
+                _provider
+                if _provider.id in _STATIC_CATALOG_PROVIDERS
+                else with_remote_catalog(
+                    _provider, get_builtin_model_data_generated_at()
+                )
+            )
         self._extension_providers: Dict[str, ProviderConfigInput] = {}
         # 代码级配置（无法 JSON 化），与纯数据配置分开存储
         self._extension_stream_fns: Dict[str, Callable[..., Any]] = {}
@@ -443,7 +458,7 @@ class ModelRuntime:
         """
         overrides = None
         if api_key is not None or env is not None:
-            overrides = AuthResolutionOverrides(apiKey=api_key, env=env)
+            overrides = AuthResolutionOverrides(api_key=api_key, env=env)
         return await self._models.get_auth(provider_or_model, overrides)
 
     async def get_api_key(self, model: Model) -> Optional[str]:
@@ -451,14 +466,14 @@ class ModelRuntime:
         result = await self._models.get_auth_for_model(model)
         if result is None:
             return None
-        return result.auth.get("apiKey")
+        return result.auth.get("api_key")
 
     async def get_api_key_for_provider(self, provider: str) -> Optional[str]:
         """解析 provider 的 API key（含 OAuth access token）。"""
         result = await self._models.get_auth(provider)
         if result is None:
             return None
-        return result.auth.get("apiKey")
+        return result.auth.get("api_key")
 
     async def check_auth(self, provider_id: str) -> Optional[AuthCheck]:
         """精确检查 provider 鉴权配置（不触发网络刷新）。"""

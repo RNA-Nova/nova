@@ -4,8 +4,11 @@ Hook 上下文与结果类型定义。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, List, Optional, Union
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, List, Optional, Union
+
+if TYPE_CHECKING:
+    from .context import AgentContext
 
 from nova_ai import (
     AssistantMessage,
@@ -22,10 +25,16 @@ from .tool import AgentToolResult
 
 @dataclass(frozen=True)
 class BeforeToolCallResult:
-    """Result returned from beforeToolCall."""
+    """Result returned from beforeToolCall.
+
+    ``block=True`` 拦截执行并产出错误结果；``terminate=True`` 进一步要求
+    拦截后**提前终止整批**（错误结果带 ``terminate=True``，经批终止判定
+    生效）——对齐 TS ``BeforeToolCallResult.terminate``。
+    """
 
     block: Optional[bool] = None
     reason: Optional[str] = None
+    terminate: Optional[bool] = None
 
 
 @dataclass(frozen=True)

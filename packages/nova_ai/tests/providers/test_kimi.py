@@ -40,7 +40,7 @@ class TestMoonshotaiProvider:
     def test_provider_auth_is_api_key(self):
         provider = moonshotai_provider()
         assert provider.auth is not None
-        assert provider.auth.apiKey is not None
+        assert provider.auth.api_key is not None
         assert provider.auth.oauth is None
 
     def test_models_registered(self):
@@ -62,7 +62,7 @@ class TestMoonshotaiCnProvider:
     def test_provider_auth_is_api_key(self):
         provider = moonshotai_cn_provider()
         assert provider.auth is not None
-        assert provider.auth.apiKey is not None
+        assert provider.auth.api_key is not None
         assert provider.auth.oauth is None
 
     def test_models_registered(self):
@@ -84,7 +84,7 @@ class TestKimiCodingProvider:
     def test_provider_auth_has_both_api_key_and_oauth(self):
         provider = kimi_coding_provider()
         assert provider.auth is not None
-        assert provider.auth.apiKey is not None
+        assert provider.auth.api_key is not None
         assert provider.auth.oauth is not None
         assert provider.auth.oauth.name == "Kimi (Moonshot AI)"
 

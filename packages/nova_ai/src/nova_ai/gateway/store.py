@@ -14,6 +14,11 @@ class ModelsStoreEntry(NovaBaseModel):
 
     models: List[Model]
     checked_at: Optional[int] = None
+    # 远程目录 Last-Modified 头的 Unix 毫秒时间戳（对齐 TS lastModified）。
+    # 与基线 generatedAt 做新鲜度竞速：早于基线的 overlay 被忽略。
+    last_modified: Optional[int] = None
+    # 远程目录 ETag 原样存储（含引号），条件请求时回传 If-None-Match
+    etag: Optional[str] = None
 
 
 class ModelsStore(Protocol):

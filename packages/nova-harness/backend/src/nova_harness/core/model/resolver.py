@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import ModelThinkingLevel
 from nova_ai import Model, clamp_thinking_level
+
 from nova_harness.core.config.defaults import DEFAULT_THINKING_LEVEL
 from nova_harness.core.types.session.model import ScopedModelConfig
 

@@ -7,6 +7,8 @@ from typing import Any, List, Optional
 
 import pytest
 
+# 注意：patch 目标是流式实现子模块（create_client 的消费方绑定处）
+import nova_ai.api_impls.openai_completions._stream as stream_module
 from nova_ai.api_impls import openai_completions
 from nova_ai.api_impls.openai_completions import (
     OpenAICompletionsOptions,
@@ -178,7 +180,7 @@ async def _collect(stream):
 
 def _setup_fake_client(monkeypatch, chunks):
     monkeypatch.setattr(
-        openai_completions, "create_client", lambda *a, **k: _FakeClient(chunks)
+        stream_module, "create_client", lambda *a, **k: _FakeClient(chunks)
     )
 
 
@@ -275,7 +277,11 @@ class TestStreamToolCalls:
 class TestStreamReasoningDetails:
     @pytest.mark.asyncio
     async def test_reasoning_details_pending(self, monkeypatch):
-        """reasoning_details 在 toolCall 之前到达：pending 后补。"""
+        """reasoning_details 在 toolCall 之前到达：归档进 thinking 块签名。
+
+        （终态契约：details 拼接后存 thinking_signature 的 JSON 数组，
+        不再挂载 toolCall.thought_signature——跨模型重放随块保留。）
+        """
         detail = {"type": "reasoning.encrypted", "id": "tc1", "data": "secret"}
         chunks = [
             _chunk(reasoning_details=[detail]),  # 先到
@@ -293,13 +299,20 @@ class TestStreamReasoningDetails:
         )
         events = await _collect(event_stream)
 
+        thinking_ends = [e for e in events if isinstance(e, ThinkingEndEvent)]
+        assert len(thinking_ends) == 1
+        thinking_blocks = [
+            b for b in thinking_ends[0].partial.content if b.type == "thinking"
+        ]
+        archived = json.loads(thinking_blocks[0].thinking_signature)
+        assert archived == [detail]
         ends = [e for e in events if isinstance(e, ToolCallEndEvent)]
         assert len(ends) == 1
-        assert ends[0].tool_call.thought_signature == json.dumps(detail)
+        assert not ends[0].tool_call.thought_signature
 
     @pytest.mark.asyncio
     async def test_reasoning_details_direct(self, monkeypatch):
-        """reasoning_details 在 toolCall 之后到达：直接应用。"""
+        """reasoning_details 在 toolCall 之后到达：同样归档进 thinking 签名。"""
         detail = {"type": "reasoning.encrypted", "id": "tc1", "data": "secret"}
         chunks = [
             _chunk(tool_calls=[_tool_call_delta(index=0, id="tc1", name="search")]),
@@ -315,9 +328,16 @@ class TestStreamReasoningDetails:
         )
         events = await _collect(event_stream)
 
+        thinking_ends = [e for e in events if isinstance(e, ThinkingEndEvent)]
+        assert len(thinking_ends) == 1
+        thinking_blocks = [
+            b for b in thinking_ends[0].partial.content if b.type == "thinking"
+        ]
+        archived = json.loads(thinking_blocks[0].thinking_signature)
+        assert archived == [detail]
         ends = [e for e in events if isinstance(e, ToolCallEndEvent)]
         assert len(ends) == 1
-        assert ends[0].tool_call.thought_signature == json.dumps(detail)
+        assert not ends[0].tool_call.thought_signature
 
 
 class TestStreamUsage:
@@ -446,7 +466,7 @@ class TestStreamAbort:
                 )
             )
         )
-        monkeypatch.setattr(openai_completions, "create_client", lambda *a, **k: fake)
+        monkeypatch.setattr(stream_module, "create_client", lambda *a, **k: fake)
 
         controller = AbortController()
         options = OpenAICompletionsOptions(api_key="sk-test", signal=controller.signal)
@@ -662,7 +682,7 @@ class TestEventPairingGuarantee:
                 )
             )
         )
-        monkeypatch.setattr(openai_completions, "create_client", lambda *a, **k: fake)
+        monkeypatch.setattr(stream_module, "create_client", lambda *a, **k: fake)
 
         event_stream = stream(
             _model(),
@@ -679,7 +699,7 @@ class TestEventPairingGuarantee:
     async def test_early_request_failure_no_blocks(self, monkeypatch):
         """请求阶段就失败（无内容块）：只产出一个 error 事件，不崩。"""
         monkeypatch.setattr(
-            openai_completions,
+            stream_module,
             "create_client",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("auth failed")),
         )
@@ -735,7 +755,7 @@ class TestEventPairingGuarantee:
                 )
             )
         )
-        monkeypatch.setattr(openai_completions, "create_client", lambda *a, **k: fake)
+        monkeypatch.setattr(stream_module, "create_client", lambda *a, **k: fake)
 
         options = OpenAICompletionsOptions(api_key="sk-test", signal=controller.signal)
         event_stream = stream(

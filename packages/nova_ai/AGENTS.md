@@ -10,7 +10,7 @@
 
 - **源码包名**：`nova_ai`
 - **版本**：`0.1.0`
-- **目标语言**：Python `>=3.9,<3.13`
+- **目标语言**：Python `>=3.12,<3.14`
 - **项目语言**：代码注释与文档主要使用**中文**
 - **License**：MIT
 - **作者**：Liujinming
@@ -21,16 +21,16 @@
 
 | 层级 | 技术 |
 |------|------|
-| 语言 | Python `>=3.9,<3.13` |
+| 语言 | Python `>=3.12,<3.14` |
 | 包管理器 | **pixi**（monorepo 根目录统一 workspace；Poetry 配置保留为兼容） |
-| 格式化 | `black`（目标语法版本 `py311`） |
+| 格式化 | `black`（目标语法版本 `py312`） |
 | Import 排序 | `isort`（`profile = "black"`） |
 | 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pytest`、`pytest-asyncio` |
 | 关键运行时依赖 | `openai >= 1.109.1`、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx` |
 
-**未使用** Mypy、Tox、Makefile、Docker 或 CI/CD。
+**未使用** Mypy、Tox、Makefile、Docker。monorepo 根有 GitHub Actions（`.github/workflows/ci.yml`），当前仅覆盖 nova_executor / nova-executor-client，不含本包。
 
 ---
 
@@ -138,7 +138,7 @@ pixi run -e dev isort src tests
 ## 代码风格指南
 
 - **类名**：`PascalCase`；**函数 / 变量**：`snake_case`；**常量**：`UPPER_CASE`
-- **导入排序**：`isort`（`profile = "black"`）；**格式化**：`black`（`py311`）
+- **导入排序**：`isort`（`profile = "black"`）；**格式化**：`black`（`py312`）
 - **注释与文档字符串**：以**中文**为主
 - **数据建模**：见上文"序列化层约定"与根 `AGENTS.md` 的"数据建模"决策顺序
 - **与 TS 对齐**：本包结构/行为对齐 `pi/packages/ai`；修改语义前先看 TS 侧实现，注释中标注"对齐 TS xxx"

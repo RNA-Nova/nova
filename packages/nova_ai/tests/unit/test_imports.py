@@ -95,9 +95,8 @@ class TestRootImports:
             [
                 "get_env_api_key",
                 "parse_streaming_json",
+                "StreamingJsonParser",
                 "sanitize_surrogates",
-                "build_base_options",
-                "transform_messages",
                 "calculate_cost",
                 "clamp_thinking_level",
                 "get_supported_thinking_levels",
@@ -106,6 +105,18 @@ class TestRootImports:
             ],
         )
 
-    def test_providers_imports(self):
+    def test_api_impls_shared_imports(self):
+        """实现层共享件的家：消息转换 / streamSimple 选项（utils 去混层后）。"""
+        self._assert_can_import(
+            "nova_ai.api_impls._shared",
+            [
+                "build_base_options",
+                "transform_messages",
+                "clamp_max_tokens_to_context",
+                "resolve_cache_retention",
+            ],
+        )
+
+    def test_volcengine_imports(self):
         mod = importlib.import_module("nova_ai.providers.volcengine")
         assert hasattr(mod, "VOLCENGINE_MODELS")

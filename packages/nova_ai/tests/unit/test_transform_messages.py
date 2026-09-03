@@ -1,5 +1,6 @@
 """transform_messages 测试（对齐 TS transformMessages）。"""
 
+from nova_ai.api_impls._shared.transform_messages import transform_messages
 from nova_ai.types import (
     AssistantMessage,
     ImageContent,
@@ -12,7 +13,6 @@ from nova_ai.types import (
     ToolResultMessage,
     UserMessage,
 )
-from nova_ai.utils.message_transformer import transform_messages
 
 
 def _model(

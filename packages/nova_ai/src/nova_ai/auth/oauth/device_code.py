@@ -6,6 +6,7 @@
 
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Literal, Optional, TypeVar
 
 from ...signal import AbortSignal
@@ -15,24 +16,18 @@ T = TypeVar("T")
 DeviceCodePollStatus = Literal["pending", "slow_down", "failed", "complete"]
 
 
+@dataclass(frozen=True, kw_only=True)
 class DeviceCodePollResult(Generic[T]):
-    """单次轮询结果。"""
+    """单次轮询结果（不可变值对象——规则 5）。"""
 
-    def __init__(
-        self,
-        status: DeviceCodePollStatus,
-        value: Optional[T] = None,
-        message: Optional[str] = None,
-        intervalSeconds: Optional[float] = None,
-    ):
-        self.status = status
-        self.value = value
-        self.message = message
-        self.intervalSeconds = intervalSeconds
+    status: DeviceCodePollStatus
+    value: Optional[T] = None
+    message: Optional[str] = None
+    intervalSeconds: Optional[float] = None
 
 
 class DeviceCodePollOptions(Generic[T]):
-    """轮询配置。"""
+    """轮询配置（持 ``poll`` Callable 与 ``signal``——规则 4，不冻结/不进 Pydantic）。"""
 
     def __init__(
         self,
@@ -78,7 +73,11 @@ async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
         signal.add_event_listener(_on_abort)
 
     try:
-        await asyncio.wait_for(done_event.wait(), timeout=ms / 1000)
+        try:
+            async with asyncio.timeout(ms / 1000):
+                await done_event.wait()
+        except TimeoutError:
+            pass
         if _is_aborted(signal):
             raise asyncio.CancelledError(_CANCEL_MESSAGE)
     except asyncio.TimeoutError:

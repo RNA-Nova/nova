@@ -25,9 +25,9 @@ class ProviderResponse:
     headers: Dict[str, str]
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class ThinkingBudgets:
-    """各思考级别的 token 预算"""
+    """各思考级别的 token 预算（不可变值对象——AGENTS.md 数据建模规则 5）"""
 
     minimal: Optional[int] = None
     low: Optional[int] = None
@@ -58,10 +58,13 @@ class StreamOptions:
     max_retries: Optional[int] = None
     # 单次重试等待上限（毫秒）。用于封顶服务器通过 Retry-After
     # 等信号要求的重试等待时长；约定默认 60000（60s），0 表示不封顶。
-    # 仅供实现了自有重试循环的 provider 消费（如未来的
-    # codex-responses 移植）；当前 openai-completions provider
-    # 的重试由 OpenAI SDK 内部管理，不读取此字段。
+    # 由 openai-completions 的 retry_provider_request 消费——SDK 内建
+    # 重试不可被 abort 打断，请求层重试已归 _shared/retry.py 接管。
     max_retry_delay_ms: Optional[int] = None
+
+    # 采样参数透传（合并进请求体顶层，自定义键覆盖命名请求字段；
+    # 对齐 TS samplingParams）
+    sampling_params: Optional[Dict[str, Any]] = None
 
     # 运行时回调/信号，不参与任何序列化
     signal: Optional[AbortSignal] = None

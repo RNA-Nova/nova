@@ -9,18 +9,15 @@ import dataclasses
 
 import pytest
 from helpers import EchoTool, SlowTool
-from nova_ai import Model, SimpleStreamOptions, UserMessage
-
 from nova_agent import (
-    AgentEndEvent,
     AgentLoopConfig,
     AgentStartEvent,
     AgentState,
     BeforeToolCallResult,
     MessageStartEvent,
-    TurnEndEvent,
 )
 from nova_agent.types.tool_execution import ExecutedToolCallBatch
+from nova_ai import SimpleStreamOptions, UserMessage
 
 
 def test_agent_event_is_frozen():

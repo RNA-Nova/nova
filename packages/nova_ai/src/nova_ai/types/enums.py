@@ -3,7 +3,7 @@
 """
 
 from enum import Enum
-from typing import Dict, Optional, Union
+from typing import Literal, Optional, TypedDict, Union
 
 
 class KnownApi(str, Enum):
@@ -65,6 +65,7 @@ ProviderId = Union[KnownProvider, str]
 class StopReason(str, Enum):
     """停止原因"""
 
+    PENDING = "pending"  # 尚未收到 finish_reason（流中瞬态初值）
     STOP = "stop"  # 正常结束
     LENGTH = "length"  # 达到长度限制
     TOOL_USE = "toolUse"  # 触发工具调用
@@ -136,8 +137,25 @@ class ThinkingFormat(str, Enum):
     ANT_LING = "ant-ling"  # 仅当级别有显式映射时发送 reasoning: { effort }
     STRING_THINKING = "string-thinking"  # 顶层 thinking 字符串参数
     CHAT_TEMPLATE = "chat-template"  # 由 chat_template_kwargs 配置驱动（$var 变量替换）
+    BASETEN = "baseten"  # 使用 chat_template_args（Record 形态）+ reasoning_effort
 
 
-# 思考级别映射：将 pi 思考级别映射到提供商/模型特定值
-# 缺失的键使用提供商默认值，null 表示该级别不受支持
-ThinkingLevelMap = Dict[str, Optional[str]]
+class ThinkingLevelMap(TypedDict, total=False):
+    """思考级别映射：将 pi 思考级别映射到提供商/模型特定值（规则 10 声明）。
+
+    缺键 = 使用提供商默认值；``None`` = 该级别不受支持。
+    """
+
+    off: Optional[str]
+    minimal: Optional[str]
+    low: Optional[str]
+    medium: Optional[str]
+    high: Optional[str]
+    xhigh: Optional[str]
+    max: Optional[str]
+
+# 顶层思考预算字段名（vLLM / Qwen-DashScope+SGLang / llama.cpp；
+# 对齐 TS ``ThinkingTokenBudgetField``）
+ThinkingTokenBudgetField = Literal[
+    "thinking_token_budget", "thinking_budget", "thinking_budget_tokens"
+]

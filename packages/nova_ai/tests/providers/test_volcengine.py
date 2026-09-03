@@ -12,29 +12,17 @@ class TestVolcengineModels:
     """Volcengine 模型数据测试"""
 
     def test_models_exist(self):
-        assert len(VOLCENGINE_MODELS) == 3
-        assert "deepseek-v3-2-251201" in VOLCENGINE_MODELS
-        assert "deepseek-v4-flash-260425" in VOLCENGINE_MODELS
+        # 生成目录（scripts/generate_models.py）：models.dev 在售 + 钉住的 260425 对
+        assert len(VOLCENGINE_MODELS) == 13
+        assert "deepseek-v3-2-251201" not in VOLCENGINE_MODELS  # 已下线
+        assert (
+            "doubao-seed-1-6-vision-250815" not in VOLCENGINE_MODELS
+        )  # Retiring，被过滤
+        assert "deepseek-v4-flash-260425" in VOLCENGINE_MODELS  # 钉住
         assert "deepseek-v4-pro-260425" in VOLCENGINE_MODELS
-
-    def test_deepseek_v3_2_fields(self):
-        m = VOLCENGINE_MODELS["deepseek-v3-2-251201"]
-        assert m.id == "deepseek-v3-2-251201"
-        assert m.name == "Deepseek-v3-2"
-        assert m.reasoning is True
-        assert m.input_types == ["text"]
-        assert m.context_window == 131072
-        assert m.max_tokens == 32768
-        assert m.cost.input == 2.0
-        assert m.thinking_level_map == {
-            "minimal": None,
-            "low": None,
-            "medium": None,
-            "high": "high",
-            "max": "max",
-        }
-        assert m.compat is not None
-        assert m.compat.thinking_format == "deepseek"
+        assert (
+            "deepseek-v4-flash-ga-260731" in VOLCENGINE_MODELS
+        )  # 新 GA 版（models.dev）
 
     def test_deepseek_v4_flash_fields(self):
         m = VOLCENGINE_MODELS["deepseek-v4-flash-260425"]
@@ -54,8 +42,8 @@ class TestVolcengineModels:
         assert m.cost.output == 24
 
     def test_get_volcengine_model_success(self):
-        m = get_volcengine_model("deepseek-v3-2-251201")
-        assert m.id == "deepseek-v3-2-251201"
+        m = get_volcengine_model("deepseek-v4-flash-260425")
+        assert m.id == "deepseek-v4-flash-260425"
 
     def test_get_volcengine_model_not_found(self):
         with pytest.raises(KeyError):
@@ -63,8 +51,8 @@ class TestVolcengineModels:
 
     def test_list_volcengine_models(self):
         models = list_volcengine_models()
-        assert len(models) == 3
-        assert "deepseek-v3-2-251201" in models
+        assert len(models) == 13
+        assert "deepseek-v4-flash-260425" in models
 
     def test_all_models_have_required_fields(self):
         """所有模型都有必需的字段"""

@@ -124,14 +124,14 @@ def test_model_definition_with_compat():
 def test_settings_with_nested_objects():
     """Settings 嵌套子模型可正常序列化。"""
     settings = Settings(
-        default_model="deepseek-v3-2-251201",
+        default_model="deepseek-v4-flash-260425",
         default_thinking_level=ModelThinkingLevel.HIGH,
         compaction=CompactionSettings(enabled=True),
         retry=RetrySettings(max_retries=5),
     )
     data = settings.model_dump()
     restored = Settings.model_validate(data)
-    assert restored.default_model == "deepseek-v3-2-251201"
+    assert restored.default_model == "deepseek-v4-flash-260425"
     assert restored.default_thinking_level == ModelThinkingLevel.HIGH
     assert restored.compaction.enabled is True
     assert restored.retry.max_retries == 5
@@ -150,11 +150,11 @@ def test_models_config_roundtrip():
         providers={
             "volcengine": ProviderConfig(
                 base_url="https://ark.cn-beijing.volces.com/api/v3/",
-                models=[ModelDefinition(id="deepseek-v3-2-251201", name="DeepSeek")],
+                models=[ModelDefinition(id="deepseek-v4-flash-260425", name="DeepSeek")],
             )
         }
     )
     data = config.model_dump()
     restored = ModelsConfig.model_validate(data)
     assert "volcengine" in restored.providers
-    assert restored.providers["volcengine"].models[0].id == "deepseek-v3-2-251201"
+    assert restored.providers["volcengine"].models[0].id == "deepseek-v4-flash-260425"

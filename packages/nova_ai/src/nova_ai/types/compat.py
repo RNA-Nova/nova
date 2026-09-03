@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import ConfigDict
 
 from .base_model import NovaBaseModel
-from .enums import ThinkingFormat
+from .enums import ThinkingFormat, ThinkingTokenBudgetField
 
 SessionAffinityFormat = Literal["openai", "openai-nosession", "openrouter"]
 DeferredToolsMode = Literal["kimi"]
@@ -63,6 +63,19 @@ class OpenAICompletionsCompat(NovaBaseModel):
 
     # 是否支持 `stream_options: { include_usage: true }` 用于流式响应中的token使用统计。默认：true
     supports_usage_in_streaming: Optional[bool] = None
+
+    # 是否保证流式响应携带 finish_reason（False 时无 finish 也按内容推断收尾）
+    supports_finish_reason: Optional[bool] = None
+
+    # 顶层思考 token 预算字段（vLLM / Qwen-SGLang / llama.cpp 等共享 max_tokens
+    # 的端点用；与 thinking_token_budget_field 二选一）
+    supports_thinking_token_budget: Optional[bool] = None
+
+    # 显式指定思考预算字段名（优先于 supports_thinking_token_budget 的默认值）
+    thinking_token_budget_field: Optional[ThinkingTokenBudgetField] = None
+
+    # thinking_format 为 "baseten" 时发送的 chat_template_args（字面量或 $var 引用）
+    chat_template_args: Optional[Dict[str, Any]] = None
 
     # 用于max tokens的字段名。默认：基于URL自动检测
     max_tokens_field: Optional[Literal["max_completion_tokens", "max_tokens"]] = None

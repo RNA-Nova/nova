@@ -62,7 +62,10 @@ export interface AssistantMessage {
   provider: "amazon-bedrock" | "anthropic" | "google" | "google-gemini-cli" | "google-antigravity" | "google-vertex" | "openai" | "azure-openai-responses" | "openai-codex" | "github-copilot" | "xai" | "groq" | "cerebras" | "openrouter" | "vercel-ai-gateway" | "zai" | "zai-coding-cn" | "mistral" | "minimax" | "minimax-cn" | "huggingface" | "opencode" | "opencode-go" | "nvidia" | "moonshotai" | "moonshotai-cn" | "kimi-coding" | "volcengine" | string;
   model: string;
   usage: Usage;
-  stopReason: "stop" | "length" | "toolUse" | "error" | "aborted";
+  stopReason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+  rawStopReason: string | null;
+  endTurn: boolean | null;
+  deferred: boolean | null;
   errorMessage: string | null;
   responseId: string | null;
   responseModel: string | null;
@@ -303,7 +306,7 @@ export interface DeleteSessionResult {
 
 export interface DoneEvent {
   type: "done";
-  reason: "stop" | "length" | "toolUse" | "error" | "aborted";
+  reason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
   message: AssistantMessage;
 }
 
@@ -1071,7 +1074,7 @@ export interface ToolResultMessage {
   toolCallId: string;
   toolName: string;
   content: (TextContent | ImageContent)[];
-  details: Record<string, unknown> | null;
+  details: unknown | null;
   isError: boolean;
   addedToolNames: string[] | null;
   timestamp: number;

@@ -11,10 +11,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 packages = [
@@ -42,8 +40,19 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 target-version = ['py312']
+# 生成物由 scripts/generate_models.py 产出，格式以生成器为准——排除出 black/isort
+extend-exclude = 'src/nova_ai/(models_generated\.py|providers/data|providers/(kimi_coding|moonshotai|moonshotai_cn|volcengine)/models\.py)'
 
 [tool.isort]
+skip_gitignore = false
+extend_skip = [
+    "src/nova_ai/models_generated.py",
+    "src/nova_ai/providers/data",
+    "src/nova_ai/providers/kimi_coding/models.py",
+    "src/nova_ai/providers/moonshotai/models.py",
+    "src/nova_ai/providers/moonshotai_cn/models.py",
+    "src/nova_ai/providers/volcengine/models.py",
+]
 profile = "black"
 multi_line_output = 3
 include_trailing_comma = true

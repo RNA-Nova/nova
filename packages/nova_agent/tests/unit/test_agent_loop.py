@@ -15,7 +15,7 @@ nova_agent 核心循环单元测试
 
 import asyncio
 import time
-from typing import Any, List
+from typing import List
 
 import pytest
 from helpers import (
@@ -33,24 +33,6 @@ from helpers import (
     tool_call_stream,
     tool_call_then_text_stream,
 )
-from nova_ai import (
-    AbortController,
-    AbortSignal,
-    AssistantMessage,
-    DoneEvent,
-    EventStream,
-    Model,
-    ModelThinkingLevel,
-    SimpleStreamOptions,
-    StartEvent,
-    TextContent,
-    ThinkingLevel,
-    ToolCall,
-    ToolCallEndEvent,
-    ToolResultMessage,
-    UserMessage,
-)
-
 from nova_agent import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -69,6 +51,21 @@ from nova_agent import (
     ToolExecutionUpdateEvent,
 )
 from nova_agent.agent_loop import run_agent_loop, run_agent_loop_continue
+from nova_ai import (
+    AbortController,
+    DoneEvent,
+    EventStream,
+    Model,
+    ModelThinkingLevel,
+    SimpleStreamOptions,
+    StartEvent,
+    TextContent,
+    ThinkingLevel,
+    ToolCall,
+    ToolCallEndEvent,
+    ToolResultMessage,
+    UserMessage,
+)
 
 # ----------------------------------------------------------------------
 # Basic prompt flow
@@ -222,7 +219,7 @@ async def test_after_tool_call_override(dummy_model):
 async def test_should_stop_after_turn(dummy_model):
     calls = []
 
-    async def should_stop(ctx: ShouldStopAfterTurnContext):
+    async def should_stop(ctx: ShouldStopAfterTurnContext, signal=None):
         calls.append(ctx.message.content[0].text)
         return True
 

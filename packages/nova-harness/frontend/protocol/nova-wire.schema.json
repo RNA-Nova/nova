@@ -110,13 +110,17 @@
     "AgentMessage": {
       "anyOf": [
         {
-          "$ref": "#/$defs/UserMessage"
-        },
-        {
-          "$ref": "#/$defs/AssistantMessage"
-        },
-        {
-          "$ref": "#/$defs/ToolResultMessage"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserMessage"
+            },
+            {
+              "$ref": "#/$defs/AssistantMessage"
+            },
+            {
+              "$ref": "#/$defs/ToolResultMessage"
+            }
+          ]
         },
         {
           "$ref": "#/$defs/CustomAgentMessage"
@@ -233,6 +237,16 @@
           },
           "type": "array"
         },
+        "deferred": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "diagnostics": {
           "anyOf": [
             {
@@ -240,6 +254,16 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endTurn": {
+          "anyOf": [
+            {
+              "type": "boolean"
             },
             {
               "type": "null"
@@ -299,6 +323,16 @@
             }
           ]
         },
+        "rawStopReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "responseId": {
           "anyOf": [
             {
@@ -327,6 +361,7 @@
         },
         "stopReason": {
           "enum": [
+            "pending",
             "stop",
             "length",
             "toolUse",
@@ -350,6 +385,9 @@
         "model",
         "usage",
         "stopReason",
+        "rawStopReason",
+        "endTurn",
+        "deferred",
         "errorMessage",
         "responseId",
         "responseModel",
@@ -1567,6 +1605,7 @@
         },
         "reason": {
           "enum": [
+            "pending",
             "stop",
             "length",
             "toolUse",
@@ -3348,13 +3387,17 @@
         "message": {
           "anyOf": [
             {
-              "$ref": "#/$defs/UserMessage"
-            },
-            {
-              "$ref": "#/$defs/AssistantMessage"
-            },
-            {
-              "$ref": "#/$defs/ToolResultMessage"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UserMessage"
+                },
+                {
+                  "$ref": "#/$defs/AssistantMessage"
+                },
+                {
+                  "$ref": "#/$defs/ToolResultMessage"
+                }
+              ]
             },
             {
               "$ref": "#/$defs/CustomMessage"
@@ -5167,9 +5210,7 @@
         },
         "details": {
           "anyOf": [
-            {
-              "type": "object"
-            },
+            {},
             {
               "type": "null"
             }

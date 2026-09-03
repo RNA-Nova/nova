@@ -64,7 +64,7 @@ class TestAuthContainers:
 
     def test_provider_auth_defaults(self):
         auth = ProviderAuth()
-        assert auth.apiKey is None
+        assert auth.api_key is None
         assert auth.oauth is None
 
     def test_auth_defs_are_dataclasses(self):

@@ -2,25 +2,29 @@
 
 Provider 是独立的运行时单元：持有 auth 配置、模型目录与 stream 调度能力
 （``model.api`` → 协议实现的路由），不做 auth 解析（那是 ``Models`` 的职责）。
+
+发布纪律（对齐 TS ``ModelsPublication``）：动态模型目录的持久化策略归
+provider 所有，但落盘必须经 ``context.publish()`` ——由 ``Models`` 做
+世代校验后串行发布，防止被 supersede 的旧刷新覆盖新目录。
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
+from ..auth.resolve import ModelsError
 from ..signal import AbortSignal
 from ..streaming import AssistantMessageEventStream
 from ..types.aliases import ProviderHeaders
 from ..types.auth import Credential, ProviderAuth
-from ..types.enums import KnownApi, StopReason
-from ..types.events import ErrorEvent
-from ..types.messages import AssistantMessage, Context
-from ..types.model import Model, Usage
+from ..types.enums import KnownApi
+from ..types.messages import Context
+from ..types.model import Model
 from ..types.stream_options import SimpleStreamOptions, StreamOptions
-from .store import ModelsStoreEntry, ProviderModelsStore
+from .store import ModelsStoreEntry
+from .streams import lazy_stream
 
 
 class ProviderStreams(Protocol):
@@ -45,42 +49,52 @@ class ProviderStreams(Protocol):
 ApiImpl = Union[ProviderStreams, Dict[str, ProviderStreams]]
 
 
-def _missing_api_error_stream(
-    model: Model, provider_id: str
-) -> AssistantMessageEventStream:
-    """构造一个立即以 error 事件结束的流。
+class _UnsetType:
+    """``ModelsPublication.persist`` 的"未提及"哨兵（三态：未提及 / 删除 / 条目）。"""
 
-    对齐 TS ``createProvider`` 的 ``dispatch``：找不到 API 实现时不抛异常，
-    而是返回携带 error 事件的流（``StreamFunction`` 契约：调用后的失败
-    一律编码进流，而不是抛出）。
+    def __repr__(self) -> str:  # pragma: no cover
+        return "UNSET"
+
+
+UNSET = _UnsetType()
+
+
+@dataclass
+class ModelsPublication:
+    """provider 一次发布的内容（对齐 TS ModelsPublication）。
+
+    - ``persist``：provider 选定的持久化目录。缺省（``UNSET``）不动存储；
+      显式 ``None`` 删除存储条目；``ModelsStoreEntry`` 则写入。
+    - ``update``：持久化成功后同步执行的 provider 私有内存目录更新。
     """
-    error_message = AssistantMessage(
-        role="assistant",
-        content=[],
-        api=model.api,
-        provider=model.provider,
-        model=model.id,
-        usage=Usage(),
-        stop_reason=StopReason.ERROR,
-        error_message=(
-            f"Provider {provider_id} has no API implementation for " f'"{model.api}"'
-        ),
-        timestamp=int(time.time() * 1000),
-    )
-    stream = AssistantMessageEventStream()
-    stream.push(ErrorEvent(type="error", reason="error", error=error_message))
-    return stream
+
+    persist: Union[ModelsStoreEntry, None, _UnsetType] = UNSET
+    update: Optional[Callable[[], None]] = None
+
+
+PublishFn = Callable[[ModelsPublication], Awaitable[bool]]
 
 
 @dataclass
 class RefreshModelsContext:
-    """``refresh_models`` 调用上下文（对齐 TS RefreshModelsContext）。"""
+    """``refresh_models`` 调用上下文（对齐 TS RefreshModelsContext）。
+
+    两阶段刷新共用本上下文：离线阶段 ``allow_network=False``（仅从
+    ``stored`` 恢复缓存）；网络阶段凭 ``credential`` 拉新目录。
+    """
 
     credential: Optional[Credential] = None
-    store: Optional[ProviderModelsStore] = None
+    """本次刷新生效的凭据（OAuth 已提前刷新）。"""
+    stored: Optional[ModelsStoreEntry] = None
+    """刷新开始前捕获的持久化目录只读快照（深拷贝，可安全持有）。"""
+    publish: Optional[PublishFn] = None
+    """世代校验的发布口（持久化 + 内存更新经 Models 串行化）。"""
     allow_network: bool = True
+    """False 表示离线/仅缓存阶段。"""
     force: bool = False
+    """绕过 provider 侧新鲜度检查立即拉取（仅网络阶段有意义）。"""
     signal: Optional[AbortSignal] = None
+    """阻塞工作的共享中断信号。"""
 
 
 @dataclass
@@ -124,6 +138,27 @@ class Provider:
             return self.api_impl.get(api_key)
         return self.api_impl
 
+    def _dispatch(
+        self,
+        model: Model,
+        run: Callable[[ProviderStreams], AssistantMessageEventStream],
+    ) -> AssistantMessageEventStream:
+        """按 model.api 派发；缺实现时以 error 流收尾（对齐 TS dispatch）。
+
+        ``StreamFunction`` 契约：调用后的失败一律编码进流，而不是抛出。
+        """
+        impl = self._api_for(model)
+        if impl is None:
+
+            async def _missing() -> AssistantMessageEventStream:
+                raise ModelsError(
+                    "stream",
+                    f'Provider {self.id} has no API implementation for "{model.api}"',
+                )
+
+            return lazy_stream(model, _missing)
+        return run(impl)
+
     def stream(
         self,
         model: Model,
@@ -131,10 +166,7 @@ class Provider:
         options: Optional[StreamOptions] = None,
     ) -> AssistantMessageEventStream:
         """使用本 provider 绑定的 API 实现发起流式调用。"""
-        api = self._api_for(model)
-        if api is None:
-            return _missing_api_error_stream(model, self.id)
-        return api.stream(model, context, options)
+        return self._dispatch(model, lambda api: api.stream(model, context, options))
 
     def stream_simple(
         self,
@@ -143,14 +175,13 @@ class Provider:
         options: Optional[SimpleStreamOptions] = None,
     ) -> AssistantMessageEventStream:
         """使用本 provider 绑定的 API 实现发起简化流式调用。"""
-        api = self._api_for(model)
-        if api is None:
-            return _missing_api_error_stream(model, self.id)
-        return api.stream_simple(model, context, options)
+        return self._dispatch(
+            model, lambda api: api.stream_simple(model, context, options)
+        )
 
 
 class _DynamicProvider(Provider):
-    """支持动态模型合并与刷新的 Provider。"""
+    """支持动态模型合并与刷新的 Provider（对齐 TS createProvider 的 refreshModels）。"""
 
     def __init__(
         self,
@@ -164,7 +195,6 @@ class _DynamicProvider(Provider):
         self._baseline_models = list(self.models)
         self._dynamic_models: List[Model] = []
         self._fetch_models = fetch_models
-        self._inflight_refresh: Optional[asyncio.Task[None]] = None
 
     def get_models(self) -> List[Model]:
         merged = list(self._baseline_models)
@@ -180,35 +210,49 @@ class _DynamicProvider(Provider):
         return merged
 
     async def refresh_models(self, context: RefreshModelsContext) -> None:
+        """两阶段刷新（对齐 TS createProvider 内的 refreshModels 实现）。
+
+        离线阶段从 ``context.stored`` 恢复缓存目录并发布；网络阶段拉新目录、
+        经 ``context.publish`` 一并持久化。持久化策略归本 provider，但发布
+        必须经上下文（世代校验在 Models 侧）。
+        """
         if self._fetch_models is None:
             return
+        publish = context.publish
 
-        async def _run() -> None:
-            if context.store is not None:
-                stored = await context.store.read()
-                if stored is not None:
-                    self._dynamic_models = [
-                        m for m in stored.models if m.provider == self.id
-                    ]
-            if not context.allow_network:
-                return
-            if context.signal is not None and context.signal.aborted:
-                return
-            refreshed = await self._fetch_models(context)
-            if context.signal is not None and context.signal.aborted:
-                return
-            self._dynamic_models = list(refreshed)
-            if context.store is not None:
-                await context.store.write(
-                    ModelsStoreEntry(
-                        models=list(refreshed),
-                        checked_at=int(time.time() * 1000),
+        async def _publish(publication: ModelsPublication) -> bool:
+            if publish is None:
+                return False
+            return await publish(publication)
+
+        if context.stored is not None:
+            # 离线恢复尽力而为：publish 缺席/失败都不阻断后续网络阶段
+            # （旧实现此处误加 early-return，会跳过网络刷新）
+            restored = [m for m in context.stored.models if m.provider == self.id]
+            await _publish(
+                ModelsPublication(
+                    update=lambda restored=restored: setattr(
+                        self, "_dynamic_models", restored
                     )
                 )
-
-        if self._inflight_refresh is None or self._inflight_refresh.done():
-            self._inflight_refresh = asyncio.create_task(_run())
-        await self._inflight_refresh
+            )
+        if not context.allow_network:
+            return
+        if context.signal is not None and context.signal.aborted:
+            return
+        refreshed = await self._fetch_models(context)
+        if context.signal is not None and context.signal.aborted:
+            return
+        await _publish(
+            ModelsPublication(
+                persist=ModelsStoreEntry(
+                    models=list(refreshed), checked_at=int(time.time() * 1000)
+                ),
+                update=lambda refreshed=refreshed: setattr(
+                    self, "_dynamic_models", list(refreshed)
+                ),
+            )
+        )
 
 
 def create_provider(
@@ -236,8 +280,8 @@ def create_provider(
         models: 静态模型列表（baseline）
         api: API 实现（单个实现或按 ``model.api`` 分发的字典）
         auth: provider 鉴权配置
-        fetch_models: 动态模型拉取回调；调用后 ``refresh_models`` 会把结果与
-            ``models`` 合并并持久化到 ``RefreshModelsContext.store``
+        fetch_models: 动态模型拉取回调；``refresh_models`` 会先从存储恢复
+            缓存目录，再拉取新目录并经 ``publish`` 世代校验地持久化
         filter_models: 凭据级模型过滤策略
 
     Returns:
@@ -261,8 +305,10 @@ def create_provider(
 
 __all__ = [
     "ApiImpl",
+    "ModelsPublication",
     "Provider",
     "ProviderStreams",
     "RefreshModelsContext",
+    "UNSET",
     "create_provider",
 ]

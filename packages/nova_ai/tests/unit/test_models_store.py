@@ -5,7 +5,12 @@ from typing import List
 
 import pytest
 
-from nova_ai.gateway import InMemoryModelsStore, ModelsStoreEntry, RefreshModelsContext
+from nova_ai.gateway import (
+    InMemoryModelsStore,
+    Models,
+    ModelsStoreEntry,
+    RefreshModelsContext,
+)
 from nova_ai.providers import create_provider
 from nova_ai.types import Context, KnownApi, Model, ModelCost, UserMessage
 
@@ -58,6 +63,16 @@ class TestInMemoryModelsStore:
         assert read1.models is not read2.models
 
 
+def _resolving_auth(key: str = "sk-test"):
+    """始终可解析的 apiKey auth 桩（网络阶段需要有效凭据）。"""
+    from nova_ai.types import ApiKeyAuth, AuthResult, ProviderAuth
+
+    async def _resolve(_ctx):
+        return AuthResult(auth={"apiKey": key}, env=None, source="test")
+
+    return ProviderAuth(api_key=ApiKeyAuth(name="test", resolve=_resolve))
+
+
 class TestDynamicProvider:
     @pytest.mark.asyncio
     async def test_refresh_models_merges_dynamic_models(self):
@@ -77,8 +92,15 @@ class TestDynamicProvider:
         # 初始只有 baseline
         assert len(provider.get_models()) == 1
 
-        # refresh 后合并
-        await provider.refresh_models(RefreshModelsContext())
+        # refresh 后合并（直调需自带发布桩——等价 Models.publish 的内存更新）
+        from nova_ai.gateway import ModelsPublication
+
+        async def _publish(publication: ModelsPublication) -> bool:
+            if publication.update is not None:
+                publication.update()
+            return True
+
+        await provider.refresh_models(RefreshModelsContext(publish=_publish))
         models = provider.get_models()
         assert len(models) == 3
         ids = {m.id for m in models}
@@ -116,12 +138,14 @@ class TestDynamicProvider:
             id="test",
             name="Test",
             fetch_models=fetch_models,
+            auth=_resolving_auth(),
         )
 
-        from nova_ai.gateway import _ProviderModelsStoreAdapter
-
-        adapter = _ProviderModelsStoreAdapter(store, "test")
-        await provider.refresh_models(RefreshModelsContext(store=adapter))
+        # 经 Models.refresh 走完整发布链（世代校验 + 持久化）
+        models = Models(models_store=store)
+        models.set_provider(provider)
+        result = await models.refresh()
+        assert result["errors"] == {}
 
         stored = await store.read("test")
         assert stored is not None
@@ -142,25 +166,23 @@ class TestDynamicProvider:
             id="test",
             name="Test",
             fetch_models=fetch_models,
+            auth=_resolving_auth(),
         )
 
-        from nova_ai.gateway import _ProviderModelsStoreAdapter
+        # 两阶段刷新（对齐 TS）：先离线恢复缓存，再在线拉新
+        models = Models(models_store=store)
+        models.set_provider(provider)
+        result = await models.refresh(allow_network=False)
+        assert result["errors"] == {}
+        restored = provider.get_models()
+        assert len(restored) == 1
+        assert restored[0].id == "d1"
 
-        adapter = _ProviderModelsStoreAdapter(store, "test")
-
-        # 先离线恢复
-        await provider.refresh_models(
-            RefreshModelsContext(store=adapter, allow_network=False)
-        )
-        models = provider.get_models()
-        assert len(models) == 1
-        assert models[0].id == "d1"
-
-        # 再在线刷新
-        await provider.refresh_models(RefreshModelsContext(store=adapter))
-        models = provider.get_models()
-        assert len(models) == 1
-        assert models[0].id == "d2"
+        result = await models.refresh()
+        assert result["errors"] == {}
+        refreshed = provider.get_models()
+        assert len(refreshed) == 1
+        assert refreshed[0].id == "d2"
 
     @pytest.mark.asyncio
     async def test_refresh_models_concurrent_calls(self):
@@ -176,17 +198,24 @@ class TestDynamicProvider:
             id="test",
             name="Test",
             fetch_models=fetch_models,
+            auth=_resolving_auth(),
         )
 
-        # 并发调用应合并为一个任务
-        await asyncio.gather(
-            provider.refresh_models(RefreshModelsContext()),
-            provider.refresh_models(RefreshModelsContext()),
-            provider.refresh_models(RefreshModelsContext()),
-        )
+        # 并发经 Models 刷新：supersede 语义（对齐 pi）——各轮独立运行，
+        # 世代校验保证终态一致（后发布者胜出，不会出现目录混合）
+        from nova_ai.gateway import Models
 
+        store = InMemoryModelsStore()
+        models = Models(models_store=store)
+        models.set_provider(provider)
+        await asyncio.gather(models.refresh(), models.refresh())
+
+        # supersede 生效：后到的刷新废弃先到的（先者在网络阶段前即收场，
+        # 不再 fetch），终态由后到者发布——不会出现目录混合
         assert call_count == 1
-        assert len(provider.get_models()) == 1
+        final = provider.get_models()
+        assert len(final) == 1
+        assert final[0].id == "d1"
 
 
 class TestProviderFilterModels:

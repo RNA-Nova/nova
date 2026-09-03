@@ -31,7 +31,7 @@ def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
 
         if credential and credential.key:
             return AuthResult(
-                auth=ModelAuth(apiKey=credential.key),
+                auth=ModelAuth(api_key=credential.key),
                 env=credential.env,
                 source="stored credential",
             )
@@ -39,7 +39,7 @@ def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
         for env_var in env_vars:
             value = await ctx.env(env_var)
             if value:
-                return AuthResult(auth=ModelAuth(apiKey=value), source=env_var)
+                return AuthResult(auth=ModelAuth(api_key=value), source=env_var)
 
         return None
 
@@ -51,7 +51,7 @@ def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
 
     async def check(input: dict) -> Optional[AuthCheck]:
         result = await resolve(input)
-        if result and result.auth.get("apiKey"):
+        if result and result.auth.get("api_key"):
             return AuthCheck(type="api_key", source=result.source)
         return None
 
@@ -61,7 +61,7 @@ def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
 def lazy_oauth(
     name: str,
     load: Callable[[], Awaitable[OAuthAuth]],
-    loginLabel: Optional[str] = None,
+    login_label: Optional[str] = None,
 ) -> OAuthAuth:
     """延迟加载 OAuth 实现，避免在导入时引入 Node-only 代码。"""
     promise: Optional[Awaitable[OAuthAuth]] = None
@@ -80,15 +80,15 @@ def lazy_oauth(
     ) -> OAuthCredential:
         return await (await loaded()).refresh(credential, signal)
 
-    async def toAuth(credential: OAuthCredential) -> ModelAuth:
-        return await (await loaded()).toAuth(credential)
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
+        return await (await loaded()).to_auth(credential)
 
     return OAuthAuth(
         name=name,
-        loginLabel=loginLabel,
+        login_label=login_label,
         login=login,
         refresh=refresh,
-        toAuth=toAuth,
+        to_auth=to_auth,
     )
 
 

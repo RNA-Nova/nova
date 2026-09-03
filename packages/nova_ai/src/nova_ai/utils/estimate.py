@@ -19,9 +19,9 @@ ESTIMATED_IMAGE_CHARS = 4800
 CONTEXT_SAFETY_TOKENS = 4096
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class ContextUsageEstimate:
-    """上下文用量估算结果。"""
+    """上下文用量估算结果（不可变值对象——规则 5）。"""
 
     tokens: int
     usage_tokens: int

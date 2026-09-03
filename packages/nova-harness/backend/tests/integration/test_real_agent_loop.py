@@ -22,7 +22,7 @@ from nova_harness.core.types.session.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
-VOLCENGINE_ID = "deepseek-v3-2-251201"
+VOLCENGINE_ID = "deepseek-v4-flash-260425"
 KIMI_ID = "k2p7"
 
 

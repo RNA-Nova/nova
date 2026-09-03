@@ -21,7 +21,6 @@ from nova_ai import (
     create_provider,
 )
 from nova_ai.api_impls import openai_completions
-from nova_ai.gateway.provider import ProviderStreams
 from nova_ai.types.auth import (
     ApiKeyAuth,
     ApiKeyCredential,
@@ -33,6 +32,7 @@ from nova_ai.types.auth import (
 )
 from nova_ai.types.enums import KnownApi
 from nova_ai.types.messages import Context
+
 from nova_harness.core.config.resolve import (
     get_config_value_env_var_names,
     is_command_config_value,
@@ -365,7 +365,7 @@ def _with_configured_auth(
         **(headers or {}),
     }
     if auth_header:
-        api_key = result.auth.get("apiKey")
+        api_key = result.auth.get("api_key")
         if not api_key:
             raise ValueError("authHeader requires a resolved API key")
         merged["Authorization"] = f"Bearer {api_key}"
@@ -385,7 +385,7 @@ def compose_api_key_auth(
     extension_oauth: Optional[ExtensionOAuthConfig] = None,
 ) -> Optional[ApiKeyAuth]:
     """合成 API key 鉴权（对齐 TS composeApiKeyAuth）。"""
-    inherited = base_auth.apiKey if base_auth is not None else None
+    inherited = base_auth.api_key if base_auth is not None else None
     raw_key = _configured_api_key(config, extension)
     has_oauth = extension_oauth is not None or (
         base_auth is not None and base_auth.oauth is not None
@@ -407,7 +407,7 @@ def compose_api_key_auth(
                 result = await inherited.resolve({"ctx": ctx, "credential": credential})
             elif credential.key:
                 result = AuthResult(
-                    auth={"apiKey": credential.key},
+                    auth={"api_key": credential.key},
                     env=credential.env,
                     source="stored credential",
                 )
@@ -425,7 +425,7 @@ def compose_api_key_auth(
                     {"ctx": ctx, "credential": ApiKeyCredential(key=key)}
                 )
             else:
-                result = AuthResult(auth={"apiKey": key}, source="configured API key")
+                result = AuthResult(auth={"api_key": key}, source="configured API key")
         elif inherited is not None:
             result = await inherited.resolve(input)
         else:
@@ -501,13 +501,13 @@ def adapt_oauth(config: ExtensionOAuthConfig) -> OAuthAuth:
         return OAuthCredential.model_validate({**dict(updated), "type": "oauth"})
 
     async def to_auth(credential: OAuthCredential) -> Dict[str, Any]:
-        return {"apiKey": config.get_api_key(credential)}
+        return {"api_key": config.get_api_key(credential)}
 
     return OAuthAuth(
         name=config.name,
         login=login,
         refresh=refresh,
-        toAuth=to_auth,
+        to_auth=to_auth,
     )
 
 
@@ -535,7 +535,7 @@ def compose_oauth_auth(
     auth_header = _configured_auth_header(config, extension)
 
     async def to_auth(credential: Any) -> Dict[str, Any]:
-        auth = await oauth.toAuth(credential)
+        auth = await oauth.to_auth(credential)
         result = _with_configured_auth(
             AuthResult(auth=auth),
             provider_id,
@@ -549,8 +549,8 @@ def compose_oauth_auth(
         name=oauth.name,
         login=oauth.login,
         refresh=oauth.refresh,
-        toAuth=to_auth,
-        loginLabel=oauth.loginLabel,
+        to_auth=to_auth,
+        login_label=getattr(oauth, "login_label", None),
     )
 
 
@@ -717,6 +717,11 @@ class _ComposedProvider(Provider):
             if base_refresh is not None:
                 await base_refresh(context)
         if self._refresh_models_fn is not None:
+            # 两阶段刷新契约（对齐 TS createProvider.refreshModels）：
+            # 离线阶段（allow_network=False）只做存储恢复——扩展刷新_fn
+            # 没有可恢复的存储，直接跳过，等网络阶段再拉。
+            if not getattr(context, "allow_network", True):
+                return
             refreshed = await self._refresh_models_fn(context)
             signal = getattr(context, "signal", None)
             if not (signal is not None and signal.aborted):
@@ -760,7 +765,7 @@ def compose_provider(
     oauth_auth = compose_oauth_auth(provider_id, base_auth, config, extension, oauth)
     auth: Optional[ProviderAuth] = None
     if api_key_auth is not None or oauth_auth is not None:
-        auth = ProviderAuth(apiKey=api_key_auth, oauth=oauth_auth)
+        auth = ProviderAuth(api_key=api_key_auth, oauth=oauth_auth)
 
     name = provider_id
     if extension is not None and extension.name:

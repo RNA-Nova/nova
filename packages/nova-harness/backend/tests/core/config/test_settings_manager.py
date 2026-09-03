@@ -18,9 +18,9 @@ def test_settings_manager_in_memory_defaults():
 def test_settings_manager_get_set_default_provider_model():
     sm = settings_manager_in_memory()
     sm.set_default_provider("volcengine")
-    sm.set_default_model("deepseek-v3-2-251201")
+    sm.set_default_model("deepseek-v4-flash-260425")
     assert sm.get_default_provider() == "volcengine"
-    assert sm.get_default_model() == "deepseek-v3-2-251201"
+    assert sm.get_default_model() == "deepseek-v4-flash-260425"
 
 
 def test_settings_manager_thinking_level_roundtrip():

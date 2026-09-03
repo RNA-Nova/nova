@@ -5,7 +5,7 @@ Copilot 特定的工具函数
 
 from typing import Dict, List, Literal
 
-from ..types.messages import Message
+from ...types.messages import Message
 
 
 def infer_copilot_initiator(messages: List[Message]) -> Literal["user", "agent"]:

@@ -16,7 +16,7 @@ from nova_harness.core.types.session.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
-MODEL_ID = "deepseek-v3-2-251201"
+MODEL_ID = "deepseek-v4-flash-260425"
 
 
 def _text_of(msg: Any) -> str:

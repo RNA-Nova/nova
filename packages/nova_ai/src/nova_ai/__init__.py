@@ -5,10 +5,14 @@
 ``complete_simple`` API。架构对齐 TypeScript ``pi/packages/ai``。
 """
 
-# 重新导出 apis 模块（API 协议实现）
-from .api_impls import (  # 各 API 协议的选项类型
-    OpenAICompletionsOptions,
-    ProviderStreamOptions,
+# 实现层共享件（轻，不含重依赖）
+from .api_impls._shared import (
+    build_base_options,
+    build_copilot_dynamic_headers,
+    build_copilot_headers_from_messages,
+    has_copilot_vision_input,
+    infer_copilot_initiator,
+    transform_messages,
 )
 
 # 重新导出 auth 模块（行为层；类型定义在 .types）
@@ -155,24 +159,18 @@ from .types import (  # enums; content; usage; messages; stream_options; events;
     VercelGatewayRouting,
 )
 
-# 重新导出utils模块
-from .utils import (  # 环境变量; Copilot; JSON解析; 字符串处理; 流选项; 消息转换; 溢出检测
-    build_base_options,
-    build_copilot_dynamic_headers,
-    build_copilot_headers_from_messages,
+# 重新导出utils模块（跨层通用件；实现层共享件从 api_impls._shared 再导出）
+from .utils import (  # 环境变量; JSON解析; 字符串处理; 溢出检测
     calculate_cost,
     clamp_thinking_level,
     get_env_api_key,
     get_supported_thinking_levels,
     has_api,
-    has_copilot_vision_input,
-    infer_copilot_initiator,
     is_context_overflow,
     models_are_equal,
     parse_streaming_json,
     sanitize_surrogates,
     to_thinking_level,
-    transform_messages,
 )
 
 __all__ = [
@@ -339,3 +337,26 @@ __all__ = [
     "get_volcengine_model",
     "list_volcengine_models",
 ]
+
+
+# ---------------------------------------------------------------------------
+# 惰性导出（PEP 562，对齐 TS subpath exports 的包体收益）：
+# API 协议实现连带 openai SDK——只在真正访问这些名字时加载。
+# ``from nova_ai import OpenAICompletionsOptions`` 等既有用法零改动。
+# ---------------------------------------------------------------------------
+
+
+def __getattr__(name: str):
+    if name in ("OpenAICompletionsOptions", "ProviderStreamOptions"):
+        from . import api_impls as _api_impls
+
+        value = getattr(_api_impls, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> "list[str]":
+    return sorted(
+        set(globals()) | {"OpenAICompletionsOptions", "ProviderStreamOptions"}
+    )

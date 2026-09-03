@@ -16,9 +16,9 @@ from typing import Any, Optional
 MAX_PROVIDER_ERROR_BODY_CHARS = 4000
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class NormalizedProviderError:
-    """标准化后的 provider 错误信息。"""
+    """标准化后的 provider 错误信息（不可变值对象——规则 5）。"""
 
     message: str
     status: Optional[int] = None

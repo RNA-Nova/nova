@@ -39,17 +39,17 @@ from .base_model import NovaBaseModel
 
 
 class ModelAuth(TypedDict, total=False):
-    """单次模型请求可使用的鉴权信息（camelCase 键与线上契约一致）。"""
+    """单次模型请求可使用的鉴权信息（进程内契约：auth 层 → api_impl 层）。"""
 
-    apiKey: str
+    api_key: str
     headers: ProviderHeaders
-    baseUrl: str
+    base_url: str
 
 
 AuthType = Literal["api_key", "oauth"]
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class AuthResult:
     """解析后的 provider 鉴权结果。"""
 
@@ -58,7 +58,7 @@ class AuthResult:
     source: Optional[str] = None
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class AuthCheck:
     """鉴权是否已配置的轻量检查结果。"""
 
@@ -99,7 +99,7 @@ class OAuthCredential(NovaBaseModel):
 Credential = Union[ApiKeyCredential, OAuthCredential]
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class CredentialInfo:
     """不暴露 secret 的 credential 元信息。"""
 
@@ -119,7 +119,7 @@ class AuthContext(Protocol):
         """读取环境变量。"""
         ...
 
-    async def fileExists(self, path: str) -> bool:
+    async def file_exists(self, path: str) -> bool:
         """检查文件是否存在（支持 ``~`` 开头）。"""
         ...
 
@@ -162,7 +162,7 @@ class CredentialStore(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class AuthPromptOption:
     """select prompt 的选项。"""
 
@@ -182,7 +182,7 @@ class AuthPrompt:
     signal: Optional[AbortSignal] = None
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class AuthInfoLink:
     """info event 中的链接。"""
 
@@ -190,7 +190,7 @@ class AuthInfoLink:
     label: Optional[str] = None
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class AuthEvent:
     """登录流程中的状态/通知事件。"""
 
@@ -245,15 +245,15 @@ class OAuthAuth:
     name: str
     login: Callable[[AuthInteraction], Awaitable[OAuthCredential]]
     refresh: Callable[[OAuthCredential, Optional[Any]], Awaitable[OAuthCredential]]
-    toAuth: Callable[[OAuthCredential], Awaitable[ModelAuth]]
-    loginLabel: Optional[str] = None
+    to_auth: Callable[[OAuthCredential], Awaitable[ModelAuth]]
+    login_label: Optional[str] = None
 
 
 @dataclass
 class ProviderAuth:
     """Provider 的鉴权配置。至少提供 apiKey 或 oauth 之一。"""
 
-    apiKey: Optional[ApiKeyAuth] = None
+    api_key: Optional[ApiKeyAuth] = None
     oauth: Optional[OAuthAuth] = None
 
 

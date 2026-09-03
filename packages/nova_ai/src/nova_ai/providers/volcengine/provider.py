@@ -6,12 +6,12 @@ API 实现模块的 ``stream`` / ``stream_simple`` 函数。
 """
 
 from ...auth.helpers import env_api_key_auth
-from ...gateway import create_provider
+from ...gateway import Provider, create_provider
 from ...types.auth import ProviderAuth
 from .models import VOLCENGINE_MODELS
 
 
-def volcengine_provider():
+def volcengine_provider() -> "Provider":
     """构造 Volcengine provider 实例。
 
     延迟导入 ``api_impls.openai_completions`` 以避免 ``api_impls`` 与
@@ -26,7 +26,7 @@ def volcengine_provider():
         models=list(VOLCENGINE_MODELS.values()),
         api=openai_completions,
         auth=ProviderAuth(
-            apiKey=env_api_key_auth(
+            api_key=env_api_key_auth(
                 "Volcengine API Key",
                 ["VOLCENGINE_API_KEY"],
             ),
