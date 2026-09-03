@@ -13,7 +13,7 @@
 import prettyMs from 'pretty-ms';
 import { Container, Text, wrapTextWithAnsi, type Component } from '@earendil-works/pi-tui';
 
-import { detailsOf, type RendererInput } from 'nova-client';
+import { detailsOf, type RendererInput } from 'nova-tui';
 
 /** 折叠态保留的视觉行数（pi BASH_PREVIEW_LINES）。 */
 const PREVIEW_VISUAL_LINES = 5;

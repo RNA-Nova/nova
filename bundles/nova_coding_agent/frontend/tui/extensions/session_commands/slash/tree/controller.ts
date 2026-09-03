@@ -7,7 +7,7 @@
  * 后端 /tree 命令保留作 headless 回退（bundle 缺席/无 UI 时）。
  */
 
-import type { ExtensionUIContext } from 'nova-client';
+import type { ExtensionUIContext } from 'nova-tui';
 
 import {
   TreeSelector,
@@ -19,7 +19,7 @@ import {
 import {
   getTreeFilterMode,
   isBranchSummarySkipPrompt,
-} from 'nova-client/modes/tui/utils/tui-settings';
+} from 'nova-tui/modes/tui/utils/tui-settings';
 
 /** /tree 命令分发：带 id 直接跳转（与后端 headless 回退同语义），无参数开选择器。 */
 export async function handleTreeCommand(args: string, ctx: ExtensionUIContext): Promise<void> {

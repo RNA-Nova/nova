@@ -54,7 +54,7 @@ include_trailing_comma = true
 [tool.uv.sources]
 nova-ai = { path = "../../packages/nova_ai" }
 nova-agent = { path = "../../packages/nova_agent" }
-nova-harness = { path = "../../packages/nova-harness/backend" }
+nova-harness = { path = "../../packages/nova_harness" }
 
 [tool.nova]
 agents = [

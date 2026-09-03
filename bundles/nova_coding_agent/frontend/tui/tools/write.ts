@@ -11,7 +11,7 @@
  */
 import { Container, Text, type Component } from '@earendil-works/pi-tui';
 
-import { detailsOf, type RendererInput } from 'nova-client';
+import { detailsOf, type RendererInput } from 'nova-tui';
 
 /** 折叠预览行数（pi write 卡片同款）。 */
 const PREVIEW_LINES = 10;

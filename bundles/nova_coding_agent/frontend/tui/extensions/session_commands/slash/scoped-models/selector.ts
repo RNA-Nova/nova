@@ -2,7 +2,7 @@
  * scoped-models 面板（pi scoped-models-selector 对位）。
  *
  * 归属：官方 bundle 的 ui/ 段（包自持命令 UI——dogfood：官方与第三方同机制；
- * 从 nova-client 宿主迁入）。宿主部件经 'nova-client/modes/tui/*' 子路径导出
+ * 从 nova-client 宿主迁入）。宿主部件经 'nova-tui/modes/tui/*' 子路径导出
  * 共享（jiti 别名 + 原生 ESM 缓存，主题/键位单例与宿主同实例）。
  *
  * scoped 池 = ctrl+p 循环模型的启用集与循环顺序（session 级配置）。
@@ -27,8 +27,8 @@ import {
   type Focusable,
 } from '@earendil-works/pi-tui';
 
-import { DynamicBorder } from 'nova-client/modes/tui/components/layout/dynamic-border';
-import { colors } from 'nova-client/modes/tui/themes/index';
+import { DynamicBorder } from 'nova-tui/modes/tui/components/layout/dynamic-border';
+import { colors } from 'nova-tui/modes/tui/themes/index';
 
 /** 面板条目（启用状态 + 展示元信息）。 */
 export interface ScopedModelRow {

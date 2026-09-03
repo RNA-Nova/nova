@@ -7,7 +7,7 @@
  * 模态挂载，不在宿主硬编码。后端同名命令保留作 headless 回退。
  */
 
-import type { ExtensionUIAPI } from 'nova-client';
+import type { ExtensionUIAPI } from 'nova-tui';
 
 import { interactiveShellDialogFactory } from './dialogs/interactive-shell.js';
 import { questionDialogFactory } from './dialogs/question.js';

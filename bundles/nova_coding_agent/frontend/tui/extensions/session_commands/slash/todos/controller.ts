@@ -7,7 +7,7 @@
  * 工具结果的 details.todos。后端 /todos 命令保留作 headless 回退。
  */
 
-import type { ExtensionUIContext } from 'nova-client';
+import type { ExtensionUIContext } from 'nova-tui';
 
 import { TodosViewer, type TodoViewItem } from './viewer.js';
 

@@ -10,8 +10,8 @@
  */
 import { Container, Markdown, Text, type Component } from '@earendil-works/pi-tui';
 
-import { detailsOf, extractText, type RendererInput } from 'nova-client';
-import { renderTableLines } from 'nova-client/modes/tui/blocks/table';
+import { detailsOf, extractText, type RendererInput } from 'nova-tui';
+import { renderTableLines } from 'nova-tui/modes/tui/blocks/table';
 
 export default function renderRead(input: RendererInput): Component {
   const d = detailsOf(input);

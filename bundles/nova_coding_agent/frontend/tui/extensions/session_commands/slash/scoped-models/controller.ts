@@ -7,7 +7,7 @@
  * 后端 /scoped-models 命令保留作 headless 回退（文本清单）。
  */
 
-import type { ExtensionUIContext } from 'nova-client';
+import type { ExtensionUIContext } from 'nova-tui';
 
 import { ScopedModelsSelector } from './selector.js';
 

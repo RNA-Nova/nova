@@ -7,7 +7,7 @@
  * 后端 /resume 命令保留作 headless 回退。
  */
 
-import type { ExtensionUIContext } from 'nova-client';
+import type { ExtensionUIContext } from 'nova-tui';
 
 import { SessionSelector, type SessionItem } from './selector.js';
 

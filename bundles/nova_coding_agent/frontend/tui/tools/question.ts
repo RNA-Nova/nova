@@ -15,7 +15,7 @@
  */
 import { Container, Text, type Component } from '@earendil-works/pi-tui';
 
-import { detailsOf, type RendererInput } from 'nova-client';
+import { detailsOf, type RendererInput } from 'nova-tui';
 
 interface QuestionOption {
   label?: string;

@@ -4,7 +4,7 @@
  * 归属：官方 bundle 的 ui/ 段（包自持命令 UI——dogfood：官方与第三方同机制；
  * 从 nova-client 宿主迁入）。包自持的原因（与 /tree 同一判决）：per-item
  * 动作键（ctrl+d 删除确认 / ctrl+r 重命名 / tab 作用域）无法经反向原语
- * select 表达。宿主部件经 'nova-client/modes/tui/*' 子路径导出共享
+ * select 表达。宿主部件经 'nova-tui/modes/tui/*' 子路径导出共享
  * （jiti 别名 + 原生 ESM 缓存，主题/键位单例与宿主同实例）。
  * 后端 /resume 命令保留作 headless 回退。
  *
@@ -35,8 +35,8 @@ import {
   type Focusable,
 } from '@earendil-works/pi-tui';
 
-import { DynamicBorder } from 'nova-client/modes/tui/components/layout/dynamic-border';
-import { colors } from 'nova-client/modes/tui/themes/index';
+import { DynamicBorder } from 'nova-tui/modes/tui/components/layout/dynamic-border';
+import { colors } from 'nova-tui/modes/tui/themes/index';
 
 /** 会话条目（listSessions 富字段的消费面）。 */
 export interface SessionItem {

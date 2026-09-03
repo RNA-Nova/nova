@@ -6,7 +6,7 @@
  */
 import { Container, Text, type Component } from '@earendil-works/pi-tui';
 
-import { detailsOf, extractText, type RendererInput } from 'nova-client';
+import { detailsOf, extractText, type RendererInput } from 'nova-tui';
 
 const PREVIEW_LINES = 20;
 

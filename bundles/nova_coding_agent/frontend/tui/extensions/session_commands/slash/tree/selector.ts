@@ -2,7 +2,7 @@
  * 会话树选择器（pi tree-selector 对位：折叠 + 标签编辑 + 过滤 + 搜索 + 水平视口）。
  *
  * 归属：官方 bundle 的 ui/ 段（包自持命令 UI——dogfood：官方与第三方同机制）。
- * 宿主部件经 'nova-client/modes/tui/*' 子路径导出共享（jiti 别名 + 原生 ESM
+ * 宿主部件经 'nova-tui/modes/tui/*' 子路径导出共享（jiti 别名 + 原生 ESM
  * 缓存，主题/键位单例与宿主同实例）。
  *
  * 数据：`getSessionEntries` 全量条目 + `getSessionState.leafId`——前端自组树
@@ -36,8 +36,8 @@ import {
   type Focusable,
 } from '@earendil-works/pi-tui';
 
-import { DynamicBorder } from 'nova-client/modes/tui/components/layout/dynamic-border';
-import { colors } from 'nova-client/modes/tui/themes/index';
+import { DynamicBorder } from 'nova-tui/modes/tui/components/layout/dynamic-border';
+import { colors } from 'nova-tui/modes/tui/themes/index';
 
 /** 线上条目（camelCase 契约，自由负载——这里只消费树组装需要的字段）。 */
 export interface TreeEntry {

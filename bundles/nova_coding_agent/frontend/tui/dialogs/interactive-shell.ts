@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 
 import type { Component, TUI } from '@earendil-works/pi-tui';
 
-import { colors } from 'nova-client/modes/tui/themes/index';
+import { colors } from 'nova-tui/modes/tui/themes/index';
 
 /** 挂起周期消费的 TUI 面（窄接口——测试以计数 mock 驱动）。 */
 export type InteractiveShellTui = Pick<TUI, 'stop' | 'start' | 'requestRender'>;

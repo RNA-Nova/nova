@@ -6,16 +6,16 @@
  * 消息父级，原文经 selectedText 回填编辑器——"编辑后重发"体验）；esc 取消。
  * 带参数（/fork <entry_id> [at|before|after]）直调 fork RPC——与后端 _fork
  * 等价（命令分发后参数不再回落后端，包侧自理；缺省 position=after 与后端对齐）。
- * 选择器本体复用宿主通用件 SearchableSelector（'nova-client/modes/tui/*' 子路径共享）。
+ * 选择器本体复用宿主通用件 SearchableSelector（'nova-tui/modes/tui/*' 子路径共享）。
  * 后端 /fork 命令保留作 headless 回退。
  */
 
-import type { ExtensionUIContext } from 'nova-client';
+import type { ExtensionUIContext } from 'nova-tui';
 
 import {
   SearchableSelector,
   type SearchableItem,
-} from 'nova-client/modes/tui/components/pickers/searchable';
+} from 'nova-tui/modes/tui/components/pickers/searchable';
 
 /** 线上条目（getSessionEntries 的自由负载——这里只消费分叉需要的字段）。 */
 interface RawEntry {

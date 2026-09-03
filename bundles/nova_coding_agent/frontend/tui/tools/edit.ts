@@ -20,8 +20,8 @@ import {
   type DiffHunk,
   type DiffLine,
   type RendererInput,
-} from 'nova-client';
-import { renderDiffLines } from 'nova-client/modes/tui/blocks/diff';
+} from 'nova-tui';
+import { renderDiffLines } from 'nova-tui/modes/tui/blocks/diff';
 
 import { computeEditPreview, type PreviewEdit } from '../lib/edit-preview.js';
 

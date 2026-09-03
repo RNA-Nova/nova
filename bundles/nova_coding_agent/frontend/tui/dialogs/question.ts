@@ -30,7 +30,7 @@ import {
   type TUI,
 } from '@earendil-works/pi-tui';
 
-import { colors } from 'nova-client/modes/tui/themes/index';
+import { colors } from 'nova-tui/modes/tui/themes/index';
 
 export interface QuestionDialogOption {
   label: string;

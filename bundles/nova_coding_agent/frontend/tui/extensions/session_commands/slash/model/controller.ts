@@ -4,17 +4,17 @@
  * 当前模型置顶带 ✓、Tab 切 all/scoped 作用域、fuzzy 搜索、provider 分组；
  * 选中即 setModel。带参数（/model provider/id）时直切——与后端 _model 的
  * set_model 等价（命令分发后参数不再回落后端，包侧自理）。
- * 选择器本体复用宿主通用件 SearchableSelector（'nova-client/modes/tui/*' 子路径
+ * 选择器本体复用宿主通用件 SearchableSelector（'nova-tui/modes/tui/*' 子路径
  * 共享——jiti 别名 + ESM 缓存，主题/键位单例与宿主同实例）。
  * 后端 /model 命令保留作 headless 回退（bundle 缺席/无 UI 时）。
  */
 
-import type { ExtensionUIContext } from 'nova-client';
+import type { ExtensionUIContext } from 'nova-tui';
 
 import {
   SearchableSelector,
   type SearchableItem,
-} from 'nova-client/modes/tui/components/pickers/searchable';
+} from 'nova-tui/modes/tui/components/pickers/searchable';
 
 /** 线上模型条目（listModels 的消费面）。 */
 export interface ModelListItem {

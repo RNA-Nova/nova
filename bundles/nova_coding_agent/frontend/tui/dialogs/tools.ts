@@ -19,7 +19,7 @@ import {
   type Focusable,
 } from '@earendil-works/pi-tui';
 
-import { colors as themeColors } from 'nova-client/modes/tui/themes/index';
+import { colors as themeColors } from 'nova-tui/modes/tui/themes/index';
 
 /** 面板条目（工具开关状态 + 展示元信息）。 */
 export interface ToolsDialogTool {
