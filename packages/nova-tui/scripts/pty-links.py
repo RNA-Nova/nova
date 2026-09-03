@@ -8,9 +8,9 @@ TERM_PROGRAM=vscode 显式开 OSC 8 能力（pi-tui 探测）。断言：
 
 import os, re, pty, subprocess, select, time, sys
 
-NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova")
+NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova-backup-20260824")
 PYTHON = os.environ.get("NOVA_PYTHON", f"{NOVA_REPO}/.pixi/envs/dev/bin/python")
-MAIN = f"{NOVA_REPO}/packages/nova-harness/frontend/dist/modes/tui/main.js"
+MAIN = f"{NOVA_REPO}/packages/nova-tui/dist/modes/tui/main.js"
 
 master, slave = pty.openpty()
 env = dict(os.environ, NOVA_PYTHON=PYTHON, TERM_PROGRAM="vscode")

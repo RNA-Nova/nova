@@ -24,10 +24,10 @@ import subprocess
 import sys
 import time
 
-CWD = "/Users/liujinming/agent/nova/tmp"
+CWD = "/Users/liujinming/agent/nova-backup-20260824"
 TUI_CMD = [
     "node",
-    "/Users/liujinming/agent/nova/packages/nova-harness/frontend/dist/modes/tui/main.js",
+    "/Users/liujinming/agent/nova-backup-20260824/packages/nova-tui/dist/modes/tui/main.js",
 ]
 LOG_PATH = "/tmp/nova-pty-e2e.log"
 
@@ -61,7 +61,7 @@ class TuiPty:
 
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
         env = dict(os.environ)
-        env["NOVA_PYTHON"] = "/Users/liujinming/agent/nova/.pixi/envs/dev/bin/python"
+        env["NOVA_PYTHON"] = "/Users/liujinming/agent/nova-backup-20260824/.pixi/envs/dev/bin/python"
         env.setdefault("TERM", "xterm-256color")
         self.proc = subprocess.Popen(
             TUI_CMD,

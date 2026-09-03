@@ -22,11 +22,11 @@ import sys
 import time
 from typing import Union
 
-NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova")
+NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova-backup-20260824")
 PYTHON = os.environ.get(
     "NOVA_PYTHON", f"{NOVA_REPO}/.pixi/envs/dev/bin/python"
 )
-MAIN_JS = f"{NOVA_REPO}/packages/nova-harness/frontend/dist/modes/tui/main.js"
+MAIN_JS = f"{NOVA_REPO}/packages/nova-tui/dist/modes/tui/main.js"
 NODE = os.path.expanduser("~/.pixi/bin/node")
 
 STARTUP_WAIT = 10.0
