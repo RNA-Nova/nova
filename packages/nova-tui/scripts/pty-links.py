@@ -37,6 +37,7 @@ def send(keys, wait=2.0):
 fails = []
 try:
     drain(8)
+    send("\x1b", 1)  # 首次配置引导（无默认模型时弹出）会让路吞输入——先关掉
     send("输出一个 markdown 链接 [示例](https://example.com)，然后闭嘴\r", 45)
     send("\x1b", 2)
     text = raw.decode("utf-8", "replace")

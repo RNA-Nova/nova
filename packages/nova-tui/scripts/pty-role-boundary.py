@@ -37,6 +37,7 @@ def main() -> int:
     tui = smoke.TuiSession("/tmp")
     try:
         tui._drain(8.0)
+        tui.send("\x1b", 1.0)  # 首次配置引导（无默认模型时弹出）会让路吞输入——先关掉
 
         # ---- 0. 切到 reviewer（open 默认）----
         checkpoint = len(tui.buffer)

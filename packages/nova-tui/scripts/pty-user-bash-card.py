@@ -87,6 +87,10 @@ def main() -> int:
         else:
             print("✔ 启动期无渲染器加载诊断")
 
+        # 首次配置引导（无默认模型时启动弹出）会让路吞输入——先 ESC 关掉
+        os.write(master, b"\x1b")
+        drain(1.0)
+
         # user bash 卡片
         before = len(buffer)
         os.write(master, "!echo pty-card-ok\r".encode())

@@ -32,7 +32,6 @@ extensions:
   - interactive_shell
   - confirm_destructive
   - subagent_gate
-  - executor_switch
 user_tools:
   - bash
 # commands / skills 未声明 = 全放（文本类资源不做角色裁剪）
