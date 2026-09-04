@@ -462,10 +462,14 @@ class UserTool:
 ├── backend/               # user 级散养资源
 │   ├── extensions/  skills/  prompts/  personas/
 ├── packages/              # 已安装包（path/ git/ npm/ 三个子目录族）
+│   └── .site/             # 冻结形态的第三方 pip 依赖落点（pip --target）
+├── builtin/               # 冻结形态内建官方包（首启落地，二进制版本驱动刷新）
 ├── sessions/--<cwd>--/    # 会话 JSONL
 ├── bin/                   # 框架自管理二进制（fd）
 └── logs/rpc-stderr.log    # RPC 进程 stderr 日志
 ```
+
+冻结（二进制打包）形态的两个独有目录：`builtin/` 与 `packages/.site/`。`builtin/` 是官方双 bundle 的首启落地处（落地后按普通 path 包登记进 settings，面板可见可卸）；`.site/` 是第三方 pip 依赖的落点——冻结二进制不内嵌 pip，装带依赖的包时借系统 Python（`NOVA_PYTHON` > 系统 python3，校验大版本与 pip 可用）装进该目录，装配时挂进内嵌解释器的 `sys.path`。开发态两者都不产生（开发态依赖装进当前环境，包经 `pip -e` 注册）。
 
 项目级（受 Project Trust 门控）：`<cwd>/.nova/` 同构——`settings.json`、`agents/`、`backend/{extensions,skills,prompts,personas}`、`packages/`。skills 另有 `~/.agents/skills` 与项目祖先 `.agents/skills` 通道。
 

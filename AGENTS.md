@@ -110,7 +110,7 @@ nova/
 - `core/agent_session/` —— `AgentSession` 运行时核心、`AgentSessionRuntime`、`AgentSessionServices`、领域控制器（user_tools、compaction、events、model、queue、retry、slash_input、stats、tools、tree）
 - `core/harness/` —— 高阶能力：会话持久化与树管理、上下文压缩、系统提示词构建、skills、Project Trust、用户工具（`user_tools/`：仅 UserToolManager 注册中心——框架不内置任何用户工具，具体工具由包经 `[tool.nova] user_tools` 类目分发；消息回载注册表在 `harness/session/message_types.py`）
 - `core/resources/` —— 资源发现与加载（`loader.py` 与 `loaders/` 下的 agent_config、context_files、extensions、personas、prompt_templates、skills、tools、user_tools）
-- `core/package/` —— Agent / tool / bundle / skill / extension 包管理器核心（manager facade + install/ 安装世界 + resolve/ 运行时世界 + source/ source 领域 + manifest / validation / scaffold / utils）。安装事实以 `*.dist-info/`（PEP 610 风格）为权威快照，副本推导兜底
+- `core/package/` —— Agent / tool / bundle / skill / extension 包管理器核心（manager facade + install/ 安装世界 + resolve/ 运行时世界 + source/ source 领域 + manifest / validation / scaffold / utils + `builtin.py` 冻结形态内建官方包通道（首启落地 + 登记）+ `runtime_paths.py` 冻结形态 sys.path 挂载（`.site/` 与各包 `backend/`））。安装事实以 `*.dist-info/`（PEP 610 风格）为权威快照，副本推导兜底
 - `core/config/` —— settings、auth storage、路径默认值、配置解析
 - `core/model/` —— 模型域：注册表运行时（`ModelRuntime`、store/composer）、模型解析（`resolver.py`）、provider attribution
 - `core/types/` —— 统一 Pydantic / dataclass 类型层

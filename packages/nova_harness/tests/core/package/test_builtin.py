@@ -56,8 +56,8 @@ def test_frozen_first_boot_lands_and_registers(tmp_path, monkeypatch):
 
     actions = builtin.ensure_builtin_packages(sm, str(agent_dir))
 
-    assert f"landed nova_base@0.1.0" in actions
-    assert f"landed nova_coding_agent@1.0.0" in actions
+    assert "landed nova_base@0.1.0" in actions
+    assert "landed nova_coding_agent@1.0.0" in actions
     assert "registered nova_base" in actions
     assert "registered nova_coding_agent" in actions
     assert (agent_dir / "builtin" / "nova_base" / "backend" / "marker.txt").exists()

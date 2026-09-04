@@ -253,16 +253,20 @@ class FrozenSiteBackend:
 
     def uninstall(self, package_name: str) -> None:
         """从 .site 删除该发行版的目录与 dist-info（共享依赖残留不清理——
-        多包共用时引用计数不值当，磁盘代价可忽略）。"""
+        多包共用时引用计数不值当，磁盘代价可忽略；wheel 附带的
+        ``bin/`` 可执行文件残留同理）。
+
+        匹配规则（精确前缀，不误伤近名包）：包目录 = 规范化全名；
+        dist-info = ``<全名>-<版本>.dist-info``（卸 ``pretty`` 不会命中
+        ``pretty_ms-1.0.0.dist-info``）。
+        """
         if not self.site_dir.is_dir():
             return
         normalized = package_name.replace("-", "_").lower()
         for child in self.site_dir.iterdir():
             name = child.name.lower()
-            if (
-                name == normalized
-                or name.startswith(f"{normalized}-")
-                or (name.startswith(normalized) and name.endswith(".dist-info"))
+            if name == normalized or (
+                name.startswith(f"{normalized}-") and name.endswith(".dist-info")
             ):
                 if child.is_dir():
                     shutil.rmtree(child, ignore_errors=True)

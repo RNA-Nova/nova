@@ -30,6 +30,25 @@ _SEEDED_FILE = ".seeded.json"
 _VERSION_MARKER = ".builtin-version"
 
 
+def _source_dir_matches(source: str, dest: Path) -> bool:
+    """settings 源是否指向 dest 目录（精确判等，非子串——避免
+    ``builtin/nova_base_extra`` 误判命中 ``builtin/nova_base``）。
+
+    settings 持久化统一 posix 分隔符（Windows 反斜杠会先归一）；
+    相对源按当前工作目录解析（与 settings 写侧的相对化约定一致）。
+    """
+    text = source.replace("\\", "/")
+    for prefix in ("path:", "./"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+    if "://" in text or text.startswith("git:") or text.startswith("npm:"):
+        return False
+    try:
+        return Path(text).resolve() == dest.resolve()
+    except OSError:
+        return False
+
+
 def _bundled_dir(name: str) -> Path:
     """二进制内携带的 bundle 目录（构建期 PyInstaller --add-data 注入）。"""
     return Path(getattr(sys, "_MEIPASS")) / "bundles" / name
@@ -90,12 +109,7 @@ def ensure_builtin_packages(
             actions.append(f"landed {name}@{version}")
 
         # 登记进 settings 包清单：已登记跳过；播种后被用户移除的不回补。
-        # settings 的 source 持久化统一 posix 分隔符（Windows 反斜杠会误判
-        # 成未登记）——比较前双方归一到 posix 形态
-        dest_posix = dest.as_posix()
-        already = any(
-            dest_posix in source.replace("\\", "/") for source in existing_sources
-        )
+        already = any(_source_dir_matches(source, dest) for source in existing_sources)
         if already:
             seen_or_registered.add(name)
             continue

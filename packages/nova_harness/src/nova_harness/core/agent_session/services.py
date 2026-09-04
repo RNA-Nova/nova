@@ -25,6 +25,8 @@ from nova_harness.core.config.migration import migrate_backend_layout
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.model import ModelRuntime
 from nova_harness.core.package import PackageManager
+from nova_harness.core.package.builtin import ensure_builtin_packages
+from nova_harness.core.package.runtime_paths import ensure_package_paths
 from nova_harness.core.resources.loader import DefaultResourceLoader, ResourceLoader
 from nova_harness.core.types.extensions import ExtensionFlag, LoadedExtensionsResult
 from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
@@ -113,14 +115,10 @@ class AgentSessionServices:
 
         # 内建官方包通道（冻结形态：首启落地 + 登记进 settings 包清单；
         # 开发态零动作）——须在资源解析之前
-        from nova_harness.core.package.builtin import ensure_builtin_packages
-
         ensure_builtin_packages(settings_manager, resolved_agent_dir)
 
         # 冻结形态的包运行时装配路径挂载（.site 依赖 + 各包 backend/），
         # 须在资源加载/工具 import 之前
-        from nova_harness.core.package.runtime_paths import ensure_package_paths
-
         ensure_package_paths(
             resolved_agent_dir,
             settings_manager,
