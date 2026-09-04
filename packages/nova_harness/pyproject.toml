@@ -48,6 +48,8 @@ nova-agent = { path = "../../nova_agent" }
 nova-harness = "nova_harness.cli.main:main"
 nova-harness-rpc = "nova_harness.modes.rpc.cli:main"
 nova-pkg = "nova_harness.cli.package:main"
+# 打包形态的统一入口（nova-server [rpc|run|pkg]）——开发渠道也可用
+nova-server = "nova_harness.cli.backend:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import sys
 
 from nova_coding_agent.subagent import runner
 from nova_coding_agent.subagent.types import (
@@ -311,3 +312,74 @@ def test_run_single_handles_line_longer_than_64k(monkeypatch):
     assert result.exit_code == 0
     assert result.error is None
     assert result.output == big_text
+
+
+# ---------------------------------------------------------------------------
+# 子代理自调的入口形态（冻结兼容）
+# ---------------------------------------------------------------------------
+
+
+class _MinimalFakeProcess:
+    """最小假子进程：空输出 + 预置退出码（走错误路径，只验 spawn 参数）。"""
+
+    def __init__(self) -> None:
+        self.returncode = None
+        self.stdout = asyncio.StreamReader()
+        self.stdout.feed_eof()
+        self.stderr = asyncio.StreamReader()
+        self.stderr.feed_eof()
+
+    async def wait(self) -> int:
+        self.returncode = 2
+        return 2
+
+    def terminate(self) -> None:
+        pass
+
+    def kill(self) -> None:
+        pass
+
+
+def _capture_spawn_args(monkeypatch) -> list:
+    captured: list = []
+
+    async def _fake_exec(*args, **kwargs):
+        captured.append(list(args))
+        return _MinimalFakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    return captured
+
+
+def test_spawn_args_dev_mode_module_invocation(monkeypatch):
+    """开发态：解释器 + ``-m nova_harness.cli.main run`` 模块调用。"""
+    captured = _capture_spawn_args(monkeypatch)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    asyncio.run(
+        runner.run_subagent_single(
+            SubagentCall(agent="a1", task="t"), agent_dir="/nonexistent"
+        )
+    )
+
+    cmd = captured[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1:3] == ["-m", "nova_harness.cli.main"]
+    assert cmd[3] == "run"
+
+
+def test_spawn_args_frozen_mode_unified_entry(monkeypatch):
+    """冻结形态（sys.frozen）：二进制自身 + run 子命令，无 -m 模块调用。"""
+    captured = _capture_spawn_args(monkeypatch)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    asyncio.run(
+        runner.run_subagent_single(
+            SubagentCall(agent="a1", task="t"), agent_dir="/nonexistent"
+        )
+    )
+
+    cmd = captured[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1] == "run"
+    assert "-m" not in cmd

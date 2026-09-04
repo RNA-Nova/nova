@@ -518,6 +518,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Changed
 - **官方 bundle 拆分为 `nova-base` + `nova-coding-agent`**（基础设施 / 执行能力分层）：`nova-base` 收会话产品基础设施（`session_commands` 21 命令、`tools_panel`、`confirm_destructive`、`question`/`todo` 工具、`ui_primitives` 原语糖库、6 个 slash 命令 UI 与 question/tools 对话框、todo/question 渲染器）；`nova-coding-agent` 收编程执行（8 工具、子代理、persona/prompts、四个 gate 扩展、工具渲染器与 interactive-shell 对话框），经 `requires = ["nova-base"]` 声明包间依赖（装/卸自动校验）。安装基线变为双包：`nova-pkg install` 两个包。
 
+### Added
+- **打包形态基建（二进制分发的后端四件）**：①统一入口分发器 `cli/backend.py`——`nova-server [rpc|run|pkg]`（裸跑缺省 rpc；pip 渠道的 `nova-harness`/`nova-harness-rpc`/`nova-pkg` 三启动器不受影响，挂同一批 main）；②子代理冻结兼容——`sys.frozen` 时自调从"解释器 + `-m` 模块调用"切换为"二进制自身 + `run` 子命令"；③内建官方包通道（`core/package/builtin.py`）——冻结形态首启把随包携带的双 bundle 落地到 `~/.nova/agent/builtin/<name>/` 并登记进 settings 包清单（幂等、版本升级重落地、用户卸载不回补），之后与正常 path 包同机制；④冻结形态依赖落点（`.site/`）——`FrozenSiteBackend`（`pip install --target <base>/packages/.site/`，宿主 python 经 `NOVA_PYTHON` > 系统 python3（校验大版本 + pip 可用）探测，无宿主时装包不阻断、警告带指引）+ `runtime_paths.ensure_package_paths`（装配时把 `.site/` 与各包 `backend/` 挂进内嵌解释器 sys.path，append 序——包不能遮蔽 nova_* 内建模块）。
+
 ### 早期雏形（2026-04，当时未封版）
 
 ### Added

@@ -83,12 +83,19 @@ def _get_global_semaphore() -> asyncio.Semaphore:
 
 
 def _nova_harness_executable() -> str:
-    """Return the Python interpreter path; ``nova-harness`` is a module entry."""
+    """子代理自调的 executable：冻结形态是二进制自身，否则是当前解释器。"""
     return sys.executable
 
 
 def _nova_harness_module_args() -> List[str]:
-    """Return the module invocation args for ``nova-harness run``."""
+    """子代理自调的入口参数。
+
+    开发态走模块调用（解释器 + ``-m``）；冻结形态（PyInstaller 置
+    ``sys.frozen``）没有解释器也没有可 import 的环境，走统一入口的
+    ``run`` 子命令（``nova-server run`` ≡ ``python -m ... run``）。
+    """
+    if getattr(sys, "frozen", False):
+        return ["run"]
     return ["-m", "nova_harness.cli.main", "run"]
 
 

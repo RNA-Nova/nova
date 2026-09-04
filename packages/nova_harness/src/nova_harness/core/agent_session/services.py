@@ -111,6 +111,22 @@ class AgentSessionServices:
         elif project_trusted is not None:
             settings_manager.set_project_trusted(initial_project_trusted)
 
+        # 内建官方包通道（冻结形态：首启落地 + 登记进 settings 包清单；
+        # 开发态零动作）——须在资源解析之前
+        from nova_harness.core.package.builtin import ensure_builtin_packages
+
+        ensure_builtin_packages(settings_manager, resolved_agent_dir)
+
+        # 冻结形态的包运行时装配路径挂载（.site 依赖 + 各包 backend/），
+        # 须在资源加载/工具 import 之前
+        from nova_harness.core.package.runtime_paths import ensure_package_paths
+
+        ensure_package_paths(
+            resolved_agent_dir,
+            settings_manager,
+            project_base_dir=str(Path(resolved_cwd) / ".nova"),
+        )
+
         model_runtime = model_runtime or ModelRuntime(
             auth_storage, Path(resolved_agent_dir) / MODELS_FILE_NAME
         )

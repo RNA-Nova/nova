@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -33,6 +34,7 @@ from nova_harness.core.config.defaults import (
 from nova_harness.core.config.settings.manager import SettingsManager
 from nova_harness.core.package.binaries import ensure_binary
 from nova_harness.core.package.install.python_backend import (
+    NoPipHostError,
     check_dependency_conflicts,
     install_dependencies,
     install_package,
@@ -358,10 +360,28 @@ class PackageInstaller:
                         logger.info("Python dependency dry-run: OK\n%s", output)
             else:
                 if deps or requirements_path:
-                    check_dependency_conflicts(
-                        deps, requirements_path=requirements_path
-                    )
-                    install_dependencies(deps, requirements_path=requirements_path)
+                    try:
+                        check_dependency_conflicts(
+                            deps,
+                            requirements_path=requirements_path,
+                            install_dir=str(self.install_dir),
+                        )
+                        install_dependencies(
+                            deps,
+                            requirements_path=requirements_path,
+                            install_dir=str(self.install_dir),
+                        )
+                    except NoPipHostError as exc:
+                        # 冻结形态无 pip 宿主：包装好、依赖待补（装配/加载时
+                        # 给指引），不阻断安装本身
+                        logger.warning("%s", exc)
+                        self._emit_progress(
+                            "progress",
+                            "install",
+                            source_obj.spec,
+                            f"警告：{exc}",
+                            percent=0.35,
+                        )
                 self._ensure_managed_binaries(manifest, pkg_name, source_obj)
                 self._verify_binary_dependencies(manifest, pkg_name)
 
@@ -387,8 +407,9 @@ class PackageInstaller:
 
         # Phase 3: 当包自身是可安装的 Python 包（name + build-system）时，
         # 将其安装到当前 Python 环境，使 executor/extension 能通过标准
-        # import 引用包内共享模块。
-        if install_python_package and not dry_run:
+        # import 引用包内共享模块。冻结形态跳过——sys.path 挂载替代
+        # （runtime_paths.ensure_package_paths，pip -e 的 .pth 等价物）。
+        if install_python_package and not dry_run and not getattr(sys, "frozen", False):
             self._emit_progress(
                 "progress",
                 "install",

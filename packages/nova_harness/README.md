@@ -267,6 +267,8 @@ class UIContext(ABC):
 
 ## CLI 参考
 
+pip 安装注册三个命令：`nova-harness`、`nova-harness-rpc`、`nova-pkg`。打包（二进制）形态下三者合并为统一入口 `nova-server [rpc|run|pkg]`（裸跑缺省 rpc——TUI 以子进程挂载；`run` 为 print 一次性执行，子代理自调走这里；`pkg` 为包管理器），挂在同一批 main 函数上。
+
 ### `nova-harness`
 
 ```

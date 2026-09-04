@@ -342,7 +342,7 @@ npm link           # 全局注册 `nova` 命令
   - `packages/nova-tui/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
   - `bundles/nova_coding_agent/` 与 `bundles/nova_base/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
-- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 529 个、`nova_agent` 125 个、`nova_harness` 1495 个、`nova_coding_agent` 288 个、`nova_base` 123 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
+- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 529 个、`nova_agent` 125 个、`nova_harness` 1521 个、`nova_coding_agent` 290 个、`nova_base` 123 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
 
 运行方式：
 
