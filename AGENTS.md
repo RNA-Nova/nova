@@ -81,7 +81,7 @@ nova/
 - `streaming.py` —— `AssistantMessageEventStream` 与流式调用入口
 - `utils/` —— 环境变量、JSON 解析、消息转换、流选项、Unicode 代理项清理、上下文溢出检测、模型工具函数等
 
-包内包含详细的 `docs/` 目录，记录架构设计、开发日志、架构决策记录（ADR）、使用与维护指南、代码约定和 API 参考。
+用户文档即包根 `README.md`（封版完整文档：安装、快速上手、Provider/鉴权、流式事件参考等）；开发期文档（devlog/ADR/维护指南）已随封版移除。
 
 ### `nova_agent`（源码包 `nova_agent`）
 
@@ -331,7 +331,7 @@ npm link           # 全局注册 `nova` 命令
   - `packages/nova-tui/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
   - `bundles/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
-- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 458 个、`nova_agent` 117 个、`nova_harness` 1498 个、`nova_coding_agent` 402 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
+- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 529 个、`nova_agent` 125 个、`nova_harness` 1501 个、`nova_coding_agent` 411 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
 
 运行方式：
 

@@ -28,9 +28,9 @@
 | 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pytest`、`pytest-asyncio` |
-| 关键运行时依赖 | `openai >= 1.109.1`、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx` |
+| 关键运行时依赖 | `openai >= 2.0`、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx` |
 
-**未使用** Mypy、Tox、Makefile、Docker。monorepo 根有 GitHub Actions（`.github/workflows/ci.yml`），当前仅覆盖 nova_executor / nova-executor-client，不含本包。
+**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现已覆盖本包：`harness-py` 腿在三平台矩阵（ubuntu/macos/windows）上安装本包（连带 nova_agent、nova_harness）并运行 nova_harness 非集成测试，`bundle-py` 腿同样连带安装本包。
 
 ---
 
