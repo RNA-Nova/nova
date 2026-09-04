@@ -2,6 +2,7 @@
 Prompt template 加载与参数替换测试。
 """
 
+import os
 from pathlib import Path
 
 from nova_harness.core.resources.loaders.prompt_templates import (
@@ -187,7 +188,10 @@ def test_normalize_path_tilde():
 
 
 def test_resolve_prompt_path_absolute():
-    assert _resolve_prompt_path("/abs/path", "/cwd") == "/abs/path"
+    # Windows 语义下 "/abs/path" 无盘符不算绝对路径（会落进 cwd 拼接）——
+    # 输入按平台取真绝对路径；函数对绝对输入原样返回
+    abs_input = "C:/abs/path" if os.name == "nt" else "/abs/path"
+    assert _resolve_prompt_path(abs_input, "/cwd") == str(Path(abs_input))
 
 
 def test_resolve_prompt_path_relative():

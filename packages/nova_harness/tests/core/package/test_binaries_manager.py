@@ -8,6 +8,7 @@ import io
 import json
 import os
 import stat
+import sys
 import tarfile
 import zipfile
 
@@ -20,6 +21,11 @@ from nova_harness.core.package.binaries.manager import (
 )
 
 
+def _exe(name: str) -> str:
+    """平台可执行文件名（Windows 为 <name>.exe）。"""
+    return name + (".exe" if sys.platform == "win32" else "")
+
+
 def _make_executable_bytes() -> bytes:
     return b"#!/bin/sh\necho fake-binary\n"
 
@@ -28,7 +34,7 @@ def _make_tar_gz(tmp_path, binary_name: str) -> str:
     archive = tmp_path / f"{binary_name}-asset.tar.gz"
     with tarfile.open(archive, "w:gz") as tf:
         data = _make_executable_bytes()
-        info = tarfile.TarInfo(name=f"pkg/{binary_name}")
+        info = tarfile.TarInfo(name=f"pkg/{_exe(binary_name)}")
         info.size = len(data)
         tf.addfile(info, io.BytesIO(data))
     return str(archive)
@@ -37,7 +43,7 @@ def _make_tar_gz(tmp_path, binary_name: str) -> str:
 def _make_zip(tmp_path, binary_name: str) -> str:
     archive = tmp_path / f"{binary_name}-asset.zip"
     with zipfile.ZipFile(archive, "w") as zf:
-        zf.writestr(f"pkg/{binary_name}", _make_executable_bytes())
+        zf.writestr(f"pkg/{_exe(binary_name)}", _make_executable_bytes())
     return str(archive)
 
 
@@ -83,7 +89,7 @@ def test_offline_mode(monkeypatch):
 def test_ensure_binary_already_installed(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    target = bin_dir / "fd"
+    target = bin_dir / _exe("fd")
     target.touch()
     target.chmod(target.stat().st_mode | stat.S_IXUSR)
     assert ensure_binary("fd", bin_dir=str(bin_dir)) == str(target)
@@ -113,7 +119,7 @@ def test_ensure_binary_download_install_tar_gz(tmp_path, monkeypatch):
 
     progress = []
     result = ensure_binary("fd", bin_dir=str(bin_dir), on_progress=progress.append)
-    assert result == str(bin_dir / "fd")
+    assert result == str(bin_dir / _exe("fd"))
     assert os.access(result, os.X_OK)
     assert open(result, "rb").read() == _make_executable_bytes()
     assert progress and "Downloading fd 1.0.0" in progress[0]
@@ -126,7 +132,7 @@ def test_ensure_binary_download_install_zip(tmp_path, monkeypatch):
     _fake_registry(monkeypatch, "fd", f"file://{archive}", _sha256(archive))
     bin_dir = tmp_path / "bin"
     result = ensure_binary("fd", bin_dir=str(bin_dir))
-    assert result == str(bin_dir / "fd")
+    assert result == str(bin_dir / _exe("fd"))
 
 
 def test_ensure_binary_checksum_mismatch(tmp_path, monkeypatch):
@@ -135,7 +141,7 @@ def test_ensure_binary_checksum_mismatch(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     assert ensure_binary("fd", bin_dir=str(bin_dir)) is None
     # 校验失败不留任何文件
-    assert not (bin_dir / "fd").exists()
+    assert not (bin_dir / _exe("fd")).exists()
 
 
 def test_ensure_binary_missing_binary_in_archive(tmp_path, monkeypatch):

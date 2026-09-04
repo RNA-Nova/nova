@@ -312,7 +312,9 @@ def normalize_package_source_for_settings(
         else os.path.expanduser(path)
     )
     base = os.path.realpath(os.path.expanduser(base_dir))
-    rel = os.path.relpath(abs_path, base)
+    # settings 里的 path: 源串统一 posix 分隔符（跨平台可移植；
+    # Windows 的 os.path.relpath 会产出反斜杠）
+    rel = os.path.relpath(abs_path, base).replace(os.sep, "/")
 
     new_source = f"path:{rel}"
     if isinstance(spec, str):
@@ -392,7 +394,8 @@ def get_package_identity(
             )
         else:
             abs_path = os.path.realpath(os.path.expanduser(path))
-        return f"local:{abs_path}"
+        # identity 统一 posix 分隔符（跨平台去重语义一致）
+        return f"local:{abs_path.replace(os.sep, '/')}"
     return source_str
 
 

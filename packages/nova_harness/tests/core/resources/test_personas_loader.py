@@ -7,6 +7,8 @@
 
 from pathlib import Path
 
+import os
+
 import pytest
 from nova_harness.core.resources.loaders.personas import (
     load_persona_from_file,
@@ -74,7 +76,7 @@ def test_load_dir_names_by_relative_path(personas_root: Path):
     ]
     by_name = {p.name: p for p in personas}
     assert by_name["coding/core"].content == "核心人格"
-    assert by_name["subagents/scout"].file_path.endswith("subagents/scout.md")
+    assert by_name["subagents/scout"].file_path.endswith(os.path.join("subagents", "scout.md"))
 
 
 def test_load_dir_missing_returns_empty(tmp_path: Path):
@@ -127,7 +129,7 @@ def test_load_personas_from_resolved_dir(personas_root: Path):
     assert info is not None
     assert info.scope == "user"
     # source_info.path 指向实际 persona 文件，而不是共享的资源根
-    assert info.path.endswith("coding/core.md")
+    assert info.path.endswith(os.path.join("coding", "core.md"))
 
 
 def test_load_personas_skips_disabled_resources(personas_root: Path):

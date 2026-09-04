@@ -289,9 +289,9 @@ def test_get_disabled_extension_names_derives_registry_names(tmp_path: Path) -> 
 
     ext_dir = tmp_path / "extensions" / "drop_dir"
     ext_dir.mkdir(parents=True)
-    (ext_dir / "extension.py").write_text("# dir 形态扩展")
+    (ext_dir / "extension.py").write_text("# dir 形态扩展", encoding="utf-8")
     ext_file = tmp_path / "extensions" / "drop_file.py"
-    ext_file.write_text("# 单文件形态扩展")
+    ext_file.write_text("# 单文件形态扩展", encoding="utf-8")
     keep_dir = tmp_path / "extensions" / "keep"
     keep_dir.mkdir()
 

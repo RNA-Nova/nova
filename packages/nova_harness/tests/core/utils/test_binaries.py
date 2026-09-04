@@ -1,10 +1,12 @@
 """core/utils/binaries.py 单元测试。"""
 
+import os
 import stat
 import sys
 from pathlib import Path
 
 import pytest
+
 from nova_harness.core.utils import binaries
 from nova_harness.core.utils.binaries import (
     get_env_bin_dir,
@@ -28,6 +30,11 @@ def fake_bins(tmp_path, monkeypatch):
     return {"env_bin": env_bin, "nova_bin": nova_bin}
 
 
+def _exe(name: str) -> str:
+    """平台可执行文件名（Windows 为 <name>.exe——shutil.which 走 PATHEXT，裸名不命中）。"""
+    return name + (".exe" if sys.platform == "win32" else "")
+
+
 def _make_executable(path) -> None:
     path.touch()
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -48,9 +55,9 @@ def test_resolve_binary_nova_bin_tier(fake_bins, monkeypatch):
 def test_resolve_binary_falls_back_to_path(fake_bins, tmp_path, monkeypatch):
     system_bin = tmp_path / "sysbin"
     system_bin.mkdir()
-    _make_executable(system_bin / "fd")
+    _make_executable(system_bin / _exe("fd"))
     monkeypatch.setenv("PATH", str(system_bin))
-    assert resolve_binary("fd") == str(system_bin / "fd")
+    assert resolve_binary("fd") == str(system_bin / _exe("fd"))
 
 
 def test_resolve_binary_priority_order(fake_bins, tmp_path, monkeypatch):
@@ -69,6 +76,7 @@ def test_resolve_binary_missing_returns_none(fake_bins, monkeypatch):
     assert resolve_binary("no-such-binary-xyz") is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="可执行位是 POSIX 语义（Windows 的 os.access(X_OK) 恒真）")
 def test_resolve_binary_requires_executable_bit(fake_bins, monkeypatch):
     (fake_bins["env_bin"] / "rg").touch()
     (fake_bins["nova_bin"] / "rg").touch()
@@ -79,15 +87,18 @@ def test_resolve_binary_requires_executable_bit(fake_bins, monkeypatch):
 def test_prepend_managed_bins(fake_bins, monkeypatch):
     env = prepend_managed_bins_to_path({"PATH": "/usr/bin:/bin"})
     # 顺序与 resolve_binary 优先级一致：env bin → nova bin
-    expected = f"{fake_bins['env_bin']}:{fake_bins['nova_bin']}:/usr/bin:/bin"
+    expected = os.pathsep.join(
+        [str(fake_bins["env_bin"]), str(fake_bins["nova_bin"]), "/usr/bin", "/bin"]
+    )
     assert env["PATH"] == expected
 
 
 def test_prepend_managed_bins_no_duplicate(fake_bins):
-    env = prepend_managed_bins_to_path(
-        {"PATH": f"{fake_bins['nova_bin']}:{fake_bins['env_bin']}:/usr/bin"}
+    initial = os.pathsep.join(
+        [str(fake_bins["nova_bin"]), str(fake_bins["env_bin"]), "/usr/bin"]
     )
-    assert env["PATH"] == f"{fake_bins['nova_bin']}:{fake_bins['env_bin']}:/usr/bin"
+    env = prepend_managed_bins_to_path({"PATH": initial})
+    assert env["PATH"] == initial
 
 
 def test_get_env_bin_dir(fake_bins):
@@ -104,9 +115,9 @@ def test_resolve_binary_alternate_system_names(fake_bins, tmp_path, monkeypatch)
     """PATH 层识别发行版别名（Debian 的 fd 叫 fdfind）。"""
     system_bin = tmp_path / "sysbin"
     system_bin.mkdir()
-    _make_executable(system_bin / "fdfind")
+    _make_executable(system_bin / _exe("fdfind"))
     monkeypatch.setenv("PATH", str(system_bin))
-    assert resolve_binary("fd") == str(system_bin / "fdfind")
+    assert resolve_binary("fd") == str(system_bin / _exe("fdfind"))
 
 
 def test_alternate_names_not_used_in_managed_dirs(fake_bins, monkeypatch):

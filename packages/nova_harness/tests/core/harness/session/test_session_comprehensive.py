@@ -238,7 +238,8 @@ def test_fork_from_copies_entries():
         source_path = source.get_session_file()
 
         forked = SessionManager.fork_from(source_path, target_cwd="/workspace")
-        assert forked.get_header().cwd == "/workspace"
+        # header 存的是 abspath 归一后的值——期望经同函数现算（Windows 补盘符）
+        assert forked.get_header().cwd == os.path.abspath("/workspace")
         assert forked.get_header().parent_session == source_path
         assert len(forked.get_entries()) == 2
 

@@ -2,6 +2,9 @@
 
 import os
 import tempfile
+
+# 全平台存在的 cwd（裸 /tmp 在 Windows 解析为 <盘符>:\tmp 且通常不存在）
+_EXISTING_CWD = tempfile.gettempdir()
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,7 +23,7 @@ def _make_config(session_manager, **overrides):
         "agent": agent,
         "session_manager": session_manager,
         "settings_manager": MagicMock(),
-        "cwd": "/tmp",
+        "cwd": _EXISTING_CWD,
         "system_prompt_manager": MagicMock(),
         "tools_manager": MagicMock(),
         "resource_loader": MagicMock(),
@@ -41,7 +44,7 @@ def persisted_session_manager(tmp_path):
     session_dir = str(tmp_path / "sessions")
     os.makedirs(session_dir, exist_ok=True)
     sm = SessionManager(
-        cwd="/tmp", session_dir=session_dir, session_file=None, persist=True
+        cwd=_EXISTING_CWD, session_dir=session_dir, session_file=None, persist=True
     )
     # 持久化需要至少一条 assistant 消息才会 flush 文件
     from nova_ai import AssistantMessage, TextContent
@@ -92,7 +95,7 @@ async def test_import_session_copies_and_switches(persisted_session_manager, tmp
     external = str(tmp_path / "external.jsonl")
     with open(external, "w", encoding="utf-8") as f:
         f.write(
-            '{"type":"session","version":2,"id":"imported-id","timestamp":"2024-01-01T00:00:00","cwd":"/tmp"}\n'
+            f'{{"type":"session","version":2,"id":"imported-id","timestamp":"2024-01-01T00:00:00","cwd":"{_EXISTING_CWD}"}}\n'
         )
 
     session = AgentSession(_make_config(persisted_session_manager))
@@ -122,7 +125,7 @@ async def test_switch_agent_session_opens_other_file(
     other_file = str(tmp_path / "other.jsonl")
     with open(other_file, "w", encoding="utf-8") as f:
         f.write(
-            '{"type":"session","version":2,"id":"other-id","timestamp":"2024-01-01T00:00:00","cwd":"/tmp"}\n'
+            f'{{"type":"session","version":2,"id":"other-id","timestamp":"2024-01-01T00:00:00","cwd":"{_EXISTING_CWD}"}}\n'
         )
 
     session = AgentSession(_make_config(persisted_session_manager))
@@ -138,7 +141,7 @@ def test_get_session_info_returns_summary(persisted_session_manager):
     info = session.get_session_info()
 
     assert info["id"] == session.session_manager.get_session_id()
-    assert info["cwd"] == "/tmp"
+    assert info["cwd"] == _EXISTING_CWD
     assert info["persisted"] is True
     assert info["entry_count"] == len(session.session_manager.get_entries())
 

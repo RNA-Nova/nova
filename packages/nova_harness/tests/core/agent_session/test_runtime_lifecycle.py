@@ -16,6 +16,9 @@ from nova_harness.core.types.session import (
 )
 from nova_harness.core.types.session.factory import CreateAgentSessionRuntimeResult
 
+# 全平台存在的 cwd（裸 /tmp 在 Windows 解析为 <盘符>:\tmp 且通常不存在）
+_EXISTING_CWD = __import__("tempfile").gettempdir()
+
 
 def _make_old_session():
     """构造一个用于 runtime 测试的旧 session mock。"""
@@ -39,7 +42,7 @@ def _make_old_session():
 def _make_services(session):
     """构造一个使用 mock 的 services 对象。"""
     return AgentSessionServices(
-        cwd="/tmp",
+        cwd=_EXISTING_CWD,
         agent_dir="/tmp/agent",
         settings_manager=MagicMock(),
         model_runtime=MagicMock(),
@@ -69,7 +72,7 @@ def test_runtime_properties():
     runtime = AgentSessionRuntime(session, services, AsyncMock())
     assert runtime.session is session
     assert runtime.services is services
-    assert runtime.cwd == "/tmp"
+    assert runtime.cwd == _EXISTING_CWD
     assert runtime.diagnostics == []
     assert runtime.model_fallback_message is None
 
@@ -92,7 +95,7 @@ async def test_new_session_uses_factory_and_replaces_session():
     ) as mock_create:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "new.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         mock_create.return_value = new_sm
 
         result = await runtime.new_session(NewSessionOptions())
@@ -124,12 +127,12 @@ async def test_new_session_in_memory_when_not_persisted():
     ) as mock_in_memory:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = None
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         mock_in_memory.return_value = new_sm
 
         await runtime.new_session(NewSessionOptions())
 
-    mock_in_memory.assert_called_once_with("/tmp")
+    mock_in_memory.assert_called_once_with(_EXISTING_CWD)
 
 
 @pytest.mark.asyncio
@@ -181,7 +184,7 @@ async def test_new_session_with_parent_and_setup():
     ) as mock_create:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "new.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         new_sm.build_session_context.return_value = MagicMock(messages=["msg"])
         mock_create.return_value = new_sm
 
@@ -212,7 +215,7 @@ async def test_switch_session_opens_existing_file():
     ) as mock_open:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "switched.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         mock_open.return_value = new_sm
 
         result = await runtime.switch_session("/path/to/session.jsonl")
@@ -252,7 +255,7 @@ async def test_switch_session_emits_session_replaced_after_rebind():
     ) as mock_open:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "switched.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         mock_open.return_value = new_sm
 
         result = await runtime.switch_session("/path/to/session.jsonl")
@@ -308,7 +311,7 @@ async def test_fork_before_user_message():
     ) as mock_open:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "forked.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         new_sm.create_branched_session.return_value = "forked.jsonl"
         mock_open.return_value = new_sm
 
@@ -344,7 +347,7 @@ async def test_fork_at_entry():
     ) as mock_open:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "forked.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         new_sm.create_branched_session.return_value = "forked.jsonl"
         mock_open.return_value = new_sm
 
@@ -446,7 +449,7 @@ async def test_rebind_and_with_session_callbacks():
     ) as mock_create:
         new_sm = MagicMock()
         new_sm.get_session_file.return_value = "new.jsonl"
-        new_sm.get_cwd.return_value = "/tmp"
+        new_sm.get_cwd.return_value = _EXISTING_CWD
         mock_create.return_value = new_sm
 
         await runtime.new_session(NewSessionOptions(with_session=with_session))

@@ -522,6 +522,13 @@ def build_artifacts() -> Tuple[Dict[str, Any], str]:
 
 
 def main() -> int:
+    # Windows 控制台缺省 cp1252 编码，中文输出会炸 UnicodeEncodeError——
+    # 显式重配 UTF-8（POSIX 下是无害 no-op）
+    import sys as _sys
+
+    if hasattr(_sys.stdout, "reconfigure"):
+        _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="导出线上契约（JSON Schema + TS）")
     root = _default_repo_root()
     parser.add_argument(

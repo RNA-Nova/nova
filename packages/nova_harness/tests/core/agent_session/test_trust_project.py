@@ -7,16 +7,25 @@
 """
 
 import json
+import os
 
 import pytest
+
 from nova_harness.core.sdk import create_agent_session_runtime
 from nova_harness.core.types.session.config import CreateAgentSessionOptions
+
+
+def _redirect_home(monkeypatch, home: str) -> None:
+    """home 重定向按平台分设：POSIX 读 $HOME，Windows 的 Path.home 读 %USERPROFILE%。"""
+    monkeypatch.setenv("HOME", home)
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", home)
 
 
 @pytest.mark.asyncio
 async def test_trust_project_persists_and_flips(tmp_path, monkeypatch):
     """trust_project：内存翻转 + trust.json 落盘（重启不忘）。"""
-    monkeypatch.setenv("HOME", str(tmp_path))  # trust.json 落到隔离 HOME
+    _redirect_home(monkeypatch, str(tmp_path))  # trust.json 落到隔离 HOME
     rt = await create_agent_session_runtime(
         CreateAgentSessionOptions(cwd=str(tmp_path))
     )

@@ -126,9 +126,9 @@ async def _async_main() -> int:
             kill_tracked_detached_children()
             server.shutdown()
 
-        signals = [signal.SIGINT]
+        signals = [signal.SIGINT, signal.SIGTERM]
         if sys.platform != "win32":
-            signals += [signal.SIGTERM, signal.SIGHUP]
+            signals.append(signal.SIGHUP)
         for sig in signals:
             try:
                 loop.add_signal_handler(sig, _on_signal, sig)

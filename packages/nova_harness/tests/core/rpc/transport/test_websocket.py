@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import sys
 
 import pytest
 import websockets
@@ -265,7 +266,9 @@ def test_provision_token_generates_and_reloads(tmp_path):
     token1, path1 = provision_token(None, None, target)
     assert path1 == target
     assert target.exists()
-    assert oct(target.stat().st_mode & 0o777) == "0o600"
+    # Windows 无 POSIX 权限位语义（chmod 仅 read-only 标志，stat 回读恒 0o666）
+    expected_mode = "0o666" if sys.platform == "win32" else "0o600"
+    assert oct(target.stat().st_mode & 0o777) == expected_mode
     # 二次调用读回同一 token（幂等）
     token2, _ = provision_token(None, None, target)
     assert token1 == token2
