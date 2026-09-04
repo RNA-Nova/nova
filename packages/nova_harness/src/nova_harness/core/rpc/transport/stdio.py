@@ -33,6 +33,11 @@ class StdioTransport(Transport):
     def __init__(self) -> None:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
+        # Windows 的 asyncio ProactorEventLoop 不支持 stdio 管道
+        # （connect_read_pipe/connect_write_pipe 仅支持 POSIX fd）——
+        # 该平台上读退化到执行器线程（阻塞 readline 不冻结事件循环），
+        # 写直出（NDJSON 小帧，放弃 drain 协作，见 open 注释）
+        self._win32_stdio = sys.platform == "win32"
 
     @property
     def supports_binary(self) -> bool:
@@ -40,6 +45,8 @@ class StdioTransport(Transport):
 
     async def open(self) -> None:
         """Bind stdin to an async StreamReader and stdout to a StreamWriter."""
+        if self._win32_stdio:
+            return
         loop = asyncio.get_running_loop()
         reader = asyncio.StreamReader(limit=_READ_LIMIT)
         protocol = asyncio.StreamReaderProtocol(reader)
@@ -56,6 +63,15 @@ class StdioTransport(Transport):
 
     async def read(self) -> Dict[str, Any] | None:
         """Read the next line from stdin and parse it as JSON."""
+        if self._win32_stdio:
+            loop = asyncio.get_running_loop()
+            line = await loop.run_in_executor(None, sys.stdin.buffer.readline)
+            if not line:
+                return None
+            text = line.decode("utf-8").strip()
+            if not text:
+                return await self.read()
+            return json.loads(text)
         if self._reader is None:
             raise RuntimeError("Transport not opened")
         line = await self._reader.readline()
@@ -68,6 +84,12 @@ class StdioTransport(Transport):
 
     async def write(self, msg: Dict[str, Any]) -> None:
         """Write a JSON object as a single line to stdout (async, backpressured)."""
+        if self._win32_stdio:
+            sys.stdout.buffer.write(
+                json.dumps(msg, ensure_ascii=False).encode("utf-8") + b"\n"
+            )
+            sys.stdout.buffer.flush()
+            return
         if self._writer is None:
             raise RuntimeError("Transport not opened")
         self._writer.write(json.dumps(msg, ensure_ascii=False).encode("utf-8") + b"\n")

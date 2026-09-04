@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { UISettings, type SessionSnapshot } from 'nova-tui';
@@ -65,7 +65,7 @@ describe('updateTitle（OSC 0）', () => {
 
   it('快照为空：回退 process.cwd() 基名', () => {
     updateTitle(null);
-    const base = process.cwd().split('/').pop()!;
+    const base = basename(process.cwd());
     assert.deepEqual(written, [`\x1b]0;nova - ${base}\x07`]);
   });
 

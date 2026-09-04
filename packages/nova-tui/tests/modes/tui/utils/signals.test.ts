@@ -89,7 +89,11 @@ describe('installSignalHandlers · 信号优雅关闭', () => {
     fixture.uninstall();
   });
 
-  it('SIGHUP → 同款优雅关闭（非 Windows 注册）', async () => {
+  it('SIGHUP → 同款优雅关闭（非 Windows 注册）', async (t) => {
+    if (process.platform === 'win32') {
+      t.skip('SIGHUP 在非 Windows 平台注册——Windows 无此信号语义');
+      return;
+    }
     const fixture = createFixture();
     fixture.proc.emit('SIGHUP');
     await flush();

@@ -250,8 +250,15 @@ describe('双 Esc 导航', () => {
     const h = makeHarness();
     assert.equal(h.keymap.handle('\x18')?.consume, true); // ctrl+x
     assert.equal(h.copied, 1);
-    assert.equal(h.keymap.handle('\x1a')?.consume, true); // ctrl+z
-    assert.equal(h.suspends, 1);
+    if (process.platform === 'win32') {
+      // ctrl+z 挂起在 Windows 键位表中刻意禁用（无 POSIX 挂起语义）——
+      // 按键让路不消费
+      assert.equal(h.keymap.handle('\x1a'), undefined);
+      assert.equal(h.suspends, 0);
+    } else {
+      assert.equal(h.keymap.handle('\x1a')?.consume, true); // ctrl+z
+      assert.equal(h.suspends, 1);
+    }
     assert.equal(h.keymap.handle('\x07')?.consume, true); // ctrl+g
     assert.equal(h.externalEditor, 1);
   });

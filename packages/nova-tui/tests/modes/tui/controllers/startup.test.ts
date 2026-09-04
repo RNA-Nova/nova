@@ -54,9 +54,12 @@ describe('expandTildePath', () => {
 describe('resolveSessionArg', () => {
   it('路径形态解析为绝对路径；裸 id 原样透传', () => {
     const cwd = '/work/proj';
-    assert.equal(resolveSessionArg('/abs/s.jsonl', cwd), '/abs/s.jsonl'); // 绝对路径直接用
-    assert.equal(resolveSessionArg('rel/s.jsonl', cwd), '/work/proj/rel/s.jsonl');
-    assert.equal(resolveSessionArg('s.jsonl', cwd), '/work/proj/s.jsonl'); // .jsonl 后缀视为路径
+    // 期望值经 resolve 现算——路径分隔符与盘符语义分平台（POSIX 绝对路径
+    // 原样返回；Windows 补当前盘符），本用例钉的是"路径形态进 resolve、
+    // 裸 id 透传"的分类行为
+    assert.equal(resolveSessionArg('/abs/s.jsonl', cwd), resolve(cwd, '/abs/s.jsonl'));
+    assert.equal(resolveSessionArg('rel/s.jsonl', cwd), resolve(cwd, 'rel/s.jsonl'));
+    assert.equal(resolveSessionArg('s.jsonl', cwd), resolve(cwd, 's.jsonl')); // .jsonl 后缀视为路径
     assert.equal(resolveSessionArg('abc123', cwd), 'abc123'); // 裸 id 由后端解析
     assert.equal(resolveSessionArg('a\\b.jsonl', cwd), resolve(cwd, 'a\\b.jsonl'));
   });
