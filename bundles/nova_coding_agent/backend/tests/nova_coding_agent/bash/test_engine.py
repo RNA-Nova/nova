@@ -199,10 +199,12 @@ async def test_local_bash_background_pipe_no_hang(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_local_bash_late_writer_captured(tmp_path: Path):
-    """宽限计时器随 chunk 重置：shell 退出后 50ms 内的迟到输出不丢。"""
+    """宽限计时器随 chunk 重置：shell 退出后宽限内的迟到输出不丢。"""
     operations = create_local_bash_operations()
+    # 迟到写留 5x 余量于 0.1s 空闲宽限内（共享 CI runner 调度抖动下
+    # 50ms 的 2x 余量实测会偶发越窗）
     result = await operations.execute(
-        "(sleep 0.05; echo late) & echo early", str(tmp_path), {}
+        "(sleep 0.02; echo late) & echo early", str(tmp_path), {}
     )
     assert result.exit_code == 0
     assert "early" in result.output

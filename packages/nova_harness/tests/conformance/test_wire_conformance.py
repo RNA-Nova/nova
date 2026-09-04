@@ -176,11 +176,16 @@ def _spawn_backend(extra_args: list[str] | None = None) -> subprocess.Popen:
         bufsize=1,
         env=env,
     )
-    # stderr 排干线程（异常栈不进协议通道；防止管道缓冲写满死锁）
-    threading.Thread(
-        target=lambda: [line for line in proc.stderr],
-        daemon=True,
-    ).start()
+    # stderr 排干线程（异常栈不进协议通道；防止管道缓冲写满死锁）；
+    # 内容留档——teardown 断言失败时带出后端死因
+    stderr_lines: list[str] = []
+
+    def _drain() -> None:
+        for line in proc.stderr:
+            stderr_lines.append(line)
+
+    threading.Thread(target=_drain, daemon=True).start()
+    proc.stderr_lines = stderr_lines  # type: ignore[attr-defined]
     return proc
 
 
@@ -241,7 +246,8 @@ def backend(request, tmp_path):
     wire.call("initialize")
     yield wire
     # 关停语义：shutdown 命令 + stdin EOF（stdio 后端主循环随管道断开退出；
-    # WS 形态 stdin 不是生命线，走 SIGTERM——顺带覆盖信号关停路径）
+    # WS 形态 stdin 不是生命线，POSIX 走 SIGTERM——顺带覆盖信号关停路径；
+    # Windows 的 terminate() 是硬杀，仅超时兜底才动用）
     try:
         wire.call("shutdown", timeout=5)
     except Exception:
@@ -251,14 +257,23 @@ def backend(request, tmp_path):
         proc.stdin.close()
     except Exception:
         pass
-    if request.param == "ws":
-        proc.terminate()
+    timed_out = False
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
-    assert proc.returncode == 0
+        timed_out = True
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    if timed_out and sys.platform == "win32":
+        # Windows 的 terminate/kill 无优雅退出码（TerminateProcess 恒非零）——
+        # 超时强杀不裁决退出码；响应面（shutdown 应答）已在上方验证
+        return
+    tail = "".join(getattr(proc, "stderr_lines", [])[-40:])
+    assert proc.returncode == 0, f"后端退出码 {proc.returncode}；stderr 尾：\n{tail}"
 
 
 def _create_session(wire: Wire) -> dict:

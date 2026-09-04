@@ -47,8 +47,8 @@ describe('discoverUIAssets', () => {
     const assets = await discoverUIAssets(pkg);
     assert.ok(assets);
     assert.deepEqual([...assets.renderers.keys()].sort(), ['bash', 'edit']);
-    assert.match(assets.extensionEntry ?? '', /frontend\/tui\/index\.ts$/);
-    assert.match(assets.renderers.get('bash') ?? '', /frontend\/tui\/tools\/bash\.ts$/);
+    assert.match(assets.extensionEntry ?? '', /frontend[\\/]tui[\\/]index\.ts$/);
+    assert.match(assets.renderers.get('bash') ?? '', /frontend[\\/]tui[\\/]tools[\\/]bash\.ts$/);
   });
 
   it('user_tools 同族发现；tools 同名覆盖 user_tools', async () => {
@@ -60,7 +60,7 @@ describe('discoverUIAssets', () => {
     const assets = await discoverUIAssets(pkg);
     assert.ok(assets);
     assert.deepEqual([...assets.renderers.keys()].sort(), ['bash', 'extra']);
-    assert.match(assets.renderers.get('bash') ?? '', /tools\/bash\.ts$/); // tools 胜出
+    assert.match(assets.renderers.get('bash') ?? '', /tools[\\/]bash\.ts$/); // tools 胜出
   });
 
   it('frontend/package.json 无 node_modules → needsNpmInstall', async () => {
@@ -98,7 +98,7 @@ describe('discoverUIAssets', () => {
     const assets = await discoverUIAssets(pkg);
     assert.ok(assets);
     assert.deepEqual([...assets.renderers.keys()], ['bash']);
-    assert.match(assets.extensionEntry ?? '', /tui\/index\.ts$/);
+    assert.match(assets.extensionEntry ?? '', /tui[\\/]index\.ts$/);
     assert.equal(assets.needsNpmInstall, true); // 根 package.json（B 型身份证）即半区清单
   });
 
