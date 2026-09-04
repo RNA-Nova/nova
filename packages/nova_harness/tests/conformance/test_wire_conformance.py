@@ -273,6 +273,16 @@ def backend(request, tmp_path):
         # 超时强杀不裁决退出码；响应面（shutdown 应答）已在上方验证
         return
     tail = "".join(getattr(proc, "stderr_lines", [])[-40:])
+    if not tail.strip():
+        # 后端启动即把 stderr 重定向到 rpc-stderr.log（fd 级）——
+        # 管道抓不到时从日志文件捞死因
+        log_path = (
+            Path.home() / ".nova" / "agent" / "logs" / "rpc-stderr.log"
+        )
+        try:
+            tail = "".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)[-40:])
+        except OSError:
+            pass
     assert proc.returncode == 0, f"后端退出码 {proc.returncode}；stderr 尾：\n{tail}"
 
 
