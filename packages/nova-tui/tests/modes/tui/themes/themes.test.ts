@@ -334,8 +334,12 @@ describe('主题文件 watcher', () => {
         const v2 = minimalTheme('hot') as { colors: Record<string, string> };
         v2.colors.accent = '#445566';
         writeFileSync(join(dir, 'hot.json'), JSON.stringify(v2));
-        // fs.watch + 100ms 去抖——留足余量
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        // fs.watch + 100ms 去抖——共享 runner 上 watch 延迟可能超固定等待，
+        // 轮询到触发为止（5s 预算）
+        const deadline = Date.now() + 5000;
+        while (fired < 1 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
         assert.ok(fired >= 1, '文件变化应触发 onThemeChange');
         assert.notEqual(colors.accent('x'), before);
       } finally {
