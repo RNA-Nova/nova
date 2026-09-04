@@ -112,12 +112,19 @@ def _resolve_spawn_context(
 
 
 def _kill_process_group(
-    proc: asyncio.subprocess.Process, sig: int = signal_module.SIGTERM
+    proc: asyncio.subprocess.Process, sig: "int | None" = None
 ) -> None:
-    """结束整个进程树（子进程以新会话启动，pid 即进程组组长）。"""
+    """结束整个进程树（子进程以新会话启动，pid 即进程组组长）。
+
+    ``sig=None`` 走 ``kill_process_tree`` 的缺省强杀（POSIX SIGKILL /
+    Windows taskkill）；显式传 SIGTERM 用于先礼后兵的第一枪。
+    """
     if proc.returncode is not None:
         return
-    kill_process_tree(proc.pid, sig)
+    if sig is None:
+        kill_process_tree(proc.pid)
+    else:
+        kill_process_tree(proc.pid, sig)
 
 
 # abort 升级策略：先 SIGTERM 给清理机会，宽限后仍未退出则 SIGKILL 保证必死
@@ -297,8 +304,10 @@ class LocalBashOperations:
                     _wait_process_exit(proc), timeout=_ABORT_TERM_GRACE_S
                 )
             except asyncio.TimeoutError:
-                # SIGTERM 被无视（如 trap），升级 SIGKILL，不留僵尸
-                _kill_process_group(proc, signal_module.SIGKILL)
+                # SIGTERM 被无视（如 trap），升级强杀，不留僵尸
+                #（Windows 无 SIGKILL 常量——kill_process_tree 的缺省分支
+                # 已按平台处理，此处传 None 走缺省）
+                _kill_process_group(proc)
                 try:
                     await asyncio.wait_for(
                         _wait_process_exit(proc), timeout=_ABORT_KILL_GRACE_S

@@ -154,7 +154,7 @@ export async function preview(args, cwd) { return { patch: 'x', path: args.path,
     assert.equal(slots.resolveToolPreview('bash'), undefined);
   });
 
-  it('结果缓存：mtime 未变直接注册缓存产物（jiti 不重跑）', async () => {
+  it('结果缓存：mtime 未变直接注册缓存产物（jiti 不重跑）', async (t) => {
     const assets = [await makePkg('pkg-cache', 'user', { bash: SIMPLE_RENDERER })];
     const filePath = [...assets[0]!.renderers.values()][0]!;
     const slots1 = new SlotRegistry();
@@ -168,6 +168,13 @@ export async function preview(args, cwd) { return { patch: 'x', path: args.path,
     const mtime = (await stat(filePath)).mtimeMs;
     await writeFile(filePath, 'this is not valid typescript (((');
     await utimes(filePath, mtime / 1000, mtime / 1000);
+
+    // 平台校准：部分 Node/libuv 版本的 utimes 浮点→纳秒转换不保真
+    //（截断而非舍入），"mtime 未变"的前提构造不出来——显式跳过。
+    if ((await stat(filePath)).mtimeMs !== mtime) {
+      t.skip('当前平台 utimes 浮点往返不保真，无法构造 mtime 未变前提');
+      return;
+    }
 
     const slots2 = new SlotRegistry();
     const second = await loadUIAssets(assets, slots2);
@@ -297,7 +304,7 @@ export default function (api) {
     assert.equal(collisions[0]?.collision?.name, 'bash');
   });
 
-  it('index.ts 缓存：mtime 未变零 jiti 重编译，工厂仍重新执行（重新注册）', async () => {
+  it('index.ts 缓存：mtime 未变零 jiti 重编译，工厂仍重新执行（重新注册）', async (t) => {
     const assets = [
       await makeEntryPkg(
         'pkg-entry-cache',
@@ -313,6 +320,12 @@ export default function (api) {
     const mtime = (await stat(entryPath)).mtimeMs;
     await writeFile(entryPath, 'not valid ts (((');
     await utimes(entryPath, mtime / 1000, mtime / 1000);
+
+    // 平台校准（同上）：utimes 往返不保真的环境构造不出本用例前提
+    if ((await stat(entryPath)).mtimeMs !== mtime) {
+      t.skip('当前平台 utimes 浮点往返不保真，无法构造 mtime 未变前提');
+      return;
+    }
 
     const slots2 = new SlotRegistry();
     const second = await loadUIAssets(assets, slots2);

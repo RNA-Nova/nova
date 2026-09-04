@@ -372,7 +372,11 @@ def test_events_conform_to_schema(backend):
     events = backend.drain_events(1.0)
 
     types = {e["type"] for e in events}
-    assert "thinking_level_changed" in types
+    # 无可切换级别时事件无从产生（无推理模型的极简环境——如干净 CI，
+    # 唯一可用级别即当前级别，setThinkingLevel 吸附回原级不发事件）；
+    # 有候选则必须发出（开发机带模型路径）。
+    if candidates:
+        assert "thinking_level_changed" in types
     assert "session_info_changed" in types
     for event in events:
         validate(event, event_schema)

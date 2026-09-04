@@ -32,13 +32,18 @@ def kill_tracked_detached_children() -> None:
     _tracked_detached_child_pids.clear()
 
 
-def kill_process_tree(pid: int, sig: int = signal.SIGKILL) -> None:
+def kill_process_tree(pid: int, sig: "int | None" = None) -> None:
     """kill 一个进程及其整棵子树（跨平台）。
 
     POSIX：子进程以新会话启动，pid 即进程组组长，直接对组发信号；
     失败（组不存在等）回退单进程。Windows：``taskkill /F /T``
     （无信号语义，总是强制）。
     """
+    if sig is None:
+        # 缺省强杀信号：Windows 的 signal 模块没有 SIGKILL（其 kill 语义
+        # 由上面的 taskkill 分支承载，sig 不被消费）——默认值不能写在
+        # 签名上，否则导入期就在 Windows 炸 AttributeError
+        sig = getattr(signal, "SIGKILL", signal.SIGTERM)
     if sys.platform == "win32":
         try:
             subprocess.Popen(
