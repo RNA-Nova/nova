@@ -96,7 +96,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: 构建 nova-tui（file: 依赖需要 dist）
+      - name: "构建 nova-tui（file: 依赖需要 dist）"
         working-directory: packages/nova-tui
         run: |
           npm ci
