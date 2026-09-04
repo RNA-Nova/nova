@@ -43,7 +43,6 @@ from .constants import (
 class ContextEvent(NovaBaseModel):
     type: Literal["context"] = CONTEXT
     messages: List[AgentMessage] = Field(default_factory=list)
-    signal: Any = None
 
 
 class BeforeProviderRequestEvent(NovaBaseModel):

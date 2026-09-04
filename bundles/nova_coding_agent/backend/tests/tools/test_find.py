@@ -75,13 +75,13 @@ def test_tool_metadata_valid():
 
 
 def test_find_prompt_snippet_aligned_with_pi():
-    """find 补齐 pi 同款 promptSnippet（纯增量元数据，不动对外契约）。"""
+    """find 补齐  promptSnippet（纯增量元数据，不动对外契约）。"""
     executor = _load_executor()
     assert executor.prompt_snippet == "Find files by glob pattern (respects .gitignore)"
 
 
 # ---------------------------------------------------------------------------
-# fd 层语义（对齐 pi）：相对化输出、--hidden、空 pattern、--full-path
+# fd 层语义（）：相对化输出、--hidden、空 pattern、--full-path
 # ---------------------------------------------------------------------------
 
 
@@ -101,7 +101,7 @@ def test_find_results_relativized(tmpdir):
 
 
 def test_find_includes_hidden(tmpdir):
-    """--hidden：隐藏文件参与查找（对齐 pi）。"""
+    """--hidden：隐藏文件参与查找（）。"""
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
@@ -132,12 +132,12 @@ def test_find_empty_pattern_matches_all(tmpdir):
 
 def test_find_full_path_pattern(tmpdir):
     """带 / 的 pattern（如 sub/*.py）经 --full-path 正确匹配（fd 可用时）。"""
-    from nova_harness.core.utils.binaries import resolve_binary
-
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
+
+    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("fd"):
         pytest.skip("fd 不可用")
@@ -217,12 +217,12 @@ def test_find_does_not_block_event_loop(tmpdir):
 
 def test_find_with_rg_tier(tmpdir):
     """rg --files 层：相对化输出、glob、limit 截断。"""
-    from nova_harness.core.utils.binaries import resolve_binary
-
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
+
+    from nova_harness.core.utils.binaries import resolve_binary
 
     rg_path = resolve_binary("rg")
     if not rg_path:
@@ -309,12 +309,12 @@ def test_find_nonexistent_path_raises_path_not_found(tmpdir):
 
 def test_find_fd_bad_glob_surfaces_stderr(tmpdir):
     """fd 错误退出码为 1（与 rg 不同）：坏 glob 时 stderr 透出为 RuntimeError。"""
-    from nova_harness.core.utils.binaries import resolve_binary
-
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
+
+    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("fd"):
         pytest.skip("fd 不可用")
@@ -324,12 +324,12 @@ def test_find_fd_bad_glob_surfaces_stderr(tmpdir):
 
 def test_find_rg_tier_bad_glob_surfaces_stderr(tmpdir):
     """rg --files 层退出码 2（坏 glob）：stderr 透出为 RuntimeError。"""
-    from nova_harness.core.utils.binaries import resolve_binary
-
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
     )
+
+    from nova_harness.core.utils.binaries import resolve_binary
 
     rg_path = resolve_binary("rg")
     if not rg_path:
@@ -340,12 +340,12 @@ def test_find_rg_tier_bad_glob_surfaces_stderr(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# 输出截断只按字节（对齐 pi 的 maxLines=∞，不再叠 2000 行上限）
+# 输出截断只按字节（不再叠 2000 行上限）
 # ---------------------------------------------------------------------------
 
 
 def test_find_output_truncated_at_50kb(tmpdir):
-    """find 输出拼接后过 truncate_head：超 50KB 截断并标注（对齐 grep/pi）。"""
+    """find 输出拼接后过 truncate_head：超 50KB 截断并标注（对齐 grep）。"""
     for i in range(500):
         name = f"file-{i:04d}-" + "x" * 100 + ".txt"
         open(os.path.join(tmpdir, name), "w").close()
@@ -359,7 +359,7 @@ def test_find_output_truncated_at_50kb(tmpdir):
 
 
 def test_find_output_not_line_capped(tmpdir):
-    """find 输出超 2000 行但未满 50KB 时不截断（对齐 pi 的 maxLines=∞）。"""
+    """find 输出超 2000 行但未满 50KB 时不截断。"""
     for i in range(2100):
         open(os.path.join(tmpdir, f"f{i:04d}.txt"), "w").close()
 
@@ -392,7 +392,7 @@ def _write_fake_fd(tmpdir, body):
 
 
 def test_find_fd_partial_output_tolerated_on_nonzero_exit(tmpdir):
-    """fd 非零退出但有产出时保留部分结果（对齐 pi：仅无输出才报错）。"""
+    """fd 非零退出但有产出时保留部分结果（仅无输出才报错）。"""
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
@@ -414,7 +414,7 @@ def test_find_fd_partial_output_tolerated_on_nonzero_exit(tmpdir):
 
 
 def test_find_fd_strips_trailing_carriage_return(tmpdir):
-    """fd 输出行尾 \\r 被清理（Windows \\r\\n 行尾，对齐 pi 的 /\\r$/ 清理）。"""
+    """fd 输出行尾 \\r 被清理（Windows \\r\\n 行尾）。"""
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,
@@ -436,7 +436,7 @@ def test_find_fd_strips_trailing_carriage_return(tmpdir):
 
 
 def test_find_fd_error_without_output_raises(tmpdir):
-    """fd 非零退出且无产出：stderr 透出为 RuntimeError（pi 同款条件）。"""
+    """fd 非零退出且无产出：stderr 透出为 RuntimeError。"""
     from nova_coding_agent.tools_common.operations import (
         FindOptions,
         create_local_find_operations,

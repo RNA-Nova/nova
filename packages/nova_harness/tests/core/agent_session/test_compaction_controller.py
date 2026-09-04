@@ -205,9 +205,12 @@ async def test_summarization_auth_returns_headers_filtered_and_env(tmp_path):
     )
 
     session = _session(tmp_path, _model(), [])
+    # ModelAuth 为进程内 snake 契约（nova_ai types/auth.py TypedDict：
+    # api_key/headers/base_url）——本测试曾用 camel "apiKey" 编写 mock,
+    # 把实现里的误读掩护成了"通过"（测试拉偏方向的实例）
     session.model_runtime.get_request_auth = AsyncMock(
         return_value=AuthResult(
-            auth={"apiKey": "k", "headers": {"X-A": "1", "X-B": None}},
+            auth={"api_key": "k", "headers": {"X-A": "1", "X-B": None}},
             env={"FOO": "bar"},
         )
     )
@@ -307,7 +310,7 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(
         return_value=AuthResult(
-            auth={"apiKey": "k", "headers": {"X-A": "1"}}, env={"E": "v"}
+            auth={"api_key": "k", "headers": {"X-A": "1"}}, env={"E": "v"}
         )
     )
     session.agent.has_queued_messages.return_value = False

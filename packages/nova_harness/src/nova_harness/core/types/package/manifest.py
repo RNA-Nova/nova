@@ -6,12 +6,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional
 
 from nova_ai.types.base_model import NovaBaseModel
-from nova_harness.core.types.package.enums import SourceScope
-from nova_harness.core.types.package.resolution import PackageFilter
 from pydantic import Field
 
+from nova_harness.core.types.package.enums import SourceScope
+from nova_harness.core.types.package.resolution import PackageFilter
 
-@dataclass
+
+@dataclass(frozen=True)
 class UninstallResult:
     """卸载结果。
 

@@ -1,4 +1,4 @@
-"""交互式 shell 扩展（pi examples/extensions/interactive-shell.ts 对位）。
+"""交互式 shell 扩展。
 
 订阅 ``user_bash`` 事件（只拦用户 ``!`` 命令，不拦 LLM bash 工具）：
 
@@ -9,7 +9,7 @@
   camel，TS 侧产出）→ 按 ``_intercept_user_bash`` 的形状返回完整
   ``result`` 替换执行；cancelled → exitCode=130 的取消回执；
 - **命中但无能力/无 UI**：``(interactive commands require TUI)``
-  exitCode=1（pi 同款文本——避免无 TTY 环境下挂死）；
+  exitCode=1（避免无 TTY 环境下挂死）；
 - **未命中**：不返回（None），正常执行。
 """
 
@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 
 from nova_harness.core.extensions.api import NovaExtensionAPI
 
-# 交互程序集（首 token 精确命中——pi interactive-shell.ts 同款名单）
+# 交互程序集（首 token 精确命中）
 _INTERACTIVE_COMMANDS = {
     "vi",
     "vim",
@@ -63,7 +63,7 @@ async def _on_user_bash(event: Any, ctx: Any) -> Optional[Dict[str, Any]]:
         return None
 
     if not ctx.has_ui or not ctx.ui.has_capability("dialog:interactive-shell"):
-        # pi 同款回执：交互命令需要真实 TTY，无前端接管时直接失败（不挂死）
+        # 无前端接管时直接失败（不挂死）
         return {
             "result": {
                 "output": "(interactive commands require TUI)",

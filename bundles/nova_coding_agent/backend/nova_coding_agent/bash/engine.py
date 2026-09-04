@@ -1,12 +1,12 @@
 """Bash 执行引擎（本地子进程后端）。
 
-对齐 pi ``core/bash-executor.ts``：
+
 - 输出清洗（strip ANSI + 二进制消毒 + ``\\r`` 归一）
 - 滚动缓冲 + 超阈值全量输出落临时文件
 - tail 截断（保留尾部，错误与最终结果在最后）
 - abort 时 kill 整个进程组
 
-超时不属于本层职责（pi 同款边界）：超时是 LLM 工具层的能力。
+超时不属于本层职责：超时是 LLM 工具层的能力。
 """
 
 from __future__ import annotations
@@ -21,6 +21,12 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
+from nova_coding_agent.tools_common.output_accumulator import (
+    OutputAccumulator,
+    OutputAccumulatorOptions,
+)
+from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
+
 from nova_harness.core.types.extensions.process import (
     SpawnContext,
     SpawnHook,
@@ -32,19 +38,13 @@ from nova_harness.core.utils.child_process import (
     untrack_detached_child_pid,
 )
 
-from nova_coding_agent.tools_common.output_accumulator import (
-    OutputAccumulator,
-    OutputAccumulatorOptions,
-)
-from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
-
 
 @dataclass
 class BashResult:
     """Bash 命令执行结果。"""
 
     output: str
-    # 被取消时为 None（对齐 pi ``exitCode: number | undefined``）
+    # 被取消时为 None
     exit_code: Optional[int]
     cancelled: bool = False
     truncated: bool = False
@@ -123,7 +123,7 @@ def _kill_process_group(
 # abort 升级策略：先 SIGTERM 给清理机会，宽限后仍未退出则 SIGKILL 保证必死
 _ABORT_TERM_GRACE_S = 2.0
 _ABORT_KILL_GRACE_S = 1.0
-# 进程退出后管道的空闲宽限（对齐 pi EXIT_STDIO_GRACE_MS）：计时器随每个
+# 进程退出后管道的空闲宽限：计时器随每个
 # chunk 重置——积极输出的后台孙进程不会被误截，安静继承管道的孙进程
 # 超时释放，避免读循环悬挂（pi#5303）
 _EXIT_STDIO_GRACE_S = 0.1
@@ -202,7 +202,7 @@ class LocalBashOperations:
         )
         popen_kwargs: Dict[str, Any] = {}
         if sys.platform == "win32":
-            # 对齐 pi windowsHide：后台进程不弹控制台窗口
+            # 后台进程不弹控制台窗口
             popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
         try:
@@ -308,7 +308,7 @@ class LocalBashOperations:
 
         # 读循环收尾：正常情况管道 EOF 结束；若后台孙进程继承了管道
         # （shell 已退出但管道不 EOF），按"空闲宽限"兜底——宽限计时器随
-        # 每个 chunk 重置，安静超过宽限即放弃读取（对齐 pi#5303）
+        # 每个 chunk 重置，安静超过宽限即放弃读取
         readers = asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         pipes_abandoned = False
         while not readers.done():
@@ -325,8 +325,7 @@ class LocalBashOperations:
             await asyncio.sleep(min(0.02, remaining))
 
         if pipes_abandoned:
-            # 放弃的管道仍被后台孙进程持有：显式关闭 transport（对齐 pi 的
-            # child.stdout.destroy()）。否则 GC 时 transport.__del__ 会在
+            # 放弃的管道仍被后台孙进程持有：显式关闭 transport。否则 GC 时 transport.__del__ 会在
             # 已关闭的事件循环上抛 RuntimeError。
             # 注：CPython 未提供公开的管道关闭 API，_transport.close() 是
             # 社区通行做法。

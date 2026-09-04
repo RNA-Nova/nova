@@ -3,8 +3,9 @@
 from typing import List, Optional
 
 from nova_ai.types.base_model import NovaBaseModel
-from nova_harness.core.types.session.entries import SessionEntry
 from pydantic import Field
+
+from nova_harness.core.types.session.entries import SessionEntry
 
 
 class SessionTreeNode(NovaBaseModel):

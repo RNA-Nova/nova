@@ -4,7 +4,7 @@
  * 键位表驱动（keymap/ 系统）：所有动作经 ``kb.matches(data, actionId)``
  * 匹配——用户 keybindings.json 重绑定立即生效，提示行自动跟随。
  *
- * Esc 三级路由（对齐 pi + cancelRequest 扩展）：
+ * Esc 三级路由：
  * - 对话框开着（四件套）→ 让路（组件本地取消，run 继续）；
  * - auth 等待框开着 → 让路（组件内 Esc → onCancel → cancelRequest）；
  * - 无框 → 按会话状态域级分派：working 停整个 run（先还原队列），
@@ -91,7 +91,7 @@ export class KeymapController {
 
   /**
    * 扩展快捷键对账（restrictOverride 消费——slots 整体替换后由装配根调用）：
-   * 撞保留键位当前绑定键的扩展快捷键禁用 + 诊断（pi RESERVED 语义对位）。
+   * 撞保留键位当前绑定键的扩展快捷键禁用 + 诊断。
    */
   validateExtensionShortcuts(): void {
     this.activeShortcuts.clear();
@@ -130,7 +130,7 @@ export class KeymapController {
     const kb = getKeybindings();
     const { editorRef, runtime, transcript, editorController } = this.deps;
 
-    // 扩展快捷键最优先（pi onExtensionShortcut 对位——先于一切内建路由）；
+    // 扩展快捷键最优先（—先于一切内建路由）；
     // 生效表经对账重建（撞保留键位的已剔除）
     if (!this.dialogsActive) {
       for (const [keyName, slotKey] of this.activeShortcuts) {
@@ -164,9 +164,10 @@ export class KeymapController {
       if (this.deps.foregroundTasks.consume()) return { consume: true };
       const status = runtime.store.status;
       if (status === 'working') {
-        // pi 语义：中断前先把排队消息还原进编辑器（队列内容不丢）
+        // 中断前先把排队消息还原进编辑器（队列内容不丢）
         void editorController
           .dequeueToEditor()
+          .catch(() => undefined)
           .finally(() => runtime.abort().catch(() => undefined));
         return { consume: true };
       }
@@ -178,7 +179,7 @@ export class KeymapController {
         void runtime.abortCompaction().catch(() => undefined);
         return { consume: true };
       }
-      // idle + 空编辑器：双击 Esc 导航（pi 同款 500ms 窗，设置档 tree/fork/none）
+      // idle + 空编辑器：双击 Esc 导航（设置档 tree/fork/none）
       if (editorRef.current.getText().trim() === '') {
         const action = this.deps.doubleEscapeAction();
         if (action !== 'none') {
@@ -237,7 +238,7 @@ export class KeymapController {
     // alt+↑：队列还原进编辑器（steering + follow-up 全量）
     if (kb.matches(data, 'app.message.dequeue')) {
       if (this.dialogsActive) return undefined;
-      void editorController.dequeueToEditor();
+      void editorController.dequeueToEditor().catch(() => undefined);
       return { consume: true };
     }
     // shift+tab：循环 thinking 级别（后端按模型支持面循环）

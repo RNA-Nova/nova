@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import pathspec
+
 from nova_harness.core.package.manifest import (
     read_manifest,
     resolve_extension_entries,

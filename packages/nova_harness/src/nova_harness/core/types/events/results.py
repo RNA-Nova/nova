@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, List, Literal, Optional, Union
 
 from nova_agent import AgentMessage
 from nova_ai import ImageContent, TextContent
 from nova_ai.types.base_model import NovaBaseModel
-from nova_harness.core.types.compaction import CompactionResult
 from pydantic import Field
+
+from nova_harness.core.types.compaction import CompactionResult
 
 
 class ContextEventResult(NovaBaseModel):
@@ -62,7 +64,14 @@ class SessionBeforeTreeResult(NovaBaseModel):
     label: Optional[str] = None
 
 
-class UserBashEventResult(NovaBaseModel):
+@dataclass(frozen=True)
+class UserBashEventResult:
+    """``user_bash`` 拦截结果（hook 结果，不跨序列化边界）。
+
+    ``operations`` 是扩展注入的活执行引擎（服务实例），按数据建模规则 4
+    不进 Pydantic——本类型因此是 frozen dataclass 而非事件契约模型。
+    """
+
     operations: Any = None
     result: Any = None
 

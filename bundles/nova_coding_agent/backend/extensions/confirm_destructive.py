@@ -1,4 +1,4 @@
-"""confirm-destructive 扩展（pi examples/extensions/confirm-destructive.ts 对位）。
+"""confirm-destructive 扩展。
 
 订阅 ``session_before_switch``（reason: "new"|"resume"）与
 ``session_before_fork``：离开当前会话前弹确认——当前会话有 N 条条目时
@@ -15,13 +15,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from nova_coding_agent.ui_primitives import confirm
+
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (
     SessionBeforeForkResult,
     SessionBeforeSwitchResult,
 )
-
-from nova_coding_agent.ui_primitives import confirm
 
 # before_switch reason → 动作文案（fork 走独立事件，文案固定）
 _ACTION_LABELS = {"new": "新建会话", "resume": "切换会话"}

@@ -31,6 +31,7 @@ from nova_ai import (
     TextContent,
     UserMessage,
 )
+
 from nova_harness.core.agent_session.controllers import (
     CompactionController,
     EventController,
@@ -379,7 +380,9 @@ class AgentSession:
             )
             return await runner.emit_prepare_next_turn(event)
 
-        async def should_stop_after_turn(ctx: Any) -> bool:
+        async def should_stop_after_turn(
+            ctx: Any, signal: Optional[Any] = None
+        ) -> bool:
             runner = self._extension_runner
             if runner is None:
                 return False
@@ -399,7 +402,9 @@ class AgentSession:
             runner = self._extension_runner
             if runner is None:
                 return messages
-            return await runner.emit_context(messages, signal)
+            # signal 是 nova_agent 钩子的入站契约；context 事件不带服务
+            # 实例（规则 4），此处就地消费不转发
+            return await runner.emit_context(messages)
 
         self.agent.before_tool_call = before_tool_call
         self.agent.after_tool_call = after_tool_call
@@ -2085,9 +2090,9 @@ class AgentSession:
     ) -> Dict[str, Any]:
         """在指定条目处 fork 出新的分支会话。
 
-        返回中携带 ``selectedText``/``editorText``（position != "at" 时被选
-        user 消息的原文，供前端回填编辑器——对齐 pi fork 语义；
-        ``editorText`` 与 navigateTree 结果的同名字段对齐，两者同值）。
+        返回中携带 ``selected_text``/``editor_text``（position != "at" 时被选
+        user 消息的原文，供前端回填编辑器——对齐 pi fork 语义；两键同值，
+        线上 camel 形态的翻译归 RPC handler（自由形状方法的过线点）。
         """
         if position not in ("at", "before", "after"):
             raise ValueError(f"Invalid fork position: {position}")
@@ -2118,8 +2123,8 @@ class AgentSession:
         self._emit(SessionReplacedEvent(reason="fork"))
         return {
             "cancelled": False,
-            "selectedText": selected_text,
-            "editorText": selected_text,
+            "selected_text": selected_text,
+            "editor_text": selected_text,
         }
 
     async def clone_session(self) -> Dict[str, Any]:

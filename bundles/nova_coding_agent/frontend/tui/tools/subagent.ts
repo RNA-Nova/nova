@@ -1,5 +1,5 @@
 /**
- * subagent 工具渲染器（组件形态——pi examples/extensions/subagent 渲染语义对位）。
+ * subagent 工具渲染器（组件形态）。
  *
  * details 契约（backend/tools/subagent.py，键名 snake 随 wire 原样透传）：
  *   { mode: 'single'|'parallel'|'chain',
@@ -13,7 +13,7 @@
  * 注意两个键名域：工具 details 层是 snake（自由负载不转换），内嵌 messages
  * 是子进程 JSONL 事件里的 wire 消息（camelCase）——本文件两个读取面分开处理。
  *
- * 呈现语义（pi 对齐）：
+ * 呈现语义：
  * - streaming/running：头部（模式 + 规模）+ 逐任务实时状态
  *   （⏳ 运行中 / ✓ / ✗，并行含 "n/m done, k running"）；
  * - 折叠态：单/链/并行均显示末 N 个展示项（工具调用格式化行 + 文本预览）；
@@ -176,7 +176,7 @@ export default function renderSubagent(input: RendererInput): Component {
   const toolOut = (s: string) => colors?.toolOutput?.(s) ?? s;
   const title = (s: string) => colors?.toolTitle?.(s) ?? s;
 
-  /** 工具调用行格式化（pi formatToolCall 对位；nova 工具参数主键为 path）。 */
+  /** 工具调用行格式化（nova 工具参数主键为 path）。 */
   function formatToolCall(name: string, args: Record<string, unknown>): string {
     const rawPath = (args.path ?? args.file_path ?? args.command ?? '') as string;
     switch (name) {
@@ -283,7 +283,7 @@ export default function renderSubagent(input: RendererInput): Component {
     }
   }
 
-  /** 调用头部（streaming 态或结果缺失时的标题——pi renderCall 对位）。 */
+  /** 调用头部（streaming 态或结果缺失时的标题）。 */
   function renderHeader(): Text {
     const args = (input.args ?? {}) as {
       agent?: string;
@@ -333,6 +333,34 @@ export default function renderSubagent(input: RendererInput): Component {
 
       const mode = d.mode ?? 'single';
 
+      /** 折叠态条目区：在跑无占位（⏳ 已表达）、完结空转给 (no output)。 */
+      function collapsedItems(r: SubagentResultItem, limit: number): void {
+        const items = getDisplayItems(r.messages ?? []);
+        if (items.length === 0) {
+          if (!isRunning(r)) container.addChild(new Text(muted('(no output)'), 1, 0));
+          return;
+        }
+        container.addChild(new Text(renderDisplayItems(items, limit), 1, 0));
+      }
+
+      /** 消耗行：只要已有累计数据就显示——过程可见（随 on_update 滚动），
+       * 不再等完结/展开。 */
+      function usageLine(usage: SubagentUsage, model?: string | null): void {
+        const str = formatUsageStats(usage, model);
+        if (str) container.addChild(new Text(dim(str), 1, 0));
+      }
+
+      /** 聚合消耗行（chain/parallel 的 Total）。 */
+      function totalUsageLine(): void {
+        const str = formatUsageStats(aggregateUsage(results));
+        if (str) {
+          container.addChild(new Spacer(1));
+          container.addChild(new Text(dim(`Total: ${str}`), 1, 0));
+        }
+      }
+
+      const cardEnded = input.status === 'done' || input.status === 'error';
+
       // ---- single ----
       if (mode === 'single' && results.length === 1) {
         const r = results[0];
@@ -350,19 +378,11 @@ export default function renderSubagent(input: RendererInput): Component {
           container.addChild(new Spacer(1));
           renderExpandedResult(container, r);
         } else {
-          const displayItems = getDisplayItems(r.messages ?? []);
-          if (displayItems.length === 0 && !isRunning(r)) {
-            if (!failed) container.addChild(new Text(muted('(no output)'), 1, 0));
-          } else if (displayItems.length > 0) {
-            container.addChild(new Text(renderDisplayItems(displayItems, COLLAPSED_ITEM_COUNT), 1, 0));
-            if (displayItems.length > COLLAPSED_ITEM_COUNT) {
-              container.addChild(new Text(muted('(ctrl+o to expand)'), 1, 0));
-            }
+          collapsedItems(r, COLLAPSED_ITEM_COUNT);
+          if (getDisplayItems(r.messages ?? []).length > COLLAPSED_ITEM_COUNT) {
+            container.addChild(new Text(muted('(ctrl+o to expand)'), 1, 0));
           }
-          if (!isRunning(r)) {
-            const usageStr = formatUsageStats(r.usage ?? {}, r.model);
-            if (usageStr) container.addChild(new Text(dim(usageStr), 1, 0));
-          }
+          usageLine(r.usage ?? {}, r.model);
         }
         return container.render(width);
       }
@@ -371,9 +391,15 @@ export default function renderSubagent(input: RendererInput): Component {
       if (mode === 'chain') {
         const doneCount = results.filter((r) => !isRunning(r) && !isFailed(r)).length;
         const failCount = results.filter((r) => isFailed(r)).length;
-        const icon = failCount > 0 ? bad('✗') : ok('✓');
+        const anyRunning = results.some(isRunning);
+        // 分母用参数声明的总步数——步骤间隙（results 暂全是已完成步骤）
+        // 不会虚显示成 "1/1"；完成判定：步数走满或卡片已终结（熔断提前结束）
+        const expectedSteps = (input.args as { chain?: unknown[] } | undefined)?.chain?.length;
+        const totalSteps = expectedSteps ?? results.length;
+        const chainComplete = !anyRunning && (results.length === totalSteps || cardEnded);
+        const icon = !chainComplete ? warn('⏳') : failCount > 0 ? bad('✗') : ok('✓');
         container.addChild(
-          new Text(`${icon} ${title('chain ')}${accent(`${doneCount}/${results.length} steps`)}`, 1, 0),
+          new Text(`${icon} ${title('chain ')}${accent(`${doneCount}/${totalSteps} steps`)}`, 1, 0),
         );
         results.forEach((r, index) => {
           container.addChild(new Spacer(1));
@@ -383,19 +409,10 @@ export default function renderSubagent(input: RendererInput): Component {
           if (expanded) {
             renderExpandedResult(container, r);
           } else {
-            const displayItems = getDisplayItems(r.messages ?? []);
-            if (displayItems.length === 0) {
-              container.addChild(new Text(muted(isRunning(r) ? '(running...)' : '(no output)'), 1, 0));
-            } else {
-              container.addChild(new Text(renderDisplayItems(displayItems, PER_STEP_COLLAPSED), 1, 0));
-            }
+            collapsedItems(r, PER_STEP_COLLAPSED);
           }
         });
-        const totalUsage = formatUsageStats(aggregateUsage(results));
-        if (totalUsage && !results.some(isRunning)) {
-          container.addChild(new Spacer(1));
-          container.addChild(new Text(dim(`Total: ${totalUsage}`), 1, 0));
-        }
+        totalUsageLine();
         if (!expanded) container.addChild(new Text(muted('(ctrl+o to expand)'), 1, 0));
         return container.render(width);
       }
@@ -405,7 +422,7 @@ export default function renderSubagent(input: RendererInput): Component {
       const failedCount = results.filter((r) => !isRunning(r) && isFailed(r)).length;
       const doneCount = results.length - running;
       const successCount = doneCount - failedCount;
-      const isLive = running > 0 && input.status !== 'done';
+      const isLive = running > 0 && !cardEnded;
       const icon = isLive ? warn('⏳') : failedCount > 0 ? warn('◐') : ok('✓');
       const status = isLive
         ? `${doneCount}/${results.length} done, ${running} running`
@@ -420,21 +437,10 @@ export default function renderSubagent(input: RendererInput): Component {
         if (expanded && !isLive) {
           renderExpandedResult(container, r);
         } else {
-          const displayItems = getDisplayItems(r.messages ?? []);
-          if (displayItems.length === 0) {
-            container.addChild(new Text(muted(isRunning(r) ? '(running...)' : '(no output)'), 1, 0));
-          } else {
-            container.addChild(new Text(renderDisplayItems(displayItems, PER_STEP_COLLAPSED), 1, 0));
-          }
+          collapsedItems(r, PER_STEP_COLLAPSED);
         }
       }
-      if (!isLive) {
-        const totalUsage = formatUsageStats(aggregateUsage(results));
-        if (totalUsage) {
-          container.addChild(new Spacer(1));
-          container.addChild(new Text(dim(`Total: ${totalUsage}`), 1, 0));
-        }
-      }
+      totalUsageLine();
       if (!expanded) container.addChild(new Text(muted('(ctrl+o to expand)'), 1, 0));
       return container.render(width);
     }

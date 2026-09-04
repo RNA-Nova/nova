@@ -7,8 +7,9 @@ from typing import List, Literal, Optional
 
 from nova_ai import ModelThinkingLevel
 from nova_ai.types.base_model import NovaBaseModel
-from nova_harness.core.types.compaction import CompactionResult
 from pydantic import Field
+
+from nova_harness.core.types.compaction import CompactionResult
 
 from .constants import (
     AUTO_COMPACTION_END,

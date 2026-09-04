@@ -132,12 +132,12 @@ def test_edit_operations_read_write_byte_faithful(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# edit 的 access fail-fast 与 prompt 元数据（对齐 pi edit.ts）
+# edit 的 access fail-fast 与 prompt 元数据
 # ---------------------------------------------------------------------------
 
 
 def test_edit_nonexistent_file_access_error(tmpdir):
-    """文件不存在：access 检查 fail-fast 报 ENOENT（对齐 pi access(R_OK|W_OK)）。"""
+    """文件不存在：access 检查 fail-fast 报 ENOENT。"""
     executor = _load_executor()
     missing = os.path.join(tmpdir, "nope.txt")
     result = _run(
@@ -176,7 +176,7 @@ def test_edit_readonly_file_fails_fast(tmpdir):
 
 
 def test_edit_prompt_metadata():
-    """edit 声明 prompt_snippet 与 prompt_guidelines（对齐 pi promptSnippet/Guidelines）。"""
+    """edit 声明 prompt_snippet 与 prompt_guidelines。"""
     executor = _load_executor()
     assert isinstance(executor.prompt_snippet, str) and executor.prompt_snippet
     guidelines = executor.prompt_guidelines

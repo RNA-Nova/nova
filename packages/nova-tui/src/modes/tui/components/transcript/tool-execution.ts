@@ -1,11 +1,11 @@
 /**
- * 工具调用卡片（复刻 pi components/tool-execution.ts 的视觉模型）。
+ * 工具调用卡片。
  *
  * header：状态背景色横跨（pending/success/error）+ 工具名 + 主参数摘要；
  * 内容：slots 渲染器产块 → 薄块适配器；无渲染器走通用回退。
- * 整体重建模式（pi 同款 updateDisplay）。
+ * 整体重建模式。
  *
- * 图片内联（pi maybeConvertImagesForKitty/updateDisplay 对位）：结果
+ * 图片内联：结果
  * content 里 ``type:'image'`` 的块用 pi-tui Image 组件内联渲染（终端
  * 不支持图片协议时回退 ``[图片: <mimeType>]`` 文本行；kitty+非 PNG
  * 等协议内不可渲染由 Image 组件自带 fallback 文案兜底——无 sharp 依赖，
@@ -13,14 +13,14 @@
  */
 
 import type { ContentBlock, NovaUIRuntime, ToolCallCard } from 'nova-tui';
-import { extractText, isComponentOutput } from 'nova-tui';
+import { extractText, guardComponentLineWidth, isComponentOutput } from 'nova-tui';
 import { Box, Container, Image, Spacer, Text, getCapabilities, type Component } from '@earendil-works/pi-tui';
 
 import { blocksToComponents } from '../../blocks/index.js';
 import { colors, markdownTheme } from '../../themes/index.js';
 import type { ExpansionState } from './expansion.js';
 
-/** 折叠预览的行数上限（对齐 pi PREVIEW_LINES）。 */
+/** 折叠预览的行数上限。 */
 const PREVIEW_LINES = 20;
 
 /** live 计时行的刷新间隔（毫秒——秒数翻面的最小感知粒度）。 */
@@ -64,7 +64,7 @@ class ElapsedLine extends Text {
   }
 }
 
-/** 从 args 提取主参数摘要（pi 同款：edit/write/read 取 path，bash 取 command 等）。 */
+/** 从 args 提取主参数摘要（edit/write/read 取 path，bash 取 command 等）。 */
 function argsSummary(card: ToolCallCard): string {
   const args = card.args;
   const primary =
@@ -76,7 +76,7 @@ function argsSummary(card: ToolCallCard): string {
 }
 
 /**
- * 结果图片 → 组件（pi updateDisplay 的图片段对位）。
+ * 结果图片 → 组件。
  * 终端支持图片协议：每张图 Spacer + Image 内联；不支持：单行
  * ``[图片: <mimeType>]`` 文本清单。data/mimeType 缺一的块跳过。
  */
@@ -110,13 +110,13 @@ export function buildImageComponents(content: ContentBlock[] | undefined): Compo
 export class ToolCardView extends Container {
   /** 执行前预览数据（preview 钩子产出，注入渲染器 input.preview）。 */
   private previewData: unknown;
-  /** 当前预览对应的参数指纹（参数变化即失效重算——pi previewArgsKey 对位）。 */
+  /** 当前预览对应的参数指纹（参数变化即失效重算）。 */
   private previewArgsKey: string | undefined;
   /** 预览计算在飞（防重入）。 */
   private previewPending = false;
   /** live 起点（ElapsedLine 计时基准——卡片自身无时间戳，宿主自建）。 */
   private liveStartedAt: number | undefined;
-  /** live 计时行（宿主持有，pi Loader 对位）；非 live 或已 dispose 为 undefined。 */
+  /** live 计时行（宿主持有）；非 live 或已 dispose 为 undefined。 */
   private elapsedLine: ElapsedLine | undefined;
   /**
    * 渲染器输入指纹（逐项 === 比对——mapping 是字段级原位赋值，
@@ -147,7 +147,7 @@ export class ToolCardView extends Container {
   }
 
   /**
-   * 执行前预览（pi edit.ts renderCall 的 argsComplete 分支对位）：
+   * 执行前预览：
    * 参数完整、执行未开始时，调渲染器模块的 preview 钩子（异步只读），
    * 完成后注入渲染器 input.preview 并重绘。参数变化则作废重算。
    */
@@ -205,8 +205,10 @@ export class ToolCardView extends Container {
     this.clear();
 
     const isLive = this.card.status === 'running' || this.card.status === 'streaming';
-    if (isLive && this.liveStartedAt === undefined) this.liveStartedAt = Date.now();
-    // 计时行实例在 live 期间跨 rebuild 常驻（pi loader 字段对位——一个
+    // 计时锚点取卡片创建时刻（数据）——重建后新组件现取，不再从当前时刻重计
+    if (isLive && this.liveStartedAt === undefined)
+      this.liveStartedAt = this.card.startedAt ?? Date.now();
+    // 计时行实例在 live 期间跨 rebuild 常驻（—一个
     // interval 活完整个 running 期，不随内容区重建生灭）；转非 live 即停。
     if (!isLive && this.elapsedLine !== undefined) {
       this.elapsedLine.stop();
@@ -255,11 +257,13 @@ export class ToolCardView extends Container {
     });
 
     // 双形态判别：组件直挂（全能力）/ 块列表走适配层（可过网）/ 空 → 通用回退
+    // 行宽防线：包侧组件逐行截断到终端宽度——渲染器 bug 不得崩掉整个 TUI
+    //（pi-tui 对超宽行直接抛异常）
     if (isComponentOutput(output)) {
-      this.addChild(output as unknown as Component);
+      this.addChild(guardComponentLineWidth(output as unknown as Component));
     } else if (Array.isArray(output) && output.length > 0) {
       for (const component of blocksToComponents(output, this.runtime.slots)) {
-        this.addChild(component);
+        this.addChild(guardComponentLineWidth(component));
       }
     } else {
       // 通用回退（slot 空态）：结果文本 / args 摘要 / 执行中与参数累积占位（折叠预览）
@@ -272,12 +276,12 @@ export class ToolCardView extends Container {
       this.addChild(new Text(this.collapseText(rawText), 1, 0));
     }
 
-    // 结果图片内联（渲染器块与通用回退共用——pi updateDisplay 图片段对位）
+    // 结果图片内联（渲染器块与通用回退共用）
     for (const component of buildImageComponents(this.card.result?.content)) {
       this.addChild(component);
     }
 
-    // live 计时行（宿主 chrome——pi Loader 对位：组件自转一行，父卡不随之重建；
+    // live 计时行（宿主 chrome——：组件自转一行，父卡不随之重建；
     // live 期间同一实例跨 rebuild 常驻，转非 live 时已在上方停掉）
     if (isLive && this.liveStartedAt !== undefined) {
       if (this.elapsedLine === undefined) {
@@ -288,7 +292,7 @@ export class ToolCardView extends Container {
     this.addChild(new Spacer(1));
   }
 
-  /** 长输出折叠：未展开时只显示末 PREVIEW_LINES 行（pi 同款预览语义）。 */
+  /** 长输出折叠：未展开时只显示末 PREVIEW_LINES 行。 */
   private collapseText(text: string): string {
     if (this.expansion.expanded) return text;
     const lines = text.split('\n');

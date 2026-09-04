@@ -14,7 +14,7 @@ DEFAULT_MAX_LINES = 2000
 DEFAULT_MAX_BYTES = 50 * 1024  # 50KB
 GREP_MAX_LINE_LENGTH = 500  # 单行最大字符数
 
-# find/grep/ls 的输出截断只按字节收口（pi 对这三个工具传 maxLines=Number.MAX_SAFE_INTEGER）：
+# find/grep/ls 的输出截断只按字节收口（对这三个工具不传行数上限）：
 # 行数已由各工具自身的 limit 参数限制，再叠默认 2000 行上限会提前截断并误报 50KB
 UNLIMITED_MAX_LINES = sys.maxsize
 

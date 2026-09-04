@@ -51,13 +51,12 @@ SUPPORTED_IMAGE_TYPES = {"png", "jpeg", "jpg", "gif", "webp", "bmp"}
 
 
 def detect_image_mime_type(header: bytes) -> Optional[str]:
-    """按魔数嗅探图片 MIME（对齐 pi ``detectSupportedImageMimeType``）。
+    """按魔数嗅探图片 MIME。
 
-    只识别 pi 支持的五种内联格式，识别不出返回 ``None``。
-    pi 的更严格校验（PNG IHDR 完整性、APNG 拒绝、JPEG 0xF7 拒绝、BMP 结构
-    校验）有意不抄：无法解码的输入由 ``process_image`` 的优雅降级路径兜底
-    （返回提示文本让模型继续），而 pi 嗅探返回 null 时会退化成按文本读取、
-    把二进制当文本倒出。
+    只识别五种内联格式，识别不出返回 ``None``。
+    更严格的结构校验（PNG IHDR 完整性、APNG 拒绝、JPEG 0xF7 拒绝、
+    BMP 结构校验）有意不做：无法解码的输入由 ``process_image`` 的
+    优雅降级路径兜底（返回提示文本让模型继续）。
     """
     if header.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
@@ -133,7 +132,7 @@ class LocalReadOperations:
     async def read_image(self, path: str) -> ReadResult:
         try:
             data = await self._fs.read_bytes(path)
-            # MIME 以魔数嗅探为准（对齐 pi detectSupportedImageMimeTypeFromFile）：
+            # MIME 以魔数嗅探为准：
             # 扩展名不可信（无扩展名或张冠李戴时 mimetypes 会标错类型）；
             # 嗅探不出再退 mimetypes，最后兜底 image/png
             mime = detect_image_mime_type(data[:12])
@@ -245,7 +244,7 @@ class EditOperations(Protocol):
 
     @abstractmethod
     async def access(self, path: str) -> None:
-        """检查文件存在且可读可写（不满足则抛异常，对齐 pi EditOperations.access）。"""
+        """检查文件存在且可读可写（不满足则抛异常）。"""
 
     @abstractmethod
     async def read_text(self, path: str, encoding: str = "utf-8") -> str:
@@ -308,7 +307,7 @@ class GrepMatch:
 
 @dataclass
 class GrepOptions:
-    """Grep 选项（对齐 pi grep.ts 的参数面）。"""
+    """Grep 选项。"""
 
     pattern: str
     glob: Optional[str] = None
@@ -349,7 +348,7 @@ _SEARCH_CONCURRENCY = 8
 
 
 async def _session_lines_with_abort(session: Any, signal: Any) -> AsyncIterator[str]:
-    """session 行流 + abort 监听（触发即 terminate——对齐 pi onAbort kill）。
+    """session 行流 + abort 监听（触发即 terminate）。
 
     三个加速链调用点（grep rg --json / find fd / find rg --files）共用的
     读泵形状；提前停止（达 limit/abort）的 terminate 归调用方（见各
@@ -382,11 +381,11 @@ class LocalGrepOperations:
     本地/远程同一份实现）。
 
     双加速面（``runner`` 提供，缺省/为 None 时落便携引擎）：
-    - rg --json 优先（达整体上限即 terminate；对齐 pi 不传 --max-count）；
+    - rg --json 优先（达整体上限即 terminate；不传 --max-count）；
     - 便携引擎兜底（layer.walk + read + 逐行正则——有界并发保序）。
     本地 runner = 本机子进程（resolve_binary 三级解析）；远程 runner =
     executor process/start 无壳 argv 直启（rg 路径随供给探测）。
-    对齐 pi grep.ts：``--hidden`` 包含隐藏文件；context 不由 rg 生成，
+    ``--hidden`` 包含隐藏文件；context 不由 rg 生成，
     而是按行号自渲染（长行经 ``truncate_line`` 截断，总输出经
     ``truncate_head`` 截断）。
     """
@@ -427,7 +426,7 @@ class LocalGrepOperations:
 
         lines, lines_truncated = await self._render(matches, path, is_dir, options)
         raw_output = "\n".join(lines)
-        # 只按字节截断（对齐 pi 的 maxLines=∞）：行数已由匹配数 limit 收口，
+        # 只按字节截断：行数已由匹配数 limit 收口，
         # 再叠默认 2000 行上限会在 context 放大行数时提前截断
         truncation = truncate_head(
             raw_output, TruncationOptions(max_lines=UNLIMITED_MAX_LINES)
@@ -460,7 +459,7 @@ class LocalGrepOperations:
         self, rg_path: str, path: str, is_dir: bool, options: GrepOptions
     ) -> Tuple[List[GrepMatch], bool]:
         """rg --json 收集匹配（经 ProcessRunner spawn——本地/远程同一份解析；
-        达整体上限即 terminate；对齐 pi 不传 --max-count）。"""
+        达整体上限即 terminate；不传 --max-count）。"""
         assert self._runner is not None
         args = [rg_path, "--json", "--line-number", "--color=never", "--hidden"]
         if options.ignore_case:
@@ -585,7 +584,7 @@ class LocalGrepOperations:
         is_dir: bool,
         options: GrepOptions,
     ) -> Tuple[List[str], bool]:
-        """按 pi 的行格式渲染：匹配行 ``path:N: text``，上下文行 ``path-N- text``。"""
+        """按 行格式渲染：匹配行 ``path:N: text``，上下文行 ``path-N- text``。"""
 
         def format_path(file_path: str) -> str:
             if is_dir:
@@ -670,7 +669,7 @@ class FindOptions:
 
 
 def _inside_git_repo(start: str) -> bool:
-    """从 start 向上查找 .git（对齐 pi find.ts 的仓库探测）。"""
+    """从 start 向上查找 .git。"""
     current = os.path.abspath(start)
     while True:
         if os.path.exists(os.path.join(current, ".git")):
@@ -682,7 +681,7 @@ def _inside_git_repo(start: str) -> bool:
 
 
 def _relativize(results: List[str], search_path: str) -> List[str]:
-    """结果相对化到搜索根（posix 分隔符，对齐 pi 的稳定输出语义）。"""
+    """结果相对化到搜索根（posix 分隔符）。"""
     base = os.path.abspath(search_path)
     relativized: List[str] = []
     for item in results:
@@ -707,7 +706,7 @@ class LocalFindOperations:
     本地/远程同一份实现）。
 
     加速链（归 runner 供给，缺省/为 None 时落便携引擎）：fd → rg
-    ``--files`` → walk 便携。fd 调用对齐 pi find.ts：``--hidden`` 包含
+    ``--files`` → walk 便携。fd 调用``--hidden`` 包含
     隐藏文件、git 仓库外 ``--no-require-git``、带 ``/`` 的 pattern 走
     ``--full-path``；目录查找是 Nova 超集（rg 列不了目录）。远程
     runner 的 fd 恒 None（v1）——远程 find 走 rg --files 或便携引擎。
@@ -741,7 +740,7 @@ class LocalFindOperations:
         search_path = os.path.abspath(options.path)
         args = [fd_path, "--glob", "--color=never", "--hidden", "--absolute-path"]
         if not _inside_git_repo(search_path):
-            # fd 在仓库外默认忽略 .gitignore 规则；pi 同款处理
+            # fd 在仓库外默认忽略 .gitignore 规则；处理
             args.append("--no-require-git")
         args.extend(["--max-results", str(max(1, options.limit))])
         args.extend(["--type", "d" if options.find_type == "directory" else "f"])
@@ -771,7 +770,7 @@ class LocalFindOperations:
             raise RuntimeError("Operation aborted")
         # fd 与 rg 语义不同：无结果也退出 0，非 0 即错误
         # （坏 glob / 无效搜索路径，实测退出码 1）；但非零退出时若已有产出，
-        # 保留部分结果（对齐 pi：仅无输出才把 stderr 透出为错误）
+        # 保留部分结果（仅无输出才把 stderr 透出为错误）
         if exit_code != 0 and not results:
             detail = await session.stderr_text()
             raise RuntimeError(detail or f"fd exited with code {exit_code}")
@@ -889,7 +888,7 @@ class LocalLsOperations:
         entries: List[LsEntry] = []
         truncated = False
         for entry in raw:
-            # 达 limit 即停（对齐 pi 的 entryLimitReached）
+            # 达 limit 即停
             if len(entries) >= options.limit:
                 truncated = True
                 break

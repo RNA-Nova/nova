@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Union
 
 from nova_ai import AbortController
+
 from nova_harness.core.agent_session.controllers.compaction import (
     get_summarization_request_auth,
 )
@@ -81,7 +82,6 @@ class TreeNavigator:
                 result = await runner.emit(
                     SessionBeforeTreeEvent(
                         preparation=prep,
-                        signal=self._session._branch_summary_abort_controller.signal,
                     )
                 )
                 if getattr(result, "cancel", False):
@@ -192,10 +192,12 @@ class TreeNavigator:
         # Bus 2 通知：leaf 迁移改变了可见消息集，前端需全量重同步 transcript
         self._session._emit(SessionReplacedEvent(reason="navigate"))
 
+        # 内部载荷保持 snake——navigateTree 是自由形状方法，线上 camel
+        # 形态的翻译归 RPC handler（过线点）
         return {
-            "editorText": editor_text,
+            "editor_text": editor_text,
             "cancelled": False,
-            "summaryEntry": summary_entry,
+            "summary_entry": summary_entry,
         }
 
     def get_user_messages_for_forking(self) -> List[Dict[str, str]]:

@@ -1,4 +1,4 @@
-"""read 工具测试：文本读取、图片管线（对齐 pi processImage）、截断提示、MIME 魔数嗅探。"""
+"""read 工具测试：文本读取、图片管线、截断提示、MIME 魔数嗅探。"""
 
 import asyncio
 import os
@@ -76,7 +76,7 @@ def test_tool_metadata_valid():
 
 
 # 1x1 红色 PNG（PIL 现造：旧硬编码 hex 样本字节错位，严格解码会拒绝——
-# 对齐 pi 的 processImage 真实解码后必须用合法样本）
+# 的 processImage 真实解码后必须用合法样本）
 def _write_tiny_png(path):
     from PIL import Image
 
@@ -93,7 +93,7 @@ def _make_exec_context(model_input_types):
 
 
 def test_read_image_non_vision_model_omits_image(tmpdir):
-    """非视觉模型：返回提示且不附带 ImageContent（对齐 pi getNonVisionImageNote）。"""
+    """非视觉模型：返回提示且不附带 ImageContent。"""
     path = os.path.join(tmpdir, "tiny.png")
     _write_tiny_png(path)
 
@@ -127,7 +127,7 @@ def test_read_image_vision_model_returns_image(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# read 图片管线（对齐 pi processImage：to_thread 异步化、失败语义、hints）
+# read 图片管线（to_thread 异步化、失败语义、hints）
 # ---------------------------------------------------------------------------
 
 
@@ -174,7 +174,7 @@ def test_read_image_does_not_block_event_loop(tmpdir):
 
 
 def test_read_image_process_failure_not_error(tmpdir):
-    """图片无法解码：给提示文本让模型继续，不标 is_error（对齐 pi read.ts）。"""
+    """图片无法解码：给提示文本让模型继续，不标 is_error。"""
     from nova_ai import ImageContent
 
     path = os.path.join(tmpdir, "broken.png")
@@ -194,7 +194,7 @@ def test_read_image_process_failure_not_error(tmpdir):
 
 
 def test_read_image_resize_dimension_hint(tmpdir):
-    """缩放后输出文本带坐标映射系数提示（对齐 pi formatDimensionNote）。"""
+    """缩放后输出文本带坐标映射系数提示。"""
     from PIL import Image
 
     path = os.path.join(tmpdir, "wide.png")
@@ -213,7 +213,7 @@ def test_read_image_resize_dimension_hint(tmpdir):
 
 
 def test_read_bmp_conversion_hint(tmpdir):
-    """bmp 归一为 PNG 并附转换提示（对齐 pi conversionHint 文案）。"""
+    """bmp 归一为 PNG 并附转换提示。"""
     from nova_ai import ImageContent
     from PIL import Image
 
@@ -239,12 +239,12 @@ def test_read_nonexistent_file_still_is_error(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# prompt 元数据（对齐 pi promptSnippet/Guidelines）
+# prompt 元数据
 # ---------------------------------------------------------------------------
 
 
 def test_read_prompt_metadata():
-    """read 声明 prompt_snippet 与 prompt_guidelines（对齐 pi promptSnippet/Guidelines）。"""
+    """read 声明 prompt_snippet 与 prompt_guidelines。"""
     executor = _load_executor()
     assert isinstance(executor.prompt_snippet, str) and executor.prompt_snippet
     guidelines = executor.prompt_guidelines
@@ -253,12 +253,12 @@ def test_read_prompt_metadata():
 
 
 # ---------------------------------------------------------------------------
-# read 截断提示文案（对齐 pi read.ts：首行大小 / 字节限标记）
+# read 截断提示文案（首行大小 / 字节限标记）
 # ---------------------------------------------------------------------------
 
 
 def test_read_first_line_exceeds_reports_size(tmpdir):
-    """首行即超字节预算：提示带该行实际大小（对齐 pi firstLineExceedsLimit 文案）。"""
+    """首行即超字节预算：提示带该行实际大小。"""
     path = os.path.join(tmpdir, "wide.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write("x" * (60 * 1024) + "\nshort\n")
@@ -273,7 +273,7 @@ def test_read_first_line_exceeds_reports_size(tmpdir):
 
 
 def test_read_bytes_truncation_notice_marks_limit(tmpdir):
-    """字节限截断：continuation 提示带 (50.0KB limit) 标记（对齐 pi bytes 变体）。"""
+    """字节限截断：continuation 提示带 (50.0KB limit) 标记。"""
     path = os.path.join(tmpdir, "fat.txt")
     line = "y" * 1023  # 每行约 1KB（含换行），100 行约 100KB > 50KB
     with open(path, "w", encoding="utf-8") as f:
@@ -291,7 +291,7 @@ def test_read_bytes_truncation_notice_marks_limit(tmpdir):
 
 
 def test_read_lines_truncation_notice_without_bytes_mark(tmpdir):
-    """行数限截断：提示不带字节限标记（对齐 pi lines 变体）。"""
+    """行数限截断：提示不带字节限标记。"""
     path = os.path.join(tmpdir, "long.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(f"line{i}" for i in range(1, 3001)) + "\n")
@@ -308,7 +308,7 @@ def test_read_lines_truncation_notice_without_bytes_mark(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# 图片 MIME 魔数嗅探（对齐 pi detectSupportedImageMimeType）
+# 图片 MIME 魔数嗅探
 # ---------------------------------------------------------------------------
 
 

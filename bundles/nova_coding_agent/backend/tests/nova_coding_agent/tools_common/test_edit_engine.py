@@ -1,11 +1,10 @@
-"""edit 编辑引擎语义测试（对齐 pi edit-diff.ts）。
+"""edit 编辑引擎语义测试。
 
 覆盖：唯一性、原文匹配、重叠拒绝、原子性、fuzzy 匹配（智能引号/破折号/
 行尾空白/NFKC）、无变化报错、CRLF/BOM 往返、diff 生成。
 """
 
 import pytest
-
 from nova_coding_agent.tools_common.edit_engine import (
     Edit,
     apply_edits_to_normalized_content,

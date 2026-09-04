@@ -1,6 +1,6 @@
 """会话 bash 引擎（``nova_coding_agent.bash.engine``）测试。
 
-行为对齐 pi ``core/bash-executor.ts``。UserTool 类（``user_tools/bash.py``）
+行为``core/bash-executor.ts``。UserTool 类（``user_tools/bash.py``）
 测试见 ``tests/user_tools/test_bash.py``。
 """
 
@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from nova_coding_agent.bash.engine import create_local_bash_operations
 
 
@@ -42,7 +41,7 @@ async def test_local_bash_cancellation(tmp_path: Path):
     asyncio.create_task(cancel_later())
     result = await operations.execute("sleep 10", str(tmp_path), {"signal": signal})
     assert result.cancelled is True
-    # 取消时退出码为 None（对齐 pi exitCode: undefined）
+    # 取消时退出码为 None
     assert result.exit_code is None
 
 

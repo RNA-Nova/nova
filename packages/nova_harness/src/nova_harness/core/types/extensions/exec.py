@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExecOptions:
     """扩展 exec 命令选项。"""
 
@@ -15,7 +15,7 @@ class ExecOptions:
     env: Optional[Dict[str, str]] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExecResult:
     """扩展 exec 命令结果。"""
 

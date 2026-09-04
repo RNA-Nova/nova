@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Union
 
 from nova_agent import AgentMessage
 from nova_ai import ImageContent, Message, TextContent, UserMessage
+
 from nova_harness.core.types.messages import (
     BRANCH_SUMMARY_PREFIX,
     BRANCH_SUMMARY_SUFFIX,

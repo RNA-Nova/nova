@@ -28,7 +28,8 @@ def _make_old_session():
     session.dispose = MagicMock()
     session.bind_extensions = AsyncMock()
     session.navigate_tree = AsyncMock(
-        return_value={"cancelled": False, "editorText": None}
+        # 内部契约为 snake（camel 翻译归 RPC handler——自由形状方法的过线点）
+        return_value={"cancelled": False, "editor_text": None, "summary_entry": None}
     )
     session.agent = MagicMock()
     session.agent.state.messages = []

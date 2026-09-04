@@ -1,5 +1,5 @@
 /**
- * SettingsController：/settings 可视化编辑（pi settings-selector 对位）。
+ * SettingsController：/settings 可视化编辑。
  *
  * 两级选择器（前端本地交互）：
  * - 第一级：配置项列表（label + 当前值）；

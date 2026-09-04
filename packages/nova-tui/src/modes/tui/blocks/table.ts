@@ -1,4 +1,4 @@
-/** table 块渲染（列对齐，pi 语义色：表头加粗、分隔线暗色）。 */
+/** table 块渲染（列对齐，表头加粗、分隔线暗色）。 */
 
 import chalk from 'chalk';
 

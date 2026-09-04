@@ -640,6 +640,36 @@ def test_resume_headless_errors():
 # -----------------------------------------------------------------------------
 
 
+def _oauth_provider():
+    """仅 OAuth 能力的 provider（model_runtime.get_provider 的 mock 返回）。"""
+    return SimpleNamespace(
+        auth=SimpleNamespace(
+            oauth=SimpleNamespace(login=object(), login_label=None),
+            api_key=None,
+        )
+    )
+
+
+def _api_key_provider():
+    """仅 API key 能力的 provider。"""
+    return SimpleNamespace(
+        auth=SimpleNamespace(
+            oauth=None,
+            api_key=SimpleNamespace(login=object()),
+        )
+    )
+
+
+def _dual_provider():
+    """OAuth + API key 双能力的 provider（如 kimi-coding）。"""
+    return SimpleNamespace(
+        auth=SimpleNamespace(
+            oauth=SimpleNamespace(login=object(), login_label=None),
+            api_key=SimpleNamespace(login=object()),
+        )
+    )
+
+
 def test_login_with_provider_arg():
     module = _load_extension()
     api = _FakeNovaAPI()
@@ -649,6 +679,7 @@ def test_login_with_provider_arg():
         login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
         get_all=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
     )
     ctx = SimpleNamespace(
         has_ui=True,
@@ -677,6 +708,7 @@ def test_login_cancelled():
         login=AsyncMock(side_effect=LoginCancelledError()),
         get_all=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
     )
     ctx = SimpleNamespace(
         has_ui=True,
@@ -699,6 +731,7 @@ def test_login_failure():
         login=AsyncMock(side_effect=RuntimeError("no oauth support")),
         get_all=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
     )
     ctx = SimpleNamespace(
         has_ui=True,
@@ -725,6 +758,7 @@ def test_login_selector_picks_provider():
         login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
         get_all=lambda: models,
         get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
     )
     ui = _FakeUI(select_script=["kimi-coding"])
     ctx = SimpleNamespace(
@@ -743,21 +777,113 @@ def test_login_selector_picks_provider():
     assert args[0] == "kimi-coding"
 
 
-def test_login_selector_shows_auth_status_tags():
-    """provider 选择器 description 带认证状态标签（对齐 pi OAuthSelector）：
+def test_login_api_key_only_provider_goes_straight():
+    """api-key-only provider（如 volcengine）：不弹认证方式选择器，直进
+    api_key 登录（此前 /login 写死 oauth，该路径报 does not support oauth）。"""
+    module = _load_extension()
+    api = _FakeNovaAPI()
+    module.extension(api)
 
-    已配置凭据 → ``✓ configured``；环境变量可得 → ``env: <VAR名>``；未配置 → 无标签。
+    model_runtime = SimpleNamespace(
+        login=AsyncMock(return_value=SimpleNamespace(type="api_key")),
+        get_all=lambda: [],
+        get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _api_key_provider(),
+    )
+    ui = _FakeUI()
+    ctx = SimpleNamespace(
+        has_ui=True,
+        ui=ui,
+        get_signal=lambda: None,
+        model_runtime=model_runtime,
+        append_entry=Mock(),
+    )
+    _run(_handler(api, "login")("volcengine", ctx))
+
+    args, _ = model_runtime.login.await_args
+    assert args[0] == "volcengine"
+    assert args[1] == "api_key"
+    # 唯一能力直进：不再弹认证方式选择器（select 只可能是 provider 选择器，
+    # 本用例给了 provider 参数，select 一次都不应发生）
+    assert ui.select_calls == []
+
+
+def test_login_dual_auth_prompts_method_choice():
+    """双能力 provider（如 kimi-coding）：弹认证方式选择器，选 API key 即
+    以 api_key 登录。"""
+    module = _load_extension()
+    api = _FakeNovaAPI()
+    module.extension(api)
+
+    model_runtime = SimpleNamespace(
+        login=AsyncMock(return_value=SimpleNamespace(type="api_key")),
+        get_all=lambda: [],
+        get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _dual_provider(),
+    )
+    ui = _FakeUI(select_script=["API key"])
+    ctx = SimpleNamespace(
+        has_ui=True,
+        ui=ui,
+        get_signal=lambda: None,
+        model_runtime=model_runtime,
+        append_entry=Mock(),
+    )
+    _run(_handler(api, "login")("kimi-coding", ctx))
+
+    # 第一次 select 即认证方式选择器（给了 provider 参数）
+    options = ui.select_calls[0]["options"]
+    assert "API key" in options
+    args, _ = model_runtime.login.await_args
+    assert args[0] == "kimi-coding"
+    assert args[1] == "api_key"
+
+
+def test_login_ambient_provider_rejected_with_guidance():
+    """无任何 login 能力的 provider（ambient 鉴权）：报错并指引环境变量
+    /models.json 配置，不进入登录流程。"""
+    module = _load_extension()
+    api = _FakeNovaAPI()
+    module.extension(api)
+
+    model_runtime = SimpleNamespace(
+        login=AsyncMock(),
+        get_all=lambda: [],
+        get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: SimpleNamespace(auth=None),
+    )
+    ctx = SimpleNamespace(
+        has_ui=True,
+        ui=_FakeUI(),
+        get_signal=lambda: None,
+        model_runtime=model_runtime,
+        append_entry=Mock(),
+    )
+    _run(_handler(api, "login")("some-provider", ctx))
+
+    text = ctx.append_entry.call_args[0][1]["text"]
+    assert "ambient" in text or "环境变量" in text
+    model_runtime.login.assert_not_called()
+
+
+def test_login_selector_shows_auth_status_tags():
+    """provider 选择器 description 带认证状态标签：
+
+    已配置凭据 → ``✓ OAuth`` / ``✓ API key``（按当前解析类型）；环境变量
+    可得 → ``env: <VAR名>``；未配置 → 无标签。
     """
     module = _load_extension()
     api = _FakeNovaAPI()
     module.extension(api)
 
     models = [
+        SimpleNamespace(provider="oauth-p", id="m0"),
         SimpleNamespace(provider="stored-p", id="m1"),
         SimpleNamespace(provider="env-p", id="m2"),
         SimpleNamespace(provider="plain-p", id="m3"),
     ]
     statuses = {
+        "oauth-p": {"configured": True, "source": "stored"},
         "stored-p": {"configured": True, "source": "stored"},
         "env-p": {
             "configured": True,
@@ -766,10 +892,12 @@ def test_login_selector_shows_auth_status_tags():
         },
         "plain-p": {"configured": False},
     }
+    oauth_providers = {"oauth-p"}
     model_runtime = SimpleNamespace(
         login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
         get_all=lambda: models,
         get_provider_auth_status=lambda provider: statuses[provider],
+        is_using_oauth=lambda provider: provider in oauth_providers,
     )
     ui = _FakeUI(select_script=[None])  # 取消选择，只检查 items
     ctx = SimpleNamespace(
@@ -782,7 +910,8 @@ def test_login_selector_shows_auth_status_tags():
     _run(_handler(api, "login")("", ctx))
 
     items = {item["value"]: item for item in ui.select_calls[0]["items"]}
-    assert items["stored-p"]["description"] == "✓ configured"
+    assert items["oauth-p"]["description"] == "✓ OAuth"
+    assert items["stored-p"]["description"] == "✓ API key"
     assert items["env-p"]["description"] == "env: ENV_P_API_KEY"
     assert "description" not in items["plain-p"]
 
@@ -1006,6 +1135,7 @@ def test_login_configured_provider_requires_confirm():
             "configured": True,
             "source": "stored",
         },
+        get_provider=lambda provider: _oauth_provider(),
     )
     ui = _FakeUI(confirm_script=[False])  # 用户选否
     ctx = SimpleNamespace(
@@ -1032,6 +1162,7 @@ def test_login_configured_provider_confirm_yes_proceeds():
             "configured": True,
             "source": "stored",
         },
+        get_provider=lambda provider: _oauth_provider(),
     )
     ui = _FakeUI(confirm_script=[True])
     ctx = SimpleNamespace(
@@ -1056,6 +1187,7 @@ def test_logout_unconfigured_provider_noop_with_notice():
         logout=AsyncMock(),
         get_all=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
     )
     ctx = SimpleNamespace(
         has_ui=True,

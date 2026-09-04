@@ -120,7 +120,7 @@ async function handleNavigate(
     return;
   }
   const options: Record<string, unknown> = {};
-  // 设置档跳过摘要问询（pi branchSummarySkipPrompt 对位）
+  // 设置档跳过摘要问询
   if (!isBranchSummarySkipPrompt()) {
     const choice = await ctx.select?.('生成分支摘要？', [
       { value: 'none', label: '不生成摘要', description: '直接跳转' },
@@ -128,7 +128,7 @@ async function handleNavigate(
       { value: 'custom', label: '自定义摘要指令', description: '输入自定义 prompt' },
     ]);
     if (choice === undefined) {
-      await openTreeSelector(ctx); // Esc：重开树（pi 同款回退）
+      await openTreeSelector(ctx); // Esc：重开树
       return;
     }
     if (choice === 'summarize') {

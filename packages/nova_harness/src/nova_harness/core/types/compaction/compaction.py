@@ -5,8 +5,9 @@ from typing import Any, List, Optional
 
 from nova_agent import AgentMessage
 from nova_ai.types.base_model import NovaBaseModel
-from nova_harness.core.types.compaction.file_ops import FileOperations
 from pydantic import Field
+
+from nova_harness.core.types.compaction.file_ops import FileOperations
 
 
 class CompactionDetails(NovaBaseModel):

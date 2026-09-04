@@ -102,7 +102,7 @@ describe('subagent 渲染器', () => {
     const text = lines.join('\n');
     assert.ok(text.includes('1/2 done, 1 running'));
     assert.ok(text.includes('⏳'));
-    assert.ok(text.includes('(running...)'));
+    assert.ok(!text.includes('(running...)'), '⏳ 已表达运行中——不再重复占位文本');
   });
 
   it('失败结果：✗ + stop_reason + 错误行', () => {

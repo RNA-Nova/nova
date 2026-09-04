@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nova_agent import CustomAgentMessage
 from nova_ai import AbortController
+
 from nova_harness.core.harness.user_tools import UserToolManager
 from nova_harness.core.types.events import USER_BASH, UserBashEvent, UserToolEvent
 from nova_harness.core.types.protocols import AgentSessionProtocol

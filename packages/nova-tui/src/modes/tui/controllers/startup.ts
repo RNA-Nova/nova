@@ -1,5 +1,5 @@
 /**
- * 启动流程编排（pi main.ts 启动段 + interactive-mode renderInitialMessages 对位）。
+ * 启动流程编排。
  *
  * 三块能力：
  * - **CLI 解析纯函数**：@file 展开、初始消息拼接、thinking 校验、
@@ -35,7 +35,7 @@ export interface StartupFlags {
   noSession?: boolean;
 }
 
-/** 合法思考级别（与契约 SetThinkingLevelParams.level 枚举一致——pi VALID_THINKING_LEVELS 对位）。 */
+/** 合法思考级别（与契约 SetThinkingLevelParams.level 枚举一致）。 */
 export const VALID_THINKING_LEVELS = [
   'off',
   'minimal',
@@ -53,7 +53,7 @@ export function isValidThinkingLevel(level: string): boolean {
 /** 启动期可预期错误（@file 缺失/读取失败等）——main.ts 捕获后报错退出。 */
 export class StartupError extends Error {}
 
-/** [message...] 词元分组：@path 前缀为文件参数（pi fileArgs 对位）；孤立 "@" 按字面文本。 */
+/** [message...] 词元分组：@path 前缀为文件参数；孤立 "@" 按字面文本。 */
 export function splitMessageTokens(parts: readonly string[]): {
   messageTokens: string[];
   fileArgs: string[];
@@ -67,7 +67,7 @@ export function splitMessageTokens(parts: readonly string[]): {
   return { messageTokens, fileArgs };
 }
 
-/** 展开 ~/ 前缀（pi resolveReadPath 的 tilde 展开对位的最小版——`~other` 不展开）。 */
+/** 展开 ~/ 前缀（`~other` 不展开）。 */
 export function expandTildePath(path: string): string {
   if (path === '~') return homedir();
   if (path.startsWith('~/')) return join(homedir(), path.slice(2));
@@ -75,7 +75,7 @@ export function expandTildePath(path: string): string {
 }
 
 /**
- * --session 参数归一（pi resolveSessionPath 对位）：路径形态（含 `/`、`\`
+ * --session 参数归一：路径形态（含 `/`、`\`
  * 或以 .jsonl 结尾）解析为绝对路径；裸 id 原样透传（后端在 cwd 会话目录解析）。
  */
 export function resolveSessionArg(arg: string, cwd: string): string {
@@ -125,12 +125,11 @@ export function detectImageMimeType(bytes: Uint8Array): string | null {
 }
 
 /**
- * @file 参数展开（pi processFileArguments 对位）：
+ * @file 参数展开：
  * - 文本文件 → ``<file name="...">内容</file>`` 内联；
- * - 图片（魔数嗅探命中）→ ImageContent 附件 + 空体 ``<file>`` 引用（pi 同款
- * 占位——模型经附件看图，引用占位标记来源）；
- * 空文件跳过（pi 同款）；缺失/目录/不可读抛 StartupError。
- * 与 pi 差异：无 auto-resize（无 TS 图像库——原图直传；压缩归后端 read 路径）。
+ * - 图片（魔数嗅探命中）→ ImageContent 附件 + 空体 ``<file>`` 引用（模型经附件看图，引用占位标记来源）；
+ * 空文件跳过；缺失/目录/不可读抛 StartupError。
+ * 无 auto-resize（无 TS 图像库——原图直传；压缩归后端 read 路径）。
  */
 export async function expandFileArguments(
   fileArgs: readonly string[],
@@ -149,7 +148,7 @@ export async function expandFileArguments(
     if (stats.isDirectory()) {
       throw new StartupError(`@参数指向目录而非文件：${absolutePath}（@${fileArg}）`);
     }
-    if (stats.size === 0) continue; // 空文件跳过（pi 同款）
+    if (stats.size === 0) continue; // 空文件跳过
 
     const bytes = await readFile(absolutePath);
     const mimeType = detectImageMimeType(bytes);
@@ -174,7 +173,7 @@ export async function expandFileArguments(
 }
 
 /**
- * 拼接首条消息：文件块在前、消息文本在后（pi buildInitialMessage 对位——
+ * 拼接首条消息：文件块在前、消息文本在后（—
  * nova 无 stdin/图片通道）。全空返回 undefined（不触发首条提交）。
  */
 export function buildInitialMessage(
@@ -188,7 +187,7 @@ export function buildInitialMessage(
   return parts.length > 0 ? parts.join('\n') : undefined;
 }
 
-/** 会话历史中的 compaction 条目计数（pi renderInitialMessages 对位——防御式解析未知条目）。 */
+/** 会话历史中的 compaction 条目计数（—防御式解析未知条目）。 */
 export function countCompactionEntries(entries: readonly unknown[]): number {
   let count = 0;
   for (const entry of entries) {
@@ -203,12 +202,12 @@ export function countCompactionEntries(entries: readonly unknown[]): number {
   return count;
 }
 
-/** compaction 提示文案（pi "Session compacted N times" 对位）。 */
+/** compaction 提示文案。 */
 export function formatCompactionHint(count: number): string {
   return `会话已压缩 ${count} 次`;
 }
 
-/** 未信任项目横幅文案（pi renderProjectTrustWarningIfNeeded 对位——含 /trust 提示）。 */
+/** 未信任项目横幅文案（—含 /trust 提示）。 */
 export const TRUST_BANNER_TEXT =
   '警告：本项目未被信任——项目级 .nova 资源与包已忽略。使用 /trust 保存信任决策后重启 nova。';
 
@@ -229,7 +228,7 @@ export class StartupController {
     private readonly flags: StartupFlags = {},
   ) {}
 
-  /** 总入口（pi renderInitialMessages 对位：横幅 → 压缩提示 → 命名 → resume 选择器）。 */
+  /** 总入口（横幅 → 压缩提示 → 命名 → resume 选择器）。 */
   async runPostStart(snapshot: SessionSnapshot | null): Promise<void> {
     this.showTrustBannerIfNeeded(snapshot);
     this.showCapabilityReportIfNeeded(snapshot);
@@ -238,7 +237,7 @@ export class StartupController {
     await this.openResumeSelectorIfRequested();
   }
 
-  /** 未信任项目横幅（快照 projectTrusted === false 时——pi renderProjectTrustWarningIfNeeded 对位）。 */
+  /** 未信任项目横幅（快照 projectTrusted === false 时）。 */
   showTrustBannerIfNeeded(snapshot: Pick<SessionSnapshot, 'projectTrusted'> | null): void {
     if (snapshot?.projectTrusted !== false) return;
     this.deps.transcript.addInfo(TRUST_BANNER_TEXT);

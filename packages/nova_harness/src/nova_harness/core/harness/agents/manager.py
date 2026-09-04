@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
+
 from nova_harness.core.config.defaults import get_agent_dir
 from nova_harness.core.types.protocols import ResourceLoaderProtocol
 from nova_harness.core.types.resources.agents import AgentConfig

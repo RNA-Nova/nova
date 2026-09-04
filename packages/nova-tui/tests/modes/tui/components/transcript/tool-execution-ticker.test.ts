@@ -1,7 +1,7 @@
 /**
- * ToolCardView 指纹 memo + ElapsedLine 计时行测试（pi 对齐改造后）：
+ * ToolCardView 指纹 memo + ElapsedLine 计时行测试：
  * - 指纹不变的 update 不重建（渲染器零重调——消"每事件重建所有卡片"放大器）；
- * - live 卡片挂计时行（宿主 chrome，pi Loader 自转对位）；
+ * - live 卡片挂计时行（宿主 chrome）；
  * - 完结/dispose 停表（interval 不泄漏）。真实定时器（非 mock）。
  */
 

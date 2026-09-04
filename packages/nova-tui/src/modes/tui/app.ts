@@ -7,7 +7,7 @@
  * - 组件零编排（自管渲染与自身输入，协作经 controller）。
  */
 
-import { NovaUIRuntime } from 'nova-tui';
+import { guardComponentLineWidth, NovaUIRuntime } from 'nova-tui';
 import type { ImageContent } from '../../protocol/nova-wire.gen.js';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -65,7 +65,7 @@ import {
   updateProgress,
   updateTitle,
 } from './controllers/terminal.js';
-import { getWhatsNewIfNeeded, renderChangelogEntry } from './utils/changelog.js';
+import { getWhatsNewIfNeeded, readPackageVersion, renderChangelogEntry } from './utils/changelog.js';
 import { initTuiSettings } from './utils/tui-settings.js';
 import { bindTerminalThemeSync, watchThemeFiles } from './themes/index.js';
 import type { ExpansionState } from './components/transcript/expansion.js';
@@ -75,9 +75,9 @@ export interface NovaTuiAppOptions {
   model?: string;
   agentName?: string;
   continueLast?: boolean;
-  /** 启动后立即发送的首条消息（CLI positional——pi initialMessage 对位）。 */
+  /** 启动后立即发送的首条消息（CLI positional）。 */
   initialMessage?: string;
-  /** 首条消息的图片附件（@file 图片参数——pi initialImages 对位）。 */
+  /** 首条消息的图片附件（@file 图片参数）。 */
   initialImages?: ImageContent[];
   /** --session <file|id>：恢复指定会话（createSession.sessionFile——D 流契约就绪）。 */
   sessionFile?: string;
@@ -91,18 +91,6 @@ export interface NovaTuiAppOptions {
   noSession?: boolean;
 }
 
-/** 版本读取（包根 package.json——app.js 位于 dist/modes/tui/ 或 src/modes/tui/，上三级均为包根）。 */
-function readPackageVersion(): string {
-  try {
-    const pkg = JSON.parse(
-      readFileSync(new URL('../../../package.json', import.meta.url), 'utf-8'),
-    ) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : '';
-  } catch {
-    return '';
-  }
-}
-
 export class NovaTuiApp {
   private readonly tui: TUI;
   private readonly runtime: NovaUIRuntime;
@@ -111,7 +99,7 @@ export class NovaTuiApp {
   private readonly keymap: KeymapController;
   private readonly headerContainer: Container;
   private readonly expansion: ExpansionState = { expanded: false };
-  /** 扩展原始终端输入拦截器集合（pi onTerminalInput 对位——keymap 之前优先消费）。 */
+  /** 扩展原始终端输入拦截器集合（—keymap 之前优先消费）。 */
   private readonly terminalInputHandlers = new Set<(data: string) => boolean | undefined>();
   /** 前台在飞任务登记处（Esc 域级路由一环——分支摘要/gist 创建等非 run 任务）。 */
   private readonly foregroundTasks = new ForegroundTasks();
@@ -208,7 +196,7 @@ export class NovaTuiApp {
           this.footer.setCustomFooter(factory);
           this.tui.requestRender();
         },
-        // 整件替换启动区 welcome（pi setHeader 对位——RegionHost('header') 不受影响）
+        // 整件替换启动区 welcome（—RegionHost('header') 不受影响）
         setHeader: (factory) => {
           this.headerOverride?.dispose?.();
           this.headerOverride = undefined;
@@ -221,7 +209,9 @@ export class NovaTuiApp {
                 this.runtime.invoke(method as never, params as never),
             };
             this.headerOverride = factory(env) as typeof this.headerOverride;
-            if (this.headerOverride) this.headerContainer.addChild(this.headerOverride);
+            // 行宽防线：包侧整件 header 超宽行不得崩掉整个 TUI
+            if (this.headerOverride)
+              this.headerContainer.addChild(guardComponentLineWidth(this.headerOverride));
           } else {
             this.headerContainer.addChild(this.welcome);
           }
@@ -241,10 +231,10 @@ export class NovaTuiApp {
     this.headerContainer = new Container();
     const chatContainer = new Container();
     const statusContainer = new Container();
-    // widget 区（pi setWidget 对位：编辑器上方的扩展部件槽位——RegionHost 两态消费）
+    // widget 区（编辑器上方的扩展部件槽位——RegionHost 两态消费）
     const widgetContainer = new Container();
     const editorContainer = new Container();
-    // widgetBelow 区（pi setWidget 的 belowEditor placement 对位——编辑器下方）
+    // widgetBelow 区（—编辑器下方）
     const widgetBelowContainer = new Container();
     // EditorRef 盒子：controllers 共享当前编辑器（扩展编辑器热替换经换盒内容生效）
     this.editorRef = { current: new Editor(this.tui, editorTheme, { paddingX: 1 }) };
@@ -356,7 +346,7 @@ export class NovaTuiApp {
     editorController.wire();
     this.editorController = editorController;
     this.tui.addInputListener((data) => {
-      // 扩展原始终端输入拦截优先（pi onTerminalInput 对位——true 消费）
+      // 扩展原始终端输入拦截优先（—true 消费）
       for (const handler of this.terminalInputHandlers) {
         try {
           if (handler(data) === true) return { consume: true };
@@ -379,7 +369,7 @@ export class NovaTuiApp {
       this.keymap.validateExtensionShortcuts(); // 扩展快捷键对账（restrictOverride）
     });
     // 编辑器边框色钩子：bash 模式（! 开头）→ bashMode 绿；
-    // 否则 thinking 级别色（pi 同款——渲染帧现取，状态即变）
+    // 否则 thinking 级别色（渲染帧现取，状态即变）
     setEditorBorderColorHook(() => {
       if (this.editorRef.current.getText().trimStart().startsWith('!')) {
         return colors.bashMode;
@@ -399,7 +389,7 @@ export class NovaTuiApp {
   /** settings 缓存（run() 启动读取；/settings 可视化编辑原地更新——getter 消费方即时生效）。 */
   private readonly currentSettings: Record<string, unknown> = {};
 
-  /** 双 Esc 导航设置（settings 派生，默认 tree——pi 同款）。 */
+  /** 双 Esc 导航设置（settings 派生，默认 tree）。 */
   private getDoubleEscapeAction(): 'fork' | 'tree' | 'none' {
     const value = this.currentSettings.doubleEscapeAction;
     return value === 'fork' || value === 'tree' || value === 'none' ? value : 'tree';
@@ -411,7 +401,7 @@ export class NovaTuiApp {
     // 前端设置存储与终端集成（E 流）：ui-settings 绑定 + 编辑器/清屏行为应用
     initTuiSettings(this.runtime.uiSettings);
     initTerminalIntegration({ tui: this.tui, editorRef: this.editorRef });
-    // 信号与崩溃守卫（pi 对位：优雅退出/死终端应急/崩溃恢复——F 流 signals 模块）
+    // 信号与崩溃守卫（优雅退出/死终端应急/崩溃恢复——F 流 signals 模块）
     installSignalHandlers({
       runtime: this.runtime,
       tui: this.tui,
@@ -449,12 +439,12 @@ export class NovaTuiApp {
       void (async () => {
         await this.runtime.refreshSnapshot();
         await this.runtime.refreshPackages();
-      })();
+      })().catch((error) => this.transcript.addError(error));
     });
     // 会话信息变更（改名/换角色/换 persona）——payload 直写角色名等，
     // 但激活工具集等派生面需全量对账（/agent 切换后 activeTools 不刷新的根因）
     this.runtime.bus.on('session_info_changed', () => {
-      void this.runtime.refreshSnapshot();
+      void this.runtime.refreshSnapshot().catch((error) => this.transcript.addError(error));
     });
     // 会话内容整体替换（/resume、/new、/fork、/tree、clone、import）→
     // 全量重同步 transcript 与快照——后端持有会话单一事实源，替换后
@@ -465,9 +455,9 @@ export class NovaTuiApp {
         await this.runtime.syncFromBackend();
         this.transcript.onChange(); // 重同步后滚到底并重绘
         void this.footer.refreshStats();
-        void this.resources.refresh();
+        void this.resources.refresh().then(() => this.tui.requestRender());
         await this.runtime.refreshPackages();
-      })();
+      })().catch((error) => this.transcript.addError(error));
     });
     updateTitle(this.runtime.store.currentSnapshot); // 启动即设终端标题
     // 键位文件诊断（坏 JSON/未知动作/非法值）——启动即提示，不阻断
@@ -489,7 +479,9 @@ export class NovaTuiApp {
       this.transcript.onChange(); // 历史回放（全量同步后首绘）
       this.welcome.refresh(); // 模型已同步——刷新模型行
       void this.footer.refreshStats();
-      void this.resources.refresh(); // 已加载资源区（四 RPC 并发，失败静默）
+      // 已加载资源区（四 RPC 并发，失败静默；完成后必须补一帧——
+      // 否则要等下一次按键/事件触发重绘才显示）
+      void this.resources.refresh().then(() => this.tui.requestRender());
       this.tui.requestRender();
       await this.themeController.init(
         typeof settings.theme === 'string' ? settings.theme : undefined,
@@ -510,16 +502,25 @@ export class NovaTuiApp {
       ).runPostStart(this.runtime.store.currentSnapshot);
       // changelog 启动提示：包版本与 settings.last_changelog_version 比对
       this.maybeNotifyNewVersion();
-      // first-time-setup：无模型配置时引导 login/选模型（设过 defaultModel 或带了 --model 不弹；
+      // first-time-setup：无任何可用模型时引导 login/选模型
+      //（可用性为准——有任意 provider 鉴权可用就不弹；此前按
+      // defaultModel 判定，会话级选过模型但 defaultModel 未写时每次
+      // 启动都弹，挡住资源行，必须按键才能看到。--model 直给不弹；
       // resume 选择器等对话框开着时让路）
-      if (
-        !this.options.model &&
-        typeof settings.defaultModel !== 'string' &&
-        !this.dialogs.isActive
-      ) {
-        this.openFirstTimeSetup();
+      if (!this.options.model && !this.dialogs.isActive) {
+        let anyAvailable = false;
+        try {
+          const result = await this.runtime.invoke('listModels', {});
+          const models = (result as { models?: Array<{ available?: boolean }> }).models;
+          anyAvailable = models?.some((m) => m.available === true) === true;
+        } catch {
+          // 可用性查询失败按"无可用"处理——该弹还是得弹
+        }
+        if (!anyAvailable) {
+          this.openFirstTimeSetup();
+        }
       }
-      // initialMessage：启动即提交首条（pi 同款——first-time 引导开着则不抢焦点，跳过）
+      // initialMessage：启动即提交首条（first-time 引导开着则不抢焦点，跳过）
       if (this.options.initialMessage && !this.dialogs.isActive) {
         this.editorController.submitText(this.options.initialMessage, {
           images: this.options.initialImages,
@@ -569,7 +570,7 @@ export class NovaTuiApp {
     this.tui.requestRender();
   }
 
-  /** 新版本启动提示（pi What's New 对位：ui-state 记录 lastSeenVersion，前进弹一次）。 */
+  /** 新版本启动提示（ui-state 记录 lastSeenVersion，前进弹一次）。 */
   private maybeNotifyNewVersion(): void {
     const version = readPackageVersion();
     if (!version) return;
@@ -579,7 +580,7 @@ export class NovaTuiApp {
 
   /** 终端标题（OSC 0）已迁 controllers/terminal.ts 的 updateTitle（basename + 控制字符净化）。 */
 
-  /** ctrl+z：挂起到后台（pi handleCtrlZ 直搬——keepAlive + SIGINT 忽略 + SIGCONT 恢复）。 */
+  /** ctrl+z：挂起到后台（keepAlive + SIGINT 忽略 + SIGCONT 恢复）。 */
   private suspendToBackground(): void {
     if (process.platform === 'win32') {
       this.transcript.addInfo('Windows 不支持挂起（Ctrl+Z）');
@@ -606,7 +607,7 @@ export class NovaTuiApp {
     }
   }
 
-  /** ctrl+g：外部编辑器编辑草稿（pi openExternalEditor 直搬——退出码 0 回写）。 */
+  /** ctrl+g：外部编辑器编辑草稿（退出码 0 回写）。 */
   private async openExternalEditor(): Promise<void> {
     const editorCmd =
       (typeof this.currentSettings.external_editor === 'string' &&
@@ -671,7 +672,7 @@ export class NovaTuiApp {
     clearTerminalProgress(); // OSC 9;4 进度清除（退出不残留任务栏指示）
     void this.runtime.stop().catch(() => undefined);
     this.tui.stop();
-    // 退出提示恢复命令（pi 打印 resume 命令对位）
+    // 退出提示恢复命令
     process.stdout.write(`恢复会话：nova --continue\n`);
     process.exit(code);
   }

@@ -1,6 +1,5 @@
 /**
- * question 工具渲染器（组件形态——pi question.ts 渲染语义对位；多问形态对位
- * pi questionnaire）。
+ * question 工具渲染器（组件形态；多问形态为 tab 条分页的多问单框）。
  *
  * details 契约（backend/tools/question.py）：
  * - 单问：{ question, options: [label...], answer, was_custom, index? }；
@@ -8,7 +7,7 @@
  *   index?}...] }（按 questions 是否存在分派）；
  * 取消 answer=null；参数/环境失败带 error。
  *
- * 呈现语义（pi 对齐）：
+ * 呈现语义：
  * - 调用/等待中：问题 + 编号选项列表（含 "Type something." 自由项）+ 等待提示；
  *   多问逐问显示，当前问（首个未答）高亮并带选项列表，已答问显示 ✓ 回执；
  * - 取消：warning "Cancelled"；自由回答：✓ (wrote) 答案；选择：✓ N. label。
@@ -108,7 +107,7 @@ function renderMultiQuestion(
   if (input.status === 'running') {
     container.addChild(new Text(c.dim(`waiting for answer… (${answeredCount}/${norm.length})`), 1, 0));
   } else if (terminal && answeredCount < norm.length) {
-    // 全部或部分未答完结（用户 Esc 取消）——pi 的 Cancelled 语义
+    // 全部或部分未答完结（用户 Esc 取消）
     container.addChild(new Text(c.warn('Cancelled'), 1, 0));
   }
   return container;

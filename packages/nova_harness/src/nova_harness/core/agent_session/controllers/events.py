@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from nova_agent import AgentMessage
+
 from nova_harness.core.types.events import (
     AGENT_END,
     AGENT_START,

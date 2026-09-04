@@ -1,9 +1,9 @@
 /**
- * skill 调用条目（复刻 pi skill-invocation-message.ts）。
+ * skill 调用条目。
  *
  * ``/skill:name`` 经后端展开为 XML skill block 注入 user 消息
  * （``<skill name="..." location="...">...</skill>`` + 可选尾部用户文本，
- * 格式与 pi 完全同构）——本组件把 skill block 部分从用户文本拆出，
+ * 格式同构）——本组件把 skill block 部分从用户文本拆出，
  * 折叠为 ``[skill] name`` 单行（ctrl+o 展开看全文），避免 XML 全文
  * 刷屏（用户视角的噪声）。
  */
@@ -14,7 +14,7 @@ import { colors, markdownTheme } from '../../themes/index.js';
 import { keyText } from '../pickers/hints.js';
 import type { ExpansionState } from './expansion.js';
 
-/** 解析出的 skill block（pi ParsedSkillBlock 对位）。 */
+/** 解析出的 skill block。 */
 export interface ParsedSkillBlock {
   name: string;
   location: string;
@@ -24,7 +24,7 @@ export interface ParsedSkillBlock {
 }
 
 /**
- * 从 user 消息文本解析 skill block（pi 正则直搬——后端 expand_skill_command
+ * 从 user 消息文本解析 skill block（后端 expand_skill_command
  * 的产物格式与之同构）。整消息须以 skill block 开头；不匹配返回 null。
  */
 export function parseSkillBlock(text: string): ParsedSkillBlock | null {

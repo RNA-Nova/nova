@@ -4,12 +4,6 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.operations import (
     FindOperations,
     FindOptions,
@@ -20,6 +14,12 @@ from nova_coding_agent.tools_common.truncate import (
     UNLIMITED_MAX_LINES,
     TruncationOptions,
     truncate_head,
+)
+
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
 )
 
 
@@ -108,8 +108,7 @@ class Tool:
                 )
 
             lines = list(results)
-            # 输出拼接后过 truncate_head：只按 50KB 字节截断（对齐 pi 的
-            # maxLines=∞；行数已由 limit 收口，叠默认行上限会提前截断）
+            # 输出拼接后过 truncate_head：只按 50KB 字节截断（行数已由 limit 收口，叠默认行上限会提前截断）
             truncation = truncate_head(
                 "\n".join(lines), TruncationOptions(max_lines=UNLIMITED_MAX_LINES)
             )

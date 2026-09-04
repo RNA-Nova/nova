@@ -79,7 +79,7 @@ export class FormDialog extends Container implements Focusable {
 
   private move(delta: number): void {
     const next = this.activeIndex + delta;
-    // 端点钳位（对齐 pi extension-selector 的不环绕语义）
+    // 端点钳位
     this.activeIndex = Math.max(0, Math.min(this.fields.length - 1, next));
     this.refreshLabels();
     this.syncInputFocus();

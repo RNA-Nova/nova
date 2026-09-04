@@ -57,12 +57,12 @@ export function isBranchSummarySkipPrompt(): boolean {
   return store?.get<boolean>('branch_summary_skip_prompt') ?? false;
 }
 
-/** 编辑器水平内边距（0-3，pi editorPaddingX 对位；默认 1——与装配根现状一致）。 */
+/** 编辑器水平内边距（0-3，；默认 1——与装配根现状一致）。 */
 export function getEditorPadding(): number {
   return clampInt(store?.get<number>('editor_padding'), 0, 3, 1);
 }
 
-/** 编辑器补全下拉可见条数（pi autocompleteMaxVisible 对位；默认 5）。 */
+/** 编辑器补全下拉可见条数（默认 5）。 */
 export function getAutocompleteMaxItems(): number {
   return clampInt(store?.get<number>('autocomplete_max_items'), 3, 20, 5);
 }
@@ -72,7 +72,7 @@ export function isClearOnShrink(): boolean {
   return store?.get<boolean>('clear_on_shrink') ?? true;
 }
 
-/** OSC 9;4 终端进度发射开关（pi showTerminalProgress 对位；默认关——同 pi）。 */
+/** OSC 9;4 终端进度发射开关（默认关——同 pi）。 */
 export function isTerminalProgressEnabled(): boolean {
   return store?.get<boolean>('terminal_progress') ?? false;
 }

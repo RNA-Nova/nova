@@ -37,8 +37,9 @@ class SubagentResult:
     output: str = ""
     error: Optional[str] = None
     error_message: Optional[str] = None
-    # -1 为"运行中"占位的约定值（parallel 模式的流式聚合用；对齐 pi 的
-    # exitCode: -1 哨兵）；正常结束为进程退出码。
+    # -1 = "运行中"哨兵：_run_single 构造即置 -1，
+    # 渲染器据此显示 ⏳；终态回填真实退出码，超时至 124、abort 无码至 130
+    # （GNU 约定），哨兵不得回漏到任何终态路径。
     exit_code: int = 0
     usage: SubagentUsage = field(default_factory=SubagentUsage)
     model: Optional[str] = None

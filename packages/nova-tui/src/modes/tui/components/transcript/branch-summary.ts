@@ -1,5 +1,5 @@
 /**
- * 分支摘要卡片（复刻 pi branch-summary-message.ts，与压缩摘要同构）。
+ * 分支摘要卡片（与压缩摘要同构）。
  */
 
 import { Box, Markdown, Spacer, Text } from '@earendil-works/pi-tui';

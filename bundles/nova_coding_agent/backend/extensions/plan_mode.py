@@ -1,6 +1,6 @@
-"""plan_mode 扩展（Claude Code 风格只读规划模式——pi examples/extensions/plan-mode 对位）。
+"""plan_mode 扩展（Claude Code 风格只读规划模式）。
 
-机制全貌（与 pi 同构，事件面全部现役）：
+机制全貌（事件面全部现役）：
 
 - ``/plan`` 命令 + ``ctrl+alt+p`` 快捷键 + ``--plan`` 启动旗标：切换规划模式；
 - 模式开启时收缩工具集（禁用 edit/write——经 ``set_active_tools`` 从激活集
@@ -15,9 +15,8 @@
 - 状态经 ``append_entry("plan-mode")`` 持久化，``session_start``（含
   reload）重建——分支/恢复所见即该历史点状态。
 
-与 pi 的两处适配：①"Refine"用单行 ``input`` 原语（pi 是多行 editor——
-基线词汇无多行编辑器）；②pi 提示词里的 questionnaire/brave-search 引用
-替换为本包的 question 工具。bash 白名单/危险模式与计划解析规则为 pi 原文移植。
+与 两处适配：①"Refine"用单行 ``input`` 原语（基线词汇无多行编辑器）；②pi 提示词里的 questionnaire/brave-search 引用
+替换为本包的 question 工具。
 """
 
 from __future__ import annotations
@@ -25,6 +24,9 @@ from __future__ import annotations
 import re
 import time
 from typing import Any, Dict, List, Optional
+
+from nova_coding_agent.ui_primitives import input as ui_input
+from nova_coding_agent.ui_primitives import notify_message, select, set_status
 
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (
@@ -34,11 +36,8 @@ from nova_harness.core.types.events.results import (
 )
 from nova_harness.core.types.messages import CustomMessage
 
-from nova_coding_agent.ui_primitives import input as ui_input
-from nova_coding_agent.ui_primitives import notify_message, select, set_status
-
 # ---------------------------------------------------------------------------
-# bash 安全判定（pi plan-mode/utils.ts 原文移植：危险否决 + 白名单放行）
+# bash 安全判定（危险否决 + 白名单放行）
 # ---------------------------------------------------------------------------
 
 _DESTRUCTIVE_PATTERNS = [
@@ -138,14 +137,14 @@ _SAFE_PATTERNS = [
 
 
 def is_safe_command(command: str) -> bool:
-    """只读命令判定：危险模式优先否决，白名单兜底放行（pi 同款双判）。"""
+    """只读命令判定：危险模式优先否决，白名单兜底放行。"""
     is_destructive = any(p.search(command) for p in _DESTRUCTIVE_PATTERNS)
     is_safe = any(p.search(command) for p in _SAFE_PATTERNS)
     return not is_destructive and is_safe
 
 
 # ---------------------------------------------------------------------------
-# 计划步骤解析（pi plan-mode/utils.ts 原文移植）
+# 计划步骤解析
 # ---------------------------------------------------------------------------
 
 _STEP_VERBS = (
@@ -220,7 +219,7 @@ def mark_completed_steps(text: str, items: List[Dict[str, Any]]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 提示词（pi 原文，questionnaire/brave-search 适配为本包 question 工具）
+# 提示词（questionnaire/brave-search 适配为本包 question 工具）
 # ---------------------------------------------------------------------------
 
 _PLAN_CONTEXT = """[PLAN MODE ACTIVE]
@@ -301,7 +300,7 @@ def extension(nova: NovaExtensionAPI) -> None:
             notify_message(ctx.ui, message, level)
 
     def _update_status(ctx: Any) -> None:
-        """footer 扩展状态行（pi plan-mode 的 setStatus 对位）：
+        """footer 扩展状态行：
         执行态 📋 n/m；规划态 ⏸ plan；否则清除。无 UI 静默降级。"""
         if not ctx.has_ui:
             return
@@ -495,7 +494,7 @@ def extension(nova: NovaExtensionAPI) -> None:
                 {"triggerTurn": True, "deliverAs": "followUp"},
             )
         elif choice == "Refine the plan":
-            # pi 用多行 editor——基线词汇无多行编辑器，用单行 input 对位
+            # 基线词汇无多行编辑器，用单行 input
             refinement = await ui_input(ctx.ui, "Refine the plan:")
             if isinstance(refinement, str) and refinement.strip():
                 await ctx.send_message(plan_list_message, {"deliverAs": "followUp"})

@@ -1,7 +1,7 @@
 /**
- * question 自定义对话框组件（dialog:question——pi examples/extensions/question.ts
- * 单框组件的移植：选项列表 + "Type something." 内联编辑器；多问形态对位
- * pi questionnaire——tab 条分页的多问单框）。
+ * question 自定义对话框组件（dialog:question
+ * 单框组件：选项列表 + "Type something." 内联编辑器；多问形态为
+ * tab 条分页的多问单框）。
  *
  * 契约（与 backend/tools/question.py 配对）：
  * - 单问入参 params：{ question: string, options: [{label, description?}] }；
@@ -43,7 +43,7 @@ interface DisplayOption extends QuestionDialogOption {
 
 const OTHER_LABEL = 'Type something.';
 
-/** 问题对话框（选项 + 内联自由输入——pi question.ts 的渲染/交互逻辑逐行对位）。 */
+/** 问题对话框（选项 + 内联自由输入）。 */
 export class QuestionDialog implements Component, Focusable {
   private optionIndex = 0;
   private editMode = false;
@@ -231,7 +231,7 @@ const QUESTION_EDITOR_THEME: EditorTheme = {
 };
 
 /**
- * 多问对话框（pi questionnaire 对位）：顶部 tab 条显示问 1..N（已答 ✓ 标记），
+ * 多问对话框：顶部 tab 条显示问 1..N（已答 ✓ 标记），
  * 每页复用单问页（选项列表 + "Type something." 内联编辑器）。答完一问自动
  * 跳到下一未答问；全部答完后 enter 提交 {answers: [...]}（按问序归集）。
  */
@@ -479,7 +479,7 @@ export function questionDialogFactory(
   done: (result?: unknown) => void,
 ): Component {
   const { tui } = env as { tui: TUI };
-  // 多问形态（pi questionnaire 对位）：questions 数组存在即分派（1~4 问）
+  // 多问形态：questions 数组存在即分派（1~4 问）
   if (Array.isArray(params.questions)) {
     const questions = normalizeQuestions(params.questions);
     if (questions.length > 0) {

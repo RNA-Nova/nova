@@ -12,6 +12,8 @@ from typing import Annotated, Any, Dict, List, Optional, Set, Tuple
 
 import uuid6
 from nova_agent import AgentMessage
+from pydantic import Field, TypeAdapter
+
 from nova_harness.core.config.defaults import SESSIONS_DIR_NAME, get_agent_dir
 from nova_harness.core.harness.session.message_types import get_session_message_type
 from nova_harness.core.types.messages import OpaqueUserToolMessage
@@ -28,7 +30,6 @@ from nova_harness.core.utils.messages import (
     create_compaction_summary_message,
     create_custom_message,
 )
-from pydantic import Field, TypeAdapter
 
 logger = logging.getLogger(__name__)
 

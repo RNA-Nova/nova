@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from nova_ai import AbortController, Model
+
 from nova_harness.core.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
@@ -58,7 +59,9 @@ async def get_summarization_request_auth(
       由调用方静默放弃。
     """
     result = await session.model_runtime.get_request_auth(model)
-    api_key = result.auth.get("apiKey") if result else None
+    # ModelAuth 是进程内 snake 契约（nova_ai types/auth.py 的 TypedDict）——
+    # 曾误读 camel "apiKey"，导致压缩/分支摘要永远判为无鉴权
+    api_key = result.auth.get("api_key") if result else None
     if api_key:
         return (
             api_key,
@@ -165,7 +168,6 @@ class CompactionController:
                         preparation=preparation,
                         branch_entries=path_entries,
                         custom_instructions=custom_instructions,
-                        signal=self._session._compaction_abort_controller.signal,
                     )
                 )
                 if getattr(result, "cancel", False):
@@ -384,7 +386,6 @@ class CompactionController:
                         preparation=preparation,
                         branch_entries=path_entries,
                         custom_instructions=None,
-                        signal=self._session._auto_compaction_abort_controller.signal,
                     )
                 )
                 if getattr(result, "cancel", False):

@@ -1,7 +1,7 @@
 /**
- * 剪贴板工具：Ctrl+V 图片/文本读取（对齐 pi handleClipboardPaste 语义）。
+ * 剪贴板工具：Ctrl+V 图片/文本读取。
  *
- * 模型（对齐 pi）：剪贴板图片不落 ImageContent——写临时文件、路径以文本
+ * 模型（）：剪贴板图片不落 ImageContent——写临时文件、路径以文本
  * 进编辑器，随 prompt 纯文本上送，LLM 经 read 工具读图（read 内建格式
  * 归一 / EXIF 校正 / 预算压缩）。
  *
@@ -50,7 +50,7 @@ function run(
   return { ok: true, stdout };
 }
 
-/** 从候选 mime 列表选出最优图片类型（对齐 pi selectPreferredImageMimeType）。 */
+/** 从候选 mime 列表选出最优图片类型。 */
 function selectImageMimeType(types: string[]): [string, string] | null {
   const bases = types.map((t) => t.split(';')[0]?.trim().toLowerCase() ?? '');
   for (const [mime, ext] of IMAGE_MIME_EXT) {
@@ -140,7 +140,7 @@ function saveClipboardImageLinux(basePath: string): string | null {
 
 /**
  * 剪贴板图片写临时文件，返回文件路径；无图片或平台不支持返回 null。
- * 临时文件生命周期归系统 tmp 清理（对齐 pi：不主动删）。
+ * 临时文件生命周期归系统 tmp 清理（不主动删）。
  */
 export async function saveClipboardImageToTemp(): Promise<string | null> {
   try {

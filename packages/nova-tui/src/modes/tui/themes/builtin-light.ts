@@ -1,5 +1,5 @@
 /**
- * 内建 light 主题（pi light.json 直搬）。
+ * 内建 light 主题。
  */
 
 import type { ThemeJson } from './theme-json.js';

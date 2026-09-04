@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 
-@dataclass
+@dataclass(frozen=True)
 class AgentSessionRuntimeDiagnostic:
     """运行时的非致命诊断条目。"""
 
@@ -14,7 +14,7 @@ class AgentSessionRuntimeDiagnostic:
     message: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class SessionCwdIssue:
     """缺失会话 cwd 的问题描述。"""
 

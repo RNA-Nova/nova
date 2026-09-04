@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol
 from nova_agent import ToolExecutionMode
 from nova_ai import Model
 from nova_ai.types.base_model import NovaBaseModel
+
 from nova_harness.core.types.extensions.source import SourceInfo
 from nova_harness.core.types.ui.context import UIContext
 from nova_harness.core.types.ui.noop import NoOpUIContext

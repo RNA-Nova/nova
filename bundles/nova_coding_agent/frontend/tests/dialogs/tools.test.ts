@@ -1,6 +1,5 @@
 /**
- * ToolsDialog 组件测试（frontend/tui/dialogs/tools.ts——pi tools.ts 的
- * SettingsList 对位）：初始激活态渲染、space 切换、enter 提交 {active: [...]}
+ * ToolsDialog 组件测试（frontend/tui/dialogs/tools.ts）：初始激活态渲染、space 切换、enter 提交 {active: [...]}
  * （入参原序）、esc 取消、工厂参数归一化。colors 经 env 注入恒等函数（无 ANSI）。
  */
 

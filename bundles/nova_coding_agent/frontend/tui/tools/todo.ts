@@ -14,7 +14,7 @@ import { Container, Text, type Component } from '@earendil-works/pi-tui';
 
 import { detailsOf, type RendererInput } from 'nova-tui';
 
-/** 折叠态展示的条目数（pi todo 渲染同款）。 */
+/** 折叠态展示的条目数。 */
 const COLLAPSED_COUNT = 5;
 
 interface TodoItem {

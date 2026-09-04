@@ -1,5 +1,5 @@
 /**
- * /resume 的包侧编排（pi showSessionSelector 对位——dogfood：官方 bundle 以扩展机制自持命令 UI）。
+ * /resume 的包侧编排（—dogfood：官方 bundle 以扩展机制自持命令 UI）。
  *
  * 数据：listSessions（富字段 + scope）→ switchSession 切换；
  * 删除 deleteSession / 重命名 renameSession（变更后重载列表——模态保持，

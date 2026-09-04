@@ -6,7 +6,7 @@
  * 然后进入 pi-tui 主循环。薄壳原则：不做任何会话逻辑/呈现归约——
  * 状态来自 runtime.store，命令经 runtime.invoke，对话框经 onUIRequest。
  *
- * CLI flags（pi cli/args.ts 对位子集）：解析/校验/@file 展开的全部逻辑
+ * CLI flags：解析/校验/@file 展开的全部逻辑
  * 拆在 controllers/startup.ts（纯函数可单测）；本文件只做 commander
  * 接线与透传。StartupFlags 字段（sessionFile/thinking/resume/sessionName/
  * noSession）随 options 透传给 app——NovaTuiAppOptions 扩展后生效
@@ -16,6 +16,10 @@
 import { Command } from 'commander';
 
 import { NovaTuiApp, type NovaTuiAppOptions } from './app.js';
+
+// 进程名（终端选项卡/任务管理器显示，否则只显示 node）
+process.title = 'nova';
+
 import {
   buildInitialMessage,
   expandFileArguments,
@@ -32,16 +36,16 @@ const program = new Command();
 program
   .name('nova')
   .description('Nova TUI（NovaUIRuntime + pi-tui 薄壳）')
-  .argument('[message...]', '启动后立即发送的首条消息（@file 展开为文件文本——pi initialMessage 对位）')
+  .argument('[message...]', '启动后立即发送的首条消息（@file 展开为文件文本）')
   .option('-c, --cwd <dir>', '工作目录', process.cwd())
   .option('-m, --model <ref>', '模型（provider/id）')
   .option('-a, --agent <name>', 'Agent 名称')
   .option('--continue', '继续当前目录最近一次会话')
-  .option('-r, --resume', '启动后打开会话选择器（pi --resume 对位）')
+  .option('-r, --resume', '启动后打开会话选择器')
   .option('--session <file|id>', '恢复指定会话（文件路径或会话 id——裸 id 由后端在 cwd 会话目录解析）')
   .option('-n, --name <name>', '设置会话名（启动后 setSessionName）')
   .option('--thinking <level>', `思考级别（${VALID_THINKING_LEVELS.join('/')}）`)
-  .option('--no-session', '不持久化会话（内存态，不落盘不进会话列表——pi --no-session 对位）')
+  .option('--no-session', '不持久化会话（内存态，不落盘不进会话列表）')
   .action(async (messageParts: string[], opts) => {
     const cwd = opts.cwd as string;
     const continueLast = Boolean(opts.continue);
@@ -51,7 +55,7 @@ program
       typeof opts.session === 'string' ? resolveSessionArg(opts.session as string, cwd) : undefined;
     const noSession = opts.session === false;
 
-    // —— 互斥校验（pi validateForkFlags/validateSessionIdFlags 对位——报错退出）——
+    // —— 互斥校验（—报错退出）——
     const conflicts = [
       sessionFile !== undefined ? '--session' : undefined,
       continueLast ? '--continue' : undefined,
@@ -62,14 +66,14 @@ program
       process.exit(1);
     }
 
-    // --name 非空校验（pi 同款）
+    // --name 非空校验
     const sessionName = typeof opts.name === 'string' ? (opts.name as string).trim() : undefined;
     if (opts.name !== undefined && !sessionName) {
       console.error('错误：--name 需要非空值');
       process.exit(1);
     }
 
-    // --thinking 校验（pi 同款：非法值警告并忽略）
+    // --thinking 校验（非法值警告并忽略）
     let thinking: string | undefined;
     if (typeof opts.thinking === 'string') {
       if (isValidThinkingLevel(opts.thinking)) {
@@ -81,7 +85,7 @@ program
       }
     }
 
-    // —— @file 展开进首条消息（文本内联 + 图片附件——pi processFileArguments 对位）——
+    // —— @file 展开进首条消息（文本内联 + 图片附件）——
     const { messageTokens, fileArgs } = splitMessageTokens(messageParts);
     let initialMessage: string | undefined;
     let initialImages: Array<{ type: 'image'; data: string; mimeType: string }> = [];

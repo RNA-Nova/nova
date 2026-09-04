@@ -1,5 +1,5 @@
 /**
- * /todos 模态查看器组件（pi examples/extensions/todo.ts TodoListComponent 对位）。
+ * /todos 模态查看器组件。
  *
  * 纯展示模态：清单 + 进度行；esc / ctrl+c / q 关闭（done() 交还，无结果值）。
  * 主题经宿主子路径导出共享（jiti 别名 + ESM 缓存单例——tree 选择器同款通道）。

@@ -1,5 +1,5 @@
 /**
- * 可复用倒计时器（pi countdown-timer.ts 对位）。
+ * 可复用倒计时器。
  *
  * 用途：对话框 timeout 倒计时（transport timeout_ms 的前端呈现）、
  * retry 指示器的"in Ns"倒计时。每秒 tick + 到期回调。

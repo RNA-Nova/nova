@@ -4,18 +4,18 @@ from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.file_queue import with_file_write_lock
 from nova_coding_agent.tools_common.operations import (
     WriteOperations,
     create_local_write_operations,
 )
 from nova_coding_agent.tools_common.path_utils import resolve_path
+
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
 
 
 class Tool:
@@ -94,15 +94,14 @@ class Tool:
         operations = self.operations
 
         def _throw_if_aborted() -> None:
-            # 对齐 pi write.ts：abort 检查全部在写锁内逐步进行，锁持有到
+            # abort 检查全部在写锁内逐步进行，锁持有到
             # 当前操作 settle 为止。不在 abort 事件回调里直接 reject——
             # 那样会在在途写操作尚未完成时就释放队列。
             if signal is not None and getattr(signal, "aborted", False):
                 raise RuntimeError("Operation aborted")
 
         try:
-            # mkdir/exists/写入整体入锁（对齐 pi withFileMutationQueue 的
-            # 包裹范围）：同一路径的并发 mutation 完整串行，而不是只串行
+            # mkdir/exists/写入整体入锁：同一路径的并发 mutation 完整串行，而不是只串行
             # 写入那一步——否则并发首写时 existed 判定与父目录创建会交错
             async with with_file_write_lock(path):
                 _throw_if_aborted()

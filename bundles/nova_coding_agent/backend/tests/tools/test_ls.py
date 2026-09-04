@@ -66,18 +66,18 @@ def test_tool_metadata_valid():
 
 
 def test_ls_prompt_snippet_aligned_with_pi():
-    """ls 补齐 pi 同款 promptSnippet（纯增量元数据，不动对外契约）。"""
+    """ls 补齐  promptSnippet（纯增量元数据，不动对外契约）。"""
     executor = _load_executor()
     assert executor.prompt_snippet == "List directory contents"
 
 
 # ---------------------------------------------------------------------------
-# 无法 stat 的条目跳过、达 limit 即停（对齐 pi ls.ts）
+# 无法 stat 的条目跳过、达 limit 即停
 # ---------------------------------------------------------------------------
 
 
 def test_ls_skips_unstatable_entries(tmpdir):
-    """悬空软链等无法 stat 的条目直接跳过（对齐 pi ls.ts 的 catch continue）。"""
+    """悬空软链等无法 stat 的条目直接跳过。"""
     from nova_coding_agent.tools_common.operations import LocalLsOperations, LsOptions
 
     _write(os.path.join(tmpdir, "real.txt"), "x")
@@ -88,7 +88,7 @@ def test_ls_skips_unstatable_entries(tmpdir):
 
 
 def test_ls_limit_stops_early_and_marks_truncated(tmpdir):
-    """达 limit 即停并标记 truncated；恰好等于 limit 时不标记（对齐 pi）。"""
+    """达 limit 即停并标记 truncated；恰好等于 limit 时不标记（）。"""
     from nova_coding_agent.tools_common.operations import LocalLsOperations, LsOptions
 
     for i in range(5):
@@ -106,12 +106,12 @@ def test_ls_limit_stops_early_and_marks_truncated(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# 输出截断只按字节（对齐 pi 的 maxLines=∞，不再叠 2000 行上限）
+# 输出截断只按字节（不再叠 2000 行上限）
 # ---------------------------------------------------------------------------
 
 
 def test_ls_output_truncated_at_50kb(tmpdir):
-    """ls 输出拼接后过 truncate_head：超 50KB 截断并标注（对齐 grep/pi）。"""
+    """ls 输出拼接后过 truncate_head：超 50KB 截断并标注（对齐 grep）。"""
     for i in range(500):
         name = f"file-{i:04d}-" + "x" * 100 + ".txt"
         open(os.path.join(tmpdir, name), "w").close()
@@ -125,7 +125,7 @@ def test_ls_output_truncated_at_50kb(tmpdir):
 
 
 def test_ls_output_not_line_capped(tmpdir):
-    """ls 输出超 2000 行但未满 50KB 时不截断（对齐 pi 的 maxLines=∞）。"""
+    """ls 输出超 2000 行但未满 50KB 时不截断。"""
     for i in range(2100):
         open(os.path.join(tmpdir, f"f{i:04d}.txt"), "w").close()
 

@@ -1,5 +1,5 @@
 /**
- * /model 的包侧编排（pi model-selector 对位——dogfood：官方 bundle 以扩展机制自持命令 UI）。
+ * /model 的包侧编排（—dogfood：官方 bundle 以扩展机制自持命令 UI）。
  *
  * 当前模型置顶带 ✓、Tab 切 all/scoped 作用域、fuzzy 搜索、provider 分组；
  * 选中即 setModel。带参数（/model provider/id）时直切——与后端 _model 的
@@ -38,8 +38,7 @@ export function modelKey(model: { provider: string; id: string }): string {
 }
 
 /**
- * 选择器条目组装（纯函数）：scoped 档过滤池 → 当前模型置顶（pi 语义，
- * 其余保持后端顺序）→ ✓ 前缀 + 元信息描述列 + provider 分组。
+ * 选择器条目组装（纯函数）：scoped 档过滤池 → 当前模型置顶（* 其余保持后端顺序）→ ✓ 前缀 + 元信息描述列 + provider 分组。
  */
 export function buildModelItems(
   models: ModelListItem[],

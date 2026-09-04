@@ -15,13 +15,16 @@ import {
   CompactionStatusIndicator,
   RetryStatusIndicator,
   StatusIndicator,
-  WorkingStatusIndicator,
 } from '../components/status/indicators.js';
+import { WorkAreaView } from '../components/status/work-area.js';
 import { colors } from '../themes/index.js';
 
+/** status 槽位的活动指示体（静态指示器或工作区视图——均有 kind/dispose）。 */
+type ActiveIndicator = StatusIndicator | WorkAreaView;
+
 export class StatusController {
-  private indicator: StatusIndicator | undefined;
-  /** working 三旋钮（pi setWorking* 对位——扩展定制内建 loader）。 */
+  private indicator: ActiveIndicator | undefined;
+  /** working 三旋钮（—扩展定制内建 loader）。 */
   private workingMessage: string | undefined;
   private workingIndicator: LoaderIndicatorOptions | undefined;
   private workingVisible = true;
@@ -93,15 +96,16 @@ export class StatusController {
     this.tui.requestRender();
   }
 
-  /** 按状态创建对应指示器（idle → undefined；working 受三旋钮约束）。 */
-  private createIndicator(status: string): StatusIndicator | undefined {
+  /** 按状态创建对应指示体（idle → undefined；working 升级为工作区视图）。 */
+  private createIndicator(status: string): ActiveIndicator | undefined {
     switch (status) {
       case 'working':
         if (!this.workingVisible) return undefined;
-        return new WorkingStatusIndicator(
+        return new WorkAreaView(
           this.tui,
-          this.workingMessage ?? 'Working…',
-          this.workingIndicator,
+          this.runtime.store,
+          { message: this.workingMessage, indicator: this.workingIndicator },
+          () => this.tui.requestRender(),
         );
       case 'retrying': {
         const retry = this.runtime.store.retryStatus;

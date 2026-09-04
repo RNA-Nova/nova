@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from nova_ai.signal import AbortController
+
 from nova_harness.core.config import AuthStorage, SettingsManager
 from nova_harness.core.config.defaults import (
     AUTH_FILE_NAME,

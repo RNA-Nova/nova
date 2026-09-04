@@ -1,4 +1,4 @@
-/** StatusController 的 working 三旋钮（pi setWorking* 对位）测试。 */
+/** StatusController 的 working 三旋钮测试。 */
 
 import assert from 'node:assert/strict';
 import { after, afterEach, describe, it } from 'node:test';

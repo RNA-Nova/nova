@@ -266,11 +266,11 @@ async def _login_device_code(
     interaction.notify(
         AuthEvent(
             type="device_code",
-            userCode=device["userCode"],
-            verificationUri=device["verificationUri"],
-            verificationUriComplete=device["verificationUriComplete"],
-            intervalSeconds=device["interval"],
-            expiresInSeconds=device["expiresIn"],
+            user_code=device["userCode"],
+            verification_uri=device["verificationUri"],
+            verification_uri_complete=device["verificationUriComplete"],
+            interval_seconds=device["interval"],
+            expires_in_seconds=device["expiresIn"],
         )
     )
 
@@ -280,8 +280,8 @@ async def _login_device_code(
     return await poll_oauth_device_code_flow(
         DeviceCodePollOptions(
             poll=_poll,
-            intervalSeconds=float(device["interval"]),
-            expiresInSeconds=_DEVICE_CODE_TIMEOUT_SECONDS,
+            interval_seconds=float(device["interval"]),
+            expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
             signal=signal,
         )
     )

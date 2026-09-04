@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional
 
 from nova_agent import Agent, AgentTool
 from nova_ai import Model, ModelThinkingLevel
+
 from nova_harness.core.types.protocols import (
     AuthStorageProtocol,
     ExtensionRunnerProtocol,

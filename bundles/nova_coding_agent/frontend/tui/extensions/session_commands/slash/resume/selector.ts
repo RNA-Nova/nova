@@ -1,5 +1,5 @@
 /**
- * 会话选择器（pi session-selector 对位：内联删除/重命名/作用域/排序/搜索语法）。
+ * 会话选择器（内联删除/重命名/作用域/排序/搜索语法）。
  *
  * 归属：官方 bundle 的 ui/ 段（包自持命令 UI——dogfood：官方与第三方同机制；
  * 从 nova-client 宿主迁入）。包自持的原因（与 /tree 同一判决）：per-item
@@ -17,9 +17,9 @@
  * - ctrl+r：重命名态（Input 预填当前名；空名=清除，对齐后端语义）；
  * - enter 选中；esc 取消（模态优先退模态）。
  *
- * 搜索语法（pi session-selector-search 对位）：``re:<pattern>`` 大小写不敏感
+ * 搜索语法：``re:<pattern>`` 大小写不敏感
  * 正则（非法→空结果）；``"phrase"`` 空白归一精确子串；裸 token → fuzzy。
- * threaded 排序仅在无搜索词时启用（有查询回退 relevance/recent——pi 同款）。
+ * threaded 排序仅在无搜索词时启用（有查询回退 relevance/recent）。
  *
  * 残余挂账：无。
  */
@@ -50,7 +50,7 @@ export interface SessionItem {
   parentSessionPath: string | null;
 }
 
-/** 排序模式（pi 对位：threaded 树形 / recent 时间 / relevance 相关度）。 */
+/** 排序模式（threaded 树形 / recent 时间 / relevance 相关度）。 */
 export type SessionSortMode = 'threaded' | 'recent' | 'relevance';
 
 /** 渲染行（depth 为 threaded 模式的树形缩进层级）。 */
@@ -67,7 +67,7 @@ export interface SessionSelectorCallbacks {
   onScopeChange: (scope: 'current' | 'all') => void;
 }
 
-/** pi formatSessionDate 对位：now/s/m/h/d/w/mo/y 缩写。 */
+/** ：now/s/m/h/d/w/mo/y 缩写。 */
 export function formatAge(modifiedEpochSeconds: number, nowMs = Date.now()): string {
   const seconds = Math.max(0, Math.floor(nowMs / 1000 - modifiedEpochSeconds));
   if (seconds < 45) return 'now';
@@ -106,7 +106,7 @@ export function filterSessions(
       const regex = new RegExp(trimmed.slice(3), 'i');
       return pool.filter((item) => regex.test(sessionTitle(item)));
     } catch {
-      return []; // 非法正则：空结果（pi 语义）
+      return []; // 非法正则：空结果（）
     }
   }
   const phraseMatch = /^"([^"]*)"$/.exec(trimmed);
@@ -181,7 +181,7 @@ export function applySessionView(
       .map((row) => ({ ...row.item, depth: 0 }));
   }
 
-  // recent（relevance 无查询时也回退到此——pi 语义）
+  // recent（relevance 无查询时也回退到此）
   return [...filtered]
     .sort((a, b) => b.modified - a.modified)
     .map((item) => ({ ...item, depth: 0 }));

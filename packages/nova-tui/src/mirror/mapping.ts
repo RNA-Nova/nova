@@ -7,7 +7,7 @@
  * 并做呈现决策的地方（架构 2.0：呈现归 Node 层）。
  *
  * R7：``message_end`` 携带 ``stop_reason = aborted | error`` 时，
- * 所有未完结的工具卡片收尾为 error（pi 的 message_end 收尾模式）；
+ * 所有未完结的工具卡片收尾为 error（ message_end 收尾模式）；
  * ``agent_end`` 兜底再做一次（防漏）。
  */
 
@@ -20,6 +20,8 @@ export interface TranscriptState {
   status: SessionStatus;
   /** 当前流式 assistant 条目的 id（message_end 时关闭）。 */
   streamingEntryId: string | null;
+  /** 当前流式 assistant 的起始时刻（epoch ms——thinking 时长计算锚点）。 */
+  streamingStartedAt: number | null;
   /** 进行中的工具卡片（callId → 条目索引）。 */
   openToolCalls: Map<string, number>;
   /** 进行中的用户工具执行（callId → 条目索引——!bash 流式输出聚合为单卡片）。 */
@@ -41,6 +43,7 @@ export function createTranscriptState(): TranscriptState {
     entries: [],
     status: 'idle',
     streamingEntryId: null,
+    streamingStartedAt: null,
     openToolCalls: new Map(),
     openUserTools: new Map(),
     lastRetryAttempt: 0,
@@ -55,7 +58,7 @@ function nextId(prefix: string): string {
   return `${prefix}-${localIdCounter}`;
 }
 
-/** token 计数的紧凑格式（pi formatTokens 对位：12345 → "12.3k"）。 */
+/** token 计数的紧凑格式（12345 → "12.3k"）。 */
 function _formatTokens(count: number): string {
   if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
   return String(count);
@@ -176,7 +179,7 @@ interface StreamingToolCall {
 /**
  * 从 assistant 消息 content 提取 toolCall 块（pi 两阶段卡片的数据源）。
  * 流式期间 arguments 为部分解析对象（nova_ai 每个 delta 后用
- * parse_streaming_json 增量填充——线与 pi 一致）。
+ * parse_streaming_json 增量填充——线一致）。
  */
 function extractToolCalls(message: AgentMessage): StreamingToolCall[] {
   if (!('content' in message)) return [];
@@ -217,6 +220,7 @@ function upsertStreamingToolCard(state: TranscriptState, call: StreamingToolCall
     args: call.arguments,
     status: 'streaming',
     argsComplete: false,
+    startedAt: Date.now(),
   };
   state.openToolCalls.set(call.id, state.entries.length);
   state.entries.push({ kind: 'toolCall', id: call.id, card });
@@ -276,6 +280,10 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
       if (role === 'assistant') {
         const id = messageId(message, nextId('assistant'));
         state.streamingEntryId = id;
+        // thinking 时长锚点：wire 消息时间戳优先，缺席取当前时刻
+        const ts = (message as { timestamp?: unknown }).timestamp;
+        state.streamingStartedAt =
+          typeof ts === 'number' && ts > 0 ? ts : Date.now();
         state.entries.push({
           kind: 'assistant',
           id,
@@ -297,7 +305,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
       // 运行时发的是累积消息，直接整段替换（delta diff 由渲染层决定）
       entry.text = extractText(event.data.message);
       entry.thinking = extractThinking(event.data.message) || undefined;
-      // pi 两阶段生命周期：参数流式期即建卡（streaming 态），参数逐段累积可见
+      // 两阶段生命周期：参数流式期即建卡（streaming 态），参数逐段累积可见
       for (const call of extractToolCalls(event.data.message)) {
         upsertStreamingToolCard(state, call);
       }
@@ -353,7 +361,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
           return false;
         }
       }
-      // pi 文案对位：aborted 且经历过自动重试 → 带重试次数
+      // ：aborted 且经历过自动重试 → 带重试次数
       const abortedText =
         state.lastRetryAttempt > 0 ? `第 ${state.lastRetryAttempt} 次重试后中止` : '已中止';
       // R7：assistant 消息以 aborted/error 收尾 → 未完结工具卡片标 error
@@ -365,7 +373,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
             (reason === 'aborted' ? abortedText : '工具调用未完成（出错）');
           changed = finalizeOpenToolCalls(state, text);
         } else {
-          // 正常结束：参数完整、执行未开始的窗口开启（pi setArgsComplete 对位——
+          // 正常结束：参数完整、执行未开始的窗口开启（—
           // edit 类工具的执行前只读预览在这个时点触发）
           for (const index of state.openToolCalls.values()) {
             const toolEntry = state.entries[index];
@@ -383,6 +391,17 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
       );
       if (entry && entry.kind === 'assistant') {
         entry.streaming = false;
+        // thinking 折叠摘要数据：时长（start→end）+ 按类聚合的工具纵览
+        const endTs = (message as { timestamp?: unknown }).timestamp;
+        const endMs = typeof endTs === 'number' && endTs > 0 ? endTs : Date.now();
+        if (state.streamingStartedAt !== null) {
+          entry.thinkingDurationMs = Math.max(0, endMs - state.streamingStartedAt);
+        }
+        const toolCounts: Record<string, number> = {};
+        for (const call of extractToolCalls(message)) {
+          toolCounts[call.name] = (toolCounts[call.name] ?? 0) + 1;
+        }
+        entry.toolCounts = toolCounts;
         // stop_reason/error_message 透出（abort/error 时前端呈现错误行；
         // pi：aborted 始终有文案——后端 error_message 缺席时按 retry 计数组装）
         const reason = stopReason(message);
@@ -393,6 +412,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
         }
       }
       state.streamingEntryId = null;
+      state.streamingStartedAt = null;
       return true;
     }
 
@@ -497,7 +517,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
 
     case 'auto_retry_start':
       state.status = 'retrying';
-      // pi retryAttempt 对位：记录次数供 abort 文案组装（turn 结束归零）
+      // ：记录次数供 abort 文案组装（turn 结束归零）
       state.lastRetryAttempt =
         typeof event.data.attempt === 'number' ? event.data.attempt : state.lastRetryAttempt;
       // 重试详情（状态指示器倒计时：attempt/maxAttempts/delayMs）
@@ -515,7 +535,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
       return true;
 
     case 'entry_appended': {
-      // 对齐 pi：仅 custom 条目实时进 transcript（消息/压缩等各有专属通道）
+      // 仅 custom 条目实时进 transcript（消息/压缩等各有专属通道）
       const appended = asRecord(event.data.entry);
       if (appended.type !== 'custom') return false;
       state.entries.push({
@@ -544,7 +564,7 @@ export function applyRuntimeEvent(state: TranscriptState, event: NovaEventEnvelo
     }
 
     case 'cache_miss': {
-      // pi addCacheMissNotice 对位：显著阈值（2 万 tokens 或 $0.1）才提醒；
+      // ：显著阈值（2 万 tokens 或 $0.1）才提醒；
       // 后端已过噪声地板（1024 tokens），这里是"值得打扰用户"的线
       const missedTokens =
         typeof event.data.missedTokens === 'number' ? event.data.missedTokens : 0;

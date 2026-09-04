@@ -1,10 +1,10 @@
 /**
- * FooterView（复刻 pi footer.ts 的三行状态栏，数据源走 RPC/快照/Node 本地）。
+ * FooterView（三行状态栏，数据源走 RPC/快照/Node 本地）。
  *
  * 行 1：~cwd (git branch) • 会话名
  * 行 2：↑input ↓output R缓存读 W缓存写 · 上下文用量% · model · thinking
  * （token 成本/cache_waste 归后续切片；git branch 用 Node 本地读 .git/HEAD
- * 并 watch 变化——pi footer-data-provider 同款思路。）
+ * 并 watch 变化。）
  */
 
 import chalk from 'chalk';
@@ -12,6 +12,7 @@ import { watchFile, unwatchFile } from 'node:fs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import {
+  guardComponentLineWidth,
   regionSlot,
   type NovaBlock,
   type NovaUIRuntime,
@@ -130,7 +131,7 @@ export class FooterView implements Component {
     this.customComponent?.invalidate?.();
   }
 
-  /** 扩展状态行（pi setStatus 对位）：key 幂等覆盖，空值清除。 */
+  /** 扩展状态行：key 幂等覆盖，空值清除。 */
   setExtensionStatus(key: string, text: string | undefined): void {
     if (text === undefined || text === '') this.extensionStatus.delete(key);
     else this.extensionStatus.set(key, text);
@@ -139,7 +140,7 @@ export class FooterView implements Component {
   /** 扩展状态表（key → 文本）。 */
   private readonly extensionStatus = new Map<string, string>();
 
-  /** 自定义 footer 组件（pi setFooter 对位——整件替换；undefined 恢复默认）。 */
+  /** 自定义 footer 组件（—整件替换；undefined 恢复默认）。 */
   private customComponent:
     | { render(width: number): string[]; invalidate?(): void; dispose?(): void }
     | undefined;
@@ -147,7 +148,7 @@ export class FooterView implements Component {
   /**
    * 整件替换 footer（扩展 ctx.setFooter 的宿主端）。
    * env 回灌宿主算好的数据（git branch/扩展状态/快照/invoke）——自定义
-   * footer 不丢宿主信息（pi footerData 对位）。旧组件有 dispose 则调用。
+   * footer 不丢宿主信息。旧组件有 dispose 则调用。
    */
   setCustomFooter(factory: ((env: unknown) => unknown) | undefined): void {
     const old = this.customComponent;
@@ -168,7 +169,7 @@ export class FooterView implements Component {
   }
 
   render(width: number): string[] {
-    // 自定义 footer 整件替换（pi setFooter 对位——异常回退默认渲染，不炸布局）
+    // 自定义 footer 整件替换（—异常回退默认渲染，不炸布局）
     if (this.customComponent) {
       try {
         return this.customComponent
@@ -186,7 +187,9 @@ export class FooterView implements Component {
     const parts = [colors.accent(cwdDisplay)];
     if (this.branch) parts.push(colors.muted(`(${this.branch})`));
     const sessionName = snapshot?.sessionName;
-    if (sessionName) parts.push(colors.dim(`• ${sessionName}`));
+    // 会话名是后端数据——与终端标题同一纪律：控制字符净化（防注入序列）
+    if (sessionName)
+      parts.push(colors.dim(`• ${sessionName.replace(/[\x00-\x1f\x7f]/g, '').trim()}`));
     const line1 = parts.join(' ');
 
     // —— 行 2：token 统计 · 命中率 · 成本 · 上下文用量 · model · thinking ——
@@ -196,7 +199,7 @@ export class FooterView implements Component {
       left.push(colors.dim(`↓${this.stats.output}`));
       if (this.stats.cacheRead > 0) left.push(colors.dim(`R${this.stats.cacheRead}`));
       if (this.stats.cacheWrite > 0) left.push(colors.dim(`W${this.stats.cacheWrite}`));
-      // 命中率（cache_read 占全部输入比）与成本（pi CH/$ 对位）
+      // 命中率（cache_read 占全部输入比）与成本
       if (this.stats.input > 0 && this.stats.cacheRead > 0) {
         const hitRate = Math.min(100, (this.stats.cacheRead / this.stats.input) * 100);
         left.push(colors.dim(`${hitRate.toFixed(0)}%`));
@@ -205,7 +208,7 @@ export class FooterView implements Component {
         left.push(colors.dim(`$${this.stats.cost.toFixed(4)}`));
       }
     }
-    // 上下文用量：percent/窗口（>70% 黄 >90% 红——pi 阈值同款；auto-compact 开带 (auto)）
+    // 上下文用量：percent/窗口（>70% 黄 >90% 红；auto-compact 开带 (auto)）
     if (this.contextUsage && this.contextUsage.contextWindow > 0) {
       const percent = Math.round(this.contextUsage.percent);
       const windowText = formatTokenCount(this.contextUsage.contextWindow);
@@ -239,7 +242,7 @@ export class FooterView implements Component {
     const gap = Math.max(1, width - visibleLength(leftText) - visibleLength(right) - 1);
     const line2 = leftText ? `${leftText}${' '.repeat(gap)}${colors.dim(right)}` : colors.dim(right);
 
-    // —— 行 3：扩展状态文本（pi footer 扩展位对位——按 key 排序，单行截断）——
+    // —— 行 3：扩展状态文本（—按 key 排序，单行截断）——
     const statusLines: string[] = [];
     if (this.extensionStatus.size > 0) {
       const texts = [...this.extensionStatus.entries()]
@@ -280,7 +283,10 @@ export class FooterView implements Component {
     const fingerprint = JSON.stringify(blocks);
     if (fingerprint !== this.regionFingerprint) {
       this.regionFingerprint = fingerprint;
-      this.regionComponents = blocksToComponents(blocks, this.runtime.slots);
+      // 行宽防线：footer 区域块产物超宽行不得崩掉整个 TUI
+      this.regionComponents = blocksToComponents(blocks, this.runtime.slots).map(
+        guardComponentLineWidth,
+      );
     }
     return (this.regionComponents ?? []).flatMap((component) => component.render(width));
   }
@@ -288,7 +294,6 @@ export class FooterView implements Component {
 
 /** 可见宽度（去 ANSI）。 */
 function visibleLength(text: string): number {
-  // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*m/g, '').length;
 }
 

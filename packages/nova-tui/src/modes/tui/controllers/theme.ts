@@ -3,7 +3,7 @@
  *
  * - 初始化：runtime.start 后读 settings.theme 初始化主题（无设置 →
  *   COLORFGBG 终端背景检测兜底）；自定义主题目录诊断经 transcript 提示；
- * - ``/theme``（前端本地命令，不进后端——pi 同款：主题是纯前端关心的事）：
+ * - ``/theme``（前端本地命令，不进后端——主题是纯前端关心的事）：
  *   SearchableSelector + onHighlight **移动即预览**（全量重渲），Enter
  *   确认并持久化（updateSettings），Esc 恢复打开前的主题；
  * - 切换渲染：onThemeChange（装配根接：transcript.rebuildAll + 重渲）。

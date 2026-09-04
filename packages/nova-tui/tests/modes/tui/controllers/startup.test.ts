@@ -115,7 +115,7 @@ describe('expandFileArguments', () => {
 });
 
 describe('expandFileArguments 图片附件', () => {
-  it('PNG 魔数命中 → ImageContent 附件 + 空体 <file> 引用（pi 同款）', async () => {
+  it('PNG 魔数命中 → ImageContent 附件 + 空体 <file> 引用', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'nova-startup-'));
     try {
       const png = Buffer.concat([

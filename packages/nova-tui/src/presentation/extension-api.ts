@@ -72,7 +72,7 @@ export type RegionComponentFactory = (env: unknown) => unknown;
  * 扩展命令/快捷键的执行上下文（框架无关最小面——宿主注入实现）：
  * ``invoke`` 直达后端 RPC；``notify`` 消息出口（transcript 本地提示）；
  * 对话框与编辑器/终端访问器为**可选**——宿主未注入则为 undefined，
- * 扩展判空降级（pi ExtensionUIContext 的对位子集，全部 UI 向）。
+ * 扩展判空降级（全部 UI 向）。
  */
 export interface ExtensionUIContext {
   invoke(method: string, params?: Record<string, unknown>): Promise<unknown>;
@@ -93,25 +93,25 @@ export interface ExtensionUIContext {
    */
   registerForegroundTask?(cancel: () => void): () => void;
 
-  // ---- 本地对话框（pi ctx.ui 四件套对位；confirm/input/editor 为便捷形态）----
-  /** 确认框（pi ctx.ui.confirm 对位）。 */
+  // ---- 本地对话框（confirm/input/editor 为便捷形态）----
+  /** 确认框。 */
   confirm?(title: string, message: string): Promise<boolean>;
-  /** 单行文本框（pi ctx.ui.input 对位）。 */
+  /** 单行文本框。 */
   input?(title: string, placeholder?: string): Promise<string | undefined>;
-  /** 多行编辑器框（pi ctx.ui.editor 对位）。 */
+  /** 多行编辑器框。 */
   editor?(title: string, prefill?: string): Promise<string | undefined>;
   /**
-   * 模态自定义对话框（pi ctx.ui.custom 对位——**逃生舱核心件**）：
+   * 模态自定义对话框（—**逃生舱核心件**）：
    * 工厂产出宿主组件（TUI：pi-tui Component & Focusable），挂载进编辑器槽位
    * （或 overlay 浮层）；组件经 ``done(result)`` 交还结果并关框；取消语义
-   * 归组件自管（Esc 处理是作者职责，pi 同款）。``overlay`` 提供时挂浮层。
+   * 归组件自管（Esc 处理是作者职责）。``overlay`` 提供时挂浮层。
    */
   custom?<T>(
     factory: (env: unknown, done: (result?: T) => void) => unknown,
     options?: { overlay?: NovaOverlayOptions },
   ): Promise<T | undefined>;
 
-  // ---- 编辑器通道（pi setEditorText/getEditorText/pasteToEditor 对位）----
+  // ---- 编辑器通道----
   getEditorText?(): string;
   setEditorText?(text: string): void;
   /** 粘贴到编辑器（大文本折叠等粘贴语义由编辑器决定）。 */
@@ -120,15 +120,15 @@ export interface ExtensionUIContext {
   writeClipboard?(text: string): Promise<boolean>;
 
   // ---- 状态与终端 ----
-  /** 扩展状态行（pi setStatus 对位——footer 扩展位，key 幂等覆盖；undefined 清除）。 */
+  /** 扩展状态行（—footer 扩展位，key 幂等覆盖；undefined 清除）。 */
   setStatus?(key: string, text: string | undefined): void;
-  /** 原始终端输入拦截（pi onTerminalInput 对位——返回反注册函数；handler 返回 true 消费）。 */
+  /** 原始终端输入拦截（—返回反注册函数；handler 返回 true 消费）。 */
   onTerminalInput?(handler: (data: string) => boolean | undefined): () => void;
-  /** 工具展开态（pi getToolsExpanded/setToolsExpanded 对位——ctrl+o 全局开关）。 */
+  /** 工具展开态（—ctrl+o 全局开关）。 */
   getToolsExpanded?(): boolean;
   setToolsExpanded?(expanded: boolean): void;
 
-  // ---- 主题访问器（pi ctx.ui.theme/getAllThemes/setTheme 对位）----
+  // ---- 主题访问器----
   getTheme?(): string;
   getAllThemes?(): Array<{ name: string; source: string }>;
   setTheme?(name: string): void;
@@ -144,7 +144,7 @@ export interface ExtensionUIContext {
   /** 桌面通知（OSC 9/777/99——受 desktop_notify 设置门控）。 */
   notifyDesktop?(title: string, body: string): void;
 
-  // ---- 整件替换（pi ctx.ui.setFooter/setHeader 对位）----
+  // ---- 整件替换----
   /**
    * 自定义 footer（整件替换宿主默认 footer；undefined 恢复）。
    * 工厂收到 ``env``（FooterEnv：cwd/gitBranch/扩展状态/快照访问器）产出
@@ -157,7 +157,7 @@ export interface ExtensionUIContext {
    */
   setHeader?(factory: ((env: unknown) => unknown) | undefined): void;
 
-  // ---- loader 三旋钮（pi setWorking* 对位——流式期间的工作指示器定制）----
+  // ---- loader 三旋钮（—流式期间的工作指示器定制）----
   /** 工作中文案（无参/undefined 恢复默认 "Working…"）。 */
   setWorkingMessage?(message?: string): void;
   /** spinner 帧/间隔定制（frames: [] 全隐藏指示器帧；undefined 恢复默认）。 */
@@ -183,7 +183,7 @@ export interface ExtensionEventsAPI {
 /** Node 扩展命令定义（registerCommand）。 */
 export interface ExtensionCommandDef {
   description?: string;
-  /** 参数补全（pi getArgumentCompletions 对位——slash 命令参数的建议条目）。 */
+  /** 参数补全（—slash 命令参数的建议条目）。 */
   getArgumentCompletions?(
     argumentPrefix: string,
   ):
@@ -228,7 +228,7 @@ export interface ExtensionStateAPI {
  * - 活组件：pi-tui ``Component``（框架无关层以 ``object`` 承载），可选
  *   ``update(data)``——流式/可定稿条目（如 bashExecution：空数据创建、
  *   chunk 累积、message_end 完结）由宿主在条目数据变化时回调重绘
- *   （pi BashExecutionComponent.updateDisplay 对位），组件身份不变。
+ *   ，组件身份不变。
  */
 export type EntryRenderableComponent = object & { update?(data: unknown): void };
 export type EntryRenderer = (entry: {
@@ -249,7 +249,7 @@ export type NovaOverlayAnchor =
   | 'right-center';
 
 /**
- * overlay 布局选项（pi ctx.ui.custom 的 overlayOptions 对位——**纯数据子集**：
+ * overlay 布局选项（—**纯数据子集**：
  * 框架无关层不收函数谓词（visible）——响应式显隐这类宿主交互逻辑
  * 属于同进程逃生舱，扩展可在组件内部自行处理）。
  */
@@ -304,7 +304,7 @@ export interface ExtensionUIAPI {
    */
   registerRegionComponent(region: string, factory: RegionComponentFactory): void;
   /**
-   * 注册 overlay 浮层（pi ctx.ui.custom 的 overlay 形态对位）：组件叠画在
+   * 注册 overlay 浮层：组件叠画在
    * 整个布局之上（不进文档流），布局经 options 声明（锚点/宽高/边距）。
    * 单例键（``region:overlay``）——后注册替换前者；TUI 宿主经
    * ``tui.showOverlay`` 呈现。逃生舱的一种（同进程全自由）。
@@ -320,7 +320,7 @@ export interface ExtensionUIAPI {
   /** 注册 Node 扩展命令（进统一命令表——slash 补全与分发合并；撞名后注册赢 + 诊断）。 */
   registerCommand(name: string, def: ExtensionCommandDef): void;
   /**
-   * 注册扩展快捷键（Node 本地执行——优先于内建键位路由，pi onExtensionShortcut 对位）；
+   * 注册扩展快捷键（Node 本地执行——优先于内建键位路由）；
    * 撞保留键位（RESERVED_KEYBINDINGS）的注册在 keymap 对账时剔除 + 诊断。
    */
   registerShortcut(key: string, handler: ExtensionShortcutHandler): void;
@@ -331,13 +331,13 @@ export interface ExtensionUIAPI {
   /** 注册 custom 条目渲染器（``entry:<customType>``——扩展 append_entry 条目的呈现）。 */
   registerEntryRenderer(customType: string, renderer: EntryRenderer): void;
   /**
-   * 注册自动补全 provider（``autocomplete:<name>``——pi addAutocompleteProvider 对位）：
+   * 注册自动补全 provider（``autocomplete:<name>``）：
    * 扩展补全源组合进编辑器基线补全（slash/文件路径），建议条目排在基线之前。
    * provider 为宿主编辑器补全接口（TUI：pi-tui ``AutocompleteProvider``——框架无关层以 unknown 承载）。
    */
   registerAutocompleteProvider?(name: string, provider: unknown): void;
   /**
-   * 注册自定义对话框（``dialog:<name>``——pi 后端扩展直驱 UI 的对位出口）：
+   * 注册自定义对话框（``dialog:<name>``）：
    * 后端（Python 工具/扩展）经 ``ui.request("dialog:<name>", params)`` 调起
    * 本工厂产出的组件；``done(result)`` 交还结果并关框（undefined = 取消，
    * 其余值按 ``{value: result}`` 应答）。注册即触发能力重宣告
@@ -347,7 +347,7 @@ export interface ExtensionUIAPI {
 }
 
 /**
- * 自定义对话框组件工厂（pi ``ctx.ui.custom`` 工厂的参数化对位）：
+ * 自定义对话框组件工厂：
  * ``env`` 为宿主对话框环境（TUI：RegionEnv——cwd/tui/colors/markdownTheme）；
  * ``params`` 为后端 ``ui.request`` 的原始参数；``done`` 交还结果。
  */
@@ -420,7 +420,7 @@ export function createExtensionUIAPI(deps: {
       if (def.description !== undefined) {
         (fn as { description?: string }).description = def.description;
       }
-      // 参数补全同样附着（editor 补全目录消费——pi getArgumentCompletions 对位）
+      // 参数补全同样附着（editor 补全目录消费）
       if (def.getArgumentCompletions !== undefined) {
         (fn as { getArgumentCompletions?: unknown }).getArgumentCompletions =
           def.getArgumentCompletions;

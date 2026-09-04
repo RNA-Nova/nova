@@ -1,4 +1,4 @@
-"""路径解析 macOS 文件名变体重试测试（对齐 pi path-utils.ts resolveReadPath）。"""
+"""路径解析 macOS 文件名变体重试测试。"""
 
 import os
 import unicodedata
@@ -26,12 +26,12 @@ def test_empty_path_returns_empty():
 
 
 # ---------------------------------------------------------------------------
-# 初始输入归一（对齐 pi normalizePath：Unicode 空格 + @ 前缀）
+# 初始输入归一（Unicode 空格 + @ 前缀）
 # ---------------------------------------------------------------------------
 
 
 def test_at_prefix_stripped(tmp_path):
-    """@ 前缀剥离（CLI @file 形态，对齐 pi stripAtPrefix）。"""
+    """@ 前缀剥离（CLI @file 形态）。"""
     p = tmp_path / "at.txt"
     p.write_text("x")
     assert resolve_path("@" + str(p)) == os.path.normpath(str(p))
@@ -62,7 +62,7 @@ def test_am_pm_narrow_no_break_space_variant(tmp_path):
 
 
 def test_curly_quote_variant(tmp_path):
-    """弯引号（U+2019）文件名：直引号输入重试命中（对齐 pi 截图名场景）。"""
+    """弯引号（U+2019）文件名：直引号输入重试命中。"""
     p = tmp_path / "what\u2019s up.png"
     p.write_bytes(b"x")
     queried = str(p).replace("\u2019", "'")
@@ -90,7 +90,7 @@ def test_nfd_variant_real_fs(tmp_path):
 
 
 def test_nonexistent_returns_resolved(tmp_path):
-    """所有变体都不存在：返回原解析结果（对齐 pi 兜底）。"""
+    """所有变体都不存在：返回原解析结果。"""
     missing = str(tmp_path / "café 3.00 PM what's.png")
     assert resolve_path(missing) == os.path.normpath(missing)
 
@@ -101,7 +101,7 @@ def test_nonexistent_returns_resolved(tmp_path):
 
 
 def test_nfd_variant_retry(monkeypatch, tmp_path):
-    """NFC 输入经重试链命中 NFD 存储（强制走重试，对齐 pi NFD 级）。"""
+    """NFC 输入经重试链命中 NFD 存储（强制走重试）。"""
     nfd = str(tmp_path / unicodedata.normalize("NFD", "café.txt"))
     monkeypatch.setattr(path_utils.os.path, "exists", lambda path: path == nfd)
     nfc = str(tmp_path / unicodedata.normalize("NFC", "café.txt"))
@@ -109,7 +109,7 @@ def test_nfd_variant_retry(monkeypatch, tmp_path):
 
 
 def test_am_pm_variant_takes_precedence_over_nfd(monkeypatch, tmp_path):
-    """AM/PM 变体优先于 NFD 变体（对齐 pi resolveReadPath 的重试顺序）。"""
+    """AM/PM 变体优先于 NFD 变体。"""
     base = str(tmp_path / "café 3.00 PM.png")
     am_pm = base.replace(" PM.", "\u202fPM.")
     nfd = unicodedata.normalize("NFD", base)
@@ -120,7 +120,7 @@ def test_am_pm_variant_takes_precedence_over_nfd(monkeypatch, tmp_path):
 
 
 def test_nfd_curly_combined_variant(monkeypatch, tmp_path):
-    """NFD+弯引号组合变体：NFC+直引号输入命中（对齐 pi 第四级）。"""
+    """NFD+弯引号组合变体：NFC+直引号输入命中。"""
     nfc_curly = str(tmp_path / "café d\u2019ete.png")
     target = unicodedata.normalize("NFD", nfc_curly)
     monkeypatch.setattr(path_utils.os.path, "exists", lambda path: path == target)

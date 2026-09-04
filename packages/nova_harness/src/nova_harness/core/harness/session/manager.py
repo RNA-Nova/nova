@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from nova_agent import CustomAgentMessage
 from nova_ai import ImageContent, Message, ModelThinkingLevel, TextContent
+from pydantic import BaseModel
+
 from nova_harness.core.config.defaults import get_sessions_dir
 from nova_harness.core.harness.session.listing import (
     MAX_CONCURRENT_SESSION_INFO_LOADS,
@@ -50,7 +52,6 @@ from nova_harness.core.types.session import (
     SessionTreeNode,
     ThinkingLevelChangeEntry,
 )
-from pydantic import BaseModel
 
 # details 字段允许写入的 JSON 原生类型
 _JSON_NATIVE_TYPES = (dict, list, str, int, float, bool)

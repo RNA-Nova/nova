@@ -1,11 +1,11 @@
 /**
- * bash 工具渲染器（终端风，组件形态——pi bash.ts 渲染语义对位）。
+ * bash 工具渲染器（终端风，组件形态）。
  *
  * details 契约（backend/tools/bash.py `_result_details`）：
  *   command / stdout / stderr / exit_code / duration_ms /
  *   truncated / truncated_by / full_output_path；错误时为 { error, command? }。
  *
- * 呈现语义（pi 对齐）：
+ * 呈现语义：
  * - 折叠态：末 5 个**视觉行**（按当前宽度折行计算），上方提示隐藏行数；
  * - 底部计时行（running… / Took X.Xs）；截断警告带完整输出路径；
  * - 展示前剥掉输出末尾的 full-output footer（避免与警告行重复）。
@@ -18,7 +18,7 @@ import { detailsOf, type RendererInput } from 'nova-tui';
 /** 折叠态保留的视觉行数（pi BASH_PREVIEW_LINES）。 */
 const PREVIEW_VISUAL_LINES = 5;
 
-/** 剥掉输出末尾的 full-output footer（`[... Full output: ...]` 段——pi 同款去重）。 */
+/** 剥掉输出末尾的 full-output footer（`[... Full output: ...]` 段）。 */
 function stripFullOutputFooter(text: string): string {
   return text.replace(/\n*\[[^\n]*(?:Full output|完整输出)[^\n]*\]\s*$/i, '');
 }
@@ -74,7 +74,7 @@ export default function renderBash(input: RendererInput): Component {
         }
       }
 
-      // 底部状态行（pi 对位）：完结 "Took X.Xs"；running 态的计时行归
+      // 底部状态行：完结 "Took X.Xs"；running 态的计时行归
       // 宿主 chrome（ElapsedLine）——渲染器不读时间、不被滴答重调。
       if (typeof d.duration_ms === 'number') {
         container.addChild(new Text(dim(`Took ${prettyMs(d.duration_ms)}`), 1, 0));

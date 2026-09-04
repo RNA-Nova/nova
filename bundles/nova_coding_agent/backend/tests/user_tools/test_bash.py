@@ -120,7 +120,7 @@ def test_message_from_result_with_bash_result(tmp_path: Path):
 
 
 def test_message_from_result_with_pi_style_dict(tmp_path: Path):
-    """扩展返回的对齐 pi 驼峰键 dict 形态同样可翻译。"""
+    """扩展返回的驼峰键 dict 形态同样可翻译。"""
     tool = _load_user_tool_class()(_FakeSession(str(tmp_path)))
     message = tool.message_from_result(
         {"command": "remote-cmd"},
@@ -142,7 +142,7 @@ def test_message_from_result_with_pi_style_dict(tmp_path: Path):
 
 
 def test_message_from_result_cancelled_has_no_exit_code(tmp_path: Path):
-    """取消的结果 exit_code 为 None（对齐 pi exitCode: undefined）。"""
+    """取消的结果 exit_code 为 None。"""
     tool = _load_user_tool_class()(_FakeSession(str(tmp_path)))
     message = tool.message_from_result({"command": "sleep 10"}, {"cancelled": True})
     assert message.cancelled is True

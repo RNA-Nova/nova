@@ -526,15 +526,11 @@ def main() -> int:
     root = _default_repo_root()
     parser.add_argument(
         "--schema",
-        default=str(
-            root / "packages/nova-tui/protocol/nova-wire.schema.json"
-        ),
+        default=str(root / "packages/nova-tui/protocol/nova-wire.schema.json"),
     )
     parser.add_argument(
         "--ts",
-        default=str(
-            root / "packages/nova-tui/src/protocol/nova-wire.gen.ts"
-        ),
+        default=str(root / "packages/nova-tui/src/protocol/nova-wire.gen.ts"),
     )
     parser.add_argument(
         "--check",

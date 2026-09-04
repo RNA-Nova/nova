@@ -29,7 +29,7 @@ python = ">=3.12,<3.14"
 # 兄弟包（nova-ai/nova-agent/nova-harness）不在此处声明 path 依赖——
 # 各包独立管理第三方依赖；安装部署由脚本统一完成（见根 pyproject 的
 # pixi workspace 清单），发布时再恢复互依声明。
-# read 工具的图片缩放（对齐 pi processImage：限制到 2000x2000 内，保护模型图像预算）
+# read 工具的图片缩放（限制到 2000x2000 内，保护模型图像预算）
 Pillow = "^10.0"
 
 [tool.poetry.group.dev.dependencies]

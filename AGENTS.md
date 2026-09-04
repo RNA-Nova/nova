@@ -304,14 +304,18 @@ npm link           # 全局注册 `nova` 命令
 - **格式化**：`black`，目标版本 `py312`
 - **注释与文档字符串**：以**中文**为主，保持与现有代码一致
 - **数据建模**：按以下顺序决策技术栈，不要为了"统一"而全用一种。
-  1. **先问可变性**：对象创建后会被原地修改吗？可变 → **普通 class 或 `dataclass`**，禁用 Pydantic（校验与拷贝语义和可变运行时容器冲突）。例：`AgentState`（普通 class + property setter 做顶层数组拷贝）、`AgentContext`（被循环原地 append）、`AgentSessionServices`。
+  1. **先问可变性**：对象创建后会被原地修改吗？可变 → **普通 class 或 `dataclass`**，禁用 Pydantic（校验与拷贝语义和可变运行时容器冲突）。例：`AgentState`（普通 class + property setter 做顶层数组拷贝）、`AgentContext`（被循环原地 append）、`AgentSessionServices`。构建期的可变中间态同样适用——关系累积用纯 dict/list，定型后一次性物化为模型（例：`build_session_tree` 两趟构建）。
   2. **再问序列化**：对象需要跨进程（RPC / WebSocket）或持久化（会话 JSONL、settings、auth.json、models.json、包 manifest）吗？需要 → **Pydantic（`NovaBaseModel`）**，序列化与 schema 一体化，使用原生 `model_dump()` / `model_validate()`。例：`Model` / `Usage` / messages / Agent 事件。
   3. **校验只给不可信输入**：第三方产出的数据（工具返回值、用户配置、前端 payload）即使不直接序列化也可用 Pydantic，换取构造时尽早报错；框架内部自产自销的对象不做构造时校验。例：`AgentToolResult` 用 Pydantic 不是因为要序列化，而是工具作者是第三方。
-  4. **`Callable` / 服务实例 / 异常永远不进 Pydantic**：依赖容器、hook 上下文、运行时中间态一律 `dataclass` 或普通 class。例：`AgentLoopConfig`、`StreamOptions` 家族、`Provider`、`AgentSessionConfig`。
+  4. **`Callable` / 服务实例 / 异常永远不进 Pydantic**：依赖容器、hook 上下文、运行时中间态一律 `dataclass` 或普通 class。例：`AgentLoopConfig`、`StreamOptions` 家族、`Provider`、`AgentSessionConfig`、扩展 hook 结果（`UserBashEventResult` 携带活执行引擎，frozen dataclass）。
   5. **不可变值对象优先 `frozen=True`**：纯数据、无序列化需求的值对象用 `dataclass(frozen=True)` 在类型层面锁死不可变性，不靠自觉。
-  6. **union 必须可判别**：存在反序列化路径的 union 用 `Field(discriminator=...)` 显式判别，不依赖 smart-union 猜测。
+  6. **union 必须可判别**：存在反序列化路径的 union 用 `Field(discriminator=...)` 显式判别，不依赖 smart-union 猜测。开放集（框架变体 + 包级兜底）用判别联合 + 兜底成员 + `union_mode="left_to_right"`（例：`core/harness/session/utils.py` 的 `FileEntry`——`SerializeAsAny` 只管序列化方向，校验方向必须显式可判别，否则 `model_validate` 按基类重建剥掉子类字段）。
+  7. **哑容器不进 Pydantic**：传输信封/中间态包装（需要原样持有任意内容——不校验、不重建、不转换）即使最终会上线，也用 `dataclass` 或普通 class。Pydantic 的"处理欲"对透明容器是害处。例：`JsonRpcMessage`（`core/rpc/protocol/jsonrpc.py`）——`result` 字段原样容纳模型实例/dict/None，序列化推迟到出货那一刻。
+  8. **单道序列化**：生产侧（RPC handler 等）返回模型**实例**，dump 归传输/分派层单点出货；不在中间环节"先 dump 再 validate 再 dump"（双道打包会在重建时剥多态字段）。dispatch 出参对实例直通 dump_wire；声明了 result_model 却返回散装 dict → 契约违约报错（`core/rpc/protocol/router.py` 先例）。
+  9. **RPC handler 签名即契约**：handler 签名必须类型化（`async def x(params: XxxParams) -> XxxResult`），体内一律属性访问（不散装取键）；注册表形状从签名注解自动推导（`register("x", x, domain=...)`——不重复声明 params_model/result_model）。形状模型集中在 `core/rpc/protocol/methods/shapes.py`；引用经 `shapes.` 模块前缀或模块级逐个 import，**禁止在函数内局部 import shapes**（`get_type_hints` 只查模块 globals——局部 import 会让推导静默失败）。自由负载方法（无固定形状）注解保持 `Dict[str, Any]`，即不声明形状的语义。
 - **类型注解**：代码中已大量使用类型注解，但未配置 `mypy` 静态检查
 - **枚举字段**：在内存中以 `Enum` 对象保存（便于代码中使用 `.value` 和枚举比较），不要依赖 `use_enum_values=True`。
+- **snake/camel 边界**：Python 内部一律 snake_case；camelCase 只存在于线上 JSON、schema 导出与双向边界词汇（扩展 ctx 契约、`ui/*` 载荷）。内部接口（controller → handler）不得携带 camel 键——有形状的方法由模型别名自动转换（`dump_wire`），自由形状方法的 camel 翻译归 handler（过线点），服务层保持 snake。
 
 ---
 

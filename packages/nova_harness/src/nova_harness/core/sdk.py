@@ -91,8 +91,9 @@ def _resolve_on_progress(
         return None
 
     def _on_progress(event: Any) -> None:
-        # 产出方统一为 ProgressEvent（NovaBaseModel），直接 model_dump
-        ui_context.notify("package_progress", event.model_dump())
+        # 产出方统一为 ProgressEvent（NovaBaseModel），线上形态 dump_wire——
+        # 与 package.py 的 package_progress 同一出货口径（camel）
+        ui_context.notify("package_progress", event.dump_wire())
 
     return _on_progress
 

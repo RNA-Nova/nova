@@ -53,7 +53,7 @@ class ExtensionShortcut:
     handler: Callable[..., Any] = field(default_factory=lambda: _noop_handler)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExtensionFlag:
     """扩展 flag。"""
 
@@ -67,7 +67,7 @@ class ExtensionFlag:
 SlashCommandSource = Literal["extension", "prompt", "skill"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class SlashCommandInfo:
     """用于 UI 展示与命令分发的 slash 命令元数据。"""
 

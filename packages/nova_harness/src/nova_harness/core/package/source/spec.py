@@ -396,7 +396,7 @@ def get_package_identity(
     return source_str
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResolvedScopedSources:
     """跨 scope 去重后的 package source 列表。
 

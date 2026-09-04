@@ -1,5 +1,5 @@
 /**
- * tools 工具开关面板（dialog:tools——pi tools.ts 的 SettingsList 对位）。
+ * tools 工具开关面板（dialog:tools）。
  *
  * 契约：
  * - 入参 params：{ tools: [{name, label, description, active}...] }；

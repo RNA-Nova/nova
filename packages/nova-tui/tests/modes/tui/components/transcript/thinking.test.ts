@@ -24,7 +24,7 @@ describe('thinkingBorderColor', () => {
     assert.equal(face.thinkingBorderColor('xhigh')('x'), `\x1b[38;2;209;131;232mx\x1b[39m`);
   });
 
-  it('max 缺省回退 xhigh（pi 同款）；未知级别回退 borderMuted', () => {
+  it('max 缺省回退 xhigh；未知级别回退 borderMuted', () => {
     // dark 显式定义了 thinkingMax=#ff5fff
     assert.equal(face.thinkingBorderColor('max')('x'), `\x1b[38;2;255;95;255mx\x1b[39m`);
     // 未知级别 → borderMuted（darkGray #505050——与 off 同色不同源）

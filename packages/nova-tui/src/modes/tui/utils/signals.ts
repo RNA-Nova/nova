@@ -1,19 +1,18 @@
 /**
- * 信号与崩溃防护（pi interactive-mode.ts:3525-3610 registerSignalHandlers 对位）。
+ * 信号与崩溃防护。
  *
  * 行为矩阵：
  * - **SIGINT** → `quit(0)`（交互式退出路径——与 ctrl-c 双击/ctrl-d 同路，
  *   由装配方决定打印恢复提示等收尾）；
  * - **SIGTERM/SIGHUP** → 优雅关闭：`runtime.stop()`（容错——后端可能已死）
- *   → `tui.stop()` 恢复终端 → `exit(0)`（pi shutdown({fromSignal}) 对位；
- *   SIGHUP 不再硬退——终端真死了会由下面的 EIO 守卫转成 129）；
+ *   → `tui.stop()` 恢复终端 → `exit(0)`（*   SIGHUP 不再硬退——终端真死了会由下面的 EIO 守卫转成 129）；
  * - **stdout/stderr EIO/EPIPE/ENOTCONN** → 死终端应急 `exit(129)`——
  *   终端已死，任何恢复写都会再触发 EIO，不做终端恢复；
  * - **uncaughtException / unhandledRejection** → `tui.stop()` 恢复
  *   cooked 模式/光标 → 打印堆栈 → `exit(1)`（防 raw 模式残留——
  *   否则用户得 `stty sane && reset` 才能捡回终端）。
  *
- * 与 utils/terminal-guard.ts 的差异：pi 对齐版——信号先停后端再恢复终端
+ * 与 utils/terminal-guard.ts 的差异：本版信号先停后端再恢复终端
  * （原实现 quit 内 fire-and-forget）、覆盖 unhandledRejection、可卸载、
  * 进程面可注入（测试友好）。app.ts 装配后替换 setupTerminalGuards 调用。
  */
@@ -38,7 +37,7 @@ export interface SignalEnv {
 
 /**
  * 注册全部信号守卫；返回卸载函数（crash/应急路径自卸，测试收尾用）。
- * 对齐 pi 用 prependListener——保证先于其他监听器（如 signal-exit）执行。
+ * 用 prependListener——保证先于其他监听器（如 signal-exit）执行。
  */
 export function installSignalHandlers(
   deps: SignalHandlerDeps,
@@ -84,8 +83,8 @@ export function installSignalHandlers(
   };
 
   /**
-   * 信号优雅关闭（pi shutdown({fromSignal}) 对位）：先停后端再恢复终端。
-   * 关闭期间保持处理器注册（pi 同款——signal-exit 会在同一派发窗口
+   * 信号优雅关闭：先停后端再恢复终端。
+   * 关闭期间保持处理器注册（signal-exit 会在同一派发窗口
    * 检查监听器列表，提前卸载会导致信号被重发）。
    */
   const gracefulShutdown = async (): Promise<void> => {
@@ -109,7 +108,7 @@ export function installSignalHandlers(
   proc.prependListener('SIGINT', onSigint);
   cleanups.push(() => proc.off('SIGINT', onSigint));
 
-  // SIGTERM/SIGHUP → 优雅关闭（SIGHUP 仅非 Windows——pi 同款守卫）
+  // SIGTERM/SIGHUP → 优雅关闭（SIGHUP 仅非 Windows）
   const gracefulSignals: NodeJS.Signals[] = ['SIGTERM'];
   if (process.platform !== 'win32') gracefulSignals.push('SIGHUP');
   for (const signal of gracefulSignals) {

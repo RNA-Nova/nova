@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Union
 
 from nova_ai.types.base_model import NovaBaseModel
+
 from nova_harness.core.types.extensions import SourceInfo
 from nova_harness.core.types.package import ResolvedResource
 
@@ -29,7 +30,7 @@ class ParsedFrontmatter:
     body: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class LoadPromptTemplatesOptions:
     """Options for loading prompt templates（程序内传参对象）。"""
 

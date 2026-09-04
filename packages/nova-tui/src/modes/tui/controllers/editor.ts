@@ -2,7 +2,7 @@
  * EditorController：编辑器接线编排。
  *
  * 职责：
- * - onSubmit 分发：``!`` 前缀走 bash 用户工具（pi bash 模式对位）、
+ * - onSubmit 分发：``!`` 前缀走 bash 用户工具、
  *   ``/`` 前缀走可取消命令（cancelRequest 句柄注册到 dialogs）、
  *   其余走普通 prompt；
  * - slash 命令补全安装（命令表经 RPC 拉取）；
@@ -14,7 +14,7 @@
  */
 
 import type { NovaUIRuntime } from 'nova-tui';
-import { commandSlot, editorSlot, type EditorFactory } from 'nova-tui';
+import { commandSlot, editorSlot, guardComponentLineWidth, type EditorFactory } from 'nova-tui';
 import type { ImageContent } from '../../../protocol/nova-wire.gen.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -181,7 +181,7 @@ export class EditorController {
 
   /**
    * 提交分发（编辑器 onSubmit 与 alt+enter 等键位提交共用）：
-   * - ``!!cmd``：bash 不进 LLM 上下文（exclude_from_context——pi ``!!`` 对位）；
+   * - ``!!cmd``：bash 不进 LLM 上下文（exclude_from_context）；
    * - ``!cmd``：bash 用户工具（输出进上下文）；
    * - /theme /settings：前端本地命令；
    * - 其余 slash：可取消调用（流式中后端拦扩展命令立即执行——安全）；
@@ -224,12 +224,12 @@ export class EditorController {
       );
       return;
     }
-    // /quit：退出（ctrl+c 双击/ctrl+d 空退的命令形态——pi 对位）
+    // /quit：退出（ctrl+c 双击/ctrl+d 空退的命令形态）
     if (trimmed === '/quit') {
       this.quit(0);
       return;
     }
-    // /changelog：渲染仓库更新日志（Unreleased 优先，否则最新版本段——pi 对位）
+    // /changelog：渲染仓库更新日志（Unreleased 优先，否则最新版本段）
     if (trimmed === '/changelog') {
       const markdown = renderChangelogEntry();
       if (markdown) this.transcript.addMarkdown(markdown);
@@ -312,7 +312,7 @@ export class EditorController {
   }
 
   /**
-   * 队列还原（pi dequeue / restoreQueuedMessagesToEditor 对位）：
+   * 队列还原：
    * 清空 steering/follow-up 队列，内容按时间序填回编辑器（现有草稿附后）。
    * alt+↑ 直接调用；Esc 中断 run 前先调用（排队内容不丢）。
    */
@@ -361,9 +361,10 @@ export class EditorController {
     this.editorRef.current = editor;
     this.wire();
     // 槽位：无对话框时直接换人（有框则关框恢复时经 ref 自动用新编辑器）
+    // 行宽防线：扩展编辑器超宽行不得崩掉整个 TUI
     if (!this.dialogs.isActive) {
       this.editorContainer.clear();
-      this.editorContainer.addChild(editor);
+      this.editorContainer.addChild(guardComponentLineWidth(editor));
       this.tui.setFocus(editor);
       this.tui.requestRender();
     }
@@ -393,7 +394,7 @@ export class EditorController {
   }
 
   /**
-   * Ctrl+V 剪贴板粘贴（对齐 pi handleClipboardPaste）：
+   * Ctrl+V 剪贴板粘贴：
    * 图片 → 写临时文件、路径文本进编辑器（提交纯文本上送，LLM 经 read
    * 工具读图）；无图片 → 退化为剪贴板文本插入。读取失败静默。
    */
@@ -423,7 +424,7 @@ export class EditorController {
     );
   }
 
-  /** /debug：镜像状态 dump 到 frontend/tui/debug/debug-<ts>.log（pi /debug 的对位 v1）。 */
+  /** /debug：镜像状态 dump 到 frontend/tui/debug/debug-<ts>.log。 */
   private writeDebugLog(): void {
     try {
       const dir = join(userFrontendDir(), 'debug');
@@ -474,7 +475,7 @@ export class EditorController {
             : entry.kind === 'skill'
               ? `技能 · ${entry.description ?? ''}`
               : entry.description,
-        // slot 命令的参数补全（注册时附着函数对象——pi getArgumentCompletions 对位）
+        // slot 命令的参数补全（注册时附着函数对象）
         ...(entry.source === 'slot'
           ? {
               getArgumentCompletions: (prefix: string) => {
@@ -497,7 +498,7 @@ export class EditorController {
           : {}),
       }));
       const base = new CombinedAutocompleteProvider(commands, this.cwd);
-      // 扩展补全源（autocomplete:* slot——建议排在基线之前，pi addAutocompleteProvider 对位）
+      // 扩展补全源（autocomplete:* slot——建议排在基线之前）
       const extensionProviders: AutocompleteProvider[] = [];
       for (const { key } of this.runtime.slots.list()) {
         if (!key.startsWith('autocomplete:')) continue;

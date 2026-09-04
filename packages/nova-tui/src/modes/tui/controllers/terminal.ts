@@ -1,15 +1,14 @@
 /**
- * TerminalController 的 OSC 发射集中点（pi tui/terminal.ts 与
- * interactive-mode 的终端集成层对位）。
+ * TerminalController 的 OSC 发射集中点。
  *
  * - ``updateTitle``：OSC 0 窗口标题（``nova - <会话名> - <cwd基名>``，
- *   无会话名省掉 name 段——pi updateTerminalTitle 对位）；
+ *   无会话名省掉 name 段）；
  * - ``updateProgress``：OSC 9;4 终端进度（working/compacting 置
- *   indeterminate，其余清除；1s keepalive——pi setProgress 同款，
+ *   indeterminate，其余清除；1s keepalive，
  *   tmux 等会丢弃一次性进度序列）——受 ``terminal_progress`` 设置门控；
  * - ``notifyTurnEnded``：agent run 结束的桌面通知（OSC 9 iTerm2/WezTerm +
  *   OSC 777 rxvt 系 + OSC 99 kitty 三序列并发，互不认识的终端各自忽略——
- *   pi notify.ts 对位；一次性序列，退出前无需清理）——受 ``desktop_notify``
+ *   ；一次性序列，退出前无需清理）——受 ``desktop_notify``
  *   设置门控；
  * - ``initTerminalIntegration`` / ``applyFrontendSettings``：编辑器内边距 /
  *   补全可见条数 / clearOnShrink 的运行时应用（pi-tui Editor/TUI 均有
@@ -55,7 +54,6 @@ let titleOverride: string | undefined;
 
 /** 控制字符净化（ESC/BEL/换行会截断甚至注入序列——会话名是后端数据，不设防）。 */
 function sanitizeOscPart(value: string): string {
-  // oxlint-disable-next-line no-control-regex
   return value.replace(/[\x00-\x1f\x7f]/g, '').trim();
 }
 
@@ -122,7 +120,7 @@ export function updateProgress(status: SessionStatus): void {
   if (progressActive) return; // 已置位（keepalive 在跑）
   progressActive = true;
   writer(PROGRESS_ACTIVE_SEQUENCE);
-  // keepalive：部分终端（tmux 等）会丢弃一次性进度序列——pi 同款 1s 重发
+  // keepalive：部分终端（tmux 等）会丢弃一次性进度序列
   progressKeepalive = setInterval(() => writer(PROGRESS_ACTIVE_SEQUENCE), PROGRESS_KEEPALIVE_MS);
   progressKeepalive.unref();
 }

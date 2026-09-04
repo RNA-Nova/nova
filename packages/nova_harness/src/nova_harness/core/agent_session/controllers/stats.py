@@ -45,7 +45,9 @@ class StatsCollector:
         percent = (estimate.tokens / context_window) * 100 if context_window else 0
         return {
             "tokens": estimate.tokens,
-            # 线上 camel（RPC 透出形状——内部变量保持 snake）
+            # 本 dict 是**双边界词汇**（camel，pi 对齐）：RPC getContextUsage
+            # 的透出形状 + 扩展 ctx.get_context_usage() 的契约载荷，两端消费
+            # 者都是 camel——键名刻意保持线上形态，勿改 snake
             "contextWindow": context_window,
             "percent": percent,
         }

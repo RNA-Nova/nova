@@ -1,10 +1,10 @@
 """question 工具执行器（交互式——``ToolExecContext.ui`` 通道的首个消费者）。
 
-pi examples/extensions/question.ts 对位：向用户提问并让其从选项中选择，
+：向用户提问并让其从选项中选择，
 附加 "Type something." 自由输入路径。双路径自适应（能力协商驱动）：
 
 - **单框路径**（``dialog:question`` 已注册时）：包侧自定义对话框——选项 +
-  内联自由输入同框完成（pi 的完整形态，组件在 ``frontend/tui/dialogs/question.ts``）；
+  内联自由输入同框完成（组件在 ``frontend/tui/dialogs/question.ts``）；
 - **基线两步降级**（dialog 未注册/老前端）：``select_items`` 带描述选项 →
   选中 "Type something." 后接 ``input``（零前端依赖的保底形态）。
 
@@ -14,7 +14,7 @@ details 契约（渲染器消费，键名 snake 随 wire 原样透传）：
 （``has_ui=False``）返回错误回执。dialog 应答值键名为 camel
 （``wasCustom``——TS 生产侧原样），本文件在边界归一为 snake details。
 
-多问形态（pi questionnaire 对位，Claude Code AskUserQuestion 同能力）：
+多问形态（Claude Code AskUserQuestion 同能力）：
 可选 ``questions`` 数组（1~4 项，每项 ``{question, options}``）与单问
 互斥——``questions`` 存在且合法走多问（一次弹一组相关问题），存在但
 非法直接错误回执（不静默落回单问），缺席则单问路径完全不变。多问
@@ -27,6 +27,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
+from nova_coding_agent.ui_primitives import input as ui_input
+from nova_coding_agent.ui_primitives import select_items
+
 from nova_harness.core.types.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContext,
@@ -34,10 +37,7 @@ from nova_harness.core.types.resources.tools import (
 )
 from nova_harness.core.types.ui import UIContext
 
-from nova_coding_agent.ui_primitives import input as ui_input
-from nova_coding_agent.ui_primitives import select_items
-
-# "Type something." 自由输入项的 value 哨兵（label 与 pi 一致）。
+# "Type something." 自由输入项的 value 哨兵（label 一致）。
 _OTHER_VALUE = "__type_something__"
 _OTHER_LABEL = "Type something."
 
@@ -132,7 +132,7 @@ class Tool:
         "once via `questions`. Do not use it for information you can find "
         "yourself with read/grep/bash."
     )
-    # 询问型工具必须串行（与 pi 一致）——并行弹窗无意义且与其他写操作互斥。
+    # 询问型工具必须串行——并行弹窗无意义且与其他写操作互斥。
     execution_mode = "sequential"
 
     def __init__(self, context: ToolContext) -> None:
@@ -401,7 +401,7 @@ async def _ask_two_step(
         return None
 
     if chosen == _OTHER_VALUE:
-        # 自由输入路径（pi 的内联编辑器对位——第二步 input 原语）
+        # 自由输入路径（—第二步 input 原语）
         text = await ui_input(ui, question, placeholder="Your answer")
         if text is None or not text.strip():
             return None

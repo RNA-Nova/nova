@@ -133,7 +133,7 @@ def test_chain_updates_carry_completed_plus_current(monkeypatch):
 
 
 def test_apply_event_payload_parses_snake_wire_keys():
-    """回归：print 模式 JSON 流是 model_dump 原生 snake 键（曾照 pi 误读
+    """回归：print 模式 JSON 流是 model_dump 原生 snake 键（曾误读
     camel——cacheRead/totalTokens/stopReason 静默丢失）。"""
     result = SubagentResult(agent="a1", task="t")
     runner._apply_event_payload(
@@ -181,3 +181,133 @@ def test_apply_event_payload_parses_snake_wire_keys():
     )
     assert result.error_message == "boom"
     assert result.stop_reason == "error"
+
+
+# ---------------------------------------------------------------------------
+# 流式回调形态回归：on_update 收单元素 List[SubagentResult]（非嵌套列表）
+# ---------------------------------------------------------------------------
+
+
+def test_run_single_on_update_receives_flat_single_element_frames(monkeypatch):
+    """历史 bug：_apply_event_payload 已把结果包成列表，_emit_update 又包
+    一层——回调实收 ``[[SubagentResult]]``，调用方遍历即 AttributeError 并被
+    各自的 except 静默吞掉，三模式流式更新全灭（卡片只在完成时一次渲染）。
+    """
+    import json
+
+    stdout = (
+        "\n".join(
+            [
+                json.dumps(
+                    {"type": "message_end", "message": {"role": "user", "content": []}}
+                ),
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "hi"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    ).encode()
+
+    class _FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.stdout = asyncio.StreamReader()
+            self.stdout.feed_data(stdout)
+            self.stdout.feed_eof()
+            self.stderr = asyncio.StreamReader()
+            self.stderr.feed_eof()
+
+        async def wait(self) -> int:
+            self.returncode = 0
+            return 0
+
+        def terminate(self) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    async def _fake_exec(*args, **kwargs):
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    frames = []
+    result = asyncio.run(
+        runner.run_subagent_single(
+            SubagentCall(agent="a1", task="t"),
+            agent_dir="/nonexistent",
+            on_update=lambda rs: frames.append(rs),
+        )
+    )
+
+    assert result.exit_code == 0
+    # 两条 message_end → 两帧；每帧是单元素列表且元素为 SubagentResult
+    assert len(frames) == 2
+    for frame in frames:
+        assert len(frame) == 1
+        assert isinstance(frame[0], SubagentResult)  # 嵌套列表时这里是 list
+    assert len(frames[1][0].details["messages"]) == 2
+
+
+def test_run_single_handles_line_longer_than_64k(monkeypatch):
+    """单行超 64KB 的消息帧（大 read/grep 结果）不再炸掉整条读取链。
+
+    历史 bug：readline 的 64KB 上限抛 ``Separator is found, but chunk is
+    longer than limit``，scout/长输出任务必现。
+    """
+    import json
+
+    big_text = "x" * 200_000
+    stdout = (
+        json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": big_text}],
+                },
+            }
+        )
+        + "\n"
+    ).encode()
+
+    class _FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.stdout = asyncio.StreamReader()
+            self.stdout.feed_data(stdout)
+            self.stdout.feed_eof()
+            self.stderr = asyncio.StreamReader()
+            self.stderr.feed_eof()
+
+        async def wait(self) -> int:
+            self.returncode = 0
+            return 0
+
+        def terminate(self) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    async def _fake_exec(*args, **kwargs):
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    result = asyncio.run(
+        runner.run_subagent_single(
+            SubagentCall(agent="a1", task="t"), agent_dir="/nonexistent"
+        )
+    )
+    assert result.exit_code == 0
+    assert result.error is None
+    assert result.output == big_text

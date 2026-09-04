@@ -1,5 +1,5 @@
 /**
- * ResourcesView：已加载资源区（pi loadedResources 对位）。
+ * ResourcesView：已加载资源区。
  *
  * compact：单行计数（`2 skills · 3 prompts · 16 commands · 2 packages`）；
  * expanded（ctrl+o 跟随全局展开态）：分组清单（名称逐行列出）。

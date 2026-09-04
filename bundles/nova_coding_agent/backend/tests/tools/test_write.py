@@ -1,4 +1,4 @@
-"""write tool executor 单元测试（对齐 pi write.ts 行为）。"""
+"""write tool executor 单元测试。"""
 
 import asyncio
 import os
@@ -36,7 +36,7 @@ def tmpdir():
 
 
 def test_write_overwrite_existing(tmpdir):
-    """覆盖已有文件：action 为"覆盖"，内容整体替换（对齐 pi overwrite 语义）。"""
+    """覆盖已有文件：action 为"覆盖"，内容整体替换。"""
     path = os.path.join(tmpdir, "file.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write("old content")
@@ -52,7 +52,7 @@ def test_write_overwrite_existing(tmpdir):
 
 
 def test_write_creates_parent_dirs(tmpdir):
-    """自动创建缺失的父目录（对齐 pi ops.mkdir(dirname)）。"""
+    """自动创建缺失的父目录。"""
     path = os.path.join(tmpdir, "a", "b", "c", "file.txt")
     executor = _load_executor()
     result = _run(executor.execute("id", {"path": path, "content": "nested"}))
@@ -94,7 +94,7 @@ def test_write_content_not_string(tmpdir):
 
 
 def test_write_pre_aborted_signal(tmpdir):
-    """spawn 前 signal 已中止：is_error 返回且不产生任何文件副作用（对齐 pi）。"""
+    """spawn 前 signal 已中止：is_error 返回且不产生任何文件副作用（）。"""
     from nova_ai import AbortController
 
     executor = _load_executor()
@@ -131,7 +131,7 @@ def test_write_encoding_param(tmpdir):
 
 
 def test_write_concurrent_same_file_serialized(tmpdir):
-    """同一路径并发写经写锁完整串行（对齐 pi withFileMutationQueue）：
+    """同一路径并发写经写锁完整串行：
 
     最终文件必然是某一次写入的完整内容，不出现交错。
     """

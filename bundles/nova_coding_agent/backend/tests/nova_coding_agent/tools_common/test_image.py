@@ -1,15 +1,14 @@
-"""图片处理管线测试（对齐 pi processImage / image-resize-core 语义）。"""
+"""图片处理管线测试。"""
 
 import base64
 import io
 import random
 
-from PIL import Image
-
 from nova_coding_agent.tools_common.image import (
     MAX_IMAGE_BASE64_BYTES,
     process_image,
 )
+from PIL import Image
 
 # EXIF Orientation 标签
 _EXIF_ORIENTATION_TAG = 0x0112
@@ -49,7 +48,7 @@ def _b64_len(data: bytes) -> int:
 
 
 def test_within_limits_returns_original_bytes():
-    """维度与字节都在预算内：原字节原样返回，不缩放（对齐 pi wasResized=false）。"""
+    """维度与字节都在预算内：原字节原样返回，不缩放。"""
     data = _make_image_bytes(100, 50)
     result = process_image(data, "image/png")
 
@@ -63,7 +62,7 @@ def test_within_limits_returns_original_bytes():
 
 
 def test_jpg_mime_normalized_to_jpeg():
-    """image/jpg 归一为 image/jpeg（对齐 pi normalizeSupportedImageMimeType）。"""
+    """image/jpg 归一为 image/jpeg。"""
     data = _make_image_bytes(10, 10, fmt="JPEG")
     result = process_image(data, "image/jpg")
 
@@ -83,7 +82,7 @@ def test_gif_within_limits_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# EXIF 方向校正（对齐 pi applyExifOrientation）
+# EXIF 方向校正
 # ---------------------------------------------------------------------------
 
 
@@ -93,7 +92,7 @@ def test_exif_orientation_applied_to_dimensions():
     result = process_image(data, "image/jpeg")
 
     assert result.ok is True
-    # 限制内返回原字节，但宽高取 EXIF 校正后的值（对齐 pi）
+    # 限制内返回原字节，但宽高取 EXIF 校正后的值（）
     assert result.resized is False
     assert (result.width, result.height) == (100, 200)
     assert (result.original_width, result.original_height) == (100, 200)
@@ -106,7 +105,7 @@ def test_exif_orientation_applied_through_resize():
 
     assert result.ok is True
     assert result.resized is True
-    # 校正后 1000x3000：高超限 → 667x2000（对齐 pi 的 clamp 比例计算）
+    # 校正后 1000x3000：高超限 → 667x2000
     assert (result.width, result.height) == (667, 2000)
     assert (result.original_width, result.original_height) == (1000, 3000)
     # 输出可解码且尺寸与报告一致
@@ -115,12 +114,12 @@ def test_exif_orientation_applied_through_resize():
 
 
 # ---------------------------------------------------------------------------
-# 格式归一（bmp 等 → PNG，对齐 pi normalizeImage / conversionHint）
+# 格式归一（bmp 等 → PNG）
 # ---------------------------------------------------------------------------
 
 
 def test_bmp_normalized_to_png_with_hint():
-    """bmp 转 PNG 并附转换提示（对齐 pi 文案 [Image converted from ... to ...]）。"""
+    """bmp 转 PNG 并附转换提示。"""
     data = _make_image_bytes(20, 20, fmt="BMP")
     result = process_image(data, "image/bmp")
 
@@ -132,7 +131,7 @@ def test_bmp_normalized_to_png_with_hint():
 
 
 def test_bmp_resize_hint_uses_final_mime():
-    """bmp 经预算链落到 JPEG 时，转换提示的目标用最终输出 mime（对齐 pi）。"""
+    """bmp 经预算链落到 JPEG 时，转换提示的目标用最终输出 mime（）。"""
     data = _make_image_bytes(200, 200, fmt="BMP", noise=True)
     # max_bytes 卡到 PNG（~30KB）超预算、JPEG q80 可进
     result = process_image(data, "image/bmp", max_dimension=100, max_bytes=8000)
@@ -144,7 +143,7 @@ def test_bmp_resize_hint_uses_final_mime():
 
 
 def test_resize_disabled_returns_normalized_bytes():
-    """auto_resize 关闭：只做格式归一，不缩放（对齐 pi autoResizeImages=false）。"""
+    """auto_resize 关闭：只做格式归一，不缩放。"""
     data = _make_image_bytes(3000, 100, fmt="BMP")
     result = process_image(data, "image/bmp", resize=False)
 
@@ -156,13 +155,13 @@ def test_resize_disabled_returns_normalized_bytes():
 
 
 # ---------------------------------------------------------------------------
-# 字节预算压缩链（对齐 pi image-resize-core.ts：PNG 优先 → JPEG 质量递减
+# 字节预算压缩链（PNG 优先 → JPEG 质量递减
 # → 尺寸 0.75 倍递减）
 # ---------------------------------------------------------------------------
 
 
 def test_png_preferred_when_within_budget():
-    """维度超限但 PNG 编码进预算：优先 PNG（对齐 pi 候选顺序首位）。"""
+    """维度超限但 PNG 编码进预算：优先 PNG。"""
     data = _make_image_bytes(3000, 2000)  # 纯色 PNG 极小
     result = process_image(data, "image/png")
 
@@ -177,7 +176,7 @@ def test_png_preferred_when_within_budget():
 
 
 def test_jpeg_fallback_when_png_over_budget():
-    """噪声大图：PNG 超预算 → 落到 JPEG（对齐 pi 择优顺序）。"""
+    """噪声大图：PNG 超预算 → 落到 JPEG。"""
     data = _make_image_bytes(2100, 2100, noise=True)
     result = process_image(data, "image/png")
 
@@ -203,7 +202,7 @@ def test_budget_chain_descends_until_fit():
 
 
 def test_over_budget_returns_failure_message():
-    """连 1x1 都压不进预算：ok=False + pi 同款提示（对齐 pi 返回 null 的路径）。"""
+    """连 1x1 都压不进预算：ok=False + 提示。"""
     data = _make_image_bytes(200, 200, noise=True)
     result = process_image(data, "image/png", max_dimension=100, max_bytes=10)
 
@@ -215,7 +214,7 @@ def test_over_budget_returns_failure_message():
 
 
 # ---------------------------------------------------------------------------
-# 失败语义（对齐 pi：提示文案，不抛异常）
+# 失败语义（提示文案，不抛异常）
 # ---------------------------------------------------------------------------
 
 
@@ -231,7 +230,7 @@ def test_corrupt_bytes_returns_failure_not_raise():
 
 
 def test_corrupt_bytes_resize_disabled_passes_through():
-    """resize 关闭时不解码（对齐 pi）：坏字节也原样返回 ok=True。"""
+    """resize 关闭时不解码（）：坏字节也原样返回 ok=True。"""
     payload = b"not a real png"
     result = process_image(payload, "image/png", resize=False)
 
@@ -241,7 +240,7 @@ def test_corrupt_bytes_resize_disabled_passes_through():
 
 
 def test_undecodable_unsupported_format_returns_convert_failure():
-    """不支持格式且无法解码：转换失败 → ok=False + converted 提示（对齐 pi）。"""
+    """不支持格式且无法解码：转换失败 → ok=False + converted 提示（）。"""
     result = process_image(b"not a real bmp", "image/bmp")
 
     assert result.ok is False

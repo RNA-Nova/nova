@@ -164,7 +164,9 @@ nova_harness/
         │   ├── session/          # 会话生命周期、条目、树、状态、模型配置、运行时诊断
         │   ├── config/           # 设置
         │   ├── extensions/       # 扩展协议类型（含 process.py spawn hook 契约）
-        │   ├── events/           # 事件常量与 payload（dataclass）
+        │   ├── events/           # 事件常量与 payload（NovaBaseModel 契约；携带
+        │   │                       # 服务实例的 hook 结果用 frozen dataclass——
+        │   │                       # 如 UserBashEventResult，规则 4）
         │   ├── compaction/       # 上下文压缩
         │   ├── package/          # 包管理域类型（PackageSource / NovaManifest / PackageManifest 等）
         │   ├── ui/               # UI 能力抽象（UIContext / UIResponse / noop.py 空实现 NoOpUIContext）
@@ -275,7 +277,7 @@ nova_harness/
 - 运行模式不设独立类型（原 `ExtensionMode` 已移除）：扩展只需要两个信号——`has_ui`（有没有前端挂在通道上，构造期即知，trust 决议等早期裁决用它）与 `ui.capabilities`（前端支持哪些原语，连接后协商）。`NoOpUIContext`（`core/types/ui/noop.py`）表示无 UI 运行模式，全部安全 no-op。
 - `core/rpc/` 是内聚的**通信层**（原 `core/transport/` + `core/protocol/` + `core/server.py` 已统一移入），内部分三层：
   - `rpc/transport/`：通道层——`Transport` 抽象（`base.py`）+ `StdioTransport` / `MemoryTransport`；dict 消息怎么物理流动，不解析 JSON-RPC 语义。
-  - `rpc/protocol/`：语义层——JSON-RPC 消息模型（`jsonrpc.py`/`errors.py`/`router.py`：注册表携带方法形状 `MethodShape`，分派前 params 模型校验）、事件直通序列化桥（`serialize.py`：Bus 2 事件 → `{type, data}` 信封，哑管道零呈现加工）、线上契约构建期导出（`schema_export.py`：事件/条目类型 + 方法形状 + `CONTRACT_VERSION_MAJOR/MINOR`（major 不等硬拒、minor 加法放行）→ JSON Schema + TS 双工件，pytest 漂移测试保鲜）、方法形状声明（`methods/shapes.py`：方法级域/params/result 模型，校验/导出/能力位三方同源）、命令方法表（`methods/`，按域拆分：`session` 会话·队列·retry·reload·克隆/导出/导入 / `model` 模型发现·切换·scoped·思考级别 / `auth` 鉴权·login / `resources` skills·prompt templates / `settings` 设置读写（无会话可用） / `system` 命令·扩展 flags·扩展快捷键目录与回调 / `user_tools` / `package`）。`ui/response` 与 `system/capabilities` 由 `RpcServer` 分派前直管（按连接记账），不进方法表。全量方法清单见 `examples/rpc_capabilities.md`。
+  - `rpc/protocol/`：语义层——JSON-RPC 消息模型（`jsonrpc.py`/`errors.py`/`router.py`：注册时从 handler 签名注解推导方法形状 `MethodShape`，分派前 params 模型校验、handler 收实例；出参单道——handler 返回实例、router 单点 dump_wire，散装 dict 即契约违约报错）、事件直通序列化桥（`serialize.py`：Bus 2 事件 → `{type, data}` 信封，哑管道零呈现加工）、线上契约构建期导出（`schema_export.py`：事件/条目类型 + 方法形状 + `CONTRACT_VERSION_MAJOR/MINOR`（major 不等硬拒、minor 加法放行）→ JSON Schema + TS 双工件，pytest 漂移测试保鲜）、方法形状模型（`methods/shapes.py`：params/result 模型集中定义，校验/导出/能力位三方同源——签名即契约，不再重复声明）、命令方法表（`methods/`，按域拆分：`session` 会话·队列·retry·reload·克隆/导出/导入 / `model` 模型发现·切换·scoped·思考级别 / `auth` 鉴权·login / `resources` skills·prompt templates / `settings` 设置读写（无会话可用） / `system` 命令·扩展 flags·扩展快捷键目录与回调 / `user_tools` / `package`）。`ui/response` 与 `system/capabilities` 由 `RpcServer` 分派前直管（按连接记账），不进方法表。全量方法清单见 `examples/rpc_capabilities.md`。
   - `rpc/server.py` + `rpc/connection.py` + `rpc/ui_context.py`：组装器 `RpcServer`——连接注册表 + MethodRegistry + `RoutingUIContext` + State 的组合，含事件广播（initialize 门）与并发分派；连接一等公民（`Connection`：状态机/能力集/在飞请求表/有界出站队列+独立写泵；读泵归服务器），背压按来源分流（stdio/memory 阻塞等位，WebSocket 慢消费者断连）；反向原语按连接寻址（`RoutingUIContext`：发起方优先——经 `current_connection` contextvar，无归属广播首响应胜出+败者收 ui/cancel）；cancelRequest 按连接隔离。
   - 依赖方向单向：transport ← protocol ← server（connection/ui_context 归 server 层）。
   - **RPC 循环线程三禁**（卡顿纪律，`RpcServer` 内置滞后探针兜底观测——超 100ms 漂移打 `rpc-stderr.log`）：①禁同步阻塞调用（`time.sleep`/同步 subprocess/大文件同步读写——逃生舱 `asyncio.to_thread`）；②禁大段 CPU（大会话全量序列化等重活分页或下线程）；③禁全局写锁类队头阻塞（出站一律走连接自有队列，写不穿 `Connection`）。入站背压：在飞 handler 超 `max_inflight`（默认 256）对请求回 `-32004 overloaded`、对通知丢弃。

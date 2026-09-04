@@ -22,6 +22,7 @@ from nova_ai import (
     builtin_models,
     to_thinking_level,
 )
+
 from nova_harness.core.harness.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,

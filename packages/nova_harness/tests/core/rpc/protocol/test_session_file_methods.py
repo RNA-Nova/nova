@@ -418,13 +418,14 @@ async def test_fork_returns_selected_text(forked_session):
 
 @pytest.mark.asyncio
 async def test_fork_at_position_has_no_selected_text(forked_session):
-    """position="at" 不选消息：无回填文本（RPC 契约不放行 "at"，直测会话层）。"""
+    """position="at" 不选消息：无回填文本（RPC 契约不放行 "at"，直测会话层——
+    内部契约为 snake；线上 camel 翻译归 fork handler，见 test_fork_returns_selected_text）。"""
     session, user_entry_id = forked_session
 
     result = await session.fork_session(user_entry_id, "at")
     assert result["cancelled"] is False
-    assert result["selectedText"] is None
-    assert result["editorText"] is None
+    assert result["selected_text"] is None
+    assert result["editor_text"] is None
 
 
 # ---------------------------------------------------------------------------

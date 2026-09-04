@@ -8,7 +8,7 @@ import { describe, it } from 'node:test';
 
 import { Container, Text } from '@earendil-works/pi-tui';
 
-import { DialogController } from '../../../../src/modes/tui/controllers/dialogs.js';
+import { DialogController, MaskedInput } from '../../../../src/modes/tui/controllers/dialogs.js';
 
 /** 最小可用的 DialogController 假环境（本地框路径不触 RPC）。 */
 function makeDialogs() {
@@ -272,5 +272,32 @@ describe('set_status 命名通知路由', () => {
     fire({ message: '', type: 'info' }); // → 丢弃
     fire({ message: '已完成', type: 'info' }); // → show
     assert.deepEqual(calls, ['clear', 'show']);
+  });
+});
+
+describe('MaskedInput（secret 输入打码——ssh 式圆点掩码）', () => {
+  it('渲染不回显明文，圆点数与真实值码点数一致（ANSI 光标样式不打断）', () => {
+    const input = new MaskedInput();
+    input.setValue('sk-secret-123');
+    const text = input.render(60).join('\n');
+    assert.ok(!text.includes('sk-secret-123'), '渲染不得泄露明文');
+    assert.equal((text.match(/•/g) ?? []).length, 'sk-secret-123'.length);
+  });
+
+  it('getValue 返回真实值（打码只影响渲染层）', () => {
+    const input = new MaskedInput();
+    input.setValue('abc');
+    input.render(60);
+    assert.equal(input.getValue(), 'abc');
+  });
+
+  it('值变短后圆点数同步（光标/宽度数学不失真）', () => {
+    const input = new MaskedInput();
+    input.setValue('abcd');
+    const longText = input.render(60).join('\n');
+    assert.equal((longText.match(/•/g) ?? []).length, 4);
+    input.setValue('ab');
+    const shortText = input.render(60).join('\n');
+    assert.equal((shortText.match(/•/g) ?? []).length, 2);
   });
 });

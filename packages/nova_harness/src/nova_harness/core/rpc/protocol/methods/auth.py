@@ -10,16 +10,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
-from nova_ai.types.auth import ApiKeyCredential, AuthType
+from nova_ai.types.auth import ApiKeyCredential
 
 from nova_harness.core.config.auth.interaction import UIAuthInteraction
 from nova_harness.core.rpc.protocol.errors import JSONRPCError
+from nova_harness.core.rpc.protocol.methods import shapes as _sh
 from nova_harness.core.rpc.protocol.methods.state import ServerState
 from nova_harness.core.rpc.protocol.router import MethodRegistry
 
-_AUTH_TYPES = ("api_key", "oauth")
+_D = "auth"
 
 
 def register(registry: MethodRegistry, state: ServerState) -> None:
@@ -28,10 +29,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             raise JSONRPCError(JSONRPCError.NO_ACTIVE_SESSION, "No active session")
         return state.runtime.session
 
-    def _provider(params: Dict[str, Any]) -> str:
-        return params["provider"]
-
-    async def getAuthStatus(params: Dict[str, Any]) -> Dict[str, Any]:
+    async def getAuthStatus(params: _sh.EmptyParams) -> _sh.GetAuthStatusResult:
         """全部已存储 credential 的元信息（provider + 类型，不含密钥本体）。
 
         auth 存储是 agent_dir 绑定而非会话绑定：无会话时也可查询。
@@ -43,23 +41,22 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
 
             storage = AuthStorage.create()
         infos = await storage.list()
-        return {
-            "credentials": [
-                {
-                    "provider": getattr(info, "provider_id", None)
+        return _sh.GetAuthStatusResult(
+            credentials=[
+                _sh.CredentialInfo(
+                    provider=getattr(info, "provider_id", None)
                     or getattr(info, "provider", None),
-                    "type": getattr(info, "type", None),
-                }
+                    type=getattr(info, "type", None),
+                )
                 for info in infos
             ],
-        }
+        )
 
-    async def setApiKey(params: Dict[str, Any]) -> Dict[str, Any]:
+    async def setApiKey(params: _sh.SetApiKeyParams) -> _sh.ProviderResult:
         """为 provider 直接设置 API key（持久化 + 模型刷新联动）。"""
         session = _session()
-        provider = _provider(params)
-        api_key = params.get("apiKey") or params.get("api_key")
-        if not isinstance(api_key, str) or not api_key.strip():
+        api_key = params.api_key
+        if api_key is None or not api_key.strip():
             raise JSONRPCError(
                 JSONRPCError.INVALID_PARAMS, "Missing 'apiKey' parameter"
             )
@@ -68,12 +65,12 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         async def _set(_current: Any) -> ApiKeyCredential:
             return ApiKeyCredential(key=api_key.strip())
 
-        await storage.modify(provider, _set)
+        await storage.modify(params.provider, _set)
         # 与 login 同一联动：credential 变更后刷新模型与可用性快照
         await session.model_runtime.refresh()
-        return {"ok": True, "provider": provider}
+        return _sh.ProviderResult(ok=True, provider=params.provider)
 
-    async def login(params: Dict[str, Any]) -> Dict[str, Any]:
+    async def login(params: _sh.LoginParams) -> _sh.LoginResult:
         """交互式登录（长命令：交互经反向原语进行，结果走模型刷新联动）。
 
         OAuth（device code / 浏览器授权）与 ApiKey prompt 统一入口。
@@ -82,14 +79,8 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         否则 device-code 流会轮询到超时（约 15 分钟）才失败。
         """
         session = _session()
-        provider = _provider(params)
-        auth_type = params.get("auth_type", "oauth")
-        if auth_type not in _AUTH_TYPES:
-            raise JSONRPCError(
-                JSONRPCError.INVALID_PARAMS,
-                f"'authType' must be one of {list(_AUTH_TYPES)}",
-            )
-        required = "notify" if auth_type == "oauth" else "input"
+        # auth_type 的取值范围由 Literal 校验在分派层把关
+        required = "notify" if params.auth_type == "oauth" else "input"
         if not state.ui_context.has_capability(required):
             raise JSONRPCError(
                 JSONRPCError.INVALID_PARAMS,
@@ -97,46 +88,18 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             )
         interaction = UIAuthInteraction(state.ui_context)
         credential = await session.model_runtime.login(
-            provider, auth_type, interaction  # type: ignore[arg-type]
+            params.provider, params.auth_type, interaction  # type: ignore[arg-type]
         )
-        cred_type = getattr(credential, "type", None) or auth_type
-        return {"ok": True, "provider": provider, "type": cred_type}
+        cred_type = getattr(credential, "type", None) or params.auth_type
+        return _sh.LoginResult(ok=True, provider=params.provider, type=cred_type)
 
-    async def logout(params: Dict[str, Any]) -> Dict[str, Any]:
+    async def logout(params: _sh.ProviderParams) -> _sh.ProviderResult:
         """删除 credential 并联动模型刷新/可用性快照重算。"""
         session = _session()
-        provider = _provider(params)
-        await session.model_runtime.logout(provider)
-        return {"ok": True, "provider": provider}
+        await session.model_runtime.logout(params.provider)
+        return _sh.ProviderResult(ok=True, provider=params.provider)
 
-    from nova_harness.core.rpc.protocol.methods import shapes as _sh
-
-    _D = "auth"
-    registry.register(
-        "getAuthStatus",
-        getAuthStatus,
-        domain=_D,
-        params_model=_sh.EmptyParams,
-        result_model=_sh.GetAuthStatusResult,
-    )
-    registry.register(
-        "setApiKey",
-        setApiKey,
-        domain=_D,
-        params_model=_sh.SetApiKeyParams,
-        result_model=_sh.ProviderResult,
-    )
-    registry.register(
-        "login",
-        login,
-        domain=_D,
-        params_model=_sh.LoginParams,
-        result_model=_sh.LoginResult,
-    )
-    registry.register(
-        "logout",
-        logout,
-        domain=_D,
-        params_model=_sh.ProviderParams,
-        result_model=_sh.ProviderResult,
-    )
+    registry.register("getAuthStatus", getAuthStatus, domain=_D)
+    registry.register("setApiKey", setApiKey, domain=_D)
+    registry.register("login", login, domain=_D)
+    registry.register("logout", logout, domain=_D)

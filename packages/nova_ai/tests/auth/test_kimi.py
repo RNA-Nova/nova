@@ -78,9 +78,9 @@ async def test_device_code_login_success():
     assert len(interaction.events) == 1
     event = interaction.events[0]
     assert event.type == "device_code"
-    assert event.userCode == "ABCD-EFGH"
+    assert event.user_code == "ABCD-EFGH"
     assert (
-        event.verificationUriComplete == "https://auth.kimi.com/verify?code=ABCD-EFGH"
+        event.verification_uri_complete == "https://auth.kimi.com/verify?code=ABCD-EFGH"
     )
 
 

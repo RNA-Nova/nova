@@ -1,4 +1,4 @@
-"""confirm_destructive 扩展测试（pi confirm-destructive.ts 对位）。
+"""confirm_destructive 扩展测试。
 
 覆盖：confirm 放行/取消两态、entry_count=0 放行、headless 放行、
 session_before_switch / session_before_fork 两事件注册与文案。

@@ -1,9 +1,8 @@
 /**
- * /scoped-models 的包侧编排（pi scoped-models-selector 对位——dogfood：官方 bundle 以扩展机制自持命令 UI）。
+ * /scoped-models 的包侧编排（—dogfood：官方 bundle 以扩展机制自持命令 UI）。
  *
  * scoped 池 = ctrl+p 循环模型的启用集与循环顺序（session 级配置）。
- * 面板交互（启用/排序/全启/全清——ctrl+s 才写 setScopedModels，pi "session-only
- * until saved" 语义）在 selector.ts（从 nova-client 宿主迁入）。
+ * 面板交互（启用/排序/全启/全清——ctrl+s 才写 setScopedModels）在 selector.ts（从 nova-client 宿主迁入）。
  * 后端 /scoped-models 命令保留作 headless 回退（文本清单）。
  */
 

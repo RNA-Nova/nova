@@ -1,6 +1,6 @@
-"""edit 工具的编辑引擎（对齐 pi ``core/tools/edit-diff.ts``）。
+"""edit 工具的编辑引擎。
 
-语义（与 pi 逐项对齐）：
+语义（逐项对齐）：
 
 - 每个 ``oldText`` 必须在原文中**唯一**（出现多次 → 报错）；
 - 全部 edit 针对**同一份原文**匹配（非顺序应用），区域重叠 → 报错；
@@ -38,7 +38,7 @@ class AppliedEditsResult:
 
 
 def detect_line_ending(content: str) -> str:
-    """检测文件换行符（以先出现者为准，对齐 pi detectLineEnding）。"""
+    """检测文件换行符（以先出现者为准）。"""
     crlf_idx = content.find("\r\n")
     lf_idx = content.find("\n")
     if lf_idx == -1:
@@ -75,7 +75,7 @@ _SPECIAL_SPACES = re.compile(r"[\u00a0\u2002-\u200a\u202f\u205f\u3000]")
 
 
 def normalize_for_fuzzy_match(text: str) -> str:
-    """fuzzy 匹配归一化（对齐 pi normalizeForFuzzyMatch）。"""
+    """fuzzy 匹配归一化。"""
     text = unicodedata.normalize("NFKC", text)
     text = "\n".join(line.rstrip() for line in text.split("\n"))
     text = _SMART_SQUOTE.sub("'", text)
@@ -95,7 +95,7 @@ class FuzzyMatchResult:
 
 
 def fuzzy_find_text(content: str, old_text: str) -> FuzzyMatchResult:
-    """先精确匹配，失败则在归一化空间 fuzzy 匹配（对齐 pi fuzzyFindText）。"""
+    """先精确匹配，失败则在归一化空间 fuzzy 匹配。"""
     exact_index = content.find(old_text)
     if exact_index != -1:
         return FuzzyMatchResult(
@@ -146,7 +146,7 @@ class _MatchedEdit:
 
 
 def _split_lines_with_endings(content: str) -> List[str]:
-    """按行切分并保留行尾（对齐 pi splitLinesWithEndings）。"""
+    """按行切分并保留行尾。"""
     return re.findall(r"[^\n]*\n|[^\n]+", content)
 
 
@@ -181,7 +181,7 @@ def _get_replacement_line_range(
 def _apply_replacements(
     content: str, replacements: List[_MatchedEdit], offset: int = 0
 ) -> str:
-    """倒序应用替换（偏移稳定，对齐 pi applyReplacements）。"""
+    """倒序应用替换（偏移稳定）。"""
     result = content
     for replacement in sorted(replacements, key=lambda r: r.match_index, reverse=True):
         index = replacement.match_index - offset
@@ -198,7 +198,7 @@ def _apply_replacements_preserving_unchanged_lines(
     base_content: str,
     replacements: List[_MatchedEdit],
 ) -> str:
-    """fuzzy 空间的替换叠回原文：未触及的行保留原始字节（对齐 pi 同名函数）。
+    """fuzzy 空间的替换叠回原文：未触及的行保留原始字节。
 
     替换范围扩到实际触及的整行，触及行用归一化基底重写，其余行从原文
     复制——重复归一化行不会被对位到错误的出现处。
@@ -245,7 +245,7 @@ def _apply_replacements_preserving_unchanged_lines(
 
 
 # ---------------------------------------------------------------------------
-# 错误消息（对齐 pi 文案）
+# 错误消息
 # ---------------------------------------------------------------------------
 
 
@@ -301,7 +301,7 @@ def _no_change_error(path: str, total_edits: int) -> ValueError:
 def apply_edits_to_normalized_content(
     normalized_content: str, edits: List[Edit], path: str
 ) -> AppliedEditsResult:
-    """对 LF 归一化内容应用一组精确文本替换（对齐 pi 同名函数）。
+    """对 LF 归一化内容应用一组精确文本替换。
 
     全部 edit 针对同一份原文匹配，倒序应用保证偏移稳定；任一 edit 需要
     fuzzy 匹配时，整体在归一化空间替换后按行叠回原文。任何校验失败
@@ -374,7 +374,7 @@ def apply_edits_to_normalized_content(
 def generate_unified_patch(
     path: str, old_content: str, new_content: str, context_lines: int = 4
 ) -> str:
-    """生成标准 unified patch（对齐 pi generateUnifiedPatch）。"""
+    """生成标准 unified patch。"""
     lines = difflib.unified_diff(
         old_content.splitlines(keepends=True),
         new_content.splitlines(keepends=True),
@@ -390,7 +390,7 @@ def generate_diff_string(
 ) -> Tuple[str, Optional[int]]:
     """生成带行号的展示型 diff，返回 (diff, 新文件首个变更行号)。
 
-    对齐 pi generateDiffString：变更行带 +/- 前缀与行号，上下文只保留
+    变更行带 +/- 前缀与行号，上下文只保留
     变更前后各 context_lines 行，中间以 ... 折叠。
     """
     old_lines = old_content.split("\n")

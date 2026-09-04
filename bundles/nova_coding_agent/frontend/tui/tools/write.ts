@@ -1,10 +1,10 @@
 /**
- * write 工具渲染器（新建组件——pi write.ts 渲染语义对位）。
+ * write 工具渲染器（新建组件）。
  *
  * details 契约（backend/tools/write.py）：错误时为 { error, path? }；
  * 成功只有文本回执。内容取自**参数**（args.content——write 的正文在参数里）。
  *
- * 呈现语义（pi 对齐）：
+ * 呈现语义：
  * - 折叠时显示前 10 行内容预览 + `... (N more lines, ctrl+o to expand)`；
  * - 展开时全量；content 缺失/非字符串给明确提示行；
  * - 成功结果不追加内容（错误时显示错误行）。
@@ -13,7 +13,7 @@ import { Container, Text, type Component } from '@earendil-works/pi-tui';
 
 import { detailsOf, type RendererInput } from 'nova-tui';
 
-/** 折叠预览行数（pi write 卡片同款）。 */
+/** 折叠预览行数。 */
 const PREVIEW_LINES = 10;
 
 export default function renderWrite(input: RendererInput): Component {

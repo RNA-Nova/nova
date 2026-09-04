@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any, List, Literal, Optional
 
 from nova_ai.types.base_model import NovaBaseModel
+from pydantic import Field
+
 from nova_harness.core.types.compaction import CompactionPreparation
 from nova_harness.core.types.session.entries import SessionEntry
-from pydantic import Field
 
 from .constants import (
     COMPACTION_END,
@@ -67,7 +68,6 @@ class SessionBeforeCompactEvent(NovaBaseModel):
     type: Literal["session_before_compact"] = SESSION_BEFORE_COMPACT
     branch_entries: List[SessionEntry] = Field(default_factory=list)
     custom_instructions: Optional[str] = None
-    signal: Any = None
 
 
 class SessionCompactEvent(NovaBaseModel):
@@ -105,7 +105,6 @@ class TreePreparation(NovaBaseModel):
 class SessionBeforeTreeEvent(NovaBaseModel):
     type: Literal["session_before_tree"] = SESSION_BEFORE_TREE
     preparation: TreePreparation = Field(default_factory=TreePreparation)
-    signal: Any = None
 
 
 class SessionTreeEvent(NovaBaseModel):

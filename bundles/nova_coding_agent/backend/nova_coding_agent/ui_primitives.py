@@ -21,7 +21,7 @@ from typing import Any, Dict, FrozenSet, List, Optional
 from nova_harness.core.types.ui import UIContext
 
 # 基线四件套：交互原子（语义冻结——决断/选择/文本/告知）+ form（官方复合原语）
-# + set_status（展示类词汇：footer 扩展状态行，pi ctx.ui.setStatus 对位）。
+# + set_status（展示类词汇：footer 扩展状态行）。
 # 前端原生实现；能力协商时按名宣告。
 STANDARD_METHODS: FrozenSet[str] = frozenset(
     {
@@ -127,7 +127,7 @@ def notify_message(ui: UIContext, message: str, type: str = "info") -> None:
 
 
 def set_status(ui: UIContext, key: str, text: Optional[str]) -> None:
-    """设置 footer 扩展状态行（pi ``ctx.ui.setStatus`` 对位）。
+    """设置 footer 扩展状态行。
 
     ``key`` 幂等覆盖（同一来源反复更新同一位）；``text`` 为 None 或空串
     时清除该位。无对应能力的前端经 transport 的 capability 检查静默降级。

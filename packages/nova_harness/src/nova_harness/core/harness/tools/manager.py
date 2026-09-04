@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from nova_agent import AgentTool
+
 from nova_harness.core.harness.tools.dynamic_tool import (
     DynamicTool,
     create_tool_definition_from_agent_tool,

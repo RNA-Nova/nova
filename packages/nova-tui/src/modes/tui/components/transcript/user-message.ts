@@ -1,12 +1,12 @@
 /**
- * 用户消息视图（复刻 pi components/user-message.ts）。
+ * 用户消息视图。
  *
  * Box 背景（userMessageBg）+ Markdown（保留列表标记与反斜杠转义），
  * 首末行注入 OSC 133 区段标记。
  *
  * skill block 拆分：消息以 ``<skill ...>...</skill>`` 开头时（/skill:name
  * 展开产物），skill 部分渲染为折叠的 [skill] 条目（ctrl+o 展开全文），
- * 尾部用户文本仍走正常消息呈现（pi 同款拆分语义）。
+ * 尾部用户文本仍走正常消息呈现。
  */
 
 import { Box, Container, Markdown, Spacer } from '@earendil-works/pi-tui';

@@ -32,7 +32,7 @@ export interface ToolCallCard {
   toolName: string;
   args: Record<string, unknown>;
   /**
-   * 两阶段生命周期（pi 同款）：
+   * 两阶段生命周期：
    * - `streaming`：参数流式累积中（message_update 从 assistant content 的
    *   toolCall 块建卡，参数逐段累积可见）；
    * - `running`：执行中（tool_execution_start）；
@@ -44,6 +44,12 @@ export interface ToolCallCard {
    * 窗口的标记：edit 类工具的执行前只读预览（diff）在这个时点触发。
    */
   argsComplete?: boolean;
+  /**
+   * 卡片创建时刻（epoch ms——计时行的锚点）。计时的单一事实源是数据而
+   * 非组件实例：transcript 重建（ctrl+o 展开态切换等）后新组件从卡片
+   * 现取，计时不再随重建归零。
+   */
+  startedAt?: number;
   /** 流式中间输出（tool_execution_update 的 partial_result）。 */
   partial?: { content?: ContentBlock[]; details?: unknown };
   /** 最终结果（tool_execution_end 的 result，或 abort 收尾的错误文本）。 */
@@ -59,6 +65,10 @@ export type TranscriptEntry =
       text: string;
       /** 思考块内容（独立字段——渲染为斜体暗色区块，不与正文混排）。 */
       thinking?: string;
+      /** thinking 持续毫秒（折叠态摘要 "Thought for Ns" 的数据源）。 */
+      thinkingDurationMs?: number;
+      /** 本消息内各类工具调用计数（折叠摘要的工具纵览 "bash ×1 · read ×2"）。 */
+      toolCounts?: Record<string, number>;
       /** 终止原因（length/aborted/error 时前端呈现错误行）。 */
       stopReason?: string;
       /** 错误详情（stopReason 为 aborted/error 时的补充文本）。 */

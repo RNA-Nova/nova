@@ -202,7 +202,7 @@ def test_parallel_adjudicates_per_agent():
     assert len(ui.select_calls) == 2  # 两个新名都问了
 
     # 第二轮：scout 已 always（不问）、worker 只允一次（再问）——脚本给取消
-    # 注意：允许集挂在扩展实例闭包上——同一 api 的 handler 共享
+    # 注意：允许集挂在扩展实例闭包上——同一 a handler 共享
     ui2 = _FakeUI(select_script=["取消"])
     ctx2 = _make_ctx(ui=ui2)
     result = _run(handler(_event(tasks), ctx2))

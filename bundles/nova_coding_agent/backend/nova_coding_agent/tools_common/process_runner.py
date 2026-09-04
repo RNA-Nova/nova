@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator, List, Optional, Protocol
 
+from nova_coding_agent.tools_common.streams import read_lines
+
 from nova_harness.core.utils.binaries import resolve_binary
 
 
@@ -58,11 +60,10 @@ class _LocalSession:
 
     async def stdout_lines(self) -> AsyncIterator[str]:
         assert self._proc.stdout is not None
-        while True:
-            line = await self._proc.stdout.readline()
-            if not line:
-                break
-            yield line.decode("utf-8", errors="replace").rstrip("\n").removesuffix("\r")
+        # readline 的 64KB 单行上限会炸大行（如 cat 巨型单行文件）——
+        # 委托无上限的共享实现
+        async for line in read_lines(self._proc.stdout):
+            yield line
         if self._proc.stderr is not None:
             self._stderr = await self._proc.stderr.read()
 

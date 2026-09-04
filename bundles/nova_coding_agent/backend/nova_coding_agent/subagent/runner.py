@@ -1,8 +1,7 @@
 """Subagent 执行引擎。
 
 支持 single、parallel、chain 三种模式。每个子 agent 都通过
-``nova-harness run`` CLI 在独立 Python 子进程中运行，与 pi 的 subagent
-扩展保持一致：pi 调用 ``pi`` CLI，Nova 调用 ``nova-harness`` CLI。
+``nova-harness run`` CLI 在独立 Python 子进程中运行。
 
 **只有 agents，没有 subagents**：agent 解析不在本引擎——调用方（subagent
 工具）消费会话注册表（``ToolExecContext.agents``）按名查表，旧工具侧三源
@@ -26,16 +25,16 @@ import sys
 from typing import Any, Callable, Dict, List, Optional
 
 from nova_ai import AbortSignal
-
 from nova_coding_agent.subagent.types import (
     SubagentCall,
     SubagentResult,
     SubagentUsage,
 )
+from nova_coding_agent.tools_common.streams import read_lines
 
 # on_update 聚合回调：始终携带**全量结果列表**（parallel 含 exit_code=-1
 # 的"运行中"占位，chain 含已完成步骤 + 当前流式步骤），渲染器据此展示
-# 总进度（对齐 pi subagent 的聚合 details 流）。
+# 总进度。
 OnUpdate = Callable[[List[SubagentResult]], None]
 
 MAX_PARALLEL_TASKS = 8
@@ -128,23 +127,27 @@ def _usage_from_dict(raw: Dict[str, Any]) -> SubagentUsage:
 async def _stream_lines(
     stream: asyncio.StreamReader,
 ) -> Any:
-    """异步逐行读取子进程 stdout。"""
-    while True:
-        line = await stream.readline()
-        if not line:
-            break
-        yield line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
+    """异步逐行读取子进程 stdout（无单行长上限——委托 tools_common.read_lines，
+    readline 的 64KB 陷阱曾让大消息帧炸掉整个子代理）。"""
+    async for line in read_lines(stream):
+        yield line
 
 
 def _apply_event_payload(
     result: SubagentResult,
     payload: Dict[str, Any],
-    on_update: Optional[OnUpdate] = None,
+    on_update: Optional["Callable[[SubagentResult], None]"] = None,
 ) -> None:
-    """解析单条 JSONL 事件并更新 result；可选触发 on_update 回调（单元素列表形态）。"""
+    """解析单条 JSONL 事件并更新 result；可选触发 on_update 回调（裸实例——
+    单元素列表的包装归 ``_run_single._emit_update``，此处不得再包）。
+
+    注：print 模式 JSONL 里工具结果以 ``message_end``（role=toolResult）
+    出现，不存在独立的 ``tool_result_end`` 事件（曾被误列为可触发类型，
+    属死词汇，已移除）。
+    """
     event_type = payload.get("type")
     msg = payload.get("message") or {}
-    if event_type in ("message_end", "tool_result_end"):
+    if event_type == "message_end":
         # 累积消息用于计算 usage/output。
         result.details.setdefault("messages", []).append(msg)
 
@@ -176,7 +179,7 @@ def _apply_event_payload(
                 break
         if on_update is not None:
             try:
-                on_update([result])
+                on_update(result)
             except Exception:
                 # on_update 异常不应中断子 agent 执行
                 pass
@@ -228,7 +231,10 @@ async def _run_single(
     ``on_update`` 收到的是**单元素列表**（聚合回调形态的统一——调用方
     在 parallel/chain 模式下自行包裹为全量列表）。
     """
-    result = SubagentResult(agent=call.agent, task=call.task)
+    # exit_code 先置 -1（运行中哨兵）——流式期间渲染器据此显示 ⏳；
+    # 进程结束后各终态路径回填真实退出码。pi 示例流式期用默认值 0，
+    # 卡片会提前亮 ✓（"确认后沙漏变对勾"）——此处刻意修正，不对齐该瑕疵。
+    result = SubagentResult(agent=call.agent, task=call.task, exit_code=-1)
     cmd = _build_single_subprocess_cmd(call)
     env = os.environ.copy()
     env["NOVA_AGENT_DIR"] = agent_dir
@@ -342,7 +348,10 @@ async def _run_single(
                             except asyncio.TimeoutError:
                                 pass
                     result.exit_code = (
-                        proc.returncode if proc.returncode is not None else -1
+                        # 130 = 128+SIGINT 约定；-1 是"运行中"哨兵，终态不回漏
+                        proc.returncode
+                        if proc.returncode is not None
+                        else 130
                     )
                     result.stop_reason = "aborted"
                     result.error = "Subagent aborted by signal."
@@ -356,26 +365,33 @@ async def _run_single(
             await asyncio.gather(stdout_task, stderr_task)
             _record_stderr()
 
-            result.exit_code = return_code if return_code is not None else -1
-
+            # 终态回填真实退出码：-1 是 _wait_with_timeout 的超时哨兵，
+            # 映射为 GNU timeout 约定的 124（-1 全程语义为"运行中"，
+            # 终态路径不得回漏——否则超时任务永远显示 ⏳）
             if return_code == -1:
+                result.exit_code = 124
                 result.stop_reason = "timeout"
                 result.error = f"Subagent timed out after {timeout} seconds."
                 result.error_message = result.error
-            elif return_code < 0:
-                # 被信号终止（如 SIGKILL）
-                result.stop_reason = "killed"
-                result.error = (
-                    f"Subagent process was terminated by signal {-return_code}."
-                )
-                result.error_message = result.error
-            elif return_code != 0:
-                stderr_text = result.details.get("stderr", "")
+            elif return_code is None:
+                result.exit_code = 1
                 result.stop_reason = "error"
-                result.error = (
-                    f"Subagent process exited with code {return_code}: {stderr_text}"
-                )
-                result.error_message = result.error_message or stderr_text
+                result.error = "Subagent process ended without an exit code."
+                result.error_message = result.error
+            else:
+                result.exit_code = return_code
+                if return_code < 0:
+                    # 被信号终止（如 SIGKILL）
+                    result.stop_reason = "killed"
+                    result.error = (
+                        f"Subagent process was terminated by signal {-return_code}."
+                    )
+                    result.error_message = result.error
+                elif return_code != 0:
+                    stderr_text = result.details.get("stderr", "")
+                    result.stop_reason = "error"
+                    result.error = f"Subagent process exited with code {return_code}: {stderr_text}"
+                    result.error_message = result.error_message or stderr_text
 
             # 成功但 model 返回了 errorMessage。
             if not result.error and result.error_message:
@@ -390,7 +406,9 @@ async def _run_single(
                 except Exception:
                     pass
             _record_stderr()
-            result.exit_code = -1
+            # 异常终态给通用失败码 1——-1 是"运行中"哨兵，不得占用
+            # （否则渲染器会把已死的任务永远显示为 ⏳ 运行中）
+            result.exit_code = 1
             result.stop_reason = "error"
             result.error = str(exc)
             result.error_message = str(exc)
@@ -443,8 +461,7 @@ async def run_subagent_parallel(
     """Parallel 模式：并发执行多个子 agent（聚合流式更新）。
 
     ``on_update`` 每次收到全量槽位列表：未完成任务以 ``exit_code=-1``
-    的占位结果表示（渲染器据此显示运行中状态与 "n/m done" 总进度，
-    对齐 pi subagent 的并行流式 details）。
+    的占位结果表示（渲染器据此显示运行中状态与 "n/m done" 总进度）。
     """
     if len(calls) > MAX_PARALLEL_TASKS:
         raise ValueError(
@@ -486,8 +503,7 @@ async def run_subagent_chain(
 ) -> List[SubagentResult]:
     """Chain 模式：顺序执行，支持 {previous} 占位符（聚合流式更新）。
 
-    ``on_update`` 收到 "已完成步骤 + 当前流式步骤" 的全量列表（对齐 pi
-    subagent 的 chain details 形态）。
+    ``on_update`` 收到 "已完成步骤 + 当前流式步骤" 的全量列表。
     """
     results: List[SubagentResult] = []
     previous_output = ""

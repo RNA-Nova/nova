@@ -1,4 +1,4 @@
-"""Edit tool executor —— 精确文本替换（对齐 pi ``core/tools/edit.ts``）。
+"""Edit tool executor —— 精确文本替换。
 
 语义（经 ``tools_common/edit_engine`` 保证）：
 - 每个 ``edits[].oldText`` 必须在原文中唯一（出现多次报错）；
@@ -13,12 +13,6 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.edit_engine import (
     Edit,
     apply_edits_to_normalized_content,
@@ -36,15 +30,21 @@ from nova_coding_agent.tools_common.operations import (
 )
 from nova_coding_agent.tools_common.path_utils import resolve_path
 
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+
 
 def _throw_if_aborted(signal: Optional[AbortSignal]) -> None:
-    """步骤间检查 abort（对齐 pi：不在事件监听里 reject，保住队列锁）。"""
+    """步骤间检查 abort（不在事件监听里 reject，保住队列锁）。"""
     if signal is not None and getattr(signal, "aborted", False):
         raise RuntimeError("Operation aborted")
 
 
 def _error_detail(exc: Exception) -> str:
-    """提取错误细节（对齐 pi：OSError 透出 errno 错误码如 ENOENT/EACCES）。"""
+    """提取错误细节（OSError 透出 errno 错误码如 ENOENT/EACCES）。"""
     err_no = getattr(exc, "errno", None)
     if err_no is not None:
         return f"Error code: {errno.errorcode.get(err_no, err_no)}"
@@ -52,7 +52,7 @@ def _error_detail(exc: Exception) -> str:
 
 
 def _prepare_edits(params: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """归一化 edits 入参（对齐 pi prepareEditArguments）。
+    """归一化 edits 入参。
 
     - 部分模型把 edits 作为 JSON 字符串发送 → 尝试解析；
     - 旧式顶层 ``oldText``/``newText`` → 并入 edits 列表。
@@ -182,7 +182,7 @@ class Tool:
         try:
             async with with_file_write_lock(path):
                 _throw_if_aborted(signal)
-                # 读写权限 fail-fast（对齐 pi access(R_OK|W_OK)）：不存在/只读
+                # 读写权限 fail-fast：不存在/只读
                 # 文件在读与匹配之前报错，而不是等写盘才暴露
                 try:
                     await operations.access(path)
@@ -214,7 +214,7 @@ class Tool:
                     )
                 _throw_if_aborted(signal)
 
-                # BOM 与换行符：匹配前剥离/归一，写回时恢复（对齐 pi 流程）
+                # BOM 与换行符：匹配前剥离/归一，写回时恢复
                 bom, content = strip_bom(original)
                 original_ending = detect_line_ending(content)
                 normalized = normalize_to_lf(content)

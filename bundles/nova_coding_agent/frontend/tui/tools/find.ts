@@ -1,5 +1,5 @@
 /**
- * find 工具渲染器（新建组件——pi find.ts 渲染语义对位）。
+ * find 工具渲染器（新建组件）。
  *
  * 结果文本在 result.content（每行一个相对路径，目录带尾 `/`）；
  * details：limit / truncated 等。折叠时前 20 行预览，展开全量。

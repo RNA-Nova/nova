@@ -1,18 +1,17 @@
 /**
- * scoped-models 面板（pi scoped-models-selector 对位）。
+ * scoped-models 面板。
  *
  * 归属：官方 bundle 的 ui/ 段（包自持命令 UI——dogfood：官方与第三方同机制；
  * 从 nova-client 宿主迁入）。宿主部件经 'nova-tui/modes/tui/*' 子路径导出
  * 共享（jiti 别名 + 原生 ESM 缓存，主题/键位单例与宿主同实例）。
  *
  * scoped 池 = ctrl+p 循环模型的启用集与循环顺序（session 级配置）。
- * 面板行为（pi 对位）：
+ * 面板行为：
  * - 启用行在前（循环顺序），未启用行在后（provider/id 序）；
  * - space/enter 切换启用（启用追加到循环序末尾；禁用移除）；
  * - alt+↑/↓ 调整启用项的循环顺序；
  * - ctrl+a 全启用（有搜索词时仅过滤结果）、ctrl+x 全清除；
- * - ctrl+s 保存（编排写 setScopedModels RPC——**仅保存时写**，pi "session-only
- *   until saved" 语义）；esc 放弃本地编辑；有未保存改动时标题带 (unsaved)；
+ * - ctrl+s 保存（编排写 setScopedModels RPC——**仅保存时写**）；esc 放弃本地编辑；有未保存改动时标题带 (unsaved)；
  * - 可打印字符进搜索框（fuzzy 过滤显示，不影响启用状态）。
  */
 
@@ -214,7 +213,7 @@ export class ScopedModelsSelector extends Container implements Focusable {
 
   private enableAll(): void {
     const query = this.searchInput.getValue().trim();
-    // pi 语义：有搜索词时仅启用过滤结果
+    // 有搜索词时仅启用过滤结果
     const pool = query ? this.display.filter((item) => !item.on).map((item) => item.row) : this.disabled;
     for (const row of pool) {
       this.enabled.push(row);

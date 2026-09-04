@@ -1,10 +1,9 @@
-"""图片处理（深度对齐 pi ``processImage`` 语义）。
+"""图片处理（深度``processImage`` 语义）。
 
 管线：格式归一（bmp 等 API 普遍不接受的格式 → PNG）→ EXIF 方向校正 →
 维度/字节预算压缩链（2000x2000 维度限 + base64 后 ≤4.5MB 预算：
 PNG/JPEG 择优 → JPEG 质量递减 → 尺寸 0.75 倍递减至 1x1）。
-无法解码或压不进预算时返回 ``ok=False`` + 提示文案——对齐 pi read.ts
-的失败语义：提示文本给模型继续，不标工具错误。
+无法解码或压不进预算时返回 ``ok=False`` + 提示文案：提示文本给模型继续，不标工具错误。
 """
 
 from __future__ import annotations
@@ -14,20 +13,20 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-# 单边最大尺寸（对齐 pi autoResizeImages 的 2000x2000 上限）
+# 单边最大尺寸
 MAX_IMAGE_DIMENSION = 2000
 
-# base64 编码后的字节预算（对齐 pi image-resize-core.ts：4.5MB，
+# base64 编码后的字节预算（4.5MB，
 # 低于 Anthropic 5MB 限制留余量）
 MAX_IMAGE_BASE64_BYTES = int(4.5 * 1024 * 1024)
 
-# JPEG 质量递减步（对齐 pi qualitySteps 默认链：[80, 85, 70, 55, 40]）
+# JPEG 质量递减步（[80, 85, 70, 55, 40]）
 _JPEG_QUALITY_STEPS = (80, 85, 70, 55, 40)
 
-# 尺寸递减系数（对齐 pi：每轮 0.75 倍直至 1x1）
+# 尺寸递减系数（每轮 0.75 倍直至 1x1）
 _DIMENSION_SHRINK_FACTOR = 0.75
 
-# 提示文案（对齐 pi image-process.ts / image-resize.ts 的原文形态）
+# 提示文案
 _MESSAGE_UNSUPPORTED_FORMAT = (
     "[Image omitted: could not be converted to a supported inline image format.]"
 )
@@ -35,8 +34,7 @@ _MESSAGE_OVER_SIZE_LIMIT = (
     "[Image omitted: could not be resized below the inline image size limit.]"
 )
 
-# API 普遍接受的内联图片格式（对齐 pi normalizeSupportedImageMimeType；
-# jpg 归一为 jpeg）
+# API 普遍接受的内联图片格式（# jpg 归一为 jpeg）
 _SUPPORTED_MIME_TYPES = {
     "image/png": "image/png",
     "image/jpeg": "image/jpeg",
@@ -48,7 +46,7 @@ _SUPPORTED_MIME_TYPES = {
 
 @dataclass
 class ProcessedImage:
-    """process_image 结果（对齐 pi ``ProcessImageResult`` 的 ok 判别 union）。
+    """process_image 结果。
 
     ``ok=False`` 时仅 ``message`` 有效：提示文案返回给模型继续，
     不构成工具错误。
@@ -67,7 +65,7 @@ class ProcessedImage:
 
 
 def _base_mime_type(mime_type: str) -> str:
-    """去掉参数部分并小写（对齐 pi ``baseMimeType``）。"""
+    """去掉参数部分并小写。"""
     return mime_type.split(";")[0].strip().lower()
 
 
@@ -97,7 +95,7 @@ def _encode_jpeg(img: "object", quality: int) -> bytes:
 
 
 def _convert_to_png(data: bytes) -> Optional[bytes]:
-    """不支持的格式转 PNG（对齐 pi ``convertImageBytesToPng``，含 EXIF 方向校正）。"""
+    """不支持的格式转 PNG（含 EXIF 方向校正）。"""
     from PIL import Image, ImageOps  # 延迟导入：文本读取路径不付出 PIL 加载成本
 
     try:
@@ -110,7 +108,7 @@ def _convert_to_png(data: bytes) -> Optional[bytes]:
 
 
 def _conversion_hints(converted_from: Optional[str], to_mime: str) -> List[str]:
-    """格式转换提示（对齐 pi ``conversionHint`` 文案形态）。"""
+    """格式转换提示。"""
     if not converted_from or converted_from == to_mime:
         return []
     return [f"[Image converted from {converted_from} to {to_mime}.]"]
@@ -119,7 +117,7 @@ def _conversion_hints(converted_from: Optional[str], to_mime: str) -> List[str]:
 def _dimension_note(
     original_width: int, original_height: int, width: int, height: int
 ) -> str:
-    """缩放坐标映射系数提示（对齐 pi ``formatDimensionNote``）。"""
+    """缩放坐标映射系数提示。"""
     scale = original_width / width
     return (
         f"[Image: original {original_width}x{original_height}, "
@@ -136,7 +134,7 @@ def process_image(
     max_dimension: int = MAX_IMAGE_DIMENSION,
     max_bytes: int = MAX_IMAGE_BASE64_BYTES,
 ) -> ProcessedImage:
-    """处理图片（对齐 pi ``processImage``）。
+    """处理图片。
 
     1. 格式归一：png/jpeg/gif/webp 原样通过（jpg 归一为 jpeg），其余格式
        （bmp 等）转 PNG 并记转换提示；
@@ -159,7 +157,7 @@ def process_image(
         norm_data, norm_mime = png_data, "image/png"
 
     if not resize:
-        # auto_resize 关闭：归一后原样返回（对齐 pi：此路径不解码）；
+        # auto_resize 关闭：归一后原样返回（此路径不解码）；
         # 尺寸尝试量取供展示，坏字节量不到不视为失败
         width = height = 0
         try:
@@ -179,18 +177,18 @@ def process_image(
             original_height=height,
         )
 
-    # 2. EXIF 方向校正（对齐 pi applyExifOrientation）
+    # 2. EXIF 方向校正
     try:
         with Image.open(io.BytesIO(norm_data)) as img:
             image = ImageOps.exif_transpose(img)
             image.load()
     except Exception:
-        # 无法解码（对齐 pi resizeImageInProcess 返回 null 的路径）
+        # 无法解码
         return ProcessedImage(ok=False, message=_MESSAGE_OVER_SIZE_LIMIT)
 
     original_width, original_height = image.size
 
-    # 3. 已在全部限制内：原样返回（对齐 pi：字节不动，宽高取 EXIF 校正后）
+    # 3. 已在全部限制内：原样返回（字节不动，宽高取 EXIF 校正后）
     if (
         original_width <= max_dimension
         and original_height <= max_dimension
@@ -208,7 +206,7 @@ def process_image(
             original_height=original_height,
         )
 
-    # 4. 首轮 clamp 到 max_dimension 内（保比例，对齐 pi 的两段 if）
+    # 4. 首轮 clamp 到 max_dimension 内（保比例）
     target_width, target_height = original_width, original_height
     if target_width > max_dimension:
         target_height = _js_round(target_height * max_dimension / target_width)
@@ -264,7 +262,7 @@ def process_image(
             break
         current_width, current_height = next_width, next_height
 
-    # 压不进预算（对齐 pi 返回 null → processImage 的失败 message）
+    # 压不进预算
     return ProcessedImage(ok=False, message=_MESSAGE_OVER_SIZE_LIMIT)
 
 

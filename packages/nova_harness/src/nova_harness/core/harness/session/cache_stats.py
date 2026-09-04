@@ -25,6 +25,7 @@
 from typing import Dict, List, Optional, Tuple
 
 from nova_ai import Message
+
 from nova_harness.core.types.session.entries import SessionEntry
 from nova_harness.core.types.session.stats import (
     CacheMiss,

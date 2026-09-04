@@ -1,5 +1,5 @@
 /**
- * 键位提示格式化（pi keybinding-hints.ts 对位）。
+ * 键位提示格式化。
  *
  * 从全局键位表动态生成提示文本（"↑↓ navigate  enter select  esc cancel"）——
  * 键位可配置后提示自动跟随（不写死）。

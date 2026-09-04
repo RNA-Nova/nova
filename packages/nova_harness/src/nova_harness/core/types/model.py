@@ -15,6 +15,11 @@ from nova_ai.types.base_model import NovaBaseModel
 from pydantic import ConfigDict, Field
 
 # 类型别名
+# 注（规则 6 的知情偏离）：两个成员模型（nova_ai types/compat）全部字段
+# 可选、无 Literal 判别位，判别联合需要用户 models.json 增写字段——破坏
+# 存量配置的代价不接受。smart-union 下：含独有字段的 dict 因得分更高命中
+# 正确成员；只含共享字段的 dict 打平落首成员，但共享字段两方同义，无数据
+# 损失面。若将来 compat 增删字段使两成员出现"同键异义"，必须改判别联合。
 OpenAICompat = Union[OpenAICompletionsCompat, OpenAIResponsesCompat]
 
 

@@ -1,4 +1,4 @@
-/** 动态边框：随视口宽度伸缩的水平线（复刻 pi dynamic-border.ts）。 */
+/** 动态边框：随视口宽度伸缩的水平线。 */
 
 import type { Component } from '@earendil-works/pi-tui';
 

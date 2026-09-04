@@ -20,41 +20,55 @@ def build_session_tree(
     labels_by_id: Dict[str, str],
     label_timestamps_by_id: Optional[Dict[str, str]] = None,
 ) -> List[SessionTreeNode]:
-    """构建会话树结构（迭代实现，避免深树递归溢出，对齐 TS getTree）。"""
-    node_map = {}
-    roots = []
+    """构建会话树结构（迭代实现，避免深树递归溢出，对齐 TS getTree）。
 
-    # 创建节点
-    for entry in entries:
-        node_map[entry.id] = SessionTreeNode(
-            entry=entry,
-            children=[],
-            label=labels_by_id.get(entry.id),
-            label_timestamp=(
-                label_timestamps_by_id.get(entry.id) if label_timestamps_by_id else None
-            ),
-        )
+    父子关系的累积/排序在纯 dict 中进行——可变构建容器不进 Pydantic
+    （规则 1）；节点在关系定型后一次性物化（迭代后序，children 引用的
+    是已定型节点）。
+    """
+    by_id = {entry.id: entry for entry in entries}
 
-    # 构建树：orphan（父链断裂）与自引用条目作为根处理
+    # 第一遍：累积父子关系——orphan（父链断裂）与自引用条目作为根
+    children_of: Dict[str, List[str]] = {entry.id: [] for entry in entries}
+    root_ids: List[str] = []
     for entry in entries:
-        node = node_map[entry.id]
-        if entry.parent_id is None or entry.parent_id == entry.id:
-            roots.append(node)
+        if (
+            entry.parent_id is None
+            or entry.parent_id == entry.id
+            or entry.parent_id not in by_id
+        ):
+            root_ids.append(entry.id)
         else:
-            parent = node_map.get(entry.parent_id)
-            if parent:
-                parent.children.append(node)
-            else:
-                roots.append(node)
+            children_of[entry.parent_id].append(entry.id)
 
-    # 按时间戳排序（迭代，对齐 TS 的栈实现）
-    stack = list(roots)
-    while stack:
-        node = stack.pop()
-        node.children.sort(key=lambda n: n.entry.timestamp)
-        stack.extend(node.children)
+    # 按时间戳排序子节点（根列表保持条目序，对齐 TS）
+    for ids in children_of.values():
+        ids.sort(key=lambda entry_id: by_id[entry_id].timestamp)
 
-    return roots
+    # 第二遍：迭代后序物化，children 一次性定型
+    node_by_id: Dict[str, SessionTreeNode] = {}
+    for root_id in root_ids:
+        stack: List[Tuple[str, bool]] = [(root_id, False)]
+        while stack:
+            entry_id, children_done = stack.pop()
+            if not children_done:
+                stack.append((entry_id, True))
+                for child_id in children_of[entry_id]:
+                    stack.append((child_id, False))
+                continue
+            entry = by_id[entry_id]
+            node_by_id[entry_id] = SessionTreeNode(
+                entry=entry,
+                children=[node_by_id[c] for c in children_of[entry_id]],
+                label=labels_by_id.get(entry_id),
+                label_timestamp=(
+                    label_timestamps_by_id.get(entry_id)
+                    if label_timestamps_by_id
+                    else None
+                ),
+            )
+
+    return [node_by_id[root_id] for root_id in root_ids]
 
 
 def create_branched_session_entries(

@@ -297,8 +297,8 @@ async def _poll_openai_codex_device_auth(
     return await poll_oauth_device_code_flow(
         DeviceCodePollOptions(
             poll=_poll,
-            intervalSeconds=device["intervalSeconds"],
-            expiresInSeconds=_DEVICE_CODE_TIMEOUT_SECONDS,
+            interval_seconds=device["intervalSeconds"],
+            expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
             signal=signal,
         )
     )
@@ -430,10 +430,10 @@ async def _login_openai_codex_device_code(
     interaction.notify(
         AuthEvent(
             type="device_code",
-            userCode=device["userCode"],
-            verificationUri=_DEVICE_VERIFICATION_URI,
-            intervalSeconds=device["intervalSeconds"],
-            expiresInSeconds=_DEVICE_CODE_TIMEOUT_SECONDS,
+            user_code=device["userCode"],
+            verification_uri=_DEVICE_VERIFICATION_URI,
+            interval_seconds=device["intervalSeconds"],
+            expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
         )
     )
     code = await _poll_openai_codex_device_auth(device, interaction.signal)

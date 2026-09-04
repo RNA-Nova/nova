@@ -95,6 +95,7 @@ export {
   type RendererOutput,
   type RendererResultPart,
 } from './presentation/blocks.js';
+export { guardComponentLineWidth } from './presentation/component-guard.js';
 export {
   SlotRegistry,
   blockSlot,

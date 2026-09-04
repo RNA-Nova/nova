@@ -8,7 +8,7 @@
  * 优先消费执行期生成的 patch；patch 缺失时降级为 old/new 整体替换
  * （不重算模糊匹配）。词级高亮经宿主 diff 行渲染器（renderDiffLines）。
  *
- * 执行前预览（pi edit.ts renderCall 的 argsComplete 分支对位）：
+ * 执行前预览：
  * 命名导出 preview 钩子——参数完整、执行未开始时由组件层调用，
  * 只读匹配并生成 patch；renderEdit 经 input.preview 消费
  * （执行后 details.patch 到达即取代预览，二者同形状无缝衔接）。

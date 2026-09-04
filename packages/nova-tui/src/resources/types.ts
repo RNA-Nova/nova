@@ -37,7 +37,7 @@ export interface PackageUIAssets {
   needsNpmInstall: boolean;
 }
 
-/** 覆盖碰撞（pi ResourceCollision 对位）：同名键的胜者/败者与来源在案。 */
+/** 覆盖碰撞：同名键的胜者/败者与来源在案。 */
 export interface ResourceCollision {
   kind: string;
   name: string;

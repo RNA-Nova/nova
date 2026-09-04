@@ -9,12 +9,13 @@ from typing import Annotated, Any, List, Literal, Optional, Union
 from nova_agent import CustomAgentMessage
 from nova_ai import Message, ModelThinkingLevel
 from nova_ai.types.base_model import NovaBaseModel
+from pydantic import BeforeValidator, Field, SerializeAsAny, TypeAdapter
+
 from nova_harness.core.types.messages import (
     CustomMessage,
     CustomMessageContent,
 )
 from nova_harness.core.types.session.constants import CURRENT_SESSION_VERSION
-from pydantic import BeforeValidator, Field, SerializeAsAny, TypeAdapter
 
 
 class SessionHeader(NovaBaseModel):
@@ -43,10 +44,14 @@ _MESSAGE_DICT_ADAPTER = TypeAdapter(Union[Message, CustomMessage])
 def _validate_message_dict(value: Any) -> Any:
     """dict 形态的消息必须能验证为标准/扩展消息，否则抛错。
 
-    包级用户工具消息（bashExecution 等）由解析层经注册表构造实例后进入
-    本模型，不应以裸 dict 到达。没有这个守卫时，union 里无字段的
-    ``CustomAgentMessage`` 基类会把任意 dict 静默吞成空消息
-    （extra ignored）——畸形数据凭空消失。
+    规则 6 的开放集处方（判别联合+兜底成员）在此不适用：包级消息由
+    各包自由定义、无共享判别字段，判别联合无从挂载，唯一替代是改
+    会话 JSONL 格式（加信封层），代价远大于收益。本守卫把规范真正
+    禁止的危害——union 里无字段的 ``CustomAgentMessage`` 基类把任意
+    dict 静默吞成空消息（extra ignored）——封死在反序列化入口：
+    裸 dict 必须先过标准/custom 两成员校验；包级用户工具消息
+    （bashExecution 等）由解析层经注册表构造实例后进入，不应以裸
+    dict 到达（实例经 revalidate_instances=never 直通，不被基类重建）。
     """
     if isinstance(value, dict):
         _MESSAGE_DICT_ADAPTER.validate_python(value)

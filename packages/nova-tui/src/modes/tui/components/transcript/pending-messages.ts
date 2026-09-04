@@ -1,9 +1,9 @@
 /**
- * 排队消息区（复刻 pi pendingMessagesContainer）。
+ * 排队消息区。
  *
  * 数据源：快照的 steering_messages / follow_up_messages（字符串数组）。
  * 有排队内容时显示在转录区与状态区之间（dim 预览），空则隐藏。
- * pi 同款呈现：前缀标记（steer ⟶ / follow-up ⏎）+ 单行截断预览。
+ * 呈现：前缀标记（steer ⟶ / follow-up ⏎）+ 单行截断预览。
  */
 
 import type { NovaUIRuntime } from 'nova-tui';

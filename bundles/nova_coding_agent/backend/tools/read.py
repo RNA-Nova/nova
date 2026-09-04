@@ -7,12 +7,6 @@ from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, ImageContent, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.image import process_image
 from nova_coding_agent.tools_common.operations import (
     ReadOperations,
@@ -23,6 +17,12 @@ from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     format_size,
     truncate_head,
+)
+
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
 )
 
 
@@ -69,7 +69,7 @@ class Tool:
         self.operations = operations or create_local_read_operations()
 
     def _non_vision_image_note(self, ctx: ToolExecContext) -> Optional[str]:
-        """当前模型不支持图片输入时返回提示（对齐 pi ``getNonVisionImageNote``）。"""
+        """当前模型不支持图片输入时返回提示。"""
         model = ctx.model
         if model is None or "image" in getattr(model, "input_types", ["image"]):
             return None
@@ -130,13 +130,13 @@ class Tool:
         try:
             _throw_if_aborted()
             # 图片文件：格式归一 + EXIF 校正 + 预算压缩后返回图片内容
-            # （对齐 pi processImage：2000x2000 维度限 + base64 ≤4.5MB 预算）
+            # （2000x2000 维度限 + base64 ≤4.5MB 预算）
             if await operations.is_image_file(path):
                 result = await operations.read_image(path)
                 if result.error:
                     raise RuntimeError(result.error)
                 _throw_if_aborted()
-                # 非视觉模型：省略图片，仅返回提示（对齐 pi read.ts）
+                # 非视觉模型：省略图片，仅返回提示
                 non_vision_note = self._non_vision_image_note(ctx)
                 if non_vision_note is not None:
                     return AgentToolResult(
@@ -157,7 +157,7 @@ class Tool:
                     resize=self._context.settings.get_image_auto_resize(),
                 )
                 if not processed.ok:
-                    # 对齐 pi read.ts：图片无法解码/压不进预算时给提示文本，
+                    # 图片无法解码/压不进预算时给提示文本，
                     # 模型可据此继续，不标 is_error
                     note = f"## 🖼️ 图片读取\n\n路径: `{path}`\n\n{processed.message}"
                     return AgentToolResult(
@@ -169,7 +169,7 @@ class Tool:
                     size_note = f"\n**尺寸**: {processed.width}x{processed.height}" + (
                         "（已缩放）" if processed.resized else ""
                     )
-                # hints：格式转换提示 + 缩放坐标映射系数提示（对齐 pi hints）
+                # hints：格式转换提示 + 缩放坐标映射系数提示
                 hint_text = ""
                 if processed.hints:
                     hint_text = "\n\n" + "\n".join(processed.hints)
@@ -226,7 +226,7 @@ class Tool:
             start_display = start + 1
             notices: list[str] = []
             if truncation.first_line_exceeds_limit:
-                # 首行即超字节预算：提示带该行实际大小（对齐 pi 文案）
+                # 首行即超字节预算：提示带该行实际大小
                 first_line_size = format_size(len(all_lines[start].encode("utf-8")))
                 content = (
                     f"[Line {start_display} is {first_line_size}, exceeds "
@@ -238,7 +238,7 @@ class Tool:
                 content = truncation.content
                 if truncation.truncated:
                     end_display = start_display + truncation.output_lines - 1
-                    # 字节限截断时标注字节预算（对齐 pi truncatedBy==="bytes" 变体）
+                    # 字节限截断时标注字节预算
                     limit_note = (
                         f" ({format_size(DEFAULT_MAX_BYTES)} limit)"
                         if truncation.truncated_by == "bytes"

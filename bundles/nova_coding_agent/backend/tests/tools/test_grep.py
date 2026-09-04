@@ -1,4 +1,4 @@
-"""grep 工具测试：基础行为、pi 对齐（--hidden、长行截断、context 自渲染、整体
+"""grep 工具测试：基础行为与边界（--hidden、长行截断、context 自渲染、整体
 limit、No matches、literal）、事件循环不阻塞、子进程退出码透出、50KB 截断。
 """
 
@@ -53,7 +53,7 @@ def test_grep(tmpdir):
     executor = _load_executor()
     result = _run(executor.execute("id", {"path": tmpdir, "pattern": "def hello"}))
 
-    # 目录搜索时输出相对路径 + 行号格式（对齐 pi：path:N: text）
+    # 目录搜索时输出相对路径 + 行号格式（path:N: text）
     assert "sample.py:1: def hello():" in result.content[0].text
 
 
@@ -89,12 +89,12 @@ def test_tool_metadata_valid():
 
 
 # ---------------------------------------------------------------------------
-# pi 对齐行为：--hidden、长行截断、context 自渲染、No matches、literal、大小写
+# --hidden、长行截断、context 自渲染、No matches、literal、大小写
 # ---------------------------------------------------------------------------
 
 
 def test_grep_includes_hidden_files(tmpdir):
-    """--hidden：隐藏文件与隐藏目录都参与搜索（对齐 pi）。"""
+    """--hidden：隐藏文件与隐藏目录都参与搜索（）。"""
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
@@ -181,7 +181,7 @@ def test_grep_literal_mode(tmpdir):
 
 
 def test_grep_case_default_sensitive(tmpdir):
-    """默认区分大小写（对齐 pi）；ignoreCase=True 才不区分。"""
+    """默认区分大小写（）；ignoreCase=True 才不区分。"""
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
@@ -304,12 +304,12 @@ def test_grep_nonexistent_path_raises_path_not_found(tmpdir):
 
 def test_grep_rg_bad_regex_surfaces_stderr(tmpdir):
     """rg 退出码 2（坏正则）：stderr 透出为 RuntimeError。"""
-    from nova_harness.core.utils.binaries import resolve_binary
-
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
     )
+
+    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("rg"):
         pytest.skip("rg 不可用")
@@ -320,12 +320,12 @@ def test_grep_rg_bad_regex_surfaces_stderr(tmpdir):
 
 def test_grep_rg_bad_glob_surfaces_stderr(tmpdir):
     """rg 退出码 2（坏 glob）：stderr 透出为 RuntimeError。"""
-    from nova_harness.core.utils.binaries import resolve_binary
-
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,
     )
+
+    from nova_harness.core.utils.binaries import resolve_binary
 
     if not resolve_binary("rg"):
         pytest.skip("rg 不可用")
@@ -339,12 +339,12 @@ def test_grep_rg_bad_glob_surfaces_stderr(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# 输出截断只按字节（对齐 pi 的 maxLines=∞，不再叠 2000 行上限）
+# 输出截断只按字节（不再叠 2000 行上限）
 # ---------------------------------------------------------------------------
 
 
 def test_grep_output_not_line_capped(tmpdir):
-    """grep 输出超 2000 行但未满 50KB 时不截断（对齐 pi maxLines=∞）。"""
+    """grep 输出超 2000 行但未满 50KB 时不截断。"""
     from nova_coding_agent.tools_common.operations import (
         GrepOptions,
         create_local_grep_operations,

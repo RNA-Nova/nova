@@ -5,13 +5,13 @@
  *   markdownTheme / syntaxColors / editorTheme）——色值三形态（hex / "" /
  *   256 索引）分别经 chalk.hex / identity / chalk.ansi256 承载；
  * - 单例：``initTheme``（启动，COLORFGBG 终端背景检测兜底 dark）/
- *   ``setTheme``（切换，失败回退 dark 并返回 error——pi 同款语义）/
+ *   ``setTheme``（切换，失败回退 dark 并返回 error）/
  *   ``onThemeChange``（切换回调——全量重渲由装配根接）；
  * - 主题来源：内建 dark/light + 自定义目录 ``frontend/tui/themes/*.json``
- *   （内建优先，坏文件诊断跳过——pi getCustomThemeInfos 对位）。
+ *   （内建优先，坏文件诊断跳过）。
  * - ``automatic`` 档：逻辑主题名（可持久化）——按终端亮暗在内建
  *   dark/light 间取值；初始取 COLORFGBG 检测，``bindTerminalThemeSync``
- *   绑定 pi-tui 配色通知后跟随终端实时切换（pi autoSync 对位）；
+ *   绑定 pi-tui 配色通知后跟随终端实时切换；
  * - ``watchThemeFiles``：用户主题目录 + 已登记包主题文件的 fs.watch
  *   热更新（命中当前主题即重读重建，onThemeChange 触发全量重渲）。
  *
@@ -103,7 +103,7 @@ export function createThemeFace(json: ThemeJson): ThemeFace {
     },
   };
 
-  // thinking 级别 → 可选 token（pi 命名直搬；max 缺省回退 xhigh——pi 同款）
+  // thinking 级别 → 可选 token（max 缺省回退 xhigh）
   const thinkingToken = (level: string): string =>
     `thinking${level.charAt(0).toUpperCase()}${level.slice(1)}`;
   const thinkingBorderColor = (level: string): ColorFn => {
@@ -156,7 +156,7 @@ export function registerPackageThemes(themes: Map<string, ThemeJson>): void {
   packageThemes = themes;
 }
 
-/** 可用主题清单（builtin > 用户目录 > 包——pi 优先级对位；坏自定义文件进 diagnostics）。 */
+/** 可用主题清单（builtin > 用户目录 > 包；坏自定义文件进 diagnostics）。 */
 export function getAvailableThemes(): { themes: ThemeInfo[]; diagnostics: string[] } {
   const diagnostics: string[] = [];
   const seen = new Set<string>();
@@ -232,7 +232,7 @@ function apply(name: string, json: ThemeJson): void {
 }
 
 // ---------------------------------------------------------------------------
-// automatic 档（跟随终端亮暗——pi autoSync 对位）
+// automatic 档（跟随终端亮暗）
 // ---------------------------------------------------------------------------
 
 /** 终端配色通知源（pi-tui TUI 的最小切面——测试可喂假对象）。 */
@@ -269,8 +269,8 @@ export function bindTerminalThemeSync(tui: TerminalColorSchemeSource): () => voi
 }
 
 /**
- * 切换主题；失败回退 dark 并返回 error（pi setTheme 同款语义——
- * 回退主题不再发回调：内容与切换前一致或已可用）。
+ * 切换主题；失败回退 dark 并返回 error。
+ * 回退路径同样触发变更回调——视觉已变化（回退到 dark），订阅方必须重渲。
  * 'automatic' 为逻辑档：按 COLORFGBG 检测取内建，永不失败。
  */
 export function setTheme(name: string): { success: boolean; error?: string } {
@@ -307,7 +307,7 @@ export function detectTerminalTheme(): 'dark' | 'light' {
   return 'dark';
 }
 
-/** 启动初始化：指定名 / 检测兜底；'automatic' 取检测档；失败回退 dark（静默，与 pi 一致）。 */
+/** 启动初始化：指定名 / 检测兜底；'automatic' 取检测档；失败回退 dark（静默，一致）。 */
 export function initTheme(name?: string): void {
   const target = name ?? detectTerminalTheme();
   try {
@@ -406,10 +406,10 @@ function reloadCurrentTheme(): void {
 
 // ---------------------------------------------------------------------------
 // HTML 导出主题数据（export/ 子系统经此取色——256 索引转 hex，export 段
-// 解析或从 userMessageBg 派生，pi getResolvedThemeColors/deriveExportColors 对位）
+// 解析或从 userMessageBg 派生）
 // ---------------------------------------------------------------------------
 
-/** ANSI 256 索引 → hex（pi ansi256ToHex 直搬）。 */
+/** ANSI 256 索引 → hex。 */
 export function ansi256ToHex(index: number): string {
   const basicColors = [
     '#000000', '#800000', '#008000', '#808000', '#000080', '#800080', '#008080', '#c0c0c0',

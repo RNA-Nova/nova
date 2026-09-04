@@ -1,5 +1,5 @@
 /**
- * Nova 键位定义表（pi keybindings.ts 对位）。
+ * Nova 键位定义表。
  *
  * 两层：
  * - ``TUI_KEYBINDINGS``（pi-tui 内建）：编辑器移动/删除/undo/kill-ring、
@@ -99,10 +99,10 @@ export const NOVA_KEYBINDINGS = {
 } as const satisfies KeybindingDefinitions;
 
 /**
- * 保留键位清单（pi RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS 对位）：
+ * 保留键位清单：
  * 编辑器全局关键动作，**第三方扩展快捷键禁覆盖**（restrictOverride）。
  * 消费者是 M4 的 TS 扩展快捷键注册——本批先把清单立起来；
- * 用户 keybindings.json 不受此限（用户对自己的键位有完全控制，pi 同款）。
+ * 用户 keybindings.json 不受此限（用户对自己的键位有完全控制）。
  */
 export const RESERVED_KEYBINDINGS: readonly string[] = [
   'app.interrupt',

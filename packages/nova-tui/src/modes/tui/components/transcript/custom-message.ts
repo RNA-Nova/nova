@@ -1,8 +1,9 @@
 /**
- * 扩展 custom 消息视图（复刻 pi custom-message.ts）。
+ * 扩展 custom 消息视图。
  *
- * Spacer + Box（customMessageBg）+ [customType] 标签 + Markdown 正文。
- * 定制渲染器（entry:<customType> slot）归 M4，v1 走默认渲染。
+ * Spacer + Box（customMessageBg）+ [customType] 标签 + Markdown 正文——
+ * 这是**默认兜底渲染**；包注册的定制渲染器（`entry:<customType>` slot）
+ * 由 transcript 的 entry 路径优先消费（双形态：NovaBlock[] / 活组件）。
  */
 
 import { Box, Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui';

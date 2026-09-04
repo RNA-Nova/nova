@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 DefaultProjectTrust = Literal["always", "never", "ask"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProjectTrustEvent:
     """允许扩展参与项目信任决策的事件。"""
 
@@ -21,7 +21,7 @@ class ProjectTrustEvent:
     cwd: str = ""
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProjectTrustEventResult:
     """扩展对 project_trust 事件的响应。"""
 
@@ -29,7 +29,7 @@ class ProjectTrustEventResult:
     remember: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProjectTrustUpdate:
     """一条信任记录更新。"""
 
@@ -37,7 +37,7 @@ class ProjectTrustUpdate:
     decision: Optional[bool]
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProjectTrustOption:
     """展示给用户的信任选项。"""
 

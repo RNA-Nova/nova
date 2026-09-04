@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from nova_ai import ImageContent, TextContent, UserMessage
+
 from nova_harness.core.types.events import QueueUpdateEvent
 from nova_harness.core.types.protocols import AgentSessionProtocol
 

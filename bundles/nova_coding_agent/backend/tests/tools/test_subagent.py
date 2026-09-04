@@ -16,11 +16,11 @@ import asyncio
 import importlib.util
 import os
 
+from nova_coding_agent.subagent.types import SubagentResult
+
 from nova_harness.core.types.extensions import SourceInfo
 from nova_harness.core.types.resources.agents import AgentConfig
 from nova_harness.core.types.resources.tools import ToolExecContext
-
-from nova_coding_agent.subagent.types import SubagentResult
 
 
 def _load_subagent_tool():

@@ -1,11 +1,11 @@
 /**
- * read 工具渲染器（文件阅读风，组件形态——pi read.ts 渲染语义对位）。
+ * read 工具渲染器（文件阅读风，组件形态）。
  *
  * details 契约（backend/tools/read.py）：
  *   文本：path / truncated / truncated_by / total_lines；
  *   图片：path / size / mime / resized；错误：{ error, path? }。
  *
- * 呈现语义（pi 对齐）：**未展开时内容区为空**（卡片只剩宿主标题行），
+ * 呈现语义：**未展开时内容区为空**（卡片只剩宿主标题行），
  * 展开时全量高亮（代码 fence + env 的 Markdown 主题）+ 截断提示。
  */
 import { Container, Markdown, Text, type Component } from '@earendil-works/pi-tui';
@@ -27,7 +27,7 @@ export default function renderRead(input: RendererInput): Component {
     return container;
   }
 
-  // pi 语义：未展开时内容区为空（截断提示仍显示——可操作提示要在）
+  // 未展开时内容区为空（截断提示仍显示——可操作提示要在）
   if (!expanded) {
     if (d.truncated === true) {
       const total = typeof d.total_lines === 'number' ? ` of ${d.total_lines}` : '';

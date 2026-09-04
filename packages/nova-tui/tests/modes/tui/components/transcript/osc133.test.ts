@@ -1,6 +1,5 @@
 /**
- * 助手/用户消息视图的 OSC 133 区段标记测试（pi user-message.ts/
- * assistant-message.ts 对位——首行 A、末行 B+C，空渲染不注入）。
+ * 助手/用户消息视图的 OSC 133 区段标记测试（—首行 A、末行 B+C，空渲染不注入）。
  */
 
 import assert from 'node:assert/strict';

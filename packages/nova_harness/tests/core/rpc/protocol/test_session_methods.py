@@ -10,6 +10,7 @@ from nova_ai import ModelThinkingLevel
 from nova_harness.core.rpc.protocol import JSONRPCError, MethodRegistry
 from nova_harness.core.rpc.protocol.methods import session as session_methods
 from nova_harness.core.rpc.protocol.methods.state import ServerState
+from nova_harness.core.types.compaction.compaction import CompactionResult
 
 
 class FakeSession:
@@ -73,18 +74,19 @@ class FakeSession:
 
     async def compact(self, custom_instructions=None):
         self.calls.append(("compact", custom_instructions))
-        return SimpleNamespace(
-            model_dump=lambda: {"summary": "s", "ok": True},
-            dump_wire=lambda: {"summary": "s", "ok": True},
+        # 会话层契约即 CompactionResult（NovaBaseModel）——handler 直通字段
+        return CompactionResult(
+            summary="s", first_kept_entry_id="e-1", tokens_before=100
         )
 
     async def navigate_tree(self, target_id, options=None):
         self.calls.append(("navigate_tree", target_id, options))
-        return {"navigated": target_id}
+        # 生产契约（内部 snake）：取消路径单词键，成功路径三键
+        return {"cancelled": False, "editor_text": f"text-of-{target_id}", "summary_entry": None}
 
     async def fork_session(self, entry_id, position="before"):
         self.calls.append(("fork_session", entry_id, position))
-        return {"sessionId": "s-2"}
+        return {"cancelled": False, "selected_text": f"sel-{entry_id}", "editor_text": f"sel-{entry_id}"}
 
     def set_session_name(self, name):
         self.calls.append(("set_session_name", name))
@@ -217,12 +219,12 @@ async def test_compact_invokes_session(registry):
     result = _result(resp)
 
     assert session.calls == [("compact", "focus on X")]
-    # 出参按 CompactResult 归一：兜底键 "ok" 不在模型内被剥离（compact 进度
-    # 走 compaction 事件流，出参字段前端不消费），None 字段以 null 上线
+    # 出参即 CompactResult 单道出参（compact 进度走 compaction 事件流，
+    # 出参字段前端不消费），None 字段以 null 上线
     assert result == {
         "summary": "s",
-        "firstKeptEntryId": None,
-        "tokensBefore": None,
+        "firstKeptEntryId": "e-1",
+        "tokensBefore": 100,
         "estimatedTokensAfter": None,
         "details": None,
     }
@@ -264,10 +266,16 @@ async def test_set_active_tools(registry):
 async def test_navigate_tree_and_fork(registry):
     reg, session = registry
     resp = await _call(reg, "navigateTree", {"targetId": "e1"})
-    assert _result(resp)["navigated"] == "e1"
+    # 自由形状方法：handler 即过线点，内部 snake 载荷翻译为线上 camel
+    assert _result(resp) == {
+        "editorText": "text-of-e1",
+        "cancelled": False,
+        "summaryEntry": None,
+    }
 
     resp = await _call(reg, "fork", {"entryId": "e2", "position": "after"})
-    assert _result(resp)["sessionId"] == "s-2"
+    assert _result(resp)["selectedText"] == "sel-e2"
+    assert _result(resp)["editorText"] == "sel-e2"
 
     assert session.calls == [
         ("navigate_tree", "e1", None),

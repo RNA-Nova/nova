@@ -1,5 +1,5 @@
 /**
- * 可搜索选择器基类（pi session-selector 形态的对位）。
+ * 可搜索选择器基类。
  *
  * 结构：DynamicBorder + 标题 + Input 搜索框 + 过滤列表（多列元信息）
  * + 键位提示 + DynamicBorder。

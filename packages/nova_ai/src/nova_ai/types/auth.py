@@ -198,11 +198,11 @@ class AuthEvent:
     message: Optional[str] = None
     url: Optional[str] = None
     instructions: Optional[str] = None
-    userCode: Optional[str] = None
-    verificationUri: Optional[str] = None
-    verificationUriComplete: Optional[str] = None
-    intervalSeconds: Optional[int] = None
-    expiresInSeconds: Optional[int] = None
+    user_code: Optional[str] = None
+    verification_uri: Optional[str] = None
+    verification_uri_complete: Optional[str] = None
+    interval_seconds: Optional[int] = None
+    expires_in_seconds: Optional[int] = None
     links: Optional[List[AuthInfoLink]] = None
 
 

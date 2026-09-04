@@ -60,9 +60,9 @@ export default function extension(api: ExtensionUIAPI): void {
   // question 工具的自定义对话框（dialog:question——注册即触发能力重宣告；
   // 后端按 has_capability 判定走单框或基线两步降级；多问形态同 slot 分派）
   api.registerDialog?.('question', questionDialogFactory);
-  // tools 工具开关面板（dialog:tools——pi tools.ts 的 SettingsList 对位）
+  // tools 工具开关面板（dialog:tools）
   api.registerDialog?.('tools', toolsDialogFactory);
-  // interactive-shell 终端让位（dialog:interactive-shell——pi 对位：挂起 TUI
+  // interactive-shell 终端让位（dialog:interactive-shell——：挂起 TUI
   // 执行交互命令后恢复，回执退出码）
   api.registerDialog?.('interactive-shell', interactiveShellDialogFactory);
   // bashExecution 条目卡片（entry:<customType> 槽——user_tools/bash 的

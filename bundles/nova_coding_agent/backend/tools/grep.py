@@ -1,4 +1,4 @@
-"""Grep tool executor —— 搜索文件内容（对齐 pi ``core/tools/grep.ts``）。
+"""Grep tool executor —— 搜索文件内容。
 
 - rg 优先，纯 Python 兜底；
 - ``--hidden`` 包含隐藏文件；context 按行号自渲染（长行截断 500 字符）；
@@ -9,18 +9,18 @@ from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.operations import (
     GrepOperations,
     GrepOptions,
     create_local_grep_operations,
 )
 from nova_coding_agent.tools_common.path_utils import resolve_path
+
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
 
 DEFAULT_LIMIT = 100
 
@@ -98,7 +98,9 @@ class Tool:
                 is_error=True,
             )
 
-        path = resolve_path(params.get("path") or ".", getattr(self._context, "cwd", None))
+        path = resolve_path(
+            params.get("path") or ".", getattr(self._context, "cwd", None)
+        )
 
         try:
             result = await self.operations.grep(

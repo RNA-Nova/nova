@@ -1,4 +1,4 @@
-"""tools_panel 扩展测试（/tools 交互开关面板——pi tools.ts 对位）。
+"""tools_panel 扩展测试（/tools 交互开关面板）。
 
 覆盖：/tools dialog 应答应用 + append_entry 持久化 + command_result 反馈
 条目、cancelled 无操作、无 UI 文本清单回退、session_start/session_tree

@@ -4,7 +4,7 @@
 /resume、/login、/logout、/session、/name、/new、/reload、/tree、/trust、
 /untrust、/persona、/agent 等常用会话命令。
 
-无参数时的交互化（对齐 pi）：/fork 弹用户消息选择器、/model 弹模型选择器、
+无参数时的交互化（）：/fork 弹用户消息选择器、/model 弹模型选择器、
 /resume 弹会话选择器、/persona 弹人格选择器、/agent 弹角色选择器——均经
 ``ui.select`` 反向原语，无 UI 时退化为参数用法或错误提示；/scoped-models
 无参数时文本列出 scoped 池（TUI 池面板在 frontend 段）。
@@ -23,14 +23,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from nova_coding_agent.ui_primitives import confirm, select, select_items
+
 from nova_harness.core.config.auth.interaction import (
     LoginCancelledError,
     UIAuthInteraction,
 )
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.harness.session.listing import list_sessions_from_dir
-
-from nova_coding_agent.ui_primitives import confirm, select_items
 
 
 def _parse_args(text: str) -> tuple[str, list[str]]:
@@ -78,7 +78,7 @@ def _choice_index(choice: Optional[str], options: List[str]) -> Optional[int]:
 
 
 async def _pick_user_message(ctx: Any) -> Optional[str]:
-    """用户消息选择器（对齐 pi getUserMessagesForForking）：返回选中的 entry id。"""
+    """用户消息选择器：返回选中的 entry id。"""
     entries = ctx.session_manager.get_entries() if ctx.session_manager else []
     candidates: List[Tuple[str, str]] = []
     for entry in entries:
@@ -108,10 +108,11 @@ async def _pick_user_message(ctx: Any) -> Optional[str]:
 
 
 def _auth_status_tag(model_runtime: Any, provider: str) -> str:
-    """provider 认证状态标签（对齐 pi OAuthSelector）：
+    """provider 认证状态标签：
 
-    已配置凭据 → ``✓ configured``；环境变量可得 → ``env: <VAR名>``；
-    未配置（或状态查询不可用）→ 空串（无标签）。
+    环境变量可得 → ``env: <VAR名>``；已配置凭据 → ``✓ OAuth`` / ``✓ API key``
+    （按当前解析类型——双能力 provider 存哪种凭据哪种生效；查询不可用回退
+    ``✓ configured``）；未配置 → 空串（无标签）。
     """
     get_status = getattr(model_runtime, "get_provider_auth_status", None)
     if get_status is None:
@@ -126,13 +127,19 @@ def _auth_status_tag(model_runtime: Any, provider: str) -> str:
         label = status.get("label")
         if label:
             return f"env: {label}"
+    is_using_oauth = getattr(model_runtime, "is_using_oauth", None)
+    if callable(is_using_oauth):
+        try:
+            return "✓ OAuth" if is_using_oauth(provider) else "✓ API key"
+        except Exception:
+            pass
     return "✓ configured"
 
 
 async def _pick_provider(ctx: Any, title: str) -> Optional[str]:
     """provider 选择器（候选取自已知模型的 provider 集合）。
 
-    description 携带认证状态标签（``_auth_status_tag``，对齐 pi OAuthSelector）。
+    description 携带认证状态标签（``_auth_status_tag``）。
     """
     if ctx.model_runtime is None:
         _reply(ctx, "模型运行时不可用", "error")
@@ -168,7 +175,7 @@ async def _fork(args: str, ctx: Any) -> None:
     position = rest[0] if rest else "after"
 
     if not entry_id:
-        # 无参数：选择器从用户消息分叉（pi 语义——fork at 该消息，含它）。
+        # 无参数：选择器从用户消息分叉（fork at 该消息，含它）。
         if not ctx.has_ui:
             _reply(ctx, "用法: /fork <entry_id> [at|before|after]", "error")
             return
@@ -193,7 +200,7 @@ async def _clone(args: str, ctx: Any) -> None:
 async def _export(args: str, ctx: Any) -> None:
     path = args.strip()
     if not path:
-        # 无参数：默认导出到 cwd 下 nova-session-<id前8>.jsonl（pi 默认文件名对位）
+        # 无参数：默认导出到 cwd 下 nova-session-<id前8>.jsonl
         info = ctx.get_session_info()
         session_id = str(info.get("id") or "session")[:8]
         path = f"nova-session-{session_id}.jsonl"
@@ -219,7 +226,7 @@ async def _model(args: str, ctx: Any) -> None:
         await ctx.set_model(model_ref)
         return
 
-    # 无参数：选择器切换（对齐 pi 模型选择器）；无 UI 退化为显示当前模型。
+    # 无参数：选择器切换；无 UI 退化为显示当前模型。
     if not ctx.has_ui or ctx.model_runtime is None:
         current = ctx.model
         name = f"{current.provider}/{current.id}" if current else "未选择"
@@ -275,7 +282,7 @@ async def _scoped_models(args: str, ctx: Any) -> None:
 
 
 async def _resume(args: str, ctx: Any) -> None:
-    """浏览并恢复已有会话（会话选择器 + switch_session，对齐 pi /resume）。"""
+    """浏览并恢复已有会话（会话选择器 + switch_session）。"""
     if not ctx.has_ui or ctx.session_manager is None:
         _reply(ctx, "/resume 需要 UI 与持久化会话目录", "error")
         return
@@ -304,11 +311,13 @@ async def _resume(args: str, ctx: Any) -> None:
 
 
 async def _login(args: str, ctx: Any) -> None:
-    """交互式登录（OAuth device code 等），复用模型运行时的登录联动。
+    """交互式登录（OAuth device code / API key prompt），复用模型运行时的登录联动。
 
-    device code 流程无 prompt 关卡（notify → 轮询直至过期，kimi 为 15 分钟），
-    headless 下设备码无处展示、轮询无人授权——直接拒绝启动；有 UI 时把会话
-    abort 信号接入交互，轮询可被用户中止。
+    认证方式按 provider 声明的能力裁决：
+    oauth / api_key 唯一直进，双型弹选择器，皆无（ambient）报错并指引
+    环境变量/models.json。两类流程都依赖 UI 原语（OAuth 要 notify 展示
+    设备码，api_key 要 input 输入密钥），headless 直接拒绝；有 UI 时把
+    会话 abort 信号接入交互，轮询/输入可被用户中止。
     """
     if not ctx.has_ui:
         _reply(ctx, "/login 需要 UI（OAuth 交互无法展示）", "error")
@@ -329,9 +338,45 @@ async def _login(args: str, ctx: Any) -> None:
         )
         if not ok:
             return
+
+    # 认证方式选择：按 provider 声明的能力——
+    # oauth / api_key 唯一则直进，双型弹选择器；皆无则是 ambient 鉴权
+    # （环境变量 / models.json 配置，无可登录入口）
+    provider_obj = ctx.model_runtime.get_provider(provider)
+    supported: List[str] = []
+    if provider_obj is not None and getattr(provider_obj, "auth", None) is not None:
+        if (
+            provider_obj.auth.oauth is not None
+            and provider_obj.auth.oauth.login is not None
+        ):
+            supported.append("oauth")
+        if (
+            provider_obj.auth.api_key is not None
+            and provider_obj.auth.api_key.login is not None
+        ):
+            supported.append("api_key")
+    if not supported:
+        _reply(
+            ctx,
+            f"{provider} 无可登录入口（ambient 鉴权——用环境变量或 models.json 配置）",
+            "error",
+        )
+        return
+    if len(supported) == 1:
+        auth_type = supported[0]
+    else:
+        oauth_label = provider_obj.auth.oauth.login_label or "账号登录（OAuth）"
+        api_key_label = "API key"
+        chosen = await select(
+            ctx.ui, f"选择 {provider} 的认证方式", [oauth_label, api_key_label]
+        )
+        if chosen is None:
+            return
+        auth_type = "oauth" if chosen == oauth_label else "api_key"
+
     try:
         credential = await ctx.model_runtime.login(
-            provider, "oauth", UIAuthInteraction(ctx.ui, ctx.get_signal())
+            provider, auth_type, UIAuthInteraction(ctx.ui, ctx.get_signal())
         )
     except LoginCancelledError:
         # 取消反馈归前端（Esc 发起、即时可靠）；后端任务取消后发反馈
@@ -421,7 +466,7 @@ async def _tree(args: str, ctx: Any) -> None:
         await ctx.navigate_tree(target_id)
         return
     # 无参数：会话树选择器（DFS 扁平化 + depth 缩进元信息，
-    # pi tree-selector 的数据驱动 v1 对位——折叠/标签编辑等定制交互归后续）
+    # ——折叠/标签编辑等定制交互归后续）
     if not ctx.has_ui or ctx.session_manager is None:
         _reply(ctx, "/tree 需要 UI 与持久化会话目录", "error")
         return

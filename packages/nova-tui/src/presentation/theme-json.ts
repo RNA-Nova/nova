@@ -1,11 +1,11 @@
 /**
- * 主题 JSON 契约与解析（pi theme-schema 的子集对齐）。
+ * 主题 JSON 契约与解析。
  *
- * 我们的必需 token 集 = pi schema 的消费面子集（核心 27 + markdown 10 +
- * syntax 9 = 46 个）；pi 主题文件（含 thinking 边框色 / export 段等
- * 多余字段）**直接可用**——多余字段容忍忽略，缺必需 token 才报错。
+ * 必需 token 集 = 46 个（核心 27 + markdown 10 + syntax 9）——
+ * 含多余字段（thinking 边框色 / export 段等）的主题文件**直接可用**：
+ * 多余字段容忍忽略，缺必需 token 才报错。
  *
- * ColorValue 三形态（pi 同款）：
+ * ColorValue 三形态：
  * - hex 字符串（``#rrggbb``）；
  * - ``""`` 空串 = 终端默认色；
  * - 0-255 整数 = 256 色索引；
@@ -89,7 +89,7 @@ export interface ThemeJson {
   name: string;
   vars?: Record<string, ColorValue>;
   colors: Record<string, ColorValue>;
-  /** HTML 导出色（可选——缺省时从 userMessageBg 派生，pi 同款语义）。 */
+  /** HTML 导出色（可选——缺省时从 userMessageBg 派生）。 */
   export?: {
     pageBg?: ColorValue;
     cardBg?: ColorValue;
@@ -103,7 +103,7 @@ function isColorValue(value: unknown): value is ColorValue {
 }
 
 /**
- * 校验并收窄为主题 JSON（pi parseThemeJson 对位：缺 token 列出完整清单）。
+ * 校验并收窄为主题 JSON（缺 token 列出完整清单）。
  * 校验失败抛 Error（调用方收集为诊断）。
  */
 export function parseThemeJson(label: string, json: unknown): ThemeJson {
@@ -115,7 +115,7 @@ export function parseThemeJson(label: string, json: unknown): ThemeJson {
     throw new Error(`主题 "${label}" 非法：缺 name 字段`);
   }
   if (record.name.includes('/')) {
-    // "/" 保留（对齐 pi：将来 light/dark 自动双主题设置的语法位）
+    // "/" 保留（将来 light/dark 自动双主题设置的语法位）
     throw new Error(`主题名 "${record.name}" 非法：不能包含 "/"`);
   }
   if (typeof record.colors !== 'object' || record.colors === null) {
@@ -150,7 +150,7 @@ export function parseThemeJson(label: string, json: unknown): ThemeJson {
   };
 }
 
-/** vars 引用解析（环引用报错；对齐 pi resolveVarRefs）。 */
+/** vars 引用解析（环引用报错；resolveVarRefs）。 */
 function resolveVarRefs(
   value: ColorValue,
   vars: Record<string, ColorValue>,

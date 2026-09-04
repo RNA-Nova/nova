@@ -60,7 +60,7 @@ function minimalTheme(name: string): Record<string, unknown> {
 }
 
 describe('parseThemeJson', () => {
-  it('合法主题（含多余字段容忍——pi 主题文件可用性）', () => {
+  it('合法主题（含多余字段容忍）', () => {
     const raw = { ...minimalTheme('x'), thinkingOff: '#111111', export: { pageBg: '#000' } };
     const json = parseThemeJson('x', raw);
     assert.equal(json.name, 'x');

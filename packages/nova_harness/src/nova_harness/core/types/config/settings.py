@@ -10,6 +10,7 @@ from typing import Any, Literal, Optional, Union
 
 from nova_ai import ModelThinkingLevel
 from nova_ai.types.base_model import NovaBaseModel
+
 from nova_harness.core.types.compaction import CompactionSettings
 
 

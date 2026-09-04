@@ -1,12 +1,11 @@
 /**
- * /share：分享会话为 GitHub secret gist（pi handleShareCommand 对位，前端自持）。
+ * /share：分享会话为 GitHub secret gist（前端自持）。
  *
  * 流程：gh 可用性检查（未安装/未登录两条明确错误）→ 导出会话 HTML 到临时
  * 文件 → ``gh gist create --public=false``（Esc 可取消——前台任务登记处）→
  * gist URL 进 transcript。临时文件尽力清理。
  *
- * 与 pi 的一处有意偏差：无 viewer URL 拼接（pi 的 pi.dev/session/#gistId 是
- * 其托管查看器——我们的导出物是自包含 HTML，gist 原始文件下载打开即可看）。
+ * 无 viewer URL 拼接（导出物是自包含 HTML，gist 原始文件下载打开即可看）。
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -25,7 +24,8 @@ export async function shareSession(
   foregroundTasks: ForegroundTasks,
 ): Promise<void> {
   // 1. gh 前置检查（未安装 → spawnSync error；未登录 → 非零退出码）
-  const auth = spawnSync('gh', ['auth', 'status'], { encoding: 'utf-8' });
+  // timeout 兜底：gh 挂死不得冻结事件循环
+  const auth = spawnSync('gh', ['auth', 'status'], { encoding: 'utf-8', timeout: 5000 });
   if (auth.error) {
     transcript.addError('未安装 GitHub CLI (gh)——安装：https://cli.github.com/');
     return;
@@ -68,16 +68,23 @@ export async function shareSession(
   };
   child.stdout.on('data', (chunk) => (stdout += chunk));
   child.stderr.on('data', (chunk) => (stderr += chunk));
+  // spawn ENOENT 类失败 close/error 双事件齐发——报错去重（用户只见一条）
+  let reported = false;
+  const reportError = (message: string | Error) => {
+    if (reported) return;
+    reported = true;
+    transcript.addError(message);
+  };
   child.on('close', (code) => {
     cleanup();
     if (cancelled) return; // Esc 取消：本地已提示，静默收尾
     if (code !== 0) {
-      transcript.addError(`创建 gist 失败: ${stderr.trim() || `退出码 ${code}`}`);
+      reportError(`创建 gist 失败: ${stderr.trim() || `退出码 ${code}`}`);
       return;
     }
     const url = stdout.trim();
     if (!url.startsWith('http')) {
-      transcript.addError(`无法从 gh 输出解析 gist URL: ${url || '(空)'}`);
+      reportError(`无法从 gh 输出解析 gist URL: ${url || '(空)'}`);
       return;
     }
     transcript.addInfo(`已分享（secret gist）: ${url}`);
@@ -85,6 +92,6 @@ export async function shareSession(
   child.on('error', (error) => {
     cleanup();
     if (cancelled) return;
-    transcript.addError(error);
+    reportError(error);
   });
 }

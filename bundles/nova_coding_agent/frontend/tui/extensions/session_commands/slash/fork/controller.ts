@@ -1,8 +1,8 @@
 /**
- * /fork 的包侧编排（pi UserMessageSelector 对位——dogfood：官方 bundle 以扩展机制自持命令 UI）。
+ * /fork 的包侧编排（—dogfood：官方 bundle 以扩展机制自持命令 UI）。
  *
- * 从用户消息分叉：列出本会话全部 user 消息（最新在前，初始选中即最新——
- * pi 初始选中末条的等价），enter → fork RPC（position=before：分支点取
+ * 从用户消息分叉：列出本会话全部 user 消息（最新在前，初始选中即最新），
+ * enter → fork RPC（position=before：分支点取
  * 消息父级，原文经 selectedText 回填编辑器——"编辑后重发"体验）；esc 取消。
  * 带参数（/fork <entry_id> [at|before|after]）直调 fork RPC——与后端 _fork
  * 等价（命令分发后参数不再回落后端，包侧自理；缺省 position=after 与后端对齐）。
@@ -61,7 +61,7 @@ export function buildForkItems(entries: RawEntry[]): SearchableItem[] {
     }));
 }
 
-/** fork RPC + 原文回填编辑器（pi 语义：selectedText 回填——编辑后重发）。 */
+/** fork RPC + 原文回填编辑器（selectedText 回填——编辑后重发）。 */
 async function forkAt(
   ctx: ExtensionUIContext,
   entryId: string,

@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from nova_agent import AgentMessage
 from nova_ai import Context, SimpleStreamOptions
+
 from nova_harness.core.harness.compaction.compaction import (
     complete_summarization,
     estimate_tokens,

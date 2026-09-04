@@ -10,6 +10,7 @@ from nova_ai import (
     clamp_thinking_level,
     get_supported_thinking_levels,
 )
+
 from nova_harness.core.config.defaults import DEFAULT_THINKING_LEVEL
 from nova_harness.core.types.events import (
     ModelSelectEvent,

@@ -1,5 +1,5 @@
 /**
- * 状态指示器家族（pi status-indicator.ts 对位复刻）。
+ * 状态指示器家族。
  *
  * 基类 extends pi-tui Loader（spinner 动画内建）；四变体：
  * - WorkingStatusIndicator：spinner + 工作中文案；

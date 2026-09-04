@@ -138,7 +138,7 @@ describe('FooterView · 数据行补全', () => {
   });
 });
 
-describe('FooterView · setCustomFooter（pi setFooter 对位）', () => {
+describe('FooterView · setCustomFooter', () => {
   it('整件替换：自定义组件接管渲染，env 回灌宿主数据', () => {
     const { footer } = makeFooter();
     try {

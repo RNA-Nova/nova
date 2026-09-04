@@ -1,5 +1,5 @@
 /**
- * grep 工具渲染器（新建组件——pi grep.ts 渲染语义对位）。
+ * grep 工具渲染器（新建组件）。
  *
  * 结果文本在 result.content（`path:LINE: text` / 上下文 `path-LINE- text`）；
  * details：truncated / match_limit_reached 等。折叠时前 15 行预览，展开全量。

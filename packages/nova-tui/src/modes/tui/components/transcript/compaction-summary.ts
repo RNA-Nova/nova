@@ -1,5 +1,5 @@
 /**
- * 压缩摘要卡片（复刻 pi compaction-summary-message.ts）。
+ * 压缩摘要卡片。
  *
  * Box（customMessageBg）+ [compaction] 标签 + 折叠态（tokens 数 + 展开提示）
  * / 展开态（完整 Markdown 摘要）。

@@ -143,7 +143,7 @@ def test_cancel_input_after_other():
 
 
 def test_sequential_execution_mode():
-    """询问型工具声明串行（与 pi 一致）。"""
+    """询问型工具声明串行。"""
     _, tool = _load_question_tool()
     assert tool.execution_mode == "sequential"
 
@@ -199,7 +199,7 @@ def test_dialog_absent_falls_back_to_two_step():
 
 
 # ---------------------------------------------------------------------------
-# 多问形态（questions 数组——pi questionnaire 对位）
+# 多问形态（questions 数组）
 # ---------------------------------------------------------------------------
 
 _MULTI_PARAMS = {

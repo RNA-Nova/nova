@@ -16,9 +16,6 @@ import inspect
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_harness.core.types.extensions.process import SpawnHook
-from nova_harness.core.types.resources.user_tools import UserToolEventCallback
-
 from nova_coding_agent.bash.engine import (
     BashOperations,
     compose_spawn_hooks,
@@ -26,12 +23,15 @@ from nova_coding_agent.bash.engine import (
 )
 from nova_coding_agent.bash.message import BashExecutionMessage
 
+from nova_harness.core.types.extensions.process import SpawnHook
+from nova_harness.core.types.resources.user_tools import UserToolEventCallback
+
 
 def _result_field(result: Any, *names: str) -> Any:
     """从执行结果取字段：先 dict 键后属性，支持多候选名（snake_case / 驼峰）。
 
     扩展经 ``user_bash`` 事件返回的 result 形态由扩展作者决定——可能是
-    ``BashResult`` 数据类、也可能是对齐 pi 驼峰键的普通 dict。
+    ``BashResult`` 数据类、也可能是驼峰键的普通 dict。
     """
     for name in names:
         if isinstance(result, dict) and name in result:
@@ -96,9 +96,7 @@ class UserTool:
             # 显式 params["operations"] 注入仍优先（调用方自定后端）
             operations = create_local_bash_operations(
                 shell_path=shell_path,
-                spawn_hook=(
-                    compose_spawn_hooks(spawn_hooks) if spawn_hooks else None
-                ),
+                spawn_hook=(compose_spawn_hooks(spawn_hooks) if spawn_hooks else None),
             )
 
         def _emit(event_name: str, data: Dict[str, Any]) -> None:
@@ -145,7 +143,7 @@ class UserTool:
 
         两个调用方：``execute`` 末尾（本地引擎结果）；会话层
         ``user_bash`` 拦截（扩展返回完整 result 时跳过真实执行、直接
-        记录本方法构造的消息，对齐 pi ``recordBashResult``）。
+        记录本方法构造的消息）。
         """
         return BashExecutionMessage(
             command=str(params.get("command", "")),

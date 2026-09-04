@@ -10,7 +10,7 @@
  */
 
 import type { NovaUIRuntime, TranscriptEntry } from 'nova-tui';
-import { entrySlot, type EntryRenderer, type NovaBlock } from 'nova-tui';
+import { entrySlot, guardComponentLineWidth, type EntryRenderer, type NovaBlock } from 'nova-tui';
 import { Container, Markdown, Text, type Component } from '@earendil-works/pi-tui';
 
 import { blocksToComponents } from '../blocks/index.js';
@@ -127,6 +127,8 @@ export class TranscriptController {
           entry.stopReason,
           entry.errorMessage,
           this.hideThinking,
+          entry.thinkingDurationMs,
+          entry.toolCounts,
         );
       case 'toolCall':
         return new ToolCardView(this.runtime, entry.card, this.expansion, () =>
@@ -155,17 +157,29 @@ export class TranscriptController {
           ReturnType<EntryRenderer>
         >(entrySlot(entry.customType));
         if (renderer !== undefined) {
-          const rendered = renderer({ customType: entry.customType, data: entry.data });
+          // 包侧渲染器全链隔离：异常/畸形产物降级为默认视图——第三方
+          // 渲染器不得带走整个 TUI（离流式数据最近的高频路径）；产物
+          // 统一过行宽防线
+          let rendered: unknown;
+          try {
+            rendered = renderer({ customType: entry.customType, data: entry.data });
+          } catch {
+            rendered = undefined;
+          }
           if (Array.isArray(rendered)) {
             if (rendered.length > 0) {
               const container = new Container();
               for (const component of blocksToComponents(rendered, this.runtime.slots)) {
-                container.addChild(component);
+                container.addChild(guardComponentLineWidth(component));
               }
               return container;
             }
-          } else if (rendered !== null && typeof rendered === 'object') {
-            return rendered as Component;
+          } else if (
+            typeof rendered === 'object' &&
+            rendered !== null &&
+            typeof (rendered as { render?: unknown }).render === 'function'
+          ) {
+            return guardComponentLineWidth(rendered as Component);
           }
         }
         return new CustomMessageView(entry.customType, entry.data);
@@ -175,14 +189,25 @@ export class TranscriptController {
 
   private updateEntry(entry: TranscriptEntry, component: Component): void {
     if (entry.kind === 'assistant' && component instanceof AssistantView) {
-      component.update(entry.text, entry.thinking, entry.stopReason, entry.errorMessage);
+      component.update(
+        entry.text,
+        entry.thinking,
+        entry.stopReason,
+        entry.errorMessage,
+        entry.thinkingDurationMs,
+        entry.toolCounts,
+      );
     } else if (entry.kind === 'toolCall' && component instanceof ToolCardView) {
       component.update(entry.card);
     } else if (entry.kind === 'custom' && hasUpdate(component)) {
       // 活组件条目（entry:<customType> 槽注册——如 bashExecution：流式创建、
       // chunk 累积、message_end 定稿）数据变化时回调重绘；
       // 没有它命令串会停在初始空值（实证过的缺陷）
-      component.update(entry.data);
+      try {
+        component.update(entry.data);
+      } catch {
+        // 包组件 update 异常不得中断归约——下帧重建兜底
+      }
     }
     // user/notice/其余 custom 创建后不变
   }

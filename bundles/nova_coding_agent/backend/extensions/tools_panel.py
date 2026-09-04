@@ -1,4 +1,4 @@
-"""tools 面板扩展（/tools 交互开关面板——pi examples/extensions/tools.ts 对位）。
+"""tools 面板扩展（/tools 交互开关面板）。
 
 - ``/tools`` 命令：``dialog:tools`` 已注册时弹包侧开关面板——应答
   ``{"active": [name...]}``（绝对集，与 ``set_active_tools`` 语义一致）
@@ -6,7 +6,7 @@
   确认条目（command_result 转录卡片，不进 LLM 上下文）；
   cancelled / 应答非法 → 无操作。无 UI 或无面板能力 → 文本清单回退
   （列出全部工具与激活状态）；
-- 状态恢复（pi session_start/session_tree 对位）：订阅 ``session_start``
+- 状态恢复：订阅 ``session_start``
   与 ``session_tree``——扫当前分支最新 ``tool-panel`` 条目（同 /todos 的
   get_branch 扫描），有则应用 ``set_active_tools``，无则不动（默认全激活）。
   分支/树导航后所见即该历史点的开关集。

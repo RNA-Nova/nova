@@ -159,12 +159,12 @@ def test_extract_todo_items_from_plan_section():
 
 
 def test_extract_todo_items_strips_inline_markdown():
-    """行内 markdown（**Add** 粗体）：pi 同款边界——[^*] 捕获遇 * 即止，
-    过短的残片被丢弃（pi 原文行为，非 bug）。"""
+    """行内 markdown（**Add** 粗体）：边界——[^*] 捕获遇 * 即止，
+    过短的残片被丢弃（非 bug）。"""
     module = _load_extension()
     message = "Plan:\n1. **Add** retry logic\n2. Read config files\n"
     items = module.extract_todo_items(message)
-    # "**Add**" 残片被丢弃，只有正常步骤保留（与 pi 逐字符一致的语义）
+    # "**Add**" 残片被丢弃，只有正常步骤保留（逐字符一致的语义）
     assert [i["text"] for i in items] == ["Config files"]
 
 
@@ -254,6 +254,7 @@ def test_context_filters_stale_plan_messages_when_disabled():
     ctx = _fake_ctx()
 
     from nova_ai import UserMessage
+
     from nova_harness.core.types.messages import CustomMessage
 
     stale = CustomMessage(
@@ -366,7 +367,7 @@ def test_plan_flag_enables_on_start():
 
 
 # ---------------------------------------------------------------------------
-# footer 状态条（set_status 命名通知——pi setStatus 对位）
+# footer 状态条（set_status 命名通知）
 # ---------------------------------------------------------------------------
 
 

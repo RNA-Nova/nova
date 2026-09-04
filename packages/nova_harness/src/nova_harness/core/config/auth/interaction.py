@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 from nova_ai.signal import AbortSignal
 from nova_ai.types.auth import AuthEvent, AuthInteraction, AuthPrompt
+
 from nova_harness.core.types.ui.context import UIContext
 
 
@@ -78,20 +79,22 @@ class UIAuthInteraction(AuthInteraction):
                 url=event.url,
             )
         elif event.type == "device_code":
-            self._open_browser(event.verificationUriComplete or event.verificationUri)
+            self._open_browser(
+                event.verification_uri_complete or event.verification_uri
+            )
             lines = []
-            if event.verificationUri:
-                lines.append(f"Open: {event.verificationUri}")
-            if event.verificationUriComplete:
-                lines.append(f"Or open directly: {event.verificationUriComplete}")
-            if event.userCode:
-                lines.append(f"Code: {event.userCode}")
-            if event.expiresInSeconds:
-                lines.append(f"Expires in {int(event.expiresInSeconds / 60)} minutes")
+            if event.verification_uri:
+                lines.append(f"Open: {event.verification_uri}")
+            if event.verification_uri_complete:
+                lines.append(f"Or open directly: {event.verification_uri_complete}")
+            if event.user_code:
+                lines.append(f"Code: {event.user_code}")
+            if event.expires_in_seconds:
+                lines.append(f"Expires in {int(event.expires_in_seconds / 60)} minutes")
             self._notify_auth(
                 "\n".join(lines),
-                url=event.verificationUriComplete or event.verificationUri,
-                userCode=event.userCode,
+                url=event.verification_uri_complete or event.verification_uri,
+                userCode=event.user_code,
             )
             # 注意：不再另发 "Waiting for authentication..." 的 progress 通知——
             # 授权等待框（type="auth" → AuthWaitingDialog）自带等待文案，
@@ -143,6 +146,9 @@ class UIAuthInteraction(AuthInteraction):
         params: Dict[str, Any] = {"title": prompt.message}
         if prompt.placeholder is not None:
             params["placeholder"] = prompt.placeholder
+        # secret 类型（API key 等）必须透传打码标记——输入框按此隐藏明文
+        if prompt.type == "secret":
+            params["secret"] = True
         resp = await self.ui.request("input", params, signal)
         if resp.cancelled or not isinstance(resp.value, str):
             return None

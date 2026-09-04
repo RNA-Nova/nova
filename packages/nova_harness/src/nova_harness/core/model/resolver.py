@@ -192,7 +192,7 @@ def _build_fallback_model(
     return base.model_copy(update={"id": model_id, "name": model_id})
 
 
-@dataclass
+@dataclass(frozen=True)
 class ParsedModelResult:
     """``parse_model_pattern`` 结果。"""
 
@@ -308,7 +308,7 @@ def resolve_model_scope(
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResolveCliModelResult:
     """CLI 模型解析结果。"""
 
@@ -471,7 +471,7 @@ def resolve_cli_model(
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class InitialModelResult:
     """初始模型解析结果。"""
 
@@ -640,7 +640,7 @@ async def restore_model_from_session(
     return RestoreModelResult(model=None, fallback_message=None)
 
 
-@dataclass
+@dataclass(frozen=True)
 class RestoreModelResult:
     """会话模型恢复结果。"""
 

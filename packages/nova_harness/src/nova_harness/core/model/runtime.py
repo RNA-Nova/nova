@@ -45,7 +45,6 @@ from nova_harness.core.config.resolve import (
     is_config_value_configured,
     resolve_headers_or_throw,
 )
-from nova_harness.core.utils.json import strip_json_comments
 from nova_harness.core.model.composer import (
     compose_provider,
     validate_extension_provider,
@@ -57,6 +56,7 @@ from nova_harness.core.types.model import (
     ModelsConfig,
     ProviderConfigInput,
 )
+from nova_harness.core.utils.json import strip_json_comments
 
 # 无远程数据源的内置 provider（订阅制单模型，目录静态）
 _STATIC_CATALOG_PROVIDERS = {"kimi-coding"}

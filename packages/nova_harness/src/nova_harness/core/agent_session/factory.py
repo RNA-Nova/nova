@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import Agent, ModelThinkingLevel
 from nova_ai import ImageContent, Model, ProviderResponse, TextContent
+
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
 from nova_harness.core.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.extensions import ExtensionRunner
@@ -245,7 +246,7 @@ def create_agent(
             extension_runner_ref, response, _model
         ),
         transform_context=lambda messages, signal=None: _transform_context(
-            extension_runner_ref, messages, signal
+            extension_runner_ref, messages
         ),
     )
 
@@ -280,12 +281,11 @@ async def _on_response(
 async def _transform_context(
     extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
     messages: List[Any],
-    signal: Optional[Any] = None,
 ) -> List[Any]:
     runner = extension_runner_ref.get("current")
     if runner is None:
         return messages
-    return await runner.emit_context(messages, signal)
+    return await runner.emit_context(messages)
 
 
 def restore_or_persist_session_state(

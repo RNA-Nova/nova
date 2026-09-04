@@ -7,13 +7,13 @@
  * - user：``~/.nova/agent/frontend/tui/keybindings.json``；
  * - project：``<cwd>/.nova/frontend/tui/keybindings.json``。
  *
- * 文件格式（pi 同款）：``{ "<actionId>": "ctrl+x" | ["ctrl+x", "f2"] }``——
+ * 文件格式：``{ "<actionId>": "ctrl+x" | ["ctrl+x", "f2"] }``——
  * 按 actionId **整体替换**默认键（不是追加）；空数组 = 禁用该动作。
  *
  * 合并发生在 user/project 两层（同名 actionId project 覆盖 user），合成
  * 一份 effective userBindings 交给 pi-tui KeybindingsManager（它对
  * builtin 做最终替换）。未知 actionId / 非法值跳过并产生诊断（拼写错误
- * 可被发现，而非静默无效——pi 是静默跳过）。
+ * 可被发现，而非静默无效）。
  *
  * 项目级不做 trust 门控：键位表是纯声明式映射，无代码执行面。
  */

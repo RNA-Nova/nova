@@ -1,9 +1,9 @@
 /**
  * 授权等待框（OAuth device_code / auth_url 流程的取消入口）。
  *
- * 展示对齐 pi LoginDialogComponent（hyperlink URL + 授权码 + waiting 提示），
+ * 展示LoginDialogComponent（hyperlink URL + 授权码 + waiting 提示），
  * 取消语义为跨进程对位：组件持有 onCancel 回调（app 注入 cancelRequest
- * 句柄），Esc → 本地关框 + 上行取消——pi 的 AbortController 内聚模式
+ * 句柄），Esc → 本地关框 + 上行取消
  * （login-dialog.ts:15）在 RPC 架构下的等价物。
  *
  * 生命周期：app 在 type="auth" 通知到达时创建并替换编辑器槽位；

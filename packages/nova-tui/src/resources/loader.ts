@@ -11,14 +11,14 @@
  *
  * - 发现源：../discovery.ts（唯一——不散落第二处探测逻辑）；
  * - trust 过滤：../trust.ts（编排层——本加载器只收已获准加载的包）；
- * - 加载：jiti（对齐 pi loader，用户写裸 .ts 免预编译）；
+ * - 加载：jiti（用户写裸 .ts 免预编译）；
  *   别名 ``nova-tui`` → 本包自身，渲染器可写
  *   ``import { detailsOf } from 'nova-tui/presentation/blocks.js'``；
  * - npm 自愈：node_modules 缺失先补跑 install，失败仍尝试加载
  *   （渲染器未必需要依赖）；
  * - 注册统一走 ExtensionUIAPI 通道（registerRenderer/registerRegion 与
  *   文件约定同源同路）——覆盖碰撞经 onCollision 收集为诊断
- *   （pi ResourceCollision 对位；slots 是纯注册表）；
+ *   （slots 是纯注册表）；
  * - 诊断即数据：失败/碰撞统一进 result.diagnostics（不阻断、不日志）。
  */
 
@@ -51,7 +51,7 @@ const runtimeRoot = fileURLToPath(new URL('..', import.meta.url));
 const piTuiEntry = createRequire(import.meta.url).resolve('@earendil-works/pi-tui');
 
 /**
- * 模块产物缓存（pi loadExtensionsCached 对位）：按 文件路径 + mtime
+ * 模块产物缓存：按 文件路径 + mtime
  * 自失效——refreshPackages 重复刷新时未变化的文件零 jiti 编译开销；
  * 文件内容变化（mtime 变）自动重载，无需显式失效通道。
  * 注意 1：project trust 过滤在编排层（本加载器只收已获准加载的包），

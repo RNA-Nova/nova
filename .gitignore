@@ -138,9 +138,8 @@ sessions/
 *.auth.json
 .nova/
 
-# Node.js
+# Node.js（package-lock.json 必须入库——npm ci 与 CI 缓存依赖它）
 node_modules/
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 

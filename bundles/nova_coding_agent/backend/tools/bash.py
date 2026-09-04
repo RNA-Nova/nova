@@ -3,7 +3,7 @@
 建立在共享引擎（``nova_coding_agent.bash.engine.LocalBashOperations``）之上：
 进程 spawn/读取/清洗/截断/进程组 kill 全部由引擎负责（与会话 bash 同一引擎）。
 本层只保留 LLM 工具面：超时控制、throttled on_update 流式推送、
-AgentToolResult 格式化（对齐 TypeScript ``core/tools/bash.ts``）。
+AgentToolResult 格式化。
 """
 
 import asyncio
@@ -14,13 +14,6 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_harness.core.types.extensions.process import SpawnHook
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.bash.engine import (
     BashOperations,
     create_local_bash_operations,
@@ -35,17 +28,24 @@ from nova_coding_agent.tools_common.truncate import (
     format_size,
 )
 
-# 对齐 pi bash.ts：timeout 上限（毫秒）。超过即参数非法，显式报错反馈给 LLM。
+from nova_harness.core.types.extensions.process import SpawnHook
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+
+# timeout 上限（毫秒）。超过即参数非法，显式报错反馈给 LLM。
 MAX_TIMEOUT_MS = 2_147_483_647
 MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000
 BASH_UPDATE_THROTTLE_MS = 100
 
 
 def _resolve_timeout_seconds(timeout: Any) -> Tuple[Optional[float], Optional[str]]:
-    """解析并校验 timeout 入参（对齐 pi resolveTimeoutMs）。
+    """解析并校验 timeout 入参。
 
-    返回 ``(秒, 错误信息)``，两者互斥；``timeout=None`` 表示不限时（pi 同款：
-    LLM 不传则无默认超时，避免误杀长构建命令）。
+    返回 ``(秒, 错误信息)``，两者互斥；``timeout=None`` 表示不限时
+    （LLM 不传则无默认超时，避免误杀长构建命令）。
     """
     if timeout is None:
         return None, None
@@ -101,7 +101,7 @@ class _CombinedAbortSignal:
 
 class Tool:
     name = "bash"
-    # 对齐 pi bash.ts 描述：明确截断上限与截断落盘语义，LLM 可据此用 read 续读全量输出
+    # 描述明确截断上限与截断落盘语义，LLM 可据此用 read 续读全量输出
     description = (
         "在当前工作目录执行 bash 命令，返回 stdout 和 stderr。"
         f"输出截断为最后 {DEFAULT_MAX_LINES} 行或 {DEFAULT_MAX_BYTES // 1024}KB"
@@ -130,7 +130,7 @@ class Tool:
     ) -> None:
         self._context = context
         self._spawn_hook = spawn_hook
-        # 构造期读取 settings（对齐 pi 装配期注入）：shell 路径与命令前缀。
+        # 构造期读取 settings：shell 路径与命令前缀。
         # 工具随资源 reload 重建，settings 变更在重建后生效。
         self._command_prefix = context.settings.get_shell_command_prefix()
         # 本地后端是唯一执行面（executor 集成已从本线切除）
@@ -169,7 +169,7 @@ class Tool:
                 details={"error": "Missing required parameter: command"},
             )
 
-        # timeout 校验（对齐 pi resolveTimeoutMs）：非有限值 / ≤0 / 超上限
+        # timeout 校验：非有限值 / ≤0 / 超上限
         # 均显式以 is_error=True 报错反馈给 LLM；缺省即不限时。
         timeout, timeout_error = _resolve_timeout_seconds(params.get("timeout"))
         if timeout_error is not None:
@@ -181,7 +181,7 @@ class Tool:
                 is_error=True,
             )
 
-        # settings 的 shell 命令前缀（对齐 pi commandPrefix）：拼进每条命令
+        # settings 的 shell 命令前缀：拼进每条命令
         if self._command_prefix:
             command = f"{self._command_prefix}\n{command}"
 
@@ -259,13 +259,13 @@ class Tool:
             # 引擎已把清洗后的文本写入 accumulator；本层只负责调度更新
             schedule_output_update()
 
-        # 初始空 update（对齐 TS bash.ts）：命令还没产出时先让 UI 渲染工具卡片。
+        # 初始空 update：命令还没产出时先让 UI 渲染工具卡片。
         if on_update:
             maybe_coro = on_update(AgentToolResult(content=[], details={}))
             if asyncio.iscoroutine(maybe_coro):
                 await maybe_coro
 
-        # 预 spawn 中止检查（对齐 pi）：signal 已中止则不启动进程，直接报错返回
+        # 预 spawn 中止检查：signal 已中止则不启动进程，直接报错返回
         if signal is not None and getattr(signal, "aborted", False):
             return AgentToolResult(
                 content=[TextContent(type="text", text="命令已取消")],
@@ -294,7 +294,7 @@ class Tool:
 
             watchers.append(asyncio.create_task(_watch_caller()))
 
-        # timeout 缺省（None）即不限时（对齐 pi：无默认超时，避免误杀长构建命令）
+        # timeout 缺省（None）即不限时（无默认超时，避免误杀长构建命令）
         if timeout is not None:
 
             async def _watch_timeout() -> None:
@@ -430,7 +430,7 @@ class Tool:
                 ),
                 **(details or {}),
             },
-            # pi 对齐：非零退出 = 结果级错误（驱动 toolResult.is_error 与错误卡片）
+            # 非零退出 = 结果级错误（驱动 toolResult.is_error 与错误卡片）
             is_error=exit_code != 0,
         )
 

@@ -128,7 +128,7 @@ def test_always_remembered_per_exact_command():
 
 
 def test_dangerous_patterns_all_match():
-    """pi 同款三条正则的全部形态。"""
+    """三条正则的全部形态。"""
     handler, ctx = _make_handler(has_ui=False)
     dangerous = [
         "rm -rf /",

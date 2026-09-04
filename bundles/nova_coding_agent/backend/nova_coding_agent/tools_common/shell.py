@@ -1,6 +1,6 @@
 """Shell 输出清洗与 shell 解析纯函数。
 
-对齐 pi 的 ``utils/ansi.ts``（stripAnsi）、``utils/shell.ts``
+的 ``utils/ansi.ts``（stripAnsi）、``utils/shell.ts``
 （sanitizeBinaryOutput / getShellConfig）：会话级 bash 输出在记录前剥离
 ANSI 转义序列、过滤二进制控制字符；shell 解析跨平台（POSIX / Git Bash /
 WSL / sh 兜底）。
@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass
 from typing import List, Literal, Optional
 
-# 对齐 pi ansi.ts：OSC 序列（ESC ] ... ST）与 CSI 序列
+# OSC 序列（ESC ] ... ST）与 CSI 序列
 _ST = r"(?:\x07|\x1b\\|\x9c)"
 _OSC = rf"(?:\x1b\][\s\S]*?{_ST})"
 _CSI = r"[\x1b\x9b][\[\]()#;?]*(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]"
@@ -50,7 +50,7 @@ def sanitize_shell_output(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Shell 解析（对齐 pi getShellConfig）
+# Shell 解析
 # ---------------------------------------------------------------------------
 
 

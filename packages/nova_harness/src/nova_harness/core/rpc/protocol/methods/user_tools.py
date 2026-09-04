@@ -7,57 +7,41 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
-
 from nova_harness.core.rpc.protocol.errors import JSONRPCError
+from nova_harness.core.rpc.protocol.methods import shapes as _sh
 from nova_harness.core.rpc.protocol.methods.state import ServerState
 from nova_harness.core.rpc.protocol.router import MethodRegistry
 
+_D = "user_tools"
+
 
 def register(registry: MethodRegistry, state: ServerState) -> None:
-    async def listUserTools(params: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def listUserTools(params: _sh.EmptyParams) -> _sh.ListUserToolsResult:
         if state.runtime is None:
             raise JSONRPCError(JSONRPCError.NO_ACTIVE_SESSION, "No active session")
-        return [info.dump_wire() for info in state.runtime.session.list_user_tools()]
+        return _sh.ListUserToolsResult(
+            root=[info.dump_wire() for info in state.runtime.session.list_user_tools()]
+        )
 
-    async def invokeUserTool(params: Dict[str, Any]) -> Dict[str, Any]:
+    async def invokeUserTool(
+        params: _sh.InvokeUserToolParams,
+    ) -> _sh.InvokeUserToolResult:
         if state.runtime is None:
             raise JSONRPCError(JSONRPCError.NO_ACTIVE_SESSION, "No active session")
         try:
             message = await state.runtime.session.invoke_user_tool(
-                params["name"], params.get("params") or {}
+                params.name, params.params or {}
             )
         except KeyError as exc:
             raise JSONRPCError(JSONRPCError.INVALID_PARAMS, str(exc))
-        return {"message": message.dump_wire()}
+        return _sh.InvokeUserToolResult(message=message.dump_wire())
 
-    async def abortUserTool(params: Dict[str, Any]) -> Dict[str, Any]:
+    async def abortUserTool(params: _sh.AbortUserToolParams) -> _sh.AbortResult:
         if state.runtime is None:
-            return {"ok": False, "reason": "no session"}
-        state.runtime.session.abort_user_tool(params.get("name"))
-        return {"ok": True}
+            return _sh.AbortResult(ok=False, reason="no session")
+        state.runtime.session.abort_user_tool(params.name)
+        return _sh.AbortResult(ok=True)
 
-    from nova_harness.core.rpc.protocol.methods import shapes as _sh
-
-    _D = "user_tools"
-    registry.register(
-        "listUserTools",
-        listUserTools,
-        domain=_D,
-        params_model=_sh.EmptyParams,
-        result_model=_sh.ListUserToolsResult,
-    )
-    registry.register(
-        "invokeUserTool",
-        invokeUserTool,
-        domain=_D,
-        params_model=_sh.InvokeUserToolParams,
-        result_model=_sh.InvokeUserToolResult,
-    )
-    registry.register(
-        "abortUserTool",
-        abortUserTool,
-        domain=_D,
-        params_model=_sh.AbortUserToolParams,
-        result_model=_sh.AbortResult,
-    )
+    registry.register("listUserTools", listUserTools, domain=_D)
+    registry.register("invokeUserTool", invokeUserTool, domain=_D)
+    registry.register("abortUserTool", abortUserTool, domain=_D)

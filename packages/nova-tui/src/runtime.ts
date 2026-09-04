@@ -111,15 +111,15 @@ export interface NovaUIRuntimeOptions extends WireClientOptions {
     setTitle?(text: string | undefined): void;
     /** 桌面通知（OSC 9/777/99——受 desktop_notify 设置门控）。 */
     notifyDesktop?(title: string, body: string): void;
-    /** 自定义 footer（整件替换；undefined 恢复默认——pi setFooter 对位）。 */
+    /** 自定义 footer（整件替换；undefined 恢复默认）。 */
     setFooter?(factory: ((env: unknown) => unknown) | undefined): void;
-    /** 自定义 header（整件替换启动区；undefined 恢复默认——pi setHeader 对位）。 */
+    /** 自定义 header（整件替换启动区；undefined 恢复默认）。 */
     setHeader?(factory: ((env: unknown) => unknown) | undefined): void;
-    /** 工作指示器文案（pi setWorkingMessage 对位）。 */
+    /** 工作指示器文案。 */
     setWorkingMessage?(message?: string): void;
-    /** spinner 帧/间隔（pi setWorkingIndicator 对位；frames: [] 隐藏帧）。 */
+    /** spinner 帧/间隔（frames: [] 隐藏帧）。 */
     setWorkingIndicator?(options?: { frames?: string[]; intervalMs?: number }): void;
-    /** 显示/隐藏内建 working loader 行（pi setWorkingVisible 对位）。 */
+    /** 显示/隐藏内建 working loader 行。 */
     setWorkingVisible?(visible: boolean): void;
   };
 }
@@ -399,7 +399,7 @@ export class NovaUIRuntime implements RuntimeHost {
         })),
       );
 
-      // trust 过滤（编排层，pi 发现域过滤思想对位）：project 级包不被
+      // trust 过滤（编排层）：project 级包不被
       // 信任时不进加载域——不 stat、不 import
       const { allowed, skipped } = partitionByTrust(discovered, trusted);
       for (const name of skipped) {
@@ -418,7 +418,7 @@ export class NovaUIRuntime implements RuntimeHost {
         uiState: this.uiState,
         onDialogChange: () => this.refreshDialogCapabilities(),
       });
-      // 诊断统一透出（加载失败 + 覆盖碰撞——pi diagnostics 对位）
+      // 诊断统一透出（加载失败 + 覆盖碰撞）
       for (const diagnostic of result.diagnostics) {
         this.store.addNotice(
           diagnostic.type === 'error' ? 'error' : 'info',
@@ -508,7 +508,7 @@ export class NovaUIRuntime implements RuntimeHost {
 
   /**
    * 发送用户消息。流式中必须给 ``streamingBehavior``（后端否则抛错）：
-   * ``steer`` 插入当前 turn / ``followUp`` 排队等 run 结束（pi 同款语义）。
+   * ``steer`` 插入当前 turn / ``followUp`` 排队等 run 结束。
    */
   async prompt(
     text: string,

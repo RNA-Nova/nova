@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 from nova_agent import AgentMessage
+
 from nova_harness.core.types.events import (
     AfterProviderResponseEvent,
     BeforeAgentStartEvent,
@@ -96,7 +97,7 @@ from nova_harness.core.types.protocols import ModelRuntimeProtocol
 from nova_harness.core.types.ui import NoOpUIContext, ScopedUIContext, UIContext
 
 
-@dataclass
+@dataclass(frozen=True)
 class BeforeAgentStartCombinedResult:
     """before_agent_start 事件合并结果。"""
 
@@ -835,9 +836,7 @@ class ExtensionRunner:
 
         return None
 
-    async def emit_context(
-        self, messages: List[Any], signal: Optional[Any] = None
-    ) -> List[Any]:
+    async def emit_context(self, messages: List[Any]) -> List[Any]:
         """触发 context 事件。多个 handler 链式修改 messages。"""
         ctx = self.create_context()
         # 与 TS structuredClone 对齐，避免 handler 原地修改原始 message 对象。
@@ -847,7 +846,7 @@ class ExtensionRunner:
             handlers = ext.handlers.get(CONTEXT, [])
             for handler in handlers:
                 try:
-                    event = ContextEvent(messages=current_messages, signal=signal)
+                    event = ContextEvent(messages=current_messages)
                     raw = handler(event, ctx)
                     if inspect.isawaitable(raw):
                         raw = await raw

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 from nova_ai import ModelThinkingLevel
+
 from nova_harness.core.config.defaults import get_agent_dir, get_project_base_dir
 from nova_harness.core.config.settings.storage import (
     FileSettingsStorage,

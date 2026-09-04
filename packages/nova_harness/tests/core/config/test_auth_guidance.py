@@ -137,6 +137,28 @@ async def test_prompt_input_returns_text():
 
 
 @pytest.mark.asyncio
+async def test_prompt_input_secret_param_passthrough():
+    """secret 类型 prompt 必须透传打码标记（``secret: true``）给前端——
+    API key 输入不得回显明文；非 secret 类型不带该键。"""
+    captured = {}
+
+    class _CaptureUI(_FakeUI):
+        async def request(self, method, params, signal=None):
+            captured["method"] = method
+            captured["params"] = params
+            return UIResponse(value="sk-123")
+
+    interaction = UIAuthInteraction(_CaptureUI())
+    result = await interaction.prompt(AuthPrompt(type="secret", message="Enter key"))
+    assert result == "sk-123"
+    assert captured["params"].get("secret") is True
+
+    captured.clear()
+    await interaction.prompt(AuthPrompt(type="text", message="Enter something"))
+    assert "secret" not in captured["params"]
+
+
+@pytest.mark.asyncio
 async def test_prompt_cancel_raises():
     ui = _FakeUI({})  # 无预置响应 → cancelled
     interaction = UIAuthInteraction(ui)
@@ -186,9 +208,9 @@ def test_notify_device_code_renders_code_and_url():
     interaction.notify(
         AuthEvent(
             type="device_code",
-            userCode="ABCD-1234",
-            verificationUri="https://example.com/device",
-            expiresInSeconds=900,
+            user_code="ABCD-1234",
+            verification_uri="https://example.com/device",
+            expires_in_seconds=900,
         )
     )
     assert ui.messages
@@ -237,7 +259,7 @@ def test_auth_url_auto_opens_browser_once_per_url(monkeypatch):
 
 
 def test_device_code_prefers_complete_uri_and_dedupes_with_auth_url(monkeypatch):
-    """device_code 优先 verificationUriComplete；与 auth_url 同 URL 不重复开。"""
+    """device_code 优先 verification_uri_complete；与 auth_url 同 URL 不重复开。"""
     import webbrowser
 
     opened = []
@@ -246,9 +268,9 @@ def test_device_code_prefers_complete_uri_and_dedupes_with_auth_url(monkeypatch)
     interaction.notify(
         AuthEvent(
             type="device_code",
-            verificationUri="https://auth.example/device",
-            verificationUriComplete="https://auth.example/complete?code=1",
-            userCode="ABCD",
+            verification_uri="https://auth.example/device",
+            verification_uri_complete="https://auth.example/complete?code=1",
+            user_code="ABCD",
         )
     )
     assert opened == ["https://auth.example/complete?code=1"]

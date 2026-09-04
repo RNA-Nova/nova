@@ -1,7 +1,7 @@
 /**
  * 对话框控制器与四件套组件（pi-tui 现成件组装）。
  *
- * 模式对齐 pi interactive-mode：对话框**替换编辑器槽位**（转录区不动），
+ * 模式对话框**替换编辑器槽位**（转录区不动），
  * 应答/取消后恢复编辑器。路由：
  * - onUIRequest → select/confirm/input 对话框 → sendUIResponse
  * - onUICancel  → 后端 abort 撤销 → 关框并按 cancelled 应答
@@ -11,6 +11,7 @@
 import chalk from 'chalk';
 import type { NovaUIRuntime, UINotice, UIRequest } from 'nova-tui';
 import type { NovaOverlayOptions } from 'nova-tui';
+import { guardComponentLineWidth } from 'nova-tui';
 import {
   Box,
   Container,
@@ -42,6 +43,26 @@ const selectListTheme: SelectListTheme = {
   scrollInfo: (s) => chalk.dim(s),
   noMatch: (s) => chalk.yellow(s),
 };
+
+/**
+ * 密码打码输入框（ssh 式圆点掩码）。
+ *
+ * pi-tui 的 Input 无掩码能力——渲染期把私有 value 临时换成等长圆点串
+ * 再委托父类渲染（码点数一致 ⇒ 光标/宽度数学不变），render 返回即恢复。
+ * 真实值全程不出现在渲染输出里；getValue/onSubmit 不受影响。
+ */
+export class MaskedInput extends Input {
+  override render(width: number): string[] {
+    const self = this as unknown as { value: string };
+    const real = self.value;
+    self.value = '•'.repeat([...real].length);
+    try {
+      return super.render(width);
+    } finally {
+      self.value = real;
+    }
+  }
+}
 
 /** 多行编辑对话框（editor 原语组件）：enter 提交、esc 取消。 */
 class EditorDialog extends Container implements Focusable {
@@ -130,7 +151,7 @@ export class DialogController {
     private readonly runtime: NovaUIRuntime,
     /** custom 原语的工厂环境（RegionEnv：cwd/tui/colors/markdownTheme——装配根注入）。 */
     private readonly customEnv: RegionEnv,
-    /** set_status 命名通知的出口（footer 扩展状态行——装配根注入，pi setStatus 对位）。 */
+    /** set_status 命名通知的出口（footer 扩展状态行——装配根注入）。 */
     private readonly onExtensionStatus?: (key: string, text: string | undefined) => void,
   ) {
     this.runtime.onUIRequest((req) => this.handle(req));
@@ -221,7 +242,7 @@ export class DialogController {
   }
 
   /**
-   * 包侧自定义对话框（dialog:* slot——pi 后端扩展直驱 UI 的对位）：
+   * 包侧自定义对话框（dialog:* slot）：
    * 工厂形态 ``(env, params, done) => Component``；done(undefined) = 取消
    * （cancelled 应答），其余值按 ``{value: result}`` 应答。撤销帧
    * （ui/cancel）经 activeId 复用 dismiss 路径（与基线对话框同语义）。
@@ -256,7 +277,9 @@ export class DialogController {
       this.runtime.sendUIResponse(req.id, { cancelled: true });
       return;
     }
-    this.swap(req.id, component as Container, component as Component);
+    // 行宽防线：包侧对话框组件超宽行不得崩掉整个 TUI
+    const guarded = guardComponentLineWidth(component as Component);
+    this.swap(req.id, guarded as Container, guarded);
   }
 
   private showSelect(req: UIRequest): void {
@@ -308,7 +331,8 @@ export class DialogController {
   private showInput(req: UIRequest): void {
     const title = str(req.params.title);
     const placeholder = str(req.params.placeholder);
-    const input = new Input();
+    // secret 载荷（API key 等）走圆点掩码输入框，不回显明文
+    const input = req.params.secret === true ? new MaskedInput() : new Input();
     if (placeholder) input.setValue(placeholder);
     input.onSubmit = (value) => {
       this.restore();
@@ -367,7 +391,7 @@ export class DialogController {
   }
 
   private showNotice(notice: UINotice): void {
-    // set_status 命名通知（pi ctx.ui.setStatus 对位——后端驱动的 footer 扩展
+    // set_status 命名通知（—后端驱动的 footer 扩展
     // 状态行：key 幂等覆盖，空文本清除）；未注入出口时静默降级
     if (notice.name === 'set_status') {
       const key = str(notice.params.key);
@@ -500,7 +524,7 @@ export class DialogController {
     });
   }
 
-  /** 本地多行编辑器框（editor 原语——pi extension-editor 对位：enter 提交、esc 取消）。 */
+  /** 本地多行编辑器框（editor 原语——：enter 提交、esc 取消）。 */
   editorLocal(title: string, prefill?: string): Promise<string | undefined> {
     return new Promise((resolve) => {
       const dialog = new EditorDialog(
@@ -521,9 +545,9 @@ export class DialogController {
   }
 
   /**
-   * 模态自定义对话框（custom 原语——逃生舱核心件，pi ctx.ui.custom 对位）。
+   * 模态自定义对话框（custom 原语——逃生舱核心件）。
    * 工厂产出组件挂载进编辑器槽位（或 overlay 浮层）；组件经 done(result)
-   * 交还结果并关框；Esc 等键位语义归组件自管（作者职责，pi 同款）。
+   * 交还结果并关框；Esc 等键位语义归组件自管（作者职责）。
    * 工厂抛错/产物非组件 → 按 undefined 解决（不挂起扩展）。
    */
   customLocal<T>(
@@ -562,14 +586,13 @@ export class DialogController {
         resolve(undefined); // 非组件产物——按取消解决
         return;
       }
+      // 行宽防线：包侧组件超宽行不得崩掉整个 TUI
+      const guarded = guardComponentLineWidth(component as Component);
       if (options?.overlay) {
-        overlayHandle = this.tui.showOverlay(
-          component as Component,
-          options.overlay as OverlayOptions,
-        );
+        overlayHandle = this.tui.showOverlay(guarded, options.overlay as OverlayOptions);
         this.localDialog = true; // Esc 域级路由让路（浮层自管键位）
       } else {
-        this.showLocal(component as Container, component as Component);
+        this.showLocal(guarded as Container, guarded);
       }
     });
   }

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import AgentTool, AgentToolResult
 from nova_ai import AbortSignal, TextContent
+
 from nova_harness.core.types.extensions import SourceInfo
 from nova_harness.core.types.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,

@@ -1,5 +1,5 @@
 /**
- * 选择器基础件（pi ExtensionSelectorComponent 对位，SelectList 结构化版）。
+ * 选择器基础件（SelectList 结构化版）。
  *
  * 视觉：DynamicBorder 上下框 + accent 标题 + SelectList（滚动/高亮/计数）
  * + 键位提示行；可选 CountdownTimer（对话框 timeout 的前端呈现）。
@@ -70,15 +70,8 @@ export class Selector extends Container implements Focusable {
     const titleText = new Text(colors.accent(` ${title} `), 0, 0);
     this.addChild(titleText);
 
-    if (options.timeoutMs && options.timeoutMs > 0) {
-      this.countdown = new CountdownTimer(
-        options.timeoutMs,
-        tui,
-        (seconds) => titleText.setText(colors.accent(` ${title} (${seconds}s) `)),
-        () => this.callbacks.onCancel(),
-      );
-    }
-
+    // SelectList 先建、CountdownTimer 后建——后者持 setInterval，
+    // 顺序反过来若 SelectList 构造抛错，interval 将无人 dispose（孤儿化）
     this.list = new SelectList(
       items.map((item) => ({
         value: item.value,
@@ -91,6 +84,15 @@ export class Selector extends Container implements Focusable {
     this.list.onSelect = (item) => this.callbacks.onSelect(item.value);
     this.list.onCancel = () => this.callbacks.onCancel();
     this.addChild(this.list);
+
+    if (options.timeoutMs && options.timeoutMs > 0) {
+      this.countdown = new CountdownTimer(
+        options.timeoutMs,
+        tui,
+        (seconds) => titleText.setText(colors.accent(` ${title} (${seconds}s) `)),
+        () => this.callbacks.onCancel(),
+      );
+    }
 
     this.addChild(new Spacer(1));
     this.addChild(

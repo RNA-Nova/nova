@@ -662,3 +662,56 @@ describe('custom 消息映射（扩展注入 / 用户工具）', () => {
     assert.equal(state.entries.length, 0);
   });
 });
+
+describe('数据面：计时锚点与 thinking 摘要', () => {
+  it('工具卡片创建即带 startedAt（计时锚点数据化——重建不归零）', () => {
+    const state = createTranscriptState();
+    applyRuntimeEvent(
+      state,
+      ev('message_start', { message: { role: 'assistant', id: 'a1', content: [] } }),
+    );
+    applyRuntimeEvent(
+      state,
+      ev('message_update', {
+        message: {
+          role: 'assistant',
+          id: 'a1',
+          content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'ls' } }],
+        },
+      }),
+    );
+    const card = state.entries.find((e) => e.kind === 'toolCall');
+    assert.ok(card?.kind === 'toolCall' && typeof card.card.startedAt === 'number');
+    assert.ok((card as { card: { startedAt: number } }).card.startedAt <= Date.now());
+  });
+
+  it('message_end 写入 thinkingDurationMs 与按类聚合的 toolCounts', () => {
+    const state = createTranscriptState();
+    applyRuntimeEvent(
+      state,
+      ev('message_start', { message: { role: 'assistant', id: 'a1', timestamp: 1000, content: [] } }),
+    );
+    applyRuntimeEvent(
+      state,
+      ev('message_end', {
+        message: {
+          role: 'assistant',
+          id: 'a1',
+          timestamp: 4200,
+          content: [
+            { type: 'text', text: 'done' },
+            { type: 'toolCall', id: 'c1', name: 'bash', arguments: {} },
+            { type: 'toolCall', id: 'c2', name: 'read', arguments: {} },
+            { type: 'toolCall', id: 'c3', name: 'read', arguments: {} },
+          ],
+        },
+      }),
+    );
+    const entry = state.entries[0];
+    assert.ok(entry?.kind === 'assistant');
+    if (entry?.kind === 'assistant') {
+      assert.equal(entry.thinkingDurationMs, 3200);
+      assert.deepEqual(entry.toolCounts, { bash: 1, read: 2 });
+    }
+  });
+});

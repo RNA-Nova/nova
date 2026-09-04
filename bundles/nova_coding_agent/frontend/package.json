@@ -16,7 +16,7 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "nova-tui": "file:../../packages/nova-tui",
+    "nova-tui": "file:../../../packages/nova-tui",
     "@earendil-works/pi-tui": "^0.80.10"
   }
 }

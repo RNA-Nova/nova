@@ -11,7 +11,7 @@
  */
 
 import type { NovaUIRuntime } from 'nova-tui';
-import { regionSlot, unwrapOverlay, type NovaOverlayOptions } from 'nova-tui';
+import { guardComponentLineWidth, regionSlot, unwrapOverlay, type NovaOverlayOptions } from 'nova-tui';
 import type { Component, OverlayHandle, OverlayOptions, TUI } from '@earendil-works/pi-tui';
 
 import type { RegionEnv } from './region-host.js';
@@ -69,8 +69,9 @@ export class OverlayHost implements Component {
       return; // 非组件形态：空态（下帧重试）
     }
     try {
+      // 行宽防线：浮层组件超宽行不得崩掉整个 TUI
       this.handle = this.tui.showOverlay(
-        candidate as Component,
+        guardComponentLineWidth(candidate as Component),
         toPiOptions(unwrapped?.options),
       );
     } catch {

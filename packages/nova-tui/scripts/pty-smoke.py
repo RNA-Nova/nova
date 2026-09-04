@@ -152,7 +152,16 @@ CASES: list[Case] = [
     ("share 无 gh 降级", "/share\r", [r"gh|分享|失败|错误"], [], 8.0),
     ("prompt 模板展开", "/refactor 测试\r", [r"refactor|重构|assistant|⠋|working"], [], 6.0),
     ("prompt 模板中止", [("\x1b", 4.0), ("/debug\r", 4.0)], [r"debug|dump"], []),
-    ("真实对话一轮", "回复ok\r", [r"."], [], 45.0),
+    # must_not 抓 turn 完成后才冒出的钩子/后端崩溃（曾有的
+    # should_stop_after_turn 签名漂移就是这一类——回复渲染后才炸）
+    ("真实对话一轮", "回复ok\r", [r"."], [r"positional argument", r"TypeError", r"Traceback", r"Error code: "], 45.0),
+    # 真实压缩：鉴权链（ModelRuntime.get_request_auth → OAuth）端到端——
+    # 曾有 apiKey/api_key 键名误读导致 /compact 恒鉴权失败
+    ("compact 真实压缩", "/compact\r", [r"\[compaction\]|Compacted from|压缩"], [r"鉴权失败|未配置鉴权|Error code: "], 120.0),
+    # 工作区：status 槽位四要素（活动·计时·输出量估算·todo 进度）实时呈现
+    #（↓~ 仅在流式输出**文本**时出现——模型纯 thinking 轮可能不现，故与
+    # thinking/tools 计数并列为可选富元素之一）
+    ("工作区实时呈现", "用 todo 工具列 3 步计划并立即逐步执行：1 创建 wa1.txt 内容 1、2 创建 wa2.txt 内容 2、3 创建 wa3.txt 内容 3\r", [r"Working…[^\n]*\d+s|Running \w+…[^\n]*\d+s", r"↓ ~|thinking|tools:\d", r"✓|■", r"□|└"], [], 120.0),
 ]
 # quit 单独判定（断言进程退出而非屏幕文本）；
 # 先 Esc 中止可能未完的 LLM 轮次——否则 /quit 会被当 steering 文本发给模型

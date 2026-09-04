@@ -1,10 +1,10 @@
 /**
- * diff 块渲染（复刻 pi components/diff.ts 的行内词级高亮，适配块结构）。
+ * diff 块渲染（行内词级高亮，适配块结构）。
  *
  * - 上下文行：灰；
  * - 删除行：红；新增行：绿；
  * - 恰好 1 删 + 1 增相邻（单行修改）→ 词级 diff，变动 token 反色高亮
- *   （pi 的 intra-line 规则；del/add 数量不等则整行平铺）。
+ *   （intra-line 规则；del/add 数量不等则整行平铺）。
  */
 
 import * as Diff from 'diff';
@@ -16,12 +16,12 @@ import { colors } from '../themes/index.js';
 type DiffBlock = Extract<NovaBlock, { kind: 'diff' }>;
 type Line = DiffBlock['hunks'][number]['lines'][number];
 
-/** tab 替换为空格（对齐 pi：渲染一致性）。 */
+/** tab 替换为空格（渲染一致性）。 */
 function replaceTabs(text: string): string {
   return text.replace(/\t/g, '   ');
 }
 
-/** 词级 diff：变动 token 反色（pi renderIntraLineDiff 直搬，theme.inverse → chalk）。 */
+/** 词级 diff：变动 token 反色（theme.inverse → chalk）。 */
 function renderIntraLineDiff(
   oldContent: string,
   newContent: string,

@@ -5,7 +5,7 @@
  * - **声明式**（默认轨）：producer 每帧调用（纯函数便宜）产 NovaBlock[]，
  *   输出指纹不变复用适配组件（Markdown 构造贵）——可过网（M3 远程）；
  * - **组件工厂**（逃生舱）：首次解析时建厂一次，产出 pi-tui Component
- *   直挂（有状态/可交互——pi setWidget/setFooter 的对位）；同进程全自由。
+ *   直挂（有状态/可交互）；同进程全自由。
  *
  * 判别：注册函数首次调用的返回形态（数组 → 块；否则 → 组件）。
  * slots 整体替换（refreshPackages）后下次渲染自动重判别（函数引用比对）。
@@ -13,7 +13,7 @@
  */
 
 import type { NovaBlock, NovaUIRuntime, RegionContext } from 'nova-tui';
-import { regionSlot } from 'nova-tui';
+import { guardComponentLineWidth, regionSlot } from 'nova-tui';
 import type { Component, TUI } from '@earendil-works/pi-tui';
 
 import { blocksToComponents } from '../../blocks/index.js';
@@ -83,7 +83,8 @@ export class RegionHost implements Component {
       typeof (out as { render?: unknown }).render === 'function'
     ) {
       this.mode = 'component';
-      this.component = out as Component;
+      // 行宽防线：区域组件超宽行不得崩掉整个 TUI
+      this.component = guardComponentLineWidth(out as Component);
     }
     // 其他返回形态：空态（下帧重试）
   }
@@ -95,12 +96,14 @@ export class RegionHost implements Component {
     return (this.blockComponents ?? []).flatMap((component) => component.render(width));
   }
 
-  /** 块列表 → 组件（指纹比对——输出不变复用）。 */
+  /** 块列表 → 组件（指纹比对——输出不变复用；统一过行宽防线）。 */
   private applyBlocks(blocks: NovaBlock[]): void {
     const fingerprint = JSON.stringify(blocks);
     if (fingerprint === this.fingerprint) return;
     this.fingerprint = fingerprint;
-    this.blockComponents = blocksToComponents(blocks, this.runtime.slots);
+    this.blockComponents = blocksToComponents(blocks, this.runtime.slots).map(
+      guardComponentLineWidth,
+    );
   }
 
   private reset(): void {

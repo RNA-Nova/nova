@@ -163,7 +163,7 @@ def test_bash_missing_command():
 
 
 def test_bash_shell_command_prefix_from_settings(tmpdir):
-    """settings.shell_command_prefix 在构造期读取并拼进每条命令（对齐 pi commandPrefix）。"""
+    """settings.shell_command_prefix 在构造期读取并拼进每条命令。"""
     executor = _load_executor(
         settings=_StubSettings(shell_command_prefix="export NOVA_MARKER=works")
     )
@@ -183,7 +183,7 @@ def test_bash_shell_path_from_settings(tmpdir):
 
 
 def test_bash_timeout_must_be_finite(tmpdir):
-    """timeout 非有限值（inf/nan）显式报错（对齐 pi resolveTimeoutMs）。"""
+    """timeout 非有限值（inf/nan）显式报错。"""
     executor = _load_executor()
     for bad in (float("inf"), float("nan")):
         result = _run(
@@ -199,7 +199,7 @@ def test_bash_timeout_must_be_finite(tmpdir):
 
 
 def test_bash_timeout_must_be_positive(tmpdir):
-    """timeout ≤ 0 显式报错（对齐 pi resolveTimeoutMs）。"""
+    """timeout ≤ 0 显式报错。"""
     executor = _load_executor()
     for bad in (0, -5):
         result = _run(
@@ -215,7 +215,7 @@ def test_bash_timeout_must_be_positive(tmpdir):
 
 
 def test_bash_timeout_exceeds_max(tmpdir):
-    """timeout 超过上限（2147483.647 秒）显式报错（对齐 pi resolveTimeoutMs）。"""
+    """timeout 超过上限（2147483.647 秒）显式报错。"""
     executor = _load_executor()
     result = _run(
         executor.execute(
@@ -227,7 +227,7 @@ def test_bash_timeout_exceeds_max(tmpdir):
 
 
 def test_bash_no_default_timeout(tmpdir):
-    """不传 timeout 即不限时（对齐 pi：无默认超时，避免误杀长构建命令）。"""
+    """不传 timeout 即不限时（无默认超时，避免误杀长构建命令）。"""
     executor = _load_executor()
     # schema 不再声明默认值
     assert "default" not in executor.parameters["properties"]["timeout"]
@@ -238,7 +238,7 @@ def test_bash_no_default_timeout(tmpdir):
 
 
 def test_bash_pre_spawn_aborted_signal(tmpdir):
-    """spawn 前 signal 已中止：直接 is_error 返回，不启动进程（对齐 pi）。"""
+    """spawn 前 signal 已中止：直接 is_error 返回，不启动进程（）。"""
     from nova_ai import AbortController
 
     executor = _load_executor()
@@ -259,7 +259,7 @@ def test_bash_pre_spawn_aborted_signal(tmpdir):
 
 
 def test_bash_description_documents_truncation():
-    """description/prompt_snippet 明确截断与落盘语义（对齐 pi bash.ts）。"""
+    """description/prompt_snippet 明确截断与落盘语义。"""
     executor = _load_executor()
     assert "2000" in executor.description
     assert "50KB" in executor.description
@@ -268,7 +268,7 @@ def test_bash_description_documents_truncation():
 
 
 def test_bash_env_param(tmpdir):
-    """env 参数合并进子进程环境（nova 增量参数，pi 由 spawnHook 覆盖此场景）。"""
+    """env 参数合并进子进程环境（nova 增量参数）。"""
     executor = _load_executor()
     result = _run(
         executor.execute(
@@ -285,7 +285,7 @@ def test_bash_env_param(tmpdir):
 
 
 def test_bash_spawn_hook_rewrites_command(tmpdir):
-    """spawn_hook 可在启动前改写 command/cwd/env（对齐 pi spawnHook）。"""
+    """spawn_hook 可在启动前改写 command/cwd/env。"""
     from nova_harness.core.types.extensions.process import SpawnContext
 
     executor = _load_executor()
@@ -305,7 +305,7 @@ def test_bash_spawn_hook_rewrites_command(tmpdir):
 
 
 def test_bash_timeout_keeps_partial_output(tmpdir):
-    """超时结果保留已产出的部分输出并透出秒数（对齐 pi appendStatus）。"""
+    """超时结果保留已产出的部分输出并透出秒数。"""
     executor = _load_executor()
     result = _run(
         executor.execute(
@@ -327,7 +327,7 @@ def test_bash_timeout_keeps_partial_output(tmpdir):
 
 
 def test_bash_cancel_keeps_partial_output(tmpdir):
-    """取消结果保留已产出的部分输出（对齐 pi：aborted 时输出 + 状态行）。"""
+    """取消结果保留已产出的部分输出（aborted 时输出 + 状态行）。"""
     from nova_ai import AbortController
 
     executor = _load_executor()
@@ -352,7 +352,7 @@ def test_bash_cancel_keeps_partial_output(tmpdir):
 
 
 def test_bash_truncation_footer_lines_branch(tmpdir):
-    """行数超限的截断 footer 文案（对齐 pi formatOutput 的 lines 分支）。"""
+    """行数超限的截断 footer 文案。"""
     executor = _load_executor()
     result = _run(
         executor.execute(
@@ -371,7 +371,7 @@ def test_bash_truncation_footer_lines_branch(tmpdir):
 
 
 def test_bash_truncation_footer_bytes_branch(tmpdir):
-    """字节超限（多行）的截断 footer 文案（对齐 pi formatOutput 的 bytes 分支）。"""
+    """字节超限（多行）的截断 footer 文案。"""
     executor = _load_executor()
     # 100 行 × 2KB ≈ 200KB > 50KB 上限；行数远低于 2000，触发 bytes 分支
     result = _run(
@@ -395,7 +395,7 @@ def test_bash_truncation_footer_bytes_branch(tmpdir):
 
 
 def test_bash_truncation_footer_last_line_partial(tmpdir):
-    """单行超长的截断 footer 文案（对齐 pi formatOutput 的 lastLinePartial 分支）。"""
+    """单行超长的截断 footer 文案。"""
     executor = _load_executor()
     result = _run(
         executor.execute(

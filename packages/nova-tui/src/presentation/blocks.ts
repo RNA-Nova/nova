@@ -53,7 +53,7 @@ export interface RendererInput {
   toolName: string;
   args?: unknown;
   /**
-   * 两阶段生命周期（pi 同款）：streaming = 参数流式累积中；
+   * 两阶段生命周期：streaming = 参数流式累积中；
    * running = 执行中；done/error = 完结。
    */
   status: 'streaming' | 'running' | 'done' | 'error';
@@ -86,7 +86,7 @@ export interface RendererEnv {
   markdownTheme?: unknown;
   /** 全局展开态（ctrl+o）——折叠语义的渲染器据此决定预览/全量。 */
   expanded?: boolean;
-  // 计时显示归宿主 chrome（ElapsedLine——pi Loader 自转对位）：渲染器
+  // 计时显示归宿主 chrome（ElapsedLine）：渲染器
   // 不读时间、不被滴答重调——渲染器是纯函数，调用只随真实输入变更发生。
 }
 

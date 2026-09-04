@@ -1,5 +1,5 @@
 /**
- * 会话树选择器（pi tree-selector 对位：折叠 + 标签编辑 + 过滤 + 搜索 + 水平视口）。
+ * 会话树选择器（折叠 + 标签编辑 + 过滤 + 搜索 + 水平视口）。
  *
  * 归属：官方 bundle 的 ui/ 段（包自持命令 UI——dogfood：官方与第三方同机制）。
  * 宿主部件经 'nova-tui/modes/tui/*' 子路径导出共享（jiti 别名 + 原生 ESM
@@ -13,10 +13,10 @@
  * - 隐藏/被滤条目的后代**重挂到最近可见祖先**（视觉结构不漂移）；
  * - 分支排序：含当前 leaf 的分支在最前，其余按子树最新活动倒序。
  *
- * 过滤五模式（pi 对位）：default（隐藏元条目）/ no-tools（再隐 toolResult）/
+ * 过滤五模式：default（隐藏元条目）/ no-tools（再隐 toolResult）/
  * user-only / labeled-only / all——ctrl+d/t/u/l/a 直切（重按回 default），
  * ctrl+o / ctrl+shift+o 前后循环。搜索：可打印字符即查询（token AND 匹配），
- * Esc 有查询先清查询（连带清折叠），过滤/查询变化清折叠（pi 语义）。
+ * Esc 有查询先清查询（连带清折叠），过滤/查询变化清折叠（）。
  *
  * 键位：↑/↓ 环绕移动 · ← 折叠/跳父级 · → 展开/进子级 · shift+l 标签编辑 ·
  * enter 跳转 · esc 取消。折叠标记 ⊟/⊞，活跃路径 •。
@@ -60,7 +60,7 @@ export interface TreeRow {
   entry: TreeEntry;
 }
 
-/** pi 的五档过滤模式。 */
+/** 五档过滤模式。 */
 export type TreeFilterMode = 'default' | 'no-tools' | 'user-only' | 'labeled-only' | 'all';
 
 /** 视图参数（过滤 + 搜索 + 标签表——assembleTreeRows 的注入面）。 */
@@ -100,7 +100,7 @@ function typeVisible(entry: TreeEntry, filter: TreeFilterMode, labels: ReadonlyM
       return entry.type === 'message' || entry.type === 'compaction' || entry.type === 'branch_summary';
     case 'default':
     default:
-      // pi default：消息（全角色）+ 压缩 + 分支摘要；元条目（label/custom/
+      // default：消息（全角色）+ 压缩 + 分支摘要；元条目（label/custom/
       // model_change/thinking_level_change/session_info/custom_message…）隐藏
       return entry.type === 'message' || entry.type === 'compaction' || entry.type === 'branch_summary';
   }
@@ -134,7 +134,7 @@ export function deriveLabelTimestamps(entries: TreeEntry[]): Map<string, string>
   return timestamps;
 }
 
-/** pi formatLabelTimestamp 对位：当天 HH:MM，今年 M/D，跨年 YY/M/D。 */
+/** ：当天 HH:MM，今年 M/D，跨年 YY/M/D。 */
 export function formatLabelTimestamp(isoTimestamp: string, now = new Date()): string {
   const date = new Date(isoTimestamp);
   if (Number.isNaN(date.getTime())) return '';
@@ -150,7 +150,7 @@ export function formatLabelTimestamp(isoTimestamp: string, now = new Date()): st
   return `${String(date.getFullYear()).slice(2)}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-/** 条目的复制文本（pi getEntryCopyText 对位）：消息取全文，摘要类取 summary。 */
+/** 条目的复制文本：消息取全文，摘要类取 summary。 */
 export function entryCopyText(entry: TreeEntry): string {
   if (entry.type === 'message') {
     const message = entry.message as { content?: unknown } | undefined;
@@ -317,7 +317,7 @@ export function assembleTreeRows(
     });
     if (folded) return;
     const children = visibleChildren(node);
-    // pi 规则：有可见子级 且（是根 或 父级为多子分支点）才可折叠
+    // 规则：有可见子级 且（是根 或 父级为多子分支点）才可折叠
     rows[rows.length - 1].foldable = children.length > 0 && (isRoot || connector !== '');
     const branch = children.length > 1;
     const childGutters = gutters + (connector ? (isLast ? '   ' : '│  ') : '');
@@ -415,7 +415,7 @@ export class TreeSelector extends Container implements Focusable {
     return assembleTreeRows(this.entries, this.leafId, this.foldedIds, this.view);
   }
 
-  /** 过滤/查询变化：清折叠（pi 语义）+ 重组装 + 选中钳位。 */
+  /** 过滤/查询变化：清折叠（）+ 重组装 + 选中钳位。 */
   private onViewChange(): void {
     this.foldedIds.clear();
     this.rows = this.assemble();
@@ -458,7 +458,7 @@ export class TreeSelector extends Container implements Focusable {
       Math.min(this.selectedIndex - half, this.rows.length - this.maxVisible),
     );
     const windowRows = this.rows.slice(start, start + this.maxVisible);
-    // 水平视口（pi renderHorizontalViewport 对位）：仅当选中行正文起点
+    // 水平视口：仅当选中行正文起点
     // 不可见时 body 左移；2 列光标 gutter 固定不动
     const bodies = windowRows.map((row, offset) => {
       const isSelected = start + offset === this.selectedIndex;
@@ -525,7 +525,7 @@ export class TreeSelector extends Container implements Focusable {
     }
   }
 
-  /** 过滤模式直切（重按当前模式回 default——pi toggle 语义）。 */
+  /** 过滤模式直切（重按当前模式回 default）。 */
   private setFilter(mode: TreeFilterMode): void {
     this.filterMode = this.filterMode === mode && mode !== 'default' ? 'default' : mode;
     this.onViewChange();
@@ -583,7 +583,7 @@ export class TreeSelector extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, 'escape')) {
-      // 有搜索词：先清搜索 + 清折叠（pi 语义）；否则取消
+      // 有搜索词：先清搜索 + 清折叠（）；否则取消
       if (this.searchQuery) {
         this.searchQuery = '';
         this.onViewChange();
@@ -647,13 +647,13 @@ export class TreeSelector extends Container implements Focusable {
       return;
     }
     if (data === 'T') {
-      // shift+t：标签时间戳显隐（pi toggleLabelTimestamp 对位）
+      // shift+t：标签时间戳显隐
       this.showLabelTimestamp = !this.showLabelTimestamp;
       this.rebuild();
       return;
     }
     if (matchesKey(data, 'ctrl+x')) {
-      // 复制选中条目全文（pi tree ctrl+x 对位——控制器写剪贴板）
+      // 复制选中条目全文（—控制器写剪贴板）
       const row = this.selected;
       if (row) this.callbacks.onCopy?.(row.id);
       return;
@@ -667,7 +667,7 @@ export class TreeSelector extends Container implements Focusable {
       }
       return;
     }
-    // 可打印字符累积进搜索词（无独立输入框，pi 同款）
+    // 可打印字符累积进搜索词（无独立输入框）
     if (data.length === 1 && data >= ' ') {
       this.searchQuery += data;
       this.onViewChange();

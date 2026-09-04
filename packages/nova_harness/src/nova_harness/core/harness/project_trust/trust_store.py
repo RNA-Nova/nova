@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from filelock import FileLock
+
 from nova_harness.core.config.defaults import TRUST_FILE_NAME
 from nova_harness.core.types.project_trust import ProjectTrustUpdate
 

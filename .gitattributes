@@ -1,2 +1,7 @@
 # SCM syntax highlighting & preventing 3-way merges
 pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff
+
+# lockfile 与生成物标记（PR 统计不计入，diff 仍可审）
+package-lock.json linguist-generated=true
+packages/nova-tui/protocol/nova-wire.schema.json linguist-generated=true
+packages/nova-tui/src/protocol/nova-wire.gen.ts linguist-generated=true

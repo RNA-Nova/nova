@@ -1,6 +1,6 @@
 /**
  * read 渲染器测试（frontend/tui/tools/read.ts）：
- * 折叠态内容区为空（pi 语义）+ 截断提示、展开态全量渲染（Markdown fence）
+ * 折叠态内容区为空（）+ 截断提示、展开态全量渲染（Markdown fence）
  * 与 meta 表（total_lines / truncated / mime / resized）、错误回执。
  * 展开态 Markdown 组件需要主题，用恒等函数 Proxy 假主题（codeBlockIndent 除外）。
  */
@@ -35,7 +35,7 @@ function readInput(overrides: Record<string, unknown>) {
   return { toolName: 'read', status: 'done' as const, env, ...overrides } as any;
 }
 
-describe('read 渲染器（折叠态——pi 语义内容区为空）', () => {
+describe('read 渲染器（折叠态）', () => {
   it('truncated 时只显示折叠提示，内容不外泄', () => {
     const lines = renderLines(
       renderRead(

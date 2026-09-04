@@ -1,5 +1,5 @@
 /**
- * 终端守卫的 tmux 检测部分（pi interactive-mode 对位）：
+ * 终端守卫的 tmux 检测部分：
  *
  * - **tmux 键位检测**：extended-keys 未开 / format 为 xterm 时给出
  *   配置指引警告（shift+enter 等修饰键在 tmux 默认配置下不可达）；
@@ -26,7 +26,7 @@ function isDeadTerminalError(error: unknown): boolean {
 /** 导出供 signals 与测试（判定逻辑独立验证）。 */
 export { isDeadTerminalError };
 
-/** tmux 键位配置检测（pi checkTmuxKeyboardSetup 对位）；无问题/查不到返回 null。 */
+/** tmux 键位配置检测；无问题/查不到返回 null。 */
 export async function checkTmuxKeyboardSetup(): Promise<string | null> {
   if (!process.env.TMUX) return null;
 

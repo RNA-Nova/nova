@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from nova_harness.core.types.package.enums import SourceOrigin, SourceScope
 
 
-@dataclass
+@dataclass(frozen=True)
 class PathMetadata:
     """描述一个资源路径的来源信息。"""
 
@@ -21,7 +21,7 @@ class PathMetadata:
     base_dir: Optional[str] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResolvedResource:
     """解析后的单个资源项。"""
 
@@ -44,7 +44,7 @@ class ResolvedPaths:
     diagnostics: List["ResourceDiagnostic"] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(frozen=True)
 class PackageFilter:
     """包级别的资源过滤器，对应 settings 中 package dict 的过滤字段。
 

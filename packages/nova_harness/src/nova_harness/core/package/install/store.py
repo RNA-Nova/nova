@@ -120,7 +120,7 @@ def install_path_for_source(
 DIST_INFO_DIR_SUFFIX = ".dist-info"
 
 
-@dataclass
+@dataclass(frozen=True)
 class DistInfo:
     """从 ``*.dist-info/`` 读出的安装事实快照。"""
 

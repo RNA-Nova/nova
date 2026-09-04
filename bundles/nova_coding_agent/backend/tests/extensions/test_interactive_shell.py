@@ -1,4 +1,4 @@
-"""interactive_shell 扩展测试（pi interactive-shell.ts 对位）。
+"""interactive_shell 扩展测试。
 
 覆盖：命中集/``i `` 前缀判定、有能力时 request 参数与 result 翻译、
 cancelled 取消回执、无能力/无 UI 的 TUI 缺失回执、未命中放行。
@@ -168,7 +168,7 @@ def test_hit_cancelled_returns_130_receipt():
 
 
 def test_hit_without_capability_returns_tui_missing_receipt():
-    """命中但无面板能力：pi 同款 TUI 缺失回执（不弹 request）。"""
+    """命中但无面板能力： TUI 缺失回执（不弹 request）。"""
     module = _load_extension()
     handler = _setup(module)
     ui = _NoShellUI([])
