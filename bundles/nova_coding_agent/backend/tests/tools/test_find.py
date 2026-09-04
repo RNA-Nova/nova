@@ -378,77 +378,75 @@ def test_find_output_not_line_capped(tmpdir):
 
 
 # ---------------------------------------------------------------------------
-# fd 部分产出容忍与行尾 \r 清理（假 fd 脚本确定性触发）
+# fd 部分产出容忍与行尾 \r 清理（假 ProcessSession 确定性触发——
+# 不走平台二进制（shell 脚本桩在 Windows 不可执行），全平台可跑）
 # ---------------------------------------------------------------------------
 
 
-def _write_fake_fd(tmpdir, body):
-    """写入假 fd 脚本并加可执行权限，返回路径。"""
-    fake = os.path.join(tmpdir, "fake-fd")
-    with open(fake, "w", encoding="utf-8") as f:
-        f.write(body)
-    os.chmod(fake, 0o755)
-    return fake
+class _FakeFdSession:
+    """假 fd 进程会话：按脚本吐行、报退出码与 stderr。
+
+    行尾 ``\\r`` 清洗是 ProcessSession 的契约（真实现见
+    tools_common/streams.read_lines，其 CRLF 行为由 test_streams 覆盖）——
+    本桩复刻同一契约，fd 层断言聚焦"清洗后的行原样进结果"。
+    """
+
+    def __init__(self, lines, exit_code, stderr=""):
+        self._lines = lines
+        self._exit_code = exit_code
+        self._stderr = stderr
+
+    async def stdout_lines(self):
+        for line in self._lines:
+            yield line.removesuffix("\r")
+
+    async def terminate(self):
+        pass
+
+    async def wait(self):
+        return self._exit_code
+
+    async def stderr_text(self):
+        return self._stderr
+
+
+class _FakeFdRunner:
+    """spawn 即返回预定会话的 runner。"""
+
+    def __init__(self, session):
+        self._session = session
+
+    async def spawn(self, argv, cwd):
+        return self._session
+
+
+def _find_with_fake_fd(tmpdir, lines, exit_code, stderr=""):
+    from nova_coding_agent.tools_common.operations import (
+        FindOptions,
+        LocalFindOperations,
+    )
+
+    operations = LocalFindOperations(
+        runner=_FakeFdRunner(_FakeFdSession(lines, exit_code, stderr))
+    )
+    return _run(operations._find_with_fd("fake-fd", FindOptions(path=str(tmpdir))))
 
 
 def test_find_fd_partial_output_tolerated_on_nonzero_exit(tmpdir):
     """fd 非零退出但有产出时保留部分结果（仅无输出才报错）。"""
-    from nova_coding_agent.tools_common.operations import (
-        FindOptions,
-        create_local_find_operations,
-    )
-
-    fake = _write_fake_fd(
-        tmpdir,
-        "#!/bin/sh\n"
-        "for last; do :; done\n"
-        'printf "%s\\n" "$last/some.py"\n'
-        "exit 1\n",
-    )
-    results = _run(
-        create_local_find_operations()._find_with_fd(
-            fake, FindOptions(path=str(tmpdir))
-        )
-    )
+    results = _find_with_fake_fd(tmpdir, [os.path.join(str(tmpdir), "some.py")], 1)
     assert results == ["some.py"]
 
 
 def test_find_fd_strips_trailing_carriage_return(tmpdir):
     """fd 输出行尾 \\r 被清理（Windows \\r\\n 行尾）。"""
-    from nova_coding_agent.tools_common.operations import (
-        FindOptions,
-        create_local_find_operations,
-    )
-
-    fake = _write_fake_fd(
-        tmpdir,
-        "#!/bin/sh\n"
-        "for last; do :; done\n"
-        'printf "%s\\r\\n" "$last/crlf.py"\n'
-        "exit 0\n",
-    )
-    results = _run(
-        create_local_find_operations()._find_with_fd(
-            fake, FindOptions(path=str(tmpdir))
-        )
+    results = _find_with_fake_fd(
+        tmpdir, [os.path.join(str(tmpdir), "crlf.py") + "\r"], 0
     )
     assert results == ["crlf.py"]
 
 
 def test_find_fd_error_without_output_raises(tmpdir):
     """fd 非零退出且无产出：stderr 透出为 RuntimeError。"""
-    from nova_coding_agent.tools_common.operations import (
-        FindOptions,
-        create_local_find_operations,
-    )
-
-    fake = _write_fake_fd(
-        tmpdir,
-        "#!/bin/sh\n" "echo 'fake fd exploded' >&2\n" "exit 1\n",
-    )
     with pytest.raises(RuntimeError, match="fake fd exploded"):
-        _run(
-            create_local_find_operations()._find_with_fd(
-                fake, FindOptions(path=str(tmpdir))
-            )
-        )
+        _find_with_fake_fd(tmpdir, [], 1, stderr="fake fd exploded")

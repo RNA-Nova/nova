@@ -126,11 +126,16 @@ async def _async_main() -> int:
             kill_tracked_detached_children()
             server.shutdown()
 
-        signals = [signal.SIGINT, signal.SIGTERM]
+        signals = [signal.SIGINT]
         if sys.platform != "win32":
-            signals.append(signal.SIGHUP)
+            signals += [signal.SIGTERM, signal.SIGHUP]
         for sig in signals:
-            loop.add_signal_handler(sig, _on_signal, sig)
+            try:
+                loop.add_signal_handler(sig, _on_signal, sig)
+            except NotImplementedError:
+                # asyncio 在 Windows 仅支持 SIGINT 注册——不支持的信号静默
+                # 降级（关停语义由 stdin EOF / shutdown 命令兜底）
+                pass
 
         try:
             if args.listen.startswith("ws://"):

@@ -305,7 +305,7 @@ class LocalBashOperations:
                 )
             except asyncio.TimeoutError:
                 # SIGTERM 被无视（如 trap），升级强杀，不留僵尸
-                #（Windows 无 SIGKILL 常量——kill_process_tree 的缺省分支
+                # （Windows 无 SIGKILL 常量——kill_process_tree 的缺省分支
                 # 已按平台处理，此处传 None 走缺省）
                 _kill_process_group(proc)
                 try:

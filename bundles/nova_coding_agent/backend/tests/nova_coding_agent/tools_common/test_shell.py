@@ -43,6 +43,9 @@ def test_sanitize_shell_output_full_pipeline():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="自定义 shell 路径语义是 POSIX 的（Windows 无 /bin/sh）"
+)
 def test_get_shell_config_custom_path():
     cfg = get_shell_config("/bin/bash" if os.path.exists("/bin/bash") else "/bin/sh")
     assert cfg.args == ["-c"]

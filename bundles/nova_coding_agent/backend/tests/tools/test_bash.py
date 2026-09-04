@@ -178,6 +178,8 @@ def test_bash_shell_path_from_settings(tmpdir):
     """settings.shell_path 在构造期传入执行后端。"""
     executor = _load_executor(settings=_StubSettings(shell_path="/bin/bash"))
     assert executor._local_operations.shell_path == "/bin/bash"
+    if os.name == "nt":
+        return  # 执行依赖 POSIX shell（Windows 无 /bin/bash），接线断言仍覆盖
     result = _run(executor.execute("id", {"command": "echo ok", "cwd": tmpdir}))
     assert result.details["exit_code"] == 0
 

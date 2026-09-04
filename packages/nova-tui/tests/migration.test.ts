@@ -20,18 +20,24 @@ import { migrateFrontendLayout } from '../src/migration.js';
 let home: string;
 let cwd: string;
 let savedHome: string | undefined;
+let savedUserProfile: string | undefined;
 
 // 每个用例独立 HOME/cwd（迁移有真实文件副作用，用例间不共享）
 beforeEach(() => {
   savedHome = process.env.HOME;
+  savedUserProfile = process.env.USERPROFILE;
   home = mkdtempSync(join(tmpdir(), 'nova-migration-home-'));
   cwd = mkdtempSync(join(tmpdir(), 'nova-migration-cwd-'));
+  // os.homedir 的环境变量语义分平台：POSIX 读 $HOME，Windows 读 %USERPROFILE%
   process.env.HOME = home;
+  if (process.platform === 'win32') process.env.USERPROFILE = home;
 });
 
 afterEach(() => {
   if (savedHome === undefined) delete process.env.HOME;
   else process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = savedUserProfile;
   rmSync(home, { recursive: true, force: true });
   rmSync(cwd, { recursive: true, force: true });
 });
