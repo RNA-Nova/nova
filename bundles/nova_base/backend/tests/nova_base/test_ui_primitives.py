@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from nova_coding_agent.ui_primitives import (
+from nova_base.ui_primitives import (
     STANDARD_METHODS,
     confirm,
     form,
@@ -105,7 +105,7 @@ def test_set_status_in_standard_methods():
 
 def test_set_status_frame_shape():
     """set_status 糖：命名通知帧形（key 幂等覆盖语义由前端承载）。"""
-    from nova_coding_agent.ui_primitives import set_status
+    from nova_base.ui_primitives import set_status
 
     ui = _FakeUI()
     set_status(ui, "plan-mode", "⏸ plan")
@@ -114,7 +114,7 @@ def test_set_status_frame_shape():
 
 def test_set_status_clear_maps_empty_text():
     """清除语义：None/空串统一归为空文本（前端据此删除状态位）。"""
-    from nova_coding_agent.ui_primitives import set_status
+    from nova_base.ui_primitives import set_status
 
     ui = _FakeUI()
     set_status(ui, "plan-mode", None)

@@ -25,8 +25,8 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from nova_coding_agent.ui_primitives import input as ui_input
-from nova_coding_agent.ui_primitives import notify_message, select, set_status
+from nova_base.ui_primitives import input as ui_input
+from nova_base.ui_primitives import notify_message, select, set_status
 
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (

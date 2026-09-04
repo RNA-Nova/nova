@@ -11,7 +11,7 @@ Nova 是一个用于构建大语言模型（LLM）智能体的分层框架，同
 - **高阶会话 SDK**：`AgentSession` 封装会话树（分支 / fork / 导航）、上下文压缩、会话持久化（JSONL）、设置与模型注册表、Project Trust 门控、JSON-RPC 服务器与扩展系统。
 - **包与扩展生态**：`nova-pkg` 包管理器（path / git / npm 三种来源），Agent 组合声明（yaml 纯选配）、工具、用户工具、扩展、persona、prompt 模板七类资源按包分发，用户级 / 项目级双作用域。
 - **终端界面**：`nova` 命令启动 TUI——流式渲染、工具卡片、对话框与选择器、主题、会话导出，前后端经 JSON-RPC over stdio 通信。
-- **开箱即用的编程 Agent**：官方 bundle 提供 10 个本地工具（bash / read / write / edit / grep / find / ls / question / todo / subagent）、子代理四件套（scout / planner / reviewer / worker）与七个会话扩展（权限门、计划模式、工具面板等）。
+- **开箱即用的编程 Agent**：官方双 bundle 分层——`nova-base` 提供会话基础设施（/login /model /tree 等 21 个 slash 命令、question/todo 工具、/tools 面板），`nova-coding-agent` 提供 8 个本地工具（bash / read / write / edit / grep / find / ls / subagent）、子代理四件套（scout / planner / reviewer / worker）与执行扩展（权限门、计划模式等）。
 
 ## 包地图
 
@@ -21,7 +21,8 @@ Nova 是一个用于构建大语言模型（LLM）智能体的分层框架，同
 | [packages/nova_agent](packages/nova_agent/README.md) | 事件驱动的异步 Agent 框架：`Agent` 类、`agent_loop` 循环、工具执行与生命周期（PyPI：`nova-agent`） |
 | [packages/nova_harness](packages/nova_harness/README.md) | 高阶 Agent SDK：`AgentSession`、会话树、上下文压缩、包管理器 CLI、JSON-RPC 服务器（PyPI：`nova-harness`） |
 | [packages/nova-tui](packages/nova-tui/README.md) | 前端运行时与 TUI 宿主，`nova` 命令入口（npm：`nova-tui`） |
-| [bundles/nova_coding_agent](bundles/nova_coding_agent/README.md) | 官方编程 Agent bundle：工具链、子代理、persona 与扩展的组合包 |
+| [bundles/nova_base](bundles/nova_base/README.md) | 官方基础 bundle：会话产品基础设施（21 个 slash 命令、question/todo 工具、/tools 面板、UI 原语糖库） |
+| [bundles/nova_coding_agent](bundles/nova_coding_agent/README.md) | 官方编程 Agent bundle：工具链、子代理、persona 与扩展的组合包（requires nova-base） |
 
 运行时依赖自下而上：`nova_ai` → `nova_agent` → `nova_harness` →（`nova-tui` 经 JSON-RPC 驱动 `nova_harness`；`nova_coding_agent` 作为已安装包被会话加载）。
 
@@ -38,7 +39,8 @@ pip install nova-harness
 # 终端界面（注册 nova 命令）
 npm install -g nova-tui
 
-# 官方编程 Agent bundle（支持 path: / git: / npm: 三种来源，裸路径按 path: 处理）
+# 官方 bundle（基础 + 编程；支持 path: / git: / npm: 三种来源，裸路径按 path: 处理）
+nova-pkg install /path/to/nova_base
 nova-pkg install /path/to/nova_coding_agent
 ```
 

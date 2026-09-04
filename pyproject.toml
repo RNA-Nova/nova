@@ -22,6 +22,7 @@ python = ">=3.12,<3.14"
 nova-ai = { path = "packages/nova_ai", editable = true }
 nova-agent = { path = "packages/nova_agent", editable = true }
 nova-harness = { path = "packages/nova_harness", editable = true }
+nova-base = { path = "bundles/nova_base", editable = true }
 nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
 websockets = ">=12.0"
 openai = ">=2.0"
@@ -54,6 +55,7 @@ test-ai = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_ai" 
 test-agent = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_agent" }
 test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_harness" }
 test-coding = { cmd = "pytest tests", cwd = "bundles/nova_coding_agent/backend" }
-test-all = { depends-on = ["test-ai", "test-agent", "test-harness", "test-coding"] }
-format = "black packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend && isort packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend"
+test-base = { cmd = "pytest tests", cwd = "bundles/nova_base/backend" }
+test-all = { depends-on = ["test-ai", "test-agent", "test-harness", "test-coding", "test-base"] }
+format = "black packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend bundles/nova_base/backend && isort packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend bundles/nova_base/backend"
 nova = "nova-harness run"

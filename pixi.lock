@@ -45,6 +45,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.6.17-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
+      - pypi: ./bundles/nova_base
       - pypi: ./bundles/nova_coding_agent
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
@@ -93,6 +94,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/python-3.12.13-h8561d8f_0_cpython.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-h010d191_3.conda
+      - pypi: ./bundles/nova_base
       - pypi: ./bundles/nova_coding_agent
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
@@ -143,6 +145,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-h1b7c187_39.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36231-h1b9f54f_39.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36231-h1b9f54f_39.conda
+      - pypi: ./bundles/nova_base
       - pypi: ./bundles/nova_coding_agent
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
@@ -207,6 +210,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.6.17-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
+      - pypi: ./bundles/nova_base
       - pypi: ./bundles/nova_coding_agent
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
@@ -274,6 +278,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/python-3.12.13-h8561d8f_0_cpython.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-h010d191_3.conda
+      - pypi: ./bundles/nova_base
       - pypi: ./bundles/nova_coding_agent
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
@@ -343,6 +348,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-h1b7c187_39.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36231-h1b9f54f_39.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36231-h1b9f54f_39.conda
+      - pypi: ./bundles/nova_base
       - pypi: ./bundles/nova_coding_agent
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
@@ -1095,6 +1101,9 @@ packages:
     - vcomp14 >=14.51.36231
   size: 120684
   timestamp: 1781320948530
+- pypi: ./bundles/nova_base
+  name: nova-base
+  requires_python: '>=3.12,<3.14'
 - pypi: ./bundles/nova_coding_agent
   name: nova-coding-agent
   requires_dist:

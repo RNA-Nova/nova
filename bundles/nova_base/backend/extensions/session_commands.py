@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from nova_coding_agent.ui_primitives import confirm, select, select_items
+from nova_base.ui_primitives import confirm, select, select_items
 
 from nova_harness.core.config.auth.interaction import (
     LoginCancelledError,

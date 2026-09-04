@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from nova_coding_agent.ui_primitives import confirm
+from nova_base.ui_primitives import confirm
 
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (

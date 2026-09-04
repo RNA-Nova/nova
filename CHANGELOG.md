@@ -515,6 +515,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **nova_harness：auto-compaction 重试路径崩溃修复**——压缩重建状态时，已落盘的截断回复（`stop_reason="length"`）可能随保留窗口还原为 assistant 尾，随后 `continue_()` 拒从 assistant 尾续跑抛 `RuntimeError`；收尾守卫由只剥 `error` 尾扩为 `error`/`length` 同剥。该 bug 此前潜伏（1M 窗口模型下阈值压缩实际不触发），由集成测试小窗口克隆模型暴露。配套加固：集成测试修三个前提腐烂（`prepare_next_turn` hook 签名跟上 `(ctx, signal)` 契约、超窗用例克隆小窗口模型不再硬灌 1M token、/debug 模板断言对齐英文模板 + 具体案例）；新增 `length` 尾剥离回归单测；新增两个 PTY 端到端加固脚本（`pty-auto-compaction.py`：沙盒小窗口模型真实触发压缩并验证续跑；`pty-auto-retry.py`：死端点 provider 验证重试倒计时与耗尽收尾）。
 - **nova_harness：无摘要导航的 SessionTreeEvent 校验崩溃修复**——`navigate` 未生成摘要时给 `from_extension`（`bool`）传 `None`，pydantic 校验爆炸导致导航半完成（leaf 已迁移、状态已重建，但事件发射崩溃、RPC 返回 -32603、前端转录不同步且后续提交被吞）；改为传 `False`（语义等价：非扩展摘要）。由新增 PTY 脚本 `pty-tree-navigate.py` 实逮（/tree 真实导航 + 编辑器回填 + 分支续写 + /fork 分叉全链路）；新增 `TreeNavigator` 编排层单测套件 12 例（此前仅 1 例）。
 
+### Changed
+- **官方 bundle 拆分为 `nova-base` + `nova-coding-agent`**（基础设施 / 执行能力分层）：`nova-base` 收会话产品基础设施（`session_commands` 21 命令、`tools_panel`、`confirm_destructive`、`question`/`todo` 工具、`ui_primitives` 原语糖库、6 个 slash 命令 UI 与 question/tools 对话框、todo/question 渲染器）；`nova-coding-agent` 收编程执行（8 工具、子代理、persona/prompts、四个 gate 扩展、工具渲染器与 interactive-shell 对话框），经 `requires = ["nova-base"]` 声明包间依赖（装/卸自动校验）。安装基线变为双包：`nova-pkg install` 两个包。
+
 ### 早期雏形（2026-04，当时未封版）
 
 ### Added

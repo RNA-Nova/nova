@@ -2,7 +2,7 @@
  * 多字段表单对话框（form 原语的前端组件）。
  *
  * 标准词汇的第五件（复合原语——四件套之外的官方扩展，定义权在
- * nova_coding_agent/ui_primitives.py）。字段纵向堆叠：标签行 + 输入行；
+ * nova_base/ui_primitives.py）。字段纵向堆叠：标签行 + 输入行；
  * 活跃字段高亮（› 前缀 + accent 色），键位：
  * - tab / ↓：下一字段；shift+tab / ↑：上一字段（端点钳位，不环绕）；
  * - enter：下一字段，末字段提交；ctrl+enter：任意位置提交；

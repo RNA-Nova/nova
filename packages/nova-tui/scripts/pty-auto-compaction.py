@@ -75,9 +75,13 @@ def main() -> int:
                 },
                 "packages": [
                     {
+                        "source": "path:/Users/liujinming/agent/nova-backup-20260824/bundles/nova_base",
+                        "editable": True,
+                    },
+                    {
                         "source": "path:/Users/liujinming/agent/nova-backup-20260824/bundles/nova_coding_agent",
                         "editable": True,
-                    }
+                    },
                 ],
             },
             f,

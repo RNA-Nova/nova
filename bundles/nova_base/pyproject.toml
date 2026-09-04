@@ -1,0 +1,58 @@
+[tool.poetry]
+name = "nova-base"
+version = "0.1.0"
+description = "Nova base bundle — 会话产品基础设施（slash 命令、question/todo 工具、UI 原语词汇）"
+authors = ["nova"]
+readme = "README.md"
+license = "MIT"
+packages = [
+    { include = "nova_base", from = "backend" },
+]
+keywords = ["agent", "llm", "session", "ui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+]
+
+# 这是一个 Nova bundle，同时也是一个可 import 的 Python 包。
+# 安装时 nova-pkg 会执行 ``pip install -e .``。
+# 兄弟包（nova-ai/nova-agent/nova-harness）不在此处声明 path 依赖——
+# 各包独立管理第三方依赖；安装部署由脚本统一完成（见根 pyproject 的
+# pixi workspace 清单），发布时再恢复互依声明。
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.10.1"
+isort = "^5.12.0"
+pre-commit = "^3.5.0"
+pytest = "^7.4.0"
+sniffio = "^1.3.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+
+[tool.nova]
+# 会话基础设施：slash 命令（session_commands 21 个）+ 工具面板 + 破坏性确认
+extensions = [
+    "./backend/extensions/confirm_destructive.py",
+    "./backend/extensions/session_commands.py",
+    "./backend/extensions/tools_panel.py"
+]
+tools = [
+    "./backend/tools/question.py",
+    "./backend/tools/todo.py"
+]
+auto_install_dependencies = true

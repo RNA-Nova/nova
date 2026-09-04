@@ -57,6 +57,9 @@ nova-agent = { path = "../../packages/nova_agent" }
 nova-harness = { path = "../../packages/nova_harness" }
 
 [tool.nova]
+# 编程执行能力包。会话基础设施（slash 命令、question/todo、UI 原语）
+# 归 nova-base——本包经 requires 强制共存。
+requires = ["nova-base"]
 agents = [
     "./agents/"
 ]
@@ -66,10 +69,8 @@ tools = [
     "./backend/tools/find.py",
     "./backend/tools/grep.py",
     "./backend/tools/ls.py",
-    "./backend/tools/question.py",
     "./backend/tools/read.py",
     "./backend/tools/subagent.py",
-    "./backend/tools/todo.py",
     "./backend/tools/write.py"
 ]
 skills = []
@@ -77,13 +78,10 @@ personas = [
     "./backend/personas/"
 ]
 extensions = [
-    "./backend/extensions/confirm_destructive.py",
     "./backend/extensions/interactive_shell.py",
     "./backend/extensions/permission_gate.py",
     "./backend/extensions/plan_mode.py",
-    "./backend/extensions/session_commands.py",
-    "./backend/extensions/subagent_gate.py",
-    "./backend/extensions/tools_panel.py"
+    "./backend/extensions/subagent_gate.py"
 ]
 prompts = [
     "./backend/prompts/debug.md",
