@@ -50,7 +50,9 @@ def resolve_session_manager(
 
     agent_dir = Path(services.agent_dir)
     cwd = services.cwd
-    cleaned_cwd = cwd.lstrip("/\\").replace("/", "-").replace("\\", "-")
+    # 清洗规则与 harness/session/utils.get_default_session_dir_path 保持一致
+    #（曾漏 ":" → Windows 盘符冒号带进了目录名，WinError 267）
+    cleaned_cwd = cwd.lstrip("/\\").replace("/", "-").replace("\\", "-").replace(":", "-")
     safe_path = f"--{cleaned_cwd}--"
     session_dir = os.path.join(agent_dir, SESSIONS_DIR_NAME, safe_path)
     os.makedirs(session_dir, exist_ok=True)
