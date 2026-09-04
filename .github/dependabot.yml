@@ -1,0 +1,36 @@
+# Dependabot 配置：依赖更新自动 PR
+# https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  # Python：各子包（Poetry 格式 dependabot 认）。
+  # 注：根 pyproject.toml 的依赖在 [tool.pixi.pypi-dependencies]（pixi 私有格式），
+  # dependabot 不识别——根目录依赖更新靠手工（pixi 统一求解）。
+  - package-ecosystem: pip
+    directories:
+      - packages/nova_ai
+      - packages/nova_agent
+      - packages/nova_harness
+      - bundles/nova_coding_agent
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  # npm：TUI 主体与 bundle 前端
+  - package-ecosystem: npm
+    directories:
+      - packages/nova-tui
+      - bundles/nova_coding_agent/frontend
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  # GitHub Actions 自身
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3

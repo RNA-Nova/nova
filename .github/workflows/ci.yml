@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'legacy/**']
+  pull_request:
+
+jobs:
+  # nova_harness（连带 nova_ai/nova_agent）Python 测试——三平台矩阵。
+  # 安装走 pip editable（与用户安装路径同形，比 pixi 快且更贴近发布形态）；
+  # 兄弟包必须显式逐个 -e 列出（子包 pyproject 不声明兄弟 path 依赖）。
+  harness-py:
+    name: harness-py / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖并跑测试（非集成）
+        run: |
+          python -m pip install -e packages/nova_ai -e packages/nova_agent -e packages/nova_harness
+          python -m pip install pytest pytest-asyncio websockets
+          python -m pytest packages/nova_harness/tests -q -m "not integration"
+
+  # 官方 bundle 单元测试（bash 引擎/工具链/扩展）——三平台矩阵。
+  # rg 二进制经 PyPI wheel 提供（与 binary_dependencies 声明同渠道）。
+  bundle-py:
+    name: bundle-py / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖并跑测试
+        run: |
+          python -m pip install -e packages/nova_ai -e packages/nova_agent -e packages/nova_harness -e bundles/nova_coding_agent
+          python -m pip install pytest pytest-asyncio ripgrep==15.1.0
+          python -m pytest bundles/nova_coding_agent/backend/tests -q
+
+  # TUI 主体（nova-tui）类型检查 + 测试——三平台矩阵（终端行为有平台差异）。
+  tui-ts:
+    name: tui-ts / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: packages/nova-tui
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/nova-tui/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: 测试
+        run: npm test
+
+  # bundle 前端渲染器/对话框测试——仅 ubuntu（纯呈现逻辑，平台无关）。
+  # file: 依赖指向 packages/nova-tui，需先构建其 dist。
+  frontend-ts:
+    name: frontend-ts / ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: 构建 nova-tui（file: 依赖需要 dist）
+        working-directory: packages/nova-tui
+        run: |
+          npm ci
+          npm run build
+
+      - name: 安装依赖并跑测试
+        working-directory: bundles/nova_coding_agent/frontend
+        run: |
+          npm ci
+          npm test
+
+  # 代码风格门禁（black + isort，配置在各子包 pyproject 的 [tool.isort]）。
+  lint:
+    name: lint / ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: black --check
+        run: |
+          python -m pip install black
+          python -m black --check packages/nova_harness/src bundles/nova_coding_agent/backend
+
+      - name: isort --check-only
+        run: |
+          python -m pip install isort
+          python -m isort --check-only packages/nova_harness/src bundles/nova_coding_agent/backend
+
+  # 仓库卫生：大二进制/产物文件门禁（防污染回归——lock 文件豁免）。
+  blob-size:
+    name: blob-size 门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 检查 tracked 文件无 >1MB（lock 文件除外）
+        run: |
+          big=$(git ls-files | grep -vE '^(pixi\.lock)$' | while read -r f; do
+            if [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1048576 ]; then echo "$f ($(wc -c < "$f") bytes)"; fi
+          done)
+          if [ -n "$big" ]; then echo "::error::大二进制/产物文件进了库："; echo "$big"; exit 1; fi
+          echo "无 >1MB 的非 lock 文件"
