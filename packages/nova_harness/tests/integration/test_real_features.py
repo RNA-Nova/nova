@@ -88,14 +88,34 @@ async def test_prompt_template_debug_expands():
         runtime = await _make_session(cwd)
         try:
             session = runtime.session
-            await session.prompt("/debug 程序报错 IndexError: list index out of range")
+            # 给一个具体可调试的案例，模型才有展开流程的对象（空泛的
+            # "程序报错"会让模型把模板当成元内容复述/反问）
+            await session.prompt(
+                "/debug 程序报错 IndexError: list index out of range。"
+                "出错代码：def first(xs): return xs[0]; print(first([]))"
+            )
             await session.agent.wait_for_idle()
             reply = _text_of(session.messages[-1])
-            # debug.md 的流程（复现/堆栈/源码/假设/根因/验证）应体现在回复中
+            # debug.md 的流程（复现/堆栈/源码/假设/根因/验证）应体现在回复中；
+            # 模板是英文的，模型可能用任一种语言表述
+            lowered = reply.lower()
             hit = sum(
                 1
-                for kw in ("复现", "堆栈", "源码", "假设", "根因", "验证")
-                if kw in reply
+                for kw in (
+                    "复现",
+                    "reproduce",
+                    "堆栈",
+                    "stack",
+                    "源码",
+                    "source",
+                    "假设",
+                    "hypothes",
+                    "根因",
+                    "root cause",
+                    "验证",
+                    "verify",
+                )
+                if kw in reply or kw in lowered
             )
             assert hit >= 2, f"回复未体现 debug 模板流程（命中 {hit}）：{reply[:120]}"
         finally:

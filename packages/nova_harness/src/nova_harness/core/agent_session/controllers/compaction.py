@@ -467,12 +467,15 @@ class CompactionController:
                 await runner.emit(session_compact_event)
 
             if will_retry:
+                # 溢出/截断响应在 message_end 时已落盘，压缩重建状态可能把
+                # 这条保留条目还原成 assistant 尾——continue_() 拒绝从
+                # assistant 尾续跑，重试前再剥一次（error 与 length 同罪）
                 messages = list(self._session.agent.state.messages)
                 last_msg = messages[-1] if messages else None
                 if (
                     last_msg is not None
                     and last_msg.role == "assistant"
-                    and last_msg.stop_reason == "error"
+                    and last_msg.stop_reason in ("error", "length")
                 ):
                     self._session.agent.state.messages = messages[:-1]
                 return True

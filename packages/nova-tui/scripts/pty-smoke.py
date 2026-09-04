@@ -43,11 +43,11 @@ def strip_ansi(raw: bytes) -> str:
 class TuiSession:
     """一个 pty 里的 nova 进程。"""
 
-    def __init__(self, cwd: str) -> None:
+    def __init__(self, cwd: str, argv: Union[list[str], None] = None) -> None:
         self.master, slave = pty.openpty()
         env = dict(os.environ, NOVA_PYTHON=PYTHON)
         self.proc = subprocess.Popen(
-            [NODE, MAIN_JS],
+            [NODE, MAIN_JS, *(argv or [])],
             stdin=slave,
             stdout=slave,
             stderr=slave,

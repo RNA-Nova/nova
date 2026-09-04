@@ -116,6 +116,14 @@ async def test_auto_compaction_fires_on_overwindow_context():
             session = runtime.session
             # 显式开启（不假定默认值——开关持久化到全局 settings，前序用例可能改过）
             session.set_auto_compaction_enabled(True)
+            # 目录模型的窗口为 1M——按 context_window - reserve_tokens 触发的
+            # auto-compaction 在本测试数据量（约 6 万 token）下永不命中；
+            # 克隆一个小窗口模型（id/端点不变，真实 API 调用不受影响）
+            await session.set_model(
+                get_volcengine_model(MODEL_ID).model_copy(
+                    update={"context_window": 45056}
+                )
+            )
 
             await _push_context_over_window(session, cwd)
 

@@ -511,6 +511,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
   - **write**：`content` 缺参显式报错（此前静默写入空串）；
   - 删除 `is_path_traversal` 半透检查（挡正当的 `../sibling` 却放绝对路径，pi 不做限制）；`resolve_path` 支持 `~` 展开。
 
+### Fixed
+- **nova_harness：auto-compaction 重试路径崩溃修复**——压缩重建状态时，已落盘的截断回复（`stop_reason="length"`）可能随保留窗口还原为 assistant 尾，随后 `continue_()` 拒从 assistant 尾续跑抛 `RuntimeError`；收尾守卫由只剥 `error` 尾扩为 `error`/`length` 同剥。该 bug 此前潜伏（1M 窗口模型下阈值压缩实际不触发），由集成测试小窗口克隆模型暴露。配套加固：集成测试修三个前提腐烂（`prepare_next_turn` hook 签名跟上 `(ctx, signal)` 契约、超窗用例克隆小窗口模型不再硬灌 1M token、/debug 模板断言对齐英文模板 + 具体案例）；新增 `length` 尾剥离回归单测；新增两个 PTY 端到端加固脚本（`pty-auto-compaction.py`：沙盒小窗口模型真实触发压缩并验证续跑；`pty-auto-retry.py`：死端点 provider 验证重试倒计时与耗尽收尾）。
+
 ### 早期雏形（2026-04，当时未封版）
 
 ### Added
