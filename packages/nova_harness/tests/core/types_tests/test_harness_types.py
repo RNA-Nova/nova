@@ -150,7 +150,9 @@ def test_models_config_roundtrip():
         providers={
             "volcengine": ProviderConfig(
                 base_url="https://ark.cn-beijing.volces.com/api/v3/",
-                models=[ModelDefinition(id="deepseek-v4-flash-260425", name="DeepSeek")],
+                models=[
+                    ModelDefinition(id="deepseek-v4-flash-260425", name="DeepSeek")
+                ],
             )
         }
     )

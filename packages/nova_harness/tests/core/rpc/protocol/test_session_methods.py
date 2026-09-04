@@ -82,11 +82,19 @@ class FakeSession:
     async def navigate_tree(self, target_id, options=None):
         self.calls.append(("navigate_tree", target_id, options))
         # 生产契约（内部 snake）：取消路径单词键，成功路径三键
-        return {"cancelled": False, "editor_text": f"text-of-{target_id}", "summary_entry": None}
+        return {
+            "cancelled": False,
+            "editor_text": f"text-of-{target_id}",
+            "summary_entry": None,
+        }
 
     async def fork_session(self, entry_id, position="before"):
         self.calls.append(("fork_session", entry_id, position))
-        return {"cancelled": False, "selected_text": f"sel-{entry_id}", "editor_text": f"sel-{entry_id}"}
+        return {
+            "cancelled": False,
+            "selected_text": f"sel-{entry_id}",
+            "editor_text": f"sel-{entry_id}",
+        }
 
     def set_session_name(self, name):
         self.calls.append(("set_session_name", name))
