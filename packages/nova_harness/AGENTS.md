@@ -13,10 +13,10 @@
 - **资源加载**：提示词模板、扩展发现加载、扩展事件总线、诊断与资源冲突检测。
 - **设置持久化**：本地 JSON 存储用户设置与模型配置（支持全局/项目级作用域）。
 - **工具链**：内置工具的注册与运行时白名单控制。
-- **UI 反向原语**：`UIContext` 是**泛型 transport（零词汇）**——只定义 `capabilities` / `has_capability` / `request(method, params)`（需响应）/ `notify(method, params)`（fire-and-forget），所有 method 均为自由字符串，harness 不持有任何交互词汇（`STANDARD_UI_METHODS`、便捷方法、params schema 全部移出）。**词汇定义权归包**：官方 bundle 的 `nova_coding_agent.ui_primitives` 定义基线四件套（select/confirm/input/notify）并提供糖库（`select()`/`confirm()`/`input()`/`notify_message()`），第三方包可自定义原语经同一通道（设计见 `nova-tui/docs/ui-primitives.md`）。无 UI 的运行模式（print/headless）使用 `NoOpUIContext` 降级；有 UI 的模式通过 JSON-RPC over stdio 实现（`modes/rpc/`，由终端/Web 前端使用）。抽象接口统一在 `core/types/ui/context.py`（唯一 ABC），`NoOpUIContext` 在 `core/types/ui/noop.py`，`UIResponse` 在 `core/types/ui/primitives.py`。正向 UI 操作（组件/状态栏/编辑器/主题）归 Node 层 UI 管线（架构 2.0，见 `examples/nova_architecture_2.0.md`）。
+- **UI 反向原语**：`UIContext` 是**泛型 transport（零词汇）**——只定义 `capabilities` / `has_capability` / `request(method, params)`（需响应）/ `notify(method, params)`（fire-and-forget），所有 method 均为自由字符串，harness 不持有任何交互词汇（`STANDARD_UI_METHODS`、便捷方法、params schema 全部移出）。**词汇定义权归包**：官方 bundle 的 `nova_coding_agent.ui_primitives` 定义基线四件套（select/confirm/input/notify）并提供糖库（`select()`/`confirm()`/`input()`/`notify_message()`），第三方包可自定义原语经同一通道。无 UI 的运行模式（print/headless）使用 `NoOpUIContext` 降级；有 UI 的模式通过 JSON-RPC over stdio 实现（`modes/rpc/`，由终端/Web 前端使用）。抽象接口统一在 `core/types/ui/context.py`（唯一 ABC），`NoOpUIContext` 在 `core/types/ui/noop.py`，`UIResponse` 在 `core/types/ui/primitives.py`。正向 UI 操作（组件/状态栏/编辑器/主题）归 Node 层 UI 管线（架构 2.0）。
 - **Project Trust**：项目级信任门控，决定在加载 `<cwd>/.nova` 下的 settings、extensions、skills 等资源前是否信任该项目；支持 `--trust` 覆盖、扩展裁决、持久化记录、默认策略与 UI 弹窗确认。**trust 只存在于运行时**（会话启动决议 + `trust.json` 持久化 + resolver 读取门控）；包管理（`nova-pkg`）不介入信任决策——装/卸包是用户的主动行为，写操作不做 trust 检查。
 
-项目语言：**Python 3.9–3.12**，注释与文档主要使用**中文**。
+项目语言：**Python `>=3.12,<3.14`**，注释与文档主要使用**中文**。
 
 ---
 
@@ -52,7 +52,7 @@ poetry publish
 
 ## 代码风格
 
-- **Formatter**：`black`（目标 Python 3.11 语法）。
+- **Formatter**：`black`（目标 Python 3.12 语法）。
 - **Import 排序**：`isort`（profile = "black"）。
 - **Pre-commit**：项目配置了 `pre-commit` 依赖，但当前仓库中未看到 `.pre-commit-config.yaml`，如有需要可自行添加。
 
@@ -85,7 +85,7 @@ poetry run isort src/
 nova_harness/
 ├── pyproject.toml              # Poetry 配置、依赖、工具设置
 ├── README.md                   # 面向人类开发者的简介
-├── CHANGELOG.md                # 变更日志（当前为空）
+├── CHANGELOG.md                # 变更日志
 ├── .gitignore                  # 忽略 pycache、venv、poetry.lock、本地会话等
 └── src/nova_harness/
     ├── __init__.py             # 包入口，对外暴露 sdk 与 runtime 核心符号
@@ -104,7 +104,7 @@ nova_harness/
     │       ├── __init__.py     # 公开 PrintRunner / run_print_mode
     │       ├── cli.py          # nova-harness run 子命令入口
     │       └── runner.py       # PrintRunner：text / json 两种输出形态
-    │                         # （WS 接入已翻案归 Python core/rpc，见 examples/nova_architecture_2.0.md 文首修订）
+    │                         # （WS 接入已翻案归 Python core/rpc）
     └── core/                   # 所有运行时实现与内部基础设施
         ├── __init__.py         # 公开运行时核心符号
         ├── sdk.py              # 对外 SDK 工厂函数
@@ -186,7 +186,7 @@ nova_harness/
 提供 `create_agent_session(options)` 异步函数，负责：
 - 解析/创建 `agent_dir`（默认 `~/.nova/agent`）与 `session_dir`。
 - 初始化 `SessionManager`、`SettingsManager`、`ModelRuntime`、`AuthStorage`，并封装为 `AgentSessionServices`。
-- 解析初始模型：优先恢复现有会话上下文中的模型，其次 settings 默认模型，最后 fallback 到 `volcengine/deepseek-v3-2-251201`。
+- 解析初始模型：优先恢复现有会话上下文中的模型，其次 settings 默认模型，末档为任一有鉴权可用的模型（优先 `DEFAULT_MODEL_PER_PROVIDER`）。
 - 构建 `Agent` 实例（来自 `nova_agent`）；Agent 层的扩展 hook 由 `AgentSession` 在初始化时直接绑定到它自己创建的 `ExtensionRunner`。
 - 将 `AgentSessionServices` 解包为扁平字段注入 `AgentSessionConfig`，创建 `AgentSession`；`AgentSessionRuntime` 仍持有 `AgentSessionServices`。
 - 调用 `session.bind_extensions()` 触发扩展 `session_start` 生命周期。
@@ -248,9 +248,8 @@ nova_harness/
 ### 6. `core/harness/session/manager.py` — SessionManager
 - 会话持久化为 **JSONL** 文件，存储在 `~/.nova/agent/sessions/--<cwd>--/` 下。
 - 支持分支（`branch`、`branch_with_summary`）、fork（`create_branched_session`）。
-- 条目类型：`message`、`thinking_level_change`、`model_change`、`active_tools_change`、`compaction`、`branch_summary`、`leaf`、`label`、`custom`、`custom_message`、`session_info`。
+- 条目类型：`message`、`thinking_level_change`、`model_change`、`compaction`、`branch_summary`、`label`、`custom`、`custom_message`、`session_info`。
 - 序列化保持 **Python 惯用的 snake_case**（如 `parent_id`、`first_kept_entry_id`、`active_tool_names`、`target_id`），文件版本为 `3`，ID 使用 generate_session_id 前 8 位（与 TS 行为一致但字段命名符合 Python 规范）。
-- `leaf` entry 持久化当前 leaf 指针；`active_tools_change` 持久化激活工具列表并在 `SessionContext` 中透出。
 
 ### 7. `core/harness/compaction/compaction.py` — 上下文压缩
 - 基于 token 估算（字符数 / 4 的启发式算法）与模型 `context_window` 判断是否触发压缩。
@@ -271,13 +270,13 @@ nova_harness/
 
 ### 10. `core/types/ui/` + `core/rpc/`（通信层）+ `modes/` — UI 反向原语与模式化前端（架构 2.0 收窄版）
 
-> 架构 2.0（`examples/nova_architecture_2.0.md` 图纸；落地终态与 Node 层/复合包/多后端完整设计见 **`examples/nova_architecture_2.1.md`**）确立：Python 为纯 agent 运行时，**正向 UI 操作**（组件/状态栏/编辑器/主题/注册表/终端输入）全部归 Node 层 UI 管线。Python 侧只保留**反向原语**——后端运行时需要向用户请求输入/发出通知的通道（trust 询问、OAuth 引导、扩展询问），对应 RPC 协议四件套之一。
+> 架构 2.0 确立：Python 为纯 agent 运行时，**正向 UI 操作**（组件/状态栏/编辑器/主题/注册表/终端输入）全部归 Node 层 UI 管线。Python 侧只保留**反向原语**——后端运行时需要向用户请求输入/发出通知的通道（trust 询问、OAuth 引导、扩展询问），对应 RPC 协议四件套之一。
 
 - `core/types/ui/primitives.py` 定义 `UIResponse`；`core/types/ui/context.py` 定义**唯一的** `UIContext` 抽象接口（泛型 transport：只有 `capabilities`/`has_capability`/`request`/`notify`，零词汇——交互词汇归包，见上文"UI 反向原语"条）。
 - 运行模式不设独立类型（原 `ExtensionMode` 已移除）：扩展只需要两个信号——`has_ui`（有没有前端挂在通道上，构造期即知，trust 决议等早期裁决用它）与 `ui.capabilities`（前端支持哪些原语，连接后协商）。`NoOpUIContext`（`core/types/ui/noop.py`）表示无 UI 运行模式，全部安全 no-op。
 - `core/rpc/` 是内聚的**通信层**（原 `core/transport/` + `core/protocol/` + `core/server.py` 已统一移入），内部分三层：
   - `rpc/transport/`：通道层——`Transport` 抽象（`base.py`）+ `StdioTransport` / `MemoryTransport`；dict 消息怎么物理流动，不解析 JSON-RPC 语义。
-  - `rpc/protocol/`：语义层——JSON-RPC 消息模型（`jsonrpc.py`/`errors.py`/`router.py`：注册时从 handler 签名注解推导方法形状 `MethodShape`，分派前 params 模型校验、handler 收实例；出参单道——handler 返回实例、router 单点 dump_wire，散装 dict 即契约违约报错）、事件直通序列化桥（`serialize.py`：Bus 2 事件 → `{type, data}` 信封，哑管道零呈现加工）、线上契约构建期导出（`schema_export.py`：事件/条目类型 + 方法形状 + `CONTRACT_VERSION_MAJOR/MINOR`（major 不等硬拒、minor 加法放行）→ JSON Schema + TS 双工件，pytest 漂移测试保鲜）、方法形状模型（`methods/shapes.py`：params/result 模型集中定义，校验/导出/能力位三方同源——签名即契约，不再重复声明）、命令方法表（`methods/`，按域拆分：`session` 会话·队列·retry·reload·克隆/导出/导入 / `model` 模型发现·切换·scoped·思考级别 / `auth` 鉴权·login / `resources` skills·prompt templates / `settings` 设置读写（无会话可用） / `system` 命令·扩展 flags·扩展快捷键目录与回调 / `user_tools` / `package`）。`ui/response` 与 `system/capabilities` 由 `RpcServer` 分派前直管（按连接记账），不进方法表。全量方法清单见 `examples/rpc_capabilities.md`。
+  - `rpc/protocol/`：语义层——JSON-RPC 消息模型（`jsonrpc.py`/`errors.py`/`router.py`：注册时从 handler 签名注解推导方法形状 `MethodShape`，分派前 params 模型校验、handler 收实例；出参单道——handler 返回实例、router 单点 dump_wire，散装 dict 即契约违约报错）、事件直通序列化桥（`serialize.py`：Bus 2 事件 → `{type, data}` 信封，哑管道零呈现加工）、线上契约构建期导出（`schema_export.py`：事件/条目类型 + 方法形状 + `CONTRACT_VERSION_MAJOR/MINOR`（major 不等硬拒、minor 加法放行）→ JSON Schema + TS 双工件，pytest 漂移测试保鲜）、方法形状模型（`methods/shapes.py`：params/result 模型集中定义，校验/导出/能力位三方同源——签名即契约，不再重复声明）、命令方法表（`methods/`，按域拆分：`session` 会话·队列·retry·reload·克隆/导出/导入 / `model` 模型发现·切换·scoped·思考级别 / `auth` 鉴权·login / `resources` skills·prompt templates / `settings` 设置读写（无会话可用） / `system` 命令·扩展 flags·扩展快捷键目录与回调 / `user_tools` / `package`）。`ui/response` 与 `system/capabilities` 由 `RpcServer` 分派前直管（按连接记账），不进方法表。
   - `rpc/server.py` + `rpc/connection.py` + `rpc/ui_context.py`：组装器 `RpcServer`——连接注册表 + MethodRegistry + `RoutingUIContext` + State 的组合，含事件广播（initialize 门）与并发分派；连接一等公民（`Connection`：状态机/能力集/在飞请求表/有界出站队列+独立写泵；读泵归服务器），背压按来源分流（stdio/memory 阻塞等位，WebSocket 慢消费者断连）；反向原语按连接寻址（`RoutingUIContext`：发起方优先——经 `current_connection` contextvar，无归属广播首响应胜出+败者收 ui/cancel）；cancelRequest 按连接隔离。
   - 依赖方向单向：transport ← protocol ← server（connection/ui_context 归 server 层）。
   - **RPC 循环线程三禁**（卡顿纪律，`RpcServer` 内置滞后探针兜底观测——超 100ms 漂移打 `rpc-stderr.log`）：①禁同步阻塞调用（`time.sleep`/同步 subprocess/大文件同步读写——逃生舱 `asyncio.to_thread`）；②禁大段 CPU（大会话全量序列化等重活分页或下线程）；③禁全局写锁类队头阻塞（出站一律走连接自有队列，写不穿 `Connection`）。入站背压：在飞 handler 超 `max_inflight`（默认 256）对请求回 `-32004 overloaded`、对通知丢弃。
@@ -474,8 +473,8 @@ auto_install_dependencies = true
 ```
 
 - `name` / `version` / `description` / `authors` 复用 Poetry 标准段；`[tool.nova]` 段声明资源路径与包行为。可声明的资源类目为 `agents` / `tools` / `skills` / `extensions` / `prompts` / `user_tools` / `personas` 七类（themes 与 ui_blocks 已归 Node 层 UI 资产）；settings 的 package dict 支持 `editable`、七类资源过滤器以及 `autoload: false`（project scope 的 delta 语义：在 user 层自动加载基础上局部翻转，`+path` 启用、`-path`/`!pattern` 禁用）。
-- 自安装边界只看**这个包是不是可安装的 Python 包**（声明了 `name` 且有 build-system）：满足则以 `--no-deps` 装进当前 Python 环境，与包含哪类资源无关——纯资源包无包结构时不自安装，executor 自包含的 tools 包同样不需要包结构。
-- 该 Python package 供 executor/extension 通过标准 import 引用包内共享模块（例如 `nova_coding_agent.tools_common`）。
+- 自安装边界只看**这个包是不是可安装的 Python 包**（声明了 `name` 且有 build-system）：满足则以 `--no-deps` 装进当前 Python 环境，与包含哪类资源无关——纯资源包无包结构时不自安装，自包含的 tools 包同样不需要包结构。
+- 该 Python package 供 tool/extension 通过标准 import 引用包内共享模块（例如 `nova_coding_agent.tools_common`）。
 - agents、skills、extensions 必须是自包含的，不得依赖包的 Python package。
 - `nova-pkg init` 会根据当前目录结构自动扫描并生成 `[tool.nova]` 段。
 

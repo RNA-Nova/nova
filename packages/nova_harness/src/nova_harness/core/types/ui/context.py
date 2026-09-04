@@ -4,7 +4,7 @@
 input/notify/form/自定义原语）都是自由字符串，其 params/result 契约归
 包作者（官方 bundle 定义标准词汇，第三方包可自定义）。
 
-设计见 ``packages/nova-tui/docs/ui-primitives.md``：
+设计要点：
 
 - ``request`` / ``notify`` 是反向通道的完备最小集——时序二分（要应答 /
   不要应答）即消息交互的完备分类；内容全部下沉到 ``method + params``；

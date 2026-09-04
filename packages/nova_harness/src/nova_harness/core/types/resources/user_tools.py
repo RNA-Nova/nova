@@ -3,7 +3,7 @@
 用户工具是用户/前端触发、执行结果以自定义消息类型记录并主动注入 LLM
 上下文的宿主能力（对照 LLM 工具：模型 tool_call 触发、结果走工具消息）。
 
-设计约束（见 ``examples/user_tools_design.md``）：泛化层只接管"管道"
+设计约束：泛化层只接管"管道"
 （pending/flush、abort 级联、消息记录、RPC dispatch），不接管"能力"——
 ``parameters`` 与 ``on_event`` 事件通道对注册表不透明，各工具自行解释。
 """

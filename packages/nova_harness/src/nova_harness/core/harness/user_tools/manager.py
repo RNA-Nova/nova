@@ -1,7 +1,7 @@
 """UserToolManager — 用户工具注册中心。
 
 只接管"管道"：注册表、目录、invoke 调度。工具的参数与事件对本类
-不透明（见 ``examples/user_tools_design.md`` §3 设计纪律）。
+不透明（设计纪律：泛化层不接管"能力"）。
 """
 
 from __future__ import annotations

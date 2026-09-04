@@ -1,6 +1,6 @@
 """UI 标准原语：词汇定义与 Python 糖库。
 
-架构 2.0 终案（``nova-client/docs/ui-primitives.md``）：harness 的
+harness 的
 ``UIContext`` 是**泛型 transport**（零词汇），交互词汇的定义权归包。
 本模块是**标准词汇的官方定义点**：
 

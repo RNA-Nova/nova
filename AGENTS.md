@@ -24,12 +24,12 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | 包管理器 | **Poetry**（各子包独立管理）；`nova-tui` 同时使用 **npm** |
 | 格式化 | `black`（目标语法版本 `py312`） |
 | Import 排序 | `isort`（`profile = "black"`） |
-| 序列化 | `pydantic` v2（`BaseModel`） |
+| 序列化 | `pydantic` v2（`NovaBaseModel`） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pre-commit`、`pytest`、`pytest-asyncio`、`sniffio` |
 | 其他关键依赖 | `openai`、`json-repair`、`jsonschema`、`pyyaml`、`filelock`、`tomli` |
 
-**未使用** Mypy、Tox、Makefile、Docker 或 CI/CD（GitHub Actions / GitLab CI）。仓库中也没有 `poetry.lock`、`.pre-commit-config.yaml` 或 GitHub Actions 工作流。
+**未使用** Mypy、Tox、Makefile 或 Docker。仓库中也没有 `poetry.lock` 与 `.pre-commit-config.yaml`；CI 为 GitHub Actions（`.github/workflows/ci.yml`，三平台矩阵，见「构建与开发命令」）。
 
 ---
 
@@ -52,11 +52,11 @@ nova/
 
 ### 运行时依赖层次（自下而上）
 
-1. **`nova_ai`** —— 最底层。提供多厂商（OpenAI、Anthropic、Google、Volcengine、GitHub Copilot 等）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层。当前仅有 `api_impls/openai_completions.py` 一个完整实现。
+1. **`nova_ai`** —— 最底层。提供多厂商（内置 Volcengine、Moonshot AI 国际/国内、Kimi Coding 四家；任意 OpenAI 兼容端点可经 `create_provider()` 接入）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层。当前仅有 `api_impls/openai_completions.py` 一个完整实现。
 2. **`nova_agent`（源码包 `nova_agent`）** —— 核心框架。基于 `nova_ai` 的模型能力，提供 `Agent` 类、事件订阅/发布、`agent_loop` 异步循环、生命周期管理、工具校验与执行。
-3. **`nova_harness`** —— 高阶 SDK。基于 `nova_ai` + `nova_agent`，封装 `AgentSession`、会话树（分支/fork/导航）、上下文压缩（Compaction）、资源加载、设置持久化、模型注册表覆盖、内置工具链、JSON-RPC 服务器、包管理器 CLI、Project Trust 门控与 `ExtensionUIContext` / RPC UI 桥接。manager 层（读自由写独占、互不调用、编排在 AgentSession）：`AgentManager`（agents 注册表视图 + 当前角色旋钮 + 默认解析链 + CapabilitySelection 汇集 + yaml 写回——`/agent save` 落地，包来源影子写 user 级）、`ToolsManager`（工具裁决单点）、`PersonaManager`（persona 装配 + override）、`SystemPromptManager`（纯渲染，激活工具含 `subagent` 时注入 `# Available Agents` 委派菜单）、`SettingsManager`（settings 唯一写门）。
+3. **`nova_harness`** —— 高阶 SDK。基于 `nova_ai` + `nova_agent`，封装 `AgentSession`、会话树（分支/fork/导航）、上下文压缩（Compaction）、资源加载、设置持久化、模型注册表覆盖、内置工具链、JSON-RPC 服务器、包管理器 CLI、Project Trust 门控与 `ScopedUIContext` / RPC UI 桥接。manager 层（读自由写独占、互不调用、编排在 AgentSession）：`AgentManager`（agents 注册表视图 + 当前角色旋钮 + 默认解析链 + CapabilitySelection 汇集 + yaml 写回——`/agent save` 落地，包来源影子写 user 级）、`ToolsManager`（工具裁决单点）、`PersonaManager`（persona 装配 + override）、`SystemPromptManager`（纯渲染，激活工具含 `subagent` 时注入 `# Available Agents` 委派菜单）、`SettingsManager`（settings 唯一写门）。
 4. **`nova_coding_agent`** —— 官方 bundle。同时是一个可 import 的 Python 包，依赖 `nova-ai`、`nova-agent`、`nova-harness`（均声明为 Poetry path 依赖），提供 `coding_agent` 等 5 个 Agent 组合声明（含 scout/planner/reviewer/worker 子代理）、`session_commands`/`permission_gate`（tool_call 拦截：bash 危险命令询问、写保护路径拦截）/`plan_mode`（只读规划模式：/plan 切换 + 写工具禁用 + bash 白名单 + 计划跟踪）/`tools_panel`（/tools 工具开关面板 + append_entry 持久化）/`interactive_shell`（user_bash 拦截：vim/htop 类交互命令终端让位）/`confirm_destructive`（session_before_switch/fork 确认）/`subagent_gate`（subagent 委派自治权检查点：per-agent 允许一次/本会话始终允许/取消，headless 放行，`subagent_allow` 条目持久化分支安全）七个扩展、10 个本地工具（bash、edit、find、grep、ls、question、read、subagent、todo、write）以及 `bash` 用户工具（`user_tools/`，LLM 工具与会话 bash 共享同一引擎）。
-5. **`nova-tui`** —— 前端运行时（架构 2.0 第二层，骨架已按 v3.1 设计一次成型）。TypeScript 厚应用层，子系统：`wire/`（client 传输 + capabilities 契约 major/minor 握手与能力位 + bridge 反向原语路由）、`bus.ts`（观察式事件脊柱，mirror 特权订阅）、`mirror/`（会话镜像：mapping 纯函数归约 + store 状态容器 + types 呈现词汇）、`presentation/`（blocks 声明式块词汇（开放集 + validateBlock schema 校验）+ slots 注册表（tool/entry/region/block/editor/command/shortcut/autocomplete/dialog 九族键）+ extension-api 扩展 UI API（ctx 纪律：只收"后端够不着的宿主原语"——对话框五件/编辑器/剪贴板/setStatus/onTerminalInput/主题/`events.on` 事件观察口/`runInteractive` 终端让位/`setTitle`/`notifyDesktop`/`setFooter`+`setHeader` 整件替换/`setWorking*` loader 三旋钮；后端方法的访问面就是 invoke 全量生成方法表，不手写包装域）+ theme-json 主题契约）、`packages/`（pkgList 索引 + npm 自愈 + 更新提醒）、`resources/`（呈现资源层：discovery 统一发现（frontend 半区：<host>/index.ts、tools|user_tools 渲染器、themes——镜像约定；外加散养根 `~/.nova/agent/frontend/tui/` 与 `<cwd>/.nova/frontend/tui/`——tools/dialogs/index.ts 三类资产，user 恒可信、project 过 trust 门）+ trust 编排层过滤 + loader jiti 管线——mtime 缓存/preview 钩子/耗时观测/diagnostics 含覆盖碰撞）、`settings/`（UISettings 扩展设置 + UIStateStore 扩展 KV——Node 层存储，不进后端 settings）、`keymap/`（键位能力子系统——keybindings.json 加载/三级合并机械 + 保留键位对账（宿主默认表经 create 注入），pi core/keybindings.ts 对位：能力归运行时层，宿主只消费；TUI 默认键位表在 `modes/tui/keymap/tables.ts`——机械上移、方言留下）、`export/`（会话导出 HTML：pi 三件套模板直搬 + 数据零映射（线上 camel 天然同构）+ vendored marked/highlight.js，宿主无关、主题注入）。`RuntimeHost` 接口与进程内实现同居 `runtime.ts`（M3 WS 宿主落地时再立 `hosts/` 目录）。**TUI 是包内的一种宿主形态**：`src/modes/tui/`（原 `nova-tui` 包合并而来——app.ts 纯装配根 + controllers/ 编排层（editor/keymap/dialogs/transcript/status/theme/settings（18 项面板）/export/share/foreground（前台任务取消登记处——Esc 域级路由一环）/terminal（OSC 0 标题 + OSC 9;4 进度 + turn 结束桌面通知 OSC 9/777/99）/startup（启动编排）+ 前端自持导航选择器（sessions/fork/models/scoped-models——per-item 动作键与面板交互反向原语表达不了的选择器直调 RPC 自渲染，已整体迁入官方 bundle frontend/tui/ 段 slash/ 目录——扩展机制 dogfood，官方与第三方同权；宿主只留 runCommand 推命令通道，后端同名命令保留 headless 回退）+ components/{transcript,dialogs,pickers,status,layout}（含 form 表单对话框、searchable 通用选择器、RegionHost/OverlayHost 区域与浮层宿主）+ blocks/ 块适配层（官方五块经 ExtensionUIAPI builtin 注册 + schema 校验）+ builtin/ 内建扩展（/packages 包面板——dogfood 验收）+ themes/ 主题系统（dark/light 内建 + 用户目录 + 包内 frontend/themes 三源 + /theme 预览）+ utils/（clipboard/terminal-guard），基于 `@earendil-works/pi-tui` 渲染（overlay 经其 showOverlay），`bin.nova` 入口），与将来的 Web UI 共享运行时主体。线上契约类型经 `nova_harness.core.rpc.protocol.schema_export` 构建期导出（`protocol/nova-wire.schema.json` + `src/protocol/nova-wire.gen.ts`，pytest 漂移测试保鲜），mapping/store/wire 全部基于生成类型。已真实跑通：对官方 bundle 与 B 型包完成 frontend/ 渲染器发现→加载→渲染（含组件形态）。WebSocket 宿主（M3）、全量 UI 扩展宿主（M4）见 `docs/design.md` §16。纯 npm 包（无 Python 源码；运行时仍需 Python 环境中可导入 `nova_harness`）。
+5. **`nova-tui`** —— 前端运行时（架构 2.0 第二层，骨架已按 v3.1 设计一次成型）。TypeScript 厚应用层，子系统：`wire/`（client 传输 + capabilities 契约 major/minor 握手与能力位 + bridge 反向原语路由）、`bus.ts`（观察式事件脊柱，mirror 特权订阅）、`mirror/`（会话镜像：mapping 纯函数归约 + store 状态容器 + types 呈现词汇）、`presentation/`（blocks 声明式块词汇（开放集 + validateBlock schema 校验）+ slots 注册表（tool/entry/region/block/editor/command/shortcut/autocomplete/dialog 九族键）+ extension-api 扩展 UI API（ctx 纪律：只收"后端够不着的宿主原语"——对话框五件/编辑器/剪贴板/setStatus/onTerminalInput/主题/`events.on` 事件观察口/`runInteractive` 终端让位/`setTitle`/`notifyDesktop`/`setFooter`+`setHeader` 整件替换/`setWorking*` loader 三旋钮；后端方法的访问面就是 invoke 全量生成方法表，不手写包装域）+ theme-json 主题契约）、`packages/`（pkgList 索引 + npm 自愈 + 更新提醒）、`resources/`（呈现资源层：discovery 统一发现（frontend 半区：<host>/index.ts、tools|user_tools 渲染器、themes——镜像约定；外加散养根 `~/.nova/agent/frontend/tui/` 与 `<cwd>/.nova/frontend/tui/`——tools/dialogs/index.ts 三类资产，user 恒可信、project 过 trust 门）+ trust 编排层过滤 + loader jiti 管线——mtime 缓存/preview 钩子/耗时观测/diagnostics 含覆盖碰撞）、`settings/`（UISettings 扩展设置 + UIStateStore 扩展 KV——Node 层存储，不进后端 settings）、`keymap/`（键位能力子系统——keybindings.json 加载/三级合并机械 + 保留键位对账（宿主默认表经 create 注入），pi core/keybindings.ts 对位：能力归运行时层，宿主只消费；TUI 默认键位表在 `modes/tui/keymap/tables.ts`——机械上移、方言留下）、`export/`（会话导出 HTML：pi 三件套模板直搬 + 数据零映射（线上 camel 天然同构）+ vendored marked/highlight.js，宿主无关、主题注入）。`RuntimeHost` 接口与进程内实现同居 `runtime.ts`（M3 WS 宿主落地时再立 `hosts/` 目录）。**TUI 是包内的一种宿主形态**：`src/modes/tui/`（原 `nova-tui` 包合并而来——app.ts 纯装配根 + controllers/ 编排层（editor/keymap/dialogs/transcript/status/theme/settings（18 项面板）/export/share/foreground（前台任务取消登记处——Esc 域级路由一环）/terminal（OSC 0 标题 + OSC 9;4 进度 + turn 结束桌面通知 OSC 9/777/99）/startup（启动编排）+ 前端自持导航选择器（sessions/fork/models/scoped-models——per-item 动作键与面板交互反向原语表达不了的选择器直调 RPC 自渲染，已整体迁入官方 bundle frontend/tui/ 段 slash/ 目录——扩展机制 dogfood，官方与第三方同权；宿主只留 runCommand 推命令通道，后端同名命令保留 headless 回退）+ components/{transcript,dialogs,pickers,status,layout}（含 form 表单对话框、searchable 通用选择器、RegionHost/OverlayHost 区域与浮层宿主）+ blocks/ 块适配层（官方五块经 ExtensionUIAPI builtin 注册 + schema 校验）+ builtin/ 内建扩展（/packages 包面板——dogfood 验收）+ themes/ 主题系统（dark/light 内建 + 用户目录 + 包内 frontend/themes 三源 + /theme 预览）+ utils/（clipboard/terminal-guard），基于 `@earendil-works/pi-tui` 渲染（overlay 经其 showOverlay），`bin.nova` 入口），与将来的 Web UI 共享运行时主体。线上契约类型经 `nova_harness.core.rpc.protocol.schema_export` 构建期导出（`protocol/nova-wire.schema.json` + `src/protocol/nova-wire.gen.ts`，pytest 漂移测试保鲜），mapping/store/wire 全部基于生成类型。已真实跑通：对官方 bundle 与 B 型包完成 frontend/ 渲染器发现→加载→渲染（含组件形态）。WebSocket 宿主（M3）、全量 UI 扩展宿主（M4）尚未落地。纯 npm 包（无 Python 源码；运行时仍需 Python 环境中可导入 `nova_harness`）。
 6. **`nova_team`** —— （已从本发布线移除；演进在 main 分支）
 7. **`nova_web_ui`** —— （已从本发布线移除；演进在 main 分支）
 
@@ -105,10 +105,10 @@ nova/
   - `print/` —— 非交互式命令行运行模式（`nova-harness run`）
   - `rpc/` —— JSON-RPC 服务器运行模式（装配入口 `cli.py`；服务器本体归 `core/rpc/`：`RpcServer` + 连接层 `Connection`/`ConnectionRegistry` + `RoutingUIContext` + `MethodRegistry`，传输经 `StdioTransport` 接入，`OutputGuard` 归 `core/utils/`）
 
-  （**WS 接入已翻案归 Python** `core/rpc`——连接化重构后 stdio/WS 同为连接来源，鉴权三守则见 `transport/websocket.py`；设计修订记录见 `packages/nova_harness/examples/nova_architecture_2.0.md` 文首）
-- `core/agent_session/` —— `AgentSession` 运行时核心、`AgentSessionRuntime`、`AgentSessionServices`、领域控制器（user_tools、compaction、events、model、queue、retry、stats、tools、tree）
-- `core/harness/` —— 高阶能力：会话持久化与树管理、上下文压缩、系统提示词构建、skills、Project Trust、用户工具（`user_tools/`：仅 UserToolManager 注册中心——框架不内置任何用户工具，具体工具由包经 `[tool.nova] user_tools` 类目分发；消息回载注册表在 `harness/session/message_types.py`；设计见 `examples/user_tools_design.md`）
-- `core/resources/` —— 资源发现与加载（`loader.py` 与 `loaders/` 下的 agent_config、extensions、prompt_templates、skills、tools）
+  （**WS 接入已翻案归 Python** `core/rpc`——连接化重构后 stdio/WS 同为连接来源，鉴权三守则见 `transport/websocket.py`）
+- `core/agent_session/` —— `AgentSession` 运行时核心、`AgentSessionRuntime`、`AgentSessionServices`、领域控制器（user_tools、compaction、events、model、queue、retry、slash_input、stats、tools、tree）
+- `core/harness/` —— 高阶能力：会话持久化与树管理、上下文压缩、系统提示词构建、skills、Project Trust、用户工具（`user_tools/`：仅 UserToolManager 注册中心——框架不内置任何用户工具，具体工具由包经 `[tool.nova] user_tools` 类目分发；消息回载注册表在 `harness/session/message_types.py`）
+- `core/resources/` —— 资源发现与加载（`loader.py` 与 `loaders/` 下的 agent_config、context_files、extensions、personas、prompt_templates、skills、tools、user_tools）
 - `core/package/` —— Agent / tool / bundle / skill / extension 包管理器核心（manager facade + install/ 安装世界 + resolve/ 运行时世界 + source/ source 领域 + manifest / validation / scaffold / utils）。安装事实以 `*.dist-info/`（PEP 610 风格）为权威快照，副本推导兜底
 - `core/config/` —— settings、auth storage、路径默认值、配置解析
 - `core/model/` —— 模型域：注册表运行时（`ModelRuntime`、store/composer）、模型解析（`resolver.py`）、provider attribution
@@ -134,16 +134,17 @@ nova/
 - `frontend/tui/tools/` —— **TS 渲染器（组件形态）**：`bash.ts`（终端风）/ `edit.ts`（diff 风，消费引擎预生成的 patch）/ `read.ts`（文件风）/ `write.ts` / `find.ts` / `grep.ts` / `ls.ts` / `todo.ts`（清单卡片）/ `subagent.ts`（三模式：流式占位 ⏳、usage 行、工具调用格式化、展开态 Markdown 终输出）——**返回活 pi-tui 组件**（渲染器契约双形态：`NovaBlock[] | Component`，判别在消费点；组件经 `input.env` 取色/取主题）；`tools/<tool>.ts` 文件名即工具名。**镜像约定**：前端段镜像后端资源类型目录（`tools/`、`user_tools/`、`extensions/`——位置即语义）；渲染器目录是纯发现域（一文件一工具、默认导出渲染函数，可选 `preview` 命名导出做执行前只读预览）——辅助模块归 `tui/lib/`（如 `edit-preview.ts` 匹配引擎），测试归 `frontend/tests/`（发现逻辑跳过 `*.test.ts`）
 - `frontend/tui/index.ts` —— 扩展入口（ExtensionUIAPI 工厂：/tree、/todos、/model、/scoped-models、/resume、/fork 命令 UI 注册——其组件与编排在 `tui/extensions/session_commands/slash/{tree,todos,model,scoped-models,resume,fork}/`，镜像后端扩展归属；通用选择器件（searchable/selector/hints）经 `nova-tui/modes/tui/*` 子路径共享宿主单例，不复制；后端同名命令保留 headless 回退）
 - `frontend/package.json` —— npm 清单（`pretty-ms`/`diff` 依赖 + typescript devDep）：nova-pkg 安装第 4 阶段（npm ci/install）的触发点（A 型探测 `<包根>/frontend/package.json`；B 型包根即前端半区，探测包根 `package.json`）；`tsconfig.json` 供开发期类型检查
-- `backend/nova_coding_agent/` —— bundle 自身的 Python 包（poetry `packages` 段 `from = "backend"`，import 路径 `nova_coding_agent.xxx` 不变），供 tools 共享辅助模块（`tools_common/`：路径/队列/截断/输出累加/shell 解析等工具基建 + **`fs_layer.py`**——`FileSystemLayer` 统一 fs 原语（全 async，read/write/edit/ls/find/grep 六个 operations 实现参数化在它上面）+ `operations.py`（per-tool operations 协议与实现）+ `process_runner.py`（grep/find 的 spawn 缝——本地 asyncio 子进程 + `resolve_binary` 三级解析）；`bash/`：bash 执行引擎与消息类型，LLM bash 工具与会话 bash 共享）；`ui_primitives.py`：**UI 标准原语的官方定义点**（基线五件套词汇 + `set_status` 展示类词汇（footer 扩展状态行，pi `setStatus` 对位）+ `select`/`select_items`/`confirm`/`input`/`form`/`notify_message`/`set_status` 糖库——harness 的 `UIContext` 是零词汇泛型 transport，词汇定义权归包，设计见 `nova-tui/docs/ui-primitives.md`）
+- `backend/nova_coding_agent/` —— bundle 自身的 Python 包（poetry `packages` 段 `from = "backend"`，import 路径 `nova_coding_agent.xxx` 不变），供 tools 共享辅助模块（`tools_common/`：路径/队列/截断/输出累加/shell 解析等工具基建 + **`fs_layer.py`**——`FileSystemLayer` 统一 fs 原语（全 async，read/write/edit/ls/find/grep 六个 operations 实现参数化在它上面）+ `operations.py`（per-tool operations 协议与实现）+ `process_runner.py`（grep/find 的 spawn 缝——本地 asyncio 子进程 + `resolve_binary` 三级解析）；`bash/`：bash 执行引擎与消息类型，LLM bash 工具与会话 bash 共享）；`ui_primitives.py`：**UI 标准原语的官方定义点**（基线五件套词汇 + `set_status` 展示类词汇（footer 扩展状态行，pi `setStatus` 对位）+ `select`/`select_items`/`confirm`/`input`/`form`/`notify_message`/`set_status` 糖库——harness 的 `UIContext` 是零词汇泛型 transport，词汇定义权归包）
 
 > **B 型纯 TS 包**（package.json 身份证，无 pyproject.toml；包根即前端半区——渲染器归 `tui/tools/<tool>.ts`、辅助件归 `tui/lib/`）：前后端作者解耦开发与发布的包形态（与 A 型并存；参考测试夹具 `nova_harness/tests/core/package/test_b_type_package.py`）。
-- `backend/tests/` —— 单元测试（Python 侧），**镜像 backend/ 目录**：`tools/`（10 工具一文件一测）/ `extensions/`（7 扩展）/ `user_tools/` / `nova_coding_agent/`（镜像可导入包：`bash/` 引擎与消息、`subagent/` 引擎、`tools_common/` 七模块、`test_ui_primitives.py`）；TS 侧测试归 `frontend/tests/`（镜像 `tui/`：`tools/`、`dialogs/`、`lib/`、`extensions/session_commands/slash/<name>/`）
+- `backend/tests/` —— 单元测试（Python 侧），**镜像 backend/ 目录**：`tools/`（10 工具一文件一测）/ `extensions/`（7 扩展）/ `user_tools/` / `nova_coding_agent/`（镜像可导入包：`bash/` 引擎与消息、`subagent/` 引擎、`tools_common/` 工具基建模块、`test_ui_primitives.py`）；TS 侧测试归 `frontend/tests/`（镜像 `tui/`：`tools/`、`dialogs/`、`lib/`、`extensions/session_commands/slash/<name>/`）
 
 该 bundle 的 `pyproject.toml` 中 `[tool.nova]` 段声明：
 - `agents = ["./agents/"]`（组合层目录——扫描其下 `*.yaml`）
 - `tools = ["./backend/tools/bash.py", "./backend/tools/edit.py", "./backend/tools/find.py", "./backend/tools/grep.py", "./backend/tools/ls.py", "./backend/tools/question.py", "./backend/tools/read.py", "./backend/tools/subagent.py", "./backend/tools/todo.py", "./backend/tools/write.py"]`
 - `extensions = ["./backend/extensions/confirm_destructive.py", "./backend/extensions/interactive_shell.py", "./backend/extensions/permission_gate.py", "./backend/extensions/plan_mode.py", "./backend/extensions/session_commands.py", "./backend/extensions/subagent_gate.py", "./backend/extensions/tools_panel.py"]`
 - `user_tools = ["./backend/user_tools/bash.py"]`
+- `prompts = ["./backend/prompts/debug.md", "./backend/prompts/implement-and-review.md", "./backend/prompts/implement.md", "./backend/prompts/refactor.md", "./backend/prompts/scout-and-plan.md"]`
 - `personas = ["./backend/personas/"]`（persona 资源类目——目录条目，loader 递归收 .md 命名）
 - `auto_install_dependencies = true`
 - `binary_dependencies = { rg = "ripgrep" }`
@@ -169,7 +170,7 @@ nova/
 
 ### `nova-tui`（含内置 TUI 宿主）
 
-运行时主体位于 `packages/nova-tui/src/`（wire/、bus.ts、mirror/、presentation/、packages/、extensions/、runtime.ts，见上文第 5 条）；TUI 作为一种宿主形态位于 `src/modes/tui/`：
+运行时主体位于 `packages/nova-tui/src/`（wire/、bus.ts、mirror/、presentation/、packages/、resources/、settings/、keymap/、export/、runtime.ts，见上文第 5 条）；TUI 作为一种宿主形态位于 `src/modes/tui/`：
 
 - `main.ts` —— `nova` CLI 入口（commander，bin 指向 `dist/modes/tui/main.js`）
 - `app.ts` —— `NovaTuiApp` 薄壳：槽位布局、生命周期、全局键位（Esc 域级路由/ctrl-c 双击/ctrl-d 空退/ctrl+o 展开）
@@ -331,7 +332,7 @@ npm link           # 全局注册 `nova` 命令
   - `packages/nova-tui/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
   - `bundles/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
-- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 529 个、`nova_agent` 125 个、`nova_harness` 1501 个、`nova_coding_agent` 411 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
+- 已通过 pixi 安装 dev 环境并验证：`nova_ai` 529 个、`nova_agent` 125 个、`nova_harness` 1497 个、`nova_coding_agent` 411 个非集成测试全部通过；修改关键逻辑后应在对应子包内运行测试并确认结果。
 
 运行方式：
 
@@ -372,11 +373,11 @@ poetry run pytest tests -m "not integration"
 
 4. **Project Trust**
    - `~/.nova/agent/trust.json` 保存用户对项目文件夹的信任决策；扩展可通过 `project_trust` 事件参与裁决。
-   - 无 UI 的 headless/RPC 模式默认信任存在 `.nova` 资源的项目，以保持向后兼容；有 UI 的前端（如 `nova-tui` 的 TUI 宿主）会弹出确认对话框。
+   - 无 UI 的 headless/print 模式默认**不信任**（可用 `--trust` 覆盖或 settings `default_project_trust` 调整）；有 UI 的前端（如 `nova-tui` 的 TUI 宿主）会弹出确认对话框。
    - **trust 只存在于运行时**：会话启动决议 + resolver 读取门控。`nova-pkg` 包管理不做 trust 检查（装/卸包是主动行为），也没有 `trust`/`untrust` 子命令。
 
 5. **敏感信息**
-   - 历史 notebook 文件 `packages/nova_agent/src/test.ipynb` 已删除。新增示例 `packages/nova_harness/examples/` 中不应包含真实 API Key。
+   - 历史 notebook 文件 `packages/nova_agent/src/test.ipynb` 已删除。示例与文档中不应包含真实 API Key。
 
 ---
 
@@ -384,20 +385,19 @@ poetry run pytest tests -m "not integration"
 
 - **修改前请先确认所属子包**：不同子包有独立的 `pyproject.toml` 与依赖，不要混用。
 - **环境管理**：仓库使用根目录 `pyproject.toml` 中的 `[tool.pixi.*]` 作为统一 workspace。新增或调整依赖时，优先在根 `pyproject.toml` 中声明，以便所有子包共享同一环境。
-- **不要假设测试一定通过**：`nova_ai` 与 `nova_agent` 非集成测试当前通过；`nova_harness` 存在若干既有失败用例。修改关键逻辑后建议手动验证或补充测试。
+- **不要假设测试一定通过**：四个 Python 子包的非集成测试当前全部通过（各包计数见「测试说明」），但改动可能打破未覆盖路径；修改关键逻辑后建议手动验证或补充测试。
 - **保持中文注释**：新增代码的 docstring 与行内注释请使用中文，与现有代码一致。
 - **序列化层**：新增数据类先按上文"数据建模"的决策顺序选型；选用 Pydantic 时一律继承 `NovaBaseModel`（基于 `pydantic.BaseModel`）。
 - **依赖新增**：
   - 若新增**第三方库**，优先在根 `pyproject.toml` 的 `[tool.pixi.pypi-dependencies]`（运行时）或 `[tool.pixi.feature.dev.pypi-dependencies]`（开发时）中声明，然后执行 `pixi install -e dev`。
   - 各子包仍保留 Poetry 配置作为兼容；如使用 Poetry，需在对应子包 `pyproject.toml` 的 `[tool.poetry.dependencies]` 中声明并执行 `poetry lock`（如有 lock 文件）。
-- **路径约定**（前后端分治 §9，全文见 `packages/nova-tui/docs/frontend-backend-separation.md`）：
+- **路径约定**（前后端分治）：
   - 全局配置根目录默认：`~/.nova/agent`（settings/auth/trust/models/sessions/packages/logs/bin 等**后端状态**平级保留）
   - 后端散养资源：`<base>/backend/{extensions,skills,prompts,personas}`（user 级 base = `~/.nova/agent`，项目级 base = `<cwd>/.nova`）；`agents/` 两半共享平级保留（`<base>/agents`）；旧位目录在会话服务装配时自动迁移（mv 语义、幂等、新位已有内容不合并不覆盖）
   - 前端域（按宿主分级）：`~/.nova/agent/frontend/tui/`（settings.json / state/ / keybindings.json / themes/ / debug/ + 散养 `tools/`、`dialogs/`、`index.ts`——扫描能力）；项目级 `<cwd>/.nova/frontend/tui/` 同构（散养资产过 trust 门）；前端旧位（ui-settings.json/ui-state/keybindings.json/themes）由 TUI 启动时自动迁移
   - 项目级配置目录：`<cwd>/.nova`（`.nova/settings.json` 不动）
   - 会话目录：`~/.nova/agent/sessions/--<cwd>--/`
   - Project Trust 记录：`~/.nova/agent/trust.json`
-- **`nova_team`** 为早期实现，修改时请保持最小侵入，避免破坏上层 `nova_harness` 的既有接口。
 - **子包级 AGENTS.md**：`nova_ai` 与 `nova_harness` 各自包含更详细的包级指南，深入修改这两个包时建议优先阅读对应文件。
 - **新增 Agent / 工具 / 扩展**：参考 `nova_coding_agent` 的 `[tool.nova]` 段与目录结构；使用 `nova-pkg init` 可自动生成该段。
 

@@ -47,7 +47,7 @@ RESOURCE_TYPE_DIRS: dict[ResourceType, str] = {
     ResourceType.PERSONAS: "personas",
 }
 
-# 前后端分治（nova-tui/docs/frontend-backend-separation.md §9）：
+# 前后端分治：
 # user/project 根下的后端散养资源统一归 ``backend/`` 半区目录。
 BACKEND_HALF_DIR_NAME = "backend"
 
