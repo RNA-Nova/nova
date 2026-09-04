@@ -141,6 +141,17 @@ def test_bash_on_update_streaming(tmpdir):
     # 首次更新是初始空 update（对齐 TS：命令产出前先渲染工具卡片）
     assert len(updates) >= 2
     assert updates[0].content == []
+    # 引擎读泵尾帧可能略滞后于 execute 返回（共享 runner 上实测会掉
+    # 最后一帧）——轮询等尾帧落定再断言（最终以 result 为准，这里是
+    # 流式更新路径的时序加固）
+    import time
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        last_text = updates[-1].content[0].text if updates[-1].content else ""
+        if "line1" in last_text and "line2" in last_text:
+            break
+        time.sleep(0.05)
     # 最终更新包含完整输出
     assert "line1" in updates[-1].content[0].text
     assert "line2" in updates[-1].content[0].text
