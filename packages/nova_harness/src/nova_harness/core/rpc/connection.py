@@ -1,6 +1,6 @@
 """连接一等公民（RPC 连接化重构）。
 
-每个接入的客户端（stdio 父进程 / WebSocket / 内存测试端）都是一条
+每个接入的客户端（stdio 父进程 / 内存测试端）都是一条
 ``Connection``：身份、状态机（uninitialized→initialized）、UI 能力集、
 在飞请求表、有界出站队列与独立写泵全部挂在连接上——服务器只持有
 ``ConnectionRegistry``，不再有"那个唯一前端"的隐含假设。
@@ -11,8 +11,7 @@
   （事件广播门 + UI 寻址都以此为准）；
 - 每连接有界出站队列 + 独立写泵：慢写只堵本连接，不队头阻塞别人
   （取代全局写锁）；
-- 背压按来源分流（codex origin 语义）：可信来源（stdio/memory）队列满
-  则让出式等位；网络来源（websocket）满则判定慢消费者主动断连；
+- 背压按来源分流：可信来源（stdio/memory）队列满则让出式等位；
 - ``current_connection`` contextvar：handler 任务链（含其派生的
   工具/会话子任务）都能取到本请求的来源连接——UI 寻址"发起方优先"
   与 cancelRequest 的连接隔离都建立在它上面。
@@ -47,12 +46,10 @@ class ConnectionOrigin(str, enum.Enum):
     """连接来源（背压/关停策略按此分流）。"""
 
     STDIO = "stdio"
-    WEBSOCKET = "websocket"
     MEMORY = "memory"
 
 
-# 可信来源集合：队列满时阻塞等位（父进程/测试端可信，不断连）；
-# 网络来源（WEBSOCKET 不在此列）满则慢消费者断连。
+# 可信来源集合：队列满时阻塞等位（父进程/测试端可信，不断连）。
 _TRUSTED_ORIGINS = {ConnectionOrigin.STDIO, ConnectionOrigin.MEMORY}
 
 _CLOSE = object()  # 写泵停止哨兵

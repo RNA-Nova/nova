@@ -10,7 +10,7 @@
 - **模型运行时**：内置 provider → `models.json` → 扩展注册三层合成；credential-blind（密钥不进 `Model`，请求时解析）；动态模型目录刷新与离线缓存。
 - **七类资源加载**：agents / tools / skills / extensions / prompts / user_tools / personas，统一经包分发 + user/project 两级散养目录发现，冲突诊断与来源跟踪。
 - **包管理器 `nova-pkg`**：path / git / npm 三种来源的安装、卸载、更新、校验与 `[tool.nova]` 脚手架；安装事实以 `*.dist-info/` 快照记录。
-- **JSON-RPC 服务器**：stdio / WebSocket 双传输，76 个方法分 8 个域，多连接、事件广播、反向 UI 原语按连接寻址。
+- **JSON-RPC 服务器**：stdio 传输（前端以子进程挂载），76 个方法分 8 个域，多连接、事件广播、反向 UI 原语按连接寻址。
 - **Project Trust**：项目级信任门控——加载 `<cwd>/.nova` 资源前的决议链、持久化记录与 UI 确认。
 - **扩展系统**：事件钩子、slash 命令、快捷键、flag、provider 注册与 spawn hook；运行期动作经 `ExtensionContext` 注入。
 - **UI 桥接**：`UIContext` 泛型反向原语通道（request/notify + 能力协商），交互词汇由包定义；headless 自动降级。
@@ -62,14 +62,9 @@ nova-harness run coding_agent --task "看一下当前目录结构并总结"
 ### RPC：启动 JSON-RPC 服务器
 
 ```bash
-# stdio（默认）——前端以子进程方式挂载，连接关闭即退出
+# stdio——前端以子进程方式挂载，连接关闭即退出
 nova-harness-rpc
-
-# WebSocket 多客户端形态
-nova-harness-rpc --listen ws://127.0.0.1:9321
 ```
-
-WS 形态自动生成 token 并连同监听地址落入 `~/.nova/agent/rpc-server.json`（0600），客户端从该文件一次拿齐 url + token。鉴权与 Origin 白名单见 [CLI 参考](#nova-harness-rpc)。
 
 ### SDK：最小会话
 
@@ -298,13 +293,10 @@ nova-harness run <agent> --task TASK [选项]
 ### `nova-harness-rpc`
 
 ```
-nova-harness-rpc [--version] [--listen stdio://|ws://HOST:PORT]
-                 [--token TOKEN] [--token-file PATH] [--allow-origin ORIGIN]...
+nova-harness-rpc [--version]
 ```
 
-- `--listen`：`stdio://`（默认，单客户端，前端以子进程挂载，连接关闭即进程退出）或 `ws://HOST:PORT`（多客户端 acceptor）。
-- WS 鉴权三守则：bearer token（`Authorization` 头或 `?token=` query，常数时间比较）；**非 loopback 监听必须显式给 token**（`--token` / `--token-file`，自动生成的本地 token 只配 loopback）；`--allow-origin` 白名单外的 Origin 一律 403（缺省空名单 = 带 Origin 头全拒）。
-- token 供给链：`--token` → `--token-file` → 自动生成落 `~/.nova/agent/rpc-server.json`（0600，含 url + token）。
+stdio 单客户端形态：前端以子进程挂载，连接关闭即进程退出。
 - 方法表：76 个方法分 8 个域——`session`（initialize/shutdown/会话/队列/重试/压缩/树导航/导入导出）、`model`（发现/切换/scoped/思考级别）、`auth`（状态/login/logout/setApiKey）、`resources`（skills/提示词模板目录）、`settings`（读写，无需会话）、`user_tools`、`system`（命令目录/扩展 flag/快捷键目录与回调）、`package`（列表/安装/卸载/更新/检查）。`ui/response` 与 `system/capabilities` 由服务器按连接直管。
 - 诊断：进程 stderr 重定向到 `~/.nova/agent/logs/rpc-stderr.log`（附加写）；stdout 有 OutputGuard 保护，杂散输出不会污染协议帧。
 
@@ -464,7 +456,6 @@ class UserTool:
 ├── models.json            # 自定义 provider / 模型覆盖
 ├── models-store.json      # 动态模型目录缓存
 ├── trust.json             # Project Trust 持久化记录
-├── rpc-server.json        # WS 监听信息（url + token，0600）
 ├── agents/                # user 级 agent 组合声明（*.yaml）
 ├── backend/               # user 级散养资源
 │   ├── extensions/  skills/  prompts/  personas/

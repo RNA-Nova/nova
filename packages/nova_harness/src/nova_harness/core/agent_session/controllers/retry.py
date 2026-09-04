@@ -78,8 +78,6 @@ class RetryController:
             "connection error",
             "connection refused",
             "connection lost",
-            "websocket closed",
-            "websocket error",
             "other side closed",
             "fetch failed",
             "upstream connect",

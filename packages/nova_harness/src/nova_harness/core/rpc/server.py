@@ -14,8 +14,7 @@ AgentSession 事件广播给全部已 initialize 的连接。
 - **反向原语按连接寻址**：``ui/response`` / ``system/capabilities``
   按连接记账，弹窗路由归 ``RoutingUIContext``。
 
-传输接入面：``add_connection`` 是唯一入口——stdio 直连、将来
-WebSocket acceptor 每 accept 一条调一次（P1）。
+传输接入面：``add_connection`` 是唯一入口——stdio 直连。
 """
 
 from __future__ import annotations

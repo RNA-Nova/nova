@@ -139,31 +139,6 @@ class Wire:
             )
 
 
-class WsWire(Wire):
-    """WebSocket 版黑盒客户端（连接化 P1 双传输参数化）。
-
-    与 stdio 版共用 call/notify/drain_events 语义；读侧同样是
-    "专职线程 + 队列"（websockets sync client 的迭代器直接排干）。
-    """
-
-    def __init__(self, proc: subprocess.Popen, conn) -> None:
-        # 先挂 conn 再进父类 __init__——后者立即启动读泵线程，
-        # _pump_lines 重写版要用 _conn
-        self._conn = conn
-        super().__init__(proc)
-
-    def _pump_lines(self) -> None:
-        for message in self._conn:
-            self._lines.put(message)
-
-    def _write(self, msg: dict) -> None:
-        self._conn.send(json.dumps(msg, ensure_ascii=False))
-
-    # ------------------------------------------------------------------
-    # 生命周期
-    # ------------------------------------------------------------------
-
-
 def _spawn_backend(extra_args: list[str] | None = None) -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
@@ -189,56 +164,19 @@ def _spawn_backend(extra_args: list[str] | None = None) -> subprocess.Popen:
     return proc
 
 
-def _free_port() -> int:
-    import socket
-
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
-
-
-@pytest.fixture(params=["stdio", "ws"])
-def backend(request, tmp_path):
+@pytest.fixture
+def backend(tmp_path):
     """一个隔离的后端进程 + 黑盒客户端（tmp cwd + tmp agentDir）。
 
-    双传输参数化（P1）：同一套契约用例跑 stdio 与 WebSocket 两种接入——
-    传输无关性（任一传输跑绿即契约兼容）的实证。
+    免 trust 询问（一致性测试聚焦协议，不测 trust 流程）。
     """
     (tmp_path / "proj").mkdir()
     (tmp_path / "agent").mkdir()
-    # 免 trust 询问（一致性测试聚焦协议，不测 trust 流程）
     (tmp_path / "agent" / "settings.json").write_text(
         json.dumps({"defaultProjectTrust": "always"}), encoding="utf-8"
     )
-    if request.param == "ws":
-        from websockets.sync.client import connect as ws_connect
-
-        token = "conformance-token"
-        port = _free_port()
-        proc = _spawn_backend(["--listen", f"ws://127.0.0.1:{port}", "--token", token])
-        # 等服务起来（acceptor 绑定端口后再连）；建链失败必须杀掉进程——
-        # setup 期异常不会跑 teardown，不杀就是孤儿
-        try:
-            conn = None
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                try:
-                    conn = ws_connect(
-                        f"ws://127.0.0.1:{port}",
-                        additional_headers={"Authorization": f"Bearer {token}"},
-                    )
-                    break
-                except OSError:
-                    time.sleep(0.1)
-            assert conn is not None, "WS 后端 10s 内未就绪"
-        except BaseException:
-            proc.kill()
-            proc.wait(timeout=5)
-            raise
-        wire = WsWire(proc, conn)
-    else:
-        proc = _spawn_backend()
-        wire = Wire(proc)
+    proc = _spawn_backend()
+    wire = Wire(proc)
     wire.cwd = str(tmp_path / "proj")
     wire.agent_dir = str(tmp_path / "agent")
     # 协议握手：连接化后 initialize 是事件广播/UI 寻址的门（真实客户端
@@ -246,7 +184,6 @@ def backend(request, tmp_path):
     wire.call("initialize")
     yield wire
     # 关停语义：shutdown 命令 + stdin EOF（stdio 后端主循环随管道断开退出；
-    # WS 形态 stdin 不是生命线，POSIX 走 SIGTERM——顺带覆盖信号关停路径；
     # Windows 的 terminate() 是硬杀，仅超时兜底才动用）
     try:
         wire.call("shutdown", timeout=5)

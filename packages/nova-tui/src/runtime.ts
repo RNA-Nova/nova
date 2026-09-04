@@ -131,10 +131,9 @@ export type ThinkingLevel = NovaWireMethodMap['setThinkingLevel']['params']['lev
 export type QueueMode = NovaWireMethodMap['setSteeringMode']['params']['mode'];
 
 /**
- * RuntimeHost：前端（TUI / WebUI）面对的唯一接口（设计 v3 §11）。
+ * RuntimeHost：前端（TUI）面对的唯一接口（设计 v3 §11）。
  *
- * 本类是进程内实现（nova-tui 直接消费）；M3 的 WebSocket 宿主对远程
- * 客户端暴露同一接口。前端能做的事收敛在四组方法里：
+ * 本类是进程内实现（nova-tui 直接消费）。前端能做的事收敛在四组方法里：
  * 读模型 / 订阅变更 / 调命令 / 应答原语。
  */
 export interface RuntimeHost {

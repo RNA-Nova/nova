@@ -1,6 +1,6 @@
 """Transport 抽象接口。
 
-所有前后端通信通道（stdio、WebSocket、内存）都实现此接口，
+所有前后端通信通道（stdio、内存）都实现此接口，
 使 ``NovaServer`` 和 ``TransportUIContext`` 不依赖具体传输方式。
 """
 
@@ -20,7 +20,7 @@ class Transport(ABC):
     @property
     @abstractmethod
     def supports_binary(self) -> bool:
-        """是否支持原始二进制帧（WebSocket 可以，stdio 不行）。"""
+        """是否支持原始二进制帧（stdio 不行）。"""
 
     @abstractmethod
     async def open(self) -> None:

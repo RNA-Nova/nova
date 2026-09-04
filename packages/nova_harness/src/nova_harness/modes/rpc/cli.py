@@ -2,11 +2,8 @@
 
 import argparse
 import asyncio
-import json
 import signal
 import sys
-from pathlib import Path
-from typing import Any
 
 from nova_harness.core.rpc.connection import ConnectionOrigin
 from nova_harness.core.rpc.protocol import MethodRegistry
@@ -30,33 +27,12 @@ from nova_harness.core.utils.output_guard import OutputGuard
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nova-harness-rpc",
-        description="Nova Harness JSON-RPC server（stdio / WebSocket）",
+        description="Nova Harness JSON-RPC server（stdio——TUI 子进程形态）",
     )
     parser.add_argument(
         "--version",
         action="version",
         version="%(prog)s 0.1.0",
-    )
-    parser.add_argument(
-        "--listen",
-        default="stdio://",
-        help="监听形态：stdio://（默认，TUI 子进程）或 ws://HOST:PORT（多客户端）",
-    )
-    parser.add_argument(
-        "--token",
-        default=None,
-        help="WS 鉴权 token（缺省经 --token-file 或 ~/.nova/agent/rpc-server.json 自动生成）",
-    )
-    parser.add_argument(
-        "--token-file",
-        default=None,
-        help="WS token 文件路径（JSON，含 token 字段；无则生成落盘 0600）",
-    )
-    parser.add_argument(
-        "--allow-origin",
-        action="append",
-        default=[],
-        help="WS Origin 白名单（可重复；带 Origin 头的请求不在名单即 403）",
     )
     return parser
 
@@ -108,7 +84,7 @@ def build_rpc_methods(state: ServerState) -> MethodRegistry:
 
 
 async def _async_main() -> int:
-    args = _build_parser().parse_args()
+    _build_parser().parse_args()
     _redirect_stderr_to_log()
 
     with OutputGuard():
@@ -138,16 +114,13 @@ async def _async_main() -> int:
                 pass
 
         try:
-            if args.listen.startswith("ws://"):
-                await _serve_websocket(server, args.listen, args)
-            else:
-                # stdio 单客户端形态：连接关闭即进程退出（exit_on_close）
-                await server.add_connection(
-                    StdioTransport(),
-                    origin=ConnectionOrigin.STDIO,
-                    exit_on_close=True,
-                )
-                await server.run()
+            # stdio 单客户端形态：连接关闭即进程退出（exit_on_close）
+            await server.add_connection(
+                StdioTransport(),
+                origin=ConnectionOrigin.STDIO,
+                exit_on_close=True,
+            )
+            await server.run()
         finally:
             for sig in signals:
                 try:
@@ -157,66 +130,6 @@ async def _async_main() -> int:
             kill_tracked_detached_children()
             await state.dispose_runtime()
     return 0
-
-
-async def _serve_websocket(server: RpcServer, listen: str, args: Any) -> None:
-    """WS 多客户端形态：acceptor 每接入一条即 ``add_connection``。"""
-    from nova_harness.core.config.defaults import get_agent_dir
-    from nova_harness.core.rpc.transport.websocket import (
-        WebSocketAcceptor,
-        _is_loopback,
-        provision_token,
-    )
-
-    authority = listen[len("ws://") :]
-    host, _, port_text = authority.rpartition(":")
-    if not host or not port_text.isdigit():
-        raise SystemExit(f"--listen 需要 ws://HOST:PORT 形态，收到: {listen}")
-
-    # 非 loopback 监听必须显式 token（--token/--token-file）——自动落盘的
-    # 本地 token 只配 loopback；裸网监听用自动生成等于把密钥留在共享机
-    if not _is_loopback(host) and not args.token and not args.token_file:
-        raise SystemExit(
-            f"拒绝在非 loopback 地址（{host}）无显式 token 启动——"
-            "请加 --token 或 --token-file"
-        )
-
-    token, _token_path = provision_token(
-        args.token,
-        args.token_file,
-        Path(get_agent_dir()) / "rpc-server.json",
-    )
-
-    async def _on_connection(transport: Any) -> None:
-        await server.add_connection(transport, origin=ConnectionOrigin.WEBSOCKET)
-
-    acceptor = WebSocketAcceptor(
-        host,
-        int(port_text),
-        token=token,
-        allow_origins=set(args.allow_origin),
-        on_connection=_on_connection,
-    )
-    await acceptor.start()
-    # 监听信息落盘（0600）：客户端读它接入（url + token 一处拿齐）
-    info_path = Path(get_agent_dir()) / "rpc-server.json"
-    info_path.write_text(
-        json.dumps({"url": f"ws://{host}:{acceptor.port}", "token": token}, indent=2),
-        encoding="utf-8",
-    )
-    info_path.chmod(0o600)
-    print(  # stdout 在 WS 形态下不是协议通道，可印一行人读信息
-        f"nova-harness-rpc listening on ws://{host}:{acceptor.port} "
-        f"（token 见 {info_path}）",
-        file=sys.stderr,
-        flush=True,
-    )
-
-    try:
-        await server.wait()
-    finally:
-        await acceptor.close()
-        await server.stop()
 
 
 def main() -> int:

@@ -8,8 +8,8 @@
   事件序列化桥）——流动的 dict 意味着什么。
 - ``server.py`` + ``connection.py`` + ``ui_context.py``：组装器
   （``RpcServer`` = 连接注册表 + MethodRegistry + RoutingUIContext，
-  含事件广播与并发分派）——多连接一等公民，stdio/WebSocket(P1)/
-  memory 都只是连接来源。
+  含事件广播与并发分派）——多连接一等公民，stdio/memory
+  都只是连接来源。
 
 依赖方向单向：transport ← protocol ← server（connection 归 server 层）。
 """
