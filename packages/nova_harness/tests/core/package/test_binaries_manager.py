@@ -10,6 +10,7 @@ import os
 import stat
 import sys
 import tarfile
+from pathlib import Path
 import zipfile
 
 import pytest
@@ -114,7 +115,7 @@ def test_ensure_binary_no_platform_entry(tmp_path, monkeypatch):
 
 def test_ensure_binary_download_install_tar_gz(tmp_path, monkeypatch):
     archive = _make_tar_gz(tmp_path, "fd")
-    _fake_registry(monkeypatch, "fd", f"file://{archive}", _sha256(archive))
+    _fake_registry(monkeypatch, "fd", Path(archive).as_uri(), _sha256(archive))
     bin_dir = tmp_path / "bin"
 
     progress = []
@@ -129,7 +130,7 @@ def test_ensure_binary_download_install_tar_gz(tmp_path, monkeypatch):
 
 def test_ensure_binary_download_install_zip(tmp_path, monkeypatch):
     archive = _make_zip(tmp_path, "fd")
-    _fake_registry(monkeypatch, "fd", f"file://{archive}", _sha256(archive))
+    _fake_registry(monkeypatch, "fd", Path(archive).as_uri(), _sha256(archive))
     bin_dir = tmp_path / "bin"
     result = ensure_binary("fd", bin_dir=str(bin_dir))
     assert result == str(bin_dir / _exe("fd"))
@@ -146,7 +147,7 @@ def test_ensure_binary_checksum_mismatch(tmp_path, monkeypatch):
 
 def test_ensure_binary_missing_binary_in_archive(tmp_path, monkeypatch):
     archive = _make_tar_gz(tmp_path, "other-name")
-    _fake_registry(monkeypatch, "fd", f"file://{archive}", _sha256(archive))
+    _fake_registry(monkeypatch, "fd", Path(archive).as_uri(), _sha256(archive))
     assert ensure_binary("fd", bin_dir=str(tmp_path / "bin")) is None
 
 

@@ -196,7 +196,12 @@ def _source_from_direct_url(direct_url: dict) -> str:
     if not url:
         return ""
     if url.startswith("file://"):
-        return unquote(urlparse(url).path)
+        path = unquote(urlparse(url).path)
+        # Windows drive URI（file:///C:/...）的 path 带前导斜杠——剥掉才是
+        # 合法盘符路径（POSIX 绝对路径的 / 开头是本体，不受影响）
+        if len(path) >= 3 and path[0] == "/" and path[2] == ":":
+            path = path[1:]
+        return path
     vcs = direct_url.get("vcs_info") or {}
     ref = vcs.get("requested_revision")
     return f"{url}@{ref}" if ref else url

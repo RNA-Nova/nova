@@ -1,16 +1,18 @@
 """AgentSession 会话命令相关方法测试。"""
 
+import json
 import os
 import tempfile
-
-# 全平台存在的 cwd（裸 /tmp 在 Windows 解析为 <盘符>:\tmp 且通常不存在）
-_EXISTING_CWD = tempfile.gettempdir()
 from unittest.mock import MagicMock
 
 import pytest
+
 from nova_harness.core import AgentSession
 from nova_harness.core.harness.session import SessionManager
 from nova_harness.core.types.events import SessionStartEvent
+
+# 全平台存在的 cwd（裸 /tmp 在 Windows 解析为 <盘符>:\tmp 且通常不存在）
+_EXISTING_CWD = tempfile.gettempdir()
 from nova_harness.core.types.session.config import AgentSessionConfig
 
 
@@ -48,6 +50,7 @@ def persisted_session_manager(tmp_path):
     )
     # 持久化需要至少一条 assistant 消息才会 flush 文件
     from nova_ai import AssistantMessage, TextContent
+
     from nova_harness.core.types.session import SessionMessageEntry
 
     msg = AssistantMessage(
@@ -95,7 +98,7 @@ async def test_import_session_copies_and_switches(persisted_session_manager, tmp
     external = str(tmp_path / "external.jsonl")
     with open(external, "w", encoding="utf-8") as f:
         f.write(
-            f'{{"type":"session","version":2,"id":"imported-id","timestamp":"2024-01-01T00:00:00","cwd":"{_EXISTING_CWD}"}}\n'
+            f'{{"type":"session","version":2,"id":"imported-id","timestamp":"2024-01-01T00:00:00","cwd":{json.dumps(_EXISTING_CWD)}}}\n'
         )
 
     session = AgentSession(_make_config(persisted_session_manager))
@@ -125,7 +128,7 @@ async def test_switch_agent_session_opens_other_file(
     other_file = str(tmp_path / "other.jsonl")
     with open(other_file, "w", encoding="utf-8") as f:
         f.write(
-            f'{{"type":"session","version":2,"id":"other-id","timestamp":"2024-01-01T00:00:00","cwd":"{_EXISTING_CWD}"}}\n'
+            f'{{"type":"session","version":2,"id":"other-id","timestamp":"2024-01-01T00:00:00","cwd":{json.dumps(_EXISTING_CWD)}}}\n'
         )
 
     session = AgentSession(_make_config(persisted_session_manager))

@@ -85,7 +85,10 @@ def test_resolve_binary_requires_executable_bit(fake_bins, monkeypatch):
 
 
 def test_prepend_managed_bins(fake_bins, monkeypatch):
-    env = prepend_managed_bins_to_path({"PATH": "/usr/bin:/bin"})
+    # 初始 PATH 按平台分隔符构造（os.pathsep.split/join 才往返一致——
+    # Windows 的 ';' 切不开 ':' 形态的初始串）
+    initial = os.pathsep.join(["/usr/bin", "/bin"])
+    env = prepend_managed_bins_to_path({"PATH": initial})
     # 顺序与 resolve_binary 优先级一致：env bin → nova bin
     expected = os.pathsep.join(
         [str(fake_bins["env_bin"]), str(fake_bins["nova_bin"]), "/usr/bin", "/bin"]
