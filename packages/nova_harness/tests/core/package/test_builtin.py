@@ -62,8 +62,13 @@ def test_frozen_first_boot_lands_and_registers(tmp_path, monkeypatch):
     assert "registered nova_coding_agent" in actions
     assert (agent_dir / "builtin" / "nova_base" / "backend" / "marker.txt").exists()
     sources = [str(getattr(s, "source", s)) for s in sm.get_package_sources()]
-    assert any("builtin/nova_base" in s for s in sources)
-    assert any("builtin/nova_coding_agent" in s for s in sources)
+    # settings 持久化统一 posix 分隔符——断言按名字判定（Windows 不假设分隔符）
+    assert any(
+        "nova_base" in s and "builtin" in s.replace("\\", "/") for s in sources
+    )
+    assert any(
+        "nova_coding_agent" in s and "builtin" in s.replace("\\", "/") for s in sources
+    )
 
 
 def test_frozen_second_boot_idempotent(tmp_path, monkeypatch):

@@ -89,8 +89,13 @@ def ensure_builtin_packages(
             marker.write_text(version, encoding="utf-8")
             actions.append(f"landed {name}@{version}")
 
-        # 登记进 settings 包清单：已登记跳过；播种后被用户移除的不回补
-        already = any(str(dest) in source for source in existing_sources)
+        # 登记进 settings 包清单：已登记跳过；播种后被用户移除的不回补。
+        # settings 的 source 持久化统一 posix 分隔符（Windows 反斜杠会误判
+        # 成未登记）——比较前双方归一到 posix 形态
+        dest_posix = dest.as_posix()
+        already = any(
+            dest_posix in source.replace("\\", "/") for source in existing_sources
+        )
         if already:
             seen_or_registered.add(name)
             continue
