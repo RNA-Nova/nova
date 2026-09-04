@@ -19,21 +19,20 @@ class DynamicContext(NovaBaseModel):
     动态上下文数据（运行时注入）。
 
     包含每次请求可能变化的动态信息：
-    - cwd: 当前工作目录（环境段——随后端切换变）
+    - cwd: 当前工作目录（环境段）
     - timestamp: 时间戳（可选）
     - session_id: 会话标识（可选）
     - custom_vars: 自定义动态变量字典
-    - backend / environment_id / shell / workspace_roots / permission / network：
-      执行后端环境段字段（executor 接入——切换后经 _sync_system_prompt 重建）
+    - backend / shell / workspace_roots / permission / network：
+      执行环境段字段（本地执行，经 _sync_system_prompt 重建）
     """
 
     cwd: Optional[str] = None
     timestamp: Optional[str] = None
     session_id: Optional[str] = None
     custom_vars: Dict[str, Any] = Field(default_factory=dict)
-    # 执行后端环境段（executor 接入）
+    # 执行环境段
     backend: Optional[str] = None
-    environment_id: Optional[str] = None
     shell: Optional[str] = None
     workspace_roots: Optional[List[str]] = None
     permission: Optional[str] = None

@@ -520,9 +520,6 @@ class ExtensionRunner:
             get_agents=context_actions.get_agents,
             change_agent=context_actions.change_agent,
             save_agent=context_actions.save_agent,
-            get_executor_settings=context_actions.get_executor_settings,
-            register_executor_endpoint=context_actions.register_executor_endpoint,
-            unregister_executor_endpoint=context_actions.unregister_executor_endpoint,
             refresh_system_prompt=context_actions.refresh_system_prompt,
             ui=ScopedUIContext(
                 self.ui_context or NoOpUIContext(),

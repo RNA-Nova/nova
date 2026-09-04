@@ -163,18 +163,16 @@ def render_dynamic_section(context: DynamicContext) -> str:
 
 
 def render_environment_section(context: DynamicContext) -> str:
-    """渲染环境段（设计定案 R5：codex environment_context 实证形态）。
+    """渲染环境段。
 
-    内容六项：执行后端身份 + 环境 id + cwd + shell（平台代理）+
-    filesystem（roots + 权限档）+ network + 日期/时区。纪律：纯声明数据
-    （无祈使句）+ ``<environment>`` 标记包裹（将来片段通道可识别可搬）。
+    内容：执行后端 + cwd + shell（平台代理）+ filesystem（roots + 权限档）
+    + network + 日期/时区。纪律：纯声明数据（无祈使句）+
+    ``<environment>`` 标记包裹（将来片段通道可识别可搬）。
     """
     lines: List[str] = ["# Environment", "", "<environment>"]
 
     backend = context.backend or "local"
     lines.append(f"  <backend>{backend}</backend>")
-    if context.environment_id:
-        lines.append(f"  <environment_id>{context.environment_id}</environment_id>")
     if context.cwd:
         lines.append(f"  <cwd>{context.cwd}</cwd>")
     if context.shell:

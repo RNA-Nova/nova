@@ -60,12 +60,7 @@ class ExtensionContext:
     get_agents: Callable[..., Any]
     change_agent: Callable[..., Any]
     save_agent: Callable[..., Any]
-    # executor 执行后端设置读取（/executor 扩展的端点清单数据源）
-    get_executor_settings: Callable[..., Any]
-    # executor 端点登记/注销（首次连接成功自动登记、/executor forget 移除）
-    register_executor_endpoint: Callable[..., Any]
-    unregister_executor_endpoint: Callable[..., Any]
-    # 请求重建系统提示词（环境段内容变化后——/executor 切换等）
+    # 请求重建系统提示词（环境段内容变化后——权限档位变化等）
     refresh_system_prompt: Callable[..., Any]
 
     # 环境信息

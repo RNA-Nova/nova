@@ -1,6 +1,6 @@
-"""环境段渲染测试（executor 接入——设计定案 R5/R6）。
+"""环境段渲染测试。
 
-覆盖：本地默认形态、远程 executor 形态、cwd/timestamp 从 Meta 搬进环境段、
+覆盖：本地默认形态、全字段形态、cwd/timestamp 从 Meta 搬进环境段、
 Meta 段不再含 cwd。
 """
 
@@ -28,22 +28,19 @@ def test_environment_section_local_default():
     assert "<root>/repo</root>" in section
     assert "<permission>workspace-write</permission>" in section
     assert "<network>unmanaged</network>" in section
-    assert "environment_id" not in section
 
 
-def test_environment_section_remote_executor():
+def test_environment_section_full_fields():
     context = DynamicContext(
-        cwd="file:///home/user/project",
-        backend="executor",
-        environment_id="wss://gpu-01:8080",
+        cwd="/repo",
+        backend="local",
         shell="bash",
         permission="read-only",
         network="managed (allowed: api.example.com)",
         timestamp="2026-08-19 12:00",
     )
     section = render_environment_section(context)
-    assert "<backend>executor</backend>" in section
-    assert "<environment_id>wss://gpu-01:8080</environment_id>" in section
+    assert "<backend>local</backend>" in section
     assert "<shell>bash</shell>" in section
     assert "<permission>read-only</permission>" in section
     assert "api.example.com" in section

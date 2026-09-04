@@ -128,18 +128,7 @@ class ExtensionContextActions:
     save_agent: Callable[..., Any] = field(
         default_factory=lambda: _not_initialized("save_agent")
     )
-    # executor 执行后端设置（读 ExecutorSettings——/executor 扩展的端点清单数据源）
-    get_executor_settings: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("get_executor_settings")
-    )
-    # executor 端点登记/注销（/executor 首次连接成功后自动登记、forget 移除）
-    register_executor_endpoint: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("register_executor_endpoint")
-    )
-    unregister_executor_endpoint: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("unregister_executor_endpoint")
-    )
-    # 请求重建系统提示词（环境段内容变化后——/executor 切换/权限档位变化）
+    # 请求重建系统提示词（环境段内容变化后——权限档位变化等）
     refresh_system_prompt: Callable[..., Any] = field(
         default_factory=lambda: _not_initialized("refresh_system_prompt")
     )

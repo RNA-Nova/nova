@@ -722,17 +722,12 @@ class AgentSession:
         self.agent.state.system_prompt = self._base_system_prompt
 
     def _enrich_environment_context(self, context: Any) -> None:
-        """富化系统提示词环境段（设计定案 R5——会话条目即事实源）。
+        """富化系统提示词环境段（会话条目即事实源）。
 
-        读两条会话条目：``executor_backend``（执行后端选择，/executor 写入）
-        与 ``plan-mode``（只读规划模式档位）。cwd/后端身份经环境段呈现；
-        缺省 = 本地直接执行（local）。
+        读 ``plan-mode`` 会话条目（只读规划模式档位）；执行环境恒为
+        本地直接执行（local）。
         """
-        backend: Optional[str] = None
-        environment_id: Optional[str] = None
         permission: Optional[str] = None
-        remote_cwd: Optional[str] = None
-        remote_shell: Optional[str] = None
 
         session_manager = getattr(self, "session_manager", None)
         if session_manager is not None:
@@ -742,45 +737,26 @@ class AgentSession:
                 data = getattr(entry, "data", None)
                 if entry_type != "custom" or not isinstance(data, dict):
                     continue
-                if custom_type == "executor_backend" and backend is None:
-                    backend = data.get("backend")
-                    url = data.get("url")
-                    environment_id = url if backend == "executor" and url else None
-                    remote_cwd = data.get("remote_cwd")
-                    remote_shell = data.get("remote_shell")
-                elif custom_type == "plan-mode" and permission is None:
+                if custom_type == "plan-mode":
                     permission = (
                         "read-only" if data.get("enabled") else "workspace-write"
                     )
-                if backend is not None and permission is not None:
                     break
 
-        context.backend = backend or "local"
-        context.environment_id = environment_id
+        context.backend = "local"
         context.permission = permission or "workspace-write"
-        # workspace_roots 即 fs 工具看到的世界：远程后端时是远程执行 cwd
-        # （六个 fs 工具已随后端切换），本地时是本地 cwd（executor 接入定案）
-        context.workspace_roots = [remote_cwd] if remote_cwd else [self.cwd]
-        # cwd 即执行 cwd（codex environment_context 语义：命令在哪跑写哪）——
-        # SSH 远程后端时用 remote_cwd（远程文件系统与本地无关）
-        if remote_cwd:
-            context.cwd = remote_cwd
-        # shell 即平台代理（codex environment_context 实证形态——不写独立 OS 字段）；
-        # 远程后端优先用供给探测到的远程登录 shell
-        if remote_shell:
-            context.shell = remote_shell
+        # workspace_roots 即 fs 工具看到的世界（本地直接执行即本地 cwd）
+        context.workspace_roots = [self.cwd]
+        # shell 即平台代理（不写独立 OS 字段）
+        shell_path = (
+            self.settings_manager.get_shell_path() if self.settings_manager else None
+        )
+        if shell_path:
+            context.shell = os.path.basename(shell_path)
+        elif os.name == "nt":
+            context.shell = "powershell"
         else:
-            shell_path = (
-                self.settings_manager.get_shell_path()
-                if self.settings_manager
-                else None
-            )
-            if shell_path:
-                context.shell = os.path.basename(shell_path)
-            elif os.name == "nt":
-                context.shell = "powershell"
-            else:
-                context.shell = os.environ.get("SHELL", "bash").split("/")[-1]
+            context.shell = os.environ.get("SHELL", "bash").split("/")[-1]
 
     # -------------------------------------------------------------------------
     # 属性
@@ -1204,24 +1180,7 @@ class AgentSession:
             get_agents=self._get_agent_entries,
             change_agent=lambda name: self.change_agent(name),
             save_agent=self._save_agent,
-            # executor 执行后端设置（/executor 扩展的端点清单数据源）
-            get_executor_settings=lambda: (
-                self.settings_manager.get_executor_settings()
-                if self.settings_manager is not None
-                else None
-            ),
-            # executor 端点登记/注销（/executor 首次连接自动登记、forget 移除）
-            register_executor_endpoint=lambda name, url, cwd=None: (
-                self.settings_manager.register_executor_endpoint(name, url, cwd)
-                if self.settings_manager is not None
-                else None
-            ),
-            unregister_executor_endpoint=lambda name: (
-                self.settings_manager.unregister_executor_endpoint(name)
-                if self.settings_manager is not None
-                else False
-            ),
-            # 系统提示词重建（环境段内容变化后——/executor 切换等）
+            # 系统提示词重建（环境段内容变化后——权限档位变化等）
             refresh_system_prompt=lambda: self._sync_system_prompt(),
         )
 

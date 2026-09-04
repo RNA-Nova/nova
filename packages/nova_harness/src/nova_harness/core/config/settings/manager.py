@@ -27,8 +27,6 @@ from nova_harness.core.types.compaction import CompactionSettings
 from nova_harness.core.types.config.settings import (
     BranchSummarySettings,
     DefaultProjectTrust,
-    ExecutorEndpoint,
-    ExecutorSettings,
     ImageSettings,
     PackageSourceSpec,
     RetrySettings,
@@ -670,49 +668,6 @@ class SettingsManager:
         self._global_settings.shell_command_prefix = prefix
         self._mark_modified("shell_command_prefix")
         self._save()
-
-    def get_executor_settings(self) -> Optional[ExecutorSettings]:
-        """获取 executor 执行后端设置（默认后端 + 已知端点清单）。"""
-        return self._settings.executor
-
-    def register_executor_endpoint(
-        self, name: str, url: str, cwd: Optional[str] = None
-    ) -> None:
-        """登记/覆盖一个远程 executor 端点（按 name upsert，写用户级）。
-
-        /executor 首次连接远程主机成功后自动登记——下次选择器直接可选，
-        无需手动编辑 settings.json。``cwd`` 仅当用户显式指定过远程工作
-        目录时记忆（缺省按会话隔离的远程工作区，切换时现算）。
-        """
-        with self._settings_lock:
-            executor = self._global_settings.executor
-            if executor is None:
-                executor = ExecutorSettings()
-                self._global_settings.executor = executor
-            endpoints = list(executor.endpoints or [])
-            for index, endpoint in enumerate(endpoints):
-                if endpoint.name == name:
-                    endpoints[index] = ExecutorEndpoint(name=name, url=url, cwd=cwd)
-                    break
-            else:
-                endpoints.append(ExecutorEndpoint(name=name, url=url, cwd=cwd))
-            executor.endpoints = endpoints
-            self._mark_modified("executor")
-            self._save()
-
-    def unregister_executor_endpoint(self, name: str) -> bool:
-        """移除一个已登记的远程端点；不存在时返回 False。"""
-        with self._settings_lock:
-            executor = self._global_settings.executor
-            endpoints = list(executor.endpoints or []) if executor else []
-            remaining = [endpoint for endpoint in endpoints if endpoint.name != name]
-            if len(remaining) == len(endpoints):
-                return False
-            assert executor is not None
-            executor.endpoints = remaining or None
-            self._mark_modified("executor")
-            self._save()
-            return True
 
     def get_default_project_trust(self) -> DefaultProjectTrust:
         """获取全局默认项目信任策略。

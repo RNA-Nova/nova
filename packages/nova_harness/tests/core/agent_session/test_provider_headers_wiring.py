@@ -56,9 +56,6 @@ def _minimal_runtime() -> ExtensionRuntime:
         get_agents=lambda: [],
         change_agent=lambda name: None,
         save_agent=lambda as_name=None: None,
-        get_executor_settings=lambda: None,
-        register_executor_endpoint=lambda *args: None,
-        unregister_executor_endpoint=lambda *args: False,
         refresh_system_prompt=lambda: None,
     )
     return runtime

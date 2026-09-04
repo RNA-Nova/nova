@@ -79,27 +79,6 @@ class MarkdownSettings(NovaBaseModel):
     code_block_indent: Optional[str] = None
 
 
-class ExecutorEndpoint(NovaBaseModel):
-    """一个已知的远程 executor 端点（/executor 选择器的数据源）。"""
-
-    name: str  # 端点名（选择器显示 + /executor remote <name> 直切用）
-    url: str  # executor 地址（ws:// / wss:// / ssh://[user@]host[:port]）
-    # 记住的远程工作目录（仅用户显式指定过才有；缺省 = 按会话隔离的
-    # 远程工作区，切换时现算，不进端点记忆）
-    cwd: Optional[str] = None
-
-
-class ExecutorSettings(NovaBaseModel):
-    """executor 执行后端设置（本地沙箱/远程 executor）。
-
-    只承载用户级默认与已知端点清单；当前生效后端是会话态
-    （/executor 切换写会话条目），token 归 auth.json——均不进本模型。
-    """
-
-    default_backend: Optional[Literal["local", "executor"]] = None
-    endpoints: Optional[list[ExecutorEndpoint]] = None
-
-
 PackageSourceSpec = Union[
     str,
     dict[
@@ -166,9 +145,6 @@ class Settings(NovaBaseModel):
     # 用户层命令排除集（slash 命令黑名单——与 agent.yaml 的 commands
     # 允许集求交：先过 agent 允许集，再扣本排除集）
     disabled_commands: Optional[list[str]] = None
-    # executor 执行后端（默认后端 + 已知远程端点清单——当前生效后端是
-    # 会话态，经 /executor 切换写会话条目，不进本模型）
-    executor: Optional[ExecutorSettings] = None
 
 
 @dataclass

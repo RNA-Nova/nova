@@ -3,6 +3,7 @@ SettingsManager 测试。
 """
 
 from nova_ai import ModelThinkingLevel
+
 from nova_harness.core.config.settings.manager import SettingsManager
 from nova_harness.core.types.config.settings import ProviderRetrySettings, Settings
 from tests._helpers.settings_manager import settings_manager_in_memory
@@ -149,65 +150,3 @@ def test_update_global_settings_validates_types():
         pass
     else:
         raise AssertionError("invalid literal should raise")
-
-
-def test_register_executor_endpoint_creates_settings():
-    """首次登记：executor 段不存在时自动创建。"""
-    sm = settings_manager_in_memory()
-    assert sm.get_executor_settings() is None
-    sm.register_executor_endpoint("gpu-01", "ssh://liujinming@180.184.33.245")
-    executor = sm.get_executor_settings()
-    assert executor is not None
-    assert executor.endpoints is not None
-    assert [(e.name, e.url) for e in executor.endpoints] == [
-        ("gpu-01", "ssh://liujinming@180.184.33.245")
-    ]
-
-
-def test_register_executor_endpoint_upsert_by_name():
-    """同名覆盖（url 更新），异名追加。"""
-    sm = settings_manager_in_memory()
-    sm.register_executor_endpoint("gpu-01", "ssh://a@1.1.1.1")
-    sm.register_executor_endpoint("gpu-02", "wss://gpu-02:8080")
-    sm.register_executor_endpoint("gpu-01", "ssh://b@2.2.2.2")
-    executor = sm.get_executor_settings()
-    assert executor is not None and executor.endpoints is not None
-    assert [(e.name, e.url) for e in executor.endpoints] == [
-        ("gpu-01", "ssh://b@2.2.2.2"),
-        ("gpu-02", "wss://gpu-02:8080"),
-    ]
-
-
-def test_unregister_executor_endpoint():
-    """移除已登记端点；空清单回落 None；不存在返回 False。"""
-    sm = settings_manager_in_memory()
-    sm.register_executor_endpoint("gpu-01", "ssh://a@1.1.1.1")
-    sm.register_executor_endpoint("gpu-02", "wss://gpu-02:8080")
-    assert sm.unregister_executor_endpoint("gpu-01") is True
-    executor = sm.get_executor_settings()
-    assert executor is not None and executor.endpoints is not None
-    assert [e.name for e in executor.endpoints] == ["gpu-02"]
-    assert sm.unregister_executor_endpoint("gpu-02") is True
-    assert sm.get_executor_settings().endpoints is None  # type: ignore[union-attr]
-    assert sm.unregister_executor_endpoint("nope") is False
-
-
-def test_register_executor_endpoint_preserves_default_backend():
-    """登记端点不破坏已有 default_backend。"""
-    sm = settings_manager_in_memory({"executor": {"default_backend": "executor"}})
-    sm.register_executor_endpoint("gpu-01", "ssh://a@1.1.1.1")
-    executor = sm.get_executor_settings()
-    assert executor is not None
-    assert executor.default_backend == "executor"
-    assert executor.endpoints is not None and len(executor.endpoints) == 1
-
-
-def test_register_executor_endpoint_with_cwd_roundtrip():
-    """显式远程目录随端点记忆；重复登记可清除（None 覆盖）。"""
-    sm = settings_manager_in_memory()
-    sm.register_executor_endpoint("gpu-01", "ssh://a@1.1.1.1", cwd="/data/proj")
-    executor = sm.get_executor_settings()
-    assert executor is not None and executor.endpoints is not None
-    assert executor.endpoints[0].cwd == "/data/proj"
-    sm.register_executor_endpoint("gpu-01", "ssh://a@1.1.1.1")
-    assert sm.get_executor_settings().endpoints[0].cwd is None  # type: ignore[index,union-attr]
