@@ -185,7 +185,7 @@ class TreeNavigator:
                     new_leaf_id=self._session.session_manager.get_leaf_id(),
                     old_leaf_id=old_leaf_id,
                     summary_entry=summary_entry,
-                    from_extension=from_extension if summary_text else None,
+                    from_extension=from_extension if summary_text else False,
                 )
             )
 

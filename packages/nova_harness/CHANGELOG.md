@@ -29,4 +29,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Fixed
 
 - **auto-compaction 重试路径崩溃**：压缩重建状态时，已落盘的截断回复（`stop_reason="length"`）可能随保留窗口还原为 assistant 尾，`continue_()` 拒从 assistant 尾续跑抛 `RuntimeError`；收尾守卫由只剥 `error` 尾扩为 `error` / `length` 同剥（此前潜伏——大窗口模型下阈值压缩实际不触发），新增回归单测与 PTY 端到端加固。
+- **无摘要导航的 SessionTreeEvent 校验崩溃**：`navigate` 未生成摘要时给 `from_extension`（`bool`）传 `None`，校验爆炸导致导航半完成（leaf 已迁移但事件发射崩溃、RPC -32603、前端转录不同步）；改传 `False`。新增 `TreeNavigator` 编排层单测套件 12 例与 PTY 端到端导航/分叉加固（`pty-tree-navigate.py`）。
 - **executor 时代残留 API 清除**：`ExecutorSettings` / `ExecutorEndpoint` 模型与 settings `executor` 键、`SettingsManager` 端点注册三方法、扩展动作三字段（`get_executor_settings` / `register_executor_endpoint` / `unregister_executor_endpoint`）、`ToolSettingsView.get_executor_settings`、会话环境段的 `executor_backend` 条目恢复链与 `DynamicContext.environment_id`——本发布线纯本地执行，以上全部为死表面。
