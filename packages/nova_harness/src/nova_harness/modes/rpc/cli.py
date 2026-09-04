@@ -150,7 +150,10 @@ async def _async_main() -> int:
                 await server.run()
         finally:
             for sig in signals:
-                loop.remove_signal_handler(sig)
+                try:
+                    loop.remove_signal_handler(sig)
+                except NotImplementedError:
+                    pass  # Windows 同样不支持摘除（与注册侧同构降级）
             kill_tracked_detached_children()
             await state.dispose_runtime()
     return 0

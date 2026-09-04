@@ -201,13 +201,17 @@ async def test_local_bash_background_pipe_no_hang(tmp_path: Path):
 async def test_local_bash_late_writer_captured(tmp_path: Path):
     """宽限计时器随 chunk 重置：shell 退出后宽限内的迟到输出不丢。"""
     operations = create_local_bash_operations()
-    # 迟到写留 5x 余量于 0.1s 空闲宽限内（共享 CI runner 调度抖动下
-    # 50ms 的 2x 余量实测会偶发越窗）
+    # 确定性构造：父 shell 持续滴答 ~240ms（每个 chunk 重置 0.1s 空闲宽限，
+    # 截止线拉到 shell 退出后 340ms+）——共享 CI runner 百毫秒级调度抖动
+    # 下，单次 sleep 的迟到写会越窗，滴答展宽后孙进程的写必入窗
     result = await operations.execute(
-        "(sleep 0.02; echo late) & echo early", str(tmp_path), {}
+        "(sleep 0.05; echo late) & "
+        "for i in 1 2 3 4 5 6 7 8; do echo tick$i; sleep 0.03; done",
+        str(tmp_path),
+        {},
     )
     assert result.exit_code == 0
-    assert "early" in result.output
+    assert "tick8" in result.output
     assert "late" in result.output
 
 
