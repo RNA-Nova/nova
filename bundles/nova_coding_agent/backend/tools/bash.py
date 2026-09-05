@@ -345,12 +345,15 @@ class Tool:
 
         elapsed_ms = int((asyncio.get_event_loop().time() - started_at) * 1000)
 
-        finished = True
         if update_timer is not None:
             update_timer.cancel()
             update_timer = None
         output.finish()
+        # 收尾冲刷必须在 finished 立旗之前：emit 的守卫含 finished，
+        # 先立旗会把这次有意的终帧吃掉——尾部 chunk 挂的节流帧已被取消时，
+        # 这是完整输出快照的最后一次投递机会
         await emit_output_update()
+        finished = True
         snapshot = output.snapshot(persist_if_truncated=True)
         output.close_temp_file()
 
