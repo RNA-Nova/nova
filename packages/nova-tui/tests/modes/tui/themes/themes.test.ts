@@ -333,12 +333,13 @@ describe('主题文件 watcher', () => {
       try {
         const v2 = minimalTheme('hot') as { colors: Record<string, string> };
         v2.colors.accent = '#445566';
-        writeFileSync(join(dir, 'hot.json'), JSON.stringify(v2));
-        // fs.watch + 100ms 去抖——共享 runner 上 watch 延迟可能超固定等待，
-        // 轮询到触发为止（5s 预算）
+        // fs.watch 激活与首次写之间存在竞速（macOS FSEvents 在 watcher 就绪
+        // 前落盘的写整帧丢失）——5s 预算内反复写，等价用户连按保存；
+        // 同内容写也推进 mtime，必触发事件
         const deadline = Date.now() + 5000;
         while (fired < 1 && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          writeFileSync(join(dir, 'hot.json'), JSON.stringify(v2));
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
         assert.ok(fired >= 1, '文件变化应触发 onThemeChange');
         assert.notEqual(colors.accent('x'), before);
@@ -372,8 +373,12 @@ describe('主题文件 watcher', () => {
       try {
         const v2 = minimalTheme('ocean') as { colors: Record<string, string> };
         v2.colors.accent = '#777777';
-        writeFileSync(filePath, JSON.stringify(v2));
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        // 同上：watch 激活竞速在共享 runner 上会整帧丢首事件——反复写吸收
+        const deadline = Date.now() + 5000;
+        while (fired < 1 && Date.now() < deadline) {
+          writeFileSync(filePath, JSON.stringify(v2));
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
         assert.ok(fired >= 1);
         assert.notEqual(colors.accent('x'), before);
       } finally {
