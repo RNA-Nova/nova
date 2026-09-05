@@ -28,9 +28,17 @@ Nova 是一个用于构建大语言模型（LLM）智能体的分层框架，同
 
 ## 安装
 
+> **完整文档见 [docs/](docs/README.md)**——安装矩阵（curl 管道/手动归档/pip+npm/源码）、使用指南、bundle 开发、参考手册。
+
 前置要求：Python `>=3.12,<3.14`；Node.js `>=22.19.0`（仅终端界面需要）。
 
-用户态安装：
+发布形态（零系统依赖的静态双二进制，推荐）：
+
+```bash
+curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh | sh
+```
+
+用户态安装（pip + npm 渠道）：
 
 ```bash
 # 后端 SDK（连带 nova-ai / nova-agent）
