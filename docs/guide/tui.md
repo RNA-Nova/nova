@@ -2,6 +2,32 @@
 
 `nova` 启动后进入 TUI（终端用户界面）。整体构成：顶部欢迎/资源区 → 中间转录区（消息与工具卡片）→ 底部状态区（loader/工作区）→ 输入框 → footer。
 
+## 界面一览
+
+**启动与一轮真实工具调用对话**：
+
+![启动 + 一轮真实工具调用对话](../assets/hero.gif)
+
+**子代理并行执行**（gate 确认 → 两 worker 并行 → 用量行收尾）：
+
+![子代理并行](../assets/subagent.gif)
+
+**工具卡片**：edit 的词级 diff、todo 清单、ls 网格——执行计时归宿主统一行：
+
+![工具卡片](../assets/tool-cards.png)
+
+**选择器**：`/model` 模糊搜索中态（当前模型 ✓ 置顶）：
+
+![/model 选择器](../assets/selectors.png)
+
+**plan 模式**：只读规划——写操作被拦并给出解释，footer 显示 `⏸ plan`：
+
+![plan 模式](../assets/plan-mode.png)
+
+**包面板**：`/packages`——已装包、作用域、版本与资源计数：
+
+![/packages 面板](../assets/packages.png)
+
 ## 键位
 
 | 键 | 作用 |

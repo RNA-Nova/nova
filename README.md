@@ -11,7 +11,9 @@
 
 Nova 是构建与运行 LLM 智能体的分层框架 + 开箱即用的终端编程助手：底层是统一的多厂商 LLM 抽象与事件驱动的异步 Agent 框架，上层是带会话树、上下文压缩与包/扩展生态的高阶 SDK，配上终端界面（TUI）与官方 bundle——装完即可在终端里驱动一个能读写文件、执行命令、委派子代理的编程助手。
 
-<!-- HERO-GIF-HERE: docs/assets/hero.gif（启动 + 一轮真实工具调用对话） -->
+<p align="center">
+  <img alt="nova 演示：启动 + 一轮真实工具调用对话" src="docs/assets/hero.gif" width="960">
+</p>
 
 - **多厂商 LLM 抽象**：内置 Volcengine / Moonshot AI（国际·国内）/ Kimi Coding，任意 OpenAI 兼容端点可接入；统一流式事件、OAuth 登录与鉴权解析链。
 - **事件驱动 Agent 框架**：完整 Agent 循环、四级事件、工具并行/串行执行、`AbortSignal` 取消传播。
