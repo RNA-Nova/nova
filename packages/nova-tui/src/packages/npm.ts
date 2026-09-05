@@ -21,12 +21,19 @@ import { join } from 'node:path';
 /** 同目录 in-flight 任务表（并发触发的去重闸）。 */
 const inflight = new Map<string, Promise<boolean>>();
 
+/** 补装失败记忆（进程级——失败后不再自动重试，防"刷新→自愈→失败→
+ * 通知"刷屏循环；/reload 或重开 TUI 后允许重试）。 */
+const failedPaths = new Set<string>();
+
 /**
  * 在包根补装 npm 依赖（后台任务）。
- * 返回是否成功；npm 缺失/网络失败/离线均返回 false（调用方降级，不阻断）。
+ * 返回是否成功；npm 缺失/网络失败/离线/曾失败均返回 false（调用方降级，不阻断）。
  */
 export function healNpmDependencies(installPath: string): Promise<boolean> {
   if (process.env.NOVA_OFFLINE) {
+    return Promise.resolve(false);
+  }
+  if (failedPaths.has(installPath)) {
     return Promise.resolve(false);
   }
   const existing = inflight.get(installPath);
@@ -40,7 +47,11 @@ export function healNpmDependencies(installPath: string): Promise<boolean> {
   const task = new Promise<boolean>((resolve) => {
     let child;
     try {
-      child = spawn('npm', args, { cwd: installPath, stdio: 'ignore' });
+      // Windows 上 npm 是 npm.cmd——裸 spawn 找不到 .cmd  shim
+      child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+        cwd: installPath,
+        stdio: 'ignore',
+      });
     } catch {
       resolve(false);
       return;
@@ -51,8 +62,17 @@ export function healNpmDependencies(installPath: string): Promise<boolean> {
     inflight.delete(installPath);
   });
   inflight.set(installPath, task);
+  void task.then((ok) => {
+    if (!ok) failedPaths.add(installPath);
+  });
   return task;
 }
 
 /** 兼容别名（旧调用点）。 */
 export const ensureNpmDependencies = healNpmDependencies;
+
+/** 测试用：清空失败记忆与在途表。 */
+export function _resetHealStateForTest(): void {
+  inflight.clear();
+  failedPaths.clear();
+}

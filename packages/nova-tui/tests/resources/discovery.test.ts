@@ -66,7 +66,7 @@ describe('discoverUIAssets', () => {
   it('frontend/package.json 无 node_modules → needsNpmInstall', async () => {
     const pkg = await makePackage({
       'frontend/tui/tools/bash.ts': 'export default function () { return []; }',
-      'frontend/package.json': '{ "name": "test-pkg", "dependencies": {} }',
+      'frontend/package.json': '{ "name": "test-pkg", "dependencies": { "pretty-ms": "^9.2.0" } }',
     });
     const assets = await discoverUIAssets(pkg);
     assert.equal(assets?.needsNpmInstall, true);
@@ -93,7 +93,7 @@ describe('discoverUIAssets', () => {
     const pkg = await makePackage({
       'tui/tools/bash.ts': 'export default function () { return []; }',
       'tui/index.ts': 'export default function () {}',
-      'package.json': '{ "name": "test-pkg", "dependencies": {} }',
+      'package.json': '{ "name": "test-pkg", "dependencies": { "pretty-ms": "^9.2.0" } }',
     });
     const assets = await discoverUIAssets(pkg);
     assert.ok(assets);
@@ -198,5 +198,49 @@ describe('discoverLooseAssets（双根编排 + trust 门）', () => {
     const projectRoot = await makeLooseRoot({});
     const loose = await discoverLooseAssets({ userRoot, projectRoot, trusted: true });
     assert.deepEqual(loose, []);
+  });
+});
+
+
+describe('needsNpmInstall 判定', () => {
+  const RENDERER = 'export default function () { return []; }\n';
+
+  it('零运行时 dependencies 的清单不触发自愈（防死循环：零依赖 npm 不产生 node_modules）', async () => {
+    const pkg = await makePackage({
+      'frontend/tui/tools/bash.ts': RENDERER,
+      'frontend/package.json': JSON.stringify({ name: 'x', version: '0.0.1' }),
+    });
+    const assets = await discoverUIAssets(pkg);
+    assert.equal(assets?.needsNpmInstall, false);
+    // 有清单即有 npmDir（自愈工作目录），只是本轮不需要
+    assert.ok(assets?.npmDir);
+  });
+
+  it('有运行时 dependencies + 缺 node_modules → 需自愈', async () => {
+    const pkg = await makePackage({
+      'frontend/tui/tools/bash.ts': RENDERER,
+      'frontend/package.json': JSON.stringify({
+        name: 'x',
+        version: '0.0.1',
+        dependencies: { 'pretty-ms': '^9.2.0' },
+      }),
+    });
+    const assets = await discoverUIAssets(pkg);
+    assert.equal(assets?.needsNpmInstall, true);
+    assert.ok(assets?.npmDir?.endsWith('frontend'));
+  });
+
+  it('有依赖但 node_modules 已在 → 不自愈', async () => {
+    const pkg = await makePackage({
+      'frontend/tui/tools/bash.ts': RENDERER,
+      'frontend/package.json': JSON.stringify({
+        name: 'x',
+        version: '0.0.1',
+        dependencies: { 'pretty-ms': '^9.2.0' },
+      }),
+      'frontend/node_modules/.keep': '',
+    });
+    const assets = await discoverUIAssets(pkg);
+    assert.equal(assets?.needsNpmInstall, false);
   });
 });

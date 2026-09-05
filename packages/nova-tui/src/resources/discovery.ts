@@ -25,7 +25,7 @@
  * 辅助模块归 ``lib/``、测试归半区 ``tests/``——发现跳过 ``*.test.ts`` 防御放错。
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { InstalledPackageInfo } from '../packages/registry.js';
@@ -101,10 +101,21 @@ export async function discoverUIAssets(
   // 没有任何可加载内容，视为无前端资产
   if (renderers.size === 0 && extensionEntry === undefined && themes.size === 0) return null;
 
-  // npm 依赖探测：package.json 在 frontend/ 半区（A 型）或包根（B 型——根即半区）
+  // npm 依赖探测：package.json 在 frontend/ 半区（A 型）或包根（B 型——根即半区）。
+  // 仅当清单声明了运行时 dependencies 且 node_modules 缺失才需自愈——
+  // 零运行时依赖的包 npm 不产生 node_modules（判定永远为真会死循环自愈）
   const halfManifest = join(halfRoot, 'package.json');
-  const needsNpmInstall =
-    existsSync(halfManifest) && !existsSync(join(halfRoot, 'node_modules'));
+  let needsNpmInstall = false;
+  if (existsSync(halfManifest) && !existsSync(join(halfRoot, 'node_modules'))) {
+    try {
+      const manifest = JSON.parse(readFileSync(halfManifest, 'utf-8')) as {
+        dependencies?: Record<string, string>;
+      };
+      needsNpmInstall = Object.keys(manifest.dependencies ?? {}).length > 0;
+    } catch {
+      needsNpmInstall = false; // 清单读不出不触发自愈（诊断归加载期）
+    }
+  }
 
   return {
     packageName: pkg.name,
