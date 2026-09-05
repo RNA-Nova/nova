@@ -98,7 +98,7 @@ nova.registerCommand("weather", {
 ### `registerShortcut(key, options)` / `registerFlag(name, options)` / `registerProvider(name, config)` / `registerSpawnHook(hook)`
 
 - 快捷键：运行时在扩展侧，目录经 RPC 透出给前端（键位绑定归前端键位子系统）；
-- flag：持久化开关（`ctx.getFlag`/settings 面板可见）；
+- flag：扩展的命名开关（`registerFlag` 注册，`nova.getFlag`/`ctx.getFlag` 读值，目录经 RPC `getExtensionFlags` 透出）；**注意**：本发布线暂无 CLI 投影与持久化（`setExtensionFlag` 只写内存态，重启即失——别把它当用户可用的启动参数宣传）；
 - provider：注册模型 provider（可带 OAuth 配置与 `modify_models` 钩子）；
 - spawn hook：进程 spawn 前整形（环境注入等）。
 
