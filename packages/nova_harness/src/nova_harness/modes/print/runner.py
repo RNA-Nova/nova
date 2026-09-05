@@ -34,6 +34,7 @@ class PrintRunner:
         additional_prompt_template_paths: Optional[List[str]] = None,
         tools: Optional[List[str]] = None,
         exclude_tools: Optional[List[str]] = None,
+        extension_flag_values: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._json_output = json_output
         self._no_session = no_session
@@ -42,6 +43,7 @@ class PrintRunner:
         self._additional_prompt_template_paths = additional_prompt_template_paths or []
         self._tools = tools
         self._exclude_tools = exclude_tools
+        self._extension_flag_values = extension_flag_values
 
     async def run_task(
         self,
@@ -69,12 +71,23 @@ class PrintRunner:
                 ),
                 tools=self._tools,
                 exclude_tools=self._exclude_tools,
+                extension_flag_values=self._extension_flag_values,
                 project_trusted=self._trust,
                 resolve_project_trust=_make_resolve_project_trust(
                     resolved_cwd, agent_dir, trust_override=self._trust
                 ),
             )
         )
+
+        # 扩展 flag 的装配期诊断（未注册名/缺值）显式上浮——
+        # print 模式没有诊断面板，静默忽略会让用户以为开关生效了
+        if self._extension_flag_values:
+            for diag in runtime.diagnostics:
+                if diag.type == "error" and (
+                    diag.message.startswith("Unknown option")
+                    or 'Extension flag "' in diag.message
+                ):
+                    sys.stderr.write(f"error: {diag.message}\n")
 
         unsubscribe: Optional[Callable[[], None]] = None
         try:
@@ -160,6 +173,7 @@ async def run_print_mode(
     additional_prompt_template_paths: Optional[List[str]] = None,
     tools: Optional[List[str]] = None,
     exclude_tools: Optional[List[str]] = None,
+    extension_flag_values: Optional[Dict[str, Any]] = None,
 ) -> int:
     """以 print 模式运行一次 agent 任务。"""
     runner = PrintRunner(
@@ -170,6 +184,7 @@ async def run_print_mode(
         additional_prompt_template_paths=additional_prompt_template_paths,
         tools=tools,
         exclude_tools=exclude_tools,
+        extension_flag_values=extension_flag_values,
     )
     return await runner.run_task(agent_name, task, cwd)
 

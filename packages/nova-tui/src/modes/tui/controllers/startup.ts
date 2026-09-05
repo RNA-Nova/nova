@@ -33,6 +33,8 @@ export interface StartupFlags {
   sessionName?: string;
   /** --no-session：不持久化（内存态运行——createSession.noSession 契约直通）。 */
   noSession?: boolean;
+  /** 扩展 flag 启动值（未声明长选项透传——createSession.extensionFlags 契约直通）。 */
+  extensionFlags?: Record<string, string | true>;
 }
 
 /** 合法思考级别（与契约 SetThinkingLevelParams.level 枚举一致）。 */
@@ -83,6 +85,43 @@ export function resolveSessionArg(arg: string, cwd: string): string {
     return resolve(cwd, expandTildePath(arg));
   }
   return arg;
+}
+
+/**
+ * 扩展 flag 收集：扩展在装配期注册命名开关（registerFlag），合法集在
+ * 解析期不可知——未声明的长选项宽松收集（``--name=value`` 收值、
+ * 裸 ``--name`` 收 true），交后端装配期对注册表校验（未注册名报错）。
+ * 裸旗标不消费下一个 argv（位置参会进 [message...]，吞掉即歧义；
+ * string 类型 flag 用 ``=`` 形）；``--`` 之后原样保留。
+ */
+export function extractExtensionFlags(
+  argv: readonly string[],
+  knownLongs: ReadonlySet<string>,
+): { rest: string[]; extensionFlags: Record<string, string | true> } {
+  const rest: string[] = [];
+  const extensionFlags: Record<string, string | true> = {};
+  let passthrough = false;
+  for (const arg of argv) {
+    if (passthrough) {
+      rest.push(arg);
+      continue;
+    }
+    if (arg === '--') {
+      passthrough = true;
+      rest.push(arg);
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=');
+      const name = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
+      if (name && !knownLongs.has(name)) {
+        extensionFlags[name] = eq === -1 ? true : arg.slice(eq + 1);
+        continue;
+      }
+    }
+    rest.push(arg);
+  }
+  return { rest, extensionFlags };
 }
 
 /** 图片魔数嗅探（png/jpeg/gif/webp——与后端 read 工具的支持集一致）。 */

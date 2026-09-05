@@ -4,11 +4,12 @@
 """
 
 from argparse import Namespace
+from typing import Any, Dict
 
 from nova_harness.modes.print.runner import run_print_mode
 
 
-def cmd_run(args: Namespace) -> int:
+def cmd_run(args: Namespace, extension_flags: "Dict[str, Any] | None" = None) -> int:
     """``nova-harness run`` 子命令入口。"""
     if not args.agent or not args.task:
         __import__("sys").stderr.write("error: agent and --task are required\n")
@@ -31,5 +32,6 @@ def cmd_run(args: Namespace) -> int:
             additional_prompt_template_paths=args.prompt_template,
             tools=_split_csv(args.tools),
             exclude_tools=_split_csv(args.exclude_tools),
+            extension_flag_values=extension_flags,
         )
     )

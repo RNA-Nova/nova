@@ -1183,6 +1183,16 @@
             }
           ]
         },
+        "extensionFlags": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "model": {
           "anyOf": [
             {
@@ -5474,7 +5484,7 @@
   },
   "$schema": "http://json-schema.org/draft-07/schema#",
   "contractVersionMajor": 1,
-  "contractVersionMinor": 3,
+  "contractVersionMinor": 4,
   "methods": {
     "abort": {
       "domain": "session",

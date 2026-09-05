@@ -21,6 +21,7 @@ runtime/nova-server run coding_agent --task "…"
 | `--no-session` | 不落盘（临时会话） |
 | `--skill <路径>` / `--prompt-template <路径>` | 临时加载 skill / 模板（可重复，不持久化） |
 | `--tools, -t <逗号名单>` / `--exclude-tools, -xt <逗号名单>` | 工具白名单 / 排除集（排除集在白名单之后应用） |
+| `--<扩展 flag>` | 扩展注册的命名开关透传（如 coding 包的 `--plan`：启动即只读规划）；`--name` 布尔开 / `--name=值` 传值，未注册名报错 |
 
 退出码：0 成功；非 0 失败（模型错误/工具失败/中断）。CI 里直接用。
 

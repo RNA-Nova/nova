@@ -74,6 +74,9 @@ class CreateSessionParams(NovaBaseModel):
     # 临时会话（pi --no-session 对位）：内存态运行、不落盘不进会话列表；
     # 与 session_flag / continue_last / session_file 互斥（恢复与临时语义矛盾）
     no_session: StrictBool = False
+    # 扩展 flag 启动值（CLI 透传的 `--<flag> [值]`）：装配期对注册表校验
+    # 应用（未注册名报参数诊断），session_start 时扩展即可读到
+    extension_flags: Optional[Dict[str, Any]] = None
 
 
 class CreateSessionResult(NovaBaseModel):

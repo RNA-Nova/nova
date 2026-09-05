@@ -18,6 +18,7 @@ nova [message...]            # 启动 TUI；message 为启动后首条消息（@
 | `-n, --name <name>` | 设置会话名 |
 | `--thinking <level>` | 思考级别（off/minimal/low/medium/high…按模型能力） |
 | `--no-session` | 内存态会话（不落盘、不进会话列表） |
+| `--<扩展 flag>` | 扩展注册的命名开关透传（`--name` 布尔开 / `--name=值` 传值；如 coding 包的 `--plan`——启动即只读规划。未注册名报错） |
 
 ## `nova-server`（后端；二进制形态在 `runtime/`，pip 渠道等价物见下）
 
@@ -47,6 +48,7 @@ nova-server [rpc|run|pkg] ...   # 缺省 rpc
 | `--prompt-template <路径>` | 临时加载模板（可重复） |
 | `--tools, -t <逗号名单>` | 工具白名单（SDK 硬闸的 CLI 投影） |
 | `--exclude-tools, -xt <逗号名单>` | 工具排除集（在 `--tools` 之后应用） |
+| `--<扩展 flag>` | 扩展注册的命名开关透传（`--name` / `--name=值`；如 `--plan`） |
 
 ### `nova-server pkg` 子命令
 

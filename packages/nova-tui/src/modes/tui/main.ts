@@ -24,6 +24,7 @@ process.title = 'nova';
 import {
   buildInitialMessage,
   expandFileArguments,
+  extractExtensionFlags,
   isValidThinkingLevel,
   resolveSessionArg,
   splitMessageTokens,
@@ -110,6 +111,7 @@ program
       ...(resume ? { resume: true } : {}),
       ...(sessionName !== undefined ? { sessionName } : {}),
       ...(noSession ? { noSession: true } : {}),
+      ...(Object.keys(extensionFlags).length > 0 ? { extensionFlags } : {}),
     };
     // StartupFlags 字段随 options 透传（NovaTuiAppOptions 扩展后由 app 消费——装配点）
     const appOptions: NovaTuiAppOptions & StartupFlags = {
@@ -125,4 +127,17 @@ program
     await app.run();
   });
 
-await program.parseAsync(process.argv);
+// 扩展 flag 透传：解析先于后端装配（合法集在注册表），未声明的长选项
+// 宽松收集后随 createSession 上行，装配期校验报错。已知集从 commander
+// 已注册选项派生，不另维护平行清单
+const knownLongs = new Set(
+  program.options
+    .map((option) => option.long?.replace(/^--/, ''))
+    .filter((name): name is string => Boolean(name)),
+);
+const { rest: argvRest, extensionFlags } = extractExtensionFlags(
+  process.argv.slice(2),
+  knownLongs,
+);
+
+await program.parseAsync([...process.argv.slice(0, 2), ...argvRest]);

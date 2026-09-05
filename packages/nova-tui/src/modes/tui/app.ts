@@ -88,8 +88,10 @@ export interface NovaTuiAppOptions {
   resume?: boolean;
   /** -n/--name <name>：启动后 setSessionName。 */
   sessionName?: string;
-  /** --no-session：不持久化（挂账——契约无开关，仅警告）。 */
+  /** --no-session：不持久化（内存态运行——createSession.noSession 契约直通）。 */
   noSession?: boolean;
+  /** 扩展 flag 启动值（未声明长选项透传——createSession.extensionFlags）。 */
+  extensionFlags?: Record<string, string | true>;
 }
 
 export class NovaTuiApp {
@@ -143,6 +145,7 @@ export class NovaTuiApp {
         sessionFile: options.sessionFile ?? null,
         thinkingLevel: options.thinking ?? null,
         ...(options.noSession ? { noSession: true } : {}),
+        ...(options.extensionFlags ? { extensionFlags: options.extensionFlags } : {}),
       },
       // 宿主 builtin 贡献：官方块适配器族 + 内建包面板（与第三方同一 ExtensionUIAPI）
       slotsBootstrap: (api) => {

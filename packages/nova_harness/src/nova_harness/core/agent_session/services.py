@@ -285,6 +285,15 @@ class AgentSessionServices:
                 continue
 
             if flag.type == "number":
+                # CLI 透传的值全是字符串——数字 flag 在此归一化
+                # （"5"→5、"0.5"→0.5；转不动的落入下方诊断）
+                if isinstance(value, str):
+                    try:
+                        value = (
+                            int(value) if value.lstrip("+-").isdigit() else float(value)
+                        )
+                    except ValueError:
+                        pass
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     if runtime is not None:
                         runtime.flag_values[name] = value

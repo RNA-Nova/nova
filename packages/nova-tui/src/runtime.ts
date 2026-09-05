@@ -58,6 +58,8 @@ export interface NovaUIRuntimeOptions extends WireClientOptions {
     thinkingLevel?: string | null;
     /** 临时会话（--no-session——内存态运行，不落盘不进会话列表）。 */
     noSession?: boolean;
+    /** 扩展 flag 启动值（未声明长选项透传——契约 CreateSessionParams.extensionFlags）。 */
+    extensionFlags?: Record<string, string | true>;
     agentDir?: string;
   };
   /**

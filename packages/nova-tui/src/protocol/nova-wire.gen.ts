@@ -7,7 +7,7 @@
  */
 
 export const NOVA_CONTRACT_MAJOR = 1;
-export const NOVA_CONTRACT_MINOR = 3;
+export const NOVA_CONTRACT_MINOR = 4;
 
 // ---- 模型定义 ----
 
@@ -233,6 +233,7 @@ export interface CreateSessionParams {
   agentDir?: string | null;
   sessionFile?: string | null;
   noSession?: boolean;
+  extensionFlags?: Record<string, unknown> | null;
 }
 
 export interface CreateSessionResult {

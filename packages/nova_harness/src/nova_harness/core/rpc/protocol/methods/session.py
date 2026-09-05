@@ -215,6 +215,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             agent_name=params.agent_name,
             agent_dir=params.agent_dir,
             session_manager=session_manager,
+            extension_flag_values=params.extension_flags,
             ui_context=state.ui_context,
             # 信任决议回调（此前 RPC 未接线——启动永远默认不信任且不读
             # trust.json，"信任过下次还问" 的根因）：trust.json 记录 →

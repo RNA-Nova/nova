@@ -53,7 +53,7 @@ from nova_harness.core.types.session.entries import SessionEntry, SessionHeader
 #   前端靠能力位与未知事件静默忽略降级。
 # schema 工件与 ``initialize`` 握手均携带两者，TS 侧常量三处同源。
 CONTRACT_VERSION_MAJOR = 1
-CONTRACT_VERSION_MINOR = 3
+CONTRACT_VERSION_MINOR = 4
 
 # ---------------------------------------------------------------------------
 # 类型 walker：annotation → （TS 类型字符串, JSON Schema 片段）

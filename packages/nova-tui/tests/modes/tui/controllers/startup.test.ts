@@ -17,6 +17,7 @@ import {
   detectImageMimeType,
   expandFileArguments,
   expandTildePath,
+  extractExtensionFlags,
   formatCompactionHint,
   isValidThinkingLevel,
   resolveSessionArg,
@@ -72,6 +73,37 @@ describe('isValidThinkingLevel', () => {
     }
     assert.equal(isValidThinkingLevel('HIGH'), false);
     assert.equal(isValidThinkingLevel(''), false);
+  });
+});
+
+describe('extractExtensionFlags', () => {
+  const known = new Set(['cwd', 'model', 'agent', 'continue', 'resume', 'session', 'name', 'thinking', 'no-session', 'version', 'help']);
+
+  it('未声明长选项收集：裸旗标 true、=形收值', () => {
+    const { rest, extensionFlags } = extractExtensionFlags(['--plan', '--foo=bar'], known);
+    assert.deepEqual(extensionFlags, { plan: true, foo: 'bar' });
+    assert.deepEqual(rest, []);
+  });
+
+  it('已声明选项与位置参原样保留；裸旗标不吞下一个 argv', () => {
+    const { rest, extensionFlags } = extractExtensionFlags(
+      ['--model', 'v/x', '--plan', '看看这个', '-c', '/tmp'],
+      known,
+    );
+    assert.deepEqual(extensionFlags, { plan: true });
+    assert.deepEqual(rest, ['--model', 'v/x', '看看这个', '-c', '/tmp']);
+  });
+
+  it('-- 之后原样保留（位置参语义）', () => {
+    const { rest, extensionFlags } = extractExtensionFlags(['--plan', '--', '--not-a-flag'], known);
+    assert.deepEqual(extensionFlags, { plan: true });
+    assert.deepEqual(rest, ['--', '--not-a-flag']);
+  });
+
+  it('= 空值收空串；无输入全空', () => {
+    const { extensionFlags } = extractExtensionFlags(['--tag='], known);
+    assert.deepEqual(extensionFlags, { tag: '' });
+    assert.deepEqual(extractExtensionFlags([], known), { rest: [], extensionFlags: {} });
   });
 });
 
