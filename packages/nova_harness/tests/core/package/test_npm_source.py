@@ -455,7 +455,9 @@ def _resolve_installed_version(
         ),
         patch(
             "nova_harness.core.package.source.resolver.urllib.request.urlopen",
-            side_effect=lambda url, timeout=None: _FakeResponse(payloads[url]),
+            side_effect=lambda url, timeout=None, context=None: _FakeResponse(
+                payloads[url]
+            ),
         ),
     ):
         path = resolver.resolve(parse_source(spec), update=True)

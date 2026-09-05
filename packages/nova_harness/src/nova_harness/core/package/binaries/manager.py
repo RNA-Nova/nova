@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from nova_harness.core.utils.binaries import get_nova_bin_dir
+from nova_harness.core.utils.http import default_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,9 @@ def _download_and_install(
 
 def _download(url: str, dest: str) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "nova-harness"})
-    with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT_S) as resp:
+    with urllib.request.urlopen(
+        request, timeout=_DOWNLOAD_TIMEOUT_S, context=default_ssl_context()
+    ) as resp:
         with open(dest, "wb") as f:
             shutil.copyfileobj(resp, f)
 

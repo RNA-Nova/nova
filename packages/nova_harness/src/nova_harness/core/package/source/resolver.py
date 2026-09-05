@@ -19,6 +19,8 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from nova_harness.core.utils.http import default_ssl_context
 from typing import Callable, Optional
 
 from nova_harness.core.config.defaults import (
@@ -71,7 +73,9 @@ def npm_fetch_json(url: str) -> dict:
     request = urllib.request.Request(
         url, headers={"Accept": "application/json", "User-Agent": "nova-pkg"}
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(
+        request, timeout=30, context=default_ssl_context()
+    ) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -333,7 +337,9 @@ class SourceResolver:
             f"Downloading {source.npm_name}@{version}...",
         )
         try:
-            with urllib.request.urlopen(tarball_url, timeout=120) as response:
+            with urllib.request.urlopen(
+                tarball_url, timeout=120, context=default_ssl_context()
+            ) as response:
                 payload = response.read()
         except (urllib.error.URLError, OSError) as exc:
             raise ValueError(f"Failed to download {tarball_url}: {exc}") from exc

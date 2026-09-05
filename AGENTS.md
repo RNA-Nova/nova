@@ -114,7 +114,7 @@ nova/
 - `core/config/` —— settings、auth storage、路径默认值、配置解析
 - `core/model/` —— 模型域：注册表运行时（`ModelRuntime`、store/composer）、模型解析（`resolver.py`）、provider attribution
 - `core/types/` —— 统一 Pydantic / dataclass 类型层
-- `core/utils/` —— 通用工具（含遥测、HTTP 空闲超时、二进制解析）
+- `core/utils/` —— 通用工具（含遥测、HTTP 空闲超时、urllib 的 certifi CA 锚定、二进制解析）
 - `core/extensions/` —— 扩展系统：API、loader、runner、wrapper、types
 
 ### 官方 bundles（`nova_base` + `nova_coding_agent`）

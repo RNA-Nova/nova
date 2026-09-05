@@ -174,7 +174,7 @@ nova_harness/
         │   ├── messages.py       # 消息类型
         │   ├── project_trust.py  # Project Trust 决策
         │   └── __init__.py       # 说明文档，不做大规模顶层重导出
-        └── utils/              # 通用工具（遥测、HTTP 空闲超时、二进制解析、子进程等）
+        └── utils/              # 通用工具（遥测、HTTP 空闲超时、urllib 的 certifi CA 锚定、二进制解析、子进程等）
 ```
 
 > 注：官方 `subagent` 工具的核心实现已随 bundle 移动到 `nova_coding_agent` 包的 `nova_coding_agent/subagent/`，不再位于 `nova_harness` 内部。

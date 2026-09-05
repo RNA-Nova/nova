@@ -536,6 +536,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **运行中工具卡片 running 双行去重**：通用回退在宿主计时行（ElapsedLine）在场时不再输出 running… 占位（此前叠出 running… + Running… Ns 两行同义文本）；subagent 渲染器自渲的 running… 行同步摘除（渲染器纪律：运行态由自身内容表达——图标/进度，计时归宿主 chrome），question 的 waiting for answer… 保留（等用户作答是语义信息非运行指示）。新增工具卡片真实渲染矩阵 PTY（pty-tool-cards.py：真实模型逐工具调用验卡片签名）。
 - **工具卡片计时行去自转改现算**：ElapsedLine 不再 100ms 自旋重渲（内容指纹不变即冻结、内容事件到达才刷新——pi 语义对位，省渲染流量）；
 - **bash 工具流式更新丢尾帧修复**：收尾冲刷此前排在 `finished` 立旗之后，被 emit 守卫吞掉——尾部 chunk 的节流帧在引擎快速收尾时被取消时，最后一帧永远停在较早内容（共享 runner 上实测出现）；改为先冲刷后立旗，测试以 20ms 行间间隔确定性复现竞态形态（原 5s 轮询加固方向错误——帧是丢了不是慢了）。
+- **冻结形态包管理下载链 SSL 修复（二进制用户的 npm/git 源全灭）**：stdlib urllib 的默认 CA 路径是**构建机绝对路径**——CI 构建的冻结后端在任意用户机上 `CERTIFICATE_VERIFY_FAILED`（npm registry 查询/tarball 下载/托管二进制下载三处同病；本机旧构建恰好踩中存活的构建期路径掩盖了问题，模型 API 走 httpx 自带 certifi 不受影响）；新增 `core/utils/http.py`（CA 束锚定随行 certifi）统一收口三处调用点，certifi 提为显式依赖。E2E 实证：CI 构建装 npm 包必败 → 修复后重冻装通。
 
 ### 早期雏形（2026-04，当时未封版）
 

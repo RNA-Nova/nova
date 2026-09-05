@@ -26,6 +26,7 @@ nova-base = { path = "bundles/nova_base", editable = true }
 nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
 openai = ">=2.0"
 httpx = ">=0.27.0"
+certifi = ">=2024.0.0"
 pydantic = ">=2.0"
 json-repair = ">=0.58.4"
 jsonschema = ">=4.0"

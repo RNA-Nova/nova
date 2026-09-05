@@ -26,6 +26,7 @@ python = ">=3.12,<3.14"
 pydantic = "^2.0"
 # 兄弟包（nova-ai/nova-agent）不在此处声明 path 依赖——各包独立管理
 # 第三方依赖；安装部署由脚本统一完成，发布时再恢复互依声明。
+certifi = ">=2024.0.0"
 pyyaml = "^6.0.1"
 filelock = "^3.24.3"
 tomli = { version = "^2.0.1", python = "<3.11" }
