@@ -163,12 +163,16 @@ class _FakeClient:
             )
         )
         self._chunks = chunks
+        self.aclosed = False
 
     async def _create_with_raw_response(self, **_kwargs):
         return _FakeRawResponse(self._chunks)
 
     async def close(self):
         pass
+
+    async def aclose(self):
+        self.aclosed = True
 
 
 async def _collect(stream):
@@ -824,3 +828,58 @@ class TestStreamSimpleGuards:
         )
         events = await _collect(event_stream)
         assert events[-1].type == "done"
+
+
+class TestClientLifecycle:
+    """客户端按次现造、用完即关（finally 里 aclose）——连接池的异步
+    生成器不得活到事件循环拆除（冻结态进程收尾的 athrow 噪音根因）。"""
+
+    @pytest.mark.asyncio
+    async def test_client_acclosed_after_done(self, monkeypatch):
+        chunks = [_chunk(content="ok", finish="stop")]
+        holder = {}
+
+        def _make(*_a, **_k):
+            holder["client"] = _FakeClient(chunks)
+            return holder["client"]
+
+        monkeypatch.setattr(stream_module, "create_client", _make)
+        event_stream = stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(api_key="sk-test"),
+        )
+        events = await _collect(event_stream)
+        assert events[-1].type == "done"
+        assert holder["client"].aclosed is True
+
+    @pytest.mark.asyncio
+    async def test_client_acclosed_on_error(self, monkeypatch):
+        """错误路径（finally 兜底）同样关闭。"""
+        holder = {}
+
+        class _BoomClient(_FakeClient):
+            def __init__(self):
+                super().__init__([])
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(
+                        with_raw_response=SimpleNamespace(create=self._boom)
+                    )
+                )
+
+            async def _boom(self, **_k):
+                raise RuntimeError("boom")
+
+        def _make(*_a, **_k):
+            holder["client"] = _BoomClient()
+            return holder["client"]
+
+        monkeypatch.setattr(stream_module, "create_client", _make)
+        event_stream = stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(api_key="sk-test"),
+        )
+        events = await _collect(event_stream)
+        assert events[-1].type == "error"
+        assert holder["client"].aclosed is True

@@ -56,7 +56,7 @@ macOS 浏览器下载的归档带 quarantine，首次运行前解除：
 xattr -d com.apple.quarantine nova runtime/nova-server
 ```
 
-**Windows**：下载 `nova-windows-x64.zip`，解压后运行 `nova.exe`（`runtime/nova-server.exe` 须与 `nova.exe` 保持在同一目录结构内）。
+**Windows**：下载 `nova-windows-x64.zip`，解压后运行 `nova.exe`（`runtime/nova-server.exe` 须与 `nova.exe` 保持在同一目录结构内）。二进制未买代码签名证书，首次运行 SmartScreen 可能弹"未知发布者"——选"仍要运行"即可（校验癖可先对 `SHA256SUMS`）。
 
 ### 归档内容
 

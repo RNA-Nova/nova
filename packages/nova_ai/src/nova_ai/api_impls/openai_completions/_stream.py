@@ -205,8 +205,10 @@ def stream(
                 )
             elif block.type == "toolCall":
                 parser = tool_call_parsers.get(id(block))
-                parsed = parser.finish() if parser else parse_streaming_json(
-                    block.partial_args
+                parsed = (
+                    parser.finish()
+                    if parser
+                    else parse_streaming_json(block.partial_args)
                 )
                 if isinstance(parsed, dict):
                     block.arguments = parsed
@@ -297,6 +299,9 @@ def stream(
 
             return block
 
+        client: Any = (
+            None  # finally 里显式关闭（否则进程收尾时连接池的异步生成器拆不干净）
+        )
         try:
             api_key = options.api_key if options else None
             compat = get_compat(model)
@@ -554,9 +559,7 @@ def stream(
             ):
                 raise Exception("Stream ended without finish_reason")
 
-            event_stream.push(
-                DoneEvent(reason=output.stop_reason, message=output)
-            )
+            event_stream.push(DoneEvent(reason=output.stop_reason, message=output))
             event_stream.end()
 
         except Exception as e:
@@ -581,13 +584,19 @@ def stream(
             ):
                 output.error_message += f"\n{raw_metadata}"
 
-            event_stream.push(
-                ErrorEvent(reason=output.stop_reason, error=output)
-            )
+            event_stream.push(ErrorEvent(reason=output.stop_reason, error=output))
             event_stream.end()
         finally:
             if abort_watcher is not None:
                 abort_watcher.cancel()
+            # 客户端按次现造（无共享缓存）——用完即关，别让连接池的异步
+            # 生成器活到事件循环拆除（冻结态会在进程收尾打
+            # "generator didn't stop after athrow()" 噪音）
+            if client is not None:
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
 
     asyncio.create_task(process_stream())
     return event_stream
