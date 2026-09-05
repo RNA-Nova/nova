@@ -23,9 +23,6 @@ import type { ExpansionState } from './expansion.js';
 /** 折叠预览的行数上限。 */
 const PREVIEW_LINES = 20;
 
-/** live 计时行的刷新间隔（毫秒——秒数翻面的最小感知粒度）。 */
-const ELAPSED_TICK_MS = 250;
-
 /** 计时格式化（本地 3 行——nova-client 无 pretty-ms 依赖，不为此引包）。 */
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -33,35 +30,6 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(ms / 60_000);
   const s = Math.round((ms % 60_000) / 1000);
   return `${m}m ${s}s`;
-}
-
-/**
- * live 卡片计时行（pi-tui Loader 自转语义的对位——宿主 chrome）。
- *
- * 纪律：**宿主持有、生命周期归卡片**（渲染器是纯函数，不自持定时器——
- * 重建/热重载模型下组件级 interval 在第三方手里必泄漏）。自己持有的
- * interval 只 `setText` 自己一行；秒数未翻面时不碰缓存不请求重绘。
- */
-class ElapsedLine extends Text {
-  private readonly intervalId: ReturnType<typeof setInterval>;
-  private lastText: string;
-
-  constructor(requestRender: () => void, startedAt: number) {
-    const initial = `Running… ${formatElapsed(Date.now() - startedAt)}`;
-    super(colors.dim(initial), 1, 0);
-    this.lastText = initial;
-    this.intervalId = setInterval(() => {
-      const text = `Running… ${formatElapsed(Date.now() - startedAt)}`;
-      if (text === this.lastText) return;
-      this.lastText = text;
-      this.setText(colors.dim(text));
-      requestRender();
-    }, ELAPSED_TICK_MS);
-  }
-
-  stop(): void {
-    clearInterval(this.intervalId);
-  }
 }
 
 /** 从 args 提取主参数摘要（edit/write/read 取 path，bash 取 command 等）。 */
@@ -114,10 +82,8 @@ export class ToolCardView extends Container {
   private previewArgsKey: string | undefined;
   /** 预览计算在飞（防重入）。 */
   private previewPending = false;
-  /** live 起点（ElapsedLine 计时基准——卡片自身无时间戳，宿主自建）。 */
+  /** live 起点（计时基准——卡片自身无时间戳，宿主自建）。 */
   private liveStartedAt: number | undefined;
-  /** live 计时行（宿主持有）；非 live 或已 dispose 为 undefined。 */
-  private elapsedLine: ElapsedLine | undefined;
   /**
    * 渲染器输入指纹（逐项 === 比对——mapping 是字段级原位赋值，
    * 引用变 = 内容变）。指纹不变则 rebuild 整体跳过：消掉"每条
@@ -138,12 +104,6 @@ export class ToolCardView extends Container {
   update(card: ToolCallCard): void {
     this.card = card;
     this.rebuild();
-  }
-
-  /** 移除卡片时停计时行（TranscriptController 出口调用；幂等）。 */
-  dispose(): void {
-    this.elapsedLine?.stop();
-    this.elapsedLine = undefined;
   }
 
   /**
@@ -208,12 +168,6 @@ export class ToolCardView extends Container {
     // 计时锚点取卡片创建时刻（数据）——重建后新组件现取，不再从当前时刻重计
     if (isLive && this.liveStartedAt === undefined)
       this.liveStartedAt = this.card.startedAt ?? Date.now();
-    // 计时行实例在 live 期间跨 rebuild 常驻（—一个
-    // interval 活完整个 running 期，不随内容区重建生灭）；转非 live 即停。
-    if (!isLive && this.elapsedLine !== undefined) {
-      this.elapsedLine.stop();
-      this.elapsedLine = undefined;
-    }
 
     const bgFn =
       this.card.status === 'running' || this.card.status === 'streaming'
@@ -284,13 +238,16 @@ export class ToolCardView extends Container {
       this.addChild(component);
     }
 
-    // live 计时行（宿主 chrome——：组件自转一行，父卡不随之重建；
-    // live 期间同一实例跨 rebuild 常驻，转非 live 时已在上方停掉）
+    // live 计时行（宿主 chrome）：渲染时现算的静态文本——不自持定时器、
+    // 不驱动重绘；刷新由卡片内容事件驱动（rebuild 现取），输出静止则数字静止。
     if (isLive && this.liveStartedAt !== undefined) {
-      if (this.elapsedLine === undefined) {
-        this.elapsedLine = new ElapsedLine(this.requestRender, this.liveStartedAt);
-      }
-      this.addChild(this.elapsedLine);
+      this.addChild(
+        new Text(
+          colors.dim(`Running… ${formatElapsed(Date.now() - this.liveStartedAt)}`),
+          1,
+          0,
+        ),
+      );
     }
     this.addChild(new Spacer(1));
   }

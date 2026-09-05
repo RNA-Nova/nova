@@ -65,7 +65,7 @@ export class TranscriptController {
 
     for (const [id, component] of [...this.components]) {
       if (!seen.has(id)) {
-        // 有生命周期的组件先 dispose（ToolCardView 的计时行 interval）再移除
+        // 有生命周期的组件先 dispose 再移除（幂等可选调用）
         (component as { dispose?: () => void }).dispose?.();
         this.chatContainer.removeChild(component);
         this.components.delete(id);
