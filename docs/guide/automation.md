@@ -17,9 +17,10 @@ runtime/nova-server run coding_agent --task "…"
 | `--task <文本>` | 任务内容（也可管道喂 stdin） |
 | `--cwd <目录>` | 工作目录 |
 | `--json` | 输出 JSONL 事件流（机器消费） |
-| `--model <ref>` | 指定模型 |
 | `--trust` | 信任项目目录（headless 缺省不信任 `.nova` 资源） |
-| `--plan` | 只读规划模式 |
+| `--no-session` | 不落盘（临时会话） |
+| `--skill <路径>` / `--prompt-template <路径>` | 临时加载 skill / 模板（可重复，不持久化） |
+| `--tools, -t <逗号名单>` / `--exclude-tools, -xt <逗号名单>` | 工具白名单 / 排除集（排除集在白名单之后应用） |
 
 退出码：0 成功；非 0 失败（模型错误/工具失败/中断）。CI 里直接用。
 

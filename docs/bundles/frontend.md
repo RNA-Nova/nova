@@ -50,12 +50,25 @@ export default function renderMyTool(input: RendererInput): Component {
 
 ```ts
 // frontend/tui/dialogs/my-dialog.ts
-import type { DialogFactory } from 'nova-tui';
+import { Text, type Component } from '@earendil-works/pi-tui';
 
-export const myDialogFactory: DialogFactory = (opts) => ({
-  // 返回 pi-tui 组件 + 结果提交回调（看官方 dialogs/question.ts 样板）
-});
+// 对话框工厂：env 为宿主对话框环境（tui/colors 等），params 为后端
+// ui.request 的原始参数，done 交还结果并关框（done(undefined) = 取消，
+// 其余值按 {value: result} 应答后端）
+export function myDialogFactory(
+  env: unknown,
+  params: Record<string, unknown>,
+  done: (result?: unknown) => void,
+): Component {
+  const title = typeof params.title === 'string' ? params.title : '';
+  return new Text(`${title}（键位处理看官方 dialogs/question.ts 样板）`, 1, 0);
+}
 export default myDialogFactory;
+```
+
+```ts
+// frontend/tui/index.ts 里注册（注册即触发能力重宣告）
+api.registerDialog('my-dialog', myDialogFactory);
 ```
 
 **能力协商闭环**：注册即触发前端 `system/capabilities` 重宣告 → 后端 `ctx.ui.has_capability("dialog:my-dialog")` 变真 → 走自定义对话框；未注册（headless/其他前端）时后端自动降级基线原语。**工具逻辑不出 Python，弹窗逻辑不出 TS**。

@@ -1,6 +1,6 @@
 # Slash 命令
 
-命令有三个来源：**bundle 扩展注册**（`nova-base` 的会话命令、`nova-coding-agent` 的 `/tools`、`/plan`）、**TUI 宿主内建**（界面域）、**第三方包**。输入 `/` 时编辑器自动补全；`/help` 在会话内列出当前可用的实时清单（含第三方包注册的命令）。
+命令有三个来源：**bundle 扩展注册**（`nova-base` 的会话命令与 `/tools`、`nova-coding-agent` 的 `/plan`）、**TUI 宿主内建**（界面域）、**第三方包**。输入 `/` 时编辑器自动补全；`/help` 在会话内列出当前可用的实时清单（含第三方包注册的命令）。
 
 ## 会话（nova-base）
 
@@ -34,12 +34,12 @@
 | `/agent save` / `/agent save-as <name>` | 把当前生效状态（人格/工具/模型偏好）物化回组合声明 yaml |
 | `/persona [name\|default]` | 切换会话人格（内存态覆盖，分支持久化） |
 
-## 工具与计划（nova-coding-agent）
+## 工具与计划
 
 | 命令 | 说明 |
 |------|------|
-| `/tools` | 工具开关面板（复选框；选择随分支持久化） |
-| `/plan` | 切换只读规划模式（写工具禁用、bash 限只读白名单） |
+| `/tools` | 工具开关面板（复选框；选择随分支持久化）——nova-base |
+| `/plan` | 切换只读规划模式（写工具禁用、bash 限只读白名单）——nova-coding-agent |
 | `/todos` | 查看当前分支的 todo 清单（TUI 弹模态查看器；运行中也可用）——nova-base |
 
 ## 资源与其他（nova-base）

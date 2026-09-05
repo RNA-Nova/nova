@@ -77,7 +77,7 @@ def extension(nova):  # nova: NovaExtensionAPI——装载期注册面
 
 **执行与系统**：`exec(command, args, options)` / `compact` / `get_context_usage` / `get_system_prompt` / `refresh_system_prompt` / `abort` / `shutdown` / `is_idle` / `has_pending_messages`
 
-**命令上下文扩展**（命令 handler 的 ctx 是 `ExtensionCommandContext`，多一层）：`new_session` / `fork` / `navigate_tree` / `switch_session` / `reload` / `wait_for_idle` / `get_session_info` / `get_scoped_models`
+**命令上下文扩展**（命令 handler 的 ctx 是 `ExtensionCommandContext`，多一层）：`new_session` / `fork` / `navigate_tree` / `switch_session` / `reload` / `wait_for_idle` / `get_session_info` / `get_scoped_models` / `trust_project` / `untrust_project` / `clone` / `export` / `import_session`
 
 **环境**：`ui`（UIContext）/ `has_ui` / `cwd` / `is_project_trusted()` / `get_signal()` / `extension_path` / `session_manager` / `model_runtime`
 
@@ -89,7 +89,7 @@ def extension(nova):  # nova: NovaExtensionAPI——装载期注册面
 nova.registerCommand("weather", {
     "description": "查天气: /weather <城市>",
     "handler": _weather,           # async (args: str, ctx: ExtensionCommandContext)
-    "getArgumentCompletions": ...,  # 可选：参数补全（async (prefix) -> [...]）
+    "get_argument_completions": ...,  # 可选：参数补全（async (prefix) -> [...]）
 })
 ```
 
@@ -117,7 +117,7 @@ nova.registerCommand("weather", {
 ```python
 from nova_base.ui_primitives import confirm, select_items
 
-if await confirm(ctx.ui, "确认删除？"):
+if await confirm(ctx.ui, "确认", "确认删除？"):
     ...
 ```
 

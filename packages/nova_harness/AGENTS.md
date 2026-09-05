@@ -304,7 +304,7 @@ nova_harness/
 - `ExtensionRunner` 在 `create_context()` 时注入当前 `ui_context` 与 runtime 状态；`project_trust` 事件允许扩展参与信任裁决。
 - `DefaultResourceLoader` 已深度接入 `PackageManager`：`AgentSessionServices.create()` 会默认构造 `PackageManager` 并注入到 `DefaultResourceLoaderOptions.package_manager`。`PackageManager` 是统一 facade，内部聚合 `PackageInstaller` 与 `PackageResolver`；传入后，`reload()` 会把解析结果作为扩展 / skill / prompt / tool / agent 的唯一来源（settings 是唯一选择层——仅物化未写入 settings 的包不参与解析），关闭子加载器的默认目录扫描，避免重复发现；`extend_resources()` 贡献的临时路径仍会与解析结果合并，并统一去重。`DefaultResourceLoaderOptions.install_missing_packages` 控制 `PackageManager.resolve_resources()` 发现 settings 中配置的 package 缺失时是否自动调用 installer 安装，默认在 `AgentSessionServices.create()` 中开启。
 
-> **与 TS 的差异**：`message_renderers` 已移除（渲染归 Node 层）；`shortcuts` 已按架构 2.0 接线（运行时持注册表与 handler，目录/回调走 RPC，键位绑定归前端）；`themes` 类目已从资源系统移除（架构 2.0 中归 Node 层 UI 资产，Python 纯运行时不再解析/加载主题；`ui_blocks` 包资源类目同）。`UIContext` 为泛型 transport（`request`/`notify` + 能力发现模型），不持有交互词汇——便捷方法与标准词汇归官方 bundle（`nova_coding_agent.ui_primitives`）。工具链路已定型：框架零内置、零预设名单，默认激活 = 注册表全部，过滤链为 denylist → allowlist → agent.yaml 白名单。
+> **与 TS 的差异**：`message_renderers` 已移除（渲染归 Node 层）；`shortcuts` 已按架构 2.0 接线（运行时持注册表与 handler，目录/回调走 RPC，键位绑定归前端）；`themes` 类目已从资源系统移除（架构 2.0 中归 Node 层 UI 资产，Python 纯运行时不再解析/加载主题；`ui_blocks` 包资源类目同）。`UIContext` 为泛型 transport（`request`/`notify` + 能力发现模型），不持有交互词汇——便捷方法与标准词汇归官方基础 bundle（`nova_base.ui_primitives`）。工具链路已定型：框架零内置、零预设名单，默认激活 = 注册表全部，过滤链为 denylist → allowlist → agent.yaml 白名单。
 
 ### 12. `core/model/` — ModelRuntime 与模型解析
 - `runtime.py`：模型与鉴权的运行时（对齐 TS `core/model-runtime.ts` 的终态设计；TS 侧的 `ModelRegistry` 薄 facade 未移植，如需扩展只读视图再议）。

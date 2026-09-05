@@ -114,7 +114,7 @@ class Tool:
         advice = ""
         if params.get("advice"):
             # 附建议前要征得用户同意（演示 UI 交互 + headless 降级）
-            if ctx.has_ui and await confirm(ctx.ui, f"为{city}生成出行建议？"):
+            if ctx.has_ui and await confirm(ctx.ui, "出行建议", f"为{city}生成出行建议？"):
                 advice = "；出门记得带伞" if "雨" in sky else "；天气不错，适合出行"
             elif not ctx.has_ui:
                 advice = "（headless 模式跳过建议确认）"

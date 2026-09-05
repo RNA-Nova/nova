@@ -2,7 +2,7 @@
 
 前后端线上协议：JSON-RPC 2.0 over stdio（NDJSON，每行一帧）。本文档是**概念与语义**参考；机器可读的完整契约由后端构建期导出：
 
-- `packages/nova_harness/src/nova_harness/core/rpc/protocol/nova-wire.schema.json`——事件/条目/方法形状的 JSON Schema；
+- `packages/nova-tui/protocol/nova-wire.schema.json`——事件/条目/方法形状的 JSON Schema（后端构建期导出的落点）；
 - `packages/nova-tui/src/protocol/nova-wire.gen.ts`——TS 类型 + 契约版本常量（生成物，勿手改）。
 
 两者由 pytest 漂移测试保鲜（改协议忘了重新导出 = 测试红）。
