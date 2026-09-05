@@ -46,7 +46,7 @@ nova
 
 ## 4. 编程能力包（0.1.1 起随安装器自动装）
 
-发布形态内建 `nova-base`（slash 命令、todo、question 等会话基础设施）；0.1.1 起安装器自检后会**自动安装** `nova-coding-agent`（bash/edit/grep/subagent 等 8 工具 + 5 个角色）。装失败或主动跳过（`NOVA_NO_CODING=1`）时手动补装：
+发布形态内建 `nova-base`（slash 命令、todo、question 等会话基础设施）；0.1.1 起 POSIX 安装器自检后会**自动安装** `nova-coding-agent`（bash/edit/grep/subagent 等 8 工具 + 5 个角色）。装失败或主动跳过（`NOVA_NO_CODING=1`）时手动补装（Windows 便携形态同样走这条手动路径）：
 
 ```bash
 # npm 源（官方发布渠道）

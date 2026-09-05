@@ -56,7 +56,25 @@ macOS 浏览器下载的归档带 quarantine，首次运行前解除：
 xattr -d com.apple.quarantine nova runtime/nova-server
 ```
 
-**Windows**：下载 `nova-windows-x64.zip`，解压后运行 `nova.exe`（`runtime/nova-server.exe` 须与 `nova.exe` 保持在同一目录结构内）。二进制未买代码签名证书，首次运行 SmartScreen 可能弹"未知发布者"——选"仍要运行"即可（校验癖可先对 `SHA256SUMS`）。
+**Windows**：便携形态（无安装器、不写 PATH）。完整步骤（PowerShell）：
+
+```powershell
+# 1. Releases 页下载 nova-windows-x64.zip（arm64 设备用对应包），
+#    解压到固定位置（别留在 Downloads——升级与数据都指着这个目录）：
+Expand-Archive .\nova-windows-x64.zip "$env:LOCALAPPDATA\nova"
+
+# 2. 目录入用户 PATH（重开终端生效）：
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\nova",
+  "User"
+)
+
+# 3. 装编程能力包（自动装包是 POSIX 安装器的行为，Windows 走这条手动路径）：
+& "$env:LOCALAPPDATA\nova\runtime\nova-server.exe" pkg install npm:nova-coding-agent
+```
+
+之后日常使用：终端里 `cd <项目目录>` 再 `nova`。双击 `nova.exe` 仅适合点亮验证（工作目录会落在解压目录，不是正式用法）；二进制未买代码签名证书，首次运行 SmartScreen 可能弹"未知发布者"——选"仍要运行"即可（校验癖可先对 `SHA256SUMS`）。
 
 ### 归档内容
 
