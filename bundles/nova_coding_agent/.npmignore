@@ -1,0 +1,7 @@
+# npm 发布排除（.npmignore 优先于 .gitignore——本目录无独立 .gitignore）
+# npm 只自动忽略根级 node_modules——嵌套的 frontend/node_modules 必须显式排除
+frontend/node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store

@@ -456,6 +456,35 @@ jobs:
   #       # 真发：npm publish（env NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}，
   #       # 或 trusted publishing 免 token）
 
+  # publish-npm-bundle:
+  #   name: publish-npm-bundle（nova-coding-agent——二进制用户的按需装通道）
+  #   needs: publish
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     id-token: write   # trusted publishing
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         ref: ${{ env.RELEASE_TAG }}
+  #         persist-credentials: false
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+  #       with:
+  #         node-version: '22'
+  #         registry-url: 'https://registry.npmjs.org'
+  #
+  #     - name: 打包检视 + 真发（A 型整包——pyproject + backend + agents + frontend）
+  #       working-directory: bundles/nova_coding_agent
+  #       run: |
+  #         set -euo pipefail
+  #         npm publish --dry-run   # 先检视内容清单（嵌套 node_modules 不入包——.npmignore 守住）
+  #         # 真发：npm publish（env NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 或 trusted publishing）
+  #       # 注：bundle 版本独立于发布 tag（pyproject.toml 与 package.json 双侧同步——
+  #       # 版本戳对账门只管 nova-tui）
+
   # 任何后续环节失败时清掉草稿，不留半成品（对齐既有发布管线的清理纪律）。
   cleanup-draft:
     name: cleanup-draft（失败时）

@@ -18,6 +18,8 @@
 
 发布节奏建议：npm 源走 semver，tag 发布与 changelog 同步；git 源至少打 tag（用户好 pin）。
 
+> 官方编程能力即此渠道：`npm:nova-coding-agent`（A 型整包——pyproject + backend + agents + frontend 一起入包，嵌套 `frontend/node_modules` 由 `.npmignore` 守住不进包）。官方包的发布挂在 release workflow 的 `publish-npm-bundle` 段。
+
 ## 打包前检查单
 
 ```bash

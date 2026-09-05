@@ -49,10 +49,10 @@ nova
 发布形态内建 `nova-base`（slash 命令、todo、question 等会话基础设施）。编程执行能力（bash/edit/grep/subagent 等 8 工具 + 5 个角色）由 `nova-coding-agent` bundle 提供：
 
 ```bash
-# 列出已装包
-nova-pkg list            # pip 渠道；二进制形态用 runtime/nova-server pkg list
+# npm 源（推荐——官方发布渠道）
+runtime/nova-server pkg install npm:nova-coding-agent
 
-# 安装官方编程 bundle（path/git/npm 三种源任选）
+# 或本地源码（path/git 源亦可）
 runtime/nova-server pkg install path:/path/to/bundles/nova_coding_agent
 ```
 
