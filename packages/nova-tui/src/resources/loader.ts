@@ -28,6 +28,7 @@ import { createJiti } from 'jiti/static';
 import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { isBunBinary } from '../binary.js';
 // —— 编译二进制（bun --compile）模式的宿主模块锚点 ——
 // 必须静态 import，bun 才会把这些模块打进二进制；运行时经 jiti
 // virtualModules 直供包渲染器（磁盘上没有宿主 dist 可供别名解析）。
@@ -56,12 +57,6 @@ import type {
 } from './types.js';
 import { parseThemeJson, resolveThemeColors, type ThemeJson } from '../presentation/theme-json.js';
 import { readFileSync } from 'node:fs';
-
-/** bun --compile 二进制检测（bunfs 虚拟文件系统路径标记，pi config.ts 同款）。 */
-const isBunBinary =
-  import.meta.url.includes('$bunfs') ||
-  import.meta.url.includes('~BUN') ||
-  import.meta.url.includes('%7EBUN');
 
 /** 本包源码/产物根（jiti 别名目标——renderers 的 import 契约锚点）。
  *  惰性：编译二进制中 bunfs 路径无磁盘对应，只在别名分支才求值。 */

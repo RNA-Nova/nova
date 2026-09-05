@@ -21,6 +21,7 @@ from nova_harness.core.rpc.protocol.schema_export import (
 )
 from nova_harness.core.sdk import create_agent_session_runtime
 from nova_harness.core.types.session.config import CreateAgentSessionOptions
+from nova_harness.core.utils.version import harness_version
 
 _D = "session"
 
@@ -143,7 +144,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
     async def initialize(params: _sh.EmptyParams) -> _sh.InitializeResult:
         """握手：服务器版本 + 契约版本（major/minor）+ 真实能力位（域/方法，来自注册表）。"""
         return _sh.InitializeResult(
-            version="0.1.0",
+            version=harness_version(),
             contract_version_major=CONTRACT_VERSION_MAJOR,
             contract_version_minor=CONTRACT_VERSION_MINOR,
             capabilities=_sh.CapabilitiesInfo(

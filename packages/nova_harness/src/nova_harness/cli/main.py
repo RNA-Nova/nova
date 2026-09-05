@@ -7,6 +7,8 @@ Subcommands are implemented under ``nova_harness.cli``.
 import argparse
 import sys
 
+from nova_harness.core.utils.version import harness_version
+
 
 def main(argv=None):
     """Main entry point for the ``nova-harness`` CLI."""
@@ -17,7 +19,7 @@ def main(argv=None):
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        version=f"%(prog)s {harness_version()}",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 

@@ -15,6 +15,7 @@
 
 import { Command } from 'commander';
 
+import { NOVA_VERSION } from '../../version.js';
 import { NovaTuiApp, type NovaTuiAppOptions } from './app.js';
 
 // 进程名（终端选项卡/任务管理器显示，否则只显示 node）
@@ -36,6 +37,8 @@ const program = new Command();
 program
   .name('nova')
   .description('Nova TUI（NovaUIRuntime + pi-tui 薄壳）')
+  // 版本戳：编译态为构建期注入值，node/tsx 态为 package.json——同一来源
+  .version(NOVA_VERSION)
   .argument('[message...]', '启动后立即发送的首条消息（@file 展开为文件文本）')
   .option('-c, --cwd <dir>', '工作目录', process.cwd())
   .option('-m, --model <ref>', '模型（provider/id）')

@@ -11,6 +11,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { binaryAssetBase, isBunBinary } from '../binary.js';
+
 /** 主题导出数据（调用方注入——TUI 经 getExportThemeData；保持本层宿主无关）。 */
 export interface ExportThemeInput {
   cssColors: Record<string, string>;
@@ -23,7 +25,11 @@ export interface ExportThemeInput {
 // 模板装配
 // ---------------------------------------------------------------------------
 
-const exportDir = dirname(fileURLToPath(import.meta.url));
+// 模板资产基底：编译二进制为二进制旁随行的 export/（build-frontend.sh 拷贝）；
+// 其余形态为模块同目录（dist/export 经 copy-assets.mjs 拷贝；src/export 源态）
+const exportDir = isBunBinary
+  ? join(binaryAssetBase(), 'export')
+  : dirname(fileURLToPath(import.meta.url));
 
 function readAsset(name: string): string {
   return readFileSync(join(exportDir, name), 'utf-8');

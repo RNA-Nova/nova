@@ -22,6 +22,7 @@ from nova_harness.core.rpc.server import RpcServer
 from nova_harness.core.rpc.transport import StdioTransport
 from nova_harness.core.utils.child_process import kill_tracked_detached_children
 from nova_harness.core.utils.output_guard import OutputGuard
+from nova_harness.core.utils.version import harness_version
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -32,7 +33,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        # 版本单一事实源是 pyproject.toml——冻结态经打包元数据命中同一值
+        version=f"%(prog)s {harness_version()}",
     )
     return parser
 

@@ -20,6 +20,14 @@ def main() -> int:
     mode = argv[0] if argv else "rpc"
     rest = argv[1:] if argv else []
 
+    # 顶层 --version：分发器直答（版本戳归 importlib.metadata——冻结态
+    # 命中打包元数据；三个子模式各自的 --version 走既有 parser 同值输出）
+    if mode == "--version":
+        from nova_harness.core.utils.version import harness_version
+
+        print(f"nova-server {harness_version()}")
+        return 0
+
     if mode == "run":
         from nova_harness.cli.main import main as run_main
 

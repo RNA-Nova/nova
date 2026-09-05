@@ -147,3 +147,6 @@ pnpm-lock.yaml
 
 # 开发期临时产物（agent 试运行输出）
 tmp/
+
+# 发布管线构建产物（scripts/build-*.sh / package-release.sh 的输出统一归仓根 dist/，
+# 由上文第 13 行的裸 dist/ 规则覆盖）

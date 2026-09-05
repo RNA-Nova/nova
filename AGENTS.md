@@ -29,7 +29,7 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | 开发依赖 | `pre-commit`、`pytest`、`pytest-asyncio`、`sniffio` |
 | 其他关键依赖 | `openai`、`json-repair`、`jsonschema`、`pyyaml`、`filelock`、`tomli` |
 
-**未使用** Mypy、Tox、Makefile 或 Docker。仓库中也没有 `poetry.lock` 与 `.pre-commit-config.yaml`；CI 为 GitHub Actions（`.github/workflows/ci.yml`，三平台矩阵，见「构建与开发命令」）。
+**未使用** Mypy、Tox、Makefile 或 Docker。仓库中也没有 `poetry.lock` 与 `.pre-commit-config.yaml`；CI 为 GitHub Actions（`.github/workflows/ci.yml`，三平台矩阵，见「构建与开发命令」；发布管线为 `.github/workflows/release.yml`，见「构建与发布」）。
 
 ---
 
@@ -264,6 +264,25 @@ cd packages/<子包名>
 pixi run -e dev python -m build      # 生成 wheel / sdist
 # poetry publish    # 如需发布到 PyPI（仍保留 poetry 配置）
 ```
+
+**发布管线（双二进制分发）**：tarball 根 = `nova`（bun 编译的前端，可交叉编译）+ `runtime/nova-server`（PyInstaller onedir 的后端，不可交叉、按平台 runner 构建）；后端内建 nova-base（`--add-data bundles/nova_base` → 运行期 `sys._MEIPASS/bundles/nova_base` 首启落地，见 `core/package/builtin.py`）。发布编排是仓级行为：脚本统一住仓根 `scripts/`，锚定仓根（相对路径——含 `--out`——一律按仓根解析，从任何 cwd 调用结果一致），产物统一落仓根 `dist/`（`dist/frontend/<平台>/`、`dist/backend/runtime/`、`dist/release/`；派生产物不进可发布包目录）。
+
+```bash
+# 前端六目标（bun 交叉，单机出齐；BUN 环境变量可指定 bun 路径）
+scripts/build-frontend.sh [--platform darwin-arm64] [--out <dir>]
+
+# 后端按本机平台冻结（干净 venv + PyInstaller onedir；产物 dist/backend/runtime/）
+scripts/build-backend.sh [--python <解释器>] [--out <dir>]
+
+# 合包归档（前端平台目录 + 后端 runtime/ → dist/release/nova-<platform>.tar.gz/zip + SHA256SUMS）
+scripts/package-release.sh --frontend <dir> --backend <dir> --platform <name> [--out <dir>]
+
+# 冒烟：RPC 握手（CI 用）/ 打包产物 PTY 真实会话（本地验收，需 VOLCENGINE_API_KEY）
+python3 scripts/smoke-rpc-handshake.py <runtime/nova-server 路径>
+python3 scripts/pty-binary-smoke.py <归档解出的 nova 路径>
+```
+
+版本戳单一事实源是各包 manifest：前端 `packages/nova-tui/package.json`（构建期 `--define __NOVA_VERSION__` 注入，node 形态读 package.json——`src/version.ts`），后端 `packages/nova_harness/pyproject.toml`（运行期 `importlib.metadata.version("nova-harness")`——`core/utils/version.py`，冻结态命中打包元数据）。`.github/workflows/release.yml`（tag `v*` / 手动触发）含 tag↔package.json 对账门；PyPI/npm 发布步骤已在 workflow 内写出但整段注释，首次演练后再开。
 
 ### Poetry 兼容说明
 

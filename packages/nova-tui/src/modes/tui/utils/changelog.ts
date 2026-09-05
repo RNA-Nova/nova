@@ -10,9 +10,13 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { UIStateStore } from 'nova-tui';
+
+import { binaryAssetBase, isBunBinary } from '../../../binary.js';
+import { NOVA_VERSION } from '../../../version.js';
 
 /** ui-state 命名空间（nova-tui 自有 KV——不进设置面板）。 */
 const WHATS_NEW_NAMESPACE = 'nova-tui';
@@ -21,6 +25,8 @@ const LAST_SEEN_VERSION_KEY = 'lastSeenVersion';
 /** CHANGELOG.md 候选路径（按优先级——首个存在即取）。 */
 function changelogCandidates(): string[] {
   return [
+    // 编译二进制：二进制旁随行的 CHANGELOG.md（build-frontend.sh 拷贝）
+    ...(isBunBinary ? [join(binaryAssetBase(), 'CHANGELOG.md')] : []),
     // 构建产物：dist/modes/tui/utils/ → dist/assets/CHANGELOG.md（copy-assets.mjs）
     fileURLToPath(new URL('../../../assets/CHANGELOG.md', import.meta.url)),
     // 开发态：包内 CHANGELOG.md（packages/nova-tui/）
@@ -79,16 +85,9 @@ export function renderChangelogEntry(): string {
   return (unreleased ?? sections[0])?.content ?? '';
 }
 
-/** 当前包版本（包根 package.json——dist/tsx 两态上四级均为包根）。 */
+/** 当前包版本（双形态统一归 version.ts——编译态构建期注入，其余读 package.json）。 */
 export function readPackageVersion(): string {
-  try {
-    const pkg = JSON.parse(
-      readFileSync(new URL('../../../../package.json', import.meta.url), 'utf-8'),
-    ) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : '';
-  } catch {
-    return '';
-  }
+  return NOVA_VERSION;
 }
 
 /**

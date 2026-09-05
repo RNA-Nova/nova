@@ -1,0 +1,471 @@
+name: Release
+
+# 发布管线（Batch C）：tag v* 或手动触发。
+#
+# 双二进制分发：tarball 根 = nova（bun 编译的前端，单 runner 六目标交叉）
+# + runtime/nova-server（PyInstaller onedir 的后端，不能交叉——按平台 runner
+# 各建一份）。产物含内建 nova-base（后端 --add-data 随行，首启落地）。
+#
+# 流程：build-frontend → build-backend（六平台矩阵）→ test-packaged
+# （三 runner 下载合包冒烟）→ assemble-release（六平台归档 + sha256）
+# → publish（draft release）。PyPI / npm 发布步骤已写出但整段注释——
+# 首次演练确认产物后再开。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建的 tag（如 v0.2.0；须与 packages/nova-tui/package.json 的 version 一致）'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # bun 可交叉编译——前端六目标在单个 ubuntu runner 出齐。
+  build-frontend:
+    name: build-frontend（bun 六目标）
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.1 # 本机验证过的版本；升级需回归打包冒烟
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/nova-tui/package-lock.json
+
+      - name: 版本戳与 tag 对账（单一事实源 = package.json）
+        run: |
+          set -euo pipefail
+          pkg_version="$(node -p "require('./packages/nova-tui/package.json').version")"
+          if [[ "v${pkg_version}" != "${RELEASE_TAG}" ]]; then
+            echo "::error::tag ${RELEASE_TAG} 与 packages/nova-tui/package.json 的 version（${pkg_version}）不一致"
+            exit 1
+          fi
+
+      - name: 构建六个平台前端
+        run: scripts/build-frontend.sh
+
+      # upload-artifact 不保可执行位——先成 tar 再上传
+      - name: 逐平台打包
+        run: |
+          set -euo pipefail
+          cd dist/frontend
+          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64 windows-arm64; do
+            tar -czf "frontend-${p}.tar.gz" -C "$p" .
+          done
+
+      - name: 上传 frontend-darwin-arm64
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-darwin-arm64
+          path: dist/frontend/frontend-darwin-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: 上传 frontend-darwin-x64
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-darwin-x64
+          path: dist/frontend/frontend-darwin-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: 上传 frontend-linux-x64
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-linux-x64
+          path: dist/frontend/frontend-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: 上传 frontend-linux-arm64
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-linux-arm64
+          path: dist/frontend/frontend-linux-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: 上传 frontend-windows-x64
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-windows-x64
+          path: dist/frontend/frontend-windows-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: 上传 frontend-windows-arm64
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-windows-arm64
+          path: dist/frontend/frontend-windows-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+  # PyInstaller onedir 不能交叉编译——按平台 runner 各建一份。
+  # darwin-x64 用 macos-15-intel（macos-13 已于 2025-12 退役，这是最后一个
+  # x86_64 macOS 镜像，可用至 2027-08）。
+  # arm64 runner（ubuntu-24.04-arm / windows-11-arm）公开仓库免费；
+  # 私有仓库计入 Actions 额度——不可用就把这两行从矩阵删掉。
+  build-backend:
+    name: build-backend / ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: darwin-arm64, os: macos-latest }
+          - { platform: darwin-x64, os: macos-15-intel }
+          - { platform: linux-x64, os: ubuntu-latest }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm }
+          - { platform: windows-x64, os: windows-latest }
+          - { platform: windows-arm64, os: windows-11-arm }
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: 冻结后端（venv + PyInstaller onedir）
+        shell: bash
+        run: |
+          scripts/build-backend.sh --python "$(command -v python)"
+
+      - name: 打包 runtime 上传（tar 保可执行位）
+        shell: bash
+        run: tar -czf "backend-${{ matrix.platform }}.tar.gz" -C dist/backend runtime
+
+      - name: 上传 backend-${{ matrix.platform }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-${{ matrix.platform }}
+          path: backend-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+  # 三 runner 下载合包：归档 → 解出真身 → 冒烟（--version × 2 + RPC 握手）。
+  test-packaged:
+    name: test-packaged / ${{ matrix.platform }}
+    needs: [build-frontend, build-backend]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux-x64 }
+          - { os: macos-latest, platform: darwin-arm64 }
+          - { os: windows-latest, platform: windows-x64 }
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout（合包与冒烟脚本）
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: 安装 Python（冒烟脚本宿主）
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: 下载前端产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-${{ matrix.platform }}
+          path: artifacts
+
+      - name: 下载后端产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: backend-${{ matrix.platform }}
+          path: artifacts
+
+      - name: 合包归档并解出待冒烟副本
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging/frontend staging/backend
+          tar -xzf "artifacts/frontend-${{ matrix.platform }}.tar.gz" -C staging/frontend
+          tar -xzf "artifacts/backend-${{ matrix.platform }}.tar.gz" -C staging/backend
+          scripts/package-release.sh \
+            --frontend staging/frontend \
+            --backend staging/backend \
+            --platform "${{ matrix.platform }}"
+          mkdir -p extracted
+          if [[ "${{ matrix.platform }}" == windows-* ]]; then
+            export ARCHIVE_PATH="$(cygpath -w "dist/release/nova-${{ matrix.platform }}.zip")"
+            export DESTINATION_PATH="$(cygpath -w extracted)"
+            powershell.exe -NoProfile -NonInteractive -Command \
+              'Expand-Archive -LiteralPath $env:ARCHIVE_PATH -DestinationPath $env:DESTINATION_PATH -Force'
+          else
+            tar -xzf "dist/release/nova-${{ matrix.platform }}.tar.gz" -C extracted
+          fi
+
+      - name: 冒烟（--version × 2 + RPC 握手）
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.platform }}" == windows-* ]]; then
+            NOVA="./extracted/nova.exe"
+            SERVER="./extracted/runtime/nova-server.exe"
+            export NOVA_AGENT_DIR="$(cygpath -w "$(mktemp -d)")"
+          else
+            NOVA="./extracted/nova"
+            SERVER="./extracted/runtime/nova-server"
+            export NOVA_AGENT_DIR="$(mktemp -d)"
+          fi
+          "$NOVA" --version
+          "$SERVER" --version
+          python scripts/smoke-rpc-handshake.py "$SERVER"
+
+  # 六平台归档 + sha256 + release notes（从 CHANGELOG.md 抽对应版本段）。
+  assemble-release:
+    name: assemble-release
+    needs: test-packaged
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout（合包脚本 + CHANGELOG）
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: 下载全部前端产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: frontend-*
+          path: dist-src/frontend
+          merge-multiple: true
+
+      - name: 下载全部后端产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: backend-*
+          path: dist-src/backend
+          merge-multiple: true
+
+      - name: 六平台合包归档 + SHA256SUMS
+        run: |
+          set -euo pipefail
+          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64 windows-arm64; do
+            rm -rf staging && mkdir -p staging/frontend staging/backend
+            tar -xzf "dist-src/frontend/frontend-${p}.tar.gz" -C staging/frontend
+            tar -xzf "dist-src/backend/backend-${p}.tar.gz" -C staging/backend
+            scripts/package-release.sh \
+              --frontend staging/frontend \
+              --backend staging/backend \
+              --platform "$p"
+          done
+          rm -rf staging
+
+      - name: 生成 release notes（抽 CHANGELOG.md 对应版本段）
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > dist/release/RELEASE_NOTES.md || true
+          if [[ ! -s dist/release/RELEASE_NOTES.md ]]; then
+            echo "见 CHANGELOG.md（${RELEASE_TAG}）。" > dist/release/RELEASE_NOTES.md
+          fi
+
+      - name: 上传发布载荷
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets-${{ env.RELEASE_TAG }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # draft release（先草稿后人工确认；已公开发布拒改）。
+  publish:
+    name: publish（draft release）
+    needs: assemble-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 下载发布载荷
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets-${{ env.RELEASE_TAG }}
+          path: release-assets
+
+      - name: 校验载荷（清单在场 + sha256 对账）
+        run: |
+          set -euo pipefail
+          cd release-assets
+          for asset in \
+            nova-darwin-arm64.tar.gz \
+            nova-darwin-x64.tar.gz \
+            nova-linux-x64.tar.gz \
+            nova-linux-arm64.tar.gz \
+            nova-windows-x64.zip \
+            nova-windows-arm64.zip \
+            SHA256SUMS \
+            RELEASE_NOTES.md; do
+            test -f "$asset"
+          done
+          sha256sum -c SHA256SUMS
+
+      - name: 建 draft release 并上传资产
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          existing_release="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [[ "${existing_release}" == "false" ]]; then
+            echo "::error::${RELEASE_TAG} 已公开发布——拒改公共 release"
+            exit 1
+          fi
+          if [[ "${existing_release}" == "true" ]]; then
+            gh release delete "${RELEASE_TAG}" --yes
+          fi
+          gh release create "${RELEASE_TAG}" \
+            --verify-tag \
+            --draft \
+            --title "${RELEASE_TAG}" \
+            --notes-file RELEASE_NOTES.md \
+            nova-darwin-arm64.tar.gz \
+            nova-darwin-x64.tar.gz \
+            nova-linux-x64.tar.gz \
+            nova-linux-arm64.tar.gz \
+            nova-windows-x64.zip \
+            nova-windows-arm64.zip \
+            SHA256SUMS
+
+  # ---------------------------------------------------------------------------
+  # PyPI / npm 发布——首次演练前保持整段注释；确认 draft release 产物后再开。
+  # 演练清单：
+  #   1. 取消注释下方两个 job（needs: publish 保持——draft 出来再发 registry，
+  #      registry 发完人工把 draft 转正式）；
+  #   2. PyPI 侧配置 trusted publishing（或 PYPI_API_TOKEN secret）；
+  #   3. npm 侧配置 NODE_AUTH_TOKEN（或 trusted publishing）；
+  #   4. 先发 -alpha 预演一次全流程。
+  # ---------------------------------------------------------------------------
+
+  # publish-pypi:
+  #   name: publish-pypi（nova-ai / nova-agent / nova-harness / nova-base）
+  #   needs: publish
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     id-token: write   # trusted publishing
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         ref: ${{ env.RELEASE_TAG }}
+  #         persist-credentials: false
+  #
+  #     - name: 安装 Python
+  #       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+  #       with:
+  #         python-version: '3.12'
+  #
+  #     - name: 构建四包 wheel/sdist（dry-run：只构建不上传）
+  #       run: |
+  #         set -euo pipefail
+  #         python -m pip install build
+  #         for pkg in packages/nova_ai packages/nova_agent packages/nova_harness bundles/nova_base; do
+  #           (cd "$pkg" && python -m build --outdir ../../pypi-dist)
+  #         done
+  #         ls -lh pypi-dist/
+  #
+  #     # 演练时先改成 twine check + echo（真发用 pypa/gh-action-pypi-publish）：
+  #     # - name: 上传 PyPI
+  #     #   uses: pypa/gh-action-pypi-publish@<pin SHA> # v1.x
+  #     #   with:
+  #     #     packages-dir: pypi-dist/
+
+  # publish-npm:
+  #   name: publish-npm（nova-tui）
+  #   needs: publish
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     id-token: write   # trusted publishing（npm >=11.5.1）
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         ref: ${{ env.RELEASE_TAG }}
+  #         persist-credentials: false
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+  #       with:
+  #         node-version: '22'
+  #         registry-url: 'https://registry.npmjs.org'
+  #
+  #     - name: 构建 + dry-run 打包检视（真发把 --dry-run 去掉）
+  #       working-directory: packages/nova-tui
+  #       run: |
+  #         set -euo pipefail
+  #         npm ci
+  #         npm run build
+  #         npm test
+  #         npm publish --dry-run
+  #       # 真发：npm publish（env NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}，
+  #       # 或 trusted publishing 免 token）
+
+  # 任何后续环节失败时清掉草稿，不留半成品（对齐既有发布管线的清理纪律）。
+  cleanup-draft:
+    name: cleanup-draft（失败时）
+    needs: [build-frontend, build-backend, test-packaged, assemble-release, publish]
+    if: ${{ always() && needs.publish.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 删除失败遗留的 draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          existing_release="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [[ "${existing_release}" == "true" ]]; then
+            gh release delete "${RELEASE_TAG}" --yes
+          fi

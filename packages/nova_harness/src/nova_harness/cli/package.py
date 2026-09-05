@@ -19,6 +19,7 @@ import sys
 from nova_harness.core.config.defaults import CONFIG_DIR_NAME
 from nova_harness.core.package import PackageManager
 from nova_harness.core.package.scaffold import scaffold_pyproject_nova_section
+from nova_harness.core.utils.version import harness_version
 
 
 def _fmt_pkg(pkg):
@@ -189,6 +190,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="nova-pkg",
         description="Nova package manager — install agents, tools, skills, extensions, and packages.",
+    )
+    # 版本单一事实源是 pyproject.toml（importlib.metadata 读打包/安装元数据）
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {harness_version()}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
