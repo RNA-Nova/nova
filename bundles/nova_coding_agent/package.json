@@ -4,6 +4,11 @@
   "description": "Nova coding agent bundle — 编程执行能力（8 工具 + 子代理四件套 + 执行扩展 + personas/prompts；requires nova-base）",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RNA-Nova/nova",
+    "directory": "bundles/nova_coding_agent"
+  },
   "nova": {
     "requires": ["nova-base"]
   }
