@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nova-base"
-version = "0.1.0"
+version = "0.1.1"
 description = "Nova base bundle — 会话产品基础设施（slash 命令、question/todo 工具、UI 原语词汇）"
 authors = ["nova"]
 readme = "README.md"

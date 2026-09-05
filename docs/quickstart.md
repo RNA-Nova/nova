@@ -44,12 +44,12 @@ nova
 - `!命令` 直接执行 bash（不进上下文）；`!!命令` 执行并进上下文；
 - `/help` 列出全部命令。
 
-## 4. 装编程能力包（按需）
+## 4. 编程能力包（0.1.1 起随安装器自动装）
 
-发布形态内建 `nova-base`（slash 命令、todo、question 等会话基础设施）。编程执行能力（bash/edit/grep/subagent 等 8 工具 + 5 个角色）由 `nova-coding-agent` bundle 提供：
+发布形态内建 `nova-base`（slash 命令、todo、question 等会话基础设施）；0.1.1 起安装器自检后会**自动安装** `nova-coding-agent`（bash/edit/grep/subagent 等 8 工具 + 5 个角色）。装失败或主动跳过（`NOVA_NO_CODING=1`）时手动补装：
 
 ```bash
-# npm 源（推荐——官方发布渠道）
+# npm 源（官方发布渠道）
 runtime/nova-server pkg install npm:nova-coding-agent
 
 # 或本地源码（path/git 源亦可）

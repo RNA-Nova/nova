@@ -101,7 +101,8 @@ import { SearchableSelector } from 'nova-tui/modes/tui/components/pickers/search
 
 ## 依赖与加载机制
 
-- `frontend/package.json` 声明运行时 `dependencies`（如 `pretty-ms`）——安装期 `npm ci` 装配；缺失时 TUI **后台自愈**补装（不阻塞启动，补完刷新上线）；
+- `frontend/package.json` 声明运行时 `dependencies`——安装期 `npm ci` 装配；缺失时 TUI **后台自愈**补装（不阻塞启动，补完刷新上线）；
+- **零依赖优先**：只用宿主共享件（pi-tui 组件、`nova-tui` 导出）与小体量 vendored 依赖时，安装与运行全程不需要用户机有 Node/npm——官方 bundle 即此形态（`tui/lib/vendor/` 收编 jsdiff/pretty-ms/parse-ms，带原版 sha256 出处注释与 LICENSE；vendor 纪律：换版重拉官方 dist 对账 sha256，禁止手改内容）；
 - 加载器是 jiti（直读 TS 源，不需要构建步骤）；`*.test.ts` 不进发现面；
 - 渲染器对 `nova-tui` 与 `@earendil-works/pi-tui` 的 import 经 virtualModules 直供（打包二进制形态下磁盘上无宿主 node_modules 也能解析）。
 

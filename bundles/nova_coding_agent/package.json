@@ -1,6 +1,6 @@
 {
   "name": "nova-coding-agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Nova coding agent bundle — 编程执行能力（8 工具 + 子代理四件套 + 执行扩展 + personas/prompts；requires nova-base）",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "nova-tui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Nova 前端运行时：后端会话管理、事件管线、呈现模型 + 内置 TUI 宿主（modes/tui）；M3 WS 宿主归 hosts/",
   "type": "module",
   "main": "dist/index.js",

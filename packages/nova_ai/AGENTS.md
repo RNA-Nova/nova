@@ -9,7 +9,7 @@
 `nova_ai` 是 Nova monorepo 的最底层子包，职责是为上层（`nova_agent`、`nova_harness` 等）提供**多厂商统一的流式调用接口**。架构与 TypeScript 端 `pi/packages/ai` 对齐：以 `Models` 集合 + `Provider` 运行时单元 + API 协议实现（`api_impls/`）三层组织，对外暴露 `stream` / `complete` / `stream_simple` / `complete_simple` API。
 
 - **源码包名**：`nova_ai`
-- **版本**：`0.1.0`
+- **版本**：`0.1.1`
 - **目标语言**：Python `>=3.12,<3.14`
 - **项目语言**：代码注释与文档主要使用**中文**
 - **License**：MIT
@@ -199,5 +199,5 @@ pixi run -e dev pytest tests                        # 全部（需相应 API key
 
 ## 版本与变更
 
-- 当前版本：`0.1.0`（Alpha）
+- 当前版本：`0.1.1`（Alpha）
 - 变更日志：`CHANGELOG.md`（当前为空）

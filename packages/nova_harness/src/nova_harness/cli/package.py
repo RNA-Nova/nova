@@ -308,6 +308,17 @@ def main(argv=None):
 
     pm = PackageManager(on_progress=_print_progress)
 
+    # 冻结形态：pkg 可能是用户装包的首个触点（先于任何会话装配）——
+    # 内建官方包须先落地登记并物化进安装仓，否则 pkg 域（list /
+    # requires 门）看不见它（会话解析面读 settings 源清单，安装仓视图
+    # 由 resolve_resources 对齐两者）；开发态整段零动作
+    if getattr(sys, "frozen", False):
+        from nova_harness.core.config.defaults import get_agent_dir
+        from nova_harness.core.package.builtin import ensure_builtin_packages
+
+        ensure_builtin_packages(pm.settings_manager, str(get_agent_dir()))
+        asyncio.run(pm.resolve_resources())
+
     dispatch = {
         "list": cmd_list,
         "install": cmd_install,

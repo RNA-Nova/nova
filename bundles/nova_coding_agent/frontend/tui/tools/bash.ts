@@ -11,7 +11,7 @@
  *   （渲染器不自渲 running 文本/计时行）；截断警告带完整输出路径；
  * - 展示前剥掉输出末尾的 full-output footer（避免与警告行重复）。
  */
-import prettyMs from 'pretty-ms';
+import prettyMs from '../lib/vendor/pretty-ms.js';
 import { Container, Text, wrapTextWithAnsi, type Component } from '@earendil-works/pi-tui';
 
 import { detailsOf, type RendererInput } from 'nova-tui';

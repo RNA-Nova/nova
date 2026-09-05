@@ -1,16 +1,12 @@
 {
   "name": "nova-coding-agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Nova coding agent — frontend half (TUI renderers/commands/themes)",
   "type": "module",
   "scripts": {
     "test": "tsx --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "pretty-ms": "^9.2.0",
-    "diff": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

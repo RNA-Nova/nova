@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nova-coding-agent"
-version = "1.0.0"
+version = "1.0.1"
 description = "Nova coding agent with local file system tools"
 authors = ["nova"]
 readme = "README.md"

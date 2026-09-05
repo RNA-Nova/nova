@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nova-ai"
-version = "0.1.0"
+version = "0.1.1"
 description = "统一的 LLM 提供商抽象层，支持流式调用、模型注册和鉴权。"
 authors = ["Liujinming"]
 readme = "README.md"

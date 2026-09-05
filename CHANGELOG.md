@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
+## [0.1.1] - 2026-09-06
+
+### Added
+- **install.sh 装完即装官方编程能力包**：自检通过后自动 `nova-server pkg install npm:nova-coding-agent`（幂等——已装/同版由包管理器处理；失败降级为打印手动装法不阻断安装；`NOVA_NO_CODING=1` / `NOVA_OFFLINE=1` 跳过）——curl 一条命令落地即是完整编程助手。配套：pkg CLI 在冻结形态先落地内建 nova-base（此前 `pkg install` 若先于任何会话执行会撞 requires 门——pkg 是装包触点，内建落地不应以会话为前提）。
+
+### Changed
+- **官方编程 bundle 前端零运行时依赖**：`pretty-ms` 与 `diff` 从 `frontend/package.json` 的 dependencies 移除——pretty-ms/parse-ms（纯 ESM 两件）与 jsdiff（官方 dist 单文件，.cjs 形态规避 ESM 包下 UMD 落空）原样 vendored 进 `frontend/tui/lib/vendor/`（带原版 sha256 出处注释与 LICENSE 随行；唯一改动是 pretty-ms 的 bare import 改写为相对路径并在头注声明）；无 Node/npm 机器上装包零警告、bash/edit 等定制卡片不再降级为通用卡片（实测：无 npm 的 PATH 下 PTY 真实会话定制卡片照出）。
+
 ## [0.1.0] - 2026-09-05
 
 > 首个封版。说明：executor 相关（`nova_executor` / `nova-executor-py` 包与

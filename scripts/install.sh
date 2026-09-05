@@ -200,6 +200,27 @@ maybe_setup_path() {
   say ""
 }
 
+# —— 官方编程能力包 ————————————————————————————————————————————————
+
+# 装完二进制即装 nova-coding-agent（npm 源——官方发布渠道）：
+# 幂等（已装/同版由包管理器侧处理），失败只警告不阻断（降级为打印手动
+# 装法）。NOVA_NO_CODING=1 或离线（NOVA_OFFLINE=1）跳过。
+maybe_install_coding_bundle() {
+  if [ "${NOVA_NO_CODING:-}" = "1" ] || [ "${NOVA_OFFLINE:-}" = "1" ]; then
+    say "跳过编程能力包（NOVA_NO_CODING/NOVA_OFFLINE）——手动装：nova-server pkg install npm:nova-coding-agent"
+    return 0
+  fi
+  server="$(install_root)/current/runtime/nova-server"
+  say ""
+  say "安装官方编程能力包（npm:nova-coding-agent）…"
+  if "$server" pkg install npm:nova-coding-agent; then
+    return 0
+  fi
+  say "警告：编程能力包安装未成功（可稍后手动装）："
+  say "  $(install_root)/current/runtime/nova-server pkg install npm:nova-coding-agent"
+  say "  编程能力缺失时 nova 仍有会话基础设施（nova-base 内建）。"
+}
+
 # —— 卸载 —————————————————————————————————————————————————————————————
 
 do_uninstall() {
@@ -279,10 +300,12 @@ main() {
   fi
   say "自检: nova --version = $reported"
 
+  maybe_install_coding_bundle
+
   maybe_setup_path
 
   say ""
-  say "安装完成。运行 nova 启动（后端 nova-server 随二进制同行，无需额外安装）。"
+  say "安装完成。运行 nova 启动（编程能力已随行——bash/edit/grep 等工具与 coding_agent 角色）。"
   if [ -t 1 ] && bin_dir_on_path; then
     say "卸载：curl -fsSL $NOVA_RELEASES_BASE/latest/download/install.sh | sh -s -- uninstall"
   fi

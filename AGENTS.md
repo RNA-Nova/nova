@@ -10,7 +10,7 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 
 - **目标语言**：Python `>=3.12,<3.14`
 - **项目语言**：代码注释与文档主要使用**中文**
-- **当前阶段**：Alpha（版本 `0.1.0`，其中 `nova-coding-agent` bundle 为 `1.0.0`）
+- **当前阶段**：Alpha（版本 `0.1.1`，其中 `nova-coding-agent` bundle 为 `1.0.1`）
 - **License**：MIT
 - **作者**：Liujinming
 
@@ -435,5 +435,5 @@ poetry run pytest tests -m "not integration"
 
 ## 版本与变更
 
-- 当前版本：`0.1.0`（Alpha）；`nova-coding-agent` bundle 版本为 `1.0.0`
+- 当前版本：`0.1.1`（Alpha）；`nova-coding-agent` bundle 版本为 `1.0.1`
 - 变更日志：根目录 `CHANGELOG.md` 记录了仓库级变更；各子包的 `CHANGELOG.md` 目前为空。

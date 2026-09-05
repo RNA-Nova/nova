@@ -26,7 +26,8 @@ curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh 
 4. 解压到 `~/.nova/agent/install/releases/<版本>/`，翻转 `current` 符号链接；
 5. 链接 `~/.local/bin/nova` → 当前版本；
 6. 装后自检（`nova --version` 报号与目标版本不一致即判负）；
-7. `~/.local/bin` 不在 PATH 时，交互式询问写入 shell profile（非终端环境改为打印指引）。
+7. **安装官方编程能力包**（`npm:nova-coding-agent`——失败只警告不阻断，手动补装命令会打印出来；`NOVA_NO_CODING=1` 或 `NOVA_OFFLINE=1` 跳过）；
+8. `~/.local/bin` 不在 PATH 时，交互式询问写入 shell profile（非终端环境改为打印指引）。
 
 安装到自定义位置：`NOVA_INSTALL_DIR` / `NOVA_BIN_DIR` 覆盖缺省。
 

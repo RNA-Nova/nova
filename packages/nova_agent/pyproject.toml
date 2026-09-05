@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nova-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "事件驱动的异步 Agent 框架，负责状态管理、工具执行、消息队列和生命周期控制。"
 authors = ["Liujinming"]
 readme = "README.md"

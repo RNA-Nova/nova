@@ -11,7 +11,7 @@
  * 原始字节）。
  */
 
-import * as Diff from 'diff';
+import * as Diff from './vendor/jsdiff.cjs';
 import { constants } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
