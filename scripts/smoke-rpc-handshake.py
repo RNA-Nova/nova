@@ -60,6 +60,12 @@ class Wire:
 
 
 def main() -> int:
+    # Windows runner 的 Python 控制台缺省 cp1252——✔/✘ 与中文输出会直接
+    # UnicodeEncodeError；重配 UTF-8（errors=replace 兜底非常规控制台）
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     binary = sys.argv[1] if len(sys.argv) > 1 else "runtime/nova-server"
     proc = subprocess.Popen(
         [binary],
