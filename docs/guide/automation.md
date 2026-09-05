@@ -25,6 +25,8 @@ runtime/nova-server run coding_agent --task "…"
 
 退出码：0 成功；非 0 失败（模型错误/工具失败/中断）。CI 里直接用。
 
+> **headless 权限门**：`permission_gate` 在无 UI 时无法询问，危险命令（rm -rf/sudo/chmod 777 类）**默认拦截**；写保护路径全模式拦截。自动化/评测环境若需放开，在组合声明里摘除（`extensions: ["!permission_gate"]` 或显式名单不含它）——自定义 `bench_agent.yaml` 放 `~/.nova/agent/agents/` 即可（实测对照：`coding_agent` 拦截 rm -rf、摘除后同命令执行）。
+
 ## RPC 模式（自写前端）
 
 ```bash
