@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -61,6 +62,9 @@ _OPTIONAL_ATTRS: Dict[str, Any] = {
 }
 
 
+logger = logging.getLogger(__name__)
+
+
 def _import_executor_module(
     executor_path: str, name_hint: str
 ) -> tuple[Optional[Any], Optional[ResourceDiagnostic]]:
@@ -83,6 +87,7 @@ def _import_executor_module(
         spec.loader.exec_module(module)
         return module, None
     except Exception as exc:
+        logger.warning("工具 executor 导入失败（%s）: %s", executor_path, exc)
         return None, ResourceDiagnostic(
             category="error",
             message=f"Failed to import tool executor: {exc}",

@@ -115,6 +115,15 @@ echo "==> 暂存 bundles/nova_base（剔除 node_modules/__pycache__/.pytest_cac
     --exclude='.git' \
     nova_base) | (mkdir -p "$WORK_DIR" && cd "$WORK_DIR" && tar -xf -)
 
+# 仅被"运行时动态加载的包代码"（工具/扩展/用户工具）引用的 stdlib 纯 Python
+# 模块对 PyInstaller 静态分析不可达，必须显式 hidden-import——缺失表现为对应
+# 工具静默缺席（difflib 缺 → edit 工具消失的实录）。新增包代码引入了静态面
+# （nova_ai/nova_agent/nova_harness/nova_base 全量收集）未覆盖的 stdlib 模块时
+# 在此追加；tests/…/test_frozen_hidden_imports.py 会按 AST 差集核对漂移。
+# （mimetypes/unicodedata 当前经第三方传递可达，仍显式声明——不把正确性押在
+# 依赖树的偶然性上。）
+HIDDEN_IMPORTS=(difflib codecs stat mimetypes unicodedata)
+
 echo "==> PyInstaller onedir 冻结（入口 nova_harness.cli.backend:main）"
 "$VENV_PYTHON" -m PyInstaller \
     --onedir \
@@ -124,6 +133,7 @@ echo "==> PyInstaller onedir 冻结（入口 nova_harness.cli.backend:main）"
     --collect-all nova_agent \
     --collect-all nova_harness \
     --collect-all nova_base \
+    $(printf -- "--hidden-import %s " "${HIDDEN_IMPORTS[@]}") \
     --add-data "$(nat "$STAGED_BUNDLE")${ADD_DATA_SEP}bundles/nova_base" \
     --distpath "$(nat "$WORK_DIR/dist")" \
     --workpath "$(nat "$WORK_DIR/build")" \
