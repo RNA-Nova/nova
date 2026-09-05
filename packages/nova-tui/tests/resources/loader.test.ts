@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -485,5 +486,49 @@ export default function (api) { api.registerDialog('ask', () => 'from-index'); }
       { kind: 'markdown', text: 'loose-project' },
     ]);
     assert.equal(slots.sourceOf(toolSlot('bash')), 'project');
+  });
+});
+
+
+describe('npm 自愈（不阻塞加载路径）', () => {
+  it('缺依赖包：本轮诊断降级 + 后台补装完成回调 + 渲染器照常注册', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'nova-loader-heal-'));
+    created.push(dir);
+    await writeFile(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'heal-pkg', version: '0.0.1' }),
+    );
+    const renderersDir = join(dir, 'frontend', 'tui', 'tools');
+    await mkdir(renderersDir, { recursive: true });
+    const rendererPath = join(renderersDir, 'mytool.ts');
+    await writeFile(rendererPath, SIMPLE_RENDERER);
+    const assets: PackageUIAssets = {
+      packageName: 'heal-pkg',
+      scope: 'user',
+      installPath: dir,
+      renderers: new Map([['mytool', rendererPath]]),
+      themes: new Map(),
+      needsNpmInstall: true,
+    };
+
+    let healed: boolean | undefined;
+    const slots = new SlotRegistry();
+    const result = await loadUIAssets([assets], slots, {
+      onNpmHealed: (_name, ok) => {
+        healed = ok;
+      },
+    });
+
+    // 不阻塞：加载已返回，诊断含"补装中"，纯 TS 渲染器照常注册
+    assert.ok(result.diagnostics.some((d) => d.message.includes('补装中')));
+    assert.ok(slots.resolveToolRenderer('mytool'));
+
+    // 后台补装完成回调（无依赖包安装很快）
+    const deadline = Date.now() + 30000;
+    while (healed === undefined && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(healed, true);
+    // 零依赖包 npm 不产生 node_modules——补装成功以返回值与回调为准
   });
 });

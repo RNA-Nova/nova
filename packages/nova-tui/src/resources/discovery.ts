@@ -114,6 +114,9 @@ export async function discoverUIAssets(
     extensionEntry,
     themes,
     needsNpmInstall,
+    // 自愈工作目录与判定同目录（A 型 frontend/ 半区，B 型包根）——
+    // 安装器 _npm_manifest_dir 同规则
+    ...(existsSync(halfManifest) ? { npmDir: halfRoot } : {}),
   };
 }
 

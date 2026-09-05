@@ -22,11 +22,24 @@
  * - 诊断即数据：失败/碰撞统一进 result.diagnostics（不阻断、不日志）。
  */
 
-import { createJiti } from 'jiti';
+// jiti/static：静态引入 babel transform——bun --compile 才能把它打进二进制
+// （pi core/extensions/loader.ts 同款；普通 node/tsx 模式同样可用）
+import { createJiti } from 'jiti/static';
 import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { ensureNpmDependencies } from '../packages/npm.js';
+// —— 编译二进制（bun --compile）模式的宿主模块锚点 ——
+// 必须静态 import，bun 才会把这些模块打进二进制；运行时经 jiti
+// virtualModules 直供包渲染器（磁盘上没有宿主 dist 可供别名解析）。
+import * as bundledPiTui from '@earendil-works/pi-tui';
+import * as bundledNovaTui from '../index.js';
+import * as bundledBlocksDiff from '../modes/tui/blocks/diff.js';
+import * as bundledBlocksTable from '../modes/tui/blocks/table.js';
+import * as bundledDynamicBorder from '../modes/tui/components/layout/dynamic-border.js';
+import * as bundledSearchable from '../modes/tui/components/pickers/searchable.js';
+import * as bundledThemes from '../modes/tui/themes/index.js';
+import * as bundledTuiSettings from '../modes/tui/utils/tui-settings.js';
+import { healNpmDependencies } from '../packages/npm.js';
 import {
   createExtensionUIAPI,
   type DialogFactory,
@@ -44,11 +57,33 @@ import type {
 import { parseThemeJson, resolveThemeColors, type ThemeJson } from '../presentation/theme-json.js';
 import { readFileSync } from 'node:fs';
 
-/** 本包源码/产物根（jiti 别名目标——renderers 的 import 契约锚点）。 */
-const runtimeRoot = fileURLToPath(new URL('..', import.meta.url));
+/** bun --compile 二进制检测（bunfs 虚拟文件系统路径标记，pi config.ts 同款）。 */
+const isBunBinary =
+  import.meta.url.includes('$bunfs') ||
+  import.meta.url.includes('~BUN') ||
+  import.meta.url.includes('%7EBUN');
 
-/** pi-tui 宿主副本入口（jiti 别名目标——包组件与宿主共享同一模块实例）。 */
-const piTuiEntry = createRequire(import.meta.url).resolve('@earendil-works/pi-tui');
+/** 本包源码/产物根（jiti 别名目标——renderers 的 import 契约锚点）。
+ *  惰性：编译二进制中 bunfs 路径无磁盘对应，只在别名分支才求值。 */
+const runtimeRoot = () => fileURLToPath(new URL('..', import.meta.url));
+
+/** pi-tui 宿主副本入口（jiti 别名目标——包组件与宿主共享同一模块实例）。
+ *  惰性：编译二进制中 createRequire 无法从 bunfs 解析（顶层求值会让 --help 都崩）。 */
+const piTuiEntry = () => createRequire(import.meta.url).resolve('@earendil-works/pi-tui');
+
+/** 编译二进制模式下经 jiti virtualModules 直供的宿主模块表（精确 specifier 匹配）。
+ *  覆盖官方 bundles 渲染器用到的全部宿主导入面；第三方包用表外子路径会加载失败
+ *  （生产化需收敛渲染器导入契约或构建期生成此表）。 */
+const VIRTUAL_MODULES: Record<string, unknown> = {
+  'nova-tui': bundledNovaTui,
+  'nova-tui/modes/tui/blocks/diff': bundledBlocksDiff,
+  'nova-tui/modes/tui/blocks/table': bundledBlocksTable,
+  'nova-tui/modes/tui/components/layout/dynamic-border': bundledDynamicBorder,
+  'nova-tui/modes/tui/components/pickers/searchable': bundledSearchable,
+  'nova-tui/modes/tui/themes/index': bundledThemes,
+  'nova-tui/modes/tui/utils/tui-settings': bundledTuiSettings,
+  '@earendil-works/pi-tui': bundledPiTui,
+};
 
 /**
  * 模块产物缓存：按 文件路径 + mtime
@@ -84,6 +119,8 @@ export interface ResourceLoaderOptions {
   uiState?: UIStateStore;
   /** dialog:* 注册变化钩子（runtime 注入——触发能力重宣告）。 */
   onDialogChange?: () => void;
+  /** npm 自愈完成钩子（runtime 注入——补装完刷新 + 通知；ok=是否成功）。 */
+  onNpmHealed?: (packageName: string, ok: boolean) => void;
 }
 
 /** 加载包的 ui/ 资产到 slots（纯管线：调用方负责 trust 过滤与发现）。 */
@@ -97,14 +134,18 @@ export async function loadUIAssets(
   const themeSources = new Map<string, string>();
 
   const jiti = createJiti(import.meta.url, {
-    alias: {
-      'nova-tui': runtimeRoot,
-      // pi-tui 锚定宿主副本（jiti 原生导入共享 ESM 缓存——getKeybindings
-      // 等模块级单例与宿主同实例，已实测验证）；双包分裂会破坏键位匹配
-      '@earendil-works/pi-tui': piTuiEntry,
-    },
     moduleCache: false,
     fsCache: false,
+    // 编译二进制：宿主模块不在磁盘——virtualModules 直供内存模块对象；
+    // 否则走 dist 别名锚定宿主副本（双包分裂会破坏 getKeybindings 等模块级单例）
+    ...(isBunBinary
+      ? { virtualModules: VIRTUAL_MODULES, tryNative: false }
+      : {
+          alias: {
+            'nova-tui': runtimeRoot(),
+            '@earendil-works/pi-tui': piTuiEntry(),
+          },
+        }),
   });
 
   /** 缓存读取（mtime 未变命中）；force 旁路。 */
@@ -122,7 +163,16 @@ export async function loadUIAssets(
 
   for (const pkg of assets) {
     if (pkg.needsNpmInstall) {
-      await ensureNpmDependencies(pkg.installPath);
+      // 不阻塞加载路径：后台补装（时长归 npm 自己的超时/重试管），
+      // 完成经 onNpmHealed 回调由 runtime 刷新 + 通知；本轮该包缺依赖的
+      // 渲染器 import 失败按诊断降级，补装后下轮上线
+      result.diagnostics.push({
+        type: 'warning',
+        message: `包 ${pkg.packageName} 缺 npm 依赖——后台补装中，完成后自动生效`,
+      });
+      void healNpmDependencies(pkg.npmDir ?? pkg.installPath).then((ok) => {
+        options.onNpmHealed?.(pkg.packageName, ok);
+      });
     }
 
     // 包的注册通道（渲染器/区域部件/命令/快捷键同源同路；碰撞收集为诊断）

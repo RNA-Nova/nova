@@ -416,6 +416,22 @@ export class NovaUIRuntime implements RuntimeHost {
         uiSettings: this.uiSettings,
         uiState: this.uiState,
         onDialogChange: () => this.refreshDialogCapabilities(),
+        // npm 自愈后台任务的完成回调：补齐则刷新让渲染器上线；失败通知
+        // 带修复指引（渲染器本轮已按诊断降级为通用显示）
+        onNpmHealed: (name, ok) => {
+          if (ok) {
+            this.store.addNotice(
+              'info',
+              `包 ${name} 的呈现依赖已补齐——重新加载渲染器`,
+            );
+            void this.refreshPackages();
+          } else {
+            this.store.addNotice(
+              'error',
+              `包 ${name} 的 npm 依赖补装失败（无 npm 或网络问题）——渲染器降级为通用显示；装 Node 后 /reload 或重装该包重试`,
+            );
+          }
+        },
       });
       // 诊断统一透出（加载失败 + 覆盖碰撞）
       for (const diagnostic of result.diagnostics) {

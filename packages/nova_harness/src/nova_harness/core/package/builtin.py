@@ -1,8 +1,14 @@
 """内建官方包通道（打包形态首启开箱即用）。
 
-冻结二进制随包携带官方 bundle（nova-base / nova-coding-agent）；首次装配
-会话时把它们落地到 ``<agentDir>/builtin/<name>/`` 并登记进 settings 包
-清单——之后与正常安装的 path 包完全同机制（注册表/resolver/遮蔽/面板可见）。
+冻结二进制随包携带 nova-base（会话基础设施——slash 命令 + question/todo
+工具 + UI 原语糖库）；首次装配会话时把它落地到 ``<agentDir>/builtin/
+nova_base/`` 并登记进 settings 包清单——之后与正常安装的 path 包同机制
+（注册表/resolver/遮蔽/面板可见）。nova-base 不可经包管理器卸载
+（PackageManager.uninstall 的基础包守护）；用户直接编辑 settings 移除
+条目的，不回补（``.seeded.json`` 记录已播种名单）。
+
+编程执行能力（nova-coding-agent）**不内建**——产品定案：壳内建、能力
+按需装（``nova-server pkg install``）。
 
 纪律：
 
@@ -25,7 +31,7 @@ from typing import TYPE_CHECKING, List
 if TYPE_CHECKING:
     from nova_harness.core.config.settings.manager import SettingsManager
 
-_BUILTIN_BUNDLES = ("nova_base", "nova_coding_agent")
+_BUILTIN_BUNDLES = ("nova_base",)
 _SEEDED_FILE = ".seeded.json"
 _VERSION_MARKER = ".builtin-version"
 

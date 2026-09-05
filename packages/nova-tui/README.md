@@ -47,7 +47,9 @@ npm install -g nova-tui
 - **Node.js `>=22.19.0`**；
 - **Python `>=3.12` 环境可 import `nova_harness`**（`pip install nova-harness`，连带 `nova-ai`、`nova-agent`）——TUI 启动时以子进程方式 spawn `<python> -m nova_harness.modes.rpc.cli` 作为后端。默认解释器为 `python3`，可用环境变量 `NOVA_PYTHON` 指定其他解释器路径（如虚拟环境或 pixi 环境的 python）。
 
-Agent 能力（工具、slash 命令、子代理等）由已安装的 Nova 包提供——官方编程 bundle `nova-coding-agent` 经 `nova-pkg install` 安装后即可在 TUI 中使用。
+后端启动命令解析链（`wire/backend-command.ts`，从高到低）：`NOVA_BACKEND`（显式指定后端二进制路径）→ 同目录 `runtime/nova-server`（打包形态：`nova` 二进制旁的随行后端，此时无需任何 Python 环境）→ `NOVA_PYTHON` → `python3` 模块调用。
+
+Agent 能力（工具、slash 命令、子代理等）由已安装的 Nova 包提供——官方双 bundle `nova-base`（会话基础设施）+ `nova-coding-agent`（编程执行）经 `nova-pkg install` 安装后即可在 TUI 中使用；打包形态下 nova-base 内建随行（首启即用），nova-coding-agent 按需 `nova-server pkg install` 安装。
 
 ## 快速上手
 

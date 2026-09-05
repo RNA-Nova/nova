@@ -35,6 +35,8 @@ export interface PackageUIAssets {
   themes: Map<string, string>;
   /** 包根有 package.json 但 node_modules 缺失（需 npm 自愈）。 */
   needsNpmInstall: boolean;
+  /** npm 清单所在目录（A 型为 frontend/ 半区，B 型即包根）——自愈的工作目录。 */
+  npmDir?: string;
 }
 
 /** 覆盖碰撞：同名键的胜者/败者与来源在案。 */

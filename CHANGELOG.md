@@ -519,7 +519,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **官方 bundle 拆分为 `nova-base` + `nova-coding-agent`**（基础设施 / 执行能力分层）：`nova-base` 收会话产品基础设施（`session_commands` 21 命令、`tools_panel`、`confirm_destructive`、`question`/`todo` 工具、`ui_primitives` 原语糖库、6 个 slash 命令 UI 与 question/tools 对话框、todo/question 渲染器）；`nova-coding-agent` 收编程执行（8 工具、子代理、persona/prompts、四个 gate 扩展、工具渲染器与 interactive-shell 对话框），经 `requires = ["nova-base"]` 声明包间依赖（装/卸自动校验）。安装基线变为双包：`nova-pkg install` 两个包。
 
 ### Added
-- **打包形态基建（二进制分发的后端四件）**：①统一入口分发器 `cli/backend.py`——`nova-server [rpc|run|pkg]`（裸跑缺省 rpc；pip 渠道的 `nova-harness`/`nova-harness-rpc`/`nova-pkg` 三启动器不受影响，挂同一批 main）；②子代理冻结兼容——`sys.frozen` 时自调从"解释器 + `-m` 模块调用"切换为"二进制自身 + `run` 子命令"；③内建官方包通道（`core/package/builtin.py`）——冻结形态首启把随包携带的双 bundle 落地到 `~/.nova/agent/builtin/<name>/` 并登记进 settings 包清单（幂等、版本升级重落地、用户卸载不回补），之后与正常 path 包同机制；④冻结形态依赖落点（`.site/`）——`FrozenSiteBackend`（`pip install --target <base>/packages/.site/`，宿主 python 经 `NOVA_PYTHON` > 系统 python3（校验大版本 + pip 可用）探测，无宿主时装包不阻断、警告带指引）+ `runtime_paths.ensure_package_paths`（装配时把 `.site/` 与各包 `backend/` 挂进内嵌解释器 sys.path，append 序——包不能遮蔽 nova_* 内建模块）。
+- **打包形态基建（二进制分发的后端四件）**：①统一入口分发器 `cli/backend.py`——`nova-server [rpc|run|pkg]`（裸跑缺省 rpc；pip 渠道的 `nova-harness`/`nova-harness-rpc`/`nova-pkg` 三启动器不受影响，挂同一批 main）；②子代理冻结兼容——`sys.frozen` 时自调从"解释器 + `-m` 模块调用"切换为"二进制自身 + `run` 子命令"；③内建官方包通道（`core/package/builtin.py`）——冻结形态首启把随包携带的 nova-base 落地到 `~/.nova/agent/builtin/nova_base/` 并登记进 settings 包清单（幂等、版本升级重落地；nova-base 受基础包守护不可卸载——卸载即失去会话基础设施），之后与正常 path 包同机制；产品定案：壳（nova-base）内建、编程能力（nova-coding-agent）按需 `nova-server pkg install`；④冻结形态依赖落点（`.site/`）——`FrozenSiteBackend`（`pip install --target <base>/packages/.site/`，宿主 python 经 `NOVA_PYTHON` > 系统 python3（校验大版本 + pip 可用）探测，无宿主时装包不阻断、警告带指引）+ `runtime_paths.ensure_package_paths`（装配时把 `.site/` 与各包 `backend/` 挂进内嵌解释器 sys.path，append 序——包不能遮蔽 nova_* 内建模块）。
+- **前端二进制可编译性（bun --compile 适配，spike 实证 62MB/冷启 0.04s）**：`resources/loader.ts`——jiti 改 `jiti/static` 导入（静态引入 babel transform，否则打包丢掉）；顶层 `createRequire().resolve` 惰性化 + `isBunBinary` 检测；bun 形态 jiti 走 `virtualModules` 直供宿主模块（pi-tui + nova-tui 根 + 6 个 `modes/tui/*` 子路径的静态 import 锚点），非 bun 形态保持 dist 别名锚定不变。
+- **后端发现链（`wire/backend-command.ts` 的 `resolveBackendCommand`）**：`NOVA_BACKEND` 显式指定 > 同目录 `runtime/nova-server[.exe]`（打包形态随行后端）> `NOVA_PYTHON` > `python3 -m nova_harness.modes.rpc.cli`；TUI spawn 点改走该解析。
+- **npm 自愈加固**：`packages/npm.ts` 重写——后台任务不阻塞加载路径（loader 本轮诊断降级"依赖补装中"，完成经 `onNpmHealed` 回调由 runtime 刷新 + 转录通知）、同目录 in-flight 去重、有 lockfile 走 `npm ci --omit=dev`（可复现）否则 `npm install --omit=dev`、`NOVA_OFFLINE` 跳过；时长归 npm 自身 fetch 超时/重试管（不设强制外层超时，防误杀大包）。
+
+### Fixed
+- **/packages 面板卸载/更新参数键名错位修复**：面板发 {name}，后端严格形状要 nameOrSource（router 类型化契约收紧后的遗留失配）——面板卸载/更新此前必败（-32602 字段缺失）；改按线上契约发 camelCase，新增 PTY 端到端覆盖（pty-packages-panel.py：双包列表 → 面板卸载 → 通知 + 列表摘除）。
+- **官方基础包卸载守护**：nova-base 不可卸载（卸载即失去 21 个 slash 命令/question/todo 工具/UI 原语——会话基础设施），PackageManager.uninstall 基础包守护（先于 requires 守护）+ /packages 面板对其不提供卸载动作。
 
 ### 早期雏形（2026-04，当时未封版）
 

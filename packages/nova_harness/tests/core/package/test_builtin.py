@@ -1,7 +1,8 @@
 """内建官方包通道（core/package/builtin.py）测试。
 
 冻结形态的首启落地 + settings 登记 + 幂等 + 版本刷新 + 卸载尊重；
-非冻结形态零动作。全部用临时 _MEIPASS 假包 + 临时 agentDir。
+非冻结形态零动作。内建清单只有 nova-base（产品定案：壳内建、能力按需装）。
+全部用临时 _MEIPASS 假包 + 临时 agentDir。
 """
 
 import sys
@@ -48,33 +49,24 @@ def test_not_frozen_noop(tmp_path, monkeypatch):
 
 
 def test_frozen_first_boot_lands_and_registers(tmp_path, monkeypatch):
-    """首启：双包落地 builtin/ + 登记进 settings + 播种标记。"""
+    """首启：nova-base 落地 builtin/ + 登记进 settings + 播种标记。"""
     _make_bundled(tmp_path, "nova_base", "0.1.0")
-    _make_bundled(tmp_path, "nova_coding_agent", "1.0.0")
     agent_dir = _freeze(monkeypatch, tmp_path)
     sm = _settings(agent_dir)
 
     actions = builtin.ensure_builtin_packages(sm, str(agent_dir))
 
     assert "landed nova_base@0.1.0" in actions
-    assert "landed nova_coding_agent@1.0.0" in actions
     assert "registered nova_base" in actions
-    assert "registered nova_coding_agent" in actions
     assert (agent_dir / "builtin" / "nova_base" / "backend" / "marker.txt").exists()
     sources = [str(getattr(s, "source", s)) for s in sm.get_package_sources()]
     # settings 持久化统一 posix 分隔符——断言按名字判定（Windows 不假设分隔符）
-    assert any(
-        "nova_base" in s and "builtin" in s.replace("\\", "/") for s in sources
-    )
-    assert any(
-        "nova_coding_agent" in s and "builtin" in s.replace("\\", "/") for s in sources
-    )
+    assert any("nova_base" in s and "builtin" in s.replace("\\", "/") for s in sources)
 
 
 def test_frozen_second_boot_idempotent(tmp_path, monkeypatch):
     """二次启动：版本一致零动作。"""
     _make_bundled(tmp_path, "nova_base", "0.1.0")
-    _make_bundled(tmp_path, "nova_coding_agent", "1.0.0")
     agent_dir = _freeze(monkeypatch, tmp_path)
     sm = _settings(agent_dir)
     builtin.ensure_builtin_packages(sm, str(agent_dir))
@@ -86,7 +78,6 @@ def test_frozen_second_boot_idempotent(tmp_path, monkeypatch):
 def test_frozen_version_upgrade_relands(tmp_path, monkeypatch):
     """二进制内 bundle 版本变了：重落地但不回补登记（条目已存在）。"""
     _make_bundled(tmp_path, "nova_base", "0.1.0")
-    _make_bundled(tmp_path, "nova_coding_agent", "1.0.0")
     agent_dir = _freeze(monkeypatch, tmp_path)
     sm = _settings(agent_dir)
     builtin.ensure_builtin_packages(sm, str(agent_dir))
@@ -96,20 +87,18 @@ def test_frozen_version_upgrade_relands(tmp_path, monkeypatch):
 
     shutil.rmtree(tmp_path / "meipass")
     _make_bundled(tmp_path, "nova_base", "0.2.0")
-    _make_bundled(tmp_path, "nova_coding_agent", "1.0.0")
 
     actions = builtin.ensure_builtin_packages(sm, str(agent_dir))
     assert "landed nova_base@0.2.0" in actions
     assert "registered nova_base" not in actions  # 已登记，不重复
-    assert (
-        agent_dir / "builtin" / "nova_base" / ".builtin-version"
-    ).read_text().strip() == "0.2.0"
+    assert (agent_dir / "builtin" / "nova_base" / ".builtin-version").read_text(
+        encoding="utf-8"
+    ).strip() == "0.2.0"
 
 
 def test_frozen_respects_user_removal(tmp_path, monkeypatch):
     """播种后用户从 settings 移除条目：不再回补。"""
     _make_bundled(tmp_path, "nova_base", "0.1.0")
-    _make_bundled(tmp_path, "nova_coding_agent", "1.0.0")
     agent_dir = _freeze(monkeypatch, tmp_path)
     sm = _settings(agent_dir)
     builtin.ensure_builtin_packages(sm, str(agent_dir))
@@ -118,12 +107,11 @@ def test_frozen_respects_user_removal(tmp_path, monkeypatch):
     sm.set_packages([])
     actions = builtin.ensure_builtin_packages(sm, str(agent_dir))
     assert "registered nova_base" not in actions
-    assert "registered nova_coding_agent" not in actions
     assert sm.get_package_sources() == []
 
 
 def test_frozen_missing_bundled_dir_skips(tmp_path, monkeypatch):
-    """构建期未携带某包：跳过不阻断。"""
+    """构建期未携带：跳过不阻断。"""
     agent_dir = _freeze(monkeypatch, tmp_path)  # meipass 里没有任何 bundles
     sm = _settings(agent_dir)
     actions = builtin.ensure_builtin_packages(sm, str(agent_dir))

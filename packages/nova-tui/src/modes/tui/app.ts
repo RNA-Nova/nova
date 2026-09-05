@@ -9,6 +9,7 @@
 
 import { guardComponentLineWidth, NovaUIRuntime } from 'nova-tui';
 import type { ImageContent } from '../../protocol/nova-wire.gen.js';
+import { resolveBackendCommand } from '../../wire/backend-command.js';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -128,10 +129,11 @@ export class NovaTuiApp {
 
     this.tui = new TUI(new ProcessTerminal());
 
-    // —— 后端运行时（NOVA_PYTHON 指定后端解释器；生产为装 nova-harness 的环境）——
-    const python = process.env.NOVA_PYTHON ?? 'python3';
+    // —— 后端运行时（打包形态优先同目录 runtime/nova-server；开发态
+    // NOVA_PYTHON 指定解释器，缺省 python3 模块调用——解析归
+    // wire/backend-command.ts 的 resolveBackendCommand）——
     this.runtime = new NovaUIRuntime({
-      command: [python, '-m', 'nova_harness.modes.rpc.cli'],
+      command: resolveBackendCommand(),
       capabilities: ['select', 'confirm', 'input', 'notify', 'form', 'set_status'],
       session: {
         cwd: options.cwd,

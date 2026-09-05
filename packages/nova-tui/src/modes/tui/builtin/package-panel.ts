@@ -77,12 +77,23 @@ async function openPanel(ctx: ExtensionUIContext, local: boolean): Promise<void>
 
   const pkg = packages.find((candidate) => candidate.name === chosen);
   if (!pkg) return;
+  // 官方基础包（nova-base：会话基础设施）不可卸载——后端同规守护，
+  // 面板直接不提供该动作
+  const isProtected = pkg.name === 'nova-base' || pkg.name === 'nova_base';
   const action = await ctx.select!(
     `${pkg.name} v${pkg.version ?? '?'}`,
     [
       { value: 'detail', label: '详情', description: pkg.description ?? '' },
       { value: 'update', label: '更新', description: '拉取最新版本' },
-      { value: 'uninstall', label: '卸载', description: '移除该包（资源随之消失）' },
+      ...(isProtected
+        ? []
+        : [
+            {
+              value: 'uninstall',
+              label: '卸载',
+              description: '移除该包（资源随之消失）',
+            },
+          ]),
     ],
   );
   if (action === undefined) return;
@@ -94,13 +105,13 @@ async function openPanel(ctx: ExtensionUIContext, local: boolean): Promise<void>
     return;
   }
   if (action === 'update') {
-    await ctx.invoke('pkgUpdate', { name: pkg.name });
+    await ctx.invoke('pkgUpdate', { nameOrSource: pkg.name });
     await ctx.refreshPackages?.();
     ctx.notify(`已更新 ${pkg.name}`);
     return;
   }
   if (action === 'uninstall') {
-    await ctx.invoke('pkgUninstall', { name: pkg.name });
+    await ctx.invoke('pkgUninstall', { nameOrSource: pkg.name });
     await ctx.refreshPackages?.();
     ctx.notify(`已卸载 ${pkg.name}（资源已移除）`);
   }

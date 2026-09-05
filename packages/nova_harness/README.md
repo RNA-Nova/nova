@@ -469,7 +469,7 @@ class UserTool:
 └── logs/rpc-stderr.log    # RPC 进程 stderr 日志
 ```
 
-冻结（二进制打包）形态的两个独有目录：`builtin/` 与 `packages/.site/`。`builtin/` 是官方双 bundle 的首启落地处（落地后按普通 path 包登记进 settings，面板可见可卸）；`.site/` 是第三方 pip 依赖的落点——冻结二进制不内嵌 pip，装带依赖的包时借系统 Python（`NOVA_PYTHON` > 系统 python3，校验大版本与 pip 可用）装进该目录，装配时挂进内嵌解释器的 `sys.path`。开发态两者都不产生（开发态依赖装进当前环境，包经 `pip -e` 注册）。
+冻结（二进制打包）形态的两个独有目录：`builtin/` 与 `packages/.site/`。`builtin/` 是内建 nova-base 的首启落地处（落地后按普通 path 包登记进 settings，面板可见可卸；编程能力包 nova-coding-agent 不内建，按需安装）；`.site/` 是第三方 pip 依赖的落点——冻结二进制不内嵌 pip，装带依赖的包时借系统 Python（`NOVA_PYTHON` > 系统 python3，校验大版本与 pip 可用）装进该目录，装配时挂进内嵌解释器的 `sys.path`。开发态两者都不产生（开发态依赖装进当前环境，包经 `pip -e` 注册）。
 
 项目级（受 Project Trust 门控）：`<cwd>/.nova/` 同构——`settings.json`、`agents/`、`backend/{extensions,skills,prompts,personas}`、`packages/`。skills 另有 `~/.agents/skills` 与项目祖先 `.agents/skills` 通道。
 

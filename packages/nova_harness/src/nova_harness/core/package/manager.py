@@ -75,6 +75,17 @@ __all__ = ["PackageManager", "PackageInstallError", "PackageUpdateError"]
 
 logger = logging.getLogger(__name__)
 
+# 官方基础包（nova-base：会话基础设施——slash 命令 + question/todo 工具 +
+# UI 原语糖库）：卸载即失去基本功能，任何安装形态（内建/用户安装）下都不可卸载
+_PROTECTED_PACKAGES = frozenset({"nova-base", "nova_base"})
+
+
+def _is_protected_package(name_or_source: str) -> bool:
+    """按包名或 path 源目录名判定是否受保护的基础包。"""
+    text = name_or_source.replace("\\", "/").rstrip("/")
+    tail = text.rsplit("/", 1)[-1]
+    return text in _PROTECTED_PACKAGES or tail in _PROTECTED_PACKAGES
+
 
 class PackageManager:
     """Nova 包管理器 facade。
@@ -270,6 +281,14 @@ class PackageManager:
         Python 包卸载，最后再统计两个 scope 的引用数，仅当引用数为 0 时才卸载
         底层 Python 包。
         """
+        # 官方基础包守护：nova-base 是会话基础设施（slash 命令/question/todo/
+        # UI 原语）——卸载即失去基本功能，任何安装形态下都不可卸载
+        if _is_protected_package(name_or_source):
+            raise ValueError(
+                f"'{name_or_source}' 是官方基础包（nova-base 提供会话基础设施："
+                "21 个 slash 命令、question/todo 工具、UI 原语糖库），"
+                "卸载将失去基本功能，不可卸载。"
+            )
         # 包间依赖守护：被其他已安装包 requires 引用时拒绝卸载
         self._guard_requires_on_uninstall(name_or_source)
 
