@@ -41,9 +41,11 @@ export default function renderTodo(input: RendererInput): Component {
 
   const todos = Array.isArray(d.todos) ? (d.todos as TodoItem[]) : [];
   if (todos.length === 0) {
-    container.addChild(
-      new Text(input.status === 'done' ? dim('(empty list)') : dim('running…'), 1, 0),
-    );
+    // 空清单：done 给 (empty list)；运行中不渲染 running 文本——运行态
+    // 归宿主计时行（渲染器纪律：不自渲 running 文本，防与宿主双行叠加）
+    if (input.status === 'done') {
+      container.addChild(new Text(dim('(empty list)'), 1, 0));
+    }
     return container;
   }
 

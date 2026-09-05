@@ -10,7 +10,10 @@
  *   刷新/通知；本轮缺依赖的渲染器按诊断降级，补装完成 refresh 后上线。
  * - 时长归 npm 自己的 fetch 超时/重试管，本层不设强制超时（防误杀大包）。
  * - 同目录 in-flight 去重（并发触发同一包只跑一次）。
- * - 有 package-lock.json 走 ``npm ci``（可复现），否则 ``npm install --omit=dev``。
+ * - 有 package-lock.json 走 ``npm ci``（可复现），否则 ``npm install``。
+ *   都不带 ``--omit=dev``：editable/源码目录（开发中的包）上 omit 会剪掉
+ *   devDependencies 破坏开发环境（实测：nova-tui file: 软链被剪）。
+ *   复制形态多装的 devDeps 是可接受的磁盘代价，换不破坏开发目录。
  * - ``NOVA_OFFLINE`` 直接跳过（返回 false）；npm 缺失/失败返回 false，不抛。
  */
 
@@ -40,10 +43,11 @@ export function healNpmDependencies(installPath: string): Promise<boolean> {
   if (existing) {
     return existing;
   }
-  // 有 lockfile 用 npm ci（可复现安装），无则 npm install
+  // 有 lockfile 用 npm ci（可复现安装），无则 npm install；
+  // 不带 --omit=dev（editable/源码目录上会剪 devDependencies 破坏开发环境）
   const args = existsSync(join(installPath, 'package-lock.json'))
-    ? ['ci', '--omit=dev']
-    : ['install', '--omit=dev'];
+    ? ['ci']
+    : ['install'];
   const task = new Promise<boolean>((resolve) => {
     let child;
     try {

@@ -7,7 +7,8 @@
  *
  * 呈现语义：
  * - 折叠态：末 5 个**视觉行**（按当前宽度折行计算），上方提示隐藏行数；
- * - 底部计时行（running… / Took X.Xs）；截断警告带完整输出路径；
+ * - 完成态计时一行（Took X.Xs）；运行态计时归宿主 ElapsedLine chrome
+ *   （渲染器不自渲 running 文本/计时行）；截断警告带完整输出路径；
  * - 展示前剥掉输出末尾的 full-output footer（避免与警告行重复）。
  */
 import prettyMs from 'pretty-ms';
