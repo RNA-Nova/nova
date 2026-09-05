@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
-from nova_harness.core.config.defaults import PACKAGES_DIR_NAME
+from nova_harness.core.config.defaults import PACKAGES_DIR_NAME, get_agent_dir
 from nova_harness.core.utils.output_guard import is_stdout_taken_over
 
 
@@ -282,8 +282,6 @@ def get_backend(install_dir: Optional[str] = None) -> PackageBackend:
     ``find_host_python()`` 探测），包装配目录挂载由 runtime_paths 负责。
     """
     if getattr(sys, "frozen", False):
-        from nova_harness.core.config.defaults import get_agent_dir
-
         base = Path(install_dir) if install_dir else Path(get_agent_dir())
         return FrozenSiteBackend(base / PACKAGES_DIR_NAME / ".site")
     uv = find_uv()

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from nova_harness.core.config.settings.manager import SettingsManager
 
 from nova_harness.core.config.defaults import PACKAGES_DIR_NAME
+from nova_harness.core.package.source.spec import parse_source
 
 # 包存储族目录（installer 的落点族）
 _STORE_FAMILIES = ("path", "git", "npm")
@@ -35,13 +36,19 @@ def _mount(path: Path, mounted: List[str]) -> None:
 
 
 def _source_to_dir(spec: object, base: Path) -> Optional[Path]:
-    """把 settings 里的 path: 源解析为目录（get_package_sources 返回已解析 spec）。"""
+    """把 settings 里的 path 族源解析为目录。
+
+    ``get_package_sources`` 返回的 spec 已按 scope 基准解析为绝对路径；
+    相对兜底（``base / path``）留给绕过 settings 直调的测试/调用方。
+    """
     text = str(getattr(spec, "source", spec))
-    if text.startswith("path:"):
-        text = text[5:]
-    if not text or "://" in text or text.startswith("git:") or text.startswith("npm:"):
+    try:
+        parsed = parse_source(text)
+    except ValueError:
         return None
-    path = Path(text)
+    if parsed.type != "path" or not parsed.path:
+        return None
+    path = Path(parsed.path)
     return path if path.is_absolute() else base / path
 
 

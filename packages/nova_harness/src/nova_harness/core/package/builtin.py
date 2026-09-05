@@ -28,6 +28,8 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
+from nova_harness.core.package.source.spec import parse_source
+
 if TYPE_CHECKING:
     from nova_harness.core.config.settings.manager import SettingsManager
 
@@ -40,17 +42,17 @@ def _source_dir_matches(source: str, dest: Path) -> bool:
     """settings 源是否指向 dest 目录（精确判等，非子串——避免
     ``builtin/nova_base_extra`` 误判命中 ``builtin/nova_base``）。
 
-    settings 持久化统一 posix 分隔符（Windows 反斜杠会先归一）；
-    相对源按当前工作目录解析（与 settings 写侧的相对化约定一致）。
+    只有 path 族源可能命中（git/npm 源经 parse_source 归族后排除）；
+    ``get_package_sources`` 返回的 path 源已按 scope 基准解析为绝对路径。
     """
-    text = source.replace("\\", "/")
-    for prefix in ("path:", "./"):
-        if text.startswith(prefix):
-            text = text[len(prefix) :]
-    if "://" in text or text.startswith("git:") or text.startswith("npm:"):
+    try:
+        parsed = parse_source(source)
+    except ValueError:
+        return False
+    if parsed.type != "path" or not parsed.path:
         return False
     try:
-        return Path(text).resolve() == dest.resolve()
+        return Path(parsed.path).resolve() == dest.resolve()
     except OSError:
         return False
 

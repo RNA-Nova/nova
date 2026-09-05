@@ -81,10 +81,18 @@ _PROTECTED_PACKAGES = frozenset({"nova-base", "nova_base"})
 
 
 def _is_protected_package(name_or_source: str) -> bool:
-    """按包名或 path 源目录名判定是否受保护的基础包。"""
-    text = name_or_source.replace("\\", "/").rstrip("/")
-    tail = text.rsplit("/", 1)[-1]
-    return text in _PROTECTED_PACKAGES or tail in _PROTECTED_PACKAGES
+    """按包名或任意源形态（path/npm/git）判定是否受保护的基础包。"""
+    try:
+        source = parse_source(name_or_source.strip())
+    except ValueError:
+        return False
+    if source.type == "npm":
+        return (source.npm_name or "") in _PROTECTED_PACKAGES
+    if source.type == "git":
+        return (source.repo_path or "").rsplit("/", 1)[-1] in _PROTECTED_PACKAGES
+    # path 族（含裸包名——parse_source 缺省按 path 解析）
+    tail = (source.path or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    return tail in _PROTECTED_PACKAGES
 
 
 class PackageManager:

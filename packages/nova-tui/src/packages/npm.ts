@@ -74,9 +74,6 @@ export function healNpmDependencies(installPath: string): Promise<boolean> {
   return task;
 }
 
-/** 兼容别名（旧调用点）。 */
-export const ensureNpmDependencies = healNpmDependencies;
-
 /** 测试用：清空失败记忆与在途表。 */
 export function _resetHealStateForTest(): void {
   inflight.clear();

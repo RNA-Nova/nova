@@ -114,7 +114,7 @@ export {
   PackageRegistry,
   type InstalledPackageInfo,
 } from './packages/registry.js';
-export { ensureNpmDependencies } from './packages/npm.js';
+export { healNpmDependencies } from './packages/npm.js';
 export { fetchPackageUpdateNotice } from './packages/updates.js';
 
 // settings（扩展设置/内部 KV 子系统——Node 层存储）

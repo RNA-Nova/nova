@@ -11,8 +11,10 @@ from typing import Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from nova_harness.core.package import PackageManager
 from nova_harness.core.package.install.installer import PackageInstaller
+from nova_harness.core.package.manager import _is_protected_package
 
 
 def _write_pyproject_manifest(
@@ -1111,3 +1113,24 @@ def test_uninstall_removes_dist_info(pm, tmp_path):
 
     assert not dist_dir.exists()
     assert not Path(meta.install_path).exists()
+
+
+def test_uninstall_protected_base_package_all_source_forms(pm):
+    """基础包守护覆盖全部源形态——名字/path/npm/git 任意写法都拒绝卸载。
+
+    守护先于任何安装事实查找触发（不需要真的装过 nova-base）。
+    """
+    for form in (
+        "nova-base",
+        "nova_base",
+        "path:/somewhere/builtin/nova_base",
+        "npm:nova-base",
+        "npm:nova-base@1.0.0",
+        "git:github.com/nova/nova_base",
+    ):
+        with pytest.raises(ValueError, match="基础包"):
+            pm.uninstall(form)
+
+    # 近名包不误伤
+    assert not _is_protected_package("npm:nova-base-extra")
+    assert not _is_protected_package("path:/somewhere/nova_base_extra")
