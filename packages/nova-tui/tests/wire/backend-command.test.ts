@@ -21,7 +21,8 @@ describe('resolveBackendCommand 解析链', () => {
     const execDir = mkdtempSync(join(tmpdir(), 'nova-backend-'));
     mkdirSync(join(execDir, 'runtime'));
     writeFileSync(join(execDir, 'runtime', 'nova-server'), '');
-    const cmd = resolveBackendCommand({}, execDir);
+    // 显式 POSIX 平台（Windows 腿会找 .exe——本例造的是无后缀文件）
+    const cmd = resolveBackendCommand({}, execDir, 'darwin');
     assert.deepEqual(cmd, [join(execDir, 'runtime', 'nova-server')]);
   });
 

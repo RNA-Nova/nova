@@ -129,3 +129,33 @@ describe('ToolCardView 计时行（ElapsedLine）', () => {
     assert.equal(renders, atDispose, 'dispose 后不应再有计时行重绘');
   });
 });
+
+
+describe('ToolCardView 运行中文本去重', () => {
+  it('running 无渲染器无内容：计时行在时不再出现 running… 占位行（不双行）', () => {
+    const runtimeNoRenderer = {
+      slots: {
+        resolveToolRenderer: () => undefined,
+        resolveToolPreview: () => undefined,
+      },
+      store: { currentSnapshot: { cwd: '/tmp' } },
+    };
+    const view = new ToolCardView(
+      runtimeNoRenderer as never,
+      card('running') as never,
+      { expanded: false } as never,
+      () => {},
+    );
+    const texts = (view as unknown as { children: unknown[] }).children
+      .filter((child) => child instanceof Text)
+      .map((child) => (child as { text: string }).text);
+    const runningLines = texts.filter((t) => t.toLowerCase().includes('running'));
+    assert.ok(findElapsedLine(view), 'live 卡片应有计时行');
+    assert.equal(
+      runningLines.length,
+      1,
+      `应只有计时行一处 Running，实际: ${JSON.stringify(runningLines)}`,
+    );
+    view.dispose();
+  });
+});

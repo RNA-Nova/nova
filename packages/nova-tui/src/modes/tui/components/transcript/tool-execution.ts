@@ -266,11 +266,14 @@ export class ToolCardView extends Container {
         this.addChild(guardComponentLineWidth(component));
       }
     } else {
-      // 通用回退（slot 空态）：结果文本 / args 摘要 / 执行中与参数累积占位（折叠预览）
+      // 通用回退（slot 空态）：结果文本 / args 摘要 / 执行中与参数累积占位（折叠预览）。
+      // 计时行（ElapsedLine）会出现时不用 'running…' 占位——两行同义会叠出
+      // "running…" + "Running… Ns" 双行；计时行缺席时（无 live 起点）才保留
+      const willShowElapsed = isLive && this.liveStartedAt !== undefined;
       const rawText =
         extractText(this.card.result?.content) ||
         extractText(this.card.partial?.content) ||
-        (this.card.status === 'running'
+        (this.card.status === 'running' && !willShowElapsed
           ? colors.dim('running…')
           : colors.dim(JSON.stringify(this.card.args).slice(0, 200)));
       this.addChild(new Text(this.collapseText(rawText), 1, 0));
