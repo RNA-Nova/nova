@@ -113,11 +113,18 @@ else
     (cd "$STAGING" && tar -czf "$ARCHIVE" .)
 fi
 
-# sha256 记录（追加——多平台连调时逐条累积成 SHA256SUMS）
+# sha256 记录（追加——多平台连调时逐条累积成 SHA256SUMS；同名先除旧行，
+# 重跑同平台不残留陈旧条目——旧 hash 会让 sha256sum -c 整体判负。
+# grep 过滤比 sed -i 便携——BSD/GNU 的 -i 参数形态不同）
+name="$(basename "$ARCHIVE")"
+if [ -f "$OUT/SHA256SUMS" ]; then
+    grep -v "  $name\$" "$OUT/SHA256SUMS" > "$OUT/SHA256SUMS.tmp" || true
+    mv "$OUT/SHA256SUMS.tmp" "$OUT/SHA256SUMS"
+fi
 if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$OUT" && sha256sum "$(basename "$ARCHIVE")" >> SHA256SUMS)
+    (cd "$OUT" && sha256sum "$name" >> SHA256SUMS)
 else
-    (cd "$OUT" && shasum -a 256 "$(basename "$ARCHIVE")" >> SHA256SUMS)
+    (cd "$OUT" && shasum -a 256 "$name" >> SHA256SUMS)
 fi
 
 echo "==> 归档完成: $ARCHIVE"
