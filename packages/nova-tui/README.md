@@ -360,6 +360,8 @@ TUI 的呈现层可扩展，内建能力（官方工具渲染器、块适配器�
 - 块词汇内建五种：`diff`（词级高亮）、`markdown`、`code`、`json`、`table`；`registerBlock` 可注册新块类型，未注册的块类型降级为 `json` 展示；
 - 组件形态直接返回组件实例（经 `input.env` 取色与主题）。
 
+**运行态纪律**：渲染器不输出"正在运行"类文本或计时——运行中该展示什么由渲染器内容表达（图标、进度计数、命令行等"在跑什么"），"跑了多久"归宿主计时行（ElapsedLine chrome，卡片级自转）。自渲 `running…`/计时行会与宿主 chrome 叠出双行（曾有回归：subagent 渲染器自渲 running… 与宿主计时行叠加）。等待用户输入的状态例外（如 question 的 `waiting for answer…`——那是语义信息，不是运行指示）。
+
 ### 扩展入口（index.ts）
 
 默认导出 `ExtensionUIAPI` 工厂，注册面：

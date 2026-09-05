@@ -528,6 +528,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **/packages 面板卸载/更新参数键名错位修复**：面板发 {name}，后端严格形状要 nameOrSource（router 类型化契约收紧后的遗留失配）——面板卸载/更新此前必败（-32602 字段缺失）；改按线上契约发 camelCase，新增 PTY 端到端覆盖（pty-packages-panel.py：双包列表 → 面板卸载 → 通知 + 列表摘除）。
 - **官方基础包卸载守护**：nova-base 不可卸载（卸载即失去 21 个 slash 命令/question/todo 工具/UI 原语——会话基础设施），PackageManager.uninstall 基础包守护（先于 requires 守护）+ /packages 面板对其不提供卸载动作。
 
+### Fixed
+- **运行中工具卡片 running 双行去重**：通用回退在宿主计时行（ElapsedLine）在场时不再输出 running… 占位（此前叠出 running… + Running… Ns 两行同义文本）；subagent 渲染器自渲的 running… 行同步摘除（渲染器纪律：运行态由自身内容表达——图标/进度，计时归宿主 chrome），question 的 waiting for answer… 保留（等用户作答是语义信息非运行指示）。新增工具卡片真实渲染矩阵 PTY（pty-tool-cards.py：真实模型逐工具调用验卡片签名）。
+
 ### 早期雏形（2026-04，当时未封版）
 
 ### Added

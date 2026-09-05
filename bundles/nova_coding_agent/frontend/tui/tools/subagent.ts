@@ -322,12 +322,12 @@ export default function renderSubagent(input: RendererInput): Component {
       const container = new Container();
       const results = d.results ?? [];
 
-      // 无结果（streaming/参数阶段或异常回执）：头部 + 内容文本兜底。
+      // 无结果（streaming/参数阶段或异常回执）：头部兜底。
+      // 不自渲 running 文本——运行态由头部（模式+规模）表达"在跑什么"，
+      // 宿主计时行（ElapsedLine）表达"跑了多久"（渲染器纪律：不自持
+      // running 文本/计时，防与宿主 chrome 双行叠加）
       if (results.length === 0) {
         container.addChild(renderHeader());
-        if (input.status === 'running') {
-          container.addChild(new Text(dim('running…'), 1, 0));
-        }
         return container.render(width);
       }
 
