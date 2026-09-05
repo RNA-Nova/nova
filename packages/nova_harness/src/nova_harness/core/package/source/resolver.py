@@ -19,8 +19,6 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-
-from nova_harness.core.utils.http import default_ssl_context
 from typing import Callable, Optional
 
 from nova_harness.core.config.defaults import (
@@ -37,6 +35,7 @@ from nova_harness.core.package.source._semver import (
 from nova_harness.core.package.source.spec import PackageSource
 from nova_harness.core.package.utils import is_offline_mode_enabled
 from nova_harness.core.types.package import ProgressEvent
+from nova_harness.core.utils.http import default_ssl_context
 
 # Git 命令默认超时（秒）。克隆/更新在网络异常时不应无限 hang 住。
 GIT_COMMAND_TIMEOUT = 60
