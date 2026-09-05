@@ -8,8 +8,9 @@ name: Release
 #
 # 流程：build-frontend → build-backend（六平台矩阵）→ test-packaged
 # （三 runner 下载合包冒烟）→ assemble-release（六平台归档 + sha256）
-# → publish（draft release）。PyPI / npm 发布步骤已写出但整段注释——
-# 首次演练确认产物后再开。
+# → publish（draft release）→ publish-npm-bundle（nova-coding-agent 经
+# trusted publishing 发 npm，同版幂等跳过）。PyPI / nova-tui npm 发布
+# 步骤已写出但保持注释——首发占名后再开。
 
 on:
   push:
@@ -382,14 +383,63 @@ jobs:
             install.sh
 
   # ---------------------------------------------------------------------------
-  # PyPI / npm 发布——首次演练前保持整段注释；确认 draft release 产物后再开。
-  # 演练清单：
-  #   1. 取消注释下方两个 job（needs: publish 保持——draft 出来再发 registry，
+  # PyPI / nova-tui npm 发布——保持注释（首发占名需手动 OTP 一次，注册表侧
+  # 有了包才能配 trusted publisher）。开通清单：
+  #   1. 取消注释对应 job（needs: publish 保持——draft 出来再发 registry，
   #      registry 发完人工把 draft 转正式）；
-  #   2. PyPI 侧配置 trusted publishing（或 PYPI_API_TOKEN secret）；
-  #   3. npm 侧配置 NODE_AUTH_TOKEN（或 trusted publishing）；
-  #   4. 先发 -alpha 预演一次全流程。
+  #   2. registry 侧配 trusted publishing（npmjs.com / pypi.org 包设置页登记
+  #      本仓库与 release.yml）；
+  #   3. 先发 -alpha 预演一次全流程。
   # ---------------------------------------------------------------------------
+
+  # nova-coding-agent 的 npm 通道——二进制用户的按需装路径。
+  # trusted publishing（OIDC）免 token：npmjs.com 包设置页一次性登记
+  # GitHub Actions（org: RNA-Nova / repo: nova / workflow: release.yml），
+  # 发布时 CLI 用 OIDC 换短期令牌，自动附 provenance 供应链证明。
+  # 幂等：本地版本 == registry 版本即跳过——bundle 版本独立于发布 tag，
+  # 升版 = 同步改 bundles/nova_coding_agent 的 package.json 与 pyproject.toml。
+  publish-npm-bundle:
+    name: publish-npm-bundle（nova-coding-agent）
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      # trusted publishing 门槛是 npm CLI >= 11.5.1——Node 24 自带满足，
+      # Node 22 的 npm 10.x 不行（本 job 不跑构建，node 版本只影响 npm）
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 版本对账（registry 已有同版即跳过）
+        id: check
+        working-directory: bundles/nova_coding_agent
+        run: |
+          set -euo pipefail
+          local_version="$(node -p "require('./package.json').version")"
+          remote_version="$(npm view nova-coding-agent version 2>/dev/null || true)"
+          echo "local=${local_version} remote=${remote_version:-<未发布>}"
+          if [[ "${local_version}" == "${remote_version}" ]]; then
+            echo "::notice::nova-coding-agent@${local_version} 已在 npm——跳过发布"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A 型整包直发（pyproject + backend + agents + frontend——嵌套
+      # node_modules 不入包，.npmignore 守住）；不设 NODE_AUTH_TOKEN——
+      # trusted publishing 由 CLI 检测 OIDC 环境自动走
+      - name: 发布 nova-coding-agent
+        if: steps.check.outputs.skip != 'true'
+        working-directory: bundles/nova_coding_agent
+        run: npm publish
 
   # publish-pypi:
   #   name: publish-pypi（nova-ai / nova-agent / nova-harness / nova-base）
@@ -431,7 +481,7 @@ jobs:
   #   runs-on: ubuntu-latest
   #   permissions:
   #     contents: read
-  #     id-token: write   # trusted publishing（npm >=11.5.1）
+  #     id-token: write   # trusted publishing（npm >=11.5.1——Node 24 自带）
   #   steps:
   #     - name: Checkout
   #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -442,7 +492,7 @@ jobs:
   #     - name: Setup Node.js
   #       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
   #       with:
-  #         node-version: '22'
+  #         node-version: '24'
   #         registry-url: 'https://registry.npmjs.org'
   #
   #     - name: 构建 + dry-run 打包检视（真发把 --dry-run 去掉）
@@ -453,37 +503,8 @@ jobs:
   #         npm run build
   #         npm test
   #         npm publish --dry-run
-  #       # 真发：npm publish（env NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}，
-  #       # 或 trusted publishing 免 token）
-
-  # publish-npm-bundle:
-  #   name: publish-npm-bundle（nova-coding-agent——二进制用户的按需装通道）
-  #   needs: publish
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: read
-  #     id-token: write   # trusted publishing
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  #       with:
-  #         ref: ${{ env.RELEASE_TAG }}
-  #         persist-credentials: false
-  #
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-  #       with:
-  #         node-version: '22'
-  #         registry-url: 'https://registry.npmjs.org'
-  #
-  #     - name: 打包检视 + 真发（A 型整包——pyproject + backend + agents + frontend）
-  #       working-directory: bundles/nova_coding_agent
-  #       run: |
-  #         set -euo pipefail
-  #         npm publish --dry-run   # 先检视内容清单（嵌套 node_modules 不入包——.npmignore 守住）
-  #         # 真发：npm publish（env NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 或 trusted publishing）
-  #       # 注：bundle 版本独立于发布 tag（pyproject.toml 与 package.json 双侧同步——
-  #       # 版本戳对账门只管 nova-tui）
+  #       # 真发：npm publish（trusted publishing 免 token——npmjs.com 包
+  #       # 设置页登记本仓库与 release.yml，对位 publish-npm-bundle 的做法）
 
   # 任何后续环节失败时清掉草稿，不留半成品（对齐既有发布管线的清理纪律）。
   cleanup-draft:
