@@ -47,10 +47,12 @@ export function healNpmDependencies(installPath: string): Promise<boolean> {
   const task = new Promise<boolean>((resolve) => {
     let child;
     try {
-      // Windows 上 npm 是 npm.cmd——裸 spawn 找不到 .cmd  shim
-      child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+      // Windows 上 npm 是 npm.cmd——Node ≥20.12 起禁裸 spawn .cmd/.bat
+      // （EINVAL），须走 shell（cmd.exe 经 PATH 解析）
+      child = spawn('npm', args, {
         cwd: installPath,
         stdio: 'ignore',
+        shell: process.platform === 'win32',
       });
     } catch {
       resolve(false);
