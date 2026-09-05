@@ -282,7 +282,7 @@ python3 scripts/smoke-rpc-handshake.py <runtime/nova-server 路径>
 python3 scripts/pty-binary-smoke.py <归档解出的 nova 路径>
 ```
 
-版本戳单一事实源是各包 manifest：前端 `packages/nova-tui/package.json`（构建期 `--define __NOVA_VERSION__` 注入，node 形态读 package.json——`src/version.ts`），后端 `packages/nova_harness/pyproject.toml`（运行期 `importlib.metadata.version("nova-harness")`——`core/utils/version.py`，冻结态命中打包元数据）。`.github/workflows/release.yml`（tag `v*` / 手动触发）含 tag↔package.json 对账门；**npm 发布已启用**——`publish-npm-bundle` 段把 `nova-coding-agent` 经 trusted publishing 发 npm（OIDC 免 token、自动附 provenance；npmjs.com 包设置页需一次性登记 org/repo/workflow；同版幂等跳过，bundle 升版 = 同步 `bundles/nova_coding_agent` 的 package.json 与 pyproject.toml）；PyPI 与 nova-tui npm 发布步骤在 workflow 内写出但保持注释，首发占名后再开。
+版本戳单一事实源是各包 manifest：前端 `packages/nova-tui/package.json`（构建期 `--define __NOVA_VERSION__` 注入，node 形态读 package.json——`src/version.ts`），后端 `packages/nova_harness/pyproject.toml`（运行期 `importlib.metadata.version("nova-harness")`——`core/utils/version.py`，冻结态命中打包元数据）。`.github/workflows/release.yml`（tag `v*` / 手动触发）含 tag↔package.json 对账门；release notes 来源优先级：`docs/release-notes/<tag>.md`（用户向成文）> CHANGELOG 版本段抽取（兜底）——两者受众不同，CHANGELOG 保持工程日志体。**npm 发布已启用**——`publish-npm-bundle` 段把 `nova-coding-agent` 经 trusted publishing 发 npm（OIDC 免 token、自动附 provenance；npmjs.com 包设置页需一次性登记 org/repo/workflow；同版幂等跳过，bundle 升版 = 同步 `bundles/nova_coding_agent` 的 package.json 与 pyproject.toml）；PyPI 与 nova-tui npm 发布步骤在 workflow 内写出但保持注释，首发占名后再开。
 
 ### Poetry 兼容说明
 

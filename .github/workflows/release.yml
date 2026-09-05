@@ -294,17 +294,24 @@ jobs:
           done
           rm -rf staging
 
-      - name: 生成 release notes（抽 CHANGELOG.md 对应版本段）
+      # release notes 来源优先级：docs/release-notes/<tag>.md（用户向成文）
+      # > CHANGELOG.md 对应版本段（工程日志体——兜底）。两者受众不同：
+      # notes 给"决定装不装的用户"，CHANGELOG 是仓库审计轨迹
+      - name: 生成 release notes（成文优先，CHANGELOG 兜底）
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
-          awk -v ver="$VERSION" '
-            $0 ~ "^## \\[" ver "\\]" { found=1; print; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > dist/release/RELEASE_NOTES.md || true
-          if [[ ! -s dist/release/RELEASE_NOTES.md ]]; then
-            echo "见 CHANGELOG.md（${RELEASE_TAG}）。" > dist/release/RELEASE_NOTES.md
+          if [[ -f "docs/release-notes/${RELEASE_TAG}.md" ]]; then
+            cp "docs/release-notes/${RELEASE_TAG}.md" dist/release/RELEASE_NOTES.md
+          else
+            awk -v ver="$VERSION" '
+              $0 ~ "^## \\[" ver "\\]" { found=1; print; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > dist/release/RELEASE_NOTES.md || true
+            if [[ ! -s dist/release/RELEASE_NOTES.md ]]; then
+              echo "见 CHANGELOG.md（${RELEASE_TAG}）。" > dist/release/RELEASE_NOTES.md
+            fi
           fi
 
       # install.sh 随 release 分发——curl 管道安装的稳定 URL：
