@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [0.1.0] - 2026-09-03
+## [0.1.0] - 2026-09-05
 
 > 首个封版。说明：executor 相关（`nova_executor` / `nova-executor-py` 包与
 > bundle 的 executor 接入/`/executor` 切换扩展）已从本发布线移除——执行后端的
