@@ -1,5 +1,7 @@
 # Nova
 
+<!-- HERO-IMAGE-HERE: docs/assets/hero.gif（启动 + 一轮真实工具调用对话） -->
+
 Nova 是一个用于构建大语言模型（LLM）智能体的分层框架，同时提供开箱即用的编程 Agent：底层是统一的多厂商 LLM 抽象与事件驱动的异步 Agent 框架，上层是带会话树、上下文压缩与包/扩展生态的高阶 SDK，配上终端界面与官方编程 Agent bundle，装完即可在终端里驱动一个能读写文件、执行命令、委派子代理的编程助手。
 
 本仓库为 monorepo，框架各层拆分为独立子包，按需组合、独立迭代。
@@ -28,31 +30,29 @@ Nova 是一个用于构建大语言模型（LLM）智能体的分层框架，同
 
 ## 安装
 
-> **完整文档见 [docs/](docs/README.md)**——安装矩阵（curl 管道/手动归档/pip+npm/源码）、使用指南、bundle 开发、参考手册。
+> **完整文档见 [docs/](docs/README.md)**——安装矩阵、使用指南、bundle 开发、参考手册。
 
-前置要求：Python `>=3.12,<3.14`；Node.js `>=22.19.0`（仅终端界面需要）。
-
-发布形态（零系统依赖的静态双二进制，推荐）：
+**渠道一：预编译二进制（推荐，零系统依赖——不需要 Node/Python）**
 
 ```bash
 curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh | sh
 ```
 
-用户态安装（pip + npm 渠道）：
+（已验证：下载 → sha256 校验 → 解压 → PATH 指引全链自动化；macOS arm64/x64、Linux x64/arm64 四平台，Windows 手动下载 zip。详见 [docs/installation.md](docs/installation.md)。）
+
+**渠道二：源码安装**（不装预编译二进制，从源码构建；需要 Python `>=3.12,<3.14` + Node.js `>=22.19.0`）
 
 ```bash
-# 后端 SDK（连带 nova-ai / nova-agent）
-pip install nova-harness
-
-# 终端界面（注册 nova 命令）
-npm install -g nova-tui
-
-# 官方 bundle（基础 + 编程；支持 path: / git: / npm: 三种来源，裸路径按 path: 处理）
-nova-pkg install /path/to/nova_base
-nova-pkg install /path/to/nova_coding_agent
+git clone --depth 1 --branch v0.1.0 https://github.com/RNA-Nova/nova.git
+cd nova
+sh scripts/install-source.sh
 ```
 
-仓库内开发（统一 pixi 环境，editable 安装全部子包）：
+（已验证：预检 → venv + pip 四包 → 注册官方双 bundle → npm 构建 → `~/.local/bin/nova` launcher → 双端版本自检。）
+
+**渠道三：pip + npm**（PyPI `nova-harness` / npm `nova-tui`——**待发布**，发布段已在 release workflow 备好，首发演练后开启）
+
+**仓库内开发**（统一 pixi 环境，editable 安装全部子包）：
 
 ```bash
 pixi install --environment dev

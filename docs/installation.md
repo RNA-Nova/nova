@@ -72,9 +72,21 @@ native/               # 终端输入原生助手（macOS/Windows）
 
 `nova` 与 `runtime/` 必须保持相对位置——前端的运行后发现链是"二进制同目录的 `runtime/nova-server`"。
 
-## 方式三：pip + npm（开发者渠道）
+## 方式三：源码安装（不装预编译二进制）
 
-需要 Python ≥3.12 与 Node ≥22.19：
+需要 Python `>=3.12,<3.14` 与 Node `>=22.19`：
+
+```bash
+git clone --depth 1 --branch v0.1.0 https://github.com/RNA-Nova/nova.git
+cd nova
+sh scripts/install-source.sh
+```
+
+安装器自动完成：预检 → `~/.nova/agent/install/venv`（pip 装四包）→ 注册官方双 bundle（editable 引用源码目录，`git pull` 后 `/reload` 即更新）→ 前端 npm 构建 → 写 `~/.local/bin/nova` launcher → 双端版本自检。卸载：`sh scripts/install-source.sh uninstall`（摘 launcher + 删 venv，源码目录与用户数据保留）。
+
+## 方式四：pip + npm（开发者渠道，**待发布**）
+
+PyPI `nova-harness` 与 npm `nova-tui` 的发布段已在 release workflow 备好（首发演练后开启）。发布后为：
 
 ```bash
 pip install nova-harness        # 后端（连带 nova_ai / nova_agent）
@@ -83,9 +95,7 @@ npm install -g nova-tui         # 前端（bin 名 nova）
 
 此渠道下前端按以下链发现后端：`NOVA_BACKEND` 环境变量 → 二进制旁 `runtime/`（不适用）→ `NOVA_PYTHON` 指定解释器 → `python3 -m nova_harness.modes.rpc.cli`（系统 Python 里能找到 nova-harness 即可）。
 
-> PyPI / npm 发布在 v0.1.0 尚未开启（workflow 已备，首发演练后打开）——当前可用渠道是脚本与手动归档。
-
-## 源码安装（参与开发）
+## 源码开发（参与贡献）
 
 ```bash
 git clone https://github.com/RNA-Nova/nova.git
