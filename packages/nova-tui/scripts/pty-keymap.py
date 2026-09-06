@@ -375,7 +375,9 @@ def _last_model_line(tui: TuiSession) -> str:
 def case_ctrl_o_expand(tui: TuiSession) -> Optional[str]:
     """ctrl+o：工具卡片展开/折叠切换（长输出卡片的早前内容随展开出现）。"""
     tui.send("!seq 1 25\r", 2.0)
-    if not tui.wait_for(r"\b25\b", 15):
+    # 首件 bash 卡片触发渲染器管线首载（jiti 冷编译包内 TS）——Windows CI
+    # 上这段可能吃掉十余秒；wait_for 命中即返，预算只是上限
+    if not tui.wait_for(r"\b25\b", 30):
         return "bash 卡片未出（seq 1 25 缺 25）"
     collapsed_has_head = re.search(r"^\s*3\s*$", tui.buffer, re.M)
     before = len(tui.buffer)
@@ -763,7 +765,13 @@ def main() -> int:
                 for name, sec, fn in cases:
                     if sec != "a":
                         continue
-                    report(name, fn(tui))  # type: ignore[arg-type]
+                    problem = fn(tui)  # type: ignore[arg-type]
+                    report(name, problem)
+                    if problem is not None:
+                        # 用例级失败的死因留档：屏尾现状（对话框未关/卡片未渲/
+                        # 输出缺席立辨）——CI 不可复现调度的唯一观察窗
+                        print(f"    ---- {name} 屏尾 ----")
+                        print(tui.buffer[-600:])
         finally:
             tui.close()
 
