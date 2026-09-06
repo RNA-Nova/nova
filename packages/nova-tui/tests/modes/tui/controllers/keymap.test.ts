@@ -103,6 +103,8 @@ function makeHarness(): Harness {
     // ctrl+l 推 '/model' 命令（bundle 包自持选择器，缺席走后端回退）
     runCommand: (name: string) => void harness.commands.push(`/${name}`),
     dequeueToEditor: async () => void harness.dequeued++,
+    // ctrl+c 清空经控制器（pi-tui setText 不重绘——内部补帧；见 editor.ts clearEditor）
+    clearEditor: () => harness.setText(''),
   } as unknown as EditorController;
 
   harness.keymap = new KeymapController({
@@ -172,6 +174,18 @@ describe('双 Esc 导航', () => {
     assert.equal(h.keymap.handle(ESC), undefined); // 超窗算单击
     assert.deepEqual(h.commands, []);
     assert.equal(h.keymap.handle(ESC)?.consume, true); // 紧接着的一次构成双击
+    assert.deepEqual(h.commands, ['/tree']);
+  });
+
+  it('ctrl+c 单击清空编辑器（不退出；双击才退出）', () => {
+    const h = makeHarness();
+    h.setText('草稿内容');
+    assert.equal(h.keymap.handle('\x03')?.consume, true); // ctrl+c
+    // 清空经 editorController.clearEditor（内部补帧）
+    assert.equal(h.quits.length, 0);
+    // 行为证据：清空后编辑器为空——双击 Esc 触发导航（非空时双击不导航）
+    h.keymap.handle(ESC);
+    h.keymap.handle(ESC);
     assert.deepEqual(h.commands, ['/tree']);
   });
 

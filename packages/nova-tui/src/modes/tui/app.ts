@@ -162,8 +162,14 @@ export class NovaTuiApp {
         editor: (title, prefill) => this.dialogs.editorLocal(title, prefill),
         custom: (factory, opts) => this.dialogs.customLocal(factory, opts),
         getEditorText: () => this.editorRef.current.getText(),
-        setEditorText: (text) => this.editorRef.current.setText(text),
-        pasteToEditor: (text) => this.editorRef.current.insertTextAtCursor?.(text),
+        setEditorText: (text) => {
+          this.editorRef.current.setText(text);
+          this.tui.requestRender(); // pi-tui setText 不重绘——补帧
+        },
+        pasteToEditor: (text) => {
+          this.editorRef.current.insertTextAtCursor?.(text);
+          this.tui.requestRender(); // 同上
+        },
         writeClipboard: (text) => writeClipboardText(text),
         setStatus: (key, text) => {
           this.footer.setExtensionStatus(key, text);

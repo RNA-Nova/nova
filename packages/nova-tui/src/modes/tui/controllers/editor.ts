@@ -127,6 +127,15 @@ export class EditorController {
     private readonly quit: (code: number) => void,
   ) {}
 
+  /** 草稿清空 + 补帧——pi-tui 的 setText/insertTextAtCursor 只写内部状态
+   * 不重绘（重绘在 handleInput 输入路径里）；控制器侧的编程式改动一律
+   * 经这里补帧，否则用户要等下一次按键才看到变化（实机实证：ctrl+c
+   * 清了草稿但屏幕纹丝不动）。 */
+  clearEditor(): void {
+    this.editorRef.current.setText('');
+    this.tui.requestRender();
+  }
+
   /** 双 Esc 导航入口（keymap 调用）：推命令（bundle 包自持 UI > 后端 slash 回退）。 */
   openNavigation(action: 'tree' | 'fork'): void {
     this.runCommand(action);
@@ -348,6 +357,7 @@ export class EditorController {
     if (queued.length === 0) return;
     const current = this.editorRef.current.getText().trim();
     this.editorRef.current.setText([...queued, current].filter(Boolean).join('\n'));
+    this.tui.requestRender(); // 编程式写入不触发重绘——补帧
   }
 
   /**
@@ -428,10 +438,12 @@ export class EditorController {
     const imagePath = await saveClipboardImageToTemp();
     if (imagePath) {
       this.editorRef.current.insertTextAtCursor?.(imagePath);
+      this.tui.requestRender(); // 编程式写入补帧
       return;
     }
     const text = await readClipboardText();
     if (text) this.editorRef.current.insertTextAtCursor?.(text);
+    if (text) this.tui.requestRender();
   }
 
   /** /hotkeys：键位表全量展示（解析后生效值——含用户 keybindings.json 重绑定）。 */

@@ -149,7 +149,8 @@ export class KeymapController {
       const now = Date.now();
       if (now - this.lastCtrlC < 500) this.deps.quit(0);
       this.lastCtrlC = now;
-      editorRef.current.setText('');
+      // pi-tui setText 不重绘——经控制器清空（内部补帧）
+      editorController.clearEditor();
       return { consume: true };
     }
     // ctrl+d：编辑器空时退出

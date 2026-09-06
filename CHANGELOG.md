@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
+## [Unreleased]
+
+### Fixed
+- **ctrl+c 清空/粘贴/队列还原等编程式编辑器写入不重绘（"按了没反应，再按别的键才生效"）**：pi-tui 的 `setText`/`insertTextAtCursor` 只写内部状态不重绘（重绘在 handleInput 输入路径里），控制器侧编程式改动一直没有补帧——实机实证：ctrl+c 清了草稿但屏幕纹丝不动，要再按任意键才看到。修复：编辑器编程式写入统一补帧——`EditorController.clearEditor()`（ctrl+c 改用）+ 队列还原/剪贴板粘贴/扩展 API `setEditorText`/`pasteToEditor` 各自补 `requestRender`。回归钉：pty 实证 ctrl+c 后零追加按键即出新帧 + keymap 单测（单击清空的行为证据：清后双击 Esc 触发导航）。
+
 ## [0.1.3] - 2026-09-06
 
 ### Fixed
