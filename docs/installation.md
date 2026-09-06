@@ -62,7 +62,7 @@ xattr -d com.apple.quarantine nova runtime/nova-server
 irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1 | iex
 ```
 
-安装器做的事与 POSIX 侧对称：解析版本（`NOVA_VERSION` 钉版）→ 下载 `nova-windows-<arch>.zip` + `SHA256SUMS` 并校验 → 解压到 `~\.nova\agent\install\releases\<版本>\` → junction 翻转 `current`（NTFS 目录链接，免管理员）→ `nova.exe --version` 自检 → 自动装官方编程能力包（`NOVA_NO_CODING=1` 跳过）→ `current` 目录写入用户 PATH（重开终端生效）。
+安装器做的事与 POSIX 侧对称：解析版本（`NOVA_VERSION` 钉版）→ 下载 `nova-windows-<arch>.zip` + `SHA256SUMS` 并校验 → 解压到 `~\.nova\agent\install\releases\<版本>\` → junction 翻转 `current`（NTFS 目录链接，免管理员）→ `nova.exe --version` 自检 → 自动装官方编程能力包（`NOVA_NO_CODING=1` 跳过）→ **Git Bash 供给**（bash 工具的 Windows 依赖：已有 Git Bash 直接用；没有则引导装管理态 Portable Git 到 `~\.nova\agent\win-git-bash\` 并把 settings 的 `shell_path` 指过去，不动系统 Git）→ `current` 目录写入用户 PATH（新开的终端立即可用）。
 
 卸载：`iex "& { $(irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1) } uninstall"`——摘 PATH 条目 + 删安装根，用户数据保留。
 

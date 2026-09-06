@@ -12,6 +12,8 @@
 #   4. 解压到 <安装根>/releases/<版本>/，junction 翻转 current（NTFS 目录链接，免管理员）
 #   5. 装后自检（nova.exe --version 报号与目标版本一致）
 #   6. 安装官方编程能力包（npm:nova-coding-agent——失败只警告不阻断）
+#   6b. Git Bash 供给（bash 工具的 Windows 依赖：管理态 PortableGit 装进
+#       agent 目录 + settings shell_path 指向；已有 Git Bash 直接使用）
 #   7. current 目录写入用户 PATH（已在则跳过）
 #
 # 环境变量：NOVA_VERSION / NOVA_INSTALLER_RELEASES_BASE（支持 file:// 本地演练）/
@@ -217,7 +219,179 @@ function Set-PathEntry([string]$root) {
     Say "PATH: 已写入用户 PATH（$current）——新开的终端立即可用"
 }
 
-# —— 卸载 ————————————————————————————————————————————————————————————
+# —— Git Bash 供给（bash 工具的 Windows 依赖） ————————————————————————————
+# coding_agent 的 bash 工具在 Windows 上必须有 bash（Git Bash）。没有的
+# 机器在装完能力包后由这里补齐：管理态 PortableGit 装进 agent 目录 +
+# settings 的 shell_path 指向它（工具链读取链：ToolContext.settings
+# .get_shell_path() → shell 解析）。
+
+$GitForWindowsLatestReleaseApi = 'https://api.github.com/repos/git-for-windows/git/releases/latest'
+
+function Get-NovaAgentDir {
+    return Join-Path $HOME '.nova\agent'
+}
+
+function Get-NovaSettingsPath {
+    return Join-Path (Get-NovaAgentDir) 'settings.json'
+}
+
+function Get-ManagedGitBashDir {
+    return Join-Path (Get-NovaAgentDir) 'win-git-bash'
+}
+
+function Get-ManagedGitBashPath {
+    return Join-Path (Get-ManagedGitBashDir) 'bin\bash.exe'
+}
+
+function Get-SettingsShellPath {
+    $p = Get-NovaSettingsPath
+    if (-not (Test-Path $p -PathType Leaf)) { return '' }
+    try { $s = Get-Content $p -Raw | ConvertFrom-Json } catch { return '' }
+    if ($s -and ($s.PSObject.Properties.Name -contains 'shell_path')) { return [string]$s.shell_path }
+    return ''
+}
+
+function Set-SettingsShellPath([string]$ShellPath) {
+    $p = Get-NovaSettingsPath
+    New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent) | Out-Null
+    if (Test-Path $p -PathType Leaf) {
+        $s = Get-Content $p -Raw | ConvertFrom-Json
+    }
+    else {
+        $s = [PSCustomObject]@{}
+    }
+    if ($null -eq $s) { $s = [PSCustomObject]@{} }
+    $s | Add-Member -MemberType NoteProperty -Name 'shell_path' -Value $ShellPath -Force
+    $json = $s | ConvertTo-Json -Depth 100
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($p, "$json`r`n", $utf8NoBom)
+}
+
+function Find-GitBash {
+    # 已配置的 shell_path 优先；已配置但文件不在了——返回空串走重装
+    $configured = Get-SettingsShellPath
+    if ($configured) {
+        if (Test-Path $configured -PathType Leaf) { return $configured }
+        return ''
+    }
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe' }
+    foreach ($c in $candidates) {
+        if (Test-Path $c -PathType Leaf) { return $c }
+    }
+    $onPath = Get-Command bash.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($onPath -and $onPath.Source -and (Test-Path $onPath.Source -PathType Leaf)) { return $onPath.Source }
+    return ''
+}
+
+function Get-PortableGitAsset {
+    $platform = Test-Platform  # windows-x64 / windows-arm64
+    $assetSuffix = '64-bit.7z.exe'
+    if ($platform -eq 'windows-arm64') { $assetSuffix = 'arm64.7z.exe' }
+
+    Say "解析 Portable Git 最新发布…"
+    $release = Invoke-RestMethod -Uri $GitForWindowsLatestReleaseApi -Headers @{ 'User-Agent' = 'nova-installer' }
+    $asset = $release.assets | Where-Object { $_.name -like "PortableGit-*$assetSuffix" } | Select-Object -First 1
+    if (-not $asset) { Err "未找到 Portable Git 资产（$assetSuffix）"; exit 1 }
+
+    # sha256 在 release 正文的资产表格里（"文件名 | sha256" 行）
+    $escaped = [regex]::Escape($asset.name)
+    $m = [regex]::Match($release.body, "(?m)^$escaped\s+\|\s+([a-fA-F0-9]{64})\s*$")
+    if (-not $m.Success) { Err "未找到 $($asset.name) 的 sha256 记录"; exit 1 }
+    return [PSCustomObject]@{ Name = $asset.name; Url = $asset.browser_download_url; Sha256 = $m.Groups[1].Value.ToLowerInvariant() }
+}
+
+function Install-GitBashManaged {
+    $gitDir = Get-ManagedGitBashDir
+    $bashPath = Get-ManagedGitBashPath
+    if (Test-Path $bashPath -PathType Leaf) {
+        Set-SettingsShellPath $bashPath
+        Say "Git Bash 已就位于 $bashPath（shell_path 已写入）"
+        return
+    }
+
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "nova-git-bash-$PID"
+    $extractDir = Join-Path $tmp 'extract'
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $tmp, $extractDir, (Get-NovaAgentDir) | Out-Null
+
+    $asset = Get-PortableGitAsset
+    $pkg = Join-Path $tmp $asset.Name
+    Say "下载 Portable Git $($asset.Name)…"
+    Fetch $asset.Url $pkg
+    Say "校验 sha256…"
+    $actual = (Get-FileHash $pkg -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $asset.Sha256) {
+        Err "Portable Git 的 sha256 校验失败（期望 $($asset.Sha256)，实际 $actual）"
+        exit 1
+    }
+
+    Say "解压到 $gitDir"
+    # PortableGit-*.7z.exe 是自解压包：-y 静默 -o 指定目标
+    $proc = Start-Process -FilePath $pkg -ArgumentList @('-y', "-o`"$extractDir`"") -PassThru -Wait -WindowStyle Hidden
+    if ($proc.ExitCode -ne 0) { Err "Portable Git 解压失败（exit $($proc.ExitCode)）"; exit $proc.ExitCode }
+    if (-not (Test-Path (Join-Path $extractDir 'bin\bash.exe') -PathType Leaf)) {
+        Err "Portable Git 解压产物缺 bin\bash.exe"
+        exit 1
+    }
+    Remove-Item $gitDir -Recurse -Force -ErrorAction SilentlyContinue
+    Move-Item $extractDir $gitDir -Force
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+    Set-SettingsShellPath $bashPath
+    Say "Git Bash 已装到 $gitDir（管理态，settings 的 shell_path 已指向）"
+}
+
+function Install-GitBashWithWinget {
+    Say "用 winget 全局安装 Git for Windows…"
+    & winget.exe install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $found = Find-GitBash
+    if ($found) {
+        if ((Get-SettingsShellPath) -and -not (Test-Path (Get-SettingsShellPath) -PathType Leaf)) {
+            Set-SettingsShellPath $found
+        }
+        Say "Git Bash 已装到 $found"
+    }
+    else {
+        Say "Git 已装但当前终端还找不到 bash——重开终端后生效"
+    }
+}
+
+function Ensure-GitBash {
+    $existing = Find-GitBash
+    if ($existing) {
+        Say "Git Bash: $existing（bash 工具就绪）"
+        return
+    }
+    if ([Console]::IsInputRedirected) {
+        Say "提示：未检测到 Git Bash——coding_agent 的 bash 工具在 Windows 上需要它。"
+        Say "  装法：winget install Git.Git，或重跑本安装器选管理态安装。"
+        return
+    }
+    Say ""
+    Say "未检测到 Git Bash（coding_agent 的 bash 工具在 Windows 上需要它）。"
+    $gitDir = Get-ManagedGitBashDir
+    $winget = [bool](Get-Command winget.exe -ErrorAction SilentlyContinue)
+    Say "  Y  管理态安装 Portable Git 到 $gitDir（默认，不影响系统 Git）"
+    if ($winget) { Say "  w  winget 全局安装 Git for Windows" }
+    Say "  n  跳过（bash 工具不可用，其余能力不受影响）"
+    $prompt = '选择 [Y/n]'
+    if ($winget) { $prompt = '选择 [Y/w/n]' }
+    $answer = Read-Host $prompt
+    if (-not $answer -or $answer -match '^(y|yes)$') {
+        Install-GitBashManaged
+    }
+    elseif ($winget -and $answer -match '^(w|winget)$') {
+        Install-GitBashWithWinget
+    }
+    else {
+        Say "跳过 Git Bash 安装——bash 工具不可用，其余能力不受影响。"
+    }
+}
+
+# —— 卸载 —————————————————————————————————————————————————————————————
 
 function Do-Uninstall {
     $root = Install-Root
@@ -306,6 +480,8 @@ function Main {
     Say "自检: nova --version = $reported"
 
     Install-CodingBundle $root
+
+    Ensure-GitBash
 
     Set-PathEntry $root
 
