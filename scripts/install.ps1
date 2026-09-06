@@ -1,4 +1,4 @@
-# install.ps1 —— Nova Windows 安装器（install.sh 的 PowerShell 对位译本）
+﻿# install.ps1 —— Nova Windows 安装器（install.sh 的 PowerShell 对位译本）
 #
 # 用法：
 #   irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1 | iex
@@ -19,6 +19,10 @@
 # 环境变量：NOVA_VERSION / NOVA_INSTALLER_RELEASES_BASE（支持 file:// 本地演练）/
 #   NOVA_RELEASES_API_BASE / NOVA_INSTALL_DIR（缺省 ~\.nova\agent\install）/
 #   NOVA_NO_CODING=1 / NOVA_OFFLINE=1
+#
+# 界面文案全英文（ASCII）——Windows 控制台代码页五花八门（GBK/OEM 系），
+# 非 ASCII 文案在缺省代码页下必出乱码；源文件带 BOM 存（PS 5.1 按 BOM
+# 判定 UTF-8，否则误读为系统 ANSI）。
 
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 缺省 TLS 版本过旧，GitHub 直接拒连——先切 1.2
@@ -38,7 +42,7 @@ function Err([string]$msg) { Write-Host "error: $msg" -ForegroundColor Red }
 
 function Test-Platform {
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
-        Err "本安装器是 Windows 专用（macOS/Linux 用 install.sh）"
+        Err "This installer is Windows-only (use install.sh on macOS/Linux)"
         exit 1
     }
     # 读机器环境注册表而非进程变量——ARM64 Windows 跑 x64 PowerShell 时
@@ -47,7 +51,7 @@ function Test-Platform {
     switch ($arch) {
         'AMD64' { return 'windows-x64' }
         'ARM64' { return 'windows-arm64' }
-        default { Err "不支持的 CPU 架构: $arch"; exit 1 }
+        default { Err "Unsupported CPU architecture: $arch"; exit 1 }
     }
 }
 
@@ -78,10 +82,10 @@ function Resolve-Version {
         $rel = Invoke-RestMethod -Uri "$api/latest" -Headers @{ 'User-Agent' = 'nova-installer' }
     }
     catch {
-        Err "无法解析最新发布版本（可设 NOVA_VERSION 显式指定）：$_"
+        Err "Could not resolve the latest release version (set NOVA_VERSION to pin one): $_"
         exit 1
     }
-    if (-not $rel.tag_name) { Err "无法解析最新发布版本（可设 NOVA_VERSION 显式指定）"; exit 1 }
+    if (-not $rel.tag_name) { Err "Could not resolve the latest release version (set NOVA_VERSION to pin one)"; exit 1 }
     return $rel.tag_name
 }
 
@@ -104,7 +108,7 @@ function Fetch([string]$url, [string]$dest) {
     }
     catch {
         if (Test-Path $dest) { Remove-Item $dest -Force }
-        Err "下载失败: $url"
+        Err "Download failed: $url"
         exit 1
     }
 }
@@ -113,14 +117,14 @@ function Test-Sha256([string]$file, [string]$sumsFile) {
     $name = Split-Path $file -Leaf
     # 同名多行取最后一笔（SHA256SUMS 是追加语义——重跑同平台最新条目在尾部）
     $line = Get-Content $sumsFile | Where-Object { $_ -match "  $([regex]::Escape($name))$" } | Select-Object -Last 1
-    if (-not $line) { Err "SHA256SUMS 中没有 $name 的记录"; exit 1 }
+    if (-not $line) { Err "SHA256SUMS has no entry for $name"; exit 1 }
     $expected = ($line -split '\s+')[0].ToLowerInvariant()
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($expected -ne $actual) {
-        Err "$name 的 sha256 校验失败——下载损坏或被篡改，未安装"
+        Err "$name failed sha256 verification — corrupted or tampered download; nothing installed"
         exit 1
     }
-    Say "校验: $name sha256 通过"
+    Say "Verified: $name sha256 OK"
 }
 
 # —— 装配 ————————————————————————————————————————————————————————————
@@ -138,17 +142,17 @@ function Activate-Release([string]$root, [string]$version, [string]$releaseDir) 
 
 function Install-CodingBundle([string]$root) {
     if ($env:NOVA_NO_CODING -eq '1' -or $env:NOVA_OFFLINE -eq '1') {
-        Say "跳过编程能力包（NOVA_NO_CODING/NOVA_OFFLINE）——手动装：nova-server.exe pkg install npm:nova-coding-agent"
+        Say "Skipping the coding pack (NOVA_NO_CODING/NOVA_OFFLINE) — install later: nova-server.exe pkg install npm:nova-coding-agent"
         return
     }
     $server = Join-Path $root 'current\runtime\nova-server.exe'
     Say ""
-    Say "安装官方编程能力包（npm:nova-coding-agent）…"
+    Say "Installing the official coding pack (npm:nova-coding-agent)..."
     & $server pkg install npm:nova-coding-agent
     if ($LASTEXITCODE -ne 0) {
-        Say "警告：编程能力包安装未成功（可稍后手动装）："
+        Say "Warning: coding pack installation failed (install it later):"
         Say "  & `"$server`" pkg install npm:nova-coding-agent"
-        Say "  编程能力缺失时 nova 仍有会话基础设施（nova-base 内建）。"
+        Say "  Without it nova still has session infrastructure (nova-base is built in)."
     }
 }
 
@@ -212,11 +216,11 @@ function Set-PathEntry([string]$root) {
     $current = Join-Path $root 'current'
     $existing = Get-UserEnv 'Path'
     if ($existing -and (@($existing -split ';') -contains $current)) {
-        Say "PATH: $current 已在用户 PATH"
+        Say "PATH: $current is already on the user PATH"
         return
     }
     Add-UserPathEntry $current
-    Say "PATH: 已写入用户 PATH（$current）——新开的终端立即可用"
+    Say "PATH: added to user PATH ($current) — new terminals see it immediately"
 }
 
 # —— Git Bash 供给（bash 工具的 Windows 依赖） ————————————————————————————
@@ -290,15 +294,15 @@ function Get-PortableGitAsset {
     $assetSuffix = '64-bit.7z.exe'
     if ($platform -eq 'windows-arm64') { $assetSuffix = 'arm64.7z.exe' }
 
-    Say "解析 Portable Git 最新发布…"
+    Say "Resolving the latest Portable Git release..."
     $release = Invoke-RestMethod -Uri $GitForWindowsLatestReleaseApi -Headers @{ 'User-Agent' = 'nova-installer' }
     $asset = $release.assets | Where-Object { $_.name -like "PortableGit-*$assetSuffix" } | Select-Object -First 1
-    if (-not $asset) { Err "未找到 Portable Git 资产（$assetSuffix）"; exit 1 }
+    if (-not $asset) { Err "No Portable Git asset found ($assetSuffix)"; exit 1 }
 
     # sha256 在 release 正文的资产表格里（"文件名 | sha256" 行）
     $escaped = [regex]::Escape($asset.name)
     $m = [regex]::Match($release.body, "(?m)^$escaped\s+\|\s+([a-fA-F0-9]{64})\s*$")
-    if (-not $m.Success) { Err "未找到 $($asset.name) 的 sha256 记录"; exit 1 }
+    if (-not $m.Success) { Err "No sha256 record found for $($asset.name)"; exit 1 }
     return [PSCustomObject]@{ Name = $asset.name; Url = $asset.browser_download_url; Sha256 = $m.Groups[1].Value.ToLowerInvariant() }
 }
 
@@ -307,7 +311,7 @@ function Install-GitBashManaged {
     $bashPath = Get-ManagedGitBashPath
     if (Test-Path $bashPath -PathType Leaf) {
         Set-SettingsShellPath $bashPath
-        Say "Git Bash 已就位于 $bashPath（shell_path 已写入）"
+        Say "Git Bash already in place at $bashPath (shell_path written)"
         return
     }
 
@@ -318,21 +322,21 @@ function Install-GitBashManaged {
 
     $asset = Get-PortableGitAsset
     $pkg = Join-Path $tmp $asset.Name
-    Say "下载 Portable Git $($asset.Name)…"
+    Say "Downloading Portable Git $($asset.Name)..."
     Fetch $asset.Url $pkg
-    Say "校验 sha256…"
+    Say "Verifying sha256..."
     $actual = (Get-FileHash $pkg -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $asset.Sha256) {
-        Err "Portable Git 的 sha256 校验失败（期望 $($asset.Sha256)，实际 $actual）"
+        Err "Portable Git failed sha256 verification (expected $($asset.Sha256), got $actual)"
         exit 1
     }
 
-    Say "解压到 $gitDir"
+    Say "Extracting to $gitDir"
     # PortableGit-*.7z.exe 是自解压包：-y 静默 -o 指定目标
     $proc = Start-Process -FilePath $pkg -ArgumentList @('-y', "-o`"$extractDir`"") -PassThru -Wait -WindowStyle Hidden
-    if ($proc.ExitCode -ne 0) { Err "Portable Git 解压失败（exit $($proc.ExitCode)）"; exit $proc.ExitCode }
+    if ($proc.ExitCode -ne 0) { Err "Portable Git extraction failed (exit $($proc.ExitCode))"; exit $proc.ExitCode }
     if (-not (Test-Path (Join-Path $extractDir 'bin\bash.exe') -PathType Leaf)) {
-        Err "Portable Git 解压产物缺 bin\bash.exe"
+        Err "Portable Git extraction produced no bin\bash.exe"
         exit 1
     }
     Remove-Item $gitDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -340,11 +344,11 @@ function Install-GitBashManaged {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
     Set-SettingsShellPath $bashPath
-    Say "Git Bash 已装到 $gitDir（管理态，settings 的 shell_path 已指向）"
+    Say "Git Bash installed at $gitDir (managed; settings shell_path points to it)"
 }
 
 function Install-GitBashWithWinget {
-    Say "用 winget 全局安装 Git for Windows…"
+    Say "Installing Git for Windows globally via winget..."
     & winget.exe install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $found = Find-GitBash
@@ -352,33 +356,33 @@ function Install-GitBashWithWinget {
         if ((Get-SettingsShellPath) -and -not (Test-Path (Get-SettingsShellPath) -PathType Leaf)) {
             Set-SettingsShellPath $found
         }
-        Say "Git Bash 已装到 $found"
+        Say "Git Bash installed at $found"
     }
     else {
-        Say "Git 已装但当前终端还找不到 bash——重开终端后生效"
+        Say "Git installed but bash is not visible in this terminal yet — it will be after a restart"
     }
 }
 
 function Ensure-GitBash {
     $existing = Find-GitBash
     if ($existing) {
-        Say "Git Bash: $existing（bash 工具就绪）"
+        Say "Git Bash: $existing (bash tool ready)"
         return
     }
     if ([Console]::IsInputRedirected) {
-        Say "提示：未检测到 Git Bash——coding_agent 的 bash 工具在 Windows 上需要它。"
-        Say "  装法：winget install Git.Git，或重跑本安装器选管理态安装。"
+        Say "Note: Git Bash not found — coding_agent's bash tool needs it on Windows."
+        Say "  Install: winget install Git.Git, or rerun this installer for the managed option."
         return
     }
     Say ""
-    Say "未检测到 Git Bash（coding_agent 的 bash 工具在 Windows 上需要它）。"
+    Say "Git Bash not found (coding_agent's bash tool needs it on Windows)."
     $gitDir = Get-ManagedGitBashDir
     $winget = [bool](Get-Command winget.exe -ErrorAction SilentlyContinue)
-    Say "  Y  管理态安装 Portable Git 到 $gitDir（默认，不影响系统 Git）"
-    if ($winget) { Say "  w  winget 全局安装 Git for Windows" }
-    Say "  n  跳过（bash 工具不可用，其余能力不受影响）"
-    $prompt = '选择 [Y/n]'
-    if ($winget) { $prompt = '选择 [Y/w/n]' }
+    Say "  Y  managed Portable Git into $gitDir (default; leaves system Git alone)"
+    if ($winget) { Say "  w  install Git for Windows globally via winget" }
+    Say "  n  skip (bash tool unavailable; everything else works)"
+    $prompt = 'Choose [Y/n]'
+    if ($winget) { $prompt = 'Choose [Y/w/n]' }
     $answer = Read-Host $prompt
     if (-not $answer -or $answer -match '^(y|yes)$') {
         Install-GitBashManaged
@@ -387,7 +391,7 @@ function Ensure-GitBash {
         Install-GitBashWithWinget
     }
     else {
-        Say "跳过 Git Bash 安装——bash 工具不可用，其余能力不受影响。"
+        Say "Skipping Git Bash — the bash tool will be unavailable; everything else works."
     }
 }
 
@@ -402,20 +406,20 @@ function Do-Uninstall {
     $existing = Get-UserEnv 'Path'
     if ($existing -and (@($existing -split ';') -contains $current)) {
         Remove-UserPathEntry $current
-        Say "已从用户 PATH 摘除 $current"
+        Say "Removed $current from user PATH"
         $removed = $true
     }
 
     if (Test-Path $current) { cmd /c rmdir "$current" | Out-Null }
     if (Test-Path $root) {
         Remove-Item $root -Recurse -Force
-        Say "已删 $root"
+        Say "Deleted $root"
         $removed = $true
     }
-    if (-not $removed) { Say "未发现本安装器的安装痕迹（$root）" }
+    if (-not $removed) { Say "No install trace of this installer found ($root)" }
     Say ""
-    Say "用户数据保留在 ~\.nova\agent（settings/sessions/packages 等）。"
-    Say "如需彻底清除：Remove-Item -Recurse -Force ~\.nova\agent"
+    Say "User data remains at ~\.nova\agent (settings/sessions/packages)."
+    Say "For full removal: Remove-Item -Recurse -Force ~\.nova\agent"
 }
 
 # —— 主流程 ———————————————————————————————————————————————————————————
@@ -428,11 +432,11 @@ function Main {
 
     Say ""
     Write-Host "  Nova Installer" -ForegroundColor Cyan
-    Write-Host "  框架 + TUI + 官方 bundle 的静态双二进制分发（Windows）" -ForegroundColor DarkGray
+    Write-Host "  Framework + TUI + official bundles as static dual binaries (Windows)" -ForegroundColor DarkGray
     Say ""
 
     $platform = Test-Platform
-    Say "平台: $platform"
+    Say "Platform: $platform"
 
     $version = Resolve-Version
     $root = Install-Root
@@ -443,21 +447,21 @@ function Main {
     $novaExe = Join-Path $releaseDir 'nova.exe'
     $serverExe = Join-Path $releaseDir 'runtime\nova-server.exe'
     if ($currentVersion -eq $version -and (Test-Path $novaExe) -and (Test-Path $serverExe)) {
-        Say "已存在 $version（$releaseDir）——跳过重装，直接激活"
+        Say "Already at $version ($releaseDir) — skipping reinstall, activating"
     }
     else {
         $stage = Join-Path $root "staging\$version.$PID"
         if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
         New-Item -ItemType Directory -Path $stage -Force | Out-Null
         try {
-            Say "下载: $ReleasesBase/download/$version/$asset"
+            Say "Downloading: $ReleasesBase/download/$version/$asset"
             Fetch "$ReleasesBase/download/$version/$asset" (Join-Path $stage $asset)
             Fetch "$ReleasesBase/download/$version/SHA256SUMS" (Join-Path $stage 'SHA256SUMS')
             Test-Sha256 (Join-Path $stage $asset) (Join-Path $stage 'SHA256SUMS')
 
             New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
             Expand-Archive -Path (Join-Path $stage $asset) -DestinationPath $releaseDir -Force
-            Say "解压: $releaseDir"
+            Say "Extracted: $releaseDir"
         }
         finally {
             if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
@@ -474,10 +478,10 @@ function Main {
     $reported = (& (Join-Path $root 'current\nova.exe') --version 2>$null | Out-String).Trim()
     $expected = $version.TrimStart('v')
     if ($reported -ne $expected) {
-        Err "自检失败：nova --version 报 '$reported'，期望 '$expected'"
+        Err "Self-check failed: nova --version reported '$reported', expected '$expected'"
         exit 1
     }
-    Say "自检: nova --version = $reported"
+    Say "Self-check: nova --version = $reported"
 
     Install-CodingBundle $root
 
@@ -486,7 +490,7 @@ function Main {
     Set-PathEntry $root
 
     Say ""
-    Say "安装完成。重开终端后运行 nova 启动（编程能力已随行——bash/edit/grep 等工具与 coding_agent 角色）。"
+    Say "Install complete. Open a new terminal and run: nova (coding capability included — bash/edit/grep tools + coding_agent role)."
     Say ""
 }
 
