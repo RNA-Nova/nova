@@ -47,7 +47,8 @@ import shutil as _shutil
 
 NODE = os.environ.get("NOVA_NODE") or _shutil.which("node") or os.path.expanduser("~/.pixi/bin/node")
 
-READY_TIMEOUT = 90.0
+# Windows CI 首启含装包全流程（wheel 构建等）——给足；POSIX 快
+READY_TIMEOUT = 240.0 if sys.platform == "win32" else 90.0
 STEP_WAIT = 3.0
 
 READY_RE = re.compile(r"coding_agent · \S")
@@ -59,6 +60,9 @@ def strip_ansi(text: str) -> str:
     text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
     text = re.sub(r"\x1b\[\?[0-9;]*[hl]", "", text)  # kitty/模式切换序列
     return text.replace("\r", "\n")
+
+
+_SHARED_SANDBOX: Optional[tuple[str, str]] = None  # 进程内共享（见 TuiSession）
 
 
 def make_sandbox() -> tuple[str, str]:
@@ -108,7 +112,13 @@ class TuiSession:
     """
 
     def __init__(self, cwd: str, extra_env: Optional[dict] = None) -> None:
-        home, agent_dir = make_sandbox()
+        # 沙箱跨段共享：fresh-per-会话会让每个段的首启都重走装包全流程
+        # （Windows CI 上 wheel 构建分钟级，段段超时）。同进程内复用——
+        # 退出类用例（ctrl+d/ctrl+c 双击）杀进程不杀沙箱。
+        global _SHARED_SANDBOX
+        if _SHARED_SANDBOX is None:
+            _SHARED_SANDBOX = make_sandbox()
+        home, agent_dir = _SHARED_SANDBOX
         self.agent_dir = agent_dir
         env = dict(
             os.environ,
@@ -424,8 +434,9 @@ def case_double_esc_tree(tui: TuiSession) -> Optional[str]:
     # 双击须 500ms 窗内——一次 write 送两字节（逐 send 的 drain 在慢机上必超窗，
     # ctrl+c 双击同款修法）
     os.write(tui.master, b"\x1b\x1b") if not tui._win32 else tui.proc.write("\x1b\x1b")
-    tui._drain(3.5)
-    if not re.search(r"会话树|session", tui.buffer[before:], re.I):
+    # 选择器是 RPC 往返（/tree → ui/request → 渲染）——CI 慢机上超固定窗口，
+    # 轮询承接
+    if not tui.wait_for(r"会话树|session", 10.0):
         return "Esc 双击后会话树未开"
     tui.send("\x1b", 2.0)  # 关闭
     return None
