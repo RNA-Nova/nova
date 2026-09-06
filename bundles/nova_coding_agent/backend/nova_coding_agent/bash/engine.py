@@ -159,6 +159,14 @@ _ABORT_KILL_GRACE_S = 1.0
 _EXIT_STDIO_GRACE_S = 0.1
 
 
+async def _heartbeat_loop() -> None:
+    """循环级心跳（NOVA_ENGINE_DEBUG 观测用）：挂起期心跳断 = 整个事件
+    循环冻结；心跳在但退出观察不到 = 子进程事件投递链路断。"""
+    while True:
+        await asyncio.sleep(2.0)
+        _stage("心跳（循环存活）")
+
+
 async def _wait_process_exit(proc: asyncio.subprocess.Process) -> None:
     """只等进程退出本身（不等待管道关闭）。
 
@@ -167,8 +175,13 @@ async def _wait_process_exit(proc: asyncio.subprocess.Process) -> None:
     管道时会一直挂住。``proc.returncode`` 则在子进程被收割时（SIGCHLD）
     立即赋值，与管道状态无关。
     """
+    polls = 0
     while proc.returncode is None:
         await asyncio.sleep(0.05)
+        polls += 1
+        if polls % 40 == 0:
+            # 观测：轮询活着 = 循环没冻结；rc 恒 None = 退出事件未送达
+            _stage(f"仍在等待退出（已轮询 {polls} 次，rc={proc.returncode}）")
 
 
 @dataclass
@@ -257,6 +270,7 @@ class LocalBashOperations:
             return BashResult(output=f"Failed to start shell: {exc}", exit_code=-1)
 
         track_detached_child_pid(proc.pid)
+        heartbeat = asyncio.create_task(_heartbeat_loop()) if _ENGINE_DEBUG else None
         try:
             return await self._run_to_completion(
                 proc,
@@ -269,6 +283,8 @@ class LocalBashOperations:
                 owns_accumulator,
             )
         finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
             untrack_detached_child_pid(proc.pid)
 
     async def _run_to_completion(
@@ -284,7 +300,8 @@ class LocalBashOperations:
     ) -> BashResult:
         """等待子进程完成/中止，收尾读循环并构造结果。"""
 
-        async def read_stream(stream: asyncio.StreamReader) -> None:
+        async def read_stream(name: str, stream: asyncio.StreamReader) -> None:
+            first = True
             while True:
                 try:
                     data = await stream.read(4096)
@@ -292,10 +309,14 @@ class LocalBashOperations:
                     break
                 if not data:
                     break
+                if first:
+                    first = False
+                    _stage(f"{name} 首 chunk 到达（{len(data)}B）")
                 handle_data(data)
+            _stage(f"{name} EOF")
 
-        stdout_task = asyncio.create_task(read_stream(proc.stdout))
-        stderr_task = asyncio.create_task(read_stream(proc.stderr))
+        stdout_task = asyncio.create_task(read_stream("stdout", proc.stdout))
+        stderr_task = asyncio.create_task(read_stream("stderr", proc.stderr))
 
         # 等待子进程退出（进程级，不等管道）或被中断
         wait_task = asyncio.create_task(_wait_process_exit(proc))
