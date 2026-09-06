@@ -95,7 +95,9 @@ class _Wire:
         无应答帧）。"""
         self._write({"jsonrpc": "2.0", "method": method, "params": params or {}})
 
-    def call(self, method: str, params: dict | None = None, timeout: float = 15.0) -> dict:
+    def call(
+        self, method: str, params: dict | None = None, timeout: float = 15.0
+    ) -> dict:
         self._next_id += 1
         rid = self._next_id
         self._write(
@@ -130,6 +132,8 @@ class _Wire:
 def _spawn_backend() -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
+    # 引擎阶段观测：挂起时 stderr 尾停在最后完成的阶段——挂点定段
+    env["NOVA_ENGINE_DEBUG"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "nova_harness.modes.rpc.cli"],
         stdin=subprocess.PIPE,
@@ -178,7 +182,10 @@ def test_user_bash_invoke_completes_over_stdio(tmp_path):
         started = time.monotonic()
         result = wire.call(
             "invokeUserTool",
-            {"name": "bash", "params": {"command": "echo PROBE_A; sleep 1; echo PROBE_B"}},
+            {
+                "name": "bash",
+                "params": {"command": "echo PROBE_A; sleep 1; echo PROBE_B"},
+            },
             timeout=30.0,
         )
         elapsed = time.monotonic() - started

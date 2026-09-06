@@ -38,6 +38,15 @@ from nova_harness.core.utils.child_process import (
     untrack_detached_child_pid,
 )
 
+# 引擎阶段观测（NOVA_ENGINE_DEBUG=1 开启）：spawn/首块/进程退出/读泵 EOF/
+# 完成——Windows 挂起类事故的定段手段（ stderr 输出，不进协议通道）
+_ENGINE_DEBUG = os.environ.get("NOVA_ENGINE_DEBUG") == "1"
+
+
+def _stage(msg: str) -> None:
+    if _ENGINE_DEBUG:
+        print(f"[engine-stage] {msg}", file=sys.stderr, flush=True)
+
 
 @dataclass
 class BashResult:
@@ -213,6 +222,7 @@ class LocalBashOperations:
             popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
         try:
+            _stage(f"spawn: {cmd_list[:2]}")
             proc = await asyncio.create_subprocess_exec(
                 *cmd_list,
                 cwd=ctx.cwd,
@@ -223,6 +233,7 @@ class LocalBashOperations:
                 start_new_session=True,
                 **popen_kwargs,
             )
+            _stage(f"spawned pid={proc.pid}")
             if use_stdin:
                 assert proc.stdin is not None
                 proc.stdin.write(ctx.command.encode("utf-8"))
@@ -274,6 +285,7 @@ class LocalBashOperations:
 
         # 等待子进程退出（进程级，不等管道）或被中断
         wait_task = asyncio.create_task(_wait_process_exit(proc))
+        _stage("readers+wait 任务已挂")
         signal_task = _create_signal_wait_task(sig)
 
         aborted = False
@@ -318,6 +330,7 @@ class LocalBashOperations:
         # 读循环收尾：正常情况管道 EOF 结束；若后台孙进程继承了管道
         # （shell 已退出但管道不 EOF），按"空闲宽限"兜底——宽限计时器随
         # 每个 chunk 重置，安静超过宽限即放弃读取
+        _stage("进程退出已观察到，收尾读泵")
         readers = asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         pipes_abandoned = False
         while not readers.done():
@@ -345,6 +358,7 @@ class LocalBashOperations:
         if tail:
             accumulator.append(tail.encode("utf-8"))
 
+        _stage("完成（读泵收尾 + 解码器冲刷毕）")
         accumulator.finish()
         snapshot = accumulator.snapshot(persist_if_truncated=True)
         if owns_accumulator:
