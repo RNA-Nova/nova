@@ -1,34 +1,34 @@
-﻿# install.ps1 —— Nova Windows 安装器（install.sh 的 PowerShell 对位译本）
+# install.ps1 - Nova Windows installer (PowerShell port of install.sh)
 #
-# 用法：
+# Usage:
 #   irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1 | iex
-#   卸载：iex "& { $(irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1) } uninstall"
-#   本地脚本形态：powershell -ExecutionPolicy Bypass -File install.ps1 [uninstall]
+#   Uninstall: iex "& { $(irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1) } uninstall"
+#   Local file form: powershell -ExecutionPolicy Bypass -File install.ps1 [uninstall]
 #
-# 做的事：
-#   1. 预检（Windows + 架构）
-#   2. 解析最新发布版本（或 NOVA_VERSION 钉版）
-#   3. 下载对应架构 zip + SHA256SUMS 并校验 sha256
-#   4. 解压到 <安装根>/releases/<版本>/，junction 翻转 current（NTFS 目录链接，免管理员）
-#   5. 装后自检（nova.exe --version 报号与目标版本一致）
-#   6. 安装官方编程能力包（npm:nova-coding-agent——失败只警告不阻断）
-#   6b. Git Bash 供给（bash 工具的 Windows 依赖：管理态 PortableGit 装进
-#       agent 目录 + settings shell_path 指向；已有 Git Bash 直接使用）
-#   7. current 目录写入用户 PATH（已在则跳过）
+# What it does:
+#   1. Preflight (Windows + architecture)
+#   2. Resolve the latest release version (or pin with NOVA_VERSION)
+#   3. Download the platform zip + SHA256SUMS and verify sha256
+#   4. Extract to <install root>/releases/<version>/, flip the 'current' junction (NTFS link, no admin)
+#   5. Post-install self check (nova.exe --version must match the target version)
+#   6. Install the official coding pack (npm:nova-coding-agent - warn only, never blocks)
+#   6b. Git Bash provisioning (Windows dependency of the bash tool: managed PortableGit
+#       into the agent dir + settings shell_path pointed at it; an existing Git Bash is used as-is)
+#   7. Add the current dir to the user PATH (skipped when already present)
 #
-# 环境变量：NOVA_VERSION / NOVA_INSTALLER_RELEASES_BASE（支持 file:// 本地演练）/
-#   NOVA_RELEASES_API_BASE / NOVA_INSTALL_DIR（缺省 ~\.nova\agent\install）/
+# Environment: NOVA_VERSION / NOVA_INSTALLER_RELEASES_BASE (file:// drills supported) /
+#   NOVA_RELEASES_API_BASE / NOVA_INSTALL_DIR (default ~\.nova\agent\install) /
 #   NOVA_NO_CODING=1 / NOVA_OFFLINE=1
 #
-# 界面文案全英文（ASCII）——Windows 控制台代码页五花八门（GBK/OEM 系），
-# 非 ASCII 文案在缺省代码页下必出乱码；源文件带 BOM 存（PS 5.1 按 BOM
-# 判定 UTF-8，否则误读为系统 ANSI）。
+# The file is pure ASCII (comments included) and stored WITHOUT a BOM. Two execution
+# forms must both work: irm | iex (PS 5.1 decodes the HTTP body without charset
+# awareness - any non-ASCII byte, BOM included, turns into mojibake that breaks parsing)
 
 $ErrorActionPreference = 'Stop'
-# Windows PowerShell 5.1 缺省 TLS 版本过旧，GitHub 直接拒连——先切 1.2
+# Windows PowerShell 5.1 defaults to a TLS version GitHub rejects - switch to 1.2 first
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-# 脚本级参数（irm|iex 与 -File 两形态共用）——函数内 $args 是函数自己的，
-# 经这里显式传递
+# Script-level args (shared by the irm|iex and -File forms) - $args inside a function is
+# the function's own; pass them explicitly here
 $ScriptArgs = $args
 
 $Repo = 'RNA-Nova/nova'
@@ -38,15 +38,15 @@ if (-not $ReleasesBase) { $ReleasesBase = "https://github.com/$Repo/releases" }
 function Say([string]$msg) { Write-Host $msg }
 function Err([string]$msg) { Write-Host "error: $msg" -ForegroundColor Red }
 
-# —— 预检 ————————————————————————————————————————————————————————————
+# ------------------------------ Preflight ------------------------------
 
 function Test-Platform {
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
         Err "This installer is Windows-only (use install.sh on macOS/Linux)"
         exit 1
     }
-    # 读机器环境注册表而非进程变量——ARM64 Windows 跑 x64 PowerShell 时
-    # $env:PROCESSOR_ARCHITECTURE 是进程模拟值（x64），注册表才是机器真值
+# Read the machine env registry, not the process env - on ARM64 Windows running x64
+# PowerShell, $env:PROCESSOR_ARCHITECTURE is the emulated (x64) value; the registry
     $arch = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment").PROCESSOR_ARCHITECTURE
     switch ($arch) {
         'AMD64' { return 'windows-x64' }
@@ -55,7 +55,7 @@ function Test-Platform {
     }
 }
 
-# —— 路径 ————————————————————————————————————————————————————————————
+# ------------------------------ Paths ------------------------------
 
 function Install-Root {
     if ($env:NOVA_INSTALL_DIR) { return $env:NOVA_INSTALL_DIR }
@@ -68,7 +68,7 @@ function Read-CurrentVersion {
     return $null
 }
 
-# —— 版本解析与下载 ———————————————————————————————————————————————————
+# ----------------------- Version resolve & download -----------------------
 
 function Resolve-Version {
     if ($env:NOVA_VERSION) {
@@ -93,13 +93,13 @@ function Fetch([string]$url, [string]$dest) {
     try {
         if ($url.StartsWith('file://')) {
             $local = ([Uri]$url).LocalPath
-            # Windows 的 file:///C:/... → LocalPath 是 /C:/...（前导斜杠要摘）
+# Windows file:///C:/... -> LocalPath yields /C:/... (strip the leading slash)
             if ($local -match '^/[A-Za-z]:') { $local = $local.Substring(1) }
             Copy-Item $local $dest -Force
         }
         else {
-            # 显式 curl.exe：Windows PowerShell 里 curl 是 Invoke-WebRequest
-            # 的别名且慢得多；curl.exe 失败再回退 IWR
+# Explicit curl.exe: in Windows PowerShell "curl" is an Invoke-WebRequest alias and much
+# slower; fall back to IWR if curl.exe fails
             curl.exe "-#SfLo" $dest $url
             if ($LASTEXITCODE -ne 0) {
                 Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
@@ -115,25 +115,25 @@ function Fetch([string]$url, [string]$dest) {
 
 function Test-Sha256([string]$file, [string]$sumsFile) {
     $name = Split-Path $file -Leaf
-    # 同名多行取最后一笔（SHA256SUMS 是追加语义——重跑同平台最新条目在尾部）
+# Last entry wins for duplicate names (SHA256SUMS is append-only - reruns append the fresh line at the tail)
     $line = Get-Content $sumsFile | Where-Object { $_ -match "  $([regex]::Escape($name))$" } | Select-Object -Last 1
     if (-not $line) { Err "SHA256SUMS has no entry for $name"; exit 1 }
     $expected = ($line -split '\s+')[0].ToLowerInvariant()
     $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($expected -ne $actual) {
-        Err "$name failed sha256 verification — corrupted or tampered download; nothing installed"
+        Err "$name failed sha256 verification - corrupted or tampered download; nothing installed"
         exit 1
     }
     Say "Verified: $name sha256 OK"
 }
 
-# —— 装配 ————————————————————————————————————————————————————————————
+# ------------------------------ Assembly ------------------------------
 
 function Activate-Release([string]$root, [string]$version, [string]$releaseDir) {
     $current = Join-Path $root 'current'
     if (Test-Path $current) {
-        # junction 删除：cmd rmdir 只摘链接不碰目标（PowerShell 5.1 的
-        # Remove-Item -Recurse 对 junction 有递归进目标目录的坑）
+# junction removal: cmd rmdir removes only the link (PowerShell 5.1's
+# Remove-Item -Recurse can descend into the target directory - a known trap)
         cmd /c rmdir "$current" | Out-Null
     }
     New-Item -ItemType Junction -Path $current -Target $releaseDir | Out-Null
@@ -142,7 +142,7 @@ function Activate-Release([string]$root, [string]$version, [string]$releaseDir) 
 
 function Install-CodingBundle([string]$root) {
     if ($env:NOVA_NO_CODING -eq '1' -or $env:NOVA_OFFLINE -eq '1') {
-        Say "Skipping the coding pack (NOVA_NO_CODING/NOVA_OFFLINE) — install later: nova-server.exe pkg install npm:nova-coding-agent"
+        Say "Skipping the coding pack (NOVA_NO_CODING/NOVA_OFFLINE) - install later: nova-server.exe pkg install npm:nova-coding-agent"
         return
     }
     $server = Join-Path $root 'current\runtime\nova-server.exe'
@@ -156,11 +156,11 @@ function Install-CodingBundle([string]$root) {
     }
 }
 
-# —— 用户环境变量（PATH）——————————————————————————————————————————————
-# 注册表直写而不用 [Environment]::SetEnvironmentVariable——后者读出时会把
-# 既有的 %VAR% 引用展开成实值再写回（REG_SZ 化），破坏用户自己的变量引用。
-# 写后广播 WM_SETTINGCHANGE（新终端立即可见）+ 进程内同步更新（本安装器
-# 后续步骤直接可用）。
+# ----------------------- User environment (PATH) -----------------------
+# Write the registry directly instead of [Environment]::SetEnvironmentVariable - the
+# latter expands existing %VAR% references into literal values on read-back
+# (REG_SZ-ified), clobbering the user's own variable references.
+# Broadcast WM_SETTINGCHANGE after writing (new terminals see it immediately) + update
 
 function Get-UserEnv([string]$Key) {
     $rk = (Get-Item 'HKCU:').OpenSubKey('Environment')
@@ -186,7 +186,7 @@ function Set-UserEnv([string]$Key, [string]$Value) {
         $rk.DeleteValue($Key, $false)
     }
     else {
-        # 含 % 的值保持 ExpandString（否则 %USERPROFILE% 类引用被写死）
+# values containing % stay ExpandString (otherwise %USERPROFILE%-style refs get baked in)
         $kind = [Microsoft.Win32.RegistryValueKind]::String
         if ($Value.Contains('%')) { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
         elseif ($rk.GetValue($Key)) { $kind = $rk.GetValueKind($Key) }
@@ -220,14 +220,14 @@ function Set-PathEntry([string]$root) {
         return
     }
     Add-UserPathEntry $current
-    Say "PATH: added to user PATH ($current) — new terminals see it immediately"
+    Say "PATH: added to user PATH ($current) - new terminals see it immediately"
 }
 
-# —— Git Bash 供给（bash 工具的 Windows 依赖） ————————————————————————————
-# coding_agent 的 bash 工具在 Windows 上必须有 bash（Git Bash）。没有的
-# 机器在装完能力包后由这里补齐：管理态 PortableGit 装进 agent 目录 +
-# settings 的 shell_path 指向它（工具链读取链：ToolContext.settings
-# .get_shell_path() → shell 解析）。
+# ------------------- Git Bash provisioning (bash tool dependency) --------------------
+# coding_agent's bash tool requires bash (Git Bash) on Windows. Machines without it get
+# a managed PortableGit installed into the agent dir + settings shell_path pointed at it
+# (toolchain read path: ToolContext.settings.get_shell_path() -> shell resolution).
+# .get_shell_path() -> shell resolution).
 
 $GitForWindowsLatestReleaseApi = 'https://api.github.com/repos/git-for-windows/git/releases/latest'
 
@@ -272,7 +272,7 @@ function Set-SettingsShellPath([string]$ShellPath) {
 }
 
 function Find-GitBash {
-    # 已配置的 shell_path 优先；已配置但文件不在了——返回空串走重装
+# configured shell_path wins; configured but missing on disk -> return empty (re-provision)
     $configured = Get-SettingsShellPath
     if ($configured) {
         if (Test-Path $configured -PathType Leaf) { return $configured }
@@ -299,7 +299,7 @@ function Get-PortableGitAsset {
     $asset = $release.assets | Where-Object { $_.name -like "PortableGit-*$assetSuffix" } | Select-Object -First 1
     if (-not $asset) { Err "No Portable Git asset found ($assetSuffix)"; exit 1 }
 
-    # sha256 在 release 正文的资产表格里（"文件名 | sha256" 行）
+# sha256 lives in the release body's asset table ("filename | sha256" rows)
     $escaped = [regex]::Escape($asset.name)
     $m = [regex]::Match($release.body, "(?m)^$escaped\s+\|\s+([a-fA-F0-9]{64})\s*$")
     if (-not $m.Success) { Err "No sha256 record found for $($asset.name)"; exit 1 }
@@ -332,7 +332,7 @@ function Install-GitBashManaged {
     }
 
     Say "Extracting to $gitDir"
-    # PortableGit-*.7z.exe 是自解压包：-y 静默 -o 指定目标
+# PortableGit-*.7z.exe is a self-extracting archive: -y silent, -o target directory
     $proc = Start-Process -FilePath $pkg -ArgumentList @('-y', "-o`"$extractDir`"") -PassThru -Wait -WindowStyle Hidden
     if ($proc.ExitCode -ne 0) { Err "Portable Git extraction failed (exit $($proc.ExitCode))"; exit $proc.ExitCode }
     if (-not (Test-Path (Join-Path $extractDir 'bin\bash.exe') -PathType Leaf)) {
@@ -359,7 +359,7 @@ function Install-GitBashWithWinget {
         Say "Git Bash installed at $found"
     }
     else {
-        Say "Git installed but bash is not visible in this terminal yet — it will be after a restart"
+        Say "Git installed but bash is not visible in this terminal yet - it will be after a restart"
     }
 }
 
@@ -370,7 +370,7 @@ function Ensure-GitBash {
         return
     }
     if ([Console]::IsInputRedirected) {
-        Say "Note: Git Bash not found — coding_agent's bash tool needs it on Windows."
+        Say "Note: Git Bash not found - coding_agent's bash tool needs it on Windows."
         Say "  Install: winget install Git.Git, or rerun this installer for the managed option."
         return
     }
@@ -391,17 +391,17 @@ function Ensure-GitBash {
         Install-GitBashWithWinget
     }
     else {
-        Say "Skipping Git Bash — the bash tool will be unavailable; everything else works."
+        Say "Skipping Git Bash - the bash tool will be unavailable; everything else works."
     }
 }
 
-# —— 卸载 —————————————————————————————————————————————————————————————
+# ------------------------------ Uninstall ------------------------------
 
 function Do-Uninstall {
     $root = Install-Root
     $removed = $false
 
-    # 摘 PATH 条目
+# remove PATH entry
     $current = Join-Path $root 'current'
     $existing = Get-UserEnv 'Path'
     if ($existing -and (@($existing -split ';') -contains $current)) {
@@ -422,7 +422,7 @@ function Do-Uninstall {
     Say "For full removal: Remove-Item -Recurse -Force ~\.nova\agent"
 }
 
-# —— 主流程 ———————————————————————————————————————————————————————————
+# ------------------------------ Main ------------------------------
 
 function Main {
     if ($script:ScriptArgs -and $script:ScriptArgs[0] -eq 'uninstall') {
@@ -447,7 +447,7 @@ function Main {
     $novaExe = Join-Path $releaseDir 'nova.exe'
     $serverExe = Join-Path $releaseDir 'runtime\nova-server.exe'
     if ($currentVersion -eq $version -and (Test-Path $novaExe) -and (Test-Path $serverExe)) {
-        Say "Already at $version ($releaseDir) — skipping reinstall, activating"
+        Say "Already at $version ($releaseDir) - skipping reinstall, activating"
     }
     else {
         $stage = Join-Path $root "staging\$version.$PID"
@@ -474,7 +474,7 @@ function Main {
 
     Activate-Release $root $version $releaseDir
 
-    # 装后自检：--version 报号必须与目标版本一致（抓到残缺/错版包）
+# post-install self check: --version must equal the target version (catches corrupt/mismatched packages)
     $reported = (& (Join-Path $root 'current\nova.exe') --version 2>$null | Out-String).Trim()
     $expected = $version.TrimStart('v')
     if ($reported -ne $expected) {
@@ -490,7 +490,7 @@ function Main {
     Set-PathEntry $root
 
     Say ""
-    Say "Install complete. Open a new terminal and run: nova (coding capability included — bash/edit/grep tools + coding_agent role)."
+    Say "Install complete. Open a new terminal and run: nova (coding capability included - bash/edit/grep tools + coding_agent role)."
     Say ""
 }
 
