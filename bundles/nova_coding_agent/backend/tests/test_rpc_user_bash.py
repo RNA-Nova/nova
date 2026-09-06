@@ -129,11 +129,16 @@ class _Wire:
             self.frames.append((time.monotonic(), line[:120]))
 
 
-def _spawn_backend() -> subprocess.Popen:
+def _spawn_backend(debug_log: Path) -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
-    # 引擎阶段观测：挂起时 stderr 尾停在最后完成的阶段——挂点定段
-    env["NOVA_ENGINE_DEBUG"] = "1"
+    # 引擎阶段观测：RPC 模式 fd 2 被 dup2 到 rpc-stderr.log（stderr 尾恒空），
+    # 故打点写专用文件——挂起时日志停在最后完成的阶段，挂点定段
+    env["NOVA_ENGINE_DEBUG"] = str(debug_log)
+    # 本地 pixi 环境的 nova_coding_agent 可能是 site-packages 陈旧副本
+    # （非 editable）——PYTHONPATH 前置仓内 backend/，保证后端跑的是仓内代码
+    repo_backend = str(Path(__file__).resolve().parents[1])
+    env["PYTHONPATH"] = repo_backend + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.Popen(
         [sys.executable, "-m", "nova_harness.modes.rpc.cli"],
         stdin=subprocess.PIPE,
@@ -167,7 +172,7 @@ def test_user_bash_invoke_completes_over_stdio(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    proc = _spawn_backend()
+    proc = _spawn_backend(tmp_path / "engine-stage.log")
     wire = _Wire(proc)
     t0 = time.monotonic()
     try:
@@ -199,14 +204,16 @@ def test_user_bash_invoke_completes_over_stdio(tmp_path):
         starts = [f for f in wire.frames if '"user_tool"' in f[1]]
         assert starts, "user_tool 事件帧未见"
     except Exception:
-        # 死因留档：帧时间线 + 后端 stderr 尾
+        # 死因留档：帧时间线 + 引擎阶段日志（RPC 模式 stderr 被 dup2 到
+        # rpc-stderr.log，排干线程恒空——引擎打点在专用文件里）
         timeline = "\n".join(
             f"  {t - t0:6.1f}s  {head}" for t, head in wire.frames[-25:]
         )
-        tail = "".join(getattr(proc, "stderr_lines", [])[-30:])
+        stage_log = tmp_path / "engine-stage.log"
+        stages = stage_log.read_text(encoding="utf-8") if stage_log.exists() else ""
         pytest.fail(
             f"invokeUserTool 挂起/失败。\n帧时间线：\n{timeline}\n"
-            f"后端 stderr 尾：\n{tail}"
+            f"引擎阶段：\n{stages}"
         )
     finally:
         try:

@@ -18,6 +18,7 @@ import os
 import signal as signal_module
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
@@ -38,14 +39,27 @@ from nova_harness.core.utils.child_process import (
     untrack_detached_child_pid,
 )
 
-# 引擎阶段观测（NOVA_ENGINE_DEBUG=1 开启）：spawn/首块/进程退出/读泵 EOF/
-# 完成——Windows 挂起类事故的定段手段（ stderr 输出，不进协议通道）
-_ENGINE_DEBUG = os.environ.get("NOVA_ENGINE_DEBUG") == "1"
+# 引擎阶段观测（NOVA_ENGINE_DEBUG 开启）：spawn/挂起/退出/收尾/完成——
+# Windows 挂起类事故的定段手段。取值："1" = 写 stderr（注意 RPC 模式
+# fd 2 被 dup2 到 rpc-stderr.log）；其余非空值 = 当作文件路径追加写
+# （CI/诊断首选——不受 stderr 重定向影响）。带相对引擎导入的秒级时标。
+_ENGINE_DEBUG = os.environ.get("NOVA_ENGINE_DEBUG", "")
+_ENGINE_T0 = time.monotonic()
 
 
 def _stage(msg: str) -> None:
-    if _ENGINE_DEBUG:
-        print(f"[engine-stage] {msg}", file=sys.stderr, flush=True)
+    if not _ENGINE_DEBUG:
+        return
+    line = f"[engine-stage] +{time.monotonic() - _ENGINE_T0:7.3f}s {msg}\n"
+    try:
+        if _ENGINE_DEBUG == "1":
+            sys.stderr.write(line)
+            sys.stderr.flush()
+        else:
+            with open(_ENGINE_DEBUG, "a", encoding="utf-8") as fh:
+                fh.write(line)
+    except Exception:
+        pass
 
 
 @dataclass
