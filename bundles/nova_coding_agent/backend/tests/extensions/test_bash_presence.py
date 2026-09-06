@@ -61,6 +61,11 @@ def _register(module):
     return api.handlers["session_start"]
 
 
+def _raise_no_bash(path):
+    """get_shell_config 替身：模拟本机无 bash。"""
+    raise FileNotFoundError("No bash shell found")
+
+
 # -----------------------------------------------------------------------------
 # _configured_shell_path：合并 settings 的 shell_path（项目覆盖全局）
 # -----------------------------------------------------------------------------
@@ -118,11 +123,7 @@ def test_skips_on_non_start_reason(monkeypatch):
     handler = _register(module)
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(module, "_configured_shell_path", lambda cwd: None)
-    monkeypatch.setattr(
-        module,
-        "get_shell_config",
-        lambda path: (_ for _ in ()).throw(FileNotFoundError()),
-    )
+    monkeypatch.setattr(module, "get_shell_config", _raise_no_bash)
     for reason in ("reload", "agent_change", "branch"):
         ui = _FakeUI()
         _run(handler(_event(reason), _fake_ctx(ui)))
@@ -134,11 +135,7 @@ def test_skips_without_ui(monkeypatch):
     handler = _register(module)
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(module, "_configured_shell_path", lambda cwd: None)
-    monkeypatch.setattr(
-        module,
-        "get_shell_config",
-        lambda path: (_ for _ in ()).throw(FileNotFoundError()),
-    )
+    monkeypatch.setattr(module, "get_shell_config", _raise_no_bash)
     ui = _FakeUI()
     _run(handler(_event(), _fake_ctx(ui, has_ui=False)))
     assert ui.notifications == []
@@ -162,11 +159,7 @@ def test_warns_with_guidance_when_bash_missing(monkeypatch):
     handler = _register(module)
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(module, "_configured_shell_path", lambda cwd: None)
-    monkeypatch.setattr(
-        module,
-        "get_shell_config",
-        lambda path: (_ for _ in ()).throw(FileNotFoundError()),
-    )
+    monkeypatch.setattr(module, "get_shell_config", _raise_no_bash)
     ui = _FakeUI()
     _run(handler(_event(), _fake_ctx(ui)))
     assert len(ui.notifications) == 1
@@ -183,11 +176,11 @@ def test_other_exceptions_propagate(monkeypatch):
     handler = _register(module)
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(module, "_configured_shell_path", lambda cwd: None)
-    monkeypatch.setattr(
-        module,
-        "get_shell_config",
-        lambda path: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
+
+    def _raise_boom(path):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(module, "get_shell_config", _raise_boom)
     ui = _FakeUI()
     with pytest.raises(RuntimeError, match="boom"):
         _run(handler(_event(), _fake_ctx(ui)))

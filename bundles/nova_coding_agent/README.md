@@ -1,6 +1,6 @@
 # nova-coding-agent
 
-Nova 官方编程 Agent bundle：编程执行能力包。提供组合声明（agents）、8 个本地工具、bash 用户工具、4 个会话扩展、persona 人格文本与 prompt 模板，经 `nova-pkg` 安装后，会话启动时自动加载——`nova` 终端界面与 `nova-harness run` 即刻获得完整的编程 Agent 能力。
+Nova 官方编程 Agent bundle：编程执行能力包。提供组合声明（agents）、8 个本地工具、bash 用户工具、5 个会话扩展、persona 人格文本与 prompt 模板，经 `nova-pkg` 安装后，会话启动时自动加载——`nova` 终端界面与 `nova-harness run` 即刻获得完整的编程 Agent 能力。
 
 本包同时是一个可 import 的 Python 包（import 名 `nova_coding_agent`），承载工具链共享的执行引擎与基础设施。
 
@@ -32,7 +32,7 @@ Nova 官方编程 Agent bundle：编程执行能力包。提供组合声明（ag
 
 - `bash` —— 用户在会话内以 `!` 前缀直接执行 bash，与 LLM 的 bash 工具共享同一执行引擎。
 
-### 扩展（`backend/extensions/`，4 个）
+### 扩展（`backend/extensions/`，5 个）
 
 | 扩展 | 说明 |
 |------|------|
@@ -40,10 +40,11 @@ Nova 官方编程 Agent bundle：编程执行能力包。提供组合声明（ag
 | `plan_mode` | 只读规划模式：/plan 切换，写工具禁用、bash 限只读白名单，编号计划提取与进度跟踪 |
 | `interactive_shell` | 交互式命令终端让位：vim / htop / ssh 等命令挂起 TUI 直接执行 |
 | `subagent_gate` | 子代理委派自治权检查点：逐名裁决允许一次 / 本会话始终允许 / 取消 |
+| `bash_presence` | Windows 无 bash 的首启引导：shell 解析失败时通知三条出路（装 Git for Windows / 加 PATH / 设 shell_path） |
 
 ### Personas（`backend/personas/`）
 
-人格文本资源：`coding/core.md` 主人格 + `subagents/`（scout / planner / reviewer / worker）四件子代理人格。
+人格文本资源（拍平布局，文件名即注册名）：`coding.md` 主人格 + `scout.md` / `planner.md` / `reviewer.md` / `worker.md` 四件子代理人格。
 
 ### Prompt 模板（`backend/prompts/`）
 
@@ -82,8 +83,8 @@ nova_coding_agent/
 │   │                        #   subagent/ 执行引擎）
 │   ├── tools/               # 8 个 LLM 工具（单文件形态）
 │   ├── user_tools/          # bash 用户工具
-│   ├── extensions/          # 4 个扩展（单文件形态）
-│   ├── personas/            # 人格文本（coding/core.md + subagents/ 四件套）
+│   ├── extensions/          # 5 个扩展（单文件形态）
+│   ├── personas/            # 人格文本（拍平布局：coding.md + 子代理四件）
 │   ├── prompts/             # prompt 模板（debug/refactor + 工作流三件套）
 │   └── tests/               # pytest（镜像 backend/ 目录）
 │
@@ -99,7 +100,7 @@ nova_coding_agent/
 
 ## 可选依赖
 
-`grep` 与 `find` 工具优先使用外部二进制加速（`rg` / `fd`），未命中时自动回退到纯 Python 实现，不影响可用性。安装本包时会按 `pyproject.toml` 的声明自动备好（`rg` 走 PyPI wheel，`fd` 走 Nova 托管注册表）；也可手动安装：
+`grep` 与 `find` 工具优先使用外部二进制加速（`rg` / `fd`），未命中时自动回退到纯 Python 实现，不影响可用性。安装本包时会按 `pyproject.toml` 的声明自动备好（两者都走 Nova 托管注册表，免 pip 宿主）；也可手动安装：
 
 ```bash
 # macOS

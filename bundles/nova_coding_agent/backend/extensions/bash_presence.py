@@ -21,6 +21,8 @@ from typing import Any, Optional
 from nova_base.ui_primitives import notify_message
 from nova_coding_agent.tools_common.shell import get_shell_config
 
+from nova_harness.core.config.defaults import get_agent_dir
+
 _GUIDANCE = (
     "未找到 bash——bash 工具在本机不可用。三选路："
     "1) 装 Git for Windows（https://git-scm.com/download/win）；"
@@ -36,8 +38,6 @@ def _configured_shell_path(cwd: str) -> Optional[str]:
     扩展上下文没有 settings 访问面——bash 引擎经 ToolContext 取同一键，
     这里直读同一文件源保持一致（读失败按未配置处理，不错过引导）。
     """
-    from nova_harness.core.config.defaults import get_agent_dir
-
     shell_path: Optional[str] = None
     for path in (
         os.path.join(str(get_agent_dir()), "settings.json"),

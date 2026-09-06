@@ -49,7 +49,7 @@ npm install -g nova-tui
 
 后端启动命令解析链（`wire/backend-command.ts`，从高到低）：`NOVA_BACKEND`（显式指定后端二进制路径）→ 同目录 `runtime/nova-server`（打包形态：`nova` 二进制旁的随行后端，此时无需任何 Python 环境）→ `NOVA_PYTHON` → `python3` 模块调用。
 
-Agent 能力（工具、slash 命令、子代理等）由已安装的 Nova 包提供——官方双 bundle `nova-base`（会话基础设施）+ `nova-coding-agent`（编程执行）经 `nova-pkg install` 安装后即可在 TUI 中使用；打包形态下 nova-base 内建随行（首启即用），nova-coding-agent 按需 `nova-server pkg install` 安装。
+Agent 能力（工具、slash 命令、子代理等）由已安装的 Nova 包提供——官方双 bundle `nova-base`（会话基础设施）+ `nova-coding-agent`（编程执行）经 `nova-pkg install` 安装后即可在 TUI 中使用；打包形态下 nova-base 内建随行（首启即用），nova-coding-agent 由安装器自动装（绕过安装器的进入路径上，首启会弹"安装编程能力包？"引导）或按需 `nova-server pkg install` 安装。
 
 ## 快速上手
 
@@ -59,10 +59,10 @@ nova --continue               # 继续当前目录最近一次会话
 nova 帮我审查 src 目录         # 带首条消息启动（@file 展开为文件内容）
 ```
 
-首次启动且无任何可用模型时，会弹出引导（登录 provider / 选择默认模型）。典型流程：
+首次启动且无任何可用模型时，会弹出引导（登录模型服务 / 跳过）；登录成功后自动选中该 provider 的默认模型，即可直接对话。典型流程：
 
-1. **`/login`** —— 配置 provider 鉴权（OAuth 授权或 API key；也可直接设环境变量，如 `VOLCENGINE_API_KEY`）；
-2. **`/model`** —— 选择模型（选择器或直接 `/model provider/id`）；
+1. **`/login`** —— 配置模型服务鉴权（OAuth 授权或 API key；也可直接设环境变量，如 `VOLCENGINE_API_KEY`）；登录成功且会话尚未选模型时自动落到该 provider 的默认模型；
+2. **`/model`** —— 更换模型（选择器或直接 `/model provider/id`）；
 3. 直接输入消息与 agent 对话；
 4. **`!命令`** —— 会话 bash（输出进入上下文）；`!!命令` 执行但不进上下文；
 5. **`/`** —— 命令入口，输入即出补全；`/help` 查看全部可用命令。
