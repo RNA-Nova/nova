@@ -130,12 +130,12 @@ class TuiSession:
             def _pump() -> None:
                 while True:
                     try:
-                        chunk = self.proc.read()
+                        chunk = self.proc.read()  # pywinpty 文本模式：返回 str
                     except Exception:
                         break
                     if not chunk:
                         break
-                    self.buffer += strip_ansi(self._decoder.decode(chunk))
+                    self.buffer += strip_ansi(chunk)
 
             threading.Thread(target=_pump, daemon=True).start()
             self.master = None
@@ -210,7 +210,10 @@ class TuiSession:
         except Exception:
             pass
         try:
-            self.proc.kill()
+            if self._win32:
+                self.proc.terminate()  # pywinpty：kill 要带 sig，terminate 才是无参强停
+            else:
+                self.proc.kill()
         except (OSError, AttributeError):
             pass
         try:
@@ -532,6 +535,9 @@ def case_turn_copy_abort_followup(tui: TuiSession) -> Optional[str]:
 
 
 def main() -> int:
+    if sys.platform == "win32":
+        # ✔/✖ 在 GBK 控制台（charmap）不可编码——stdout 换 UTF-8 容错
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--cwd", default=tempfile.gettempdir(), help="会话工作目录（缺省系统临时目录）"
