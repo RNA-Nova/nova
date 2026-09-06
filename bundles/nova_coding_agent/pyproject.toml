@@ -78,6 +78,7 @@ personas = [
     "./backend/personas/"
 ]
 extensions = [
+    "./backend/extensions/bash_presence.py",
     "./backend/extensions/interactive_shell.py",
     "./backend/extensions/permission_gate.py",
     "./backend/extensions/plan_mode.py",

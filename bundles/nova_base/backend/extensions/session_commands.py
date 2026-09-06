@@ -27,6 +27,7 @@ from nova_harness.core.config.auth.interaction import (
 )
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.harness.session.listing import list_sessions_from_dir
+from nova_harness.core.model.resolver import DEFAULT_MODEL_PER_PROVIDER
 
 
 def _parse_args(text: str) -> tuple[str, list[str]]:
@@ -386,6 +387,21 @@ async def _login(args: str, ctx: Any) -> None:
         ctx.ui.notify("notify", {"message": "", "type": "progress"})
     cred_type = getattr(credential, "type", None) or "oauth"
     _reply(ctx, f"已登录 {provider}（{cred_type}）")
+
+    # 登录闭环：会话尚无模型时自动选中该 provider 的默认模型——首启引导
+    # "登录即可对话"（否则首条消息撞 No model selected：刚登录完又被指引
+    # 去 /login + /model）。模型变更条目（append_model_change）即用户可见
+    # 回执，不再另发提示。
+    if ctx.model is None and ctx.model_runtime is not None:
+        available = [
+            m
+            for m in ctx.model_runtime.get_available_snapshot()
+            if m.provider == provider
+        ]
+        if available:
+            preferred = DEFAULT_MODEL_PER_PROVIDER.get(provider)
+            target = next((m for m in available if m.id == preferred), available[0])
+            await ctx.set_model(target)
 
 
 async def _logout(args: str, ctx: Any) -> None:

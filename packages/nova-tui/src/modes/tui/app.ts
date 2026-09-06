@@ -605,7 +605,14 @@ export class NovaTuiApp {
    * 失败降级为通知，下次启动再问。
    */
   private async maybeOfferCodingPack(): Promise<void> {
-    if (this.dialogs.isActive) return;
+    // 与在飞命令流（/login 的 OAuth 长交互等）互斥：本地框与后端框共享
+    // 同一槽位且无队列（后开覆盖先开），并发弹会掐断对方 Promise。有界
+    // 轮询让路——超时放弃，下次启动再问。
+    const deadline = Date.now() + 10 * 60_000;
+    while (this.dialogs.isActive || this.dialogs.hasPendingCommand) {
+      if (Date.now() > deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
     if (['1', 'true', 'yes'].includes(process.env.NOVA_OFFLINE ?? '')) return;
     if (this.runtime.uiState.get('coding-pack', 'installDismissed') === true) return;
 
@@ -722,22 +729,37 @@ export class NovaTuiApp {
     }
   }
 
-  /** first-time 引导：登录 provider / 选择默认模型 / 跳过（本地框）。 */
+  /**
+   * first-time 引导：登录模型服务 / 跳过（本地框）。
+   *
+   * 只在"零可用模型"状态弹出——该状态下"选择默认模型"是死路（/model
+   * 选择器无可用项），故选项只有登录与跳过。登录成功后后端自动选中
+   * 该 provider 的默认模型（session_commands /login 联动），即可对话。
+   */
   private openFirstTimeSetup(): void {
     const selector = new SearchableSelector(
-      '欢迎使用 nova —— 先配置模型',
+      '欢迎使用 nova —— 开始前先登录一个模型服务',
       [
-        { value: 'login', label: '登录 provider', description: 'OAuth 授权（Kimi 等）' },
-        { value: 'model', label: '选择默认模型', description: '从已配置的模型清单选择' },
-        { value: 'skip', label: '跳过', description: '稍后用 /login 或 /model 配置' },
+        {
+          value: 'login',
+          label: '登录模型服务（推荐）',
+          description: 'Kimi 等厂商，OAuth 授权或 API Key——登录后自动选好模型，即可开聊',
+        },
+        { value: 'skip', label: '跳过', description: '稍后用 /login 登录、/model 选模型' },
       ],
       {
         onSelect: (value) => {
           this.dialogs.restoreLocal();
           if (value === 'login') this.editorController.runSlashCommand('/login');
-          if (value === 'model') this.editorController.runCommand('model');
+          // 首启引导关闭后补装包询问（此前装包自检因对话框开着本轮让路——
+          // 不再等下次启动）。/login 命令流在飞时装包框有界让路（对话框无
+          // 队列互斥，并发弹会掐断 OAuth 流程）
+          void this.maybeOfferCodingPack();
         },
-        onCancel: () => this.dialogs.restoreLocal(),
+        onCancel: () => {
+          this.dialogs.restoreLocal();
+          void this.maybeOfferCodingPack();
+        },
       },
       { placeholder: '↑↓ 选择，Enter 确认' },
     );

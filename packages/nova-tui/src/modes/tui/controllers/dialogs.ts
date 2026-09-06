@@ -164,6 +164,11 @@ export class DialogController {
     return this.activeId !== undefined || this.localDialog;
   }
 
+  /** 在飞 slash 命令（/login 的 OAuth 长交互等）——首启引导链的让路判定。 */
+  get hasPendingCommand(): boolean {
+    return this.pendingCommandCancel !== undefined;
+  }
+
   /** 授权等待框是否开着（Esc 让路判断）。 */
   get hasAuthDialog(): boolean {
     return this.authDialog !== undefined;

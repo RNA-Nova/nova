@@ -677,6 +677,7 @@ def test_login_with_provider_arg():
     model_runtime = SimpleNamespace(
         login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
         get_all=lambda: [],
+        get_available_snapshot=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
         get_provider=lambda provider: _oauth_provider(),
     )
@@ -685,6 +686,8 @@ def test_login_with_provider_arg():
         ui=_FakeUI(),
         get_signal=lambda: None,
         model_runtime=model_runtime,
+        model=None,
+        set_model=AsyncMock(return_value=True),
         append_entry=Mock(),
     )
     _run(_handler(api, "login")("kimi-coding", ctx))
@@ -756,6 +759,7 @@ def test_login_selector_picks_provider():
     model_runtime = SimpleNamespace(
         login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
         get_all=lambda: models,
+        get_available_snapshot=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
         get_provider=lambda provider: _oauth_provider(),
     )
@@ -765,6 +769,8 @@ def test_login_selector_picks_provider():
         ui=ui,
         get_signal=lambda: None,
         model_runtime=model_runtime,
+        model=None,
+        set_model=AsyncMock(return_value=True),
         append_entry=Mock(),
     )
     _run(_handler(api, "login")("", ctx))
@@ -786,6 +792,7 @@ def test_login_api_key_only_provider_goes_straight():
     model_runtime = SimpleNamespace(
         login=AsyncMock(return_value=SimpleNamespace(type="api_key")),
         get_all=lambda: [],
+        get_available_snapshot=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
         get_provider=lambda provider: _api_key_provider(),
     )
@@ -795,6 +802,8 @@ def test_login_api_key_only_provider_goes_straight():
         ui=ui,
         get_signal=lambda: None,
         model_runtime=model_runtime,
+        model=None,
+        set_model=AsyncMock(return_value=True),
         append_entry=Mock(),
     )
     _run(_handler(api, "login")("volcengine", ctx))
@@ -817,6 +826,7 @@ def test_login_dual_auth_prompts_method_choice():
     model_runtime = SimpleNamespace(
         login=AsyncMock(return_value=SimpleNamespace(type="api_key")),
         get_all=lambda: [],
+        get_available_snapshot=lambda: [],
         get_provider_auth_status=lambda provider: {"configured": False},
         get_provider=lambda provider: _dual_provider(),
     )
@@ -826,6 +836,8 @@ def test_login_dual_auth_prompts_method_choice():
         ui=ui,
         get_signal=lambda: None,
         model_runtime=model_runtime,
+        model=None,
+        set_model=AsyncMock(return_value=True),
         append_entry=Mock(),
     )
     _run(_handler(api, "login")("kimi-coding", ctx))
@@ -1157,6 +1169,7 @@ def test_login_configured_provider_confirm_yes_proceeds():
     model_runtime = SimpleNamespace(
         login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
         get_all=lambda: [],
+        get_available_snapshot=lambda: [],
         get_provider_auth_status=lambda provider: {
             "configured": True,
             "source": "stored",
@@ -1169,11 +1182,77 @@ def test_login_configured_provider_confirm_yes_proceeds():
         ui=ui,
         get_signal=lambda: None,
         model_runtime=model_runtime,
+        model=None,
+        set_model=AsyncMock(return_value=True),
         append_entry=Mock(),
     )
     _run(_handler(api, "login")("kimi-coding", ctx))
     model_runtime.login.assert_awaited_once()
     assert "已登录 kimi-coding" in ctx.append_entry.call_args[0][1]["text"]
+
+
+def test_login_auto_selects_default_model_when_session_has_none():
+    """登录闭环：会话无模型时自动选中该 provider 的默认模型
+    （DEFAULT_MODEL_PER_PROVIDER 优先）——首启引导"登录即可对话"。"""
+    module = _load_extension()
+    api = _FakeNovaAPI()
+    module.extension(api)
+
+    available = [
+        SimpleNamespace(provider="kimi-coding", id="other-model"),
+        SimpleNamespace(provider="kimi-coding", id="kimi-for-coding"),
+        SimpleNamespace(provider="volcengine", id="deepseek-v4-flash"),
+    ]
+    model_runtime = SimpleNamespace(
+        login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
+        get_all=lambda: available,
+        get_available_snapshot=lambda: available,
+        get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
+    )
+    ctx = SimpleNamespace(
+        has_ui=True,
+        ui=_FakeUI(),
+        get_signal=lambda: None,
+        model_runtime=model_runtime,
+        model=None,
+        set_model=AsyncMock(return_value=True),
+        append_entry=Mock(),
+    )
+    _run(_handler(api, "login")("kimi-coding", ctx))
+
+    target = ctx.set_model.await_args[0][0]
+    assert target.provider == "kimi-coding"
+    assert target.id == "kimi-for-coding"  # DEFAULT_MODEL_PER_PROVIDER 优先
+
+
+def test_login_keeps_current_model_when_already_selected():
+    """会话已有模型时登录不夺权（自动选中只在模型悬空时发生）。"""
+    module = _load_extension()
+    api = _FakeNovaAPI()
+    module.extension(api)
+
+    model_runtime = SimpleNamespace(
+        login=AsyncMock(return_value=SimpleNamespace(type="oauth")),
+        get_all=lambda: [],
+        get_available_snapshot=lambda: [
+            SimpleNamespace(provider="kimi-coding", id="kimi-for-coding")
+        ],
+        get_provider_auth_status=lambda provider: {"configured": False},
+        get_provider=lambda provider: _oauth_provider(),
+    )
+    ctx = SimpleNamespace(
+        has_ui=True,
+        ui=_FakeUI(),
+        get_signal=lambda: None,
+        model_runtime=model_runtime,
+        model=SimpleNamespace(provider="volcengine", id="deepseek-v4-flash"),
+        set_model=AsyncMock(return_value=True),
+        append_entry=Mock(),
+    )
+    _run(_handler(api, "login")("kimi-coding", ctx))
+
+    ctx.set_model.assert_not_called()
 
 
 def test_logout_unconfigured_provider_noop_with_notice():

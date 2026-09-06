@@ -47,9 +47,13 @@ import shutil as _shutil
 
 NODE = os.environ.get("NOVA_NODE") or _shutil.which("node") or os.path.expanduser("~/.pixi/bin/node")
 
-# Windows CI 首启含装包全流程（wheel 构建等）——给足；POSIX 快
-READY_TIMEOUT = 240.0 if sys.platform == "win32" else 90.0
+# 就绪预算分冷热：同进程首个会话承担冷启（Windows CI 要装两个 bundle——
+# pip 构建 + npm ci，实测超 240s）；沙箱跨段共享后的后续会话是温启（秒级）。
+READY_TIMEOUT_COLD = 600.0 if sys.platform == "win32" else 120.0
+READY_TIMEOUT_WARM = 240.0 if sys.platform == "win32" else 90.0
 STEP_WAIT = 3.0
+
+_cold_budget_spent = False  # 首个 wait_ready 消费冷预算（--filter 乱序也成立）
 
 READY_RE = re.compile(r"coding_agent · \S")
 
@@ -199,13 +203,25 @@ class TuiSession:
         return False
 
     def wait_ready(self) -> bool:
-        """等到首屏就绪标记（模型行）。"""
-        deadline = time.time() + READY_TIMEOUT
+        """等到首屏就绪标记（模型行）。同进程首次调用消费冷启预算。"""
+        global _cold_budget_spent
+        timeout = READY_TIMEOUT_WARM if _cold_budget_spent else READY_TIMEOUT_COLD
+        _cold_budget_spent = True
+        deadline = time.time() + timeout
         while time.time() < deadline:
             if READY_RE.search(self.buffer):
                 return True
             self._drain(0.5)
         return False
+
+    def is_alive(self) -> bool:
+        """进程存活（POSIX poll / pywinpty isalive 的平台差归一）。"""
+        if self._win32:
+            try:
+                return bool(self.proc.isalive())
+            except Exception:
+                return False  # 死 pty 的 isalive 也可能抛——按已退出论
+        return self.proc.poll() is None
 
     def debug_dump(self) -> None:
         """超时/失败的死因留档：buffer 尾 + 后端 rpc-stderr.log 尾 + 子进程表。"""
@@ -243,7 +259,9 @@ class TuiSession:
             else:
                 os.write(self.master, b"\x03\x03")
             self._drain(1.0)
-        except OSError:
+        except Exception:
+            # 拆卸路径永不抛——进程可能已退（winpty 对死 pty 的 write 抛
+            # EOFError，POSIX 抛 OSError）；用例断言不该被收尾动作覆盖
             pass
         try:
             self.buffer += strip_ansi(self._decoder.decode(b"", final=True))
@@ -254,7 +272,7 @@ class TuiSession:
                 self.proc.terminate()  # pywinpty：kill 要带 sig，terminate 才是无参强停
             else:
                 self.proc.kill()
-        except (OSError, AttributeError):
+        except Exception:
             pass
         try:
             if self.master is not None:
@@ -423,7 +441,7 @@ def case_ctrl_z_suspend(tui: TuiSession) -> Optional[str]:
     after = tui.buffer[before + len(delta) :]
     if not re.search(r"coding_agent ·|escape 中断|命令", after):
         return "SIGCONT 后未见恢复重绘"
-    if tui.proc.poll() is not None:
+    if not tui.is_alive():
         return "ctrl+z 后进程退出（应为挂起恢复）"
     return None
 
@@ -468,7 +486,7 @@ def case_ctrl_c_clears_editor(tui: TuiSession) -> Optional[str]:
     delta = tui.buffer[before:]
     if "CLEARPROBE" in delta:
         return "ctrl+c 未清空输入框（混合命令被执行）"
-    if tui.proc.poll() is not None:
+    if not tui.is_alive():
         return "ctrl+c 单击误退"
     return None
 
@@ -478,7 +496,7 @@ def case_ctrl_d_nonempty_stays(tui: TuiSession) -> Optional[str]:
     tui.send("草稿文本", 1.0)
     tui.send("\x04", 1.5)  # ctrl+d
     time.sleep(1.0)
-    if tui.proc.poll() is not None:
+    if not tui.is_alive():
         return "ctrl+d 在非空编辑器误退"
     # 复原：清空草稿，别污染后续用例
     tui.send("\x03", 1.0)
@@ -512,7 +530,7 @@ def case_ctrl_d_exits(cwd: str) -> Optional[str]:
             return "启动超时"
         tui.send("\x04", 2.0)  # ctrl+d
         time.sleep(1.5)
-        if tui.proc.poll() is None:
+        if tui.is_alive():
             return "ctrl+d 后进程未退出"
         return None
     finally:
@@ -527,14 +545,13 @@ def case_ctrl_c_double_exits(cwd: str) -> Optional[str]:
             tui.debug_dump()
             return "启动超时"
         tui.send("\x03", 1.0)  # 单击：不退出
-        if tui.proc.poll() is not None:
+        if not tui.is_alive():
             return "ctrl+c 单击误退"
         # 双击须 500ms 窗内——两次按键一次 write 送入（逐 send 的 drain
         # 会把间隔拉到秒级，必超窗）
-        os.write(tui.master, b"\x03\x03")
-        tui._drain(2.0)
+        tui.send("\x03\x03", 2.0)
         time.sleep(1.0)
-        if tui.proc.poll() is None:
+        if tui.is_alive():
             return "ctrl+c 双击未退出"
         return None
     finally:

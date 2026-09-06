@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
+### Added
+- **PTY 验证跨平台化**：pty-keymap.py 驱动双后端（POSIX pty+select / Windows ConPTY pywinpty+读线程），探针平台化（剪贴板 mac pbcopy/win clip.exe+Get-Clipboard、编辑器助手统一 python 形态）；新增 `--local` 档（无模型键环境跳过模型依赖用例）；CI 新增 `pty-keymap / macos+windows` 双腿。
+- **bash_presence 扩展（Windows 无 bash 的首启引导）**：绕过安装器的进入路径（手动解压/绿色版）上，用户要到第一次跑 bash 工具才撞 FileNotFoundError。新扩展在 session_start（reason=="start"，reload/切角色不重扰）检测 win32 + shell 解析失败（settings `shell_path` → Git Bash 已知位置 → PATH 全落空）→ 通知三条出路（装 Git for Windows / 加 PATH / 设 shell_path，或重跑安装器自动供给 PortableGit）。纯提示不代装。
+
 ### Fixed
 - **install.ps1 在 VS Code 终端解压即崩**：Expand-Archive 内部的 Write-Progress 在无进度 UI 的宿主（VS Code 终端等）抛 IndexOutOfRangeException（PS 5.1 已知坑）——脚本块作用域内 `SilentlyContinue`（不污染调用者偏好）。
 - **剪贴板图片粘贴在 Windows 宿主终端不可达**：ctrl+v 被 VS Code/Windows Terminal 宿主吃掉（永不到达）——`app.clipboard.paste` 加 alt+v 伴生键（ESC 前缀各终端放行）；文本粘贴本就走 bracketed paste（终端手势与平台无关），此键位只承载图片路径。
-
-### Added
-- **PTY 验证跨平台化**：pty-keymap.py 驱动双后端（POSIX pty+select / Windows ConPTY pywinpty+读线程），探针平台化（剪贴板 mac pbcopy/win clip.exe+Get-Clipboard、编辑器助手统一 python 形态）；新增 `--local` 档（无模型键环境跳过模型依赖用例）；CI 新增 `pty-keymap / macos+windows` 双腿。
+- **/login 成功后模型悬空**：登录完成只落了凭据，会话模型仍是 None——首条消息撞 "No model selected. Use /login..."（用户刚登录完又被指引去 /login，首启引导链断在最后一环）。修复：登录成功且会话无模型时自动选中该 provider 的默认模型（DEFAULT_MODEL_PER_PROVIDER 优先，与初始解析链 tier 6 同源）；已有模型时不夺权。
+- **首启引导三连弹互踩**：首启装包询问与 /login 的 OAuth 对话框共享同一槽位且无队列（后开覆盖先开，被覆盖方 Promise 永悬——OAuth 流程会被装包框掐断）。装包询问现在有界让路（等在飞命令 settle，上限 10 分钟，超时下次启动再问）；first-time 引导关闭后本轮即补装包询问（不再等下次启动）。
+- **首启模型引导文案新人不可解码**：`登录 provider`（行话）改为"登录模型服务"并说明登录后自动选好模型；删掉"选择默认模型"选项——引导框只在零可用模型状态弹出，该状态下它是死路（/model 报没有可用模型）。
+- **pty-keymap Windows 腿崩溃与冷启超时**：① B 段退出用例的 `proc.poll()` 是 POSIX-only API（pywinpty 无此方法）——崩溃把单用例失败放大成整脚本退出，新增 `TuiSession.is_alive()` 归一平台差；② `close()` 对已退进程的 write 在 winpty 抛 EOFError——拆卸路径收敛为永不抛；③ ctrl+c 双击的裸 `os.write(master)` 在 win32 无 master 可用——改走 `send()` 单次写入（跨平台同语义）；④ A 段 240s 就绪预算吃不下 Windows CI 冷启（两个 bundle 的 pip 构建 + npm ci 仅首启一次）——就绪预算拆冷（600s/首会话）温（240s/后续）两档。
 
 ### Removed
 - **/persona 运行期人格旋钮拆除**（含 getPersonas/setPersonaOverride RPC、persona_override 会话状态字段与条目持久化、footer 的 `agent·override` 标记、扩展 ctx 的 persona 四个 action）：人格文本的唯一装配点收敛回 agent 组合声明的 `persona:` 条目——override 旋钮对终端用户几乎无用且制造串染组合（scout 人格 + worker 工具），选择器/页脚的注册名路径串（`coding/core`、`subagents/worker`）对用户不可解码。旧会话里的 persona_override 条目在恢复时无人消费=自动回默认装配，平滑。nova-wire 契约同步缩面（74 方法）。PersonaManager 只留装配（注册表活视图不变）。
