@@ -1,4 +1,4 @@
-﻿# nova-wire-diag.ps1 —— Windows 线上读取诊断（不需要模型）
+# nova-wire-diag.ps1 —— Windows 线上读取诊断（不需要模型）
 #
 # 直接 spawn nova-server，发 initialize + createSession + pkgInstall
 # （真实网络操作，多帧进度突发 + 长耗时——验证"零输入时帧流会不会
@@ -28,15 +28,14 @@ function Send-Rpc([string]$method, [hashtable]$params) {
     return $script:seq
 }
 
-# 启动后先干等 2 秒——看有没有自发帧（不该有）
+# 启动后先干等 2 秒——看有没有自发帧（不该有）。
+# 注意：StreamReader.Peek() 在空管道上会阻塞填充缓冲（.NET 文档陷阱），
+# 探测必须用 ReadLineAsync + Wait 超时
 $spontaneous = @()
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-while ($sw.ElapsedMilliseconds -lt 2000) {
-    if ($proc.StandardOutput.Peek() -ge 0) {
-        $line = $proc.StandardOutput.ReadLine()
-        if ($line) { $spontaneous += $line }
-    }
-    Start-Sleep -Milliseconds 50
+$peekTask = $proc.StandardOutput.ReadLineAsync()
+if ($peekTask.Wait(2000)) {
+    $line = $peekTask.Result
+    if ($line) { $spontaneous += $line }
 }
 Write-Host "spontaneous frames in first 2s: $($spontaneous.Count) (expect 0)"
 
