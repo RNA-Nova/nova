@@ -6,7 +6,7 @@
 #
 # 用法：powershell -ExecutionPolicy Bypass -File nova-bash-probe.ps1
 $ErrorActionPreference = 'Stop'
-Write-Host "nova-bash-probe v4"
+Write-Host "nova-bash-probe v6"
 
 $server = Join-Path $HOME '.nova\agent\install\current\runtime\nova-server.exe'
 Write-Host "server: $server"
