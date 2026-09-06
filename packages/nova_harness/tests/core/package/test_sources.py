@@ -269,3 +269,34 @@ def test_resolve_managed_path_allows_nested(tmp_path):
     root.mkdir()
     result = resolve_managed_path(root, "a", "b")
     assert result == (root / "a" / "b").resolve()
+
+
+def test_normalize_path_source_cross_mount_falls_back_to_absolute(
+    monkeypatch, tmp_path
+):
+    """跨盘符（Windows D: 源 + C: settings）relpath 无解时保留绝对路径——
+    不再在装完包后的 settings 登记步骤炸 ValueError。"""
+    import os
+
+    from nova_harness.core.package.source import spec as spec_module
+    from nova_harness.core.package.source.spec import (
+        normalize_package_source_for_settings,
+        resolve_package_source_from_settings,
+    )
+
+    def _raise_cross_mount(path, start):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+    monkeypatch.setattr(os.path, "relpath", _raise_cross_mount)
+    pkg_dir = tmp_path / "some-pkg"
+    pkg_dir.mkdir()
+
+    normalized = normalize_package_source_for_settings(
+        f"path:{pkg_dir}", base_dir=str(tmp_path / "agent"), cwd=str(tmp_path)
+    )
+    assert normalized == f"path:{str(pkg_dir).replace(os.sep, '/')}"
+
+    # 读取侧对绝对路径原样直通（normalize/resolve 往返不丢信息）
+    resolved = resolve_package_source_from_settings(normalized, str(tmp_path / "agent"))
+    source_str, _, _ = spec_module.parse_package_source_spec(resolved)
+    assert source_str == f"path:{str(pkg_dir).replace(os.sep, '/')}"

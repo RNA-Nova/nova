@@ -9,7 +9,10 @@
  * - macOS：osascript（图片，PNGf → JPEG 顺序尝试）+ pbpaste（文本）——
  *   系统内建命令，零依赖；
  * - Linux：wl-paste（Wayland）/ xclip（X11 兜底）；
- * - Windows：未实现（WSL PowerShell 路线归后续里程碑，需要时补）。
+ * - Windows：PowerShell `Get-Clipboard`/`Set-Clipboard`（文本读/写——系统
+ *   内建 PS 5.1 即可，显式 UTF-8 控制台编码防中文 locale 的 OEM 乱码；
+ *   每次起进程数百毫秒，读取走超时护栏）。图片剪贴板 Windows 未实现
+ *   （System.Drawing 路线归后续里程碑，需要时补）。
  *
  * 读取失败一律静默返回 null（无剪贴板权限等场景不打断输入流）。
  */
@@ -135,6 +138,37 @@ function saveClipboardImageLinux(basePath: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Windows：PowerShell Get/Set-Clipboard（系统内建 PS 5.1 即可——显式 UTF-8
+// 控制台编码防中文 locale 的 OEM 乱码）
+// ---------------------------------------------------------------------------
+
+const PS_READ_TEXT_SCRIPT =
+  '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;Get-Clipboard';
+const PS_WRITE_TEXT_SCRIPT =
+  '[Console]::InputEncoding=[System.Text.Encoding]::UTF8;$input|Set-Clipboard';
+
+function readClipboardTextWindows(): string | null {
+  const result = run(
+    'powershell',
+    ['-NoProfile', '-Command', PS_READ_TEXT_SCRIPT],
+    READ_TIMEOUT_MS,
+  );
+  if (!result.ok) return null;
+  // PS 按行输出（CRLF 分隔 + 尾部 CRLF）——归一为 POSIX 侧的原文语义
+  const text = result.stdout.toString('utf-8').replace(/\r\n/g, '\n').replace(/\n$/, '');
+  return text.length > 0 ? text : null;
+}
+
+function writeClipboardTextWindows(text: string): boolean {
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-Command', PS_WRITE_TEXT_SCRIPT],
+    { input: text, timeout: READ_TIMEOUT_MS },
+  );
+  return !result.error && result.status === 0;
+}
+
+// ---------------------------------------------------------------------------
 // 对外接口
 // ---------------------------------------------------------------------------
 
@@ -147,7 +181,7 @@ export async function saveClipboardImageToTemp(): Promise<string | null> {
     const basePath = join(tmpdir(), `nova-clipboard-${randomUUID()}`);
     if (process.platform === 'darwin') return saveClipboardImageMacOS(basePath);
     if (process.platform === 'linux') return saveClipboardImageLinux(basePath);
-    return null; // Windows：未实现
+    return null; // Windows：图片未实现（文本读写见 readClipboardText/writeClipboardText）
   } catch {
     return null;
   }
@@ -171,6 +205,9 @@ export async function readClipboardText(): Promise<string | null> {
       const text = result.stdout.toString('utf-8');
       return result.ok && text.length > 0 ? text : null;
     }
+    if (process.platform === 'win32') {
+      return readClipboardTextWindows();
+    }
     return null;
   } catch {
     return null;
@@ -180,6 +217,7 @@ export async function readClipboardText(): Promise<string | null> {
 /** 写剪贴板文本（/copy、ctrl+x 用）；成功 true，失败/平台不支持 false。 */
 export async function writeClipboardText(text: string): Promise<boolean> {
   try {
+    if (process.platform === 'win32') return writeClipboardTextWindows(text);
     const command =
       process.platform === 'darwin'
         ? 'pbcopy'

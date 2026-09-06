@@ -313,8 +313,13 @@ def normalize_package_source_for_settings(
     )
     base = os.path.realpath(os.path.expanduser(base_dir))
     # settings 里的 path: 源串统一 posix 分隔符（跨平台可移植；
-    # Windows 的 os.path.relpath 会产出反斜杠）
-    rel = os.path.relpath(abs_path, base).replace(os.sep, "/")
+    # Windows 的 os.path.relpath 会产出反斜杠）。跨盘符（源在 D:、
+    # settings 在 C:）relpath 无解抛 ValueError——保留绝对路径
+    # （读取侧 resolve_package_source_from_settings 对绝对路径原样直通）。
+    try:
+        rel = os.path.relpath(abs_path, base).replace(os.sep, "/")
+    except ValueError:
+        rel = abs_path.replace(os.sep, "/")
 
     new_source = f"path:{rel}"
     if isinstance(spec, str):
