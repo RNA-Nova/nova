@@ -32,16 +32,26 @@
 
 | 键 | 作用 |
 |----|------|
-| `Esc` | 中断当前生成；对话框/面板中关闭浮层（域级路由——先关浮层，再中断生成） |
+| `Esc` | 中断当前生成；对话框/面板中关闭浮层（域级路由——先关浮层，再中断生成）；空输入时双击打开会话树导航 |
+| `Ctrl+C` 单击 | 清空输入框 |
 | `Ctrl+C` 双击 | 退出 |
 | `Ctrl+D`（空输入时） | 退出 |
 | `Ctrl+O` | 展开/收起工具卡片详情（全部卡片） |
-| `Ctrl+P` | 循环 scoped 模型池的启用集与顺序 |
+| `Ctrl+P` / `Shift+Ctrl+P` | scoped 模型池向前/向后轮询（Shift+Ctrl+P 需 kitty 键盘协议的终端——legacy 终端两键同字节） |
+| `Ctrl+L` | 打开模型选择器 |
+| `Shift+Tab` | 循环 thinking 级别 |
+| `Ctrl+T` | 切换 thinking 块显隐 |
+| `Ctrl+V` / `Alt+V` | 剪贴板粘贴（图片 → 临时文件路径）；ctrl+v 在 VS Code/Windows Terminal 被宿主吃掉时用 alt+v |
+| `Ctrl+X` | 复制最后一条 assistant 回复 |
+| `Ctrl+G` | 外部编辑器编辑草稿（$VISUAL/$EDITOR） |
+| `Ctrl+Z` | 挂起到后台（POSIX；fg 恢复） |
+| `Alt+Enter` | 排队 follow-up 消息（当前轮结束后发送） |
+| `Alt+↑` | 排队内容还原进编辑器 |
 | `Ctrl+Alt+P` | 切换 plan 模式（需 `nova-coding-agent`） |
 | `Tab` | 命令/参数自动补全 |
 | `↑` | 编辑器历史/选择器上移 |
 
-键位可用 `~/.nova/agent/frontend/tui/keybindings.json` 自定义（三级合并：包注册 → 用户表 → 项目表）。
+键位可用 `~/.nova/agent/frontend/tui/keybindings.json` 自定义（三级合并：内建默认 → 用户表 → 项目表）。文本粘贴另走终端自带手势（cmd+v / 右键 / ctrl+shift+v——bracketed paste 与平台无关）。
 
 ## 转录区
 
@@ -57,6 +67,8 @@
 ## footer
 
 `角色 · 模型 · thinking 级别` + 扩展状态行（如 plan 模式的 `⏸ plan` / `📋 n/m` 进度）。包可经 `set_status` 原语挂自己的状态段。
+
+有 token 统计后另有一行数据行：`↑输入 ↓输出 R<缓存读> W<缓存写> <命中率>% $<成本> <上下文%>/<<窗口>>(auto)`——命中率 = 缓存读 ÷（输入 + 缓存读）（上游 input 已扣除 cache_read）；上下文用量超 70% 转黄、90% 转红，`(auto)` 表示自动压缩开启。
 
 ## 面板与对话框
 
