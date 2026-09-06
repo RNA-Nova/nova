@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import os
 import pty
 import re
@@ -33,8 +34,9 @@ STARTUP_WAIT = 10.0
 STEP_WAIT = 3.0
 
 
-def strip_ansi(raw: bytes) -> str:
-    text = raw.decode("utf-8", "replace")
+def strip_ansi(text: str) -> str:
+    """剥 ANSI 控制序列（入参是已解码文本——解码归 TuiSession 的增量解码器，
+    按块独立 decode 会把跨块的多字节字符碎成替换符）。"""
     text = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text)
     text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
     return text.replace("\r", "\n")
@@ -57,6 +59,8 @@ class TuiSession:
         )
         os.close(slave)
         self.buffer = ""
+        # 增量解码器：跨读块的多字节字符在块边界处暂存，不碎成替换符
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def _drain(self, timeout: float) -> None:
         deadline = time.time() + timeout
@@ -70,7 +74,7 @@ class TuiSession:
                 break
             if not chunk:
                 break
-            self.buffer += strip_ansi(chunk)
+            self.buffer += strip_ansi(self._decoder.decode(chunk))
 
     def send(self, keys: str, wait: float = STEP_WAIT) -> None:
         os.write(self.master, keys.encode())
@@ -85,6 +89,9 @@ class TuiSession:
             self._drain(1.5)
         except OSError:
             pass
+        # 冲刷解码器尾部（进程死了之后管道里可能还有未读字节已在上一轮
+        # drain 进了解码器——final=True 把暂存的半个字符落盘）
+        self.buffer += strip_ansi(self._decoder.decode(b"", final=True))
         try:
             self.proc.kill()
         except OSError:

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import os
 import pty
 import re
@@ -33,8 +34,9 @@ READY_RE = re.compile(r"coding_agent · \S")
 DIAG_RE = re.compile(r"渲染器加载失败|默认导出不是渲染函数")
 
 
-def strip_ansi(raw: bytes) -> str:
-    text = raw.decode("utf-8", "replace")
+def strip_ansi(text: str) -> str:
+    """剥 ANSI 控制序列（入参是已解码文本——解码归 main 的增量解码器，
+    按块独立 decode 会把跨块的多字节字符碎成替换符）。"""
     text = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text)
     text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
     return text.replace("\r", "\n")
@@ -58,6 +60,8 @@ def main() -> int:
     )
     os.close(slave)
     buffer = ""
+    # 增量解码器：跨读块的多字节字符在块边界处暂存，不碎成替换符
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def drain(timeout: float) -> None:
         nonlocal buffer
@@ -72,7 +76,7 @@ def main() -> int:
                 break
             if not chunk:
                 break
-            buffer += strip_ansi(chunk)
+            buffer += strip_ansi(decoder.decode(chunk))
 
     failures: list[str] = []
     try:
