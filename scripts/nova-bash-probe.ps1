@@ -1,4 +1,4 @@
-﻿# nova-bash-probe.ps1 —— bash 引擎 + 事件流探针（无模型，零输入）
+# nova-bash-probe.ps1 —— bash 引擎 + 事件流探针（无模型，零输入）
 #
 # 直接经 RPC 调用户 bash 工具（与 LLM bash 工具同一引擎），命令带 3s
 # sleep 制造运行窗口：看 user_tool 进度帧是随时间摊开（健康）还是
@@ -63,15 +63,29 @@ while ($sw.Elapsed.TotalSeconds -lt $deadline) {
     $kind = '?'
     if ($line.Contains('"agent/event"')) { $kind = 'agent/event' }
     if ($line.Contains('"user_tool"')) { $kind = 'user_tool' }
+    if ($line.Contains('"ui/request"')) { $kind = 'ui/request（反向请求——探针不应答）' }
+    if ($line.Contains('"ui/')) { $kind = 'ui/*' }
     $isResult = $line.Contains([string]::Format('"id":{0}', $invokeId))
     if ($isResult) { $kind = 'RPC-RESULT' }
-    $rows += [PSCustomObject]@{ t = $t; kind = $kind }
+    $rows += [PSCustomObject]@{ t = $t; kind = $kind; head = $line.Substring(0, [Math]::Min(110, $line.Length)) }
     if ($isResult) { break }
 }
 
 Write-Host ""
 Write-Host "frame arrival table (t = seconds since invoke):"
-$rows | ForEach-Object { Write-Host ("  {0,6}s  {1}" -f $_.t, $_.kind) }
+$rows | ForEach-Object { Write-Host ("  {0,6}s  {1}  {2}" -f $_.t, $_.kind, $_.head) }
+
+# 尾部读后端 stderr——引擎异常/日志可能在这（管道重定向了但没读就会积压）
+$proc.StandardInput.Close()
+Start-Sleep -Milliseconds 500
+$stderrTail = ''
+if (-not $proc.HasExited) { $proc.Kill() ; $proc.WaitForExit(5000) }
+try { $stderrTail = $proc.StandardError.ReadToEnd() } catch {}
+if ($stderrTail) {
+    Write-Host ""
+    Write-Host "--- backend stderr (last 1500 chars) ---"
+    Write-Host $stderrTail.Substring([Math]::Max(0, $stderrTail.Length - 1500))
+}
 
 $got = $false
 if ($rows.Count -gt 0) { $got = [bool]($rows | Where-Object { $_.kind -eq 'RPC-RESULT' }) }
@@ -87,6 +101,3 @@ if ($got) {
 } else {
     Write-Host "verdict: RPC result never arrived within ${deadline}s ($($rows.Count) frames) -- backend stalled mid-invoke"
 }
-
-$proc.StandardInput.Close()
-if (-not $proc.WaitForExit(5000)) { $proc.Kill() }
