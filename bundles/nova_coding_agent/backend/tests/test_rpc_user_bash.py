@@ -129,7 +129,7 @@ class _Wire:
             self.frames.append((time.monotonic(), line[:120]))
 
 
-def _spawn_backend(debug_log: Path) -> subprocess.Popen:
+def _spawn_backend(debug_log: Path, agent_dir: Path) -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     # 引擎阶段观测：RPC 模式 fd 2 被 dup2 到 rpc-stderr.log（stderr 尾恒空），
@@ -139,6 +139,9 @@ def _spawn_backend(debug_log: Path) -> subprocess.Popen:
     # （非 editable）——PYTHONPATH 前置仓内 backend/，保证后端跑的是仓内代码
     repo_backend = str(Path(__file__).resolve().parents[1])
     env["PYTHONPATH"] = repo_backend + os.pathsep + env.get("PYTHONPATH", "")
+    # agent 目录收进 tmp_path：rpc-stderr.log（fd 2 dup2 落点）随测试
+    # 目录留档，失败时可倒出——循环内部异常栈的唯一可见处
+    env["NOVA_AGENT_DIR"] = str(agent_dir)
     proc = subprocess.Popen(
         [sys.executable, "-m", "nova_harness.modes.rpc.cli"],
         stdin=subprocess.PIPE,
@@ -172,7 +175,7 @@ def test_user_bash_invoke_completes_over_stdio(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    proc = _spawn_backend(tmp_path / "engine-stage.log")
+    proc = _spawn_backend(tmp_path / "engine-stage.log", agent_dir)
     wire = _Wire(proc)
     t0 = time.monotonic()
     try:
@@ -204,16 +207,22 @@ def test_user_bash_invoke_completes_over_stdio(tmp_path):
         starts = [f for f in wire.frames if '"user_tool"' in f[1]]
         assert starts, "user_tool 事件帧未见"
     except Exception:
-        # 死因留档：帧时间线 + 引擎阶段日志（RPC 模式 stderr 被 dup2 到
-        # rpc-stderr.log，排干线程恒空——引擎打点在专用文件里）
+        # 死因留档：帧时间线 + 引擎阶段日志 + rpc-stderr.log 尾
+        # （RPC 模式 stderr 被 dup2 到该文件——循环内部异常栈的唯一可见处）
         timeline = "\n".join(
             f"  {t - t0:6.1f}s  {head}" for t, head in wire.frames[-25:]
         )
         stage_log = tmp_path / "engine-stage.log"
         stages = stage_log.read_text(encoding="utf-8") if stage_log.exists() else ""
+        stderr_log = agent_dir / "logs" / "rpc-stderr.log"
+        stderr_tail = ""
+        if stderr_log.exists():
+            stderr_tail = "".join(
+                stderr_log.read_text(encoding="utf-8").splitlines(keepends=True)[-30:]
+            )
         pytest.fail(
             f"invokeUserTool 挂起/失败。\n帧时间线：\n{timeline}\n"
-            f"引擎阶段：\n{stages}"
+            f"引擎阶段：\n{stages}\nrpc-stderr 尾：\n{stderr_tail}"
         )
     finally:
         try:

@@ -182,6 +182,23 @@ async def _wait_process_exit(proc: asyncio.subprocess.Process) -> None:
         if polls % 40 == 0:
             # 观测：轮询活着 = 循环没冻结；rc 恒 None = 退出事件未送达
             _stage(f"仍在等待退出（已轮询 {polls} 次，rc={proc.returncode}）")
+            if sys.platform == "win32" and polls % 80 == 0:
+                # 观测：直接问 OS 子进程死没死——死了而 rc 不更新即坐实
+                # "事件投递链路断"（而非 bash 真活着）
+                try:
+                    out = subprocess.run(
+                        ["tasklist", "/FI", f"PID eq {proc.pid}", "/NH"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    ).stdout.strip()
+                    alive = str(proc.pid) in out
+                    _stage(
+                        f"tasklist 探测：pid={proc.pid} "
+                        f"{'仍在运行' if alive else '已消失'}"
+                    )
+                except Exception as exc:
+                    _stage(f"tasklist 探测失败：{exc}")
 
 
 @dataclass
