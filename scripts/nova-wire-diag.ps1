@@ -48,26 +48,30 @@ $id2 = Send-Rpc 'createSession' @{ cwd = $PWD.Path }
 $line = $proc.StandardOutput.ReadLine()
 Write-Host "createSession 应答: $($line.Substring(0, [Math]::Min(120, $line.Length)))"
 
-# 关键：发一个耗时数秒的调用，然后纯干等——不碰任何输入
-$id3 = Send-Rpc 'pkgCheckUpdates' @{}
-Write-Host "已发 pkgCheckUpdates（网络耗时数秒），干等响应中..."
+# 关键：发一个会产生多帧进度通知（突发）+ 长耗时的调用，然后纯干等——
+# 不碰任何输入。pkgInstall 重装已装包是幂等无副作用的。
+$id3 = Send-Rpc 'pkgInstall' @{ source = 'npm:nova-coding-agent' }
+Write-Host "已发 pkgInstall（多帧进度 + 长耗时），干等帧自行到达..."
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
+$frames = 0
 $got = $false
-while ($sw.Elapsed.TotalSeconds -lt 30) {
+$firstFrameAt = $null
+while ($sw.Elapsed.TotalSeconds -lt 60) {
     $readTask = $proc.StandardOutput.ReadLineAsync()
     if ($readTask.Wait(500)) {
         $line = $readTask.Result
-        if ($line -and $line.Contains('"id":3')) {
-            $got = $true
-            break
+        if ($line) {
+            $frames += 1
+            if ($null -eq $firstFrameAt) { $firstFrameAt = $sw.Elapsed.TotalSeconds }
+            if ($line.Contains('"id":3')) { $got = $true; break }
         }
-        if ($line) { Write-Host "（中间帧）$($line.Substring(0, [Math]::Min(80, $line.Length)))" }
     }
 }
+Write-Host "干等期间到达帧数: $frames（首帧于 $([Math]::Round([double]($firstFrameAt ?? -1), 1))s）"
 if ($got) {
-    Write-Host "PASS: 零输入下响应自行到达（用时 $([Math]::Round($sw.Elapsed.TotalSeconds, 1))s）——线上读取不卡"
+    Write-Host "PASS: 零输入下帧流+响应自行到达（用时 $([Math]::Round($sw.Elapsed.TotalSeconds, 1))s）——线上读取不卡"
 } else {
-    Write-Host "FAIL: 30s 内响应没有自行到达——线上读取在 Windows 上有停滞"
+    Write-Host "FAIL: 60s 内响应没有自行到达（到达 $frames 帧）——线上读取/后端写出在 Windows 上停滞"
 }
 
 $proc.StandardInput.Close()
