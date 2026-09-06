@@ -57,7 +57,7 @@ import { SearchableSelector } from './components/pickers/searchable.js';
 import { checkTmuxKeyboardSetup, checkTmuxExtendedKeys } from './utils/terminal-guard.js';
 import { writeClipboardText } from './utils/clipboard.js';
 import { installSignalHandlers } from './utils/signals.js';
-import { StartupController } from './controllers/startup.js';
+import { isCodingPackInstalled, StartupController } from './controllers/startup.js';
 import {
   clearTerminalProgress,
   initTerminalIntegration,
@@ -525,6 +525,9 @@ export class NovaTuiApp {
           this.openFirstTimeSetup();
         }
       }
+      // 首启自检：没装官方编程能力包（手动解压/绿色版等绕过安装器的进入
+      // 路径）时引导安装——装完即 reload 激活
+      await this.maybeOfferCodingPack();
       // initialMessage：启动即提交首条（first-time 引导开着则不抢焦点，跳过）
       if (this.options.initialMessage && !this.dialogs.isActive) {
         this.editorController.submitText(this.options.initialMessage, {
@@ -581,6 +584,62 @@ export class NovaTuiApp {
     if (!version) return;
     const text = getWhatsNewIfNeeded(this.runtime.uiState, version);
     if (text) this.transcript.addInfo(text);
+  }
+
+  /**
+   * 首启自检装编程能力包：覆盖安装器之外的进入路径（手动解压/绿色版/
+   * 拷贝来的目录）——这些路径上没有任何装包引导。
+   * 语义：已装/已拒答/对话框正开/离线 → 不问；装完即 reload 激活；
+   * 失败降级为通知，下次启动再问。
+   */
+  private async maybeOfferCodingPack(): Promise<void> {
+    if (this.dialogs.isActive) return;
+    if (['1', 'true', 'yes'].includes(process.env.NOVA_OFFLINE ?? '')) return;
+    if (this.runtime.uiState.get('coding-pack', 'installDismissed') === true) return;
+
+    let installed = true;
+    try {
+      const views = (await this.runtime.invoke('pkgList', {})) as Record<
+        string,
+        { name?: string } | undefined
+      >;
+      installed = isCodingPackInstalled(views);
+    } catch {
+      return; // 查询失败不打扰（后端都没答就别谈装包）
+    }
+    if (installed) return;
+
+    const choice = await this.dialogs.selectLocal('安装编程能力包？', [
+      {
+        value: 'install',
+        label: '安装 nova-coding-agent',
+        description: '编程能力：bash/edit/grep 等 8 工具 + coding_agent 等 5 角色（npm 源）',
+      },
+      { value: 'skip', label: '暂不', description: '下次启动再问' },
+      { value: 'never', label: '不再询问' },
+    ]);
+    if (choice === 'never') {
+      this.runtime.uiState.set('coding-pack', 'installDismissed', true);
+      return;
+    }
+    if (choice !== 'install') return;
+
+    this.transcript.addInfo('正在安装编程能力包 nova-coding-agent（npm 源）…');
+    try {
+      await this.runtime.invoke('pkgInstall', { source: 'npm:nova-coding-agent' });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.transcript.addInfo(
+        `编程能力包安装失败：${reason}——可稍后手动装：runtime/nova-server pkg install npm:nova-coding-agent（下次启动会再问）`,
+      );
+      return;
+    }
+    try {
+      await this.runtime.invoke('reload', {});
+    } catch {
+      // reload 失败不阻断——下次启动自然加载
+    }
+    this.transcript.addInfo('编程能力已就绪：coding_agent 角色与 8 个编程工具已上线');
   }
 
   /** 终端标题（OSC 0）已迁 controllers/terminal.ts 的 updateTitle（basename + 控制字符净化）。 */

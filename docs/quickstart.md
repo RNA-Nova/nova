@@ -58,6 +58,8 @@ runtime/nova-server pkg install path:/path/to/bundles/nova_coding_agent
 
 装完重启 `nova`（或 `/reload`），角色选择器（`/agent`）里就有 `coding_agent` 了。
 
+> 没走安装器（手动解压/绿色版）也不用记这条命令：TUI 检测到未装时会**首启主动询问**——选"安装"即后台装包并自动激活；"暂不"下次启动再问，"不再询问"持久记住。
+
 ## 5. 接下来读什么
 
 - 日常操作：[TUI 界面](guide/tui.md)、[Slash 命令](guide/commands.md)

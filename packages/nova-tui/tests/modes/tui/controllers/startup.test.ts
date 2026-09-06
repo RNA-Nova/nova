@@ -19,6 +19,7 @@ import {
   expandTildePath,
   extractExtensionFlags,
   formatCompactionHint,
+  isCodingPackInstalled,
   isValidThinkingLevel,
   resolveSessionArg,
   splitMessageTokens,
@@ -73,6 +74,16 @@ describe('isValidThinkingLevel', () => {
     }
     assert.equal(isValidThinkingLevel('HIGH'), false);
     assert.equal(isValidThinkingLevel(''), false);
+  });
+});
+
+describe('isCodingPackInstalled', () => {
+  it('键按来源串 / 值按 name 双路命中；空视图与无关包不误判', () => {
+    assert.equal(isCodingPackInstalled({ 'npm:nova-coding-agent': { name: 'nova-coding-agent' } }), true);
+    assert.equal(isCodingPackInstalled({ 'local:/opt/coding': { name: 'nova-coding-agent' } }), true);
+    assert.equal(isCodingPackInstalled({ 'path:/x/nova_coding_agent': undefined }), true);
+    assert.equal(isCodingPackInstalled({}), false);
+    assert.equal(isCodingPackInstalled({ 'npm:nova-base': { name: 'nova-base' } }), false);
   });
 });
 

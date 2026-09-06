@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Added
 - **Windows 一条命令安装（install.ps1）**：install.sh 的 PowerShell 对位译本——`irm .../install.ps1 | iex`（Windows 自带 PowerShell 5.1 即可，内存执行不触执行策略）：版本解析（NOVA_VERSION 钉版）→ zip + sha256 校验 → `releases/<版本>/` + junction 翻转 `current`（NTFS 目录链接免管理员）→ `nova.exe --version` 自检 → 自动装官方编程能力包（NOVA_NO_CODING/OFFLINE 跳过）→ **Git Bash 供给**（无 Git Bash 的机器引导装管理态 Portable Git 到 `~/.nova/agent/win-git-bash/` + settings `shell_path` 指向——coding_agent 的 bash 工具开箱可用）→ 注册表直写用户 PATH（保留 ExpandString + WM_SETTINGCHANGE 广播，新终端立即可见）；`uninstall` 对称摘除（保用户数据）。随 release 分发（`releases/latest/download/install.ps1` 稳定 URL），release 管线 windows 腿新增 file:// 镜像安装冒烟。
 - **冻结态 print 模式收尾的 httpcore2 拆除噪音修复**：见 Fixed。
+- **TUI 首启自检装编程能力包**：没装 nova-coding-agent 时首启弹"安装编程能力包？"选择器（安装 / 暂不 / 不再询问——后者经 UIStateStore 持久化）——覆盖安装器之外的进入路径（手动解压/绿色版/U盘拷贝）；装完自动 `reload` 激活，失败降级为通知下次再问（NOVA_OFFLINE 不弹；对话框占用时让路本轮）。PTY 实测：引导框 → npm 源真装 → reload → 就绪通知全链。
+- **PTY 测试脚本换增量解码器**（pty-smoke 共享驱动 + pty-user-bash-card 自持副本）：按读块独立 `decode(utf-8, replace)` 会把跨块多字节字符碎成替换符（断言中文文本时的偶发假失败源）；解码上移会话级 incrementaldecoder。pty-links 是收齐整段 decode 的安全模式，不动。
 
 ### Fixed
 - **冻结态 print 模式收尾的 httpcore2 拆除噪音**：`nova-server run` 跑完任务、进程拆除事件循环时 stderr 打一段 `generator didn't stop after athrow()` traceback（结果正确、退出码 0——纯噪音）。根因：`AsyncOpenAI` 客户端按次现造但从不显式关闭，连接池的异步生成器活到循环拆除被 athrow 时没能立刻停；修复为流式实现 `finally` 里显式 `await client.aclose()`（错误路径同样兜底），nova_ai 新增生命周期双测（done/error 两路径均关闭）。存量问题（冻结形态首版即有），与 0.1.1 的改动无关。

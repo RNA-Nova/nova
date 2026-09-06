@@ -21,6 +21,21 @@ import { join, resolve } from 'node:path';
 import type { RuntimeHost } from '../../../runtime.js';
 import type { SessionSnapshot } from '../../../mirror/types.js';
 
+/** 官方编程能力包的包名（pkgList 视图按来源作键，按名与键双路判定）。 */
+export const CODING_PACK_NAME = 'nova-coding-agent';
+
+/** pkgList 视图里是否已装官方编程能力包（键是来源串、值带 name——两路都查；
+ *  来源串里 path 安装是下划线目录名（nova_coding_agent），归一后比较）。 */
+export function isCodingPackInstalled(
+  views: Record<string, { name?: string } | undefined>,
+): boolean {
+  return Object.entries(views).some(
+    ([source, view]) =>
+      source.replaceAll('_', '-').endsWith(CODING_PACK_NAME) ||
+      view?.name === CODING_PACK_NAME,
+  );
+}
+
 /** main.ts 解析出的启动 flags（app 装配透传进 runtime options / StartupController）。 */
 export interface StartupFlags {
   /** --session <file|id>：createSession 的 sessionFile（绝对路径直接用；裸 id 由后端在 cwd 会话目录解析）。 */
