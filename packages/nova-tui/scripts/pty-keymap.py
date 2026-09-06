@@ -391,8 +391,10 @@ def case_ctrl_z_suspend(tui: TuiSession) -> Optional[str]:
 def case_double_esc_tree(tui: TuiSession) -> Optional[str]:
     """Esc 双击（idle+空编辑器）：会话树导航打开。"""
     before = len(tui.buffer)
-    tui.send("\x1b", 0.3)
-    tui.send("\x1b", 3.5)
+    # 双击须 500ms 窗内——一次 write 送两字节（逐 send 的 drain 在慢机上必超窗，
+    # ctrl+c 双击同款修法）
+    os.write(tui.master, b"\x1b\x1b") if not tui._win32 else tui.proc.write("\x1b\x1b")
+    tui._drain(3.5)
     if not re.search(r"会话树|session", tui.buffer[before:], re.I):
         return "Esc 双击后会话树未开"
     tui.send("\x1b", 2.0)  # 关闭
@@ -617,6 +619,7 @@ def main() -> int:
         try:
             if not tui.wait_ready():
                 print("✖ A 段启动超时")
+                print(tui.buffer[-800:])  # 死因留档
                 failures.append(("A 段启动", "ready 标记未现"))
             else:
                 tui.send("\x1b", 1.0)  # 关掉可能的首启引导/对话框让路

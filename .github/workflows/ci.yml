@@ -78,6 +78,10 @@ jobs:
           python -m pip install -e packages/nova_ai -e packages/nova_agent -e packages/nova_harness -e bundles/nova_base -e bundles/nova_coding_agent
           python -m pip install ripgrep==15.1.0
 
+      - name: 预置托管二进制种子（fd/rg 经框架 ensure_binary 落 ~/.nova/agent/bin——
+          沙箱预填从那里复制；否则每个测试会话首启都现下一遍）
+        run: python -c "from nova_harness.core.package.binaries import ensure_binary; ensure_binary('fd'); ensure_binary('rg')"
+
       - name: 安装 pywinpty（Windows ConPTY 驱动）
         if: matrix.os == 'windows-latest'
         run: python -m pip install pywinpty
