@@ -50,7 +50,11 @@ export const APP_KEYBINDINGS = {
   'app.exit': { defaultKeys: 'ctrl+d', description: 'Exit when editor is empty' },
   'app.tools.expand': { defaultKeys: 'ctrl+o', description: 'Toggle tool output expansion' },
   'app.clipboard.paste': {
-    defaultKeys: 'ctrl+v',
+    // 粘贴现实：文本走终端自带的 bracketed paste（右键/cmd+v 等手势与平台
+    // 无关，终端直送）——本键位只承载"剪贴板图片 → 临时文件路径"。ctrl+v
+    // 在 VS Code/Windows Terminal 被宿主吃掉（永不到达），alt+v 作伴生键
+    // （ESC 前缀各终端都放行）。
+    defaultKeys: ['ctrl+v', 'alt+v'],
     description: 'Paste from clipboard (image → temp file path)',
   },
   'app.message.followUp': {

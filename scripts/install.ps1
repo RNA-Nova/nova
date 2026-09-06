@@ -460,7 +460,14 @@ function Main {
             Test-Sha256 (Join-Path $stage $asset) (Join-Path $stage 'SHA256SUMS')
 
             New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
-            Expand-Archive -Path (Join-Path $stage $asset) -DestinationPath $releaseDir -Force
+            # Expand-Archive's Write-Progress throws IndexOutOfRangeException on
+            # hosts without a progress UI (VS Code terminal et al., known PS 5.1
+            # pit) - suppress progress in a script block scope so the caller's
+            # $ProgressPreference is untouched
+            & {
+                $ProgressPreference = 'SilentlyContinue'
+                Expand-Archive -Path (Join-Path $stage $asset) -DestinationPath $releaseDir -Force
+            }
             Say "Extracted: $releaseDir"
         }
         finally {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
+### Fixed
+- **install.ps1 在 VS Code 终端解压即崩**：Expand-Archive 内部的 Write-Progress 在无进度 UI 的宿主（VS Code 终端等）抛 IndexOutOfRangeException（PS 5.1 已知坑）——脚本块作用域内 `SilentlyContinue`（不污染调用者偏好）。
+- **剪贴板图片粘贴在 Windows 宿主终端不可达**：ctrl+v 被 VS Code/Windows Terminal 宿主吃掉（永不到达）——`app.clipboard.paste` 加 alt+v 伴生键（ESC 前缀各终端放行）；文本粘贴本就走 bracketed paste（终端手势与平台无关），此键位只承载图片路径。
+
+### Added
+- **PTY 验证跨平台化**：pty-keymap.py 驱动双后端（POSIX pty+select / Windows ConPTY pywinpty+读线程），探针平台化（剪贴板 mac pbcopy/win clip.exe+Get-Clipboard、编辑器助手统一 python 形态）；新增 `--local` 档（无模型键环境跳过模型依赖用例）；CI 新增 `pty-keymap / macos+windows` 双腿。
+
 ### Removed
 - **/persona 运行期人格旋钮拆除**（含 getPersonas/setPersonaOverride RPC、persona_override 会话状态字段与条目持久化、footer 的 `agent·override` 标记、扩展 ctx 的 persona 四个 action）：人格文本的唯一装配点收敛回 agent 组合声明的 `persona:` 条目——override 旋钮对终端用户几乎无用且制造串染组合（scout 人格 + worker 工具），选择器/页脚的注册名路径串（`coding/core`、`subagents/worker`）对用户不可解码。旧会话里的 persona_override 条目在恢复时无人消费=自动回默认装配，平滑。nova-wire 契约同步缩面（74 方法）。PersonaManager 只留装配（注册表活视图不变）。
 - **bundle personas 目录拍平**：`coding/core.md` + `subagents/*.md` → `coding.md`/`scout.md`/`planner.md`/`reviewer.md`/`worker.md`——agent yaml 经相对路径直达文件，注册名/分组本就不参与装配；目录层级是此前 /persona 选择器暴露路径名的唯一理由，旋钮拆了即拍平。

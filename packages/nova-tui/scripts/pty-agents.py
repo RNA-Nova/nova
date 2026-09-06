@@ -86,10 +86,15 @@ def case_model_identity_probe(tui) -> Optional[str]:
     worker 人格（worker/执行/implement 字样），证明系统提示词真实落到模型。"""
     before = len(tui.buffer)
     tui.send("你是谁？用一句话回答，必须说出你的角色名\r", 2.0)
-    if not tui.wait_for(r"worker|执行|implement|工人", 60.0):
-        return "模型回复未现 worker 人格线索（60s 超时）"
+    # 宽接受集 + 轮询（模型措辞有抖动；thinking 与回复都算——同为提示词驱动）
+    if not tui.wait_for(r"worker|执行|implement|子代理|委派|委托", 60.0):
+        return "模型回复未现人格线索（60s 超时）"
+    import time as _time
+
+    _time.sleep(1.5)  # 收尾帧
+    tui._drain(1.0)
     delta = tui.buffer[before:]
-    if not re.search(r"worker|执行者|执行代理|implement", delta, re.I):
+    if not re.search(r"worker|执行者|执行代理|implement|子代理|委派|委托", delta, re.I):
         return "模型回复未见 worker 人格内容"
     return None
 

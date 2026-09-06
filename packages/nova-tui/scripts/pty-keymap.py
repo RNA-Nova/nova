@@ -23,21 +23,30 @@ from __future__ import annotations
 import argparse
 import codecs
 import os
-import pty
 import re
-import select
-import signal
-import stat
 import subprocess
 import sys
 import tempfile
 import time
 from typing import Callable, Optional
 
-NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova-backup-20260824")
-PYTHON = os.environ.get("NOVA_PYTHON", f"{NOVA_REPO}/.pixi/envs/dev/bin/python")
-MAIN_JS = f"{NOVA_REPO}/packages/nova-tui/dist/modes/tui/main.js"
-NODE = os.path.expanduser("~/.pixi/bin/node")
+if sys.platform != "win32":
+    import pty
+    import select
+    import signal
+    import stat
+
+NOVA_REPO = os.environ.get(
+    "NOVA_REPO", os.environ.get("NOVA_REPO_DIR", "/Users/liujinming/agent/nova-backup-20260824")
+)
+PYTHON = os.environ.get(
+    "NOVA_PYTHON",
+    os.path.join(NOVA_REPO, ".pixi", "envs", "dev", "Scripts" if sys.platform == "win32" else "bin", "python"),
+)
+MAIN_JS = os.path.join(NOVA_REPO, "packages", "nova-tui", "dist", "modes", "tui", "main.js")
+import shutil as _shutil
+
+NODE = os.environ.get("NOVA_NODE") or _shutil.which("node") or os.path.expanduser("~/.pixi/bin/node")
 
 READY_TIMEOUT = 90.0
 STEP_WAIT = 3.0
@@ -93,11 +102,14 @@ def make_sandbox() -> tuple[str, str]:
 
 
 class TuiSession:
-    """一个 pty 里的 nova 进程（沙箱 HOME + NOVA_AGENT_DIR）。"""
+    """一个伪终端里的 nova 进程（沙箱 HOME + NOVA_AGENT_DIR）。
+
+    双后端：POSIX 用 pty+select；Windows 用 pywinpty（ConPTY）+ 读取线程
+    （Windows 的 select 不吃管道句柄——读线程 + 队列是唯一姿势）。
+    """
 
     def __init__(self, cwd: str, extra_env: Optional[dict] = None) -> None:
         home, agent_dir = make_sandbox()
-        self.master, slave = pty.openpty()
         env = dict(
             os.environ,
             HOME=home,
@@ -105,21 +117,48 @@ class TuiSession:
             NOVA_PYTHON=PYTHON,
             **(extra_env or {}),
         )
-        self.proc = subprocess.Popen(
-            [NODE, MAIN_JS],
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            cwd=cwd,
-            env=env,
-            close_fds=True,
-            start_new_session=True,  # 独立进程组——ctrl+z 挂起不影响驱动进程
-        )
-        os.close(slave)
         self.buffer = ""
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._win32 = sys.platform == "win32"
+        if self._win32:
+            from winpty import PtyProcess  # pywinpty（CI windows 腿 pip 装）
+
+            self.proc = PtyProcess.spawn(
+                [NODE, MAIN_JS], cwd=cwd, env=env, dimensions=(24, 100)
+            )
+            import threading
+
+            def _pump() -> None:
+                while True:
+                    try:
+                        chunk = self.proc.read()
+                    except Exception:
+                        break
+                    if not chunk:
+                        break
+                    self.buffer += strip_ansi(self._decoder.decode(chunk))
+
+            threading.Thread(target=_pump, daemon=True).start()
+            self.master = None
+        else:
+            self.master, slave = pty.openpty()
+            self.proc = subprocess.Popen(
+                [NODE, MAIN_JS],
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                cwd=cwd,
+                env=env,
+                close_fds=True,
+                start_new_session=True,  # 独立进程组——ctrl+z 挂起不影响驱动进程
+            )
+            os.close(slave)
 
     def _drain(self, timeout: float) -> None:
+        if self._win32:
+            # 读线程已在攒 buffer——drain 即等待
+            time.sleep(timeout)
+            return
         deadline = time.time() + timeout
         while time.time() < deadline:
             r, _, _ = select.select([self.master], [], [], 0.2)
@@ -134,7 +173,10 @@ class TuiSession:
             self.buffer += strip_ansi(self._decoder.decode(chunk))
 
     def send(self, keys: str, wait: float = STEP_WAIT) -> None:
-        os.write(self.master, keys.encode())
+        if self._win32:
+            self.proc.write(keys)
+        else:
+            os.write(self.master, keys.encode())
         self._drain(wait)
 
     def wait_for(self, pattern: str, timeout: float = 10.0) -> bool:
@@ -157,7 +199,10 @@ class TuiSession:
 
     def close(self) -> None:
         try:
-            os.write(self.master, b"\x03\x03")
+            if self._win32:
+                self.proc.write("\x03\x03")
+            else:
+                os.write(self.master, b"\x03\x03")
             self._drain(1.0)
         except OSError:
             pass
@@ -167,10 +212,11 @@ class TuiSession:
             pass
         try:
             self.proc.kill()
-        except OSError:
+        except (OSError, AttributeError):
             pass
         try:
-            os.close(self.master)
+            if self.master is not None:
+                os.close(self.master)
         except OSError:
             pass
 
@@ -178,6 +224,26 @@ class TuiSession:
 # ---------------------------------------------------------------------------
 # 用例：name, 执行体（session → 失败描述或 None）
 # ---------------------------------------------------------------------------
+
+
+def _clipboard_write(text: str) -> None:
+    """跨平台剪贴板写入（mac pbcopy / win clip.exe——探针标记全 ASCII）。"""
+    if sys.platform == "win32":
+        subprocess.run(["clip.exe"], input=text.encode("ascii"), check=True)
+    else:
+        subprocess.run(["pbcopy"], input=text.encode(), check=True)
+
+
+def _clipboard_read() -> str:
+    """跨平台剪贴板读回（mac pbpaste / win PowerShell Get-Clipboard）。"""
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+            capture_output=True,
+            check=True,
+        )
+        return result.stdout.decode("utf-8", errors="replace").strip()
+    return subprocess.run(["pbpaste"], capture_output=True, text=True).stdout
 
 
 def _last_model_line(tui: TuiSession) -> str:
@@ -255,27 +321,32 @@ def case_ctrl_l_selector(tui: TuiSession) -> Optional[str]:
 
 
 def case_ctrl_v_paste(tui: TuiSession) -> Optional[str]:
-    """ctrl+v：剪贴板文本进编辑器。
+    """ctrl+v + alt+v：剪贴板文本进编辑器（双键位——ctrl+v 在 VS Code/WT
+    被宿主吃掉，alt+v 为伴生键）。
 
     编辑器的回显不一定落字节（重绘区域不可见时增量为空）——真实内容经
     ctrl+g 的草稿转存探针读回（助手脚本转存后写入 ext-edit 标记；本条末尾
     ctrl+c 清掉该标记，不污染后续用例）。
     """
-    mark = "pty-paste-mark-键盘"
-    subprocess.run(["pbcopy"], input=mark.encode(), check=True)
-    tui.send("\x16", 3.0)  # ctrl+v
-    time.sleep(4.0)  # osascript 图片探测 + pbpaste 串行最坏 ~6s
-    tui._drain(1.0)
     probe = getattr(tui, "draft_probe", None)
-    if probe and os.path.exists(probe):
-        os.unlink(probe)
-    tui.send("\x07", 6.0)  # ctrl+g：助手转存草稿 + 写入 ext-edit 标记
-    content = ""
-    if probe and os.path.exists(probe):
-        content = open(probe, encoding="utf-8").read()
-    tui.send("\x03", 1.0)  # 清掉 writeback 的 ext-edit 标记
-    if mark not in content:
-        return f"ctrl+v 后草稿无剪贴板文本（读到 {content[:40]!r}）"
+
+    def _readback() -> str:
+        if probe and os.path.exists(probe):
+            os.unlink(probe)
+        tui.send("\x07", 6.0)  # ctrl+g：助手转存草稿 + 写入 ext-edit 标记
+        content = open(probe, encoding="utf-8").read() if probe and os.path.exists(probe) else ""
+        tui.send("\x03", 1.0)  # 清掉 writeback 的 ext-edit 标记
+        return content
+
+    for keys, label in (("\x16", "ctrl+v"), ("\x1bv", "alt+v")):
+        mark = f"pty-paste-mark-{label}"  # 探针标记全 ASCII（clip.exe 按 ANSI 走）
+        _clipboard_write(mark)
+        tui.send(keys, 3.0)
+        time.sleep(4.0)  # osascript 图片探测 + pbpaste 串行最坏 ~6s
+        tui._drain(1.0)
+        content = _readback()
+        if mark not in content:
+            return f"{label} 后草稿无剪贴板文本（读到 {content[:40]!r}）"
     return None
 
 
@@ -436,10 +507,10 @@ def case_turn_copy_abort_followup(tui: TuiSession) -> Optional[str]:
     # 并发使用存在竞争；断言"读回内容出自屏幕回复区"，允许一次重试）
     reply_match = None
     for _ in range(2):
-        subprocess.run(["pbcopy"], input=b"__pty_clear__", check=True)
+        _clipboard_write("__pty_clear__")
         tui.send("\x18", 2.5)
         time.sleep(0.5)
-        pasted = subprocess.run(["pbpaste"], capture_output=True, text=True).stdout
+        pasted = _clipboard_read()
         if "蓝莓" in pasted:
             reply_match = pasted
             break
@@ -466,6 +537,11 @@ def main() -> int:
     parser.add_argument("--cwd", default="/tmp")
     parser.add_argument("--filter", default="")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="无可用模型的环境（CI 无 API key）——跳过模型依赖用例（ctrl+p 族/C 段）",
+    )
     args = parser.parse_args()
 
     # A 段（模型无关，单会话）——顺序即依赖（ctrl+o 的卡片等）
@@ -489,11 +565,15 @@ def main() -> int:
         ("ctrl+c 双击退出", case_ctrl_c_double_exits),
     ]
 
+    # 模型依赖用例（无可用模型时不可达）：ctrl+p 轮询需 scoped/可用模型 ≥2
+    MODEL_CASES = {"ctrl+p 模型向前轮询", "shift+ctrl+p 碰撞现实"}
     cases: list[tuple[str, str, object]] = [
         *[(name, "a", fn) for name, fn in section_a],
         *[(name, "b", fn) for name, fn in section_b],
         ("真模型：复制/排队/还原/中止", "c", case_turn_copy_abort_followup),
     ]
+    if args.local:
+        cases = [c for c in cases if c[1] != "c" and c[0] not in MODEL_CASES]
     if args.filter:
         pattern = re.compile(args.filter)
         cases = [c for c in cases if pattern.search(c[0])]
@@ -517,11 +597,15 @@ def main() -> int:
         # （ctrl+v 的读回面），再写入标记（ctrl+g 的写回断言）
         probe = os.path.join(tempfile.mkdtemp(prefix="nova-keymap-probe-"), "draft.txt")
         helper_dir = tempfile.mkdtemp(prefix="nova-keymap-editor-")
-        helper = os.path.join(helper_dir, "editor.sh")
+        helper = os.path.join(helper_dir, "editor_helper.py")
         with open(helper, "w", encoding="utf-8") as f:
-            f.write(f'#!/bin/sh\ncp "$1" "{probe}"\nprintf "pty-ext-edit-mark" > "$1"\n')
-        os.chmod(helper, stat.S_IRWXU)
-        tui = TuiSession(args.cwd, extra_env={"EDITOR": helper, "VISUAL": helper})
+            f.write(
+                "import shutil, sys, pathlib\n"
+                f'shutil.copyfile(sys.argv[1], r"{probe}")\n'
+                'pathlib.Path(sys.argv[1]).write_text("pty-ext-edit-mark", encoding="utf-8")\n'
+            )
+        editor_cmd = f"{PYTHON} {helper}"  # app 按空格分拆 cmd+args（不带引号）——路径均无空格
+        tui = TuiSession(args.cwd, extra_env={"EDITOR": editor_cmd, "VISUAL": editor_cmd})
         tui.draft_probe = probe  # type: ignore[attr-defined]
         try:
             if not tui.wait_ready():

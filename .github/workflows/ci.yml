@@ -54,6 +54,53 @@ jobs:
           python -m pytest bundles/nova_base/backend/tests -q
           python -m pytest bundles/nova_coding_agent/backend/tests -q
 
+  # PTY 键位矩阵（真实伪终端逐键断言）——macOS + Windows 双腿（输入形态
+  # 平台各异：POSIX pty / ConPTY+pywinpty）。无模型键——跑 --local 档
+  # （ctrl+p 族与真模型段跳过）。
+  pty-keymap:
+    name: pty-keymap / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: 安装 Nova Python 包（可编辑）+ 测试依赖
+        run: |
+          python -m pip install -e packages/nova_ai -e packages/nova_agent -e packages/nova_harness -e bundles/nova_base -e bundles/nova_coding_agent
+          python -m pip install ripgrep==15.1.0
+
+      - name: 安装 pywinpty（Windows ConPTY 驱动）
+        if: matrix.os == 'windows-latest'
+        run: python -m pip install pywinpty
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/nova-tui/package-lock.json
+
+      - name: 构建 TUI（dist）
+        working-directory: packages/nova-tui
+        run: |
+          npm ci
+          npm run build
+
+      - name: PTY 键位矩阵（--local）
+        env:
+          NOVA_REPO: ${{ github.workspace }}
+          NOVA_PYTHON: python
+        run: python packages/nova-tui/scripts/pty-keymap.py --local
+
   # TUI 主体（nova-tui）类型检查 + 测试——三平台矩阵（终端行为有平台差异）。
   tui-ts:
     name: tui-ts / ${{ matrix.os }}
