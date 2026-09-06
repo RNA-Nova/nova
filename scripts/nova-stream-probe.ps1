@@ -1,11 +1,12 @@
-# nova-stream-probe.ps1 —— bash 流式帧的到达时刻探针（真实模型，零输入）
+# nova-stream-probe.ps1 -- bash 流式帧的到达时刻探针（真实模型，零输入）
 #
 # 完整链路（冻结后端 + 真实模型 + bash 工具流式更新），只缺 bun 前端：
-# 帧到达时刻摊开看——分布开 = 后端零卡顿（嫌疑归 bun 前端管道读）；
+# 帧到达时刻摊开看--分布开 = 后端零卡顿（嫌疑归 bun 前端管道读）；
 # 挤在最后 = 后端在 Windows 上真的卡住了。
 #
 # 用法：powershell -ExecutionPolicy Bypass -File nova-stream-probe.ps1
 $ErrorActionPreference = 'Stop'
+Write-Host "nova-stream-probe v3"
 
 $server = Join-Path $HOME '.nova\agent\install\current\runtime\nova-server.exe'
 Write-Host "server: $server"
@@ -29,7 +30,7 @@ function Send-Rpc([string]$method, [hashtable]$params) {
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-# 读帧统一走 ReadLineAsync + Wait 超时；**超时不弃单**——pending 的读
+# 读帧统一走 ReadLineAsync + Wait 超时；**超时不弃单**--pending 的读
 # 任务留在流上，下次接着等（.NET 的 StreamReader 同时只允许一个读操作，
 # 弃单再发起会撞"流正被前一操作使用"）
 $script:readTask = $null
@@ -79,12 +80,12 @@ if ($rows.Count -gt 0 -and $bashFrames.Count -gt 0) {
     Write-Host ""
     Write-Host "span: ${spread}s / frames: $($rows.Count) (tool-ish: $($bashFrames.Count))"
     if ($spread -gt 2) {
-        Write-Host "verdict: frames spread out over time — backend does NOT stall on Windows; suspect the bun frontend pipe read"
+        Write-Host "verdict: frames spread out over time -- backend does NOT stall on Windows; suspect the bun frontend pipe read"
     } else {
-        Write-Host "verdict: frames bunched at the end — backend really stalls on Windows (engine/write-pump direction)"
+        Write-Host "verdict: frames bunched at the end -- backend really stalls on Windows (engine/write-pump direction)"
     }
 } else {
-    Write-Host "too few frames to judge — send me the whole table above"
+    Write-Host "too few frames to judge -- send me the whole table above"
 }
 
 $proc.StandardInput.Close()
