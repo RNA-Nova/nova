@@ -413,7 +413,8 @@ jobs:
             nova-windows-x64.zip \
             nova-windows-arm64.zip \
             SHA256SUMS \
-            install.sh
+            install.sh \
+            install.ps1
 
   # ---------------------------------------------------------------------------
   # PyPI / nova-tui npm 发布——保持注释（首发占名需手动 OTP 一次，注册表侧
