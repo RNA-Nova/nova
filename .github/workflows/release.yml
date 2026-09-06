@@ -342,7 +342,7 @@ jobs:
       # install.sh / install.ps1 随 release 分发——管道安装的稳定 URL：
       # releases/latest/download/install.sh|install.ps1（latest 解析在 GitHub 侧完成）
       - name: 附带安装器脚本
-        run: cp scripts/install.sh scripts/install.ps1 dist/release/install.sh
+        run: cp scripts/install.sh scripts/install.ps1 dist/release/
 
       - name: 上传发布载荷
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
