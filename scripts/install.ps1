@@ -39,7 +39,9 @@ function Test-Platform {
         Err "本安装器是 Windows 专用（macOS/Linux 用 install.sh）"
         exit 1
     }
-    $arch = $env:PROCESSOR_ARCHITECTURE
+    # 读机器环境注册表而非进程变量——ARM64 Windows 跑 x64 PowerShell 时
+    # $env:PROCESSOR_ARCHITECTURE 是进程模拟值（x64），注册表才是机器真值
+    $arch = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment").PROCESSOR_ARCHITECTURE
     switch ($arch) {
         'AMD64' { return 'windows-x64' }
         'ARM64' { return 'windows-arm64' }
@@ -90,7 +92,12 @@ function Fetch([string]$url, [string]$dest) {
             Copy-Item $local $dest -Force
         }
         else {
-            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            # 显式 curl.exe：Windows PowerShell 里 curl 是 Invoke-WebRequest
+            # 的别名且慢得多；curl.exe 失败再回退 IWR
+            curl.exe "-#SfLo" $dest $url
+            if ($LASTEXITCODE -ne 0) {
+                Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            }
         }
     }
     catch {
@@ -143,17 +150,71 @@ function Install-CodingBundle([string]$root) {
     }
 }
 
+# —— 用户环境变量（PATH）——————————————————————————————————————————————
+# 注册表直写而不用 [Environment]::SetEnvironmentVariable——后者读出时会把
+# 既有的 %VAR% 引用展开成实值再写回（REG_SZ 化），破坏用户自己的变量引用。
+# 写后广播 WM_SETTINGCHANGE（新终端立即可见）+ 进程内同步更新（本安装器
+# 后续步骤直接可用）。
+
+function Get-UserEnv([string]$Key) {
+    $rk = (Get-Item 'HKCU:').OpenSubKey('Environment')
+    $rk.GetValue($Key, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+}
+
+function Publish-EnvChange {
+    if (-not ('Win32.EnvBroadcast' -as [Type])) {
+        Add-Type -Namespace Win32 -Name EnvBroadcast -MemberDefinition @"
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern System.IntPtr SendMessageTimeout(
+    System.IntPtr hWnd, uint Msg, System.UIntPtr wParam, string lParam,
+    uint fuFlags, uint uTimeout, out System.UIntPtr lpdwResult);
+"@
+    }
+    $result = [UIntPtr]::Zero
+    [Win32.EnvBroadcast]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null
+}
+
+function Set-UserEnv([string]$Key, [string]$Value) {
+    $rk = (Get-Item 'HKCU:').OpenSubKey('Environment', $true)
+    if ($null -eq $Value) {
+        $rk.DeleteValue($Key, $false)
+    }
+    else {
+        # 含 % 的值保持 ExpandString（否则 %USERPROFILE% 类引用被写死）
+        $kind = [Microsoft.Win32.RegistryValueKind]::String
+        if ($Value.Contains('%')) { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+        elseif ($rk.GetValue($Key)) { $kind = $rk.GetValueKind($Key) }
+        $rk.SetValue($Key, $Value, $kind)
+    }
+    Publish-EnvChange
+}
+
+function Add-UserPathEntry([string]$Dir) {
+    $entries = @()
+    $existing = Get-UserEnv 'Path'
+    if ($existing) { $entries = @($existing -split ';' | Where-Object { $_ -and $_ -ne $Dir }) }
+    $entries += $Dir
+    Set-UserEnv 'Path' ($entries -join ';')
+    $processEntries = @($env:PATH -split ';' | Where-Object { $_ -and $_ -ne $Dir })
+    $env:PATH = (($processEntries + $Dir) -join ';')
+}
+
+function Remove-UserPathEntry([string]$Dir) {
+    $existing = Get-UserEnv 'Path'
+    if (-not $existing) { return }
+    $kept = @($existing -split ';' | Where-Object { $_ -and $_ -ne $Dir })
+    Set-UserEnv 'Path' ($kept -join ';')
+}
+
 function Set-PathEntry([string]$root) {
     $current = Join-Path $root 'current'
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $entries = @()
-    if ($userPath) { $entries = $userPath -split ';' | Where-Object { $_ } }
-    if ($entries -contains $current) {
+    $existing = Get-UserEnv 'Path'
+    if ($existing -and (@($existing -split ';') -contains $current)) {
         Say "PATH: $current 已在用户 PATH"
         return
     }
-    [Environment]::SetEnvironmentVariable('Path', ($entries + $current) -join ';', 'User')
-    Say "PATH: 已写入用户 PATH（$current）——重开终端生效"
+    Add-UserPathEntry $current
+    Say "PATH: 已写入用户 PATH（$current）——新开的终端立即可用"
 }
 
 # —— 卸载 ————————————————————————————————————————————————————————————
@@ -164,10 +225,9 @@ function Do-Uninstall {
 
     # 摘 PATH 条目
     $current = Join-Path $root 'current'
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($userPath -and ($userPath -split ';') -contains $current) {
-        $kept = ($userPath -split ';' | Where-Object { $_ -and $_ -ne $current }) -join ';'
-        [Environment]::SetEnvironmentVariable('Path', $kept, 'User')
+    $existing = Get-UserEnv 'Path'
+    if ($existing -and (@($existing -split ';') -contains $current)) {
+        Remove-UserPathEntry $current
         Say "已从用户 PATH 摘除 $current"
         $removed = $true
     }
