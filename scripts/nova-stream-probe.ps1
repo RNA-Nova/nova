@@ -1,4 +1,4 @@
-# nova-stream-probe.ps1 —— bash 流式帧的到达时刻探针（真实模型，零输入）
+﻿# nova-stream-probe.ps1 —— bash 流式帧的到达时刻探针（真实模型，零输入）
 #
 # 完整链路（冻结后端 + 真实模型 + bash 工具流式更新），只缺 bun 前端：
 # 帧到达时刻摊开看——分布开 = 后端零卡顿（嫌疑归 bun 前端管道读）；
@@ -39,9 +39,9 @@ Send-Rpc 'initialize' @{ client = @{ name = 'stream-probe'; version = '0' } } | 
 $null = Read-Frame
 Send-Rpc 'createSession' @{ cwd = $PWD.Path } | Out-Null
 $null = Read-Frame
-Write-Host "握手完成，发起任务（echo A && sleep 3 && echo B）..."
+Write-Host "handshake done, sending task (echo PROBE_A && sleep 3 && echo PROBE_B)..."
 
-$promptId = Send-Rpc 'prompt' @{ message = '用 bash 工具执行这个命令：echo PROBE_A && sleep 3 && echo PROBE_B。然后只回复 done' }
+$promptId = Send-Rpc 'prompt' @{ message = 'Execute this with the bash tool: echo PROBE_A && sleep 3 && echo PROBE_B . Then reply with just: done' }
 
 # 零输入干等，记录每帧到达时刻
 $rows = @()
@@ -53,26 +53,28 @@ while ($sw.Elapsed.TotalSeconds -lt $deadline) {
     $kind = '?'
     if ($line -match '"type"\s*:\s*"([a-z_]+)"') { $kind = $Matches[1] }
     $isResult = $line.Contains([string]::Format('"id":{0}', $promptId))
-    $rows += [PSCustomObject]@{ t = $t; kind = $(if ($isResult) { 'RPC-RESULT' } else { $kind }) }
+    $label = $kind
+    if ($isResult) { $label = 'RPC-RESULT' }
+    $rows += [PSCustomObject]@{ t = $t; kind = $label }
     if ($isResult) { break }
 }
 
 Write-Host ""
-Write-Host "帧到达时刻表（t=秒，自任务发起）："
+Write-Host "frame arrival table (t = seconds since task sent):"
 $rows | ForEach-Object { Write-Host ("  {0,6}s  {1}" -f $_.t, $_.kind) }
 
-$bashFrames = $rows | Where-Object { $_.kind -match 'tool' }
+$bashFrames = @($rows | Where-Object { $_.kind -match 'tool' })
 if ($rows.Count -gt 0 -and $bashFrames.Count -gt 0) {
-    $spread = ($rows[-1].t - $rows[0].t)
+    $spread = ($rows[$rows.Count - 1].t - $rows[0].t)
     Write-Host ""
-    Write-Host "总跨度: ${spread}s / 帧数: $($rows.Count)（tool 相关 $($bashFrames.Count) 帧）"
+    Write-Host "span: ${spread}s / frames: $($rows.Count) (tool-ish: $($bashFrames.Count))"
     if ($spread -gt 2) {
-        Write-Host "结论：帧流时间分布开——后端在 Windows 上零卡顿，嫌疑归前端（bun 管道读层）"
+        Write-Host "verdict: frames spread out over time — backend does NOT stall on Windows; suspect the bun frontend pipe read"
     } else {
-        Write-Host "结论：帧挤在一小段——后端在 Windows 上卡住了（引擎/写泵方向）"
+        Write-Host "verdict: frames bunched at the end — backend really stalls on Windows (engine/write-pump direction)"
     }
 } else {
-    Write-Host "帧数过少，无法判定——把上面整张表发给我"
+    Write-Host "too few frames to judge — send me the whole table above"
 }
 
 $proc.StandardInput.Close()

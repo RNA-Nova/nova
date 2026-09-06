@@ -1,13 +1,13 @@
-# nova-wire-diag.ps1 —— Windows 线上读取诊断（不需要模型）
+﻿# nova-wire-diag.ps1 —— Windows 线上读取诊断（不需要模型）
 #
-# 直接 spawn nova-server，发 initialize + createSession + pkgCheckUpdates
-# （真实网络操作，耗时数秒——用来验证"零输入时响应会不会自己回来"）。
+# 直接 spawn nova-server，发 initialize + createSession + pkgInstall
+# （真实网络操作，多帧进度突发 + 长耗时——验证"零输入时帧流会不会
+# 自己回来"）。pkgInstall 重装已装包是幂等无副作用的。
 #
 # 用法：powershell -ExecutionPolicy Bypass -File nova-wire-diag.ps1
 $ErrorActionPreference = 'Stop'
 
 $server = Join-Path $HOME '.nova\agent\install\current\runtime\nova-server.exe'
-if (-not (Test-Path $server)) { $server = Join-Path $HOME '.nova\agent\install\current\runtime\nova-server.exe' }
 Write-Host "server: $server"
 
 $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -38,40 +38,39 @@ while ($sw.ElapsedMilliseconds -lt 2000) {
     }
     Start-Sleep -Milliseconds 50
 }
-Write-Host "启动 2s 内的自发帧数: $($spontaneous.Count)（期望 0）"
+Write-Host "spontaneous frames in first 2s: $($spontaneous.Count) (expect 0)"
 
 $id1 = Send-Rpc 'initialize' @{ client = @{ name = 'wire-diag'; version = '0' } }
 $line = $proc.StandardOutput.ReadLine()
-Write-Host "initialize 应答: $($line.Substring(0, [Math]::Min(160, $line.Length)))"
+Write-Host "initialize reply: $($line.Substring(0, [Math]::Min(160, $line.Length)))"
 
 $id2 = Send-Rpc 'createSession' @{ cwd = $PWD.Path }
 $line = $proc.StandardOutput.ReadLine()
-Write-Host "createSession 应答: $($line.Substring(0, [Math]::Min(120, $line.Length)))"
+Write-Host "createSession reply: $($line.Substring(0, [Math]::Min(120, $line.Length)))"
 
-# 关键：发一个会产生多帧进度通知（突发）+ 长耗时的调用，然后纯干等——
-# 不碰任何输入。pkgInstall 重装已装包是幂等无副作用的。
+# 关键：发一个会产生多帧进度通知（突发）+ 长耗时的调用，然后纯干等
 $id3 = Send-Rpc 'pkgInstall' @{ source = 'npm:nova-coding-agent' }
-Write-Host "已发 pkgInstall（多帧进度 + 长耗时），干等帧自行到达..."
+Write-Host "pkgInstall sent (burst + long op), waiting with zero input..."
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $frames = 0
 $got = $false
-$firstFrameAt = $null
+$firstFrameAt = -1.0
 while ($sw.Elapsed.TotalSeconds -lt 60) {
     $readTask = $proc.StandardOutput.ReadLineAsync()
     if ($readTask.Wait(500)) {
         $line = $readTask.Result
         if ($line) {
             $frames += 1
-            if ($null -eq $firstFrameAt) { $firstFrameAt = $sw.Elapsed.TotalSeconds }
+            if ($firstFrameAt -lt 0) { $firstFrameAt = $sw.Elapsed.TotalSeconds }
             if ($line.Contains('"id":3')) { $got = $true; break }
         }
     }
 }
-Write-Host "干等期间到达帧数: $frames（首帧于 $([Math]::Round([double]($firstFrameAt ?? -1), 1))s）"
+Write-Host "frames arrived while idle: $frames (first at $([Math]::Round($firstFrameAt, 1))s)"
 if ($got) {
-    Write-Host "PASS: 零输入下帧流+响应自行到达（用时 $([Math]::Round($sw.Elapsed.TotalSeconds, 1))s）——线上读取不卡"
+    Write-Host "PASS: frames + response arrived with zero input (took $([Math]::Round($sw.Elapsed.TotalSeconds, 1))s) — wire reads fine"
 } else {
-    Write-Host "FAIL: 60s 内响应没有自行到达（到达 $frames 帧）——线上读取/后端写出在 Windows 上停滞"
+    Write-Host "FAIL: response never arrived within 60s ($frames frames) — wire read/backend write stalls on Windows"
 }
 
 $proc.StandardInput.Close()
