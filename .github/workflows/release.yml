@@ -260,12 +260,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           # 装出安装器期望的镜像布局 download/<tag>/<资产>+SHA256SUMS——
-          # 线上该布局由 assemble-release 产出（本 job 之后），此处就地复刻
+          # 线上该布局由 assemble-release 产出（本 job 之后），此处就地复刻。
+          # SHA256SUMS 必须现造：Windows git-bash 的 sha256sum 默认二进制
+          # 模式（" *名"标记），与安装器期望的文本格式（两空格）不符——
+          # 用 Get-FileHash 按 canonical 格式写
           $tag = $env:RELEASE_TAG
           $mirror = "dist/release/download/$tag"
           New-Item -ItemType Directory -Force -Path $mirror | Out-Null
           Copy-Item "dist/release/nova-windows-x64.zip" $mirror
-          Copy-Item "dist/release/SHA256SUMS" "$mirror/SHA256SUMS"
+          $zipHash = (Get-FileHash "$mirror/nova-windows-x64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText("$PWD/$mirror/SHA256SUMS", "$zipHash  nova-windows-x64.zip`n")
           $env:NOVA_VERSION = $tag
           $env:NOVA_INSTALLER_RELEASES_BASE = "file:///$(($PWD.Path -replace '\\','/'))/dist/release"
           $env:NOVA_INSTALL_DIR = Join-Path $env:TEMP "nova-install-$PID"
