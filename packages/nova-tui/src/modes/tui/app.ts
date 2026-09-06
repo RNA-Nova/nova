@@ -531,7 +531,9 @@ export class NovaTuiApp {
         } catch {
           // 可用性查询失败按"无可用"处理——该弹还是得弹
         }
-        if (!anyAvailable) {
+        if (!anyAvailable && !this.editorRef.current.getText().trim()) {
+          // 编辑器已有草稿不弹——对话框抢焦点会吃掉在飞输入（可用性检查
+          // 是一次 RPC 往返，慢后端上框可能比用户的手迟到）
           this.openFirstTimeSetup();
         }
       }
@@ -627,6 +629,8 @@ export class NovaTuiApp {
       return; // 查询失败不打扰（后端都没答就别谈装包）
     }
     if (installed) return;
+    // 不抢在飞草稿的焦点（让路轮询可能等过几分钟——期间用户可能已开敲）
+    if (this.editorRef.current.getText().trim()) return;
 
     const choice = await this.dialogs.selectLocal('安装编程能力包？', [
       {

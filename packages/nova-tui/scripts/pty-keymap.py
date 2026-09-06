@@ -761,7 +761,13 @@ def main() -> int:
                 tui.debug_dump()  # 死因留档（buffer 尾 + rpc-stderr.log + 进程表）
                 failures.append(("A 段启动", "ready 标记未现"))
             else:
-                tui.send("\x1b", 1.0)  # 关掉可能的首启引导/对话框让路
+                # 首启引导可能在 ready 标记之后才弹（可用性检查是一次 RPC
+                # 往返，慢后端上迟到）——先等它现身再关；盲发的 Esc 若早于
+                # 弹框等于没关，后续用例的按键会被迟到的对话框吃掉
+                # （Windows 腿 ctrl+o/ctrl+v flake 的根因）。有真模型时不弹。
+                if not os.environ.get("VOLCENGINE_API_KEY"):
+                    if tui.wait_for("欢迎使用", 12.0):
+                        tui.send("\x1b", 2.0)
                 for name, sec, fn in cases:
                     if sec != "a":
                         continue
@@ -769,9 +775,9 @@ def main() -> int:
                     report(name, problem)
                     if problem is not None:
                         # 用例级失败的死因留档：屏尾现状（对话框未关/卡片未渲/
-                        # 输出缺席立辨）——CI 不可复现调度的唯一观察窗
+                        # 输出缺席立辨）——Windows 帧带真彩色序列很长，给足
                         print(f"    ---- {name} 屏尾 ----")
-                        print(tui.buffer[-600:])
+                        print(tui.buffer[-3000:])
         finally:
             tui.close()
 
