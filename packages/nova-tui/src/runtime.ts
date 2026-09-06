@@ -188,6 +188,10 @@ export class NovaUIRuntime implements RuntimeHost {
   private readonly slotsReplacedHandlers: Array<() => void> = [];
 
   constructor(private readonly options: NovaUIRuntimeOptions = {}) {
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.readyResolve = resolve;
+      this.readyReject = reject;
+    });
     this.client = new WireClient(options);
     this.bus = new NovaBus();
     this.bridge = new ReverseBridge(this.client);
@@ -291,6 +295,22 @@ export class NovaUIRuntime implements RuntimeHost {
   /** 扩展事件订阅登记处（refreshPackages 整体替换 slots 时统一注销）。 */
   private readonly extensionEventUnsubs = new Set<() => void>();
 
+  /** 后端就绪门：start() 完成（握手+建会话+全量同步）后置位。
+   * 就绪前的后端绑定提交（prompt/user_tool/后端命令）经 ``whenReady``
+   * 排队——连接窗口期（冷启动数秒）内用户的输入不丢不错位。 */
+  private readyFlag = false;
+  private readonly readyPromise: Promise<void>;
+  private readyResolve!: () => void;
+  private readyReject!: (error: Error) => void;
+
+  get isReady(): boolean {
+    return this.readyFlag;
+  }
+
+  whenReady(): Promise<void> {
+    return this.readyPromise;
+  }
+
   /** 事件高水位（最近一次 syncSession 的原子锚点）：seq ≤ 水位的增量
    * 事件已反映在快照内，事件汇直接丢弃（防快照/增量重复应用）。 */
   private syncWatermark = 0;
@@ -302,35 +322,44 @@ export class NovaUIRuntime implements RuntimeHost {
 
   /** 启动后端、握手、创建会话、全量同步、加载包渲染器。 */
   async start(): Promise<void> {
-    // 后端事件上线：wire → bus（mirror 经特权订阅先行应用）。
-    // 水位对账（连接化 P2）：seq ≤ syncWatermark 的事件已包含在最近一次
-    // syncSession 快照里（原子锚点）——丢弃，防止快照/增量重复应用
-    this.client.onEvent((event: NovaEventEnvelope) => {
-      if (typeof event.seq === 'number' && event.seq <= this.syncWatermark) return;
-      this.bus.publish(event);
-    });
-    // 后端进程退出 → 转交前端（在飞的调用已被 client 全部 reject）
-    this.client.onClose(() => this.closeHandler?.());
+    try {
+      // 后端事件上线：wire → bus（mirror 经特权订阅先行应用）。
+      // 水位对账（连接化 P2）：seq ≤ syncWatermark 的事件已包含在最近一次
+      // syncSession 快照里（原子锚点）——丢弃，防止快照/增量重复应用
+      this.client.onEvent((event: NovaEventEnvelope) => {
+        if (typeof event.seq === 'number' && event.seq <= this.syncWatermark) return;
+        this.bus.publish(event);
+      });
+      // 后端进程退出 → 转交前端（在飞的调用已被 client 全部 reject）
+      this.client.onClose(() => this.closeHandler?.());
 
-    await this.client.start();
-    const handshake = await this.client.call('initialize', {});
-    checkContractVersion(handshake);
-    this.caps = new CapabilitySet(handshake);
+      await this.client.start();
+      const handshake = await this.client.call('initialize', {});
+      checkContractVersion(handshake);
+      this.caps = new CapabilitySet(handshake);
 
-    this.bridge.sendCapabilities(
-      // 诚实宣告：默认空集——以实际实现为准（基线由宿主显式传入，包侧
-      // 自定义对话框经 dialog:* slot 实时并入）；默认全支持会让后端误以为
-      // 有 UI，把 headless 该走的路径（拦截/拒绝）错走成"发问后挂起"。
-      this.advertisedCapabilities(),
-    );
+      this.bridge.sendCapabilities(
+        // 诚实宣告：默认空集——以实际实现为准（基线由宿主显式传入，包侧
+        // 自定义对话框经 dialog:* slot 实时并入）；默认全支持会让后端误以为
+        // 有 UI，把 headless 该走的路径（拦截/拒绝）错走成"发问后挂起"。
+        this.advertisedCapabilities(),
+      );
 
-    await this.client.call('createSession', this.options.session ?? {});
+      await this.client.call('createSession', this.options.session ?? {});
 
-    await this.syncFromBackend();
+      await this.syncFromBackend();
 
-    // 后台加载（不阻塞启动）：包索引 → ui/ 渲染器；启动更新提醒
-    void this.refreshPackages();
-    void this.checkPackageUpdates();
+      // 后台加载（不阻塞启动）：包索引 → ui/ 渲染器；启动更新提醒
+      void this.refreshPackages();
+      void this.checkPackageUpdates();
+
+      this.readyFlag = true;
+      this.readyResolve();
+    } catch (error) {
+      // 启动失败：就绪门驳回——排队中的提交立刻以真实错误拒绝，不悬挂
+      this.readyReject(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
   }
 
   /** 全量同步：原子快照（syncSession：状态 + 条目分页 + 事件高水位）→ mirror。

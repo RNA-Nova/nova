@@ -77,8 +77,12 @@ export class WireClient {
 
   constructor(private readonly options: WireClientOptions = {}) {}
 
-  /** 启动后端子进程（任意语言实现，契约一致即可）。 */
-  async start(readyDelayMs = 300): Promise<void> {
+  /** 启动后端子进程（任意语言实现，契约一致即可）。
+   *
+   * 就绪以真实事件为准：Node 的 ``spawn`` 事件 = 进程已拉起（管道可写），
+   * ``error`` = 拉起失败（ENOENT 等）。盲等固定时长的做法已废——冷机器上
+   * 300ms 不够（假就绪），热机器上纯浪费（白等）。 */
+  async start(): Promise<void> {
     const command = this.options.command ?? DEFAULT_COMMAND;
     return new Promise((resolve, reject) => {
       this.child = spawn(command[0]!, command.slice(1), {
@@ -86,8 +90,12 @@ export class WireClient {
         env: { ...process.env, ...this.options.env, PYTHONUNBUFFERED: '1' },
         cwd: this.options.cwd,
         detached: true,
+        // Windows 上 detached 会给子进程新建控制台窗口——隐藏之
+        // （打包形态的 nova-server.exe 连接瞬间闪黑窗的根因）
+        windowsHide: true,
       });
 
+      this.child.once('spawn', () => resolve());
       this.child.on('error', reject);
       this.child.on('exit', () => {
         this.handleExit();
@@ -106,8 +114,6 @@ export class WireClient {
           process.stderr.write(chunk);
         });
       }
-
-      setTimeout(resolve, readyDelayMs);
     });
   }
 

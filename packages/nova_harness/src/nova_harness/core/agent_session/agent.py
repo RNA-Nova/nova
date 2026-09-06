@@ -128,6 +128,7 @@ from nova_harness.core.types.session.model import (
     ScopedModelConfig,
 )
 from nova_harness.core.types.ui import NoOpUIContext, ScopedUIContext, UIContext
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.core.utils.name_sets import (
     apply_name_list,
@@ -1035,6 +1036,8 @@ class AgentSession:
                     cwd=cwd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    # 隐藏控制台形态下不弹黑窗（Windows）
+                    **hidden_console_kwargs(),
                 )
                 if opts.timeout and opts.timeout > 0:
                     try:

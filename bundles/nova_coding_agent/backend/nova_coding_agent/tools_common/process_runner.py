@@ -15,6 +15,7 @@ from typing import AsyncIterator, List, Optional, Protocol
 from nova_coding_agent.tools_common.streams import read_lines
 
 from nova_harness.core.utils.binaries import resolve_binary
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 
 
 class ProcessSession(Protocol):
@@ -96,5 +97,7 @@ class LocalProcessRunner:
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # rg/fd 是 console 程序——隐藏控制台形态下不弹黑窗（Windows）
+            **hidden_console_kwargs(),
         )
         return _LocalSession(proc)

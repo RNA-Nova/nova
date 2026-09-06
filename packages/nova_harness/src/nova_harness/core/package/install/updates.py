@@ -21,6 +21,7 @@ from nova_harness.core.package.source.spec import (
 from nova_harness.core.package.utils import is_offline_mode_enabled
 from nova_harness.core.types.config.settings import PackageSourceSpec
 from nova_harness.core.types.package import PackageUpdate, SourceScope
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ def _git_run(
         cwd=str(cwd) if cwd else None,
         env=git_env(),
         timeout=timeout or GIT_REMOTE_TIMEOUT,
+        **hidden_console_kwargs(),
     )
 
 

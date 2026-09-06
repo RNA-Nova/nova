@@ -190,15 +190,19 @@ export class EditorController {
    */
   submitText(trimmed: string, options?: { followUp?: boolean; images?: ImageContent[] }): void {
     if (trimmed.startsWith('!!')) {
-      void this.runtime
-        .invokeUserTool('bash', { command: trimmed.slice(2), exclude_from_context: true })
-        .catch((error) => this.transcript.addError(error));
+      this.whenBackendReady(() => {
+        void this.runtime
+          .invokeUserTool('bash', { command: trimmed.slice(2), exclude_from_context: true })
+          .catch((error) => this.transcript.addError(error));
+      });
       return;
     }
     if (trimmed.startsWith('!')) {
-      void this.runtime
-        .invokeUserTool('bash', { command: trimmed.slice(1) })
-        .catch((error) => this.transcript.addError(error));
+      this.whenBackendReady(() => {
+        void this.runtime
+          .invokeUserTool('bash', { command: trimmed.slice(1) })
+          .catch((error) => this.transcript.addError(error));
+      });
       return;
     }
     if (trimmed === '/theme') {
@@ -252,55 +256,77 @@ export class EditorController {
       return;
     }
     if (trimmed.startsWith('/')) {
-      // /export 分叉：.jsonl 走后端命令（JSONL 复制）；无参数或 .html 走前端 HTML 导出
-      if (trimmed === '/export' || trimmed.startsWith('/export ')) {
-        const exportPath = trimmed === '/export' ? undefined : trimmed.slice(8).trim();
-        if (exportPath === undefined || !exportPath.endsWith('.jsonl')) {
-          void exportSessionHtml(this.runtime, this.transcript, this.cwd, exportPath).catch(
-            (error) => this.transcript.addError(error),
-          );
-          return;
-        }
-      }
-      // Node 扩展命令优先（registerCommand——统一命令表的 Node 源）
-      const spaceIndex = trimmed.indexOf(' ');
-      const name = spaceIndex === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIndex);
-      // 命令过滤（快照透出：agent.yaml commands 允许集 + settings 排除集）
-      if (!this.isCommandEnabled(name)) {
-        this.transcript.addInfo(`命令 /${name} 已被当前 agent 配置或用户设置禁用`);
-        return;
-      }
-      const extensionCommand = this.runtime.slots.resolve<string, unknown>(
-        commandSlot(name),
-      );
-      if (extensionCommand !== undefined) {
-        const args = spaceIndex === -1 ? '' : trimmed.slice(spaceIndex + 1);
-        void Promise.resolve(extensionCommand(args)).catch((error) =>
-          this.transcript.addError(error),
-        );
-        return;
-      }
-      // 后端 slash 命令：可取消调用（OAuth 登录等长命令的 Esc 入口）。
-      // 普通对话不走这里——run 的取消语义是 abort（领域清理），不是取消调用
-      this.runSlashCommand(trimmed);
+      // 斜杠块余下全是后端绑定路径（包命令 slot / 后端 slash）——就绪门
+      // 排队（连接窗口期提交不丢不错位；本地命令上面已 early-return）
+      this.whenBackendReady(() => this.dispatchBackendSlash(trimmed));
       return;
     }
     // user 条目经事件流回 store 后由 transcript 渲染，不做本地预绘
-    const working = this.runtime.store.status === 'working';
-    const hasImages = options?.images !== undefined && options.images.length > 0;
+    this.whenBackendReady(() => {
+      const working = this.runtime.store.status === 'working';
+      const hasImages = options?.images !== undefined && options.images.length > 0;
+      void this.runtime
+        .prompt(
+          trimmed,
+          working || hasImages
+            ? {
+                ...(working
+                  ? { streamingBehavior: options?.followUp ? ('followUp' as const) : ('steer' as const) }
+                  : {}),
+                ...(hasImages ? { images: options.images } : {}),
+              }
+            : undefined,
+        )
+        .catch((error) => this.transcript.addError(error));
+    });
+  }
+
+  /** 后端就绪门：已就绪直通；未就绪排队到握手+建会话+全量同步完成后
+   * 执行（连接窗口期的提交按序补发，失败以真实错误拒绝）。 */
+  private whenBackendReady(fn: () => void): void {
+    if (this.runtime.isReady) {
+      fn();
+      return;
+    }
     void this.runtime
-      .prompt(
-        trimmed,
-        working || hasImages
-          ? {
-              ...(working
-                ? { streamingBehavior: options?.followUp ? ('followUp' as const) : ('steer' as const) }
-                : {}),
-              ...(hasImages ? { images: options.images } : {}),
-            }
-          : undefined,
-      )
+      .whenReady()
+      .then(fn)
       .catch((error) => this.transcript.addError(error));
+  }
+
+  /** 后端绑定的斜杠命令分发（就绪门内执行——包 slot 命令与后端 slash）。 */
+  private dispatchBackendSlash(trimmed: string): void {
+    // /export 分叉：.jsonl 走后端命令（JSONL 复制）；无参数或 .html 走前端 HTML 导出
+    if (trimmed === '/export' || trimmed.startsWith('/export ')) {
+      const exportPath = trimmed === '/export' ? undefined : trimmed.slice(8).trim();
+      if (exportPath === undefined || !exportPath.endsWith('.jsonl')) {
+        void exportSessionHtml(this.runtime, this.transcript, this.cwd, exportPath).catch(
+          (error) => this.transcript.addError(error),
+        );
+        return;
+      }
+    }
+    // Node 扩展命令优先（registerCommand——统一命令表的 Node 源）
+    const spaceIndex = trimmed.indexOf(' ');
+    const name = spaceIndex === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIndex);
+    // 命令过滤（快照透出：agent.yaml commands 允许集 + settings 排除集）
+    if (!this.isCommandEnabled(name)) {
+      this.transcript.addInfo(`命令 /${name} 已被当前 agent 配置或用户设置禁用`);
+      return;
+    }
+    const extensionCommand = this.runtime.slots.resolve<string, unknown>(
+      commandSlot(name),
+    );
+    if (extensionCommand !== undefined) {
+      const args = spaceIndex === -1 ? '' : trimmed.slice(spaceIndex + 1);
+      void Promise.resolve(extensionCommand(args)).catch((error) =>
+        this.transcript.addError(error),
+      );
+      return;
+    }
+    // 后端 slash 命令：可取消调用（OAuth 登录等长命令的 Esc 入口）。
+    // 普通对话不走这里——run 的取消语义是 abort（领域清理），不是取消调用
+    this.runSlashCommand(trimmed);
   }
 
   /** /help：命令目录查看器（三源合并——与补全目录同一事实源）。 */

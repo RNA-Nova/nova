@@ -34,6 +34,7 @@ from nova_harness.core.types.extensions.process import (
 )
 from nova_harness.core.utils.binaries import prepend_managed_bins_to_path
 from nova_harness.core.utils.child_process import (
+    hidden_console_kwargs,
     kill_process_tree,
     track_detached_child_pid,
     untrack_detached_child_pid,
@@ -191,6 +192,7 @@ async def _wait_process_exit(proc: asyncio.subprocess.Process) -> None:
                         capture_output=True,
                         text=True,
                         timeout=5,
+                        **hidden_console_kwargs(),
                     ).stdout.strip()
                     alive = str(proc.pid) in out
                     _stage(

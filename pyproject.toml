@@ -36,6 +36,7 @@ tomli = ">=2.0.1"
 uuid6 = ">=2024.7.10"
 setuptools = "*"
 pathspec = ">=0.12.1"
+packaging = ">=24.0"
 pillow = ">=10.0"
 
 [tool.pixi.feature.dev.pypi-dependencies]

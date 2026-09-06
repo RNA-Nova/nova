@@ -10,10 +10,11 @@ import os
 import stat
 import sys
 import tarfile
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 import pytest
+
 from nova_harness.core.package.binaries import manager
 from nova_harness.core.package.binaries.manager import (
     detect_platform_key,
@@ -152,9 +153,10 @@ def test_ensure_binary_missing_binary_in_archive(tmp_path, monkeypatch):
 
 
 def test_registry_file_loads():
-    """真实 registry.json：注册表只收"PyPI 覆盖不了"的二进制（一 binary 一家）。"""
+    """真实 registry.json：注册表收"PyPI 覆盖不了"（fd）与"PyPI wheel 需
+    pip 宿主、冻结形态装不了"（rg）的二进制——一 binary 一家。"""
     registry = manager._load_registry()
-    assert set(registry) == {"fd"}
+    assert set(registry) == {"fd", "rg"}
     for name, entry in registry.items():
         assert entry["version"]
         assert entry["binary_name"] == name

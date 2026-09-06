@@ -17,7 +17,12 @@ import { colors } from '../../themes/index.js';
 import { keyText } from '../pickers/hints.js';
 import { CountdownTimer } from './countdown-timer.js';
 
-export type StatusIndicatorKind = 'working' | 'retry' | 'compaction' | 'branchSummary';
+export type StatusIndicatorKind =
+  | 'working'
+  | 'retry'
+  | 'compaction'
+  | 'branchSummary'
+  | 'connecting';
 
 export class StatusIndicator extends Loader {
   readonly kind: StatusIndicatorKind;
@@ -82,6 +87,13 @@ export class CompactionStatusIndicator extends StatusIndicator {
         ? `Compacting context… ${cancelHint}`
         : `${reason === 'overflow' ? 'Context overflow detected, ' : ''}Auto-compacting… ${cancelHint}`;
     super('compaction', ui, colors.accent, colors.muted, label);
+  }
+}
+
+/** 连接期指示（后端握手+建会话+全量同步完成前——就绪门见 runtime.whenReady）。 */
+export class ConnectingStatusIndicator extends StatusIndicator {
+  constructor(ui: TUI) {
+    super('connecting', ui, colors.accent, colors.muted, '正在连接后端…');
   }
 }
 

@@ -94,11 +94,9 @@ user_tools = [
     "./backend/user_tools/bash.py"
 ]
 auto_install_dependencies = true
-# 二进制依赖（wheel 可装）：rg → ripgrep 平台 wheel（pin 版本保证可复现，
-# 对齐框架注册表的 pin 纪律）。
+# 自管理二进制（框架注册表 pin 版本 + sha256，下载到 nova bin——免 pip、
+# 免宿主 Python，冻结形态开箱即用）：rg（grep/find 主加速）与 fd（目录
+# 查找，rg --files 覆盖不了的 find_type="directory" 场景）。
 # grep/find 工具经 resolve_binary 命中后获得原生加速，未命中走纯 Python 兜底。
-binary_dependencies = { rg = "ripgrep==15.1.0" }
-# 自管理二进制（框架注册表，无 wheel）：fd 的目录查找是 rg --files 覆盖不了的
-# 场景（find_type="directory"）。安装时按 pin 版本 + sha256 下载到 nova bin。
-binary_managed_dependencies = ["fd"]
+binary_managed_dependencies = ["fd", "rg"]
 

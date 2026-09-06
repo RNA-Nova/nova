@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from nova_harness.core.package.install.python_backend import (
     FrozenSiteBackend,
     NoPipHostError,
@@ -74,14 +75,31 @@ class TestFrozenSiteBackend:
         assert str(tmp_path / ".site") in cmd
         assert "pretty-ms" in cmd
 
-    def test_no_host_raises_guidance(self, tmp_path):
+    def test_no_host_falls_back_to_wheel_channel(self, tmp_path):
+        """无 pip 宿主：免 pip wheel 解包通道接管（不再是硬错误）。"""
         backend = FrozenSiteBackend(tmp_path / ".site")
         with patch(
             "nova_harness.core.package.install.python_backend.find_host_python",
             return_value=None,
         ):
-            with pytest.raises(NoPipHostError, match="pip 宿主"):
-                backend.install(["pretty-ms"])
+            with patch(
+                "nova_harness.core.package.install.python_backend.install_wheels"
+            ) as wheels:
+                wheels.return_value = ["pretty-ms==1.2.3"]
+                assert backend.install(["pretty-ms"]) == ""
+        wheels.assert_called_once_with(
+            ["pretty-ms"], site_dir=str(tmp_path / ".site"), requirements_path=None
+        )
+
+    def test_no_host_dry_run_still_raises(self, tmp_path):
+        """dry-run 冲突检查无宿主不可用——wheel 通道无 dry-run 语义。"""
+        backend = FrozenSiteBackend(tmp_path / ".site")
+        with patch(
+            "nova_harness.core.package.install.python_backend.find_host_python",
+            return_value=None,
+        ):
+            with pytest.raises(NoPipHostError):
+                backend.install(["pretty-ms"], dry_run=True)
 
     def test_uninstall_removes_dist_dirs(self, tmp_path):
         site = tmp_path / ".site"

@@ -13,6 +13,7 @@ import { Container, Text, type LoaderIndicatorOptions, type TUI } from '@earendi
 
 import {
   CompactionStatusIndicator,
+  ConnectingStatusIndicator,
   RetryStatusIndicator,
   StatusIndicator,
 } from '../components/status/indicators.js';
@@ -28,6 +29,9 @@ export class StatusController {
   private workingMessage: string | undefined;
   private workingIndicator: LoaderIndicatorOptions | undefined;
   private workingVisible = true;
+  /** 连接期（后端就绪前）：覆盖 store 驱动的一切指示——此时还没有会话，
+   * store.status 恒 idle，working loader 机制承载不了这个相位。 */
+  private connecting = false;
 
   constructor(
     private readonly tui: TUI,
@@ -72,10 +76,18 @@ export class StatusController {
     this.tui.requestRender();
   }
 
+  /** 连接期指示开关（后端就绪门 app 层驱动）。 */
+  setConnecting(connecting: boolean): void {
+    if (this.connecting === connecting) return;
+    this.connecting = connecting;
+    this.refresh();
+  }
+
   /** 按 store.status 刷新指示器（idle 停、工作态起；状态迁移时切换变体）。 */
   refresh(): void {
-    const status = this.runtime.store.status;
-    const next = this.createIndicator(status);
+    const next = this.connecting
+      ? new ConnectingStatusIndicator(this.tui)
+      : this.createIndicator(this.runtime.store.status);
 
     if (next === undefined && this.indicator === undefined) return;
     // 同变体续用（避免闪烁）；变体切换/进入 idle 时替换

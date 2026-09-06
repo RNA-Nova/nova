@@ -35,6 +35,7 @@ from nova_harness.core.package.source._semver import (
 from nova_harness.core.package.source.spec import PackageSource
 from nova_harness.core.package.utils import is_offline_mode_enabled
 from nova_harness.core.types.package import ProgressEvent
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.http import default_ssl_context
 
 # Git 命令默认超时（秒）。克隆/更新在网络异常时不应无限 hang 住。
@@ -132,6 +133,8 @@ class SourceResolver:
         if timeout is None:
             timeout = GIT_COMMAND_TIMEOUT
         kwargs.setdefault("env", git_env())
+        # 隐藏控制台形态下 git 子进程不弹黑窗（Windows）
+        kwargs = {**hidden_console_kwargs(), **kwargs}
         return subprocess.run(
             args,
             check=check,

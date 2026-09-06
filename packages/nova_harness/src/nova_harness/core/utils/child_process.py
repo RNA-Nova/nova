@@ -10,9 +10,22 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Set
+from typing import Dict, Set
 
 _tracked_detached_child_pids: Set[int] = set()
+
+
+def hidden_console_kwargs() -> Dict[str, int]:
+    """Windows 子进程不弹控制台窗口的 Popen kwargs（POSIX 返回空 dict）。
+
+    打包形态下后端自身以隐藏控制台运行（TUI 侧 spawn 带 windowsHide），
+    此后端再 spawn 的任何 console 子进程都会新建**可见**控制台——黑窗
+    闪烁（子代理、rg/fd、pip/git、!cmd 鉴权命令皆是）。一律经此 helper
+    取 kwargs；POSIX 无控制台语义，返回空。
+    """
+    if sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {}
 
 
 def track_detached_child_pid(pid: int) -> None:
@@ -68,6 +81,7 @@ def kill_process_tree(pid: int, sig: "int | None" = None) -> None:
 __all__ = [
     "kill_process_tree",
     "kill_tracked_detached_children",
+    "hidden_console_kwargs",
     "track_detached_child_pid",
     "untrack_detached_child_pid",
 ]

@@ -112,7 +112,8 @@ describe('registerEditor 扩展编辑器热替换', () => {
 // 提交管线路由（submitText）与队列还原（dequeueToEditor）
 // ---------------------------------------------------------------------------
 
-/** 行为桩 runtime（记录 prompt/invokeUserTool/clearQueue 调用）。 */
+/** 行为桩 runtime（记录 prompt/invokeUserTool/clearQueue 调用）。
+ * isReady/whenReady 模拟"已就绪"——就绪门直通；未就绪排队另有专测。 */
 function makeStubRuntime(status: 'idle' | 'working' = 'idle') {
   const calls = {
     prompt: [] as Array<{ text: string; options?: unknown }>,
@@ -122,6 +123,8 @@ function makeStubRuntime(status: 'idle' | 'working' = 'idle') {
   const runtime = {
     store: { status },
     slots: new SlotRegistry(), // submitText 的 slash 分支查扩展命令用
+    isReady: true,
+    whenReady: () => Promise.resolve(),
     prompt: async (text: string, options?: unknown) => {
       calls.prompt.push({ text, options });
     },
@@ -189,6 +192,35 @@ describe('submitText 提交路由', () => {
       { text: '打断一下', options: { streamingBehavior: 'steer' } },
       { text: '等会再说', options: { streamingBehavior: 'followUp' } },
     ]);
+  });
+
+  it('未就绪：后端绑定提交排队到就绪门后补发', async () => {
+    const { runtime, calls } = makeStubRuntime();
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    (runtime as { isReady: boolean }).isReady = false;
+    (runtime as unknown as { whenReady: () => Promise<void> }).whenReady = () => gate;
+    const editorRef: EditorRef = { current: makeFakeEditor() as never };
+    const controller = new EditorController(
+      editorRef,
+      runtime,
+      '/tmp',
+      { addInfo: () => {}, addError: () => {} } as never,
+      { isActive: false } as never,
+      {} as never, // theme
+      {} as never, // settings
+      { setFocus: () => {}, requestRender: () => {} } as never,
+      { clear: () => {}, addChild: () => {} } as never,
+    );
+    controller.submitText('排队消息');
+    // 未就绪：一字未发
+    assert.deepEqual(calls.prompt, []);
+    open();
+    await gate;
+    await new Promise((resolve) => setImmediate(resolve)); // .then 链结算
+    assert.deepEqual(calls.prompt, [{ text: '排队消息', options: undefined }]);
   });
 
   it('slash 命令走 runSlashCommand（不进 prompt 通道）', () => {

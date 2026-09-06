@@ -170,8 +170,8 @@ nova/
 > 扩展形态与 tools 同一纪律：**单文件优先、目录按需**。`extensions/<name>.py`（单文件，推荐——无资产纯逻辑扩展）；目录形态（`<name>/extension.py` 或 `<name>/__init__.py`）仅在需要同目录子模块/资产时使用——发现机制收集根级全部 `.py` 但不递归扩展目录，目录内部 helper 不会被误当扩展加载。
 >
 > 二进制依赖（性能加速用，可选）：
-> - `binary_dependencies = { 命令名 = "PyPI包名" }`——wheel 可装的二进制（如 `rg = "ripgrep==15.1.0"` 平台 wheel，官方包建议 pin 版本保证可复现），安装时随 pip 依赖进入当前环境 `bin/`；
-> - `binary_managed_dependencies = ["fd"]`——框架注册表自管理的二进制。**注册表只收"PyPI 覆盖不了"的官方必需二进制（一个二进制一个家，当前仅 fd）**，安装时按 `core/package/binaries/registry.json` 的 pin 版本 + sha256 下载到 `~/.nova/agent/bin/`（`NOVA_OFFLINE` 跳过下载仅警告；Linux 区分 glibc/musl，Alpine 走 musl 资产）；
+> - `binary_dependencies = { 命令名 = "PyPI包名" }`——wheel 可装的二进制（平台 wheel，官方包建议 pin 版本保证可复现），安装时随 pip 依赖进入当前环境 `bin/`（冻结形态无 pip 宿主时装不上——官方必需二进制请走 managed 通道）；
+> - `binary_managed_dependencies = ["fd"]`——框架注册表自管理的二进制。**注册表收"PyPI 覆盖不了"（fd）与"PyPI wheel 需 pip 宿主、冻结形态装不了"（rg）的官方必需二进制（一个二进制一个家）**，安装时按 `core/package/binaries/registry.json` 的 pin 版本 + sha256 下载到 `~/.nova/agent/bin/`（`NOVA_OFFLINE` 跳过下载仅警告；Linux 区分 glibc/musl，Alpine 走 musl 资产；rg 的 linux x64 无 gnu 资产，用 musl 静态构建通用承载）；
 > - `binary_system_dependencies = ["xx"]`——无自动安装渠道的系统二进制要求（如 docker 类守护进程），安装时校验存在性、缺失仅警告（不代装）；
 > - 运行时经 `nova_harness.core.utils.binaries.resolve_binary()` 三级解析（env bin → nova bin → PATH，托管优先；PATH 层识别发行版别名如 `fdfind`）；spawn 子进程 env 会自动前置 nova bin + env bin，bash 里可直接命中托管二进制；
 > - 工具消费端应按"二进制加速 + 纯 Python 兜底"设计（如 grep/find 的 fd → rg → Python 三级链），二进制缺失不影响可用性；缺失警告附带 brew/apt 安装指引。

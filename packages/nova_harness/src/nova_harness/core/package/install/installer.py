@@ -54,6 +54,7 @@ from nova_harness.core.package.install.store import (
     scan_installed_package_dirs,
     write_dist_info,
 )
+from nova_harness.core.package.install.wheel_installer import WheelInstallError
 from nova_harness.core.package.manifest import (
     is_installable_python_package,
     load_package_json,
@@ -96,6 +97,7 @@ from nova_harness.core.types.package import (
     ResourceMetadata,
 )
 from nova_harness.core.utils.binaries import binary_install_guidance, resolve_binary
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.telemetry import report_install_telemetry
 
 logger = logging.getLogger(__name__)
@@ -367,14 +369,19 @@ class PackageInstaller:
                             requirements_path=requirements_path,
                             install_dir=str(self.install_dir),
                         )
+                    except NoPipHostError:
+                        # 无 pip 宿主：冲突 dry-run 不可用——安装改走
+                        # 免 pip 的 wheel 解包通道（见 FrozenSiteBackend）
+                        pass
+                    try:
                         install_dependencies(
                             deps,
                             requirements_path=requirements_path,
                             install_dir=str(self.install_dir),
                         )
-                    except NoPipHostError as exc:
-                        # 冻结形态无 pip 宿主：包装好、依赖待补（装配/加载时
-                        # 给指引），不阻断安装本身
+                    except (NoPipHostError, WheelInstallError) as exc:
+                        # 依赖装不上（wheel 通道失败/离线/无匹配 wheel）：
+                        # 包装好、依赖待补（装配/加载时报错），不阻断安装本身
                         logger.warning("%s", exc)
                         self._emit_progress(
                             "progress",
@@ -645,6 +652,7 @@ class PackageInstaller:
                 text=True,
                 timeout=600,
                 env={**os.environ, "CI": "1"},
+                **hidden_console_kwargs(),
             )
         except (
             subprocess.CalledProcessError,

@@ -473,6 +473,9 @@ export class NovaTuiApp {
     for (const message of this.migrationMessages) {
       this.transcript.addInfo(message);
     }
+    // 连接期指示：后端就绪门（runtime.start = 握手+建会话+全量同步）期间
+    // status 区挂"正在连接后端…"——窗口期的后端绑定提交经就绪门排队
+    this.statusController.setConnecting(true);
     try {
       await this.runtime.start();
       // settings 统一读取一次入缓存：主题 / quiet_startup / 双 Esc / first-time 判定共用
@@ -536,6 +539,8 @@ export class NovaTuiApp {
       }
     } catch (error) {
       this.transcript.addError(error);
+    } finally {
+      this.statusController.setConnecting(false);
     }
   }
 

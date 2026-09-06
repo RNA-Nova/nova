@@ -32,6 +32,9 @@ filelock = "^3.24.3"
 tomli = { version = "^2.0.1", python = "<3.11" }
 uuid6 = ">=2024.7.10"
 pathspec = ">=0.12.1"
+# 冻结形态免 pip wheel 解包通道的依赖解析/平台 tag 判定（packaging.tags
+# sys_tags 与 pip 同数据源）
+packaging = ">=24.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"

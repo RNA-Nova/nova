@@ -9,6 +9,7 @@ Priority:
 2. plain ``python -m pip`` as the universal fallback.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -17,7 +18,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
 from nova_harness.core.config.defaults import PACKAGES_DIR_NAME, get_agent_dir
+from nova_harness.core.package.install.wheel_installer import install_wheels
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.output_guard import is_stdout_taken_over
+
+logger = logging.getLogger(__name__)
 
 
 class PackageBackend(Protocol):
@@ -52,12 +57,23 @@ def _stdio_kwargs(*, capture_output: bool = False) -> Dict[str, Any]:
     must not write to stdout (which belongs to the JSON-RPC protocol). In that
     case we redirect child stdout/stderr to Nova's stderr and close stdin.
     Otherwise we let the child inherit Nova's stdio for progress visibility.
+
+    另合一档 ``hidden_console_kwargs``：冻结/隐藏控制台形态下子进程
+    （pip/uv/git/npm）缺省会新建可见控制台——Windows 黑窗闪烁源。
     """
+    kwargs: Dict[str, Any]
     if capture_output:
-        return {"capture_output": True, "text": True}
-    if is_stdout_taken_over():
-        return {"stdin": subprocess.DEVNULL, "stdout": sys.stderr, "stderr": sys.stderr}
-    return {}
+        kwargs = {"capture_output": True, "text": True}
+    elif is_stdout_taken_over():
+        kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": sys.stderr,
+            "stderr": sys.stderr,
+        }
+    else:
+        kwargs = {}
+    kwargs.update(hidden_console_kwargs())
+    return kwargs
 
 
 def _expand_targets(targets: List[str]) -> List[str]:
@@ -182,6 +198,7 @@ def find_host_python() -> Optional[str]:
                 check=True,
                 capture_output=True,
                 text=True,
+                **hidden_console_kwargs(),
             ).stdout.strip()
             if version != f"{sys.version_info.major}.{sys.version_info.minor}":
                 return False
@@ -189,6 +206,7 @@ def find_host_python() -> Optional[str]:
                 [python, "-m", "pip", "--version"],
                 check=True,
                 capture_output=True,
+                **hidden_console_kwargs(),
             )
             return True
         except (OSError, subprocess.CalledProcessError):
@@ -204,7 +222,14 @@ def find_host_python() -> Optional[str]:
 
 
 class FrozenSiteBackend:
-    """冻结形态的依赖安装后端：``pip install --target <…>/packages/.site/``。
+    """冻结形态的依赖安装后端：依赖装进 ``<…>/packages/.site/``。
+
+    两条通道（按可用性选择）：
+    1. 有 pip 宿主（``find_host_python()`` 探测到系统 python + pip）：
+       ``pip install --target``——通用安装（sdist/复杂规格皆可）；
+    2. 无宿主：免 pip 的 wheel 解包通道（``wheel_installer.install_wheels``
+       ——PyPI 解析 + sha256 校验 + 解包，零宿主需求）。
+    dry-run 冲突检查仍属 pip 宿主职责（无宿主时由调用方跳过）。
 
     依赖装进 Nova 用户目录的 ``.site/``（不归任何环境管理器），装配时由
     runtime_paths 挂进内嵌解释器的 sys.path。包的"自安装"（pip -e）在冻结
@@ -213,17 +238,6 @@ class FrozenSiteBackend:
 
     def __init__(self, site_dir: Path) -> None:
         self.site_dir = site_dir
-
-    def _require_host(self) -> str:
-        host = find_host_python()
-        if host is None:
-            raise NoPipHostError(
-                "该包带第三方 Python 依赖，但本机没有可用的 Python "
-                f"{sys.version_info.major}.{sys.version_info.minor} + pip 宿主"
-                "（冻结二进制不内嵌 pip）。安装系统 Python 后重试，"
-                "或用 NOVA_PYTHON 显式指定解释器。"
-            )
-        return host
 
     def install(
         self,
@@ -237,7 +251,20 @@ class FrozenSiteBackend:
         # 包自安装（pip -e）在冻结形态由 sys.path 挂载替代——零动作
         if editable:
             return ""
-        host = self._require_host()
+        host = find_host_python()
+        if host is None:
+            if dry_run:
+                # dry-run 冲突检查无宿主不可用——由调用方决定跳过
+                raise NoPipHostError("冻结形态无 pip 宿主，dry-run 冲突检查不可用")
+            # 免 pip 通道：PyPI wheel 直解进 .site/（宿主需求的正式解法）
+            installed = install_wheels(
+                targets,
+                site_dir=str(self.site_dir),
+                requirements_path=requirements_path,
+            )
+            if installed:
+                logger.info("wheel 通道就绪: %s", ", ".join(installed))
+            return ""
         cmd = [host, "-m", "pip", "install", "--target", str(self.site_dir)]
         if dry_run:
             cmd.append("--dry-run")
@@ -278,8 +305,8 @@ def get_backend(install_dir: Optional[str] = None) -> PackageBackend:
     """Return the best available installer backend for Nova's Python env.
 
     冻结形态（PyInstaller 无环境可写）：返回 FrozenSiteBackend——依赖装到
-    ``<install_dir>/packages/.site/``（pip --target，宿主 python 经
-    ``find_host_python()`` 探测），包装配目录挂载由 runtime_paths 负责。
+    ``<install_dir>/packages/.site/``（有 pip 宿主走 ``pip --target``，
+    无宿主走免 pip 的 wheel 解包通道），包装配目录挂载由 runtime_paths 负责。
     """
     if getattr(sys, "frozen", False):
         base = Path(install_dir) if install_dir else Path(get_agent_dir())

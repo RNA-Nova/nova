@@ -57,6 +57,8 @@ export function healNpmDependencies(installPath: string): Promise<boolean> {
         cwd: installPath,
         stdio: 'ignore',
         shell: process.platform === 'win32',
+        // 后台自愈装包不弹控制台窗口（Windows）
+        windowsHide: true,
       });
     } catch {
       resolve(false);

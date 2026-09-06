@@ -14,6 +14,8 @@ import subprocess
 import threading
 from typing import Dict, List, Optional, Tuple
 
+from nova_harness.core.utils.child_process import hidden_console_kwargs
+
 # shell 命令结果缓存（进程生命周期内有效）
 _command_result_cache: Dict[str, Optional[str]] = {}
 _cache_lock = threading.Lock()
@@ -167,6 +169,8 @@ def _execute_command_uncached(command_config: str) -> Optional[str]:
             timeout=10,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
+            # 鉴权命令（!cmd）在隐藏控制台形态下不弹黑窗（Windows）
+            **hidden_console_kwargs(),
         )
         trimmed = output.strip()
         return trimmed if trimmed else None

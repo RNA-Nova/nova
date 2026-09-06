@@ -32,6 +32,8 @@ from nova_coding_agent.subagent.types import (
 )
 from nova_coding_agent.tools_common.streams import read_lines
 
+from nova_harness.core.utils.child_process import hidden_console_kwargs
+
 # on_update 聚合回调：始终携带**全量结果列表**（parallel 含 exit_code=-1
 # 的"运行中"占位，chain 含已完成步骤 + 当前流式步骤），渲染器据此展示
 # 总进度。
@@ -316,6 +318,8 @@ async def _run_single(
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=call.cwd or None,
+                # 子代理 CLI 是 console 程序——隐藏控制台形态下不弹黑窗
+                **hidden_console_kwargs(),
             )
 
             stdout_task = asyncio.create_task(_read_stdout())
