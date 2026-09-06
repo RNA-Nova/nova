@@ -259,7 +259,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $env:NOVA_VERSION = $env:RELEASE_TAG
+          # 装出安装器期望的镜像布局 download/<tag>/<资产>+SHA256SUMS——
+          # 线上该布局由 assemble-release 产出（本 job 之后），此处就地复刻
+          $tag = $env:RELEASE_TAG
+          $mirror = "dist/release/download/$tag"
+          New-Item -ItemType Directory -Force -Path $mirror | Out-Null
+          Copy-Item "dist/release/nova-windows-x64.zip" $mirror
+          Copy-Item "dist/release/SHA256SUMS" "$mirror/SHA256SUMS"
+          $env:NOVA_VERSION = $tag
           $env:NOVA_INSTALLER_RELEASES_BASE = "file:///$(($PWD.Path -replace '\\','/'))/dist/release"
           $env:NOVA_INSTALL_DIR = Join-Path $env:TEMP "nova-install-$PID"
           $env:NOVA_AGENT_DIR = Join-Path $env:TEMP "nova-agent-$PID"
