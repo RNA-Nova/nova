@@ -21,7 +21,7 @@ curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh 
 安装器做的事：
 
 1. 预检平台与工具（`curl` / `tar` / `sha256sum` 或 `shasum`）；
-2. 解析最新发布版本（或 `NOVA_VERSION=0.1.3` 钉版）；
+2. 解析最新发布版本（或 `NOVA_VERSION=0.1.4` 钉版）；
 3. 下载对应平台归档 + `SHA256SUMS` 并**校验 sha256**；
 4. 解压到 `~/.nova/agent/install/releases/<版本>/`，翻转 `current` 符号链接；
 5. 链接 `~/.local/bin/nova` → 当前版本；
@@ -38,8 +38,8 @@ curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh 
 到 [Releases](https://github.com/RNA-Nova/nova/releases) 下载对应平台归档，解压即用：
 
 ```bash
-tar -xzf nova-darwin-arm64.tar.gz -C nova-v0.1.3
-cd nova-v0.1.3
+tar -xzf nova-darwin-arm64.tar.gz -C nova-v0.1.4
+cd nova-v0.1.4
 ./nova --version
 ```
 
@@ -90,7 +90,7 @@ native/               # 终端输入原生助手（macOS/Windows）
 需要 Python `>=3.12,<3.14` 与 Node `>=22.19`：
 
 ```bash
-git clone --depth 1 --branch v0.1.3 https://github.com/RNA-Nova/nova.git
+git clone --depth 1 --branch v0.1.4 https://github.com/RNA-Nova/nova.git
 cd nova
 sh scripts/install-source.sh
 ```
@@ -134,7 +134,7 @@ curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh 
 ## 验证安装
 
 ```bash
-nova --version            # 前端版本（如 0.1.3）
+nova --version            # 前端版本（如 0.1.4）
 # 二进制形态下后端随行至 runtime/：
 "$(dirname "$(readlink -f "$(command -v nova)")")/runtime/nova-server" --version
 ```
