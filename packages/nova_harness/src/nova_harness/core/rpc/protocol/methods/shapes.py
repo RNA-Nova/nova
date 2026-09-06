@@ -230,9 +230,8 @@ class SessionStateResult(NovaBaseModel):
     # 角色能力选配报告（仅非 ok 项：missing / disabled_by_settings /
     # disabled_by_sdk）——"角色为什么少了个工具"的确定性答案来源
     capability_report: List[CapabilitySelection] = []
-    # 当前角色与 persona override（footer/选择器的数据源）
+    # 当前角色（footer/选择器的数据源）
     agent_name: Optional[str] = None
-    persona_override: Optional[str] = None
 
 
 class CompactParams(NovaBaseModel):
@@ -635,32 +634,6 @@ class AgentEntry(NovaBaseModel):
 
 class GetAgentsResult(NovaBaseModel):
     agents: List[AgentEntry] = []
-
-
-class PersonaEntry(NovaBaseModel):
-    """persona 注册表条目（getPersonas / /persona 选择器数据源）。"""
-
-    name: str
-    path: str = ""
-    scope: str = ""
-    origin: str = ""
-    is_override: bool = False
-
-
-class GetPersonasResult(NovaBaseModel):
-    personas: List[PersonaEntry] = []
-    override: Optional[str] = None
-
-
-class SetPersonaOverrideParams(NovaBaseModel):
-    """persona override 设置/清除（name 缺席或 null = 清除，恢复角色默认装配）。"""
-
-    name: Optional[str] = None
-
-
-class SetPersonaOverrideResult(NovaBaseModel):
-    ok: bool
-    persona_override: Optional[str] = None
 
 
 class AppendEntryParams(NovaBaseModel):

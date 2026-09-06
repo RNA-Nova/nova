@@ -1174,12 +1174,6 @@ class AgentSession:
             compact=compact,
             get_system_prompt=lambda: self.system_prompt,
             get_system_prompt_options=lambda: dict(self._base_system_prompt_options),
-            get_personas=self._get_persona_entries,
-            get_persona_override=lambda: (
-                self.persona_manager.current_override if self.persona_manager else None
-            ),
-            set_persona_override=self._set_persona_override,
-            clear_persona_override=self._clear_persona_override,
             # agent 旋钮（注册表视图 + 当前角色切换 + yaml 写回——AgentManager 的扩展面）
             get_agents=self._get_agent_entries,
             change_agent=lambda name: self.change_agent(name),
@@ -1899,10 +1893,6 @@ class AgentSession:
         未知名由 AgentManager 抛 ``ValueError``（列出可用名）。
         """
         self.agent_manager.change_agent(name)
-        # 角色切换清 persona override——绑定特定人格文本的 override 留在新角色
-        # 的能力面上是串染（scout 人格 + worker 工具）；用户要再开自行重选。
-        # 条目持久化侧由 /agent 命令补清除条目（分支最新态 = 默认装配）
-        self.persona_manager.clear_persona_override()
         self._build_runtime(active_tool_names=None)
         if self._has_extension_bindings() and self._extension_runner is not None:
             self.session_start_event = SessionStartEvent(reason="agent_change")
@@ -1941,44 +1931,6 @@ class AgentSession:
         return await self.save_agent(as_name)
 
     # -------------------------------------------------------------------------
-    # Persona 管理（override 旋钮的会话面——扩展命令经 context actions 调用）
-    # -------------------------------------------------------------------------
-
-    def _get_persona_entries(self) -> List[Dict[str, Any]]:
-        """persona 注册表快照（/persona 选择器等扩展交互的数据源）。"""
-        if self.persona_manager is None:
-            return []
-        entries: List[Dict[str, Any]] = []
-        for persona in self.persona_manager.personas.values():
-            info = persona.source_info
-            entries.append(
-                {
-                    "name": persona.name,
-                    "path": persona.file_path,
-                    "source": info.source if info else "",
-                    "scope": info.scope if info else "",
-                    "origin": info.origin if info else "",
-                }
-            )
-        return entries
-
-    def _set_persona_override(self, name: str) -> None:
-        """设置 persona override 并重建系统提示词（找不到由 manager 抛错）。"""
-        if self.persona_manager is None:
-            raise ValueError("persona 管理器不可用")
-        self.persona_manager.set_persona_override(name)
-        self._sync_system_prompt()
-        self._emit_session_info_changed()
-
-    def _clear_persona_override(self) -> None:
-        """清除 persona override（恢复角色默认装配）并重建系统提示词。"""
-        if self.persona_manager is None:
-            return
-        self.persona_manager.clear_persona_override()
-        self._sync_system_prompt()
-        self._emit_session_info_changed()
-
-    # -------------------------------------------------------------------------
     # 工具管理
     # -------------------------------------------------------------------------
 
@@ -2009,11 +1961,6 @@ class AgentSession:
             agent=(
                 self.agent_manager.current
                 if getattr(self, "agent_manager", None) is not None
-                else None
-            ),
-            persona_override=(
-                self.persona_manager.current_override
-                if getattr(self, "persona_manager", None) is not None
                 else None
             ),
         )

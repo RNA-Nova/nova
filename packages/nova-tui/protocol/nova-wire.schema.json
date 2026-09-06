@@ -1976,33 +1976,6 @@
       "title": "GetExtensionFlagsResult",
       "type": "object"
     },
-    "GetPersonasResult": {
-      "additionalProperties": false,
-      "properties": {
-        "override": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "personas": {
-          "items": {
-            "$ref": "#/$defs/PersonaEntry"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "personas",
-        "override"
-      ],
-      "title": "GetPersonasResult",
-      "type": "object"
-    },
     "GetSessionEntriesParams": {
       "additionalProperties": false,
       "properties": {
@@ -2796,35 +2769,6 @@
       "title": "PackageUpdateItem",
       "type": "object"
     },
-    "PersonaEntry": {
-      "additionalProperties": false,
-      "properties": {
-        "isOverride": {
-          "type": "boolean"
-        },
-        "name": {
-          "type": "string"
-        },
-        "origin": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        },
-        "scope": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "path",
-        "scope",
-        "origin",
-        "isOverride"
-      ],
-      "title": "PersonaEntry",
-      "type": "object"
-    },
     "PkgCheckUpdatesResult": {
       "additionalProperties": false,
       "properties": {
@@ -3268,16 +3212,6 @@
             }
           ]
         },
-        "personaOverride": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "type": {
           "enum": [
             "session_info_changed"
@@ -3288,8 +3222,7 @@
       "required": [
         "type",
         "name",
-        "agent",
-        "personaOverride"
+        "agent"
       ],
       "title": "SessionInfoChangedEvent",
       "type": "object"
@@ -3590,16 +3523,6 @@
         "pendingMessageCount": {
           "type": "number"
         },
-        "personaOverride": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "projectTrusted": {
           "type": "boolean"
         },
@@ -3668,8 +3591,7 @@
         "allowedCommands",
         "disabledCommands",
         "capabilityReport",
-        "agentName",
-        "personaOverride"
+        "agentName"
       ],
       "title": "SessionStateResult",
       "type": "object"
@@ -4001,48 +3923,6 @@
         "model"
       ],
       "title": "SetModelParams",
-      "type": "object"
-    },
-    "SetPersonaOverrideParams": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [],
-      "title": "SetPersonaOverrideParams",
-      "type": "object"
-    },
-    "SetPersonaOverrideResult": {
-      "additionalProperties": false,
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "personaOverride": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "ok",
-        "personaOverride"
-      ],
-      "title": "SetPersonaOverrideResult",
       "type": "object"
     },
     "SetResourceExclusionParams": {
@@ -5700,15 +5580,6 @@
         "$ref": "#/$defs/GetExtensionFlagsResult"
       }
     },
-    "getPersonas": {
-      "domain": "session",
-      "params": {
-        "$ref": "#/$defs/EmptyParams"
-      },
-      "result": {
-        "$ref": "#/$defs/GetPersonasResult"
-      }
-    },
     "getSessionAgents": {
       "domain": "session",
       "params": {
@@ -6068,15 +5939,6 @@
       },
       "result": {
         "$ref": "#/$defs/OkResult"
-      }
-    },
-    "setPersonaOverride": {
-      "domain": "session",
-      "params": {
-        "$ref": "#/$defs/SetPersonaOverrideParams"
-      },
-      "result": {
-        "$ref": "#/$defs/SetPersonaOverrideResult"
       }
     },
     "setScopedModels": {

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
+## [Unreleased]
+
+### Removed
+- **/persona 运行期人格旋钮拆除**（含 getPersonas/setPersonaOverride RPC、persona_override 会话状态字段与条目持久化、footer 的 `agent·override` 标记、扩展 ctx 的 persona 四个 action）：人格文本的唯一装配点收敛回 agent 组合声明的 `persona:` 条目——override 旋钮对终端用户几乎无用且制造串染组合（scout 人格 + worker 工具），选择器/页脚的注册名路径串（`coding/core`、`subagents/worker`）对用户不可解码。旧会话里的 persona_override 条目在恢复时无人消费=自动回默认装配，平滑。nova-wire 契约同步缩面（74 方法）。PersonaManager 只留装配（注册表活视图不变）。
+- **bundle personas 目录拍平**：`coding/core.md` + `subagents/*.md` → `coding.md`/`scout.md`/`planner.md`/`reviewer.md`/`worker.md`——agent yaml 经相对路径直达文件，注册名/分组本就不参与装配；目录层级是此前 /persona 选择器暴露路径名的唯一理由，旋钮拆了即拍平。
+
 ## [0.1.4] - 2026-09-06
 
 ### Fixed

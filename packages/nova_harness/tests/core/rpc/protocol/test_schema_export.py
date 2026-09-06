@@ -109,8 +109,8 @@ def test_methods_table_covers_all_registered_methods():
     schema, ts_source = schema_export.build_artifacts()
     shapes = schema_export._collect_method_shapes()
 
-    # 76 个方法全部带域与形状（75 + syncSession——连接化 P2 原子同步快照）
-    assert len(shapes) == 76
+    # 74 个方法全部带域与形状（persona 两方法随 /persona 旋钮拆除下线）
+    assert len(shapes) == 74
     assert set(schema["methods"].keys()) == set(shapes.keys())
     for name, shape in shapes.items():
         assert shape.domain, name

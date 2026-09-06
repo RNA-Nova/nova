@@ -383,11 +383,6 @@ export interface GetExtensionFlagsResult {
   flags: ExtensionFlagInfo[];
 }
 
-export interface GetPersonasResult {
-  personas: PersonaEntry[];
-  override: string | null;
-}
-
 export interface GetSessionEntriesParams {
   offset?: number;
   limit?: number;
@@ -566,14 +561,6 @@ export interface PackageUpdateItem {
   scope: string | null;
 }
 
-export interface PersonaEntry {
-  name: string;
-  path: string;
-  scope: string;
-  origin: string;
-  isOverride: boolean;
-}
-
 export interface PkgCheckUpdatesResult {
   updates: PackageUpdateItem[];
 }
@@ -674,7 +661,6 @@ export interface SessionInfoChangedEvent {
   type: "session_info_changed";
   name: string | null;
   agent: string | null;
-  personaOverride: string | null;
 }
 
 export interface SessionInfoEntry {
@@ -741,7 +727,6 @@ export interface SessionStateResult {
   disabledCommands: string[];
   capabilityReport: CapabilitySelection[];
   agentName: string | null;
-  personaOverride: string | null;
 }
 
 export interface SessionStatsResult {
@@ -817,15 +802,6 @@ export interface SetLabelParams {
 
 export interface SetModelParams {
   model: string | Record<string, unknown>;
-}
-
-export interface SetPersonaOverrideParams {
-  name?: string | null;
-}
-
-export interface SetPersonaOverrideResult {
-  ok: boolean;
-  personaOverride: string | null;
 }
 
 export interface SetResourceExclusionParams {
@@ -1190,7 +1166,6 @@ export interface NovaWireMethodMap {
   "getCommands": { params: EmptyParams; result: GetCommandsResult };
   "getContextUsage": { params: EmptyParams; result: GetContextUsageResult };
   "getExtensionFlags": { params: EmptyParams; result: GetExtensionFlagsResult };
-  "getPersonas": { params: EmptyParams; result: GetPersonasResult };
   "getSessionAgents": { params: EmptyParams; result: GetAgentsResult };
   "getSessionEntries": { params: GetSessionEntriesParams; result: GetSessionEntriesResult };
   "getSessionState": { params: EmptyParams; result: SessionStateResult };
@@ -1232,7 +1207,6 @@ export interface NovaWireMethodMap {
   "setFollowUpMode": { params: SetFollowUpModeParams; result: SetFollowUpModeResult };
   "setLabel": { params: SetLabelParams; result: OkResult };
   "setModel": { params: SetModelParams; result: OkResult };
-  "setPersonaOverride": { params: SetPersonaOverrideParams; result: SetPersonaOverrideResult };
   "setScopedModels": { params: SetScopedModelsParams; result: SetScopedModelsResult };
   "setSessionName": { params: SetSessionNameParams; result: SetSessionNameResult };
   "setSteeringMode": { params: SetSteeringModeParams; result: SetSteeringModeResult };

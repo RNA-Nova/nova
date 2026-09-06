@@ -243,11 +243,9 @@ export class MirrorStore {
         break;
       }
       case 'session_info_changed': {
-        // payload = 三字段当前全量值（无脑直写，无增量歧义）
+        // payload = 当前全量值（无脑直写，无增量歧义）
         this.snapshot.sessionName = event.data.name;
         if (event.data.agent !== undefined) this.snapshot.agentName = event.data.agent;
-        if (event.data.personaOverride !== undefined)
-          this.snapshot.personaOverride = event.data.personaOverride;
         this.emit('snapshot');
         break;
       }

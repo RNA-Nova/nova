@@ -51,11 +51,6 @@ class ExtensionContext:
     compact: Callable[..., Any]
     get_system_prompt: Callable[..., Any]
     get_system_prompt_options: Callable[..., Any]
-    # persona 旋钮（由 ExtensionRuntime.context_actions 代理）
-    get_personas: Callable[..., Any]
-    get_persona_override: Callable[..., Any]
-    set_persona_override: Callable[..., Any]
-    clear_persona_override: Callable[..., Any]
     # agent 旋钮（由 ExtensionRuntime.context_actions 代理）
     get_agents: Callable[..., Any]
     change_agent: Callable[..., Any]

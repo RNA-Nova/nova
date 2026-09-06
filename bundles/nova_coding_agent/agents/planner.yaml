@@ -7,7 +7,7 @@ author: nova
 # model: volcengine/doubao-pro  # 规划是重推理任务，按需指定强模型
 
 persona:
-  - ../backend/personas/subagents/planner.md
+  - ../backend/personas/planner.md
 
 # 纯只读工具集——人格承诺"不做任何改动"由工具面兜底
 tools:

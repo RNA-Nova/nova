@@ -50,15 +50,14 @@ def _is_within(target: Path, root: Path) -> bool:
 
 @dataclass
 class PersonaManager:
-    """persona 装配与 override 管理（可变运行时容器，故 dataclass 而非 Pydantic）。
+    """persona 装配（可变运行时容器，故 dataclass 而非 Pydantic）。
 
     注册表视图是**活视图**——``personas`` 每次访问现取 loader，reload 后
-    无需手动刷新；override 为内存态，随 reload 保留；**角色切换清除**
-    （绑定特定人格文本的 override 在新角色能力面上是串染）。
+    无需手动刷新。（运行期 override 旋钮已随 /persona 命令一并移除——
+    人格文本的唯一装配点是 agent 组合声明的 ``persona:`` 条目。）
     """
 
     resource_loader: Optional[ResourceLoaderProtocol] = None
-    _override: Optional[str] = None
     _last_diagnostics: List[ResourceDiagnostic] = field(default_factory=list)
     # 最近一次装配中"路径解析不了且注册表无此名"的 yaml 条目原文
     # （CapabilitySelection 报告的 missing 数据源）
@@ -102,64 +101,14 @@ class PersonaManager:
         ]
 
     # ------------------------------------------------------------------
-    # override 旋钮
-    # ------------------------------------------------------------------
-
-    @property
-    def current_override(self) -> Optional[str]:
-        """当前 override 的 persona 注册名；``None`` = 角色默认装配。"""
-        return self._override
-
-    def set_persona_override(self, name: str) -> None:
-        """设置 override（查注册表，找不到抛 ``ValueError``）。"""
-        if name not in self.personas:
-            available = ", ".join(sorted(self.personas)) or "(空)"
-            raise ValueError(f"persona 不存在: {name}（注册表可用: {available}）")
-        self._override = name
-
-    def clear_persona_override(self) -> None:
-        """清除 override，恢复角色默认装配。"""
-        self._override = None
-
-    # ------------------------------------------------------------------
     # 装配
     # ------------------------------------------------------------------
 
     def assemble(
         self, config: AgentConfig
     ) -> Tuple[List[Section], List[ResourceDiagnostic]]:
-        """把 AgentConfig 的 persona 条目装配为 Section 序列（override 优先）。
-
-        override 生效时人格部分 = override persona 的单份 content；override
-        目标已不在注册表（reload 后被裁/卸载）时回退角色默认装配并记诊断。
-        """
+        """把 AgentConfig 的 persona 条目装配为 Section 序列。"""
         diagnostics: List[ResourceDiagnostic] = []
-
-        if self._override is not None:
-            persona = self.personas.get(self._override)
-            if persona is not None:
-                sections = [
-                    Section(
-                        name=persona.name,
-                        order=1,
-                        content=persona.content,
-                        source=persona.file_path,
-                    )
-                ]
-                self._last_diagnostics = diagnostics
-                self._last_missing = []
-                return sections, diagnostics
-            diagnostics.append(
-                ResourceDiagnostic(
-                    category="warning",
-                    message=(
-                        f"persona override '{self._override}' 不在注册表，"
-                        "回退角色默认装配"
-                    ),
-                    path=config.agent_dir,
-                )
-            )
-
         sections, entry_diagnostics = self._assemble_entries(config)
         diagnostics.extend(entry_diagnostics)
         self._last_diagnostics = diagnostics

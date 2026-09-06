@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""pty-agents：/agent 与 /persona 切换链路的真实 TTY 验证。
+"""pty-agents：/agent 切换链路的真实 TTY 验证。
 
 /agent 系列在真实终端里逐条断言：选择器开合、直切反馈、footer 角色行、
-/tools 面板随角色换集、persona override 标记、以及"角色切换清 persona
-override"（串染修复的回归钉）。模型段用"你是谁"探针验证系统提示词真实
-落到模型（人格文本即提示词）。
+/tools 面板随角色换集。模型段用"你是谁"探针验证系统提示词真实落到模型
+（人格文本即提示词）。（/persona 运行期旋钮已拆——人格文本的唯一装配点
+是 agent 组合声明。）
 
-探针读法（Ctrl+C 测试同款纪律）：编辑器内容不可靠回显时经 ctrl+g 草稿
-转存读回；渲染器后台加载经 wait_for 轮询承接。
+探针读法：编辑器内容不可靠回显时经 ctrl+g 草稿转存读回；渲染器后台加载
+经 wait_for 轮询承接。
 
 用法：python3 scripts/pty-agents.py [--cwd DIR] [--filter REGEX] [--list]
 """
@@ -81,59 +81,6 @@ def case_tools_panel_scout_set(tui) -> Optional[str]:
             return f"scout 激活集里 {tool} 仍激活"
     tui.send("\x1b", 2.0)  # 关面板
     return None
-
-
-def case_persona_selector(tui) -> Optional[str]:
-    """/persona 无参：选择器开合，注册名在列。"""
-    before = len(tui.buffer)
-    tui.send("/persona\r", STEP_WAIT)
-    delta = tui.buffer[before:]
-    if "coding/core" not in delta and "subagents/" not in delta:
-        return "/persona 选择器未见注册名"
-    tui.send("\x1b", 2.0)
-    return None
-
-
-def case_persona_override_marker(tui) -> Optional[str]:
-    """/persona subagents/worker：直切反馈 + footer 角色行带 override 标记。"""
-    before = len(tui.buffer)
-    tui.send("/persona subagents/worker\r", STEP_WAIT + 1)
-    delta = tui.buffer[before:]
-    if "已切换 persona" not in delta:
-        return "/persona 直切无反馈"
-    role = _last_role_line(tui)
-    if "subagents/worker" not in role and "·" not in role:
-        return f"footer 未见 override 标记（读到 {role[:60]!r}）"
-    return None
-
-
-def case_agent_switch_clears_override(tui) -> Optional[str]:
-    """角色切换清 persona override（串染修复回归钉）：override 状态切
-    /agent worker 后 footer 角色行 = 纯 worker（无 ·override 标记）。"""
-    before = len(tui.buffer)
-    tui.send("/agent worker\r", STEP_WAIT + 2)
-    delta = tui.buffer[before:]
-    if "已切换角色" not in delta or "worker" not in delta:
-        return "/agent worker 无切换反馈"
-    role = _last_role_line(tui)
-    if "subagents/worker" in role or "·" in role.split("·")[0] + "·":
-        # worker·xxx 形态即 override 残留
-        if re.search(r"worker·\S", role):
-            return f"切 agent 后 override 标记残留（{role[:60]!r}）"
-    if not role.startswith("worker"):
-        return f"footer 角色行未换 worker（读到 {role[:60]!r}）"
-    return None
-
-
-def case_persona_default(tui) -> Optional[str]:
-    """/persona default：恢复角色默认装配。"""
-    before = len(tui.buffer)
-    tui.send("/persona default\r", STEP_WAIT)
-    if "已恢复角色默认人格装配" not in tui.buffer[before:]:
-        return "/persona default 无恢复反馈"
-    return None
-
-
 def case_model_identity_probe(tui) -> Optional[str]:
     """模型探针（真模型段）：当前 worker 角色下问"你是谁"——回答应反映
     worker 人格（worker/执行/implement 字样），证明系统提示词真实落到模型。"""
@@ -158,10 +105,6 @@ def main() -> int:
         ("agent 选择器开合", case_agent_selector),
         ("agent 直切 scout + footer 换名", case_agent_switch_scout),
         ("tools 面板随角色换集", case_tools_panel_scout_set),
-        ("persona 选择器开合", case_persona_selector),
-        ("persona override 标记", case_persona_override_marker),
-        ("切 agent 清 override（串染钉）", case_agent_switch_clears_override),
-        ("persona default 恢复", case_persona_default),
         ("模型探针：worker 人格落地", case_model_identity_probe),
         ("切回 coding_agent", None),  # 占位——主流程串行处理
     ]

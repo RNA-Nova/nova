@@ -105,19 +105,6 @@ class ExtensionContextActions:
     get_system_prompt_options: Callable[..., Any] = field(
         default_factory=lambda: _not_initialized("get_system_prompt_options")
     )
-    # persona 旋钮（注册表视图 + override get/set/clear——PersonaManager 的扩展面）
-    get_personas: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("get_personas")
-    )
-    get_persona_override: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("get_persona_override")
-    )
-    set_persona_override: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("set_persona_override")
-    )
-    clear_persona_override: Callable[..., Any] = field(
-        default_factory=lambda: _not_initialized("clear_persona_override")
-    )
     # agent 旋钮（注册表视图 + 当前角色切换 + yaml 写回——AgentManager 的扩展面）
     get_agents: Callable[..., Any] = field(
         default_factory=lambda: _not_initialized("get_agents")

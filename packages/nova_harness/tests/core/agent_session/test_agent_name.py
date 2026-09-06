@@ -88,25 +88,3 @@ async def test_change_agent_unknown_name_raises(two_agent_dirs):
     result = await _create_session(cwd, agent_dir, CreateAgentSessionOptions())
     with pytest.raises(ValueError, match="not found"):
         await result.session.change_agent("nonexistent")
-
-
-@pytest.mark.asyncio
-async def test_change_agent_clears_persona_override(two_agent_dirs):
-    """角色切换清 persona override——绑定特定人格文本的 override 留在新角色
-    的能力面上是串染（scout 人格 + worker 工具的弗兰肯斯坦形态实证）。"""
-    cwd, agent_dir = two_agent_dirs
-    # user 级散养 persona（<agent_dir>/backend/personas/*.md → 注册名即文件名）
-    pdir = agent_dir / "backend" / "personas"
-    pdir.mkdir(parents=True)
-    (pdir / "free.md").write_text("自由人格文本标记", encoding="utf-8")
-    result = await _create_session(cwd, agent_dir, CreateAgentSessionOptions())
-    session = result.session
-
-    session.persona_manager.set_persona_override("free")
-    assert session.persona_manager.current_override == "free"
-    session._sync_system_prompt()
-    assert "自由人格文本标记" in (session.agent.state.system_prompt or "")
-
-    await session.change_agent("zzz_agent")
-    assert session.persona_manager.current_override is None
-    assert "自由人格文本标记" not in (session.agent.state.system_prompt or "")

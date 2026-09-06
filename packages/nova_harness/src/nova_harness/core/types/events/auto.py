@@ -72,14 +72,13 @@ class QueueUpdateEvent(NovaBaseModel):
 class SessionInfoChangedEvent(NovaBaseModel):
     """会话信息变更直写通知（payload = 三个字段的当前全量值，非增量——
 
-    前端快照无脑直写，省一趟 pull；None 即真值（未命名/无 override），
+    前端快照无脑直写，省一趟 pull；None 即真值（未命名），
     不存在"字段缺席 vs 清除"的歧义）。
     """
 
     type: Literal["session_info_changed"] = SESSION_INFO_CHANGED
     name: Optional[str] = None
     agent: Optional[str] = None
-    persona_override: Optional[str] = None
 
 
 class SessionReloadedEvent(NovaBaseModel):

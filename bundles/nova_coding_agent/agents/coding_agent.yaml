@@ -10,7 +10,7 @@ model: openai/gpt-4o
 
 # 人格文本素材（相对本文件解析——本文件位于 <包根>/agents/ 下，故先向上一级）
 persona:
-  - ../backend/personas/coding/core.md
+  - ../backend/personas/coding.md
 
 # 能力选配（三态：键缺席 = 全放；显式空列表 = 全禁；名单支持 ! 排除）
 tools:

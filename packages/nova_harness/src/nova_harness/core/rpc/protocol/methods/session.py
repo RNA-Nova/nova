@@ -132,11 +132,6 @@ def _session_state(session: Any) -> _sh.SessionStateResult:
             if getattr(session, "agent_manager", None) is not None
             else None
         ),
-        persona_override=(
-            session.persona_manager.current_override
-            if getattr(session, "persona_manager", None) is not None
-            else None
-        ),
     )
 
 
@@ -799,48 +794,6 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             ],
         )
 
-    async def getPersonas(params: _sh.EmptyParams) -> _sh.GetPersonasResult:
-        """persona 注册表快照 + 当前 override——/persona 选择器与前端 ctx 数据源。"""
-        if state.runtime is None:
-            raise JSONRPCError(JSONRPCError.NO_ACTIVE_SESSION, "No active session")
-        session = state.runtime.session
-        override = (
-            session.persona_manager.current_override
-            if getattr(session, "persona_manager", None) is not None
-            else None
-        )
-        return _sh.GetPersonasResult(
-            personas=[
-                _sh.PersonaEntry(
-                    name=entry["name"],
-                    path=entry["path"],
-                    scope=entry["scope"],
-                    origin=entry["origin"],
-                    is_override=entry["name"] == override,
-                )
-                for entry in session._get_persona_entries()
-            ],
-            override=override,
-        )
-
-    async def setPersonaOverride(
-        params: _sh.SetPersonaOverrideParams,
-    ) -> _sh.SetPersonaOverrideResult:
-        """设置/清除 persona override（name 缺席或 null = 清除）。"""
-        if state.runtime is None:
-            raise JSONRPCError(JSONRPCError.NO_ACTIVE_SESSION, "No active session")
-        session = state.runtime.session
-        if params.name:
-            session._set_persona_override(params.name)
-        else:
-            session._clear_persona_override()
-        override = (
-            session.persona_manager.current_override
-            if getattr(session, "persona_manager", None) is not None
-            else None
-        )
-        return _sh.SetPersonaOverrideResult(ok=True, persona_override=override)
-
     async def appendEntry(params: _sh.AppendEntryParams) -> _sh.AppendEntryResult:
         """追加 custom 条目（B 型纯前端包经 invoke 也能产生条目——
         entry renderer 对全量包形态闭环）。"""
@@ -896,7 +849,5 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
     registry.register("changeAgent", changeAgent, domain=_D)
     registry.register("saveAgent", saveAgent, domain=_D)
     registry.register("getSessionAgents", getSessionAgents, domain=_D)
-    registry.register("getPersonas", getPersonas, domain=_D)
-    registry.register("setPersonaOverride", setPersonaOverride, domain=_D)
     registry.register("appendEntry", appendEntry, domain=_D)
     registry.register("getTools", getTools, domain=_D)

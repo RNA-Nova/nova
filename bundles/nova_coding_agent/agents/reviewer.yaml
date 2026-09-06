@@ -6,7 +6,7 @@ author: nova
 # model: volcengine/doubao-pro  # 评审是重推理任务，按需指定强模型
 
 persona:
-  - ../backend/personas/subagents/reviewer.md
+  - ../backend/personas/reviewer.md
 
 # 只读评审工具集（bash 限 git diff/log/show 等只读命令——人格层约束）
 tools:

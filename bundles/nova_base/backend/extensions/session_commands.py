@@ -2,16 +2,12 @@
 
 提供 /help、/compact、/fork、/clone、/export、/import、/model、/scoped-models、
 /resume、/login、/logout、/session、/name、/new、/reload、/tree、/trust、
-/untrust、/persona、/agent 等常用会话命令。
+/untrust、/agent 等常用会话命令。
 
 无参数时的交互化（）：/fork 弹用户消息选择器、/model 弹模型选择器、
-/resume 弹会话选择器、/persona 弹人格选择器、/agent 弹角色选择器——均经
+/resume 弹会话选择器、/agent 弹角色选择器——均经
 ``ui.select`` 反向原语，无 UI 时退化为参数用法或错误提示；/scoped-models
 无参数时文本列出 scoped 池（TUI 池面板在 frontend 段）。
-
-/persona（persona 升格后的运行时切换器）：切换只换身份文本（人格部分），
-能力面不动；选择结果经 ``persona_override`` 会话条目持久化（分支安全），
-session_start / session_tree 从分支最新条目恢复。
 
 /agent（AgentManager 的命令面）：切换当前角色（全量重建能力面）；/agent save
 把当前生效状态物化回组合声明 yaml（包来源影子写 user 级），/agent save-as
@@ -544,125 +540,6 @@ async def _untrust(args: str, ctx: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /persona —— persona 运行时切换器（persona 升格：只换身份文本，能力面不动）
-# ---------------------------------------------------------------------------
-
-_DEFAULT_PERSONA_VALUE = ""  # 选择器首项："角色默认装配"（清除 override）
-
-
-def _persona_source_tag(persona: Dict[str, Any]) -> str:
-    """persona 来源标签（scope · origin），供选择器 description 列。"""
-    parts = [p for p in (persona.get("scope"), persona.get("origin")) if p]
-    return " · ".join(parts)
-
-
-def _apply_persona_choice(ctx: Any, name: Optional[str]) -> bool:
-    """应用选择：name 为 None 清除 override，否则设置；未知名报错并返回 False。"""
-    if name is None:
-        ctx.clear_persona_override()
-        ctx.append_entry("persona_override", {"name": None})
-        _reply(ctx, "已恢复角色默认人格装配")
-        return True
-    try:
-        ctx.set_persona_override(name)
-    except Exception:
-        _reply(ctx, f"persona 不存在: {name}", "error")
-        return False
-    ctx.append_entry("persona_override", {"name": name})
-    _reply(ctx, f"已切换 persona: {name}（仅人格文本，能力面不变）")
-    return True
-
-
-async def _persona(args: str, ctx: Any) -> None:
-    name = args.strip()
-    if name:
-        # 带参数直切：/persona <name>；/persona default 恢复默认装配
-        _apply_persona_choice(ctx, None if name == "default" else name)
-        return
-
-    personas = ctx.get_personas() or []
-    current = ctx.get_persona_override()
-    if not ctx.has_ui:
-        # 无 UI 文本回退：列出当前 override 与注册表
-        lines = [f"当前 persona: {current or '(角色默认装配)'}", ""]
-        if personas:
-            for p in personas:
-                tag = _persona_source_tag(p)
-                suffix = f"  {tag}" if tag else ""
-                lines.append(f"{p.get('name', '?')}{suffix}")
-        else:
-            lines.append("(persona 注册表为空)")
-        lines.append("")
-        lines.append("用法: /persona <name> 切换；/persona default 恢复默认装配")
-        _reply(ctx, "\n".join(lines))
-        return
-
-    items = [
-        {
-            "value": _DEFAULT_PERSONA_VALUE,
-            "label": "角色默认装配",
-            "description": "清除 override，恢复 yaml persona 装配"
-            + ("  ·  current" if not current else ""),
-        }
-    ]
-    for p in personas:
-        tag = _persona_source_tag(p)
-        description = tag or p.get("path", "")
-        if p.get("name") == current:
-            description = f"{description + '  ·  ' if description else ''}current"
-        items.append(
-            {
-                "value": p.get("name", ""),
-                "label": p.get("name", ""),
-                "description": description,
-            }
-        )
-    chosen = await select_items(ctx.ui, "Select persona", items)
-    if chosen is None:
-        return
-    _apply_persona_choice(ctx, chosen or None)
-
-
-_PERSONA_ENTRY_MISSING = object()  # 哨兵：分支无 persona_override 条目
-
-
-def _latest_persona_override(ctx: Any) -> Any:
-    """扫当前分支取最新一条 persona_override 条目的名字（无条目返回哨兵）。
-
-    条目 data 形态：``{"name": str | None}``——None 表示"已清除 override"
-    （显式清除也落条目，分支导航后所见即该历史点状态）。
-    """
-    sm = ctx.session_manager
-    if sm is None:
-        return _PERSONA_ENTRY_MISSING
-    for entry in reversed(sm.get_branch()):
-        if getattr(entry, "type", "") != "custom":
-            continue
-        if getattr(entry, "custom_type", "") != "persona_override":
-            continue
-        data = getattr(entry, "data", None)
-        if isinstance(data, dict):
-            name = data.get("name")
-            return str(name) if isinstance(name, str) and name else None
-    return _PERSONA_ENTRY_MISSING
-
-
-async def _restore_persona_from_branch(ctx: Any) -> None:
-    """session_start / session_tree：有条目则恢复 override，无则不动。"""
-    saved = _latest_persona_override(ctx)
-    if saved is _PERSONA_ENTRY_MISSING:
-        return
-    try:
-        if saved is None:
-            ctx.clear_persona_override()
-        else:
-            ctx.set_persona_override(saved)
-    except Exception:
-        # 恢复失败（如 persona 已随包卸载出注册表）不炸会话——保持当前状态
-        pass
-
-
-# ---------------------------------------------------------------------------
 # /agent —— 角色切换与物化（AgentManager 的扩展命令面）
 #
 # 无参数弹选择器（description + source 标签，select_items）；/agent <name>
@@ -686,9 +563,6 @@ async def _apply_agent_choice(ctx: Any, name: str) -> bool:
         _reply(ctx, f"agent 不存在: {name}", "error")
         return False
     ctx.append_entry("agent", {"name": name})
-    # 切换清了内存态 persona override（change_agent）——补清除条目让分支
-    # 最新态 = 默认装配，后续 session_tree 恢复不会把旧 override 贴回来
-    ctx.append_entry("persona_override", {"name": None})
     _reply(ctx, f"已切换角色: {name}")
     return True
 
@@ -945,10 +819,6 @@ def extension(nova: NovaExtensionAPI) -> None:
             "description": "查看当前分支的 todo 清单（TUI 下弹模态查看器）",
             "handler": _todos,
         },
-        "persona": {
-            "description": "切换会话人格（无参数时弹选择器）: /persona [name|default]",
-            "handler": _persona,
-        },
         "agent": {
             "description": "切换/保存当前角色（无参数时弹选择器）: /agent [name|save|save-as <name>]",
             "handler": _agent,
@@ -966,15 +836,9 @@ def extension(nova: NovaExtensionAPI) -> None:
     for name, options in commands.items():
         nova.registerCommand(name, options)
 
-    # 条目持久化的分支恢复（session_start/session_tree 重放）：persona override
-    # 与角色切换共用同一管道——同一扩展每事件注册一个合并 handler
+    # 条目持久化的分支恢复（session_start/session_tree 重放）：角色切换恢复
     async def _restore_session_state(event: Any, ctx: Any) -> None:
-        reason = getattr(event, "reason", None)
-        # agent_change 重放：persona/角色恢复双双跳过——切换本身就是来源
-        # （角色恢复会把刚切的切回去；人格恢复会把已清的 override 贴回来）
-        if reason != "agent_change":
-            await _restore_persona_from_branch(ctx)
-        await _restore_agent_from_branch(ctx, reason)
+        await _restore_agent_from_branch(ctx, getattr(event, "reason", None))
 
     nova.on("session_start", lambda event, ctx: _restore_session_state(event, ctx))
     nova.on("session_tree", lambda event, ctx: _restore_session_state(event, ctx))

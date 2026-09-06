@@ -230,14 +230,8 @@ export class FooterView implements Component {
     }
     const modelRef = snapshot?.model;
     const model = modelRef ? `${modelRef.provider}/${modelRef.id}` : 'no model';
-    // 当前角色（+ persona override 标记——/agent /persona 切换的可见落点）
-    const agentName = snapshot?.agentName;
-    const personaOverride = snapshot?.personaOverride;
-    const role = agentName
-      ? personaOverride
-        ? `${agentName}·${personaOverride}`
-        : agentName
-      : undefined;
+    // 当前角色（/agent 切换的可见落点）
+    const role = snapshot?.agentName || undefined;
     const thinking = snapshot?.thinkingLevel;
     const modelThinking =
       thinking && thinking !== 'off' ? `${model} · ${thinking}` : model;

@@ -9,7 +9,7 @@ author: nova
 # model: volcengine/doubao-flash
 
 persona:
-  - ../backend/personas/subagents/scout.md
+  - ../backend/personas/scout.md
 
 # 只读侦察工具集（bash 用于 git log 等只读探查）
 tools:
