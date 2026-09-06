@@ -56,7 +56,7 @@
 
 ## footer
 
-`角色 · persona · 模型 · thinking 级别` + 扩展状态行（如 plan 模式的 `⏸ plan` / `📋 n/m` 进度）。包可经 `set_status` 原语挂自己的状态段。
+`角色 · 模型 · thinking 级别` + 扩展状态行（如 plan 模式的 `⏸ plan` / `📋 n/m` 进度）。包可经 `set_status` 原语挂自己的状态段。
 
 ## 面板与对话框
 

@@ -9,12 +9,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import inspect
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from nova_agent import AgentMessage
 
@@ -42,19 +41,11 @@ from nova_harness.core.types.events import (
     UserBashEvent,
 )
 from nova_harness.core.types.events.constants import (
-    AFTER_PROVIDER_RESPONSE,
     BEFORE_PROVIDER_HEADERS,
     BEFORE_PROVIDER_REQUEST,
     CONTEXT,
     INPUT,
-    MESSAGE_END,
-    MODEL_SELECT,
-    SESSION_SHUTDOWN,
-    THINKING_LEVEL_SELECT,
     TOOL_CALL,
-    TOOL_EXECUTION_END,
-    TOOL_EXECUTION_START,
-    TOOL_EXECUTION_UPDATE,
     TOOL_RESULT,
     USER_BASH,
 )
@@ -85,7 +76,6 @@ from nova_harness.core.types.extensions import (
     ExtensionProviderActions,
     ExtensionRuntime,
     ExtensionShortcut,
-    LoadedExtensionsResult,
     RegisteredCommand,
 )
 from nova_harness.core.types.project_trust import (

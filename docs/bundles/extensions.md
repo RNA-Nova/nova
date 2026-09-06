@@ -73,7 +73,7 @@ def extension(nova):  # nova: NovaExtensionAPI——装载期注册面
 
 **模型**：`model`（属性，活取）/ `set_model`（缺鉴权返回 False）/ `get_thinking_level` / `set_thinking_level`
 
-**角色与人格**：`get_agents` / `change_agent` / `save_agent` / `get_personas` / `set_persona_override` / `clear_persona_override`
+**角色**：`get_agents` / `change_agent` / `save_agent`
 
 **执行与系统**：`exec(command, args, options)` / `compact` / `get_context_usage` / `get_system_prompt` / `refresh_system_prompt` / `abort` / `shutdown` / `is_idle` / `has_pending_messages`
 

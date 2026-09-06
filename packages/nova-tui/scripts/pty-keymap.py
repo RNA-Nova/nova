@@ -34,7 +34,6 @@ if sys.platform != "win32":
     import pty
     import select
     import signal
-    import stat
 
 NOVA_REPO = os.environ.get(
     "NOVA_REPO", os.environ.get("NOVA_REPO_DIR", "/Users/liujinming/agent/nova-backup-20260824")
@@ -534,7 +533,9 @@ def case_turn_copy_abort_followup(tui: TuiSession) -> Optional[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cwd", default="/tmp")
+    parser.add_argument(
+        "--cwd", default=tempfile.gettempdir(), help="会话工作目录（缺省系统临时目录）"
+    )
     parser.add_argument("--filter", default="")
     parser.add_argument("--list", action="store_true")
     parser.add_argument(
@@ -566,7 +567,7 @@ def main() -> int:
     ]
 
     # 模型依赖用例（无可用模型时不可达）：ctrl+p 轮询需 scoped/可用模型 ≥2
-    MODEL_CASES = {"ctrl+p 模型向前轮询", "shift+ctrl+p 碰撞现实"}
+    MODEL_CASES = {"ctrl+p 模型向前轮询", "shift+ctrl+p 碰撞现实", "shift+tab thinking 循环"}
     cases: list[tuple[str, str, object]] = [
         *[(name, "a", fn) for name, fn in section_a],
         *[(name, "b", fn) for name, fn in section_b],

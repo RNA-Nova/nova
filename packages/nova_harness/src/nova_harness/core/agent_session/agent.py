@@ -16,7 +16,7 @@ import os
 import time
 import traceback
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from nova_agent import (
     AbortController,
@@ -632,7 +632,6 @@ class AgentSession:
         flag_values: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化扩展 runner、工具注册表与系统提示词。"""
-        from nova_harness.core.extensions.event_bus import ExtensionEventBus
         from nova_harness.core.types.extensions import ExtensionRuntime
 
         raw_extensions_result = self.resource_loader.get_extensions()

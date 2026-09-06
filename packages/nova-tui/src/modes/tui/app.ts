@@ -453,7 +453,7 @@ export class NovaTuiApp {
         await this.runtime.refreshPackages();
       })().catch((error) => this.transcript.addError(error));
     });
-    // 会话信息变更（改名/换角色/换 persona）——payload 直写角色名等，
+    // 会话信息变更（改名/换角色）——payload 直写角色名等，
     // 但激活工具集等派生面需全量对账（/agent 切换后 activeTools 不刷新的根因）
     this.runtime.bus.on('session_info_changed', () => {
       void this.runtime.refreshSnapshot().catch((error) => this.transcript.addError(error));
