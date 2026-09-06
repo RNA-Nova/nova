@@ -19,7 +19,7 @@ model: volcengine/deepseek-v4-pro-260425
 # 装配（文件直读；目录递归收 .md 按相对路径字典序在该位置展开；路径须收敛
 # 包根内），否则按注册名查 persona 注册表
 persona:
-  - ../backend/personas/coding/core.md
+  - ../backend/personas/coding.md
   - coding/extra          # 注册名形态（persona 注册表）
 
 # 能力名单（统一三态：键缺席=全放；[]=全禁；非空=名单，支持 ! 排除）
@@ -56,10 +56,10 @@ backend/personas/
 └── subagents/worker.md       #       subagents/worker
 ```
 
-- 命名 = 相对 personas 根去 `.md`；目录条目递归收 `.md`；
+- 命名 = 相对 personas 根去 `.md`；目录条目递归收 `.md`（官方 bundle 用拍平布局：`coding.md`/`worker.md`——嵌套层级只为命名演示，非必须）；
 - 三源发现：包 `personas` 类目 + `~/.nova/agent/backend/personas/` + `.nova/backend/personas/`；
 - 装配归会话期 PersonaManager：路径引用（相对 agent yaml，收敛包根）与注册名混排；
-- 运行时切换：`/persona <name|default>`——内存态覆盖 + 分支持久化（换分支各自恢复）。
+- 唯一装配点即组合声明的 `persona:` 条目——运行期 `/persona` 旋钮已拆除（换人格 = `/agent` 换角色或改 yaml）。
 
 写人格文本的建议：身份与原则在前（模型权重高），工具使用守则在后；**别写工具名单**（名单归 yaml 的 `tools:`，文本里写会漂移）。
 

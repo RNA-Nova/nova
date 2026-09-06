@@ -41,7 +41,7 @@
 | `Ctrl+L` | 打开模型选择器 |
 | `Shift+Tab` | 循环 thinking 级别 |
 | `Ctrl+T` | 切换 thinking 块显隐 |
-| `Ctrl+V` / `Alt+V` | 剪贴板粘贴（图片 → 临时文件路径）；ctrl+v 在 VS Code/Windows Terminal 被宿主吃掉时用 alt+v |
+| `Ctrl+V` / `Alt+V` | 剪贴板粘贴（有图片 → 临时文件路径进编辑器、LLM 经 read 读图；无图片 → 文本进编辑器；Windows 支持文本、图片未实现）；ctrl+v 在 VS Code/Windows Terminal 被宿主吃掉时用 alt+v |
 | `Ctrl+X` | 复制最后一条 assistant 回复 |
 | `Ctrl+G` | 外部编辑器编辑草稿（$VISUAL/$EDITOR） |
 | `Ctrl+Z` | 挂起到后台（POSIX；fg 恢复） |

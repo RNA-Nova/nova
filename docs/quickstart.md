@@ -18,10 +18,12 @@ curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh 
 nova
 ```
 
-首次启动若无可用鉴权，用 `/login` 配置 provider：
+首次启动若无可用模型，会弹"登录模型服务"引导（也可跳过）；此后随时可用 `/login` 配置鉴权：
 
 - **OAuth 登录**（推荐，kimi-coding 等）：`/login` → 选 provider → 按引导完成浏览器授权；
 - **API key**：`/login` → 选 provider → 粘贴 key（输入以掩码显示，不落明文回显）。
+
+登录成功且会话还没选过模型时，会自动落到该 provider 的默认模型——登录完直接开聊，不用再来一步 `/model`。
 
 也可直接放环境变量（如 `VOLCENGINE_API_KEY`），或写 `~/.nova/agent/models.json` 自定义 provider/端点（OpenAI 兼容端点均可接入）。
 

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [Unreleased]
+## [0.1.5] - 2026-09-07
 
 ### Added
 - **PTY 验证跨平台化**：pty-keymap.py 驱动双后端（POSIX pty+select / Windows ConPTY pywinpty+读线程），探针平台化（剪贴板 mac pbcopy/win clip.exe+Get-Clipboard、编辑器助手统一 python 形态）；新增 `--local` 档（无模型键环境跳过模型依赖用例）；CI 新增 `pty-keymap / macos+windows` 双腿。
