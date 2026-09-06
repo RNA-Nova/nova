@@ -36,16 +36,30 @@ if sys.platform != "win32":
     import signal
 
 NOVA_REPO = os.environ.get(
-    "NOVA_REPO", os.environ.get("NOVA_REPO_DIR", "/Users/liujinming/agent/nova-backup-20260824")
+    "NOVA_REPO",
+    os.environ.get("NOVA_REPO_DIR", "/Users/liujinming/agent/nova-backup-20260824"),
 )
 PYTHON = os.environ.get(
     "NOVA_PYTHON",
-    os.path.join(NOVA_REPO, ".pixi", "envs", "dev", "Scripts" if sys.platform == "win32" else "bin", "python"),
+    os.path.join(
+        NOVA_REPO,
+        ".pixi",
+        "envs",
+        "dev",
+        "Scripts" if sys.platform == "win32" else "bin",
+        "python",
+    ),
 )
-MAIN_JS = os.path.join(NOVA_REPO, "packages", "nova-tui", "dist", "modes", "tui", "main.js")
+MAIN_JS = os.path.join(
+    NOVA_REPO, "packages", "nova-tui", "dist", "modes", "tui", "main.js"
+)
 import shutil as _shutil
 
-NODE = os.environ.get("NOVA_NODE") or _shutil.which("node") or os.path.expanduser("~/.pixi/bin/node")
+NODE = (
+    os.environ.get("NOVA_NODE")
+    or _shutil.which("node")
+    or os.path.expanduser("~/.pixi/bin/node")
+)
 
 # 就绪预算分冷热：同进程首个会话承担冷启（Windows CI 要装两个 bundle——
 # pip 构建 + npm ci，实测超 240s）；沙箱跨段共享后的后续会话是温启（秒级）。
@@ -69,6 +83,45 @@ def strip_ansi(text: str) -> str:
 _SHARED_SANDBOX: Optional[tuple[str, str]] = None  # 进程内共享（见 TuiSession）
 
 
+def _shared_sandbox() -> tuple[str, str]:
+    """进程内共享沙箱：fresh-per-会话会让每个段的首启都重走装包全流程
+    （Windows CI 上 wheel 构建分钟级，段段超时）。同进程内复用——
+    退出类用例（ctrl+d/ctrl+c 双击）杀进程不杀沙箱。"""
+    global _SHARED_SANDBOX
+    if _SHARED_SANDBOX is None:
+        _SHARED_SANDBOX = make_sandbox()
+    return _SHARED_SANDBOX
+
+
+def warm_sandbox_packages() -> None:
+    """把两 bundle 的装包冷成本从 PTY 就绪路径挪到驱动进程。
+
+    Windows CI 实测：fresh 沙箱首启的 pip 构建（×2 + Pillow 依赖）在 600s
+    就绪预算内吃不完，且进度不可见（rpc-stderr.log 只在超时 dump 时露面）。
+    这里同步预装（输出直通 CI 日志，卡点即现形），此后所有 TuiSession 温启。
+    """
+    home, agent_dir = _shared_sandbox()
+    env = dict(os.environ, HOME=home, NOVA_AGENT_DIR=agent_dir, NOVA_PYTHON=PYTHON)
+    for bundle in ("nova_base", "nova_coding_agent"):
+        spec = f"path:{os.path.join(NOVA_REPO, 'bundles', bundle)}"
+        print(f"[warm] nova-pkg install {spec}", flush=True)
+        try:
+            result = subprocess.run(
+                [PYTHON, "-m", "nova_harness.cli.package", "install", spec],
+                env=env,
+                timeout=900,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                f"[warm] {bundle} 安装超 900s——流程级卡点在此（装包而非 PTY）",
+                flush=True,
+            )
+            continue
+        if result.returncode != 0:
+            # 不拦：PTY 会话内会重装并留档（debug_dump）
+            print(f"[warm] {bundle} 安装退出码 {result.returncode}", flush=True)
+
+
 def make_sandbox() -> tuple[str, str]:
     """临时 HOME + NOVA_AGENT_DIR + settings（trust 放开 + 本仓 bundle + 模型）。
 
@@ -82,14 +135,20 @@ def make_sandbox() -> tuple[str, str]:
     sandbox_bin = os.path.join(agent_dir, "bin")
     os.makedirs(sandbox_bin, exist_ok=True)
     for name in ("fd", "rg"):
-        for candidate in (
-            os.path.join(real_bin, name),
-            os.path.expanduser(f"~/.kimi-code/bin/{name}"),
-        ):
-            if os.path.isfile(candidate):
-                import shutil
+        # Windows 托管二进制带 .exe 后缀——两形态都试，拷贝保持同名
+        for suffix in (".exe", "") if sys.platform == "win32" else ("",):
+            found = False
+            for candidate in (
+                os.path.join(real_bin, name + suffix),
+                os.path.expanduser(os.path.join("~/.kimi-code/bin", name + suffix)),
+            ):
+                if os.path.isfile(candidate):
+                    import shutil
 
-                shutil.copy2(candidate, os.path.join(sandbox_bin, name))
+                    shutil.copy2(candidate, os.path.join(sandbox_bin, name + suffix))
+                    found = True
+                    break
+            if found:
                 break
     settings = {
         "defaultProjectTrust": "always",
@@ -116,13 +175,7 @@ class TuiSession:
     """
 
     def __init__(self, cwd: str, extra_env: Optional[dict] = None) -> None:
-        # 沙箱跨段共享：fresh-per-会话会让每个段的首启都重走装包全流程
-        # （Windows CI 上 wheel 构建分钟级，段段超时）。同进程内复用——
-        # 退出类用例（ctrl+d/ctrl+c 双击）杀进程不杀沙箱。
-        global _SHARED_SANDBOX
-        if _SHARED_SANDBOX is None:
-            _SHARED_SANDBOX = make_sandbox()
-        home, agent_dir = _SHARED_SANDBOX
+        home, agent_dir = _shared_sandbox()
         self.agent_dir = agent_dir
         env = dict(
             os.environ,
@@ -224,13 +277,22 @@ class TuiSession:
         return self.proc.poll() is None
 
     def debug_dump(self) -> None:
-        """超时/失败的死因留档：buffer 尾 + 后端 rpc-stderr.log 尾 + 子进程表。"""
+        """超时/失败的死因留档：buffer 尾 + 后端 rpc-stderr.log 尾 + 装包状态 + 子进程表。"""
         print("---- buffer 尾 ----")
         print(self.buffer[-800:])
         log = os.path.join(self.agent_dir, "logs", "rpc-stderr.log")
         if os.path.exists(log):
             print("---- rpc-stderr.log 尾 ----")
-            print(open(log, encoding="utf-8", errors="replace").read()[-1200:])
+            print(open(log, encoding="utf-8", errors="replace").read()[-8000:])
+        pkg_root = os.path.join(self.agent_dir, "packages")
+        if os.path.isdir(pkg_root):
+            print("---- packages 目录（两级） ----")
+            for root, dirs, _files in os.walk(pkg_root):
+                depth = root[len(pkg_root) :].count(os.sep)
+                if depth > 2:
+                    dirs[:] = []
+                    continue
+                print("  " * depth + (os.path.basename(root) or "packages") + "/")
         # 后端进程树（死活 + 命令行）
         if sys.platform == "win32":
             subprocess.run(
@@ -245,9 +307,7 @@ class TuiSession:
             print("---- python.exe 进程 ----")
             print(out[-600:])
         else:
-            out = subprocess.run(
-                ["ps", "-ef"], capture_output=True, text=True
-            ).stdout
+            out = subprocess.run(["ps", "-ef"], capture_output=True, text=True).stdout
             rows = [l for l in out.splitlines() if "nova_harness" in l]
             print("---- nova_harness 进程 ----")
             print("\n".join(rows[-4:]))
@@ -394,7 +454,11 @@ def case_ctrl_v_paste(tui: TuiSession) -> Optional[str]:
         if probe and os.path.exists(probe):
             os.unlink(probe)
         tui.send("\x07", 6.0)  # ctrl+g：助手转存草稿 + 写入 ext-edit 标记
-        content = open(probe, encoding="utf-8").read() if probe and os.path.exists(probe) else ""
+        content = (
+            open(probe, encoding="utf-8").read()
+            if probe and os.path.exists(probe)
+            else ""
+        )
         tui.send("\x03", 1.0)  # 清掉 writeback 的 ext-edit 标记
         return content
 
@@ -635,7 +699,11 @@ def main() -> int:
     ]
 
     # 模型依赖用例（无可用模型时不可达）：ctrl+p 轮询需 scoped/可用模型 ≥2
-    MODEL_CASES = {"ctrl+p 模型向前轮询", "shift+ctrl+p 碰撞现实", "shift+tab thinking 循环"}
+    MODEL_CASES = {
+        "ctrl+p 模型向前轮询",
+        "shift+ctrl+p 碰撞现实",
+        "shift+tab thinking 循环",
+    }
     cases: list[tuple[str, str, object]] = [
         *[(name, "a", fn) for name, fn in section_a],
         *[(name, "b", fn) for name, fn in section_b],
@@ -650,6 +718,11 @@ def main() -> int:
         for name, *_ in cases:
             print(name)
         return 0
+
+    # 装包冷成本前置：fresh 沙箱首启的 pip 构建在 PTY 就绪预算内吃不完
+    # （Windows CI 实测超 600s）——驱动进程同步预装，输出直通 CI 日志
+    if cases:
+        warm_sandbox_packages()
 
     failures: list[tuple[str, str]] = []
 
@@ -673,8 +746,12 @@ def main() -> int:
                 f'shutil.copyfile(sys.argv[1], r"{probe}")\n'
                 'pathlib.Path(sys.argv[1]).write_text("pty-ext-edit-mark", encoding="utf-8")\n'
             )
-        editor_cmd = f"{PYTHON} {helper}"  # app 按空格分拆 cmd+args（不带引号）——路径均无空格
-        tui = TuiSession(args.cwd, extra_env={"EDITOR": editor_cmd, "VISUAL": editor_cmd})
+        editor_cmd = (
+            f"{PYTHON} {helper}"  # app 按空格分拆 cmd+args（不带引号）——路径均无空格
+        )
+        tui = TuiSession(
+            args.cwd, extra_env={"EDITOR": editor_cmd, "VISUAL": editor_cmd}
+        )
         tui.draft_probe = probe  # type: ignore[attr-defined]
         try:
             if not tui.wait_ready():
@@ -713,7 +790,9 @@ def main() -> int:
         finally:
             tui.close()
 
-    total = len([c for c in cases if c[1] != "c" or os.environ.get("VOLCENGINE_API_KEY")])
+    total = len(
+        [c for c in cases if c[1] != "c" or os.environ.get("VOLCENGINE_API_KEY")]
+    )
     print(f"\n{total - len(failures)}/{total} 通过")
     return 1 if failures else 0
 
