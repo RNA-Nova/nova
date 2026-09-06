@@ -28,24 +28,33 @@ function Send-Rpc([string]$method, [hashtable]$params) {
     return $script:seq
 }
 
-# 启动后先干等 2 秒——看有没有自发帧（不该有）。
-# 注意：StreamReader.Peek() 在空管道上会阻塞填充缓冲（.NET 文档陷阱），
-# 探测必须用 ReadLineAsync + Wait 超时
-$spontaneous = @()
-$peekTask = $proc.StandardOutput.ReadLineAsync()
-if ($peekTask.Wait(2000)) {
-    $line = $peekTask.Result
-    if ($line) { $spontaneous += $line }
+# 读帧统一走 ReadLineAsync + Wait 超时；**超时不弃单**——pending 的读
+# 任务留在流上，下次接着等（.NET 的 StreamReader 同时只允许一个读操作，
+# 弃单再发起会撞"流正被前一操作使用"）
+$script:readTask = $null
+function Read-Frame([int]$timeoutMs) {
+    if ($null -eq $script:readTask) {
+        $script:readTask = $proc.StandardOutput.ReadLineAsync()
+    }
+    if ($script:readTask.Wait($timeoutMs)) {
+        $r = $script:readTask.Result
+        $script:readTask = $null
+        return $r
+    }
+    return $null
 }
-Write-Host "spontaneous frames in first 2s: $($spontaneous.Count) (expect 0)"
+
+# 启动后先干等 2 秒——看有没有自发帧（不该有）
+$spontaneous = Read-Frame 2000
+Write-Host "spontaneous frames in first 2s: $(if ($spontaneous) { 1 } else { 0 }) (expect 0)"
 
 $id1 = Send-Rpc 'initialize' @{ client = @{ name = 'wire-diag'; version = '0' } }
-$line = $proc.StandardOutput.ReadLine()
-Write-Host "initialize reply: $($line.Substring(0, [Math]::Min(160, $line.Length)))"
+$line = Read-Frame 15000
+Write-Host "initialize reply: $(if ($line) { $line.Substring(0, [Math]::Min(160, $line.Length)) } else { '<TIMEOUT>' })"
 
 $id2 = Send-Rpc 'createSession' @{ cwd = $PWD.Path }
-$line = $proc.StandardOutput.ReadLine()
-Write-Host "createSession reply: $($line.Substring(0, [Math]::Min(120, $line.Length)))"
+$line = Read-Frame 15000
+Write-Host "createSession reply: $(if ($line) { $line.Substring(0, [Math]::Min(120, $line.Length)) } else { '<TIMEOUT>' })"
 
 # 关键：发一个会产生多帧进度通知（突发）+ 长耗时的调用，然后纯干等
 $id3 = Send-Rpc 'pkgInstall' @{ source = 'npm:nova-coding-agent' }
@@ -55,14 +64,11 @@ $frames = 0
 $got = $false
 $firstFrameAt = -1.0
 while ($sw.Elapsed.TotalSeconds -lt 60) {
-    $readTask = $proc.StandardOutput.ReadLineAsync()
-    if ($readTask.Wait(500)) {
-        $line = $readTask.Result
-        if ($line) {
-            $frames += 1
-            if ($firstFrameAt -lt 0) { $firstFrameAt = $sw.Elapsed.TotalSeconds }
-            if ($line.Contains('"id":3')) { $got = $true; break }
-        }
+    $line = Read-Frame 500
+    if ($line) {
+        $frames += 1
+        if ($firstFrameAt -lt 0) { $firstFrameAt = $sw.Elapsed.TotalSeconds }
+        if ($line.Contains('"id":3')) { $got = $true; break }
     }
 }
 Write-Host "frames arrived while idle: $frames (first at $([Math]::Round($firstFrameAt, 1))s)"

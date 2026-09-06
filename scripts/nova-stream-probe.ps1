@@ -1,4 +1,4 @@
-﻿# nova-stream-probe.ps1 —— bash 流式帧的到达时刻探针（真实模型，零输入）
+# nova-stream-probe.ps1 —— bash 流式帧的到达时刻探针（真实模型，零输入）
 #
 # 完整链路（冻结后端 + 真实模型 + bash 工具流式更新），只缺 bun 前端：
 # 帧到达时刻摊开看——分布开 = 后端零卡顿（嫌疑归 bun 前端管道读）；
@@ -29,26 +29,36 @@ function Send-Rpc([string]$method, [hashtable]$params) {
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-function Read-Frame {
-    $task = $proc.StandardOutput.ReadLineAsync()
-    if ($task.Wait(30000)) { return $task.Result }
+# 读帧统一走 ReadLineAsync + Wait 超时；**超时不弃单**——pending 的读
+# 任务留在流上，下次接着等（.NET 的 StreamReader 同时只允许一个读操作，
+# 弃单再发起会撞"流正被前一操作使用"）
+$script:readTask = $null
+function Read-Frame([int]$timeoutMs) {
+    if ($null -eq $script:readTask) {
+        $script:readTask = $proc.StandardOutput.ReadLineAsync()
+    }
+    if ($script:readTask.Wait($timeoutMs)) {
+        $r = $script:readTask.Result
+        $script:readTask = $null
+        return $r
+    }
     return $null
 }
 
 Send-Rpc 'initialize' @{ client = @{ name = 'stream-probe'; version = '0' } } | Out-Null
-$null = Read-Frame
+$null = Read-Frame 15000
 Send-Rpc 'createSession' @{ cwd = $PWD.Path } | Out-Null
-$null = Read-Frame
+$null = Read-Frame 15000
 Write-Host "handshake done, sending task (echo PROBE_A && sleep 3 && echo PROBE_B)..."
 
 $promptId = Send-Rpc 'prompt' @{ message = 'Execute this with the bash tool: echo PROBE_A && sleep 3 && echo PROBE_B . Then reply with just: done' }
 
-# 零输入干等，记录每帧到达时刻
+# 零输入干等，记录每帧到达时刻（空读不弃单，继续等到期限）
 $rows = @()
-$deadline = 90
+$deadline = 120
 while ($sw.Elapsed.TotalSeconds -lt $deadline) {
-    $line = Read-Frame
-    if ($null -eq $line) { break }
+    $line = Read-Frame 500
+    if ($null -eq $line) { continue }
     $t = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
     $kind = '?'
     if ($line -match '"type"\s*:\s*"([a-z_]+)"') { $kind = $Matches[1] }
