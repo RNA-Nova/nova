@@ -99,15 +99,18 @@ def test_singleton_install_registers_as_taken_over():
 
 def test_stdio_kwargs_follow_context_manager_guard():
     """子进程 stdio 决策（_stdio_kwargs）跟随任一安装路径的活动 guard：
-    活动时改道 stderr + 关 stdin（不继承协议 fd 1），非活动时直继承。"""
+    活动时改道 stderr + 关 stdin（不继承协议 fd 1），非活动时直继承。
+    （creationflags 是 hidden_console_kwargs 的平台附加，与 stdio 正交——
+    比较时剔除）"""
     import subprocess
     import sys as _sys
 
     from nova_harness.core.package.install.python_backend import _stdio_kwargs
+    from nova_harness.core.utils.child_process import hidden_console_kwargs
 
     with OutputGuard(stdout=io.StringIO(), stderr=io.StringIO()):
         kwargs = _stdio_kwargs()
         assert kwargs["stdin"] is subprocess.DEVNULL
         assert kwargs["stdout"] is _sys.stderr
         assert kwargs["stderr"] is _sys.stderr
-    assert _stdio_kwargs() == {}
+    assert _stdio_kwargs() == hidden_console_kwargs()
