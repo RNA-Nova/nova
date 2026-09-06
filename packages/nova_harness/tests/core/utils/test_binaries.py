@@ -76,7 +76,10 @@ def test_resolve_binary_missing_returns_none(fake_bins, monkeypatch):
     assert resolve_binary("no-such-binary-xyz") is None
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="可执行位是 POSIX 语义（Windows 的 os.access(X_OK) 恒真）")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="可执行位是 POSIX 语义（Windows 的 os.access(X_OK) 恒真）",
+)
 def test_resolve_binary_requires_executable_bit(fake_bins, monkeypatch):
     (fake_bins["env_bin"] / "rg").touch()
     (fake_bins["nova_bin"] / "rg").touch()
@@ -135,5 +138,7 @@ def test_binary_install_guidance():
 
     assert "brew install fd" in binary_install_guidance("fd")
     assert "fd-find" in binary_install_guidance("fd")
+    assert "winget install sharkdp.fd" in binary_install_guidance("fd")
     assert "brew install ripgrep" in binary_install_guidance("rg")
+    assert "winget install BurntSushi.ripgrep.MSVC" in binary_install_guidance("rg")
     assert "官方安装文档" in binary_install_guidance("unknown-tool")

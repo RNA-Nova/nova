@@ -41,15 +41,23 @@ ALTERNATE_BINARY_NAMES: Dict[str, List[str]] = {
     "fd": ["fd", "fdfind"],
 }
 
+
 # 二进制不可用时的安装指引（对齐 kimi-code rgUnavailableMessage 的友好报错）。
+# 按平台给（Windows 上是 winget——brew/apt 指引在 Windows 上是误导）。
+def _binary_guidance(
+    name: str, brew_pkg: str, apt_pkg: str, winget_pkg: str, apt_note: str = ""
+) -> str:
+    apt_line = f"sudo apt install {apt_pkg}  # Debian/Ubuntu{apt_note}"
+    return (
+        f"brew install {brew_pkg}  # macOS\n"
+        f"{apt_line}\n"
+        f"winget install {winget_pkg}  # Windows"
+    )
+
+
 _BINARY_INSTALL_GUIDANCE: Dict[str, str] = {
-    "fd": (
-        "brew install fd  # macOS\n"
-        "sudo apt install fd-find  # Debian/Ubuntu（命令名 fdfind）"
-    ),
-    "rg": (
-        "brew install ripgrep  # macOS\n" "sudo apt install ripgrep  # Debian/Ubuntu"
-    ),
+    "fd": _binary_guidance("fd", "fd", "fd-find", "sharkdp.fd", "（命令名 fdfind）"),
+    "rg": _binary_guidance("rg", "ripgrep", "ripgrep", "BurntSushi.ripgrep.MSVC"),
 }
 
 
