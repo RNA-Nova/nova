@@ -63,7 +63,7 @@ while ($sw.Elapsed.TotalSeconds -lt $deadline) {
     $kind = '?'
     if ($line.Contains('"agent/event"')) { $kind = 'agent/event' }
     if ($line.Contains('"user_tool"')) { $kind = 'user_tool' }
-    if ($line.Contains('"ui/request"')) { $kind = 'ui/request（反向请求——探针不应答）' }
+    if ($line.Contains('"ui/request"')) { $kind = 'ui/request (REVERSE REQUEST - probe never answers)' }
     if ($line.Contains('"ui/')) { $kind = 'ui/*' }
     $isResult = $line.Contains([string]::Format('"id":{0}', $invokeId))
     if ($isResult) { $kind = 'RPC-RESULT' }
