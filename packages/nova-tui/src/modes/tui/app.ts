@@ -361,11 +361,12 @@ export class NovaTuiApp {
       }
       return this.keymap.handle(data);
     });
-    // 主题切换 → transcript 全量重建 + welcome/resources 重染 + 重绘
+    // 主题切换 → transcript 全量重建 + welcome/resources 重染 + 状态指示器重染 + 重绘
     onThemeChange(() => {
       this.welcome.refresh();
       this.resources.rebuild();
       this.transcript.rebuildAll();
+      this.statusController.retheme();
       this.tui.requestRender();
     });
     // 扩展编辑器热替换：slots 整体替换完成后（refreshPackages）检测 editor:main

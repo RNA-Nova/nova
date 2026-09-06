@@ -76,6 +76,12 @@ export class StatusController {
     this.tui.requestRender();
   }
 
+  /** 主题切换后强制重建（指示器在构造期捕获色函数，不随主题切换自动换色；
+   * 流光/working 行每帧现取 colors 代理不受影响，这条是给构造期捕获派的）。 */
+  retheme(): void {
+    this.recreate();
+  }
+
   /** 连接期指示开关（后端就绪门 app 层驱动）。 */
   setConnecting(connecting: boolean): void {
     if (this.connecting === connecting) return;

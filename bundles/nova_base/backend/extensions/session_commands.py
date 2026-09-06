@@ -686,6 +686,9 @@ async def _apply_agent_choice(ctx: Any, name: str) -> bool:
         _reply(ctx, f"agent 不存在: {name}", "error")
         return False
     ctx.append_entry("agent", {"name": name})
+    # 切换清了内存态 persona override（change_agent）——补清除条目让分支
+    # 最新态 = 默认装配，后续 session_tree 恢复不会把旧 override 贴回来
+    ctx.append_entry("persona_override", {"name": None})
     _reply(ctx, f"已切换角色: {name}")
     return True
 
@@ -966,8 +969,12 @@ def extension(nova: NovaExtensionAPI) -> None:
     # 条目持久化的分支恢复（session_start/session_tree 重放）：persona override
     # 与角色切换共用同一管道——同一扩展每事件注册一个合并 handler
     async def _restore_session_state(event: Any, ctx: Any) -> None:
-        await _restore_persona_from_branch(ctx)
-        await _restore_agent_from_branch(ctx, getattr(event, "reason", None))
+        reason = getattr(event, "reason", None)
+        # agent_change 重放：persona/角色恢复双双跳过——切换本身就是来源
+        # （角色恢复会把刚切的切回去；人格恢复会把已清的 override 贴回来）
+        if reason != "agent_change":
+            await _restore_persona_from_branch(ctx)
+        await _restore_agent_from_branch(ctx, reason)
 
     nova.on("session_start", lambda event, ctx: _restore_session_state(event, ctx))
     nova.on("session_tree", lambda event, ctx: _restore_session_state(event, ctx))

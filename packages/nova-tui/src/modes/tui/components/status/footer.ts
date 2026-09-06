@@ -200,8 +200,13 @@ export class FooterView implements Component {
       if (this.stats.cacheRead > 0) left.push(colors.dim(`R${this.stats.cacheRead}`));
       if (this.stats.cacheWrite > 0) left.push(colors.dim(`W${this.stats.cacheWrite}`));
       // 命中率（cache_read 占全部输入比）与成本
+      // 分母 = input + cacheRead：上游的 input 已扣除 cache_read（_stream.py
+      // 规范语义）——拿 cacheRead/input 会超 100% 被 clamp 成恒 100%
       if (this.stats.input > 0 && this.stats.cacheRead > 0) {
-        const hitRate = Math.min(100, (this.stats.cacheRead / this.stats.input) * 100);
+        const hitRate = Math.min(
+          100,
+          (this.stats.cacheRead / (this.stats.input + this.stats.cacheRead)) * 100,
+        );
         left.push(colors.dim(`${hitRate.toFixed(0)}%`));
       }
       if (this.stats.cost > 0) {

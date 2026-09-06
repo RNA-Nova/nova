@@ -132,14 +132,22 @@ class AgentSessionServices:
         # 执行期的当前模型由 ToolExecContext 经 execute 第 5 参注入
         # （AgentSession.get_tool_exec_context → refresh 时包装）。
         tool_context = ToolContext(cwd=resolved_cwd, settings=settings_manager)
-        # 启动时做一次动态模型网络刷新（15s 上限，对齐 TS ModelRuntime.create），
-        # 离线（NOVA_OFFLINE）时只读 models-store 缓存；同时精确刷新可用性快照。
-        controller = AbortController()
-        timer = asyncio.get_running_loop().call_later(15, controller.abort)
-        try:
-            await model_runtime.refresh(signal=controller.signal)
-        finally:
-            timer.cancel()
+
+        # 启动时的动态模型网络刷新——后台化：弱网/外网不可达时连接不可
+        # 中止（socket 级），"15s 预算"形同虚设（实测拖住启动 60s+）。
+        # 改为后台任务：会话即刻就绪（缓存/内置目录先服务，首个 prompt 的
+        # 模型解析不依赖本次刷新），落地后经同步快照发布；失败只记日志。
+        async def _refresh_models_in_background() -> None:
+            controller = AbortController()
+            timer = asyncio.get_running_loop().call_later(15, controller.abort)
+            try:
+                await model_runtime.refresh(signal=controller.signal)
+            except Exception as exc:
+                logger.debug("启动期模型目录刷新失败（后台任务）：%s", exc)
+            finally:
+                timer.cancel()
+
+        asyncio.create_task(_refresh_models_in_background())
 
         if resource_loader is None:
             package_manager = PackageManager(

@@ -118,7 +118,7 @@ describe('FooterView · 数据行补全', () => {
       assert.match(out, /↓2000/);
       assert.match(out, /R8000/);
       assert.match(out, /W500/);
-      assert.match(out, /80%/); // 命中率 8000/10000
+      assert.match(out, /44%/); // 命中率 8000/(10000+8000)——input 已扣 cache_read
       assert.match(out, /\$0\.0123/);
       assert.match(out, /75%\/128k\(auto\)/); // 上下文（默认 auto-compact 开）
     } finally {

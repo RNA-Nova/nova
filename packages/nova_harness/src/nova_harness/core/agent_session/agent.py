@@ -1898,6 +1898,10 @@ class AgentSession:
         未知名由 AgentManager 抛 ``ValueError``（列出可用名）。
         """
         self.agent_manager.change_agent(name)
+        # 角色切换清 persona override——绑定特定人格文本的 override 留在新角色
+        # 的能力面上是串染（scout 人格 + worker 工具）；用户要再开自行重选。
+        # 条目持久化侧由 /agent 命令补清除条目（分支最新态 = 默认装配）
+        self.persona_manager.clear_persona_override()
         self._build_runtime(active_tool_names=None)
         if self._has_extension_bindings() and self._extension_runner is not None:
             self.session_start_event = SessionStartEvent(reason="agent_change")
