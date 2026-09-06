@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [Unreleased]
+## [0.1.3] - 2026-09-06
 
 ### Fixed
 - **persona override 跨角色切换串染**：/persona 选了某人格后 /agent 换角色，新角色顶着旧人格文本跑（scout 人格 + worker 工具的弗兰肯斯坦，实机探针实证）。三处合修：`change_agent` 清内存态 override + `/agent` 补 persona_override 清除条目（分支最新态 = 默认装配，session_tree 恢复不贴回）+ session_start 重放在 `reason=agent_change` 下 persona/角色恢复双跳过。
@@ -13,9 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **冷启动在弱网/外网不可达时分钟级卡死**：会话服务装配期 `await model_runtime.refresh()`（动态模型远程目录刷新，标注 15s 预算）——但 urllib 连接在 socket 级不可中止，弱网实测拖住启动 60s+（print 模式"回复ok"全程 63s vs 离线 2.8s）。修复：启动期刷新后台化（fire-and-forget + 原 15s 预算保留为后台中止闸）——会话即刻就绪（内置种子 + models-store 缓存先服务，首个 prompt 的模型解析不依赖本次刷新），刷新落地后经同步快照发布，失败只记日志。
 - **主题切换后状态指示器残留旧色**：RetryStatusIndicator/CompactionStatusIndicator 等在构造期捕获色函数，主题切换不重染（流光 working 行每帧现取 colors 代理不受影响）——主题切换现在经 onThemeChange 强制重建状态指示器（`StatusController.retheme()`）。
 - **pty-keymap / pty-agents 键位与切换链路全量 PTY 验证**（scripts/pty-keymap.py + scripts/pty-agents.py）：键位 16 用例三段（含 ctrl+c 单击清空/双击退出、ctrl+d 空退/非空不退、Esc 中止/让路/双击导航、shift+ctrl+p 碰撞现实钉死、ctrl+z 应用侧契约）；/agent /persona 链路 9 用例（选择器开合/直切反馈/footer 换名/tools 面板随角色换集/override 标记/切 agent 清 override/模型"你是谁"探针证提示词真实落地）。
-- **pty-keymap 键位全量 PTY 验证**（scripts/pty-keymap.py）：APP_KEYBINDINGS 全部 app 级键位在真实 TTY 逐键断言——16 用例三段（模型无关单会话 / 退出键新会话进程级断言 / 真模型段）：ctrl+o 展开、shift+tab thinking 循环、ctrl+p/ctrl+l 模型、**shift+ctrl+p 碰撞现实钉死**（legacy 字节与 ctrl+p 同字节→向前；kitty CSI-u→向后回环）、ctrl+v 剪贴板（草稿转存探针读回）、ctrl+g 外部编辑器写回、ctrl+d 空退/非空不退、ctrl+c 单击清空/双击退出（双击须一次 write 双字节——逐 send 的 drain 必超 500ms 窗）、Esc 中止/对话框让路/双击导航、ctrl+z 应用侧契约（PTY 沙箱是孤儿进程组，POSIX 丢弃 SIGTSTP——验 tui.stop 让位 + SIGCONT 重绘，内核停止归真实 shell）、alt+↑ 队列还原、真模型段 ctrl+x 剪贴板读回 + alt+enter 排队 + alt+↑ 还原 + Esc 中止。沙箱预填 fd/rg 二进制（fresh 沙箱首启 ensure_binary 的 GitHub 下载实测吃掉分钟级）。
-
-### Fixed
 - **Windows 下 bash 工具输出中文乱码（`版本`→`汾` 形态）**：cmd/powershell/query 等 Windows 原生控制台程序按系统 OEM 代码页（中文机 GBK/936）写字节，引擎一律 UTF-8 解码必乱码（pi 同款现状）。新增 `tools_common/output_decode.StreamDecoder`：UTF-8 增量优先（strict 探测，跨块半字符由增量状态承接）→ 整块非法回退系统 OEM 代码页（`GetOEMCP`），**回退后流级粘滞**（产出者同源同码页，杜绝"GBK 字节碰巧是合法 UTF-8"的反复横跳）；POSIX 行为不变（UTF-8+replace）。bash 引擎（LLM 工具与 `!` 用户工具共享）接入；测试覆盖 UTF-8 直通/跨块承接/GBK 回退/混合流/粘滞/无回退旧行为。
 - **子代理并行委派时并发装包互踩 + 每次后端启动都重装 npm 包**：`PackageManager._is_package_resolvable` 对 npm 源恒判 False——每个后端进程（子代理 CLI 亦同）启动都走 `update=True` 全量重装（npm registry 往返 + 装配全流程），冷启动慢且多进程并发装同一包时互踩缓存删换（实机实证：两个 worker 并行，一个把另一个 resolve 到一半的目录删换，炸出 `Path escapes package root: ./backend/tools/write.py`）。三连修：① npm 源改纯本地可解析判定——缓存目录（即安装态）+ package.json + 版本满足 spec（精确/range 本地 semver 判定，dist-tag 装了即满足，安装态损坏重装自愈），装了即不再重装，启动不再触网；② `PackageInstaller.install`/`uninstall` 持包装配根的跨进程 `.install.lock`（filelock，进程内单例可重入）；③ 启动确保路径锁内复查——并发进程等锁期间被装好的免重装。回归测试 8 例（本地判定六例 + 并发串行化 + 锁内复查只装一次）。
 - **install.ps1 转纯 ASCII + 去 BOM**：`irm | iex` 形态在 PS 5.1 中文 locale 下 BOM 被误读成 `ï»¿` 顶在行首（`#` 不再是注释 → CommandNotFoundException 实机实证）；注释全译英文、串内 em-dash 换连字符——`irm|iex` 与本地 `-File` 两形态都不再依赖编码推断。v0.1.2 的公开 install.ps1 资产已热替换为修复版。

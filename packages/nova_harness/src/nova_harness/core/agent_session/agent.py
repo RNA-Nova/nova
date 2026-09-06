@@ -276,7 +276,8 @@ class AgentSession:
         # _build_runtime 中按当前 agent 白名单注册（与包工具同一注册路径）
         self.user_tools_manager = UserToolManager()
         self._user_tools = UserToolController(self, self.user_tools_manager)
-        # persona 管理器：会话级单例（override 内存态随 change_agent/reload 保留；
+        # persona 管理器：会话级单例（override 内存态随 reload 保留；
+        # change_agent 清除——绑定特定人格文本的 override 在新角色上是串染；
         # 注册表为活视图，读 loader 现取，无需手动刷新）
         self.persona_manager = PersonaManager(resource_loader=self._resource_loader)
         # agent 管理器：会话级单例（当前角色旋钮内存态；注册表活视图；

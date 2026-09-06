@@ -53,7 +53,8 @@ class PersonaManager:
     """persona 装配与 override 管理（可变运行时容器，故 dataclass 而非 Pydantic）。
 
     注册表视图是**活视图**——``personas`` 每次访问现取 loader，reload 后
-    无需手动刷新；override 为内存态，随会话/角色切换保留。
+    无需手动刷新；override 为内存态，随 reload 保留；**角色切换清除**
+    （绑定特定人格文本的 override 在新角色能力面上是串染）。
     """
 
     resource_loader: Optional[ResourceLoaderProtocol] = None
