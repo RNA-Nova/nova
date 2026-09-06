@@ -250,14 +250,14 @@ class SourceResolver:
         return self.agent_dir / PACKAGES_DIR_NAME / NPM_PACKAGES_DIR_NAME
 
     @staticmethod
-    def _npm_safe_name(name: str) -> str:
+    def npm_safe_name(name: str) -> str:
         """npm 包名 → 目录名（@scope/name → scope__name）。"""
         return name.replace("/", "__").lstrip("@").replace("@", "")
 
     def _resolve_npm(self, source: PackageSource, *, update: bool = False) -> str:
         if not source.npm_name:
             raise ValueError(f"Invalid npm source: {source.spec}")
-        cache_dir = self.npm_root / self._npm_safe_name(source.npm_name)
+        cache_dir = self.npm_root / self.npm_safe_name(source.npm_name)
 
         # 只读解析（update=False）：缓存存在即用，不触网
         if cache_dir.exists() and (cache_dir / "package.json").exists():

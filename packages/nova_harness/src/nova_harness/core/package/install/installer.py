@@ -21,8 +21,11 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+from filelock import FileLock
 
 from nova_harness.core.config.defaults import (
     GIT_PACKAGES_DIR_NAME,
@@ -117,6 +120,26 @@ def _npm_manifest_dir(root: Path) -> Path:
     遗留 ``package.json`` 不再触发。
     """
     return root if _is_pure_ts_package(root) else root / "frontend"
+
+
+# 跨进程安装锁注册表（按包装配根一把锁）。并发启动的多个后端进程
+# （子代理并行委派等）会同时走"确保已装"路径——npm 缓存的删换与安装
+# 副本的写入没有互斥就会互踩（实机实证：两个 worker 并发装同一 npm 包，
+# 一个把另一个 resolve 到一半的目录删换，炸出路径校验错误）。
+# 进程内单例：filelock 同实例可重入；多实例同文件走不同 fd，
+# POSIX 上"任一 fd 关闭即放全锁"是经典坑。
+_install_locks: Dict[str, FileLock] = {}
+_install_locks_guard = threading.Lock()
+
+
+def _install_lock_for(packages_dir: Path) -> FileLock:
+    key = str(packages_dir)
+    with _install_locks_guard:
+        lock = _install_locks.get(key)
+        if lock is None:
+            lock = FileLock(str(packages_dir / ".install.lock"))
+            _install_locks[key] = lock
+        return lock
 
 
 class PackageInstaller:
@@ -215,6 +238,33 @@ class PackageInstaller:
         return source
 
     def install(
+        self,
+        source: PackageSourceSpec,
+        no_deps: bool = False,
+        dry_run: bool = False,
+        quiet: bool = False,
+        editable: bool = False,
+    ) -> PackageMetadata:
+        """Install a package from *source* but do not persist it to settings.
+
+        跨进程互斥：整个 解析→装配 操作持包装配根的 ``.install.lock``——
+        并发启动的多个后端进程（子代理并行委派）不会互踩 npm 缓存删换与
+        安装副本写入。
+        """
+        with self.install_lock():
+            return self._install_impl(
+                source,
+                no_deps=no_deps,
+                dry_run=dry_run,
+                quiet=quiet,
+                editable=editable,
+            )
+
+    def install_lock(self) -> FileLock:
+        """本 scope 包装配根的跨进程安装锁（同实例可重入）。"""
+        return _install_lock_for(self.packages_dir)
+
+    def _install_impl(
         self,
         source: PackageSourceSpec,
         no_deps: bool = False,
@@ -900,6 +950,18 @@ class PackageInstaller:
             )
 
     def uninstall(
+        self, name_or_source: str, *, uninstall_python_package: bool = True
+    ) -> bool:
+        """Remove an installed package by name or source spec.
+
+        与 install 共享同一把跨进程锁——并发装/卸不互踩副本与 dist-info。
+        """
+        with self.install_lock():
+            return self._uninstall_impl(
+                name_or_source, uninstall_python_package=uninstall_python_package
+            )
+
+    def _uninstall_impl(
         self, name_or_source: str, *, uninstall_python_package: bool = True
     ) -> bool:
         """Remove an installed package by name or source spec."""

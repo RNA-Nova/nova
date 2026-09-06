@@ -25,6 +25,7 @@ Typical usage::
 """
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -44,6 +45,12 @@ from nova_harness.core.package.install.store import (
 from nova_harness.core.package.install.updates import check_for_available_updates
 from nova_harness.core.package.manifest import read_manifest
 from nova_harness.core.package.resolve.resolver import PackageResolver
+from nova_harness.core.package.source._semver import Version as SemverVersion
+from nova_harness.core.package.source._semver import (
+    max_satisfying,
+    parse_version,
+    parse_version_spec,
+)
 from nova_harness.core.package.source.spec import (
     PackageSourceCollection,
     ResolvedScopedSources,
@@ -759,12 +766,17 @@ class PackageManager:
                     if action == "error":
                         raise ValueError(f"Missing source: {source_str}")
                     # action == "install" falls through
-                await asyncio.to_thread(
-                    self._installer_for_scope(scope).install,
-                    source_str,
-                    editable=editable,
-                    quiet=True,
-                )
+                installer = self._installer_for_scope(scope)
+
+                def _install_serialized() -> None:
+                    # 跨进程串行 + 锁内复查：并发启动的多个后端进程同时判定
+                    # "未装"时，等锁期间可能已被别的进程装好——复查免重装
+                    with installer.install_lock():
+                        if self._is_package_resolvable(source_str, scope):
+                            return
+                        installer.install(source_str, editable=editable, quiet=True)
+
+                await asyncio.to_thread(_install_serialized)
             except Exception as exc:
                 logger.warning(
                     "Failed to install missing package %s: %s", source_str, exc
@@ -808,6 +820,37 @@ class PackageManager:
             # git 源的安装路径由 host/repo 直接确定，缓存可随时重装
             # （clone/fetch），统一要求安装完成标志，不触发网络。
             pkg_name = ""
+        elif source_obj.type == "npm":
+            # npm 源：纯本地判定——registry 缓存目录（即安装态）存在、
+            # package.json 在、版本满足 spec。此前恒 False：每次后端启动
+            # （子代理 CLI 亦同）都判"未装"→ update=True 全量重装——
+            # 冷启动慢与并发安装互踩（实机 "Path escapes package root"）
+            # 的总根子。dist-tag 规格（latest/beta）本地不可判定，装了即
+            # 视为满足——滚动更新归 nova-pkg update 显式触发。
+            pkg_json = (
+                installer.npm_root
+                / installer.source_resolver.npm_safe_name(source_obj.npm_name or "")
+                / "package.json"
+            )
+            if not pkg_json.exists():
+                return False
+            spec = source_obj.npm_version
+            if not spec:
+                return True
+            try:
+                raw = json.loads(pkg_json.read_text(encoding="utf-8")).get(
+                    "version", ""
+                )
+                installed_version = parse_version(raw)
+            except (ValueError, json.JSONDecodeError):
+                return False  # 安装态损坏——重装自愈
+            try:
+                parsed_spec = parse_version_spec(spec)
+            except ValueError:
+                return True  # dist-tag 规格：装了即视为满足
+            if isinstance(parsed_spec, SemverVersion):
+                return parsed_spec == installed_version
+            return max_satisfying([raw], parsed_spec) is not None
         else:
             return False
 

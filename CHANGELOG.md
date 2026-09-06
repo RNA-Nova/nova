@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
+## [Unreleased]
+
+### Fixed
+- **子代理并行委派时并发装包互踩 + 每次后端启动都重装 npm 包**：`PackageManager._is_package_resolvable` 对 npm 源恒判 False——每个后端进程（子代理 CLI 亦同）启动都走 `update=True` 全量重装（npm registry 往返 + 装配全流程），冷启动慢且多进程并发装同一包时互踩缓存删换（实机实证：两个 worker 并行，一个把另一个 resolve 到一半的目录删换，炸出 `Path escapes package root: ./backend/tools/write.py`）。三连修：① npm 源改纯本地可解析判定——缓存目录（即安装态）+ package.json + 版本满足 spec（精确/range 本地 semver 判定，dist-tag 装了即满足，安装态损坏重装自愈），装了即不再重装，启动不再触网；② `PackageInstaller.install`/`uninstall` 持包装配根的跨进程 `.install.lock`（filelock，进程内单例可重入）；③ 启动确保路径锁内复查——并发进程等锁期间被装好的免重装。回归测试 8 例（本地判定六例 + 并发串行化 + 锁内复查只装一次）。
+- **install.ps1 转纯 ASCII + 去 BOM**：`irm | iex` 形态在 PS 5.1 中文 locale 下 BOM 被误读成 `ï»¿` 顶在行首（`#` 不再是注释 → CommandNotFoundException 实机实证）；注释全译英文、串内 em-dash 换连字符——`irm|iex` 与本地 `-File` 两形态都不再依赖编码推断。v0.1.2 的公开 install.ps1 资产已热替换为修复版。
+
 ## [0.1.2] - 2026-09-06
 
 ### Added
