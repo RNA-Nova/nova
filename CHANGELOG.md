@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **PTY 测试脚本换增量解码器**（pty-smoke 共享驱动 + pty-user-bash-card 自持副本）：按读块独立 `decode(utf-8, replace)` 会把跨块多字节字符碎成替换符（断言中文文本时的偶发假失败源）；解码上移会话级 incrementaldecoder。pty-links 是收齐整段 decode 的安全模式，不动。
 
 ### Fixed
+- **Windows 下 bash 工具在 TUI/RPC 模式挂起（须再发一条消息才出结果）**：根因是引擎 spawn 子进程时 `stdin=None`——子进程原样继承后端进程的 stdin，而 RPC 模式（TUI/远程皆是）下父进程 stdin 是有挂起读线程的协议管道，MSYS2（Git Bash）启动初始化探查继承句柄即卡死（进程活着但永不执行命令；新消息到达改变管道状态才"碰巧"放行——实机"再发一次才出结果"的由来）。修复：非 stdin 传输时子进程 stdin 一律 `DEVNULL`（顺带堵住 POSIX 潜在坑——继承协议 stdin 会让 `read` 类命令偷吃协议帧）。定位全程由 CI 复现钉 + 引擎阶段观测（`NOVA_ENGINE_DEBUG`，spawn/首块/EOF/退出轮询/循环心跳/tasklist 生死探测）完成：windows-latest 腿挂出与实机逐字吻合的形态，修复后转绿。
 - **冻结态 print 模式收尾的 httpcore2 拆除噪音**：`nova-server run` 跑完任务、进程拆除事件循环时 stderr 打一段 `generator didn't stop after athrow()` traceback（结果正确、退出码 0——纯噪音）。根因：`AsyncOpenAI` 客户端按次现造但从不显式关闭，连接池的异步生成器活到循环拆除被 athrow 时没能立刻停；修复为流式实现 `finally` 里显式 `await client.aclose()`（错误路径同样兜底），nova_ai 新增生命周期双测（done/error 两路径均关闭）。存量问题（冻结形态首版即有），与 0.1.1 的改动无关。
 
 ## [0.1.1] - 2026-09-06

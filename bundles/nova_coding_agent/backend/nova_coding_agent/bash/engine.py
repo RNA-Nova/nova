@@ -270,7 +270,13 @@ class LocalBashOperations:
             proc = await asyncio.create_subprocess_exec(
                 *cmd_list,
                 cwd=ctx.cwd,
-                stdin=asyncio.subprocess.PIPE if use_stdin else None,
+                # 非 stdin 传输时一律 DEVNULL，绝不继承父进程 stdin：
+                # RPC 模式下父进程 stdin 是协议管道且有挂起读线程，
+                # MSYS2（Git Bash）初始化探查继承句柄即卡死（Windows 挂起
+                # 事故根因）；POSIX 上继承也会让 `read` 类命令偷吃协议帧
+                stdin=(
+                    asyncio.subprocess.PIPE if use_stdin else asyncio.subprocess.DEVNULL
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=ctx.env,
