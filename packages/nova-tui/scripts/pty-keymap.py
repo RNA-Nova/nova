@@ -109,6 +109,7 @@ class TuiSession:
 
     def __init__(self, cwd: str, extra_env: Optional[dict] = None) -> None:
         home, agent_dir = make_sandbox()
+        self.agent_dir = agent_dir
         env = dict(
             os.environ,
             HOME=home,
@@ -195,6 +196,35 @@ class TuiSession:
                 return True
             self._drain(0.5)
         return False
+
+    def debug_dump(self) -> None:
+        """超时/失败的死因留档：buffer 尾 + 后端 rpc-stderr.log 尾 + 子进程表。"""
+        print("---- buffer 尾 ----")
+        print(self.buffer[-800:])
+        log = os.path.join(self.agent_dir, "logs", "rpc-stderr.log")
+        if os.path.exists(log):
+            print("---- rpc-stderr.log 尾 ----")
+            print(open(log, encoding="utf-8", errors="replace").read()[-1200:])
+        # 后端进程树（死活 + 命令行）
+        if sys.platform == "win32":
+            subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq python.exe"],
+                capture_output=True,
+            )
+            out = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq python.exe"],
+                capture_output=True,
+                text=True,
+            ).stdout
+            print("---- python.exe 进程 ----")
+            print(out[-600:])
+        else:
+            out = subprocess.run(
+                ["ps", "-ef"], capture_output=True, text=True
+            ).stdout
+            rows = [l for l in out.splitlines() if "nova_harness" in l]
+            print("---- nova_harness 进程 ----")
+            print("\n".join(rows[-4:]))
 
     def close(self) -> None:
         try:
@@ -467,6 +497,7 @@ def case_ctrl_d_exits(cwd: str) -> Optional[str]:
     tui = TuiSession(cwd)
     try:
         if not tui.wait_ready():
+            tui.debug_dump()
             return "启动超时"
         tui.send("\x04", 2.0)  # ctrl+d
         time.sleep(1.5)
@@ -482,6 +513,7 @@ def case_ctrl_c_double_exits(cwd: str) -> Optional[str]:
     tui = TuiSession(cwd)
     try:
         if not tui.wait_ready():
+            tui.debug_dump()
             return "启动超时"
         tui.send("\x03", 1.0)  # 单击：不退出
         if tui.proc.poll() is not None:
@@ -619,7 +651,7 @@ def main() -> int:
         try:
             if not tui.wait_ready():
                 print("✖ A 段启动超时")
-                print(tui.buffer[-800:])  # 死因留档
+                tui.debug_dump()  # 死因留档（buffer 尾 + rpc-stderr.log + 进程表）
                 failures.append(("A 段启动", "ready 标记未现"))
             else:
                 tui.send("\x1b", 1.0)  # 关掉可能的首启引导/对话框让路
