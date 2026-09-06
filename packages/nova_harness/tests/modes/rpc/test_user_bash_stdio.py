@@ -17,19 +17,41 @@ import pytest
 from tests.conformance.test_wire_conformance import Wire, _spawn_backend
 
 
-def _write_settings(agent_dir, repo_root):
+def _write_settings(agent_dir, pkg_dir):
+    """settings：trust 放开 + 注册夹具包（path 源，绝对路径）。"""
     agent_dir.mkdir(parents=True, exist_ok=True)
     (agent_dir / "settings.json").write_text(
         json.dumps(
             {
                 "defaultProjectTrust": "always",
-                "packages": [
-                    f"path:{repo_root / 'bundles' / 'nova_base'}",
-                    f"path:{repo_root / 'bundles' / 'nova_coding_agent'}",
-                ],
+                "packages": [f"path:{pkg_dir}"],
             }
         ),
         encoding="utf-8",
+    )
+
+
+def _make_user_bash_pkg(pkg_dir, repo_root):
+    """最小夹具包：只带真实 bash 用户工具（抄自官方 bundle——跟住真身），
+    零 Python 依赖（不触发 pip——否则冷缓存下 pip 构建输出会污染
+    协议通道，且 CI 冷装超时）。"""
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "fixture-user-bash"\nversion = "0.1.0"\n'
+        '[tool.nova]\nuser_tools = ["./user_tools/bash.py"]\n',
+        encoding="utf-8",
+    )
+    (pkg_dir / "user_tools").mkdir()
+    real = (
+        repo_root
+        / "bundles"
+        / "nova_coding_agent"
+        / "backend"
+        / "user_tools"
+        / "bash.py"
+    )
+    (pkg_dir / "user_tools" / "bash.py").write_text(
+        real.read_text(encoding="utf-8"), encoding="utf-8"
     )
 
 
@@ -42,8 +64,10 @@ def test_user_bash_invoke_completes_over_stdio(tmp_path):
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[5]
+    pkg_dir = tmp_path / "fixture_pkg"
+    _make_user_bash_pkg(pkg_dir, root)
     agent_dir = tmp_path / "agent"
-    _write_settings(agent_dir, root)
+    _write_settings(agent_dir, pkg_dir)
     proj = tmp_path / "proj"
     proj.mkdir()
 
