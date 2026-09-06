@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [Unreleased]
+## [0.1.2] - 2026-09-06
 
 ### Added
 - **免 pip 的 wheel 解包通道（冻结形态第三方依赖的正式解法）**：冻结二进制不内嵌 pip，此前无"系统 Python 3.12 + pip"宿主的机器装带依赖的包只能降级警告（Pillow 装不上、读图用时才炸）。新增 `wheel_installer`：PyPI JSON 解析版本与平台 wheel（`packaging.tags.sys_tags()` 与 pip 同数据源）→ 下载边下边算 sha256（数据源自带摘要）→ 安全解包进 `.site/`（防路径逃逸）→ METADATA `Requires-Dist` 递归解析运行期依赖（环境 marker 全量评估、extra 门控按声明 extras 求值）。`FrozenSiteBackend` 双通道：有宿主仍走 pip（通用安装），无宿主自动落 wheel 通道；失败/离线降级警告不阻断安装。nova_harness 新增 `packaging` 运行时依赖。Pillow 在无宿主 Windows 机器上自此装得上、读图可用。

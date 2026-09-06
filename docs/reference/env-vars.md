@@ -9,7 +9,7 @@
 | `NOVA_AGENT_DIR` | `~/.nova/agent` | 后端状态根（settings/sessions/packages/builtin 全在此下） |
 | `NOVA_CONFIG_DIR` | `.nova` | 项目级配置目录名 |
 | `NOVA_APP_NAME` | `nova` | 应用名（派生命名/再分发用） |
-| `NOVA_PYTHON` | `python3` | pip/开发渠道的后端解释器；冻结形态下是 pip 宿主探测的首选 |
+| `NOVA_PYTHON` | `python3` | pip/开发渠道的后端解释器；冻结形态下是 pip 宿主探测的首选（无宿主时依赖安装自动落免 pip wheel 解包通道，宿主不再是硬前提） |
 | `NOVA_BACKEND` | — | TUI 显式指定后端二进制路径（调试/非常规布局） |
 
 ## 行为开关
@@ -18,6 +18,7 @@
 |------|------|
 | `NOVA_OFFLINE=1` | 离线模式：包安装/更新检查/模型网络刷新全部跳过（模型调用本身除外） |
 | `NOVA_SUBAGENT_MAX_CONCURRENCY` | 子代理全局并发上限（缺省 4） |
+| `NOVA_ENGINE_DEBUG` | bash 引擎阶段观测：`=1` 写 stderr，`= <路径>` 追加写文件（带时标——spawn/首块/EOF/退出轮询/循环心跳/Windows tasklist 探测）；挂起类事故的定段手段，默认关闭 |
 | `NOVA_HTTP_IDLE_TIMEOUT_MS` | 模型请求的空闲超时（毫秒；缺省 300000 即 5 分钟，`0`/`disabled` 关闭——长 thinking 或慢网络场景用） |
 | `NOVA_TELEMETRY=1` | 安装遥测 opt-in（当前仅写本地日志，无远程上报；缺省关，settings `enable_install_telemetry` 同义） |
 | `NOVA_TIMING=1` | 后端内部耗时观测（装配/加载分段计时打日志） |

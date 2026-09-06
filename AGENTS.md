@@ -155,8 +155,7 @@ nova/
 - `prompts = ["./backend/prompts/debug.md", "./backend/prompts/implement-and-review.md", "./backend/prompts/implement.md", "./backend/prompts/refactor.md", "./backend/prompts/scout-and-plan.md"]`
 - `personas = ["./backend/personas/"]`（persona 资源类目——目录条目，loader 递归收 .md 命名）
 - `auto_install_dependencies = true`
-- `binary_dependencies = { rg = "ripgrep" }`
-- `binary_managed_dependencies = ["fd"]`
+- `binary_managed_dependencies = ["fd", "rg"]`（框架注册表托管——rg 自 0.1.2 起从 PyPI wheel 渠道迁入：冻结形态无 pip 宿主也装得上）
 
 > `[tool.nova]` 还可声明 **`requires = ["<包名>"]`**（包间依赖——非 Python/npm 依赖）：安装时校验被依赖 nova 包已安装（user/project 合并视图，任一 scope 命中即满足），缺失即拒绝并附安装提示；卸载时被其他包 `requires` 引用的包拒绝卸载。B 型纯 TS 包以 package.json 顶层 `"nova": {"requires": [...]}` 声明同一语义。v1 只做约束校验不做来源解析（无中心 registry）。
 >

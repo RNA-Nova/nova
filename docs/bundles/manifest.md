@@ -34,9 +34,9 @@ personas = ["./backend/personas/"]           # 目录：递归收 .md
 skills = ["./backend/skills/"]               # 目录：递归收 SKILL.md
 
 # 依赖装配
-auto_install_dependencies = true             # pip 依赖自动装（pyproject 声明的）
-binary_dependencies = { rg = "ripgrep" }     # PyPI wheel 可装的二进制（建议 pin 版本）
-binary_managed_dependencies = ["fd"]         # 框架注册表托管的二进制
+auto_install_dependencies = true             # pip 依赖自动装（pyproject 声明的；冻结形态无 pip 宿主时走免 pip wheel 解包通道）
+binary_dependencies = { foo = "foo-bin" }    # PyPI wheel 可装的二进制（建议 pin 版本；冻结形态无 pip 宿主时装不上）
+binary_managed_dependencies = ["fd", "rg"]   # 框架注册表托管的二进制（pin + sha256 下载，免 pip）
 binary_system_dependencies = ["docker"]      # 只校验存在性的系统二进制（缺失仅警告）
 ```
 
@@ -71,15 +71,15 @@ binary_system_dependencies = ["docker"]      # 只校验存在性的系统二进
 
 | 族 | 适用 | 安装行为 |
 |----|------|---------|
-| `binary_dependencies` | PyPI 有平台 wheel（如 `ripgrep`） | 随 pip 依赖进环境 `bin/` |
-| `binary_managed_dependencies` | PyPI 覆盖不了的官方必需（当前仅 `fd`） | 框架按注册表 pin 版本 + sha256 下载到 `~/.nova/agent/bin/` |
+| `binary_dependencies` | PyPI 有平台 wheel | 随 pip 依赖进环境 `bin/`（冻结形态无 pip 宿主时装不上——官方必需二进制请走 managed） |
+| `binary_managed_dependencies` | PyPI 覆盖不了（`fd`）或 wheel 渠道需 pip 宿主（`rg`）的官方必需 | 框架按注册表 pin 版本 + sha256 下载到 `~/.nova/agent/bin/` |
 | `binary_system_dependencies` | 无自动安装渠道（docker 类守护进程） | 只校验存在性，缺失警告附安装指引，不代装 |
 
 运行时经 `resolve_binary()` 三级解析：env bin → nova bin → PATH（托管优先；识别发行版别名如 `fdfind`）。**消费端纪律：二进制加速 + 纯 Python 兜底**——缺失不影响可用性。
 
 ### `auto_install_dependencies`
 
-`true` 时安装期自动装 `pyproject.toml` 声明的 Python 依赖（uv 优先、pip 兜底；**冻结二进制形态**落到 `~/.nova/agent/packages/.site/`）。包自身若是可安装 Python 包（有 name + build-system），pip 渠道会以 `--no-deps` 自安装供 `import 包名` 使用；冻结形态由 `sys.path` 挂载替代（无需自安装）。
+`true` 时安装期自动装 `pyproject.toml` 声明的 Python 依赖（uv 优先、pip 兜底；**冻结二进制形态**落到 `~/.nova/agent/packages/.site/`——有 pip 宿主走 `pip --target`，**无宿主自动落免 pip 的 wheel 解包通道**：PyPI 解析版本与平台 wheel（`packaging.tags.sys_tags()` 与 pip 同数据源）→ sha256 校验 → 安全解包 → `Requires-Dist` 递归）。包自身若是可安装 Python 包（有 name + build-system），pip 渠道会以 `--no-deps` 自安装供 `import 包名` 使用；冻结形态由 `sys.path` 挂载替代（无需自安装）。
 
 ## settings 中的包条目（安装后的登记形态）
 
