@@ -20,7 +20,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Set
 
 from nova_base.ui_primitives import select
-
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import ToolCallEventResult
 

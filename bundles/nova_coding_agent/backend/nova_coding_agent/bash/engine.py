@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import asyncio
-import codecs
 import inspect
 import os
 import signal as signal_module
@@ -21,12 +20,6 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol
-
-from nova_coding_agent.tools_common.output_accumulator import (
-    OutputAccumulator,
-    OutputAccumulatorOptions,
-)
-from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
 
 from nova_harness.core.types.extensions.process import (
     SpawnContext,
@@ -39,6 +32,13 @@ from nova_harness.core.utils.child_process import (
     track_detached_child_pid,
     untrack_detached_child_pid,
 )
+
+from nova_coding_agent.tools_common.output_accumulator import (
+    OutputAccumulator,
+    OutputAccumulatorOptions,
+)
+from nova_coding_agent.tools_common.output_decode import StreamDecoder, system_oem_codec
+from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
 
 # 引擎阶段观测（NOVA_ENGINE_DEBUG 开启）：spawn/挂起/退出/收尾/完成——
 # Windows 挂起类事故的定段手段。取值："1" = 写 stderr（注意 RPC 模式
@@ -241,8 +241,10 @@ class LocalBashOperations:
             OutputAccumulator(OutputAccumulatorOptions(temp_file_prefix="nova-bash"))
         )
         owns_accumulator = "accumulator" not in options
-        # 流式 UTF-8 增量解码器：先解码再清洗，accumulator 收到的都是完整字符
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        # 流式增量解码：先解码再清洗，accumulator 收到的都是完整字符。
+        # Windows 下带系统 OEM 代码页回退——cmd/powershell 等原生控制台
+        # 程序按 OEM（中文机 GBK）写字节，纯 UTF-8 必乱码（pi 同款坑）
+        decoder = StreamDecoder(fallback=system_oem_codec())
         loop = asyncio.get_running_loop()
         last_chunk_at = [loop.time()]
 
@@ -414,7 +416,7 @@ class LocalBashOperations:
             proc._transport.close()  # type: ignore[attr-defined]
 
         # flush 解码器残余
-        tail = sanitize_shell_output(decoder.decode(b"", final=True))
+        tail = sanitize_shell_output(decoder.flush())
         if tail:
             accumulator.append(tail.encode("utf-8"))
 

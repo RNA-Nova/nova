@@ -13,6 +13,12 @@ from typing import Any, Dict, List, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+
 from nova_coding_agent.tools_common.edit_engine import (
     Edit,
     apply_edits_to_normalized_content,
@@ -29,12 +35,6 @@ from nova_coding_agent.tools_common.operations import (
     create_local_edit_operations,
 )
 from nova_coding_agent.tools_common.path_utils import resolve_path
-
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
 
 
 def _throw_if_aborted(signal: Optional[AbortSignal]) -> None:

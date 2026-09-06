@@ -18,14 +18,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_coding_agent.subagent.runner import (
-    format_parallel_output,
-    run_subagent_chain,
-    run_subagent_parallel,
-    run_subagent_single,
-)
-from nova_coding_agent.subagent.types import SubagentCall, SubagentResult
-
 from nova_harness.core.config.defaults import get_agent_dir
 from nova_harness.core.types.resources.agents import AgentConfig
 from nova_harness.core.types.resources.tools import (
@@ -33,6 +25,14 @@ from nova_harness.core.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
+
+from nova_coding_agent.subagent.runner import (
+    format_parallel_output,
+    run_subagent_chain,
+    run_subagent_parallel,
+    run_subagent_single,
+)
+from nova_coding_agent.subagent.types import SubagentCall, SubagentResult
 
 MAX_PARALLEL_TASKS = 8
 

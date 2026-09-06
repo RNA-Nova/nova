@@ -16,15 +16,15 @@ import inspect
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from nova_harness.core.types.extensions.process import SpawnHook
+from nova_harness.core.types.resources.user_tools import UserToolEventCallback
+
 from nova_coding_agent.bash.engine import (
     BashOperations,
     compose_spawn_hooks,
     create_local_bash_operations,
 )
 from nova_coding_agent.bash.message import BashExecutionMessage
-
-from nova_harness.core.types.extensions.process import SpawnHook
-from nova_harness.core.types.resources.user_tools import UserToolEventCallback
 
 
 def _result_field(result: Any, *names: str) -> Any:

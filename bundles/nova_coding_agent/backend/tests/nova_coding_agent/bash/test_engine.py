@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from nova_coding_agent.bash.engine import create_local_bash_operations
 
 

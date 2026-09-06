@@ -4,11 +4,12 @@ import base64
 import io
 import random
 
+from PIL import Image
+
 from nova_coding_agent.tools_common.image import (
     MAX_IMAGE_BASE64_BYTES,
     process_image,
 )
-from PIL import Image
 
 # EXIF Orientation 标签
 _EXIF_ORIENTATION_TAG = 0x0112

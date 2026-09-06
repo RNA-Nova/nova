@@ -5,6 +5,7 @@
 """
 
 import pytest
+
 from nova_coding_agent.tools_common.edit_engine import (
     Edit,
     apply_edits_to_normalized_content,

@@ -25,14 +25,14 @@ import sys
 from typing import Any, Callable, Dict, List, Optional
 
 from nova_ai import AbortSignal
+from nova_harness.core.utils.child_process import hidden_console_kwargs
+
 from nova_coding_agent.subagent.types import (
     SubagentCall,
     SubagentResult,
     SubagentUsage,
 )
 from nova_coding_agent.tools_common.streams import read_lines
-
-from nova_harness.core.utils.child_process import hidden_console_kwargs
 
 # on_update 聚合回调：始终携带**全量结果列表**（parallel 含 exit_code=-1
 # 的"运行中"占位，chain 含已完成步骤 + 当前流式步骤），渲染器据此展示
