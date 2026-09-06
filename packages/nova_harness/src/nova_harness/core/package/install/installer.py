@@ -15,6 +15,7 @@ Typical usage::
     >>> installer.uninstall("nova-coding-agent")
 """
 
+import json
 import logging
 import os
 import shutil
@@ -580,7 +581,8 @@ class PackageInstaller:
     ) -> None:
         """装配前端半区 package.json 声明的 npm 依赖（安装流程第 4 阶段）。
 
-        - 探测点为前端半区的 ``package.json``（只检测存在性，不读清单内容）：
+        - 探测点为前端半区的 ``package.json``（存在性 + 清单内容——**零运行时
+          dependencies 的包跳过本阶段**：vendored/宿主共享件形态不需要 npm）：
           B 型纯 TS 包的根即前端半区（包根 ``package.json``）；A 型复合包
           探测 ``<包根>/frontend/package.json``（不做双轨，包根遗留
           ``package.json`` 不再触发）；
@@ -592,6 +594,16 @@ class PackageInstaller:
         root_dir = Path(abs_src if editable else final_install_path)
         frontend_dir = _npm_manifest_dir(root_dir)
         if not (frontend_dir / "package.json").exists():
+            return
+        # 零运行时依赖（vendored/宿主共享件形态）的包不触发 npm 阶段——
+        # 否则无 npm 的机器会收到一条无意义的警告
+        try:
+            pkg_json = json.loads(
+                (frontend_dir / "package.json").read_text(encoding="utf-8")
+            )
+        except Exception:
+            pkg_json = {}
+        if isinstance(pkg_json, dict) and not pkg_json.get("dependencies"):
             return
         if is_offline_mode_enabled():
             logger.warning(

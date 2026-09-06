@@ -34,8 +34,8 @@ def _make_ts_pkg(
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / "package.json").write_text(
-        '{"name": "%s", "version": "%s", "description": "pure ts", "dependencies": {}}'
-        % (name, version),
+        '{"name": "%s", "version": "%s", "description": "pure ts", '
+        '"dependencies": {"left-pad": "1.0.0"}}' % (name, version),
         encoding="utf-8",
     )
     (root / "tui" / "tools").mkdir(parents=True)

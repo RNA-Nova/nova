@@ -67,7 +67,8 @@ def _make_pkg(
         frontend.mkdir(parents=True, exist_ok=True)
         if with_package_json:
             (frontend / "package.json").write_text(
-                '{"name": "@pkg-npm/ui", "dependencies": {}}', encoding="utf-8"
+                '{"name": "@pkg-npm/ui", "dependencies": {"left-pad": "1.0.0"}}',
+                encoding="utf-8",
             )
         if with_lock:
             (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
@@ -81,6 +82,27 @@ def test_no_package_json_skips_npm(pm, tmp_path, npm_calls):
     with patch("subprocess.run", fake_run):
         pm.install(str(pkg))
     assert calls == []
+
+
+def test_zero_runtime_deps_skips_npm(pm, tmp_path, caplog):
+    """零运行时 dependencies 的包（vendored 形态）跳过 npm 阶段——
+    无 npm 的机器不再收到无意义警告。"""
+    import logging
+
+    pkg = _make_pkg(tmp_path / "pkg")
+    # 覆写为零依赖清单
+    (pkg / "frontend" / "package.json").write_text(
+        '{"name": "@pkg-npm/ui", "dependencies": {}}', encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING):
+        with patch(
+            "nova_harness.core.package.install.installer.shutil.which",
+            return_value=None,  # npm 不在场
+        ):
+            pm.install(str(pkg))
+    # 装上了（没被 npm 阶段阻断）且零 npm 相关警告
+    assert pm.info("pkg-npm") is not None
+    assert not [r for r in caplog.records if "npm" in r.getMessage()]
 
 
 def test_legacy_root_package_json_does_not_trigger_npm(pm, tmp_path, npm_calls):
