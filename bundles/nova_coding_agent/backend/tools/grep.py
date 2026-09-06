@@ -9,18 +9,18 @@ from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.operations import (
     GrepOperations,
     GrepOptions,
     create_local_grep_operations,
 )
 from nova_coding_agent.tools_common.path_utils import resolve_path
+
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
 
 DEFAULT_LIMIT = 100
 

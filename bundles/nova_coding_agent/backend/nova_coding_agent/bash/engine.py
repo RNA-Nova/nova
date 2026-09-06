@@ -21,6 +21,13 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
+from nova_coding_agent.tools_common.output_accumulator import (
+    OutputAccumulator,
+    OutputAccumulatorOptions,
+)
+from nova_coding_agent.tools_common.output_decode import StreamDecoder, system_oem_codec
+from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
+
 from nova_harness.core.types.extensions.process import (
     SpawnContext,
     SpawnHook,
@@ -32,13 +39,6 @@ from nova_harness.core.utils.child_process import (
     track_detached_child_pid,
     untrack_detached_child_pid,
 )
-
-from nova_coding_agent.tools_common.output_accumulator import (
-    OutputAccumulator,
-    OutputAccumulatorOptions,
-)
-from nova_coding_agent.tools_common.output_decode import StreamDecoder, system_oem_codec
-from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
 
 # 引擎阶段观测（NOVA_ENGINE_DEBUG 开启）：spawn/挂起/退出/收尾/完成——
 # Windows 挂起类事故的定段手段。取值："1" = 写 stderr（注意 RPC 模式

@@ -122,7 +122,7 @@ echo "==> 暂存 bundles/nova_base（剔除 node_modules/__pycache__/.pytest_cac
 # 在此追加；tests/…/test_frozen_hidden_imports.py 会按 AST 差集核对漂移。
 # （mimetypes/unicodedata 当前经第三方传递可达，仍显式声明——不把正确性押在
 # 依赖树的偶然性上。）
-HIDDEN_IMPORTS=(difflib codecs stat mimetypes unicodedata)
+HIDDEN_IMPORTS=(difflib codecs stat mimetypes unicodedata ctypes)
 
 echo "==> PyInstaller onedir 冻结（入口 nova_harness.cli.backend:main）"
 "$VENV_PYTHON" -m PyInstaller \

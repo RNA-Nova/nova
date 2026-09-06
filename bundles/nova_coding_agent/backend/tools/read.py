@@ -7,12 +7,6 @@ from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
 from nova_ai import AbortSignal, ImageContent, TextContent
-from nova_harness.core.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-
 from nova_coding_agent.tools_common.image import process_image
 from nova_coding_agent.tools_common.operations import (
     ReadOperations,
@@ -23,6 +17,12 @@ from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     format_size,
     truncate_head,
+)
+
+from nova_harness.core.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
 )
 
 

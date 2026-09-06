@@ -12,10 +12,10 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator, List, Optional, Protocol
 
+from nova_coding_agent.tools_common.streams import read_lines
+
 from nova_harness.core.utils.binaries import resolve_binary
 from nova_harness.core.utils.child_process import hidden_console_kwargs
-
-from nova_coding_agent.tools_common.streams import read_lines
 
 
 class ProcessSession(Protocol):
