@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
+### Added
+- **Windows 一条命令安装（install.ps1）**：install.sh 的 PowerShell 对位译本——`irm .../install.ps1 | iex`（Windows 自带 PowerShell 5.1 即可，内存执行不触执行策略）：版本解析（NOVA_VERSION 钉版）→ zip + sha256 校验 → `releases/<版本>/` + junction 翻转 `current`（NTFS 目录链接免管理员）→ `nova.exe --version` 自检 → 自动装官方编程能力包（NOVA_NO_CODING/OFFLINE 跳过）→ 写用户 PATH；`uninstall` 对称摘除（保用户数据）。随 release 分发（`releases/latest/download/install.ps1` 稳定 URL），release 管线 windows 腿新增 file:// 镜像安装冒烟。
+- **冻结态 print 模式收尾的 httpcore2 拆除噪音修复**：见 Fixed。
+
 ### Fixed
 - **冻结态 print 模式收尾的 httpcore2 拆除噪音**：`nova-server run` 跑完任务、进程拆除事件循环时 stderr 打一段 `generator didn't stop after athrow()` traceback（结果正确、退出码 0——纯噪音）。根因：`AsyncOpenAI` 客户端按次现造但从不显式关闭，连接池的异步生成器活到循环拆除被 athrow 时没能立刻停；修复为流式实现 `finally` 里显式 `await client.aclose()`（错误路径同样兜底），nova_ai 新增生命周期双测（done/error 两路径均关闭）。存量问题（冻结形态首版即有），与 0.1.1 的改动无关。
 

@@ -10,7 +10,7 @@ Nova 的发布形态是**静态双二进制**：`nova`（TUI 前端）+ `runtime
 | macOS x64（Intel） | `nova-darwin-x64.tar.gz` | 脚本 / 手动 |
 | Linux x64 | `nova-linux-x64.tar.gz` | 脚本 / 手动 |
 | Linux arm64 | `nova-linux-arm64.tar.gz` | 脚本 / 手动 |
-| Windows x64 / arm64 | `nova-windows-*.zip` | 手动（见下文） |
+| Windows x64 / arm64 | `nova-windows-*.zip` | install.ps1 / 手动（见下文） |
 
 ## 方式一：curl 管道安装（推荐，macOS / Linux）
 
@@ -56,25 +56,19 @@ macOS 浏览器下载的归档带 quarantine，首次运行前解除：
 xattr -d com.apple.quarantine nova runtime/nova-server
 ```
 
-**Windows**：便携形态（无安装器、不写 PATH）。完整步骤（PowerShell）：
+**Windows**——一条命令（PowerShell 自带，零前置）：
 
 ```powershell
-# 1. Releases 页下载 nova-windows-x64.zip（arm64 设备用对应包），
-#    解压到固定位置（别留在 Downloads——升级与数据都指着这个目录）：
-Expand-Archive .\nova-windows-x64.zip "$env:LOCALAPPDATA\nova"
-
-# 2. 目录入用户 PATH（重开终端生效）：
-[Environment]::SetEnvironmentVariable(
-  "Path",
-  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\nova",
-  "User"
-)
-
-# 3. 装编程能力包（自动装包是 POSIX 安装器的行为，Windows 走这条手动路径）：
-& "$env:LOCALAPPDATA\nova\runtime\nova-server.exe" pkg install npm:nova-coding-agent
+irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1 | iex
 ```
 
-之后日常使用：终端里 `cd <项目目录>` 再 `nova`。双击 `nova.exe` 仅适合点亮验证（工作目录会落在解压目录，不是正式用法）；二进制未买代码签名证书，首次运行 SmartScreen 可能弹"未知发布者"——选"仍要运行"即可（校验癖可先对 `SHA256SUMS`）。
+安装器做的事与 POSIX 侧对称：解析版本（`NOVA_VERSION` 钉版）→ 下载 `nova-windows-<arch>.zip` + `SHA256SUMS` 并校验 → 解压到 `~\.nova\agent\install\releases\<版本>\` → junction 翻转 `current`（NTFS 目录链接，免管理员）→ `nova.exe --version` 自检 → 自动装官方编程能力包（`NOVA_NO_CODING=1` 跳过）→ `current` 目录写入用户 PATH（重开终端生效）。
+
+卸载：`iex "& { $(irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1) } uninstall"`——摘 PATH 条目 + 删安装根，用户数据保留。
+
+二进制未买代码签名证书，首次运行 SmartScreen 可能弹"未知发布者"——选"仍要运行"即可（校验癖可先对 `SHA256SUMS`）。双击 `nova.exe` 仅适合点亮验证（工作目录会落在解压目录，不是正式用法——正式用法是终端里 `cd <项目目录>` 再 `nova`）。
+
+**Windows 手动分步**（不用安装器时）：下载 zip 解压到固定位置（如 `$env:LOCALAPPDATA\nova`）→ 目录入用户 PATH → `& runtime\nova-server.exe pkg install npm:nova-coding-agent` 装编程能力包。
 
 ### 归档内容
 

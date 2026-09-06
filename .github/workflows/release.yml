@@ -252,6 +252,20 @@ jobs:
           "$SERVER" --version
           python scripts/smoke-rpc-handshake.py "$SERVER"
 
+      # install.ps1 真实冒烟（file:// 镜像装到临时根 → 自检版号）——
+      # Windows 安装链的回归守卫（NOVA_NO_CODING 跳过 npm 拉取，只验安装器）
+      - name: install.ps1 冒烟
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:NOVA_VERSION = $env:RELEASE_TAG
+          $env:NOVA_INSTALLER_RELEASES_BASE = "file:///$(($PWD.Path -replace '\\','/'))/dist/release"
+          $env:NOVA_INSTALL_DIR = Join-Path $env:TEMP "nova-install-$PID"
+          $env:NOVA_AGENT_DIR = Join-Path $env:TEMP "nova-agent-$PID"
+          $env:NOVA_NO_CODING = '1'
+          & scripts/install.ps1
+
   # 六平台归档 + sha256 + release notes（从 CHANGELOG.md 抽对应版本段）。
   assemble-release:
     name: assemble-release
@@ -314,10 +328,10 @@ jobs:
             fi
           fi
 
-      # install.sh 随 release 分发——curl 管道安装的稳定 URL：
-      # releases/latest/download/install.sh（latest 解析在 GitHub 侧完成）
+      # install.sh / install.ps1 随 release 分发——管道安装的稳定 URL：
+      # releases/latest/download/install.sh|install.ps1（latest 解析在 GitHub 侧完成）
       - name: 附带安装器脚本
-        run: cp scripts/install.sh dist/release/install.sh
+        run: cp scripts/install.sh scripts/install.ps1 dist/release/install.sh
 
       - name: 上传发布载荷
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -356,6 +370,7 @@ jobs:
             nova-windows-arm64.zip \
             SHA256SUMS \
             install.sh \
+            install.ps1 \
             RELEASE_NOTES.md; do
             test -f "$asset"
           done

@@ -32,7 +32,7 @@ Nova 是构建与运行 LLM 智能体的框架 + 产品：Python 分层框架（
 
 ### 参考（reference/）
 
-- [CLI 参考](reference/cli.md)——`nova` / `nova-server` / `install.sh` 全旗标
+- [CLI 参考](reference/cli.md)——`nova` / `nova-server` / `install.sh` / `install.ps1` 全旗标
 - [环境变量](reference/env-vars.md)——全部 `NOVA_*` 旋钮
 - [RPC 契约](reference/rpc.md)——前后端线上协议、版本语义、schema 导出
 

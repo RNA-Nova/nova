@@ -22,14 +22,15 @@
 | `NOVA_TELEMETRY=1` | 安装遥测 opt-in（当前仅写本地日志，无远程上报；缺省关，settings `enable_install_telemetry` 同义） |
 | `NOVA_TIMING=1` | 后端内部耗时观测（装配/加载分段计时打日志） |
 
-## 安装器（install.sh）
+## 安装器（install.sh / install.ps1）
 
 | 变量 | 说明 |
 |------|------|
 | `NOVA_VERSION` | 钉版本（缺省查 latest release） |
 | `NOVA_INSTALLER_RELEASES_BASE` | 发布源覆盖（支持 `file://` 本地演练） |
 | `NOVA_RELEASES_API_BASE` | latest 版本查询的 API 端点覆盖（镜像/内网演练用） |
-| `NOVA_INSTALL_DIR` / `NOVA_BIN_DIR` | 安装根 / bin 目录 |
+| `NOVA_INSTALL_DIR` / `NOVA_BIN_DIR` | 安装根 / bin 目录（install.ps1 无 BIN_DIR——junction + 用户 PATH） |
+| `NOVA_NO_CODING=1` | 跳过官方编程能力包自动安装（`NOVA_OFFLINE=1` 同效） |
 
 ## 源码安装器（install-source.sh）
 

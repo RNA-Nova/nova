@@ -28,6 +28,12 @@ Nova 是构建与运行 LLM 智能体的分层框架 + 开箱即用的终端编�
 curl -fsSL https://github.com/RNA-Nova/nova/releases/latest/download/install.sh | sh
 ```
 
+Windows（PowerShell 自带，零前置）：
+
+```powershell
+irm https://github.com/RNA-Nova/nova/releases/latest/download/install.ps1 | iex
+```
+
 **源码安装**（从源码构建，需 Python `>=3.12,<3.14` + Node `>=22.19`）：
 
 ```bash

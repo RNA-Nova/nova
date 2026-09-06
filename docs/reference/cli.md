@@ -54,16 +54,22 @@ nova-server [rpc|run|pkg] ...   # 缺省 rpc
 
 `list` / `install <源> [--editable] [--local]` / `uninstall <名或源> [--local]` / `update <名或源>` / `info <名>` / `validate <路径>` / `init` / `--version`
 
-## `install.sh`（安装器）
+## `install.sh` / `install.ps1`（安装器）
 
 ```bash
-curl -fsSL <release>/install.sh | sh                  # 安装/升级（幂等）
-curl -fsSL <release>/install.sh | sh -s -- uninstall  # 卸载
+curl -fsSL <release>/install.sh | sh                    # macOS/Linux 安装/升级（幂等）
+curl -fsSL <release>/install.sh | sh -s -- uninstall    # 卸载
+```
+
+```powershell
+irm <release>/install.ps1 | iex                          # Windows 安装/升级
+iex "& { $(irm <release>/install.ps1) } uninstall"       # 卸载
 ```
 
 | 环境变量 | 说明 |
 |---------|------|
-| `NOVA_VERSION` | 钉版本（`v0.1.0` 或 `0.1.0`；缺省查 latest） |
+| `NOVA_VERSION` | 钉版本（`v0.1.1` 或 `0.1.1`；缺省查 latest） |
 | `NOVA_INSTALLER_RELEASES_BASE` | 发布源覆盖（支持 `file://` 本地演练） |
 | `NOVA_INSTALL_DIR` | 安装根（缺省 `~/.nova/agent/install`） |
-| `NOVA_BIN_DIR` | bin 目录（缺省 `~/.local/bin`） |
+| `NOVA_BIN_DIR` | bin 目录（仅 install.sh；缺省 `~/.local/bin`。install.ps1 用 junction + 用户 PATH，无此概念） |
+| `NOVA_NO_CODING=1` | 跳过官方编程能力包的自动安装（NOVA_OFFLINE=1 同效） |
