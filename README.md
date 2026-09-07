@@ -6,7 +6,7 @@
   <a href="https://github.com/RNA-Nova/nova/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/RNA-Nova/nova/actions/workflows/ci.yml/badge.svg?branch=legacy/0.1.x" /></a>
   <a href="https://github.com/RNA-Nova/nova/releases"><img alt="Release" src="https://img.shields.io/github/v/release/RNA-Nova/nova?style=flat-square" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
-  <img alt="Python >=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-blue?style=flat-square" />
+  <img alt="Python &gt;=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-blue?style=flat-square" />
 </p>
 
 Nova 是构建与运行 LLM 智能体的分层框架 + 开箱即用的终端编程助手：底层是统一的多厂商 LLM 抽象与事件驱动的异步 Agent 框架，上层是带会话树、上下文压缩与包/扩展生态的高阶 SDK，配上终端界面（TUI）与官方 bundle——装完即可在终端里驱动一个能读写文件、执行命令、委派子代理的编程助手。
