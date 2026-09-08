@@ -32,6 +32,7 @@ extensions:
   - interactive_shell
   - confirm_destructive
   - subagent_gate
+  - experiment_mode
 user_tools:
   - bash
 # commands / skills 未声明 = 全放（文本类资源不做角色裁剪）

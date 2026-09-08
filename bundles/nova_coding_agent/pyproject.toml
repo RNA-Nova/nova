@@ -79,6 +79,7 @@ personas = [
 ]
 extensions = [
     "./backend/extensions/bash_presence.py",
+    "./backend/extensions/experiment_mode.py",
     "./backend/extensions/interactive_shell.py",
     "./backend/extensions/permission_gate.py",
     "./backend/extensions/plan_mode.py",
