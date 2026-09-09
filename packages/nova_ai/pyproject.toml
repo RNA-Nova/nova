@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nova-ai"
-version = "0.1.0"
+version = "0.1.5"
 description = "统一的 LLM 提供商抽象层，支持流式调用、模型注册和鉴权。"
 authors = ["Liujinming"]
 readme = "README.md"
@@ -11,10 +11,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 packages = [
@@ -24,7 +22,10 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.12,<3.14"
 setuptools = "*"
-openai = ">=2.0"
+# 上限钉在 <3.10.0：3.10.0（2026-09-08）引入流式收尾回归——
+# PoolByteStream 生成器在 athrow 后无法停止，即使显式关流+关客户端也压不住
+# "generator didn't stop after athrow()" 噪音；3.9.0 及之前干净。上游修复后放开。
+openai = ">=2.0,<3.10.0"
 pydantic = ">=2.0"
 json-repair = ">=0.58.4"
 httpx = ">=0.27.0"
@@ -42,8 +43,19 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 target-version = ['py312']
+# 生成物由 scripts/generate_models.py 产出，格式以生成器为准——排除出 black/isort
+extend-exclude = 'src/nova_ai/(models_generated\.py|providers/data|providers/(kimi_coding|moonshotai|moonshotai_cn|volcengine)/models\.py)'
 
 [tool.isort]
+skip_gitignore = false
+extend_skip = [
+    "src/nova_ai/models_generated.py",
+    "src/nova_ai/providers/data",
+    "src/nova_ai/providers/kimi_coding/models.py",
+    "src/nova_ai/providers/moonshotai/models.py",
+    "src/nova_ai/providers/moonshotai_cn/models.py",
+    "src/nova_ai/providers/volcengine/models.py",
+]
 profile = "black"
 multi_line_output = 3
 include_trailing_comma = true

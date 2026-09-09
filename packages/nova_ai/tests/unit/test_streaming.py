@@ -2,10 +2,17 @@
 流式处理测试
 """
 
+import asyncio
+
+import pytest
+
+from nova_ai.streaming import AssistantMessageEventStream
 from nova_ai.types import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,
+    KnownApi,
+    KnownProvider,
     StopReason,
     TextContent,
     TextDeltaEvent,
@@ -19,6 +26,7 @@ from nova_ai.types import (
     ToolCallDeltaEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
+    Usage,
 )
 
 
@@ -141,3 +149,46 @@ class TestAssistantMessageContent:
         assert len(msg.content) == 2
         assert isinstance(msg.content[0], ThinkingContent)
         assert isinstance(msg.content[1], TextContent)
+
+
+class TestEndSemantics:
+    """end() 契约（有意分歧：fail-loud，对齐 pi undefined 语义的收紧）。"""
+
+    def test_end_without_result_on_empty_stream_raises(self):
+        """空流无参 end()：result() 抛 RuntimeError——生产者漏发终态事件时响亮失败。"""
+        stream = AssistantMessageEventStream()
+        stream.end()
+        with pytest.raises(RuntimeError, match="ended without result"):
+            asyncio.run(stream.result())
+
+    def test_end_after_complete_event_is_noop(self):
+        """push 过 done/error（complete 事件置 _done）后 end() 是 no-op——
+        不会覆盖已提取的 result，也不会抛 RuntimeError。"""
+        message = AssistantMessage(
+            role="assistant",
+            content=[],
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider=KnownProvider.OPENAI,
+            model="m",
+            usage=Usage(),
+            stop_reason=StopReason.STOP,
+        )
+        stream = AssistantMessageEventStream()
+        stream.push(DoneEvent(reason=StopReason.STOP, message=message))
+        stream.end()  # no-op：已完成
+        assert asyncio.run(stream.result()) is message
+
+    def test_end_with_result_still_wins_over_nothing(self):
+        """end(result=...) 显式给果：无 complete 事件也能正常收尾。"""
+        message = AssistantMessage(
+            role="assistant",
+            content=[],
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider=KnownProvider.OPENAI,
+            model="m",
+            usage=Usage(),
+            stop_reason=StopReason.STOP,
+        )
+        stream = AssistantMessageEventStream()
+        stream.end(result=message)
+        assert asyncio.run(stream.result()) is message

@@ -786,7 +786,7 @@ class TestDifferentModels:
         [
             "deepseek-v4-flash-260425",
             "deepseek-v4-pro-260425",
-            "deepseek-v3-2-251201",
+            # "deepseek-v3-2-251201" 已于火山方舟下线（404），2026-08-30 移除
         ],
     )
     @pytest.mark.asyncio

@@ -473,12 +473,7 @@ class TestVolcengineIntegration:
         return asyncio.run(_setup_models("volcengine", VOLCENGINE_API_KEY))
 
     @pytest.mark.asyncio
-    async def test_deepseek_v3_2(self, models):
-        result = await _test_model(models, "volcengine", "deepseek-v3-2-251201")
-        assert result["available"] is True
-        for case in result["cases"]:
-            assert case["ok"] is True, f"{case['case']} failed: {case.get('error')}"
-            assert len(case["text"]) > 0
+    # deepseek-v3-2 用例已移除：该模型于火山方舟下线（404），2026-08-30 集成确认
 
     @pytest.mark.asyncio
     async def test_deepseek_v4_flash(self, models):

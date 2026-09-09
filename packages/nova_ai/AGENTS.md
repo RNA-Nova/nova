@@ -9,7 +9,7 @@
 `nova_ai` 是 Nova monorepo 的最底层子包，职责是为上层（`nova_agent`、`nova_harness` 等）提供**多厂商统一的流式调用接口**。架构与 TypeScript 端 `pi/packages/ai` 对齐：以 `Models` 集合 + `Provider` 运行时单元 + API 协议实现（`api_impls/`）三层组织，对外暴露 `stream` / `complete` / `stream_simple` / `complete_simple` API。
 
 - **源码包名**：`nova_ai`
-- **版本**：`0.1.0`
+- **版本**：`0.1.1`
 - **目标语言**：Python `>=3.12,<3.14`
 - **项目语言**：代码注释与文档主要使用**中文**
 - **License**：MIT
@@ -21,16 +21,16 @@
 
 | 层级 | 技术 |
 |------|------|
-| 语言 | Python `>=3.9,<3.13` |
+| 语言 | Python `>=3.12,<3.14` |
 | 包管理器 | **pixi**（monorepo 根目录统一 workspace；Poetry 配置保留为兼容） |
-| 格式化 | `black`（目标语法版本 `py311`） |
+| 格式化 | `black`（目标语法版本 `py312`） |
 | Import 排序 | `isort`（`profile = "black"`） |
 | 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pytest`、`pytest-asyncio` |
-| 关键运行时依赖 | `openai >= 1.109.1`、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx` |
+| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx` |
 
-**未使用** Mypy、Tox、Makefile、Docker 或 CI/CD。
+**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现已覆盖本包：`harness-py` 腿在三平台矩阵（ubuntu/macos/windows）上安装本包（连带 nova_agent、nova_harness）并运行 nova_harness 非集成测试，`bundle-py` 腿同样连带安装本包。
 
 ---
 
@@ -138,7 +138,7 @@ pixi run -e dev isort src tests
 ## 代码风格指南
 
 - **类名**：`PascalCase`；**函数 / 变量**：`snake_case`；**常量**：`UPPER_CASE`
-- **导入排序**：`isort`（`profile = "black"`）；**格式化**：`black`（`py311`）
+- **导入排序**：`isort`（`profile = "black"`）；**格式化**：`black`（`py312`）
 - **注释与文档字符串**：以**中文**为主
 - **数据建模**：见上文"序列化层约定"与根 `AGENTS.md` 的"数据建模"决策顺序
 - **与 TS 对齐**：本包结构/行为对齐 `pi/packages/ai`；修改语义前先看 TS 侧实现，注释中标注"对齐 TS xxx"
@@ -199,5 +199,5 @@ pixi run -e dev pytest tests                        # 全部（需相应 API key
 
 ## 版本与变更
 
-- 当前版本：`0.1.0`（Alpha）
+- 当前版本：`0.1.1`（Alpha）
 - 变更日志：`CHANGELOG.md`（当前为空）

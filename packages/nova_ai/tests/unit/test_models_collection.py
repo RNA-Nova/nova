@@ -61,7 +61,7 @@ def _make_auth(api_key_env: Optional[str] = None, oauth: bool = False) -> Provid
     api_key_auth = (
         env_api_key_auth("Test API Key", [api_key_env]) if api_key_env else None
     )
-    return ProviderAuth(apiKey=api_key_auth, oauth=None if not oauth else object())
+    return ProviderAuth(api_key=api_key_auth, oauth=None if not oauth else object())
 
 
 class TestModelsProviders:
@@ -135,7 +135,7 @@ class TestModelsAuth:
 
         result = await models.get_auth("test")
         assert result is not None
-        assert result.auth.get("apiKey") == "sk-test"
+        assert result.auth.get("api_key") == "sk-test"
 
     @pytest.mark.asyncio
     async def test_get_auth_for_model_merges_headers(self):
@@ -248,7 +248,7 @@ class TestModelsLoginLogout:
         provider = create_provider(
             id="test",
             name="Test",
-            auth=type("Auth", (), {"apiKey": _LoginAuth(), "oauth": None})(),
+            auth=type("Auth", (), {"api_key": _LoginAuth(), "oauth": None})(),
         )
         models = Models(credential_store=store)
         models.set_provider(provider)
@@ -426,14 +426,14 @@ class TestModelsApplyAuth:
         api = _FakeApiImpl()
 
         async def _to_auth(self, credential):
-            return {"apiKey": "token", "baseUrl": "https://oauth.example.com"}
+            return {"api_key": "token", "base_url": "https://oauth.example.com"}
 
         provider = create_provider(
             id="test",
             name="Test",
             api=api,
             auth=ProviderAuth(
-                apiKey=None,
+                api_key=None,
                 oauth=type(
                     "OAuth",
                     (),
@@ -441,7 +441,7 @@ class TestModelsApplyAuth:
                         "name": "Test OAuth",
                         "login": None,
                         "refresh": None,
-                        "toAuth": _to_auth,
+                        "to_auth": _to_auth,
                     },
                 )(),
             ),
@@ -547,9 +547,7 @@ class TestModelHeadersResolver:
         def resolver(model, env):
             return {"X-Resolved": f"{model.id}-v"}
 
-        models = Models(
-            credential_store=store, model_headers_resolver=resolver
-        )
+        models = Models(credential_store=store, model_headers_resolver=resolver)
         models.set_provider(provider)
 
         result = await models.get_auth_for_model(_make_model("m1"))
@@ -574,9 +572,7 @@ class TestModelHeadersResolver:
         def resolver(model, env):
             return {"X-K": "from-resolver"}
 
-        models = Models(
-            credential_store=store, model_headers_resolver=resolver
-        )
+        models = Models(credential_store=store, model_headers_resolver=resolver)
         models.set_provider(provider)
 
         model = _make_model()
@@ -605,9 +601,7 @@ class TestModelHeadersResolver:
             seen["env"] = env
             return None
 
-        models = Models(
-            credential_store=store, model_headers_resolver=resolver
-        )
+        models = Models(credential_store=store, model_headers_resolver=resolver)
         models.set_provider(provider)
 
         result = await models.get_auth_for_model(_make_model())

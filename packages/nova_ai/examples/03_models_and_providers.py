@@ -86,7 +86,7 @@ async def demo_custom():
         name="My Provider",
         models=[my_model],
         api=make_echo_api(),
-        auth=ProviderAuth(apiKey=env_api_key_auth("Demo API key", ["DEMO_API_KEY"])),
+        auth=ProviderAuth(api_key=env_api_key_auth("Demo API key", ["DEMO_API_KEY"])),
     )
     models = create_models()
     models.set_provider(provider)
@@ -126,9 +126,18 @@ def demo_dynamic():
         fetch_models=fetch_models,
     )
     print("[dynamic] 刷新前:", len(provider.get_models()))
+
+    from nova_ai import RefreshModelsContext
+
+    async def publish(publication):
+        """演示用发布口：直接应用内存更新（真实场景由 Models 做世代校验与持久化）。"""
+        if publication.update is not None:
+            publication.update()
+        return True
+
     asyncio.run(
         provider.refresh_models(
-            SimpleNamespace(store=None, allow_network=True, signal=None)
+            RefreshModelsContext(publish=publish, allow_network=True)
         )
     )
     print("[dynamic] 刷新后:", [m.id for m in provider.get_models()])

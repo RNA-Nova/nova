@@ -1,13 +1,10 @@
 """
-工具函数模块
+跨层通用工具函数
+
+实现层共享件（消息转换 / streamSimple 选项 / Copilot 头部 / prompt cache）
+已迁至 ``nova_ai.api_impls._shared``——本模块只收容跨层通用件。
 """
 
-from .copilot import (
-    build_copilot_dynamic_headers,
-    build_copilot_headers_from_messages,
-    has_copilot_vision_input,
-    infer_copilot_initiator,
-)
 from .env import get_env_api_key
 from .estimate import (
     ContextUsageEstimate,
@@ -16,8 +13,7 @@ from .estimate import (
     estimate_message_tokens,
     estimate_text_tokens,
 )
-from .json_parser import parse_streaming_json
-from .message_transformer import transform_messages
+from .json_parser import StreamingJsonParser, parse_streaming_json
 from .model_utils import (
     calculate_cost,
     clamp_thinking_level,
@@ -27,35 +23,22 @@ from .model_utils import (
     to_thinking_level,
 )
 from .overflow import is_context_overflow
-from .simple_options import (
-    build_base_options,
-    clamp_max_tokens_to_context,
-)
 from .surrogate import sanitize_surrogates
 
 __all__ = [
     # env
     "get_env_api_key",
-    # copilot
-    "infer_copilot_initiator",
-    "has_copilot_vision_input",
-    "build_copilot_dynamic_headers",
-    "build_copilot_headers_from_messages",
     # json_parser
+    "StreamingJsonParser",
     "parse_streaming_json",
     # surrogate
     "sanitize_surrogates",
-    # simple_options
-    "build_base_options",
-    "clamp_max_tokens_to_context",
     # estimate
     "ContextUsageEstimate",
     "calculate_context_tokens",
     "estimate_context_tokens",
     "estimate_message_tokens",
     "estimate_text_tokens",
-    # message_transformer
-    "transform_messages",
     # model_utils
     "calculate_cost",
     "clamp_thinking_level",

@@ -1,12 +1,23 @@
 """新 provider 模型详细字段测试（moonshotai / moonshotai-cn / kimi-coding）。"""
 
+import pytest
+
+from nova_ai import create_models
+from nova_ai.gateway import create_provider
 from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, get_kimi_coding_model
 from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, get_moonshotai_model
 from nova_ai.providers.moonshotai_cn import (
     MOONSHOTAI_CN_MODELS,
     get_moonshotai_cn_model,
 )
-from nova_ai.types import KnownApi, KnownProvider
+from nova_ai.types import (
+    Context,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    UserMessage,
+)
 
 
 class TestMoonshotaiModels:
@@ -163,3 +174,69 @@ class TestKimiCodingModels:
 
         with pytest.raises(KeyError):
             get_kimi_coding_model("nonexistent")
+
+
+class TestStreamContract:
+    """stream 契约收口（lazy_stream 单点强制）：失败一律编码进流。"""
+
+    @pytest.mark.asyncio
+    async def test_unknown_provider_yields_error_stream(self):
+        """未知 provider 不再同步抛——返回以 error 事件结束的流。"""
+        from nova_ai.types import DoneEvent, ErrorEvent
+
+        models = create_models()
+        model = Model(
+            id="m1",
+            name="M",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider="nonexistent",
+            base_url="https://example.com/v1",
+            reasoning=False,
+            input_types=["text"],
+            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
+            context_window=128000,
+            max_tokens=4096,
+        )
+        stream = models.stream(model, Context(messages=[UserMessage(content="hi")]))
+        events = []
+        async for event in stream:
+            events.append(event)
+        types = [e.type for e in events]
+        assert "error" in types
+        assert "done" not in types
+        assert isinstance(events[-1], (ErrorEvent, DoneEvent)) or types[-1] == "error"
+        result = await stream.result()
+        assert result.stop_reason.value == "error"
+        assert "Unknown provider" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_unconfigured_provider_yields_error_stream(self):
+        """provider 存在但未配置 auth：同样 error 流，不抛异常。"""
+        from nova_ai.types import ApiKeyAuth, ProviderAuth
+
+        async def _resolve(_ctx):
+            return None
+
+        models = create_models()
+        models.set_provider(
+            create_provider(
+                id="p1",
+                name="P",
+                auth=ProviderAuth(api_key=ApiKeyAuth(name="k", resolve=_resolve)),
+            )
+        )
+        model = Model(
+            id="m1",
+            name="M",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider="p1",
+            base_url="https://example.com/v1",
+            reasoning=False,
+            input_types=["text"],
+            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
+            context_window=128000,
+            max_tokens=4096,
+        )
+        stream = models.stream(model, Context(messages=[UserMessage(content="hi")]))
+        types = [e.type async for e in stream]
+        assert types == ["error"]

@@ -7,7 +7,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Callable, List
+from typing import Callable, Iterable, List, Optional
+
+
+class AbortedError(Exception):
+    """操作被中断时抛出（对齐 TS AbortError）。"""
 
 
 class AbortSignal:
@@ -55,6 +59,56 @@ class AbortSignal:
                 # 监听器异常不应影响其他监听器和中断传播
                 pass
 
+    def throw_if_aborted(self) -> None:
+        """若已中断则抛出 :class:`AbortedError`（对齐 TS throwIfAborted）。"""
+        if self._aborted:
+            raise AbortedError(f"Operation aborted: {self.name or 'signal'}")
+
+    @classmethod
+    def timeout(cls, ms: int) -> "AbortSignal":
+        """构造 ``ms`` 毫秒后自动中断的一次性信号（对齐 TS AbortSignal.timeout）。
+
+        需要在运行中的事件循环内调用（定时器挂在当前 loop 上）。
+        """
+        controller = AbortController(name=f"timeout:{ms}ms")
+        timer = asyncio.get_running_loop().call_later(ms / 1000, controller.abort)
+
+        def _cancel_timer(_sig: "AbortSignal") -> None:
+            timer.cancel()
+
+        # 先于定时器中断（如被 any 组合或手动 abort）时撤销定时器
+        controller.signal.add_event_listener(_cancel_timer)
+        return controller.signal
+
+    @classmethod
+    def any(cls, signals: Iterable["AbortSignal"]) -> Optional["AbortSignal"]:
+        """构造一个任一输入中断即中断的组合信号（对齐 TS AbortSignal.any）。
+
+        全部输入为空时返回 ``None``；单一输入直接返回它本身（零开销）。
+        """
+        collected = [s for s in signals if s is not None]
+        if not collected:
+            return None
+        if len(collected) == 1:
+            return collected[0]
+        controller = AbortController(name="any")
+
+        def _abort_from(_sig: "AbortSignal") -> None:
+            controller.abort()
+
+        def _detach(_sig: "AbortSignal") -> None:
+            # 组合信号一旦终结，移除全部源监听器（长驻进程防泄漏）
+            for source in collected:
+                source.remove_event_listener(_abort_from)
+
+        for source in collected:
+            if source.aborted:
+                controller.abort()
+                break
+            source.add_event_listener(_abort_from)
+        controller.signal.add_event_listener(_detach)
+        return controller.signal
+
     async def wait(self) -> None:
         """异步等待中断。若已中断则立即返回。"""
         if self._aborted:
@@ -95,4 +149,4 @@ class AbortController:
         self._signal._trigger()
 
 
-__all__ = ["AbortController", "AbortSignal"]
+__all__ = ["AbortController", "AbortedError", "AbortSignal"]

@@ -29,7 +29,7 @@ async def test_poll_returns_complete_value():
         return DeviceCodePollResult(status="complete", value="token")
 
     result = await poll_oauth_device_code_flow(
-        DeviceCodePollOptions(poll=_poll, intervalSeconds=0.01)
+        DeviceCodePollOptions(poll=_poll, interval_seconds=0.01)
     )
     assert result == "token"
 
@@ -45,7 +45,7 @@ async def test_poll_retries_pending_until_complete():
         return DeviceCodePollResult(status="complete", value="token")
 
     result = await poll_oauth_device_code_flow(
-        DeviceCodePollOptions(poll=_poll, intervalSeconds=0.01)
+        DeviceCodePollOptions(poll=_poll, interval_seconds=0.01)
     )
     assert result == "token"
     assert len(calls) == 3
@@ -62,7 +62,7 @@ async def test_poll_slow_down_does_not_fail():
         return DeviceCodePollResult(status="complete", value="token")
 
     result = await poll_oauth_device_code_flow(
-        DeviceCodePollOptions(poll=_poll, intervalSeconds=0.01)
+        DeviceCodePollOptions(poll=_poll, interval_seconds=0.01)
     )
     assert result == "token"
     assert len(calls) == 2
@@ -75,7 +75,7 @@ async def test_poll_failed_status_raises():
 
     with pytest.raises(RuntimeError, match="user denied"):
         await poll_oauth_device_code_flow(
-            DeviceCodePollOptions(poll=_poll, intervalSeconds=0.01)
+            DeviceCodePollOptions(poll=_poll, interval_seconds=0.01)
         )
 
 
@@ -87,7 +87,7 @@ async def test_poll_times_out_when_always_pending():
     with pytest.raises(TimeoutError, match="Device flow timed out"):
         await poll_oauth_device_code_flow(
             DeviceCodePollOptions(
-                poll=_poll, intervalSeconds=0.05, expiresInSeconds=0.1
+                poll=_poll, interval_seconds=0.05, expires_in_seconds=0.1
             )
         )
 
@@ -101,7 +101,7 @@ async def test_poll_cancels_when_signal_aborted():
         await poll_oauth_device_code_flow(
             DeviceCodePollOptions(
                 poll=_poll,
-                intervalSeconds=0.01,
+                interval_seconds=0.01,
                 signal=_DummySignal(aborted=True),
             )
         )
@@ -119,7 +119,7 @@ async def test_poll_cancels_mid_run():
 
     with pytest.raises(asyncio.CancelledError, match="Login cancelled"):
         await poll_oauth_device_code_flow(
-            DeviceCodePollOptions(poll=_poll, intervalSeconds=0.01, signal=signal)
+            DeviceCodePollOptions(poll=_poll, interval_seconds=0.01, signal=signal)
         )
     assert len(calls) == 1
 
@@ -133,8 +133,8 @@ async def test_poll_waits_before_first_poll_when_requested():
     result = await poll_oauth_device_code_flow(
         DeviceCodePollOptions(
             poll=_poll,
-            intervalSeconds=0.1,
-            waitBeforeFirstPoll=True,
+            interval_seconds=0.1,
+            wait_before_first_poll=True,
         )
     )
     elapsed = asyncio.get_event_loop().time() - start
@@ -149,12 +149,12 @@ async def test_poll_slow_down_uses_server_interval():
     async def _poll() -> DeviceCodePollResult[str]:
         calls.append(len(calls))
         if len(calls) == 1:
-            return DeviceCodePollResult(status="slow_down", intervalSeconds=1.2)
+            return DeviceCodePollResult(status="slow_down", interval_seconds=1.2)
         return DeviceCodePollResult(status="complete", value="token")
 
     start = asyncio.get_event_loop().time()
     result = await poll_oauth_device_code_flow(
-        DeviceCodePollOptions(poll=_poll, intervalSeconds=5)
+        DeviceCodePollOptions(poll=_poll, interval_seconds=5)
     )
     elapsed = asyncio.get_event_loop().time() - start
     assert result == "token"
@@ -170,7 +170,7 @@ async def test_poll_timeout_message_with_slow_down():
     with pytest.raises(TimeoutError, match="clock drift"):
         await poll_oauth_device_code_flow(
             DeviceCodePollOptions(
-                poll=_poll, intervalSeconds=0.05, expiresInSeconds=0.1
+                poll=_poll, interval_seconds=0.05, expires_in_seconds=0.1
             )
         )
 
@@ -187,7 +187,7 @@ async def test_poll_cancels_with_nova_abort_controller():
         await poll_oauth_device_code_flow(
             DeviceCodePollOptions(
                 poll=_poll,
-                intervalSeconds=5,
+                interval_seconds=5,
                 signal=controller.signal,
             )
         )
@@ -207,7 +207,7 @@ async def test_poll_cancels_mid_run_with_nova_abort_controller():
         await poll_oauth_device_code_flow(
             DeviceCodePollOptions(
                 poll=_poll,
-                intervalSeconds=5,
+                interval_seconds=5,
                 signal=controller.signal,
             )
         )

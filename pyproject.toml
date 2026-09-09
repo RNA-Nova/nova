@@ -26,7 +26,10 @@ nova-server = { path = "packages/nova_server", editable = true }
 nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
 nova-executor-client = { path = "packages/nova-executor-client", editable = true }
 websockets = ">=12.0"
-openai = ">=2.0"
+# 上限钉在 <3.10.0：3.10.0（2026-09-08）引入流式收尾回归——
+# PoolByteStream 生成器在 athrow 后无法停止，即使显式关流+关客户端也压不住
+# "generator didn't stop after athrow()" 噪音；3.9.0 及之前干净。上游修复后放开。
+openai = ">=2.0,<3.10.0"
 httpx = ">=0.27.0"
 pydantic = ">=2.0"
 json-repair = ">=0.58.4"

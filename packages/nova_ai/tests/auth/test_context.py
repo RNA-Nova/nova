@@ -27,10 +27,10 @@ async def test_default_auth_context_file_exists(tmp_path):
     ctx = default_provider_auth_context()
     file = tmp_path / "exists.txt"
     file.write_text("ok")
-    assert await ctx.fileExists(str(file)) is True
+    assert await ctx.file_exists(str(file)) is True
 
 
 @pytest.mark.asyncio
 async def test_default_auth_context_file_not_exists(tmp_path):
     ctx = default_provider_auth_context()
-    assert await ctx.fileExists(str(tmp_path / "missing.txt")) is False
+    assert await ctx.file_exists(str(tmp_path / "missing.txt")) is False

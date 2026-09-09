@@ -83,11 +83,11 @@ nova/
 - `gateway/` —— `Models` 集合（`models.py`）、`Provider` 运行时单元与 `create_provider`（`provider.py`）、`ModelsStore`（`store.py`）；鉴权解析在请求时完成（runtime override → stored credential → 环境变量链 → OAuth 刷新）
 - `providers/` —— 内置厂商定义（`volcengine`、`moonshotai`、`moonshotai_cn`、`kimi_coding`），各含静态模型数据与 provider 工厂；`all.py` 提供 `builtin_models()`
 - `auth/` —— `AuthContext`、credential store 协议、`resolve_provider_auth`、`env_api_key_auth` 等辅助，以及 `oauth/`（`codex`、`kimi` OAuth 流程与登录页）
-- `api_impls/` —— API 协议实现：`openai_completions.py`（当前唯一完整实现）
+- `api_impls/` —— API 协议实现：`openai_completions/` 包（当前唯一完整实现）
 - `streaming.py` —— `AssistantMessageEventStream` 与流式调用入口
 - `utils/` —— 环境变量、JSON 解析、消息转换、流选项、Unicode 代理项清理、上下文溢出检测、模型工具函数等
 
-包内包含详细的 `docs/` 目录，记录架构设计、开发日志、架构决策记录（ADR）、使用与维护指南、代码约定和 API 参考。
+开发期 `docs/`（架构设计/ADR/devlog 等）已随 0.1.x 封版移除——设计文档以包内 `README.md` 为准；历史版本可在 git 历史中查阅。
 
 ### `nova_agent`（源码包 `nova_agent`）
 

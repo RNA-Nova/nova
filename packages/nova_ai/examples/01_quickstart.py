@@ -63,7 +63,7 @@ async def real_demo():
         return
 
     models = builtin_models()
-    model = get_volcengine_model("deepseek-v3-2-251201")
+    model = get_volcengine_model("deepseek-v4-flash-260425")
     context = Context(messages=[UserMessage(role="user", content="用一句话介绍你自己")])
     message = await models.stream_simple(model, context).result()
     print("[real]", message.content[0].text)

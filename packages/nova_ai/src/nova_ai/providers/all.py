@@ -46,3 +46,21 @@ def get_builtin_models(provider_id: Optional[str] = None) -> List[Model]:
 def get_builtin_model(provider_id: str, model_id: str) -> Optional[Model]:
     """按 provider id + model id 查找内置模型。"""
     return builtin_models().get_model(provider_id, model_id)
+
+
+def get_builtin_model_data_generated_at() -> Optional[int]:
+    """基线目录的生成时间（epoch ms；来自 data/.manifest.json，缺失返回 None）。
+
+    作为远程目录物化的新鲜度竞速锚点：基线比运行时缓存新时，缓存 overlay
+    让位（对齐 TS ``getBuiltinModelDataGeneratedAt``）。
+    """
+    import json
+    from datetime import datetime
+    from pathlib import Path
+
+    manifest_path = Path(__file__).resolve().parent / "data" / ".manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text("utf-8"))
+        return int(datetime.fromisoformat(manifest["generatedAt"]).timestamp() * 1000)
+    except Exception:
+        return None

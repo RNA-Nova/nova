@@ -19,7 +19,7 @@ class DefaultAuthContext(AuthContext):
             return value
         return None
 
-    async def fileExists(self, path: str) -> bool:
+    async def file_exists(self, path: str) -> bool:
         try:
             resolved = Path(path).expanduser()
             return resolved.exists()
