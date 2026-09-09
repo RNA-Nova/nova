@@ -12,6 +12,7 @@ schema 推导为纯启发式正则解析，提取不全只影响"少检查"，�
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -296,6 +297,40 @@ def derive_step_schema(step_id: str, doc_name: str, text: str) -> StepSchema:
     )
 
 
+# 终产物识别的通用线索词（文件名词元，领域无关）
+_FINAL_PRODUCT_CLUES = ("final", "ranked", "ranking", "top", "result", "results")
+# 可计数行数的终产物后缀
+_FINAL_COUNTABLE_SUFFIXES = (".csv", ".tsv")
+# 文档中的占位写法（非具体产物）：{var}、...、XXXX 连写
+_PLACEHOLDER_RE = re.compile(r"\{|\}|\.\.\.|x{3,}", re.IGNORECASE)
+
+
+def identify_final_product(step_dicts: List[Dict[str, Any]]) -> Optional[str]:
+    """从各步骤的产物声明中识别"最终产物"（供数量符合性核对）。
+
+    领域无关启发式：文件名词元含 final/ranked/top/result 等通用线索的
+    可计数文件（csv/tsv）为强候选，同档内靠后步骤优先；全部无线索时
+    退化为最靠后步骤的可计数产物。识别不到返回 None（记"未声明"，
+    属中性结果而非失败）。
+    """
+    best: Optional[Tuple[int, int, int, str]] = None  # (线索分, 步骤序号, 声明序, 路径)
+    for index, step in enumerate(step_dicts):
+        for order, rel in enumerate(step.get("outputs", [])):
+            name = Path(rel).name.lower()
+            if Path(name).suffix not in _FINAL_COUNTABLE_SUFFIXES:
+                continue
+            if _PLACEHOLDER_RE.search(rel):
+                continue
+            # 文件型（basename 含扩展名）且含线索词元（下划线/连字符分隔）
+            tokens = re.split(r"[^a-z0-9]+", Path(name).stem)
+            clue = 1 if any(t in _FINAL_PRODUCT_CLUES for t in tokens) else 0
+            # 排序键：线索分主导 → 步骤序号 → 声明顺序（靠后优先）
+            key = (clue, index, order)
+            if best is None or key > best[:3]:
+                best = (clue, index, order, rel)
+    return best[3] if best else None
+
+
 def derive_skill_schema(skill_name: str, skill_dir: str) -> Dict[str, Any]:
     """绑定瞬间解析全部步骤文档，推导 skill 级 schema（§4.3）。
 
@@ -307,37 +342,116 @@ def derive_skill_schema(skill_name: str, skill_dir: str) -> Dict[str, Any]:
         text = _read_doc_text(root / "docs" / doc_name)
         steps.append(derive_step_schema(step_id, doc_name, text))
     final_outputs = steps[-1].outputs if steps else []
+    step_dicts = [
+        {
+            "step_id": s.step_id,
+            "doc_name": s.doc_name,
+            "title": s.title,
+            "scripts": s.scripts,
+            "configs": s.configs,
+            "outputs": s.outputs,
+        }
+        for s in steps
+    ]
     return {
         "version": 1,
         "skill_name": skill_name,
         "skill_dir": str(root),
-        "steps": [
-            {
-                "step_id": s.step_id,
-                "doc_name": s.doc_name,
-                "title": s.title,
-                "scripts": s.scripts,
-                "configs": s.configs,
-                "outputs": s.outputs,
-            }
-            for s in steps
-        ],
+        "steps": step_dicts,
         "final_outputs": final_outputs,
+        "final_product": identify_final_product(step_dicts),
     }
 
 
 # ---------------------------------------------------------------------------
-# 记录侧消费：步骤归属与 yaml 提取
+# 记录侧消费：步骤归属、yaml 提取与 cd 目标解析
 # ---------------------------------------------------------------------------
+
+
+def match_script(command: str, schema: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """bash 命令命中某步骤脚本名 → 返回 ``(步骤编号, 脚本名)``；未命中 None。"""
+    for step in schema.get("steps", []):
+        for script in step.get("scripts", []):
+            if script and script in command:
+                return step.get("step_id"), script
+    return None
 
 
 def attribute_command(command: str, schema: Dict[str, Any]) -> Optional[str]:
     """bash 命令命中某步骤脚本名 → 归该步；未命中返回 None。"""
-    for step in schema.get("steps", []):
-        for script in step.get("scripts", []):
-            if script and script in command:
-                return step.get("step_id")
-    return None
+    matched = match_script(command, schema)
+    return matched[0] if matched else None
+
+
+# 命令前导的 cd 目标：`cd <dir> && ...` / `cd "<dir>" ; ...`（常见形态；
+# 含变量/命令替换的目录不可静态解析，按无 cd 处理）
+# 前导变量赋值段：`VAR=value` / `export VAR=value`，段间以 &&/;/换行分隔。
+# 仅接受简单字面量（含引号包裹）；值含 $ / 反引号的不收录（保守不展开）。
+_ASSIGNMENT_RE = re.compile(
+    r"\s*(?:export\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)="
+    r"(?P<value>\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|\n]+)\s*(?:&&|;|\n|$)"
+)
+# 赋值段之后的前导 cd：`cd <dir>` 以 &&/;/换行/结尾收束
+_CD_PREFIX_RE = re.compile(
+    r"\s*cd\s+(?P<dir>\"[^\"]+\"|'[^']+'|[^\s;&|\n]+)\s*(?:&&|;|\n|$)"
+)
+# 变量引用形态：$VAR / ${VAR}
+_VAR_REF_RE = re.compile(r"^\$\{?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\}?$")
+
+
+def _extract_leading_assignments(command: str) -> Tuple[Dict[str, str], int]:
+    """解析命令开头连续的变量赋值段，返回 ``(局部变量表, 赋值段结束位置)``。"""
+    table: Dict[str, str] = {}
+    pos = 0
+    while True:
+        m = _ASSIGNMENT_RE.match(command, pos)
+        if not m:
+            break
+        value = m.group("value")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if "$" not in value and "`" not in value:
+            table[m.group("name")] = value
+        pos = m.end()
+    return table, pos
+
+
+def extract_cd_target(command: str) -> Optional[str]:
+    """解析命令的 cd 目标目录；不可解析返回 None。
+
+    支持前导变量赋值代入：``TASK_DIR=/a/b && cd "$TASK_DIR" && ...``（含
+    ``export`` 前缀与换行分隔形态）；变量查不到表、值含 $()/递归引用等
+    不可静态解析的形态一律回退 None（宁可中性不可猜错）。
+    """
+    variables, pos = _extract_leading_assignments(command)
+    m = _CD_PREFIX_RE.match(command, pos)
+    if not m:
+        return None
+    raw = m.group("dir")
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        raw = raw[1:-1]
+    # 变量引用：查前导赋值表，查不到不可解析
+    var_ref = _VAR_REF_RE.match(raw)
+    if var_ref:
+        resolved = variables.get(var_ref.group("name"))
+        if resolved is None:
+            return None
+        raw = resolved
+    # 其余变量/命令替换/拼接形式不做静态解析（按会话 cwd 处理）
+    if "$" in raw or "`" in raw:
+        return None
+    return os.path.expanduser(raw)
+
+
+def resolve_command_workdir(command: str, cwd: str) -> str:
+    """该条 bash 命令的工作目录：cd 目标（绝对化）或会话 cwd。"""
+    target = extract_cd_target(command)
+    if target is None:
+        return str(Path(cwd))
+    path = Path(target)
+    if not path.is_absolute():
+        path = Path(cwd) / path
+    return str(path)
 
 
 def extract_yaml_paths(command: str) -> List[str]:

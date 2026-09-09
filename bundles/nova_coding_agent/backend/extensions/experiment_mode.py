@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from nova_base.ui_primitives import confirm, notify_message, select, set_status
+from nova_coding_agent.experiment import memory_store, recorder, steps
+
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (
     BeforeAgentStartEventResult,
@@ -37,8 +39,6 @@ from nova_harness.core.types.events.results import (
     InputEventResult,
 )
 from nova_harness.core.types.messages import CustomMessage
-
-from nova_coding_agent.experiment import memory_store, recorder, steps
 
 logger = logging.getLogger(__name__)
 
@@ -295,10 +295,16 @@ def extension(nova: NovaExtensionAPI) -> None:
         if not state["enabled"] or record is None:
             return None
         try:
+            is_error = bool(getattr(event, "is_error", False))
             record.record_tool_end(
                 getattr(event, "tool_call_id", ""),
                 getattr(event, "tool_name", ""),
-                bool(getattr(event, "is_error", False)),
+                is_error,
+                error_summary=(
+                    recorder.summarize_error(getattr(event, "result", None))
+                    if is_error
+                    else None
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("experiment: 结果记录失败: %s", exc)

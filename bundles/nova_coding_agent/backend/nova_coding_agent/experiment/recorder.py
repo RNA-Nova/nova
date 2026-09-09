@@ -67,8 +67,11 @@ class CommandRecord:
     tool_call_id: str
     command: str
     step_id: Optional[str] = None  # schema 步骤归属（未命中为 None）
+    script: Optional[str] = None  # 命中的步骤脚本名（参与判定的最小单位）
+    workdir: str = ""  # 该条命令的工作目录（前导 cd 目标，无 cd 为会话 cwd）
     yaml_snapshots: Dict[str, str] = field(default_factory=dict)  # 路径 → 全文
     ok: Optional[bool] = None  # tool_execution_end 回填
+    error_summary: Optional[str] = None  # 失败时的关键错误摘要（截断）
     outputs: List[OutputInventory] = field(default_factory=list)
 
 
@@ -93,11 +96,14 @@ class TaskRecord:
     # ------------------------------------------------------------------
 
     def record_command(self, tool_call_id: str, command: str) -> CommandRecord:
-        """tool_call 捕获 bash 命令：步骤归属 + 命令行引用 yaml 全文快照。"""
+        """tool_call 捕获 bash 命令：步骤/脚本归属 + cd 工作目录 + yaml 全文快照。"""
+        matched = steps_mod.match_script(command, self.schema)
         record = CommandRecord(
             tool_call_id=tool_call_id,
             command=command,
-            step_id=steps_mod.attribute_command(command, self.schema),
+            step_id=matched[0] if matched else None,
+            script=matched[1] if matched else None,
+            workdir=steps_mod.resolve_command_workdir(command, self.project_root),
         )
         for rel in steps_mod.extract_yaml_paths(command):
             snapshot = _read_snapshot(self.project_root, rel)
@@ -107,17 +113,26 @@ class TaskRecord:
         return record
 
     def record_tool_end(
-        self, tool_call_id: str, tool_name: str, is_error: bool
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        is_error: bool,
+        error_summary: Optional[str] = None,
     ) -> None:
-        """tool_execution_end 回填结果；bash 命令归属步骤时做产物盘点。"""
+        """tool_execution_end 回填结果；归属步骤的命令做产物盘点。
+
+        盘点基准：该条命令的工作目录（前导 cd 目标；无 cd 为会话 cwd）。
+        """
         record = next(
             (c for c in self.commands if c.tool_call_id == tool_call_id), None
         )
         if record is not None:
             record.ok = not is_error
+            if is_error and error_summary:
+                record.error_summary = error_summary
             if record.step_id and not is_error:
                 record.outputs = inventory_step_outputs(
-                    self.schema, record.step_id, self.project_root
+                    self.schema, record.step_id, record.workdir
                 )
         elif is_error:
             self.other_failures.append(
@@ -160,11 +175,11 @@ def _count_lines(path: Path) -> Optional[tuple]:
     return total, data
 
 
-def inventory_output(project_root: str, rel: str) -> OutputInventory:
-    """盘点单个期望产物（文件：大小 + 行数；目录：文件清单）。"""
+def inventory_output(base_dir: str, rel: str) -> OutputInventory:
+    """盘点单个期望产物（相对 ``base_dir`` 解析；文件：大小 + 行数；目录：清单）。"""
     inv = OutputInventory(path=rel)
     try:
-        path = Path(project_root) / rel
+        path = Path(base_dir) / rel
         if path.is_dir():
             inv.exists = True
             inv.kind = "dir"
@@ -182,15 +197,43 @@ def inventory_output(project_root: str, rel: str) -> OutputInventory:
 
 
 def inventory_step_outputs(
-    schema: Dict[str, Any], step_id: str, project_root: str
+    schema: Dict[str, Any], step_id: str, base_dir: str
 ) -> List[OutputInventory]:
     """盘点某步骤的全部期望产物（schema 提取不全 → 只盘点已提取项）。"""
     for step in schema.get("steps", []):
         if step.get("step_id") == step_id:
             return [
-                inventory_output(project_root, rel) for rel in step.get("outputs", [])
+                inventory_output(base_dir, rel)
+                for rel in step.get("outputs", [])
+                if _is_concrete_path(rel)
             ]
     return []
+
+
+def summarize_error(result: Any, max_len: int = 160) -> str:
+    """从 tool_execution_end 的 result 提取关键错误摘要（压缩空白 + 截断）。
+
+    result 形态不固定（工具作者是第三方）：优先取 content 列表首个非空
+    文本部件，其次字符串本体，最后 str() 兜底；提取不到返回空串。
+    """
+    text = ""
+    content = getattr(result, "content", None)
+    if isinstance(content, list):
+        for part in content:
+            candidate = getattr(part, "text", None)
+            if candidate is None and isinstance(part, dict):
+                candidate = part.get("text")
+            if isinstance(candidate, str) and candidate.strip():
+                text = candidate
+                break
+    elif isinstance(result, str):
+        text = result
+    if not text and result is not None:
+        text = str(result)
+    text = " ".join(text.split())
+    if len(text) > max_len:
+        text = text[: max_len - 1] + "…"
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -203,48 +246,95 @@ def _is_file_like(rel: str) -> bool:
     return bool(_FILE_SUFFIX_RE.search(Path(rel).name))
 
 
+# 文档中的占位写法（非具体产物，不参与缺项检查）：{var}、...、XXXX 连写
+_PLACEHOLDER_RE = re.compile(r"\{|\}|\.\.\.|x{3,}", re.IGNORECASE)
+
+
+def _is_concrete_path(rel: str) -> bool:
+    """产物路径是否为具体路径（非文档占位示例）。"""
+    return not _PLACEHOLDER_RE.search(rel)
+
+
 def evaluate_criteria(
     record: TaskRecord,
-    path_exists: Optional[Callable[[str], bool]] = None,
+    path_exists: Optional[Callable[[str, str], bool]] = None,
 ) -> List[Dict[str, Any]]:
-    """四标准逐项判定（纯逻辑；``path_exists`` 可注入便于单测）。
+    """四标准逐项判定（纯逻辑；``path_exists(base_dir, rel)`` 可注入便于单测）。
 
-    返回 ``[{key, name, ok, note}]``；整体成功 = 全部 ok。
-    中性结果（未声明 / 无法核对 / 未检查）记 note，不判失败。
+    返回 ``[{key, name, ok, note, neutral?}]``；整体成功 = 全部 ok。
+    中性结果（未声明 / 无法核对 / 未检查）记 note + ``neutral=True``，
+    不判失败；渲染为 ➖（✅ 只给真通过、❌ 只给真失败）。
     """
     if path_exists is None:
-        root = Path(record.project_root)
 
-        def _default_exists(rel: str) -> bool:
-            return (root / rel).exists()
+        def _default_exists(base_dir: str, rel: str) -> bool:
+            return (Path(base_dir) / rel).exists()
 
         path_exists = _default_exists
 
     criteria: List[Dict[str, Any]] = []
 
-    # 标准 1：工具全成功（无失败 tool_result）
-    failed = [c.command for c in record.commands if c.ok is False]
-    failed += [f["tool_name"] for f in record.other_failures]
+    # 标准 1：步骤脚本全部最终成功（§4.6 口径）——只统计命中 schema 脚本
+    # 清单的调用；辅助命令记流水不参与判定；同脚本前几次失败但最终成功
+    # 视为经重试成功（⚠️ 标注尝试次数），仅最终未成功的脚本判 ❌。
+    by_script: Dict[str, List[CommandRecord]] = {}
+    for cmd in record.commands:
+        if cmd.script:
+            by_script.setdefault(cmd.script, []).append(cmd)
+    retried: List[str] = []
+    failed: List[str] = []
+    for script, cmds in by_script.items():
+        last = cmds[-1]
+        if last.ok is True:
+            if any(c.ok is False for c in cmds[:-1]):
+                retried.append(f"{script} 经 {len(cmds)} 次尝试后成功 ⚠️")
+        else:
+            summary = last.error_summary or "执行失败"
+            failed.append(f"{script}（{summary}）")
+    if failed:
+        note = "最终未成功：" + "；".join(failed)
+        if retried:
+            note += "；" + "；".join(retried)
+    elif retried:
+        note = "全部最终成功；" + "；".join(retried)
+    elif by_script:
+        note = f"{len(by_script)} 个步骤脚本全部成功"
+    else:
+        note = "未检查（未捕获到步骤脚本调用）"
     criteria.append(
         {
             "key": "tools_ok",
             "name": "工具全部调用成功",
             "ok": not failed,
-            "note": (
-                "无失败"
-                if not failed
-                else f"失败 {len(failed)} 项：{'; '.join(failed[:5])}"
-            ),
+            "note": note,
+            # 无脚本调用可判时为中性（不渲染 ✅/❌）
+            "neutral": not failed and not by_script,
         }
     )
 
-    # 标准 2：产物完整性——执行过的步骤对照期望清单不缺项（仅文件型产物）
-    executed_steps = {c.step_id for c in record.commands if c.step_id}
+    # 标准 2：产物完整性——执行过的步骤对照期望清单不缺项（仅文件型产物）；
+    # 产物路径相对于该步骤各命令的工作目录（cd 目标）解析，任一命中即存在。
+    step_workdirs: Dict[str, List[str]] = {}
+    for cmd in record.commands:
+        if cmd.step_id:
+            dirs = step_workdirs.setdefault(cmd.step_id, [])
+            if cmd.workdir not in dirs:
+                dirs.append(cmd.workdir)
     expected: List[str] = []
+    expected_bases: Dict[str, List[str]] = {}
     for step in record.schema.get("steps", []):
-        if step.get("step_id") in executed_steps:
-            expected += [o for o in step.get("outputs", []) if _is_file_like(o)]
-    missing = [rel for rel in expected if not path_exists(rel)]
+        bases = step_workdirs.get(step.get("step_id"))
+        if not bases:
+            continue
+        for rel in step.get("outputs", []):
+            if _is_file_like(rel) and _is_concrete_path(rel) and rel not in expected:
+                expected.append(rel)
+                expected_bases[rel] = bases
+    missing = [
+        rel
+        for rel in expected
+        if not any(path_exists(base, rel) for base in expected_bases[rel])
+    ]
     if not expected:
         criteria.append(
             {
@@ -252,6 +342,7 @@ def evaluate_criteria(
                 "name": "产物完整性",
                 "ok": True,
                 "note": "未检查（schema 未提取到可核对的期望产物）",
+                "neutral": True,
             }
         )
     else:
@@ -264,7 +355,8 @@ def evaluate_criteria(
             }
         )
 
-    # 标准 3：终产物数量符合提示词要求
+    # 标准 3：终产物数量符合提示词要求。终产物来自 schema 的 final_product
+    # （绑定瞬间从步骤文档识别）；文件定位依次尝试各命令工作目录与会话 cwd。
     if record.expected_count is None:
         criteria.append(
             {
@@ -272,42 +364,58 @@ def evaluate_criteria(
                 "name": "终产物数量符合要求",
                 "ok": True,
                 "note": "未声明（提示词中未解析到数量要求）",
+                "neutral": True,
             }
         )
     else:
-        measured: Optional[int] = None
-        measured_path = ""
-        for rel in record.schema.get("final_outputs", []):
-            if Path(rel).suffix.lower() not in _COUNTABLE_SUFFIXES:
-                continue
-            inv = inventory_output(record.project_root, rel)
-            if inv.exists and inv.data_lines is not None:
-                measured = inv.data_lines
-                measured_path = rel
-                break
-        if measured is None:
+        final_product = record.schema.get("final_product")
+        if not final_product:
             criteria.append(
                 {
                     "key": "count_match",
                     "name": "终产物数量符合要求",
                     "ok": True,
-                    "note": "无法核对（未找到可计数的终产物文件）",
+                    "note": "未声明（schema 未提取到终产物）",
+                    "neutral": True,
                 }
             )
         else:
-            ok = measured == record.expected_count
-            criteria.append(
-                {
-                    "key": "count_match",
-                    "name": "终产物数量符合要求",
-                    "ok": ok,
-                    "note": (
-                        f"{measured_path} 数据行 {measured} == 要求 {record.expected_count}"
-                        if ok
-                        else f"{measured_path} 数据行 {measured} != 要求 {record.expected_count}"
-                    ),
-                }
-            )
+            bases = [record.project_root]
+            for cmd in reversed(record.commands):
+                if cmd.workdir and cmd.workdir not in bases:
+                    bases.insert(0, cmd.workdir)
+            measured: Optional[int] = None
+            measured_at = ""
+            for base in bases:
+                inv = inventory_output(base, final_product)
+                if inv.exists and inv.data_lines is not None:
+                    measured = inv.data_lines
+                    measured_at = str(Path(base) / final_product)
+                    break
+            if measured is None:
+                criteria.append(
+                    {
+                        "key": "count_match",
+                        "name": "终产物数量符合要求",
+                        "ok": True,
+                        "note": f"无法核对（未找到终产物 {final_product}）",
+                        "neutral": True,
+                    }
+                )
+            else:
+                ok = measured == record.expected_count
+                criteria.append(
+                    {
+                        "key": "count_match",
+                        "name": "终产物数量符合要求",
+                        "ok": ok,
+                        "note": (
+                            f"{measured_at} 数据行 {measured} == 要求 {record.expected_count}"
+                            if ok
+                            else f"{measured_at} 数据行 {measured} != 要求 {record.expected_count}"
+                        ),
+                    }
+                )
 
     # 标准 4：无中断
     criteria.append(
@@ -428,7 +536,13 @@ def render_task_page(
 
     lines += ["## 四标准判定", ""]
     for c in criteria:
-        mark = "✅" if c["ok"] else "❌"
+        # 三态图标：✅ 真通过 / ❌ 真失败 / ➖ 中性（未声明/无法核对/未检查）
+        if not c["ok"]:
+            mark = "❌"
+        elif c.get("neutral"):
+            mark = "➖"
+        else:
+            mark = "✅"
         lines.append(f"- {mark} **{c['name']}**：{c['note']}")
     lines.append(
         f"\n**总体判定：{'成功' if status == 'completed' else ('中断' if status == 'aborted' else '失败')}**"
@@ -440,7 +554,10 @@ def render_task_page(
         lines.append("（无异常）")
     else:
         for cmd in failures:
-            lines.append(f"- 命令失败：`{cmd.command}`")
+            text = cmd.command
+            if len(text) > 200:
+                text = text[:199] + "…"
+            lines.append(f"- 命令失败：`{text}`")
         for f in record.other_failures:
             lines.append(f"- 工具失败：{f['tool_name']}（{f['tool_call_id']}）")
         if record.interrupted:
