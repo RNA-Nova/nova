@@ -100,6 +100,7 @@ nova/
   - `tools.py` —— 循环中的工具执行相关逻辑
 - `types/` —— 完整事件类型体系、Agent 状态、上下文、工具、钩子上下文与结果等
 - `signal.py` —— `AbortSignal` / `AbortController` 异步取消信号
+- `stream_fn.py` —— 宿主（如 nova_harness）安装默认模型运行时 stream 函数的注入点
 - `utils.py` —— 工具调用校验与参数验证（基于 `jsonschema`）
 
 ### `nova_harness`（源码包 `nova_harness`）
@@ -338,17 +339,16 @@ npm link           # 全局注册 `nova` 命令
   1. **先问可变性**：对象创建后会被原地修改吗？可变 → **普通 class 或 `dataclass`**，禁用 Pydantic（校验与拷贝语义和可变运行时容器冲突）。例：`AgentState`（普通 class + property setter 做顶层数组拷贝）、`AgentContext`（被循环原地 append）、`AgentSessionServices`。**可变默认参数是硬红线**：dataclass 的可变容器必须 `field(default_factory=...)`（解释器对 dataclass 已强制，此条为成文）；普通 class 的 `__init__` 默认参数同样不得为可变字面量——那才是没人拦的真坑。
   2. **再问边界与频率**：对象要跨进程（RPC / WebSocket）或持久化吗？需要就有人在边界校验，但**校验强度按数据频率分档**：
      - **低频契约对象**（settings、auth.json、models.json、包 manifest、RPC envelope、API 消息——数量少、边界单次校验、schema 收益主导）→ **Pydantic（`NovaBaseModel`）**，序列化与 schema 一体化，使用原生 `model_dump()` / `model_validate()`。例：`Model` / `Usage` / messages / Agent 事件。
-     - **高频重放流**（会话 JSONL 逐行恢复、批量事件回放——一次几千行）→ 边界只做结构校验（JSON 可序列化级）+ 语义校验（reducer），内存工作表示用 dict + `TypedDict` 窄签名；**逐行 `model_validate` 是已量出的加载瓶颈**（novaharness 会话加载先例）。将来 codec 需要强 schema 时，在 codec 单点用 `TypeAdapter(TypedDict)`（pydantic 原生支持）或 `msgspec`（decode 快 6–15x），不进库层工作表示。例：session 库层 entry/record（`nova_agent/harness/session/`）。
+     - **高频重放流**（会话 JSONL 逐行恢复、批量事件回放——一次几千行）→ 边界只做结构校验（JSON 可序列化级）+ 语义校验（reducer），内存工作表示用 dict + `TypedDict` 窄签名；**逐行 `model_validate` 是已量出的加载瓶颈**（novaharness 会话加载先例）。将来 codec 需要强 schema 时，在 codec 单点用 `TypeAdapter(TypedDict)`（pydantic 原生支持）或 `msgspec`（decode 快 6–15x），不进库层工作表示。
   3. **校验只给不可信输入**：第三方产出的数据（工具返回值、用户配置、前端 payload）即使不直接序列化也可用 Pydantic，换取构造时尽早报错；框架内部自产自销的对象不做构造时校验。例：`AgentToolResult` 用 Pydantic 不是因为要序列化，而是工具作者是第三方。
   4. **`Callable` / 服务实例 / 异常永远不进 Pydantic**：依赖容器、hook 上下文、运行时中间态一律 `dataclass` 或普通 class。例：`AgentLoopConfig`、`StreamOptions` 家族、`Provider`、`AgentSessionConfig`。
-  5. **不可变值对象优先 `frozen=True`**：纯数据、无序列化需求的值对象用 `dataclass(frozen=True)` 在类型层面锁死不可变性，不靠自觉；多字段的查询/选项类再加 `kw_only=True` 防位置参数耦合。例：`EntryQuery` / `BranchBounds` / `ForkOptions` / `RecordQuery` / `LogOptions`。
+  5. **不可变值对象优先 `frozen=True`**：纯数据、无序列化需求的值对象用 `dataclass(frozen=True)` 在类型层面锁死不可变性，不靠自觉；多字段的查询/选项类再加 `kw_only=True` 防位置参数耦合。
   6. **union 必须可判别**：存在反序列化路径的 union 用 `Field(discriminator=...)` 显式判别，不依赖 smart-union 猜测。开放集（框架变体 + 包级兜底）用判别联合 + 兜底成员 + `union_mode="left_to_right"`（例：`server/types/items.py` 的 `WireItem`——`SerializeAsAny` 只管序列化方向，校验方向必须显式可判别，否则 `model_validate` 按基类重建剥掉子类字段）。TypedDict 文档路径的判别联合不引 Pydantic——判别键（`type`）保持 Literal 字面量稳定即可，与 Pydantic 路径共享同一词汇，为将来任何 codec 校验留位。
   7. **哑容器不进 Pydantic**：透传载荷/中间态包装（需要原样持有任意内容——不校验、不重建、不转换）即使最终会上线也不用 Pydantic；纯数据透传用 `TypedDict` 声明形状，有行为/不变量的容器才用 `dataclass`。Pydantic 的"处理欲"对透明容器是害处。例：`JsonRpcMessage`——`result` 字段原样容纳模型实例/dict/None，序列化推迟到出货那一刻。
   8. **单道序列化**：生产侧（RPC handler 等）返回模型**实例**，dump 归传输/分派层单点出货；不在中间环节"先 dump 再 validate 再 dump"（双道打包会在重建时剥多态字段）。dispatch 出参对实例直通 dump_wire；声明了 result_model 却返回散装 dict → 契约违约报错（router.py 先例）。出货只走 `model_dump` / `dump_wire`（`NovaBaseModel.model_dump` 默认 `mode="json"`，Enum→value、datetime→ISO 已单点处理）——**禁止旁路** `json.dumps(model.__dict__)` 式手工打包，旁路会丢掉 json mode 语义。
   9. **RPC handler 签名即契约**：handler 签名必须类型化（`async def x(params: XxxParams) -> XxxResult`），体内一律属性访问（不散装取键）；注册表形状从签名注解自动推导（`register("x", x, domain=...)`——不重复声明 params_model/result_model）。形状模型集中在 `server/protocol/methods/shapes.py`；引用经 `shapes.` 模块前缀或模块级逐个 import，**禁止在函数内局部 import shapes**（`get_type_hints` 只查模块 globals——局部 import 会让推导静默失败）。shapes 需要引用 handler 侧类型时用 `if TYPE_CHECKING:` 块 + 字符串注解破环——不要为杜绝循环依赖而退回局部 import（future annotations 下运行时求值仍查模块 globals，局部 import 禁令与延迟求值互补、不冲突）。自由负载方法（无固定形状）注解保持 `Dict[str, Any]`，即不声明形状的语义。
-  10. **声明 ≠ 校验（第四种表示：TypedDict）**：形状表示按成本选（规则 1/5/7），校验强度按信任边界选（规则 2/3）——两者正交。"有声明、零开销、不校验"的形状用 `typing.TypedDict` + 窄签名，**禁止拿 `Dict[str, Any]` 冒充已声明形状**（`Dict[str, Any]` 只保留给规则 9"无固定形状"的语义）；同一份 TypedDict 可以"库内零校验 + 边界 `TypeAdapter` 校验"两头用。行业锚点：openai-python 请求参数（[#1074](https://github.com/openai/openai-python/issues/1074) 显式拒绝 pydantic）、anthropic SDK `MessageParam`、LangGraph state 全部 TypedDict，解析产物/契约对象才 Pydantic。例：`nova_agent/harness/session/types.py` 的 entry/record 形状。
-- **类型注解与静态检查**：全仓已大量使用类型注解；静态检查采用**渐进棘轮**——新增/重写模块必须过 pyright 基础档**零新增告警**（先从类型最全的新层做起，如 `harness/session/`），存量按目录逐次清零；`typecheck` 收进 pixi task。规则 10 的 TypedDict 窄签名是纯静态约束，其价值由本条兑现。
-- **枚举字段**：在内存中以 `Enum` 对象保存（便于代码中使用 `.value` 和枚举比较），不要依赖 `use_enum_values=True`。
+  10. **声明 ≠ 校验（第四种表示：TypedDict）**：形状表示按成本选（规则 1/5/7），校验强度按信任边界选（规则 2/3）——两者正交。"有声明、零开销、不校验"的形状用 `typing.TypedDict` + 窄签名，**禁止拿 `Dict[str, Any]` 冒充已声明形状**（`Dict[str, Any]` 只保留给规则 9"无固定形状"的语义）；同一份 TypedDict 可以"库内零校验 + 边界 `TypeAdapter` 校验"两头用。行业锚点：openai-python 请求参数（[#1074](https://github.com/openai/openai-python/issues/1074) 显式拒绝 pydantic）、anthropic SDK `MessageParam`、LangGraph state 全部 TypedDict，解析产物/契约对象才 Pydantic。
+- **类型注解与静态检查**：全仓已大量使用类型注解；静态检查采用**渐进棘轮**——新增/重写模块必须过 pyright 基础档**零新增告警**（先从类型最全的新层做起），存量按目录逐次清零；`typecheck` 收进 pixi task。规则 10 的 TypedDict 窄签名是纯静态约束，其价值由本条兑现。
 - **枚举字段**：在内存中以 `Enum` 对象保存（便于代码中使用 `.value` 和枚举比较），不要依赖 `use_enum_values=True`。
 
 ---

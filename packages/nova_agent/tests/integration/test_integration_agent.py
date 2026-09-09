@@ -619,7 +619,9 @@ class TestAgentHooksReal:
         """prepare_next_turn 会被调用并允许修改下一轮上下文。"""
         called = False
 
-        def prepare(ctx: PrepareNextTurnContext) -> Optional[AgentLoopTurnUpdate]:
+        def prepare(
+            ctx: PrepareNextTurnContext, signal=None
+        ) -> Optional[AgentLoopTurnUpdate]:
             nonlocal called
             called = True
             return AgentLoopTurnUpdate(

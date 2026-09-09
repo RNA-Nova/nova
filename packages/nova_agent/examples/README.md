@@ -18,10 +18,7 @@
 | `05_abort_continue.py` | `abort()` 取消 run、`wait_for_idle()` 的 shield 语义、`continue_()` 继续 |
 | `06_agent_loop_lowlevel.py` | 低层 facade：`agent_loop()` 返回 `AgentEventStream`，自管状态 |
 
-另有两个辅助文件：
-
-- `generate_event_flow_log.py`：生成各场景完整事件流日志的工具脚本（`python examples/generate_event_flow_log.py`）
-- `EVENT_FLOW_LOG.md`：上述脚本的生成产物，事件序列参考
+各场景完整的事件序列见包根 [`README.md`](../README.md) 的「事件流」一节。
 
 ## 运行方式
 
@@ -42,7 +39,7 @@ export VOLCENGINE_API_KEY="<your-key>"
 from nova_ai import get_volcengine_model
 
 agent = Agent()  # 默认 stream_fn 走内置 Models
-agent.set_model(get_volcengine_model("deepseek-v3-2-251201"))
+agent.set_model(get_volcengine_model("deepseek-v4-flash-260425"))
 await agent.prompt("你好")
 ```
 
