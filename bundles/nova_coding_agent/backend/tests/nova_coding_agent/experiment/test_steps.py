@@ -279,8 +279,11 @@ def test_extract_cd_target_common_forms():
 def test_resolve_command_workdir(tmp_path):
     base = str(tmp_path)
     assert steps.resolve_command_workdir("python x.py", base) == base
-    assert steps.resolve_command_workdir("cd /abs/dir && python x.py", base) == (
-        "/abs/dir"
+    # 绝对 cd 目标原样使用（用平台原生的绝对路径构造，避开 POSIX 字面量假设）
+    abs_target = str(tmp_path / "abs" / "dir")
+    assert (
+        steps.resolve_command_workdir(f'cd "{abs_target}" && python x.py', base)
+        == abs_target
     )
     assert steps.resolve_command_workdir("cd sub/dir && python x.py", base) == str(
         tmp_path / "sub" / "dir"
