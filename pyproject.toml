@@ -24,7 +24,9 @@ nova-agent = { path = "packages/nova_agent", editable = true }
 nova-harness = { path = "packages/nova_harness", editable = true }
 nova-base = { path = "bundles/nova_base", editable = true }
 nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
-openai = ">=2.0"
+# 上限钉在 <3.10.0：3.10.0 流式收尾回归（PoolByteStream athrow 噪音），
+# 详见 packages/nova_ai/pyproject.toml 注释；上游修复后放开。
+openai = ">=2.0,<3.10.0"
 httpx = ">=0.27.0"
 certifi = ">=2024.0.0"
 pydantic = ">=2.0"
