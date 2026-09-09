@@ -1,13 +1,13 @@
 """AgentSession 生命周期相关类型。"""
 
-from nova_harness.core.types.session.config import (
+from nova_harness.types.session.config import (
     AgentSessionConfig,
     CreateAgentSessionOptions,
 )
-from nova_harness.core.types.session.constants import CURRENT_SESSION_VERSION
-from nova_harness.core.types.session.context import SessionContext
-from nova_harness.core.types.session.diagnostics import AgentSessionRuntimeDiagnostic
-from nova_harness.core.types.session.entries import (
+from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
+from nova_harness.types.session.context import SessionContext
+from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.types.session.entries import (
     BranchSummaryEntry,
     CompactionEntry,
     CustomEntry,
@@ -22,18 +22,18 @@ from nova_harness.core.types.session.entries import (
     SessionMessageEntry,
     ThinkingLevelChangeEntry,
 )
-from nova_harness.core.types.session.factory import CreateAgentSessionRuntimeResult
-from nova_harness.core.types.session.info import SessionInfo
-from nova_harness.core.types.session.model import ModelCycleResult, ScopedModelConfig
-from nova_harness.core.types.session.options import (
+from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
+from nova_harness.types.session.info import SessionInfo
+from nova_harness.types.session.model import ModelCycleResult, ScopedModelConfig
+from nova_harness.types.session.options import (
     ForkOptions,
     NavigateOptions,
     NewSessionOptions,
     PromptOptions,
     SwitchSessionOptions,
 )
-from nova_harness.core.types.session.stats import SessionStats, SessionTokens
-from nova_harness.core.types.session.tree import SessionTreeNode
+from nova_harness.types.session.stats import SessionStats, SessionTokens
+from nova_harness.types.session.tree import SessionTreeNode
 
 __all__ = [
     "AgentSessionConfig",

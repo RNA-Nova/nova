@@ -21,9 +21,9 @@ from nova_ai import ImageContent
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field, RootModel, SerializeAsAny, StrictBool
 
-from nova_harness.core.types.resources.selection import CapabilitySelection
-from nova_harness.core.types.resources.tools import ToolInfo
-from nova_harness.server.types.items import NovaItem, WireItem
+from nova_server.types.items import WireItem
+from nova_harness.types.resources.selection import CapabilitySelection
+from nova_harness.types.resources.tools import ToolInfo
 
 # ---------------------------------------------------------------------------
 # 公共小模型
@@ -75,6 +75,16 @@ class CreateSessionParams(NovaBaseModel):
     # 临时会话（pi --no-session 对位）：内存态运行、不落盘不进会话列表；
     # 与 session_flag / continue_last / session_file 互斥（恢复与临时语义矛盾）
     no_session: StrictBool = False
+    # exec/headless 形态参数面（此前只存在于进程内 CreateAgentSessionOptions
+    # ——exec 走协议后经契约承接，对齐 codex exec 经 InProcessAppServerClient
+    # 驱动的参数通路）：
+    additional_skill_paths: Optional[List[str]] = None
+    additional_prompt_template_paths: Optional[List[str]] = None
+    tools: Optional[List[str]] = None
+    exclude_tools: Optional[List[str]] = None
+    # 项目信任三态：None=按 UI 决议（trust.json → default 设置 → 信任框）；
+    # True/False=无 UI 覆盖（headless 形态，决议不问人）
+    trust: Optional[bool] = None
 
 
 class CreateSessionResult(NovaBaseModel):

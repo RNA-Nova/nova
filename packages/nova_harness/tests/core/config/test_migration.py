@@ -10,9 +10,7 @@
 
 from pathlib import Path
 
-import pytest
-
-from nova_harness.core.config.migration import (
+from nova_harness.config.migration import (
     MIGRATED_RESOURCE_DIR_NAMES,
     migrate_backend_layout,
     migrate_backend_resource_dirs,

@@ -20,24 +20,28 @@ import pytest
 from nova_ai import AssistantMessage, TextContent, UserMessage
 
 from nova_harness.core import AgentSession
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.harness.session.utils import get_default_session_dir_path
-from nova_harness.core.types.session.config import AgentSessionConfig
-from nova_harness.server.protocol import JSONRPCError, MethodRegistry
-from nova_harness.server.protocol.methods import session as session_methods
-from nova_harness.server.protocol.methods.state import ServerState
+from nova_server.protocol import JSONRPCError, MethodRegistry
+from nova_server.protocol.methods import session as session_methods
+from nova_server.protocol.methods.state import ServerState
+from nova_harness.sessions import SessionManager
+from nova_harness.sessions.utils import get_default_session_dir_path
+from nova_harness.types.session.config import AgentSessionConfig
 
 
-def _make_state(runtime: Any = None) -> ServerState:
+def _make_state(runtime: Any = None, runtime_manager: Any = None) -> ServerState:
     state = ServerState(ui_context=SimpleNamespace())
+    if runtime_manager is not None:
+        state.runtime_manager = runtime_manager
     if runtime is not None:
         state.set_runtime(runtime)
     return state
 
 
-def _session_registry(runtime: Any = None) -> MethodRegistry:
+def _session_registry(
+    runtime: Any = None, runtime_manager: Any = None
+) -> MethodRegistry:
     reg = MethodRegistry()
-    session_methods.register(reg, _make_state(runtime))
+    session_methods.register(reg, _make_state(runtime, runtime_manager))
     return reg
 
 
@@ -443,22 +447,41 @@ class _CreateFakeRuntime:
         self.switched.append(path)
         return {"cancelled": False}
 
+    async def dispose(self):
+        return None
 
-@pytest.fixture
-def fake_create_runtime(monkeypatch):
-    """把 create_agent_session_runtime 换成替身工厂（避免真实 SDK 创建）。
 
-    返回已创建的 runtime 列表，供断言 switch_session 调用。
+class _StubRuntimeManager:
+    """RuntimeManager 替身：open_session 记账式返回工厂产物。
+
+    created / opts 供测试断言（对齐真实 manager 的注入面——createSession
+    现走 ``state.runtime_manager.open_session``，patch 函数已无效）。
     """
-    created: List[_CreateFakeRuntime] = []
 
-    async def _factory(opts):
-        runtime = _CreateFakeRuntime()
-        created.append(runtime)
+    def __init__(self, factory):
+        self._factory = factory
+        self.created: List[Any] = []
+        self.opts: List[Any] = []
+
+    async def open_session(self, opts):
+        self.opts.append(opts)
+        runtime = await self._factory(opts)
+        self.created.append(runtime)
         return runtime
 
-    monkeypatch.setattr(session_methods, "create_agent_session_runtime", _factory)
-    return created
+
+@pytest.fixture
+def fake_create_runtime():
+    """注入替身 manager（避免真实组装链创建会话）。
+
+    返回 stub manager；``.created`` 为已创建 runtime 列表，供断言
+    switch_session 调用。
+    """
+
+    async def _factory(opts):
+        return _CreateFakeRuntime()
+
+    return _StubRuntimeManager(_factory)
 
 
 @pytest.mark.asyncio
@@ -469,7 +492,7 @@ async def test_create_session_with_session_file_absolute(
     path = str(tmp_path / "explicit.jsonl")
     _write_session(path, "sid-explicit", str(tmp_path), user_texts=["hi"])
 
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=fake_create_runtime)
     resp = await _call(
         reg,
         "createSession",
@@ -477,7 +500,7 @@ async def test_create_session_with_session_file_absolute(
     )
     assert resp.error is None
     assert resp.result["resumed"] is True
-    assert fake_create_runtime[0].switched == [path]
+    assert fake_create_runtime.created[0].switched == [path]
 
 
 @pytest.mark.asyncio
@@ -490,11 +513,11 @@ async def test_create_session_with_session_file_bare_id(
     path = os.path.join(session_dir, "abc123.jsonl")
     _write_session(path, "abc123", cwd, user_texts=["resume me"])
 
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=fake_create_runtime)
     resp = await _call(reg, "createSession", {"cwd": cwd, "sessionFile": "abc123"})
     assert resp.error is None
     assert resp.result["resumed"] is True
-    assert fake_create_runtime[0].switched == [path]
+    assert fake_create_runtime.created[0].switched == [path]
 
 
 @pytest.mark.asyncio
@@ -507,10 +530,10 @@ async def test_create_session_bare_id_with_jsonl_suffix_not_doubled(
     path = os.path.join(session_dir, "s2.jsonl")
     _write_session(path, "s2", cwd, user_texts=["hi"])
 
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=fake_create_runtime)
     resp = await _call(reg, "createSession", {"cwd": cwd, "sessionFile": "s2.jsonl"})
     assert resp.error is None
-    assert fake_create_runtime[0].switched == [path]
+    assert fake_create_runtime.created[0].switched == [path]
 
 
 @pytest.mark.asyncio
@@ -519,14 +542,14 @@ async def test_create_session_session_file_not_found(
 ):
     """文件不存在：SESSION_NOT_FOUND，且不创建 runtime（校验先于重建）。"""
     missing = str(tmp_path / "nope.jsonl")
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=fake_create_runtime)
     resp = await _call(
         reg, "createSession", {"cwd": str(tmp_path), "sessionFile": missing}
     )
     assert resp.error is not None
     assert resp.error["code"] == JSONRPCError.SESSION_NOT_FOUND
     assert missing in resp.error["message"]
-    assert fake_create_runtime == []
+    assert fake_create_runtime.created == []
 
 
 @pytest.mark.asyncio
@@ -538,13 +561,13 @@ async def test_create_session_session_file_invalid(
     with open(path, "w", encoding="utf-8") as f:
         f.write('{"type": "message"}\n')
 
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=fake_create_runtime)
     resp = await _call(
         reg, "createSession", {"cwd": str(tmp_path), "sessionFile": path}
     )
     assert resp.error is not None
     assert resp.error["code"] == JSONRPCError.SESSION_NOT_FOUND
-    assert fake_create_runtime == []
+    assert fake_create_runtime.created == []
 
 
 @pytest.mark.asyncio
@@ -555,7 +578,7 @@ async def test_create_session_session_file_mutually_exclusive(
     path = str(tmp_path / "explicit.jsonl")
     _write_session(path, "sid-x", str(tmp_path), user_texts=["hi"])
 
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=fake_create_runtime)
     for extra in (
         {"sessionFlag": "some-id"},
         {"sessionFlag": ""},
@@ -568,7 +591,7 @@ async def test_create_session_session_file_mutually_exclusive(
         )
         assert resp.error is not None, extra
         assert resp.error["code"] == JSONRPCError.INVALID_PARAMS, extra
-    assert fake_create_runtime == []
+    assert fake_create_runtime.created == []
 
 
 @pytest.mark.asyncio
@@ -588,16 +611,13 @@ async def test_create_session_session_file_blank(agent_dir, tmp_path):
 
 
 @pytest.fixture
-def capture_create_opts(monkeypatch):
-    """捕获 create_agent_session_runtime 收到的 opts（验证内存态注入）。"""
-    captured: List[Any] = []
+def capture_create_opts():
+    """捕获 open_session 收到的 opts（验证内存态注入）。"""
 
     async def _factory(opts):
-        captured.append(opts)
         return _CreateFakeRuntime()
 
-    monkeypatch.setattr(session_methods, "create_agent_session_runtime", _factory)
-    return captured
+    return _StubRuntimeManager(_factory)
 
 
 @pytest.mark.asyncio
@@ -606,10 +626,10 @@ async def test_create_session_no_session_injects_memory_manager(
 ):
     """noSession=True：SessionManager.in_memory 注入 opts（不落盘机制与
     print 模式 --no-session 同源）。"""
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=capture_create_opts)
     resp = await _call(reg, "createSession", {"cwd": str(tmp_path), "noSession": True})
     assert resp.error is None
-    opts = capture_create_opts[0]
+    opts = capture_create_opts.opts[0]
     assert opts.session_manager is not None
     # 内存态管理器：persist=False（in_memory 构造语义——不落盘不进列表）
     assert opts.session_manager.is_persisted() is False
@@ -620,7 +640,7 @@ async def test_create_session_no_session_mutually_exclusive(
     agent_dir, tmp_path, capture_create_opts
 ):
     """noSession 与恢复类参数互斥：参数错误且不创建 runtime。"""
-    reg = _session_registry()
+    reg = _session_registry(runtime_manager=capture_create_opts)
     for extra in (
         {"sessionFlag": "abc"},
         {"continueLast": True},
@@ -632,4 +652,34 @@ async def test_create_session_no_session_mutually_exclusive(
         assert resp.error is not None
         assert resp.error["code"] == JSONRPCError.INVALID_PARAMS
         assert "noSession" in resp.error["message"]
-    assert capture_create_opts == []
+    assert capture_create_opts.opts == []
+
+
+@pytest.mark.asyncio
+async def test_create_session_exec_params_passthrough(
+    agent_dir, tmp_path, capture_create_opts
+):
+    """exec/headless 参数面透传：tools/exclude/skill 路径/trust 三态进 options。
+
+    trust=True 走无 UI 覆盖决议（NoOpUIContext + has_ui=False）。
+    """
+    reg = _session_registry(runtime_manager=capture_create_opts)
+    resp = await _call(
+        reg,
+        "createSession",
+        {
+            "cwd": str(tmp_path),
+            "tools": ["bash", "read"],
+            "excludeTools": ["write"],
+            "additionalSkillPaths": ["/skills"],
+            "additionalPromptTemplatePaths": ["/prompts"],
+            "trust": True,
+        },
+    )
+    assert resp.error is None
+    opts = capture_create_opts.opts[0]
+    assert opts.tools == ["bash", "read"]
+    assert opts.exclude_tools == ["write"]
+    assert opts.additional_skill_paths == ["/skills"]
+    assert opts.additional_prompt_template_paths == ["/prompts"]
+    assert opts.project_trusted is True

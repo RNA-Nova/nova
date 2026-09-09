@@ -7,15 +7,13 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, get_type_hints
 
+from nova_ai.types.base_model import NovaBaseModel
 from pydantic import BaseModel, RootModel, ValidationError
 
-from nova_ai.types.base_model import NovaBaseModel
-
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.jsonrpc import (
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.jsonrpc import (
     JsonRpcMessage,
     build_error,
-    build_notification,
     build_response,
 )
 

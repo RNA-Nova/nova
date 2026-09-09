@@ -1,6 +1,6 @@
 """通用存储后端。"""
 
-from nova_harness.core.config.storage.backends import (
+from nova_harness.config.storage.backends import (
     FileStorageBackend,
     InMemoryStorageBackend,
     StorageBackend,

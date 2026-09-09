@@ -16,7 +16,7 @@ import shutil
 import sys
 from typing import Dict, List, Optional
 
-from nova_harness.core.config.defaults import get_agent_dir
+from nova_harness.config.defaults import get_agent_dir
 
 
 def get_env_bin_dir() -> str:

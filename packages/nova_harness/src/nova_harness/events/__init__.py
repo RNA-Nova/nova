@@ -1,7 +1,7 @@
 """
 事件 payload 与结果类型。
 
-集中存放原 `nova_harness.extensions.types` 中的事件类型、
+集中存放原 `nova_harness.types.extensions` 中的事件类型、
 原 `nova_harness.agent.events` 中的 AgentSession 事件，以及所有事件结果类型。
 所有事件统一使用 dataclass，避免不可序列化对象触发 Pydantic 校验。
 

@@ -5,7 +5,7 @@ item 是因 wire/呈现边界而生的词汇——会话的域真身（消息/�
 BashExecutionItem）继承本模块的 ``NovaItem`` 定义。
 """
 
-from nova_harness.server.types.items import (
+from nova_server.types.items import (
     AgentMessageItem,
     BranchSummaryItem,
     CompactionItem,
@@ -18,7 +18,7 @@ from nova_harness.server.types.items import (
     ToolCallItem,
     UserMessageItem,
 )
-from nova_harness.server.types.notifications import (
+from nova_server.types.notifications import (
     ItemCompletedNotification,
     ItemDeltaNotification,
     ItemStartedNotification,

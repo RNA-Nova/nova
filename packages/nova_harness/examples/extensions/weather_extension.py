@@ -9,8 +9,8 @@
 下次启动 AgentSession 时，扩展会自动加载。
 """
 
-from nova_harness.core.extensions import NovaExtensionAPI
-from nova_harness.core.types.events import InputEventResult
+from nova_harness.extensions import NovaExtensionAPI
+from nova_harness.events import InputEventResult
 
 
 def extension(nova: NovaExtensionAPI):

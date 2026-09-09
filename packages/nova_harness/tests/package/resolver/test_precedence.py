@@ -2,16 +2,12 @@
 
 import pytest
 
-from nova_harness.core.types.package import (
-    PathMetadata,
-    ResolvedResource,
-    SourceOrigin,
-    SourceScope,
-)
 from nova_harness.package.resolve.resolver import (
     resource_precedence_rank,
     sort_resolved_resources,
 )
+from nova_harness.types.package import PathMetadata, SourceOrigin, SourceScope
+from nova_harness.types.resources.prompts import ResolvedResource
 
 
 @pytest.mark.parametrize(

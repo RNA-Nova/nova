@@ -7,7 +7,7 @@ import json
 import sys
 from typing import Any, Dict, Optional
 
-from nova_harness.server.transport.base import Transport
+from nova_server.transport.base import Transport
 
 # 读侧行限：协议单帧为单行 JSON——带图 prompt（base64）/大会话全量历史
 # 等合法帧轻松超过 asyncio 默认的 64KB，故显式放宽到 64MB（上限非预分配，

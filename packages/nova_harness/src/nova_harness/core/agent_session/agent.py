@@ -16,7 +16,7 @@ import os
 import time
 import traceback
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from nova_agent import (
     AbortController,
@@ -32,6 +32,11 @@ from nova_ai import (
     UserMessage,
 )
 
+from nova_harness.config.auth.guidance import (
+    format_no_auth_message,
+    format_no_model_selected_message,
+)
+from nova_harness.config.defaults import get_agent_dir
 from nova_harness.core.agent_session.controllers import (
     CompactionController,
     EventController,
@@ -44,28 +49,22 @@ from nova_harness.core.agent_session.controllers import (
     TreeNavigator,
     UserToolController,
 )
-from nova_harness.core.config.auth.guidance import (
-    format_no_auth_message,
-    format_no_model_selected_message,
-)
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.extensions import (
-    ExtensionRunner,
-    emit_session_shutdown_event,
-)
-from nova_harness.core.harness.agents import AgentManager
-from nova_harness.core.harness.persona import PersonaManager
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.harness.skills import (
+from nova_harness.core.domains.agents import AgentManager
+from nova_harness.core.domains.persona import PersonaManager
+from nova_harness.core.domains.skills import (
     expand_skill_command,
     filter_skills_by_whitelist,
 )
-from nova_harness.core.harness.system_prompt import SystemPromptManager
-from nova_harness.core.harness.tools import ToolsManager
-from nova_harness.core.harness.user_tools import UserToolManager
-from nova_harness.core.resources.loaders.prompt_templates import expand_prompt_template
-from nova_harness.core.types.compaction import CompactionResult
-from nova_harness.core.types.events import (
+from nova_harness.core.domains.system_prompt import SystemPromptManager
+from nova_harness.core.domains.tools import ToolsManager
+from nova_harness.core.domains.user_tools import UserToolManager
+from nova_harness.core.utils.messages import extract_text_from_content
+from nova_harness.core.utils.name_sets import (
+    apply_name_list,
+    build_selection_report,
+    is_name_allowed,
+)
+from nova_harness.events import (
     AgentSessionEvent,
     AgentSettledEvent,
     AutoRetryEndEvent,
@@ -83,24 +82,29 @@ from nova_harness.core.types.events import (
     ToolResultEvent,
     TurnEndEvent,
 )
-from nova_harness.core.types.events.constants import (
+from nova_harness.events.constants import (
     AGENT_SETTLED,
     INPUT,
     RESOURCES_DISCOVER,
     TOOL_CALL,
     TOOL_RESULT,
 )
-from nova_harness.core.types.extensions import (
-    ExecOptions,
-    ExecResult,
+from nova_harness.extensions import (
+    ExtensionRunner,
+    emit_session_shutdown_event,
+)
+from nova_harness.resources.loaders.prompt_templates import expand_prompt_template
+from nova_harness.sessions import SessionManager
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_harness.types.extensions.actions import (
     ExtensionActions,
     ExtensionCommandContextActions,
     ExtensionContextActions,
     ExtensionProviderActions,
-    SlashCommandInfo,
-    SourceInfo,
 )
-from nova_harness.core.types.protocols import (
+from nova_harness.types.extensions.commands import SlashCommandInfo
+from nova_harness.types.extensions.exec import ExecOptions, ExecResult
+from nova_harness.types.protocols import (
     ModelRuntimeProtocol,
     ResourceLoaderProtocol,
     SessionManagerProtocol,
@@ -108,33 +112,25 @@ from nova_harness.core.types.protocols import (
     SystemPromptManagerProtocol,
     ToolsManagerProtocol,
 )
-from nova_harness.core.types.resources.extension_paths import (
+from nova_harness.types.resources.extension_paths import (
     ResourceExtensionPathEntry,
     ResourceExtensionPaths,
 )
-from nova_harness.core.types.resources.selection import CapabilitySelection
-from nova_harness.core.types.resources.tools import (
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.selection import CapabilitySelection
+from nova_harness.types.resources.tools import (
     ToolDefinition,
     ToolExecContext,
 )
-from nova_harness.core.types.resources.user_tools import UserToolInfo
-from nova_harness.core.types.session import (
-    NavigateOptions,
-    PromptOptions,
-    SessionStats,
-)
-from nova_harness.core.types.session.config import AgentSessionConfig
-from nova_harness.core.types.session.model import (
+from nova_harness.types.resources.user_tools import UserToolInfo
+from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.types.session.model import (
     ModelCycleResult,
     ScopedModelConfig,
 )
-from nova_harness.core.types.ui import NoOpUIContext, ScopedUIContext, UIContext
-from nova_harness.core.utils.messages import extract_text_from_content
-from nova_harness.core.utils.name_sets import (
-    apply_name_list,
-    build_selection_report,
-    is_name_allowed,
-)
+from nova_harness.types.session.options import NavigateOptions, PromptOptions
+from nova_harness.types.session.stats import SessionStats
+from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
 
 # ============================================================================
 # Extension action 具体实现（替代 SimpleNamespace，提供类型安全）
@@ -631,8 +627,7 @@ class AgentSession:
         flag_values: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化扩展 runner、工具注册表与系统提示词。"""
-        from nova_harness.core.extensions.event_bus import ExtensionEventBus
-        from nova_harness.core.types.extensions import ExtensionRuntime
+        from nova_harness.types.extensions.loading import ExtensionRuntime
 
         raw_extensions_result = self.resource_loader.get_extensions()
         extensions = raw_extensions_result.extensions
@@ -710,7 +705,7 @@ class AgentSession:
 
     def _sync_system_prompt(self) -> None:
         """用当前配置和工具白名单重建系统提示词。"""
-        from nova_harness.core.types.resources.agents import DynamicContext
+        from nova_harness.types.resources.agents import DynamicContext
 
         context = DynamicContext(cwd=self.cwd, session_id=str(self.session_id))
         self._enrich_environment_context(context)
@@ -1371,7 +1366,7 @@ class AgentSession:
             await self._extend_resources_from_extensions(reason="reload")
 
         # Bus 2 通知（前端刷新包 UI 贡献——slots 整体重载的触发点）
-        from nova_harness.core.types.events import SessionReloadedEvent
+        from nova_harness.events import SessionReloadedEvent
 
         self._emit(SessionReloadedEvent(reason="reload"))
 
@@ -1489,7 +1484,7 @@ class AgentSession:
                 self._extension_runner is not None
                 and self._extension_runner.has_handlers(INPUT)
             ):
-                from nova_harness.core.types.events import InputEvent
+                from nova_harness.events import InputEvent
 
                 input_event = InputEvent(
                     text=current_text,
@@ -1802,7 +1797,7 @@ class AgentSession:
         options: Optional[Dict[str, Any]] = None,
     ) -> None:
         """发送一条自定义消息，创建 CustomMessageEntry。"""
-        from nova_harness.core.types.messages import CustomMessage
+        from nova_harness.types.messages import CustomMessage
 
         opts = options or {}
         # 边界归一：扩展圈事实惯例是 {"type": ..., "text": ...}（pi 对位为
@@ -2091,7 +2086,7 @@ class AgentSession:
         （completed），落盘与定稿同一事实源（消息），item 只是其线上呈现。
 
         core 对 ``item`` 全程不透明：约定为
-        ``nova_harness.server.types.items.NovaItem`` 子类——core 不 import
+        ``nova_server.types.items.NovaItem`` 子类——core 不 import
         不解读，类型校验在 server 承接时进行（垃圾在边界丢弃 + 日志）。
         """
         self._emit(ItemEmissionEvent(phase="started", item=item))
@@ -2179,7 +2174,7 @@ class AgentSession:
         if not os.path.exists(session_file):
             raise RuntimeError("当前会话还没有内容，无法克隆")
 
-        from nova_harness.core.harness.session.utils import (
+        from nova_harness.sessions.utils import (
             generate_session_id,
         )
 
@@ -2336,8 +2331,8 @@ class AgentSession:
             self.settings_manager, "set_project_trusted"
         ):
             self.settings_manager.set_project_trusted(trusted)
-        from nova_harness.core.config.defaults import get_agent_dir
-        from nova_harness.core.harness.project_trust import ProjectTrustStore
+        from nova_harness.config.defaults import get_agent_dir
+        from nova_harness.resources.project_trust.trust_store import ProjectTrustStore
 
         ProjectTrustStore.for_agent_dir(str(get_agent_dir())).set(self.cwd, trusted)
 

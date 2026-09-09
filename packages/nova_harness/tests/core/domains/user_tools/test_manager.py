@@ -1,7 +1,7 @@
 """UserToolManager 与 UserToolController 测试。"""
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pytest
 from nova_agent import CustomAgentMessage
@@ -9,8 +9,8 @@ from nova_agent import CustomAgentMessage
 from nova_harness.core.agent_session.controllers.user_tools import (
     UserToolController,
 )
-from nova_harness.core.harness.user_tools import UserToolManager
-from nova_harness.core.types.resources.user_tools import UserToolDefinition
+from nova_harness.core.domains.user_tools import UserToolManager
+from nova_harness.types.resources.user_tools import UserToolDefinition
 
 
 class FakeMessage(CustomAgentMessage):

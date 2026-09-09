@@ -19,11 +19,11 @@ from typing import Callable, Dict, Optional
 import pytest
 import yaml
 
-from nova_harness.core.harness.agents import AgentManager
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.resources.agents import AgentConfig
-from nova_harness.core.types.resources.selection import CapabilitySelection
-from nova_harness.core.types.resources.tools import ToolInfo
+from nova_harness.core.domains.agents import AgentManager
+from nova_harness.types.resources.agents import AgentConfig
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.selection import CapabilitySelection
+from nova_harness.types.resources.tools import ToolInfo
 
 
 class _FakeLoader:
@@ -414,7 +414,7 @@ def test_save_reload_makes_shadow_effective(tmp_path: Path):
 
     def _rescan() -> Dict[str, AgentConfig]:
         # 模拟 loader reload：user 级影子优先于包（user > package 碰撞裁决）
-        from nova_harness.core.resources.loaders.agent_config import (
+        from nova_harness.resources.loaders.agent_config import (
             load_agent_config_from_yaml,
         )
 

@@ -9,16 +9,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import inspect
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from nova_agent import AgentMessage
 
-from nova_harness.core.types.events import (
+from nova_harness.events import (
     AfterProviderResponseEvent,
     BeforeAgentStartEvent,
     BeforeProviderHeadersEvent,
@@ -41,24 +40,16 @@ from nova_harness.core.types.events import (
     TurnEndEvent,
     UserBashEvent,
 )
-from nova_harness.core.types.events.constants import (
-    AFTER_PROVIDER_RESPONSE,
+from nova_harness.events.constants import (
     BEFORE_PROVIDER_HEADERS,
     BEFORE_PROVIDER_REQUEST,
     CONTEXT,
     INPUT,
-    MESSAGE_END,
-    MODEL_SELECT,
-    SESSION_SHUTDOWN,
-    THINKING_LEVEL_SELECT,
     TOOL_CALL,
-    TOOL_EXECUTION_END,
-    TOOL_EXECUTION_START,
-    TOOL_EXECUTION_UPDATE,
     TOOL_RESULT,
     USER_BASH,
 )
-from nova_harness.core.types.events.results import (
+from nova_harness.events.results import (
     AfterProviderResponseEventResult,
     BeforeAgentStartEventResult,
     BeforeProviderRequestEventResult,
@@ -74,27 +65,28 @@ from nova_harness.core.types.events.results import (
     ToolResultEventResult,
     UserBashEventResult,
 )
-from nova_harness.core.types.extensions import (
-    Extension,
+from nova_harness.types.extensions.actions import (
     ExtensionActions,
-    ExtensionCommandContext,
     ExtensionCommandContextActions,
-    ExtensionContext,
     ExtensionContextActions,
-    ExtensionFlag,
     ExtensionProviderActions,
-    ExtensionRuntime,
+)
+from nova_harness.types.extensions.context import (
+    ExtensionCommandContext,
+    ExtensionContext,
+)
+from nova_harness.types.extensions.extension import (
+    ExtensionFlag,
     ExtensionShortcut,
-    LoadedExtensionsResult,
     RegisteredCommand,
 )
-from nova_harness.core.types.project_trust import (
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.types.project_trust import ProjectTrustEvent, ProjectTrustEventResult
+from nova_harness.types.protocols import ModelRuntimeProtocol
+from nova_harness.types.session.factory import (
     ProjectTrustContext,
-    ProjectTrustEvent,
-    ProjectTrustEventResult,
 )
-from nova_harness.core.types.protocols import ModelRuntimeProtocol
-from nova_harness.core.types.ui import NoOpUIContext, ScopedUIContext, UIContext
+from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
 
 
 @dataclass

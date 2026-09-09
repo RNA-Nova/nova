@@ -3,13 +3,13 @@
 对外暴露 ``ExtensionRunner``、``load_extensions``、``NovaExtensionAPI`` 等核心能力。
 """
 
-from nova_harness.core.extensions.api import NovaExtensionAPI, create_extension_api
-from nova_harness.core.extensions.loader import (
+from nova_harness.extensions.api import NovaExtensionAPI, create_extension_api
+from nova_harness.extensions.loader import (
     ExtensionLoader,
     ExtensionLoadError,
     load_extensions,
 )
-from nova_harness.core.extensions.runner import (
+from nova_harness.extensions.runner import (
     ExtensionRunner,
     emit_project_trust_event,
     emit_session_shutdown_event,

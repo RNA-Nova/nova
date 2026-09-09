@@ -11,7 +11,7 @@ import pytest
 from nova_ai import AssistantMessage, Cost, TextContent, Usage
 
 from nova_harness.core.agent_session.controllers.events import EventController
-from nova_harness.core.types.events import CacheMissEvent
+from nova_harness.events import CacheMissEvent
 
 
 class _FakeQueue:

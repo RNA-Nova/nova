@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nova_harness.modes.rpc.cli import _async_main, _build_parser, main
+from nova_server.rpc.cli import _async_main, _build_parser, main
 
 _EXPECTED_SIGNAL_COUNT = 3 if sys.platform != "win32" else 2
 
@@ -31,7 +31,7 @@ async def test_async_main_runs_server():
     mock_loop.remove_signal_handler = MagicMock()
 
     with patch.object(sys, "argv", ["nova-harness-rpc"]):
-        with patch("nova_harness.modes.rpc.cli.RpcServer", return_value=mock_server):
+        with patch("nova_server.rpc.cli.RpcServer", return_value=mock_server):
             with patch("asyncio.get_running_loop", return_value=mock_loop):
                 result = await _async_main()
 
@@ -58,7 +58,7 @@ async def test_async_main_calls_shutdown_on_signal():
     mock_loop.add_signal_handler.side_effect = capture
 
     with patch.object(sys, "argv", ["nova-harness-rpc"]):
-        with patch("nova_harness.modes.rpc.cli.RpcServer", return_value=mock_server):
+        with patch("nova_server.rpc.cli.RpcServer", return_value=mock_server):
             with patch("asyncio.get_running_loop", return_value=mock_loop):
                 await _async_main()
 
@@ -73,7 +73,7 @@ def test_main_returns_keyboard_interrupt_code():
     async def raise_interrupt():
         raise KeyboardInterrupt
 
-    with patch("nova_harness.modes.rpc.cli._async_main", raise_interrupt):
+    with patch("nova_server.rpc.cli._async_main", raise_interrupt):
         assert main() == 130
 
 
@@ -83,5 +83,5 @@ def test_main_propagates_return_code():
     async def fake_async_main():
         return 0
 
-    with patch("nova_harness.modes.rpc.cli._async_main", fake_async_main):
+    with patch("nova_server.rpc.cli._async_main", fake_async_main):
         assert main() == 0

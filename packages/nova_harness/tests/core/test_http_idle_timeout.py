@@ -3,8 +3,6 @@
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from nova_harness.core.utils.http_idle_timeout import (
     DEFAULT_HTTP_IDLE_TIMEOUT_MS,
     MAX_HTTP_IDLE_TIMEOUT_MS,

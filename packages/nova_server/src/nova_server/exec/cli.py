@@ -1,15 +1,15 @@
-"""Command-line entry point for print mode.
+"""Command-line entry point for exec mode.
 
-``nova-harness run`` 以 print 模式执行：非交互式地运行一次 agent 任务。
+``nova-server exec`` 以 exec 模式执行：非交互式地运行一次 agent 任务。
 """
 
 from argparse import Namespace
 
-from nova_harness.modes.print.runner import run_print_mode
+from nova_server.exec.runner import run_exec_mode
 
 
 def cmd_run(args: Namespace) -> int:
-    """``nova-harness run`` 子命令入口。"""
+    """``nova-server exec`` 子命令入口。"""
     if not args.agent or not args.task:
         __import__("sys").stderr.write("error: agent and --task are required\n")
         return 2
@@ -20,7 +20,7 @@ def cmd_run(args: Namespace) -> int:
         return [name.strip() for name in value.split(",") if name.strip()]
 
     return __import__("asyncio").run(
-        run_print_mode(
+        run_exec_mode(
             agent_name=args.agent,
             task=args.task,
             cwd=args.cwd,

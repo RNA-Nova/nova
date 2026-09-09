@@ -8,17 +8,14 @@ import json
 import pytest
 from nova_ai import AssistantMessage, TextContent, UserMessage
 
-from nova_harness.core.harness.session.listing import (
+from nova_harness.sessions.listing import (
     _build_session_info_sync,
     build_session_info,
     list_sessions_from_dir,
 )
-from nova_harness.core.harness.session.utils import generate_session_id
-from nova_harness.core.types.session import (
-    SessionHeader,
-    SessionInfo,
-    SessionMessageEntry,
-)
+from nova_harness.sessions.utils import generate_session_id
+from nova_harness.types.session.entries import SessionHeader, SessionMessageEntry
+from nova_harness.types.session.info import SessionInfo
 
 
 def _write_session(path, header, entries):
@@ -56,7 +53,7 @@ def test_build_session_info_sync_with_messages(tmp_path):
 
 
 def test_build_session_info_sync_with_session_info_name(tmp_path):
-    from nova_harness.core.types.session.entries import SessionInfoEntry
+    from nova_harness.types.session.entries import SessionInfoEntry
 
     session_id = generate_session_id()
     header = SessionHeader(

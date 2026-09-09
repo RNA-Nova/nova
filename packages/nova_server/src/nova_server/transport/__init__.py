@@ -8,10 +8,10 @@
 - ``MemoryTransport``：内存传输，主要用于测试。
 """
 
-from nova_harness.server.transport.base import Transport
-from nova_harness.server.transport.memory import MemoryTransport
-from nova_harness.server.transport.stdio import StdioTransport
-from nova_harness.server.transport.websocket import (
+from nova_server.transport.base import Transport
+from nova_server.transport.memory import MemoryTransport
+from nova_server.transport.stdio import StdioTransport
+from nova_server.transport.websocket import (
     WebSocketAcceptor,
     WebSocketTransport,
 )

@@ -9,14 +9,14 @@ from nova_agent import ToolExecutionMode
 from nova_ai import Model
 from nova_ai.types.base_model import NovaBaseModel
 
-from nova_harness.core.types.extensions.source import SourceInfo
-from nova_harness.core.types.ui.context import UIContext
-from nova_harness.core.types.ui.noop import NoOpUIContext
+from nova_harness.types.extensions.source import SourceInfo
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.noop import NoOpUIContext
 
 if TYPE_CHECKING:
     # 仅类型检查视角（运行期不导入——agents.py 反向 import 本模块的 ToolInfo，
     # 运行期导入构成循环）
-    from nova_harness.core.types.resources.agents import AgentConfig
+    from nova_harness.types.resources.agents import AgentConfig
 
 _SHARED_NOOP_UI = NoOpUIContext()
 """无 UI 宿主时的共享空实现（无状态，可安全共享作默认值）。"""

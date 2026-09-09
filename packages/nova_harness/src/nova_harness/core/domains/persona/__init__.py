@@ -4,6 +4,6 @@
   + override 旋钮（内存态会话级人格切换）。
 """
 
-from nova_harness.core.harness.persona.manager import PersonaManager
+from nova_harness.core.domains.persona.manager import PersonaManager
 
 __all__ = ["PersonaManager"]

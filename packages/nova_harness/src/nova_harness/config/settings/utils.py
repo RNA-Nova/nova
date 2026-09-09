@@ -4,7 +4,7 @@ Settings utilities for merging and migration.
 
 from pydantic import BaseModel
 
-from nova_harness.core.types.config.settings import Settings
+from nova_harness.types.config.settings import Settings
 
 
 def deep_merge_settings(base: Settings, overrides: Settings) -> Settings:

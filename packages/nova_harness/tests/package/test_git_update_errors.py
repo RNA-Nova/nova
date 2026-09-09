@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from nova_harness.core.types.package import PackageSource
 from nova_harness.package.source.resolver import SourceResolver
+from nova_harness.types.package import PackageSource
 
 
 def _git_source(ref: str = "main") -> PackageSource:

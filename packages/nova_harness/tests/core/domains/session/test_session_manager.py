@@ -7,7 +7,7 @@ import tempfile
 import pytest
 from nova_ai import ModelThinkingLevel
 
-from nova_harness.core.harness.session import SessionManager
+from nova_harness.sessions import SessionManager
 
 
 @pytest.fixture

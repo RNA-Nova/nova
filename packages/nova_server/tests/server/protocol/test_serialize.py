@@ -5,11 +5,11 @@
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from nova_ai.types.base_model import NovaBaseModel
 
-from nova_harness.server.protocol.serialize import serialize_event
+from nova_server.protocol.serialize import serialize_event
 
 
 class _FakeEvent(NovaBaseModel):

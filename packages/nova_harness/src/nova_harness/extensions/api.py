@@ -15,16 +15,14 @@ from typing import Any, Callable, Dict, List, Optional, Type
 
 from nova_agent import CustomAgentMessage
 
-from nova_harness.core.extensions.event_bus import ExtensionEventBus
-from nova_harness.core.harness.session import message_types as _message_types
-from nova_harness.core.types.extensions import (
-    Extension,
-    ExtensionAPI,
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.sessions import message_types as _message_types
+from nova_harness.types.extensions.extension import (
     ExtensionFlag,
-    ExtensionRuntime,
     ExtensionShortcut,
     RegisteredCommand,
 )
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
 
 
 def _noop_handler(*args: Any, **kwargs: Any) -> Any:

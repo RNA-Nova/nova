@@ -13,10 +13,7 @@ from nova_ai import (
     VercelGatewayRouting,
 )
 
-from nova_harness.core.types.model import (
-    ModelOverride,
-    OpenAICompat,
-)
+from nova_harness.types.model import ModelOverride, OpenAICompat
 
 
 def merge_compat(

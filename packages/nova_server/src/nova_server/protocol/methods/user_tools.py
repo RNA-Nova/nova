@@ -7,15 +7,15 @@
 
 from __future__ import annotations
 
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.methods import shapes
-from nova_harness.server.protocol.methods.shapes import (
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods import shapes
+from nova_server.protocol.methods.shapes import (
     AbortResult,
     InvokeUserToolResult,
     ListUserToolsResult,
 )
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
 
 
 def register(registry: MethodRegistry, state: ServerState) -> None:

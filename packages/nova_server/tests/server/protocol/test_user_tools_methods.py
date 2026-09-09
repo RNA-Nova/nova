@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Literal, Optional
 import pytest
 from nova_agent import CustomAgentMessage
 
-from nova_harness.core.types.resources.user_tools import UserToolInfo
-from nova_harness.server.protocol import JSONRPCError, MethodRegistry
-from nova_harness.server.protocol.methods import user_tools as st_methods
-from nova_harness.server.protocol.methods.state import ServerState
+from nova_server.protocol import MethodRegistry
+from nova_server.protocol.methods import user_tools as st_methods
+from nova_server.protocol.methods.state import ServerState
+from nova_harness.types.resources.user_tools import UserToolInfo
 
 
 class FakeToolMessage(CustomAgentMessage):

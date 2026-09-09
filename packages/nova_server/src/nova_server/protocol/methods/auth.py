@@ -12,19 +12,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from nova_ai.types.auth import ApiKeyCredential, AuthType
+from nova_ai.types.auth import ApiKeyCredential
 
-from nova_harness.core.config.auth.interaction import UIAuthInteraction
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.methods import shapes
-from nova_harness.server.protocol.methods.shapes import (
+from nova_harness.config.auth.interaction import UIAuthInteraction
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods import shapes
+from nova_server.protocol.methods.shapes import (
     CredentialInfo,
     GetAuthStatusResult,
     LoginResult,
     ProviderResult,
 )
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
 
 _AUTH_TYPES = ("api_key", "oauth")
 
@@ -46,7 +46,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         if state.runtime is not None:
             storage = state.runtime.services.auth_storage
         else:
-            from nova_harness.core.config import AuthStorage
+            from nova_harness.config import AuthStorage
 
             storage = AuthStorage.create()
         infos = await storage.list()

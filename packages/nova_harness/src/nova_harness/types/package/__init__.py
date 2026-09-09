@@ -1,6 +1,6 @@
 """包管理器类型统一入口。"""
 
-from nova_harness.core.types.package.enums import (
+from nova_harness.types.package.enums import (
     BACKEND_HALF_DIR_NAME,
     RESOURCE_TYPE_DIRS,
     TOP_LEVEL_RESOURCE_TYPE_DIRS,
@@ -9,12 +9,12 @@ from nova_harness.core.types.package.enums import (
     SourceOrigin,
     SourceScope,
 )
-from nova_harness.core.types.package.errors import (
+from nova_harness.types.package.errors import (
     AmbiguousPackageNameError,
     PackageInstallError,
     PackageUpdateError,
 )
-from nova_harness.core.types.package.manifest import (
+from nova_harness.types.package.manifest import (
     ConfiguredPackage,
     NovaManifest,
     PackageManifest,
@@ -25,11 +25,11 @@ from nova_harness.core.types.package.manifest import (
     ResourceMetadata,
     UninstallResult,
 )
-from nova_harness.core.types.package.progress import (
+from nova_harness.types.package.progress import (
     ProgressCallback,
     ProgressEvent,
 )
-from nova_harness.core.types.package.resolution import (
+from nova_harness.types.package.resolution import (
     PackageFilter,
     PathMetadata,
     ResolvedPaths,

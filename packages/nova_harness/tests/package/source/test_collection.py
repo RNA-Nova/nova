@@ -1,6 +1,5 @@
 """PackageSourceCollection 单元测试。"""
 
-from pathlib import Path
 
 from nova_harness.package.source.spec import (
     PackageSourceCollection,

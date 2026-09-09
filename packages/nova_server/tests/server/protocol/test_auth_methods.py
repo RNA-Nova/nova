@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional
 import pytest
 from nova_ai.types.auth import ApiKeyCredential, CredentialInfo
 
-from nova_harness.server.protocol import MethodRegistry
-from nova_harness.server.protocol.methods import auth as auth_methods
-from nova_harness.server.protocol.methods.state import ServerState
+from nova_server.protocol import MethodRegistry
+from nova_server.protocol.methods import auth as auth_methods
+from nova_server.protocol.methods.state import ServerState
 
 
 class FakeAuthStorage:

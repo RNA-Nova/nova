@@ -8,9 +8,9 @@ from typing import List, Optional, Tuple
 from nova_agent import AgentMessage
 from nova_ai import Message
 
-from nova_harness.core.harness.session.utils import session_entry_to_context_messages
-from nova_harness.core.types.compaction import FileOperations
-from nova_harness.core.types.session import SessionEntry
+from nova_harness.sessions.utils import session_entry_to_context_messages
+from nova_harness.types.compaction.branch_summary import SessionEntry
+from nova_harness.types.compaction.file_ops import FileOperations
 
 # ============================================================================
 # Message Extraction

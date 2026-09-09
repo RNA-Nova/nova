@@ -6,12 +6,12 @@
 - 用户级/项目级/显式路径（其余 origin 与无 source_info）始终放行。
 """
 
-from nova_harness.core.harness.skills import (
+from nova_harness.core.domains.skills import (
     filter_skills_by_whitelist,
     is_package_skill,
 )
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.resources.skills import Skill
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.skills import Skill
 
 
 def _skill(name: str, origin: str | None) -> Skill:

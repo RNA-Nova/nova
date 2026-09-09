@@ -5,7 +5,7 @@ AuthStorage 测试。
 import pytest
 from nova_ai.types.auth import ApiKeyCredential, OAuthCredential
 
-from nova_harness.core.config.auth.storage import AuthStorage
+from nova_harness.config.auth.storage import AuthStorage
 from tests._helpers.auth_storage import auth_storage_in_memory
 
 

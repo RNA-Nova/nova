@@ -11,7 +11,7 @@
    提问文本也不含完整标签（防屏幕回显碰撞）；
 3. **热切回本地**：/executor local → !hostname 回本地主机名。
 
-用法：python packages/nova-harness/frontend/scripts/tui-hot-switch-e2e.py
+用法：python packages/nova_client/frontend/scripts/tui-hot-switch-e2e.py
 """
 
 import os
@@ -27,7 +27,7 @@ import time
 CWD = "/Users/liujinming/agent/nova/tmp"
 TUI_CMD = [
     "node",
-    "/Users/liujinming/agent/nova/packages/nova-harness/frontend/dist/modes/tui/main.js",
+    "/Users/liujinming/agent/nova/packages/nova_client/frontend/dist/modes/tui/main.js",
 ]
 LOG_PATH = "/tmp/nova-pty-e2e.log"
 

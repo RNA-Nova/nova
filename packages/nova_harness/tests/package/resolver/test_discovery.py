@@ -1,6 +1,5 @@
 """测试资源自动发现。"""
 
-import os
 
 import pytest
 

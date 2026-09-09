@@ -18,8 +18,8 @@ import shutil
 from pathlib import Path
 from typing import List, Union
 
-from nova_harness.core.config.defaults import get_project_base_dir
-from nova_harness.core.types.package import BACKEND_HALF_DIR_NAME
+from nova_harness.config.defaults import get_project_base_dir
+from nova_harness.types.package import BACKEND_HALF_DIR_NAME
 
 logger = logging.getLogger(__name__)
 

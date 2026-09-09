@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Set
 
-from nova_harness.core.types.ui.context import UIContext
-from nova_harness.core.types.ui.primitives import UIResponse
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.primitives import UIResponse
 
 
 class NoOpUIContext(UIContext):

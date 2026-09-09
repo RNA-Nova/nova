@@ -8,7 +8,8 @@ from typing import Any
 
 from nova_agent import AgentMessage
 
-from nova_harness.core.types.events import (
+from nova_harness.core.utils.messages import extract_text_from_content
+from nova_harness.events import (
     AGENT_END,
     AGENT_START,
     MESSAGE_END,
@@ -32,8 +33,7 @@ from nova_harness.core.types.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from nova_harness.core.types.protocols import AgentSessionProtocol
-from nova_harness.core.utils.messages import extract_text_from_content
+from nova_harness.types.protocols import AgentSessionProtocol
 
 
 class EventController:
@@ -214,7 +214,7 @@ class EventController:
         if not getattr(settings, "show_cache_miss_notices", False):
             return
         try:
-            from nova_harness.core.harness.session.cache_stats import (
+            from nova_harness.sessions.cache_stats import (
                 detect_cache_miss,
             )
 

@@ -1,6 +1,6 @@
 """配置相关类型：设置。"""
 
-from nova_harness.core.types.config.settings import (
+from nova_harness.types.config.settings import (
     BranchSummarySettings,
     ImageSettings,
     MarkdownSettings,

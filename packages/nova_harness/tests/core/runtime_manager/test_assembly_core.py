@@ -1,5 +1,5 @@
 """
-sdk/core.py 工厂与解析逻辑测试。
+assembly 组装编排的工厂与解析逻辑测试（原 tests/core/sdk/test_core.py）。
 """
 
 from unittest.mock import MagicMock
@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from nova_ai import Model, ModelThinkingLevel
 
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.model import ModelRuntime
-from nova_harness.core.model.resolver import (
+from nova_harness.sessions import SessionManager
+from nova_harness.model import ModelRuntime
+from nova_harness.model.resolver import (
     find_initial_model,
     parse_model_pattern,
     resolve_cli_model,
@@ -17,7 +17,7 @@ from nova_harness.core.model.resolver import (
     resolve_thinking_level,
     restore_model_from_session,
 )
-from nova_harness.core.sdk import CreateAgentSessionOptions
+from nova_harness.core.runtime_manager.assembly import CreateAgentSessionOptions
 from tests._helpers.auth_storage import auth_storage_in_memory
 from tests._helpers.settings_manager import settings_manager_in_memory
 
@@ -59,13 +59,13 @@ async def test_find_initial_model_falls_back_to_settings(tmp_path):
     auth = auth_storage_in_memory({})
     auth.set_runtime_api_key("volcengine", "key")
     settings = settings_manager_in_memory(
-        {"default_provider": "volcengine", "default_model": "deepseek-v3-2-251201"}
+        {"default_provider": "volcengine", "default_model": "deepseek-v4-flash-260425"}
     )
     services = _make_services(tmp_path, auth_storage=auth, settings=settings)
     result = await find_initial_model(services)
     assert result.model is not None
     assert result.model.provider == "volcengine"
-    assert result.model.id == "deepseek-v3-2-251201"
+    assert result.model.id == "deepseek-v4-flash-260425"
     assert result.fallback_message is None
 
 
@@ -166,12 +166,12 @@ async def test_resolve_cli_model_provider_slash_pattern(tmp_path):
     services = _make_services(tmp_path, auth_storage=auth)
     result = resolve_cli_model(
         cli_provider="volcengine",
-        cli_model="deepseek-v3-2-251201",
+        cli_model="deepseek-v4-flash-260425",
         model_runtime=services.model_runtime,
     )
     assert result.model is not None
     assert result.model.provider == "volcengine"
-    assert result.model.id == "deepseek-v3-2-251201"
+    assert result.model.id == "deepseek-v4-flash-260425"
     assert result.error is None
 
 
@@ -206,22 +206,22 @@ async def test_resolve_cli_model_unknown_provider(tmp_path):
 def test_parse_model_pattern_extracts_thinking_level():
     from nova_ai import get_builtin_model
 
-    available = [get_builtin_model("volcengine", "deepseek-v3-2-251201")]
+    available = [get_builtin_model("volcengine", "deepseek-v4-flash-260425")]
     result = parse_model_pattern(
-        "deepseek-v3-2-251201:high",
+        "deepseek-v4-flash-260425:high",
         available,
     )
     assert result.model is not None
-    assert result.model.id == "deepseek-v3-2-251201"
+    assert result.model.id == "deepseek-v4-flash-260425"
     assert result.thinking_level == ModelThinkingLevel.HIGH
 
 
 def test_parse_model_pattern_invalid_thinking_level_warns():
     from nova_ai import get_builtin_model
 
-    available = [get_builtin_model("volcengine", "deepseek-v3-2-251201")]
+    available = [get_builtin_model("volcengine", "deepseek-v4-flash-260425")]
     result = parse_model_pattern(
-        "deepseek-v3-2-251201:invalid",
+        "deepseek-v4-flash-260425:invalid",
         available,
     )
     assert result.model is not None
@@ -248,7 +248,7 @@ async def test_restore_model_from_session_uses_current_on_auth_failure(tmp_path)
     auth = auth_storage_in_memory({})
     auth.set_runtime_api_key("volcengine", "key")
     services = _make_services(tmp_path, auth_storage=auth)
-    current = services.model_runtime.find("volcengine", "deepseek-v3-2-251201")
+    current = services.model_runtime.find("volcengine", "deepseek-v4-flash-260425")
     result = await restore_model_from_session(
         saved_provider="volcengine",
         saved_model_id="non-existent-model",
@@ -256,7 +256,7 @@ async def test_restore_model_from_session_uses_current_on_auth_failure(tmp_path)
         model_runtime=services.model_runtime,
     )
     assert result.model is not None
-    assert result.model.id == "deepseek-v3-2-251201"
+    assert result.model.id == "deepseek-v4-flash-260425"
     assert result.fallback_message is not None
 
 
@@ -271,7 +271,7 @@ async def test_find_initial_model_agent_model_beats_settings_default(tmp_path):
     auth = auth_storage_in_memory({})
     auth.set_runtime_api_key("volcengine", "key")
     settings = settings_manager_in_memory(
-        {"default_provider": "volcengine", "default_model": "deepseek-v3-2-251201"}
+        {"default_provider": "volcengine", "default_model": "deepseek-v4-flash-260425"}
     )
     services = _make_services(tmp_path, auth_storage=auth, settings=settings)
     result = await find_initial_model(
@@ -308,7 +308,7 @@ async def test_find_initial_model_agent_model_without_auth_falls_through(
     # provider，均无 key —— 用 settings 默认也无 key 则继续落到任意可用；
     # 这里验证 agent_model 不会在无 key 时被选中。
     settings = settings_manager_in_memory(
-        {"default_provider": "volcengine", "default_model": "deepseek-v3-2-251201"}
+        {"default_provider": "volcengine", "default_model": "deepseek-v4-flash-260425"}
     )
     services = _make_services(tmp_path, auth_storage=auth, settings=settings)
     result = await find_initial_model(
@@ -324,12 +324,12 @@ async def test_find_initial_model_unknown_provider_agent_model_falls_through(tmp
     auth = auth_storage_in_memory({})
     auth.set_runtime_api_key("volcengine", "key")
     settings = settings_manager_in_memory(
-        {"default_provider": "volcengine", "default_model": "deepseek-v3-2-251201"}
+        {"default_provider": "volcengine", "default_model": "deepseek-v4-flash-260425"}
     )
     services = _make_services(tmp_path, auth_storage=auth, settings=settings)
     result = await find_initial_model(services, agent_model="ghost-provider/some-model")
     assert result.model is not None
-    assert result.model.id == "deepseek-v3-2-251201"
+    assert result.model.id == "deepseek-v4-flash-260425"
 
 
 @pytest.mark.asyncio

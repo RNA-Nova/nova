@@ -6,14 +6,10 @@
 - ``test_entry_union_covers_session_entries``：条目联合覆盖全部条目 type。
 """
 
-import json
 import subprocess
 import sys
-from pathlib import Path
 
-import pytest
-
-from nova_harness.server.protocol import schema_export
+from nova_server.protocol import schema_export
 
 
 def test_committed_artifacts_are_fresh():
@@ -21,7 +17,7 @@ def test_committed_artifacts_are_fresh():
         [
             sys.executable,
             "-m",
-            "nova_harness.server.protocol.schema_export",
+            "nova_server.protocol.schema_export",
             "--check",
         ],
         capture_output=True,
@@ -29,7 +25,7 @@ def test_committed_artifacts_are_fresh():
     )
     assert result.returncode == 0, (
         "线上契约工件已漂移，请重新导出："
-        "python -m nova_harness.server.protocol.schema_export\n"
+        "python -m nova_server.protocol.schema_export\n"
         f"{result.stdout}{result.stderr}"
     )
 

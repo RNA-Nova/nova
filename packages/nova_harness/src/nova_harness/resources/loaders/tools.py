@@ -27,22 +27,22 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from nova_harness.core.resources.source_info import (
+from nova_harness.core.utils.files import canonicalize_path
+from nova_harness.resources.source_info import (
     find_source_info_for_path,
     source_info_from_metadata,
 )
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.package import ResolvedResource
-from nova_harness.core.types.resources.diagnostics import (
+from nova_harness.types.resources.diagnostics import (
     ResourceCollision,
     ResourceDiagnostic,
 )
-from nova_harness.core.types.resources.tools import (
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.prompts import ResolvedResource
+from nova_harness.types.resources.tools import (
     NULL_TOOL_SETTINGS,
     ToolContext,
     ToolDefinition,
 )
-from nova_harness.core.utils.files import canonicalize_path
 
 # Tool 类必须声明的元数据属性及期望类型
 _REQUIRED_ATTRS: Dict[str, type] = {

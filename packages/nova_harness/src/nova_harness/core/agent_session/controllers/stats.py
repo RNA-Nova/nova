@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from nova_harness.core.harness.compaction.compaction import estimate_context_tokens
-from nova_harness.core.harness.session.cache_stats import compute_cache_waste
-from nova_harness.core.types.protocols import AgentSessionProtocol
-from nova_harness.core.types.session.stats import (
+from nova_harness.core.domains.compaction.compaction import estimate_context_tokens
+from nova_harness.sessions.cache_stats import compute_cache_waste
+from nova_harness.types.protocols import AgentSessionProtocol
+from nova_harness.types.session.stats import (
     CacheWasteTotals,
     ModelPriceSource,
     SessionStats,

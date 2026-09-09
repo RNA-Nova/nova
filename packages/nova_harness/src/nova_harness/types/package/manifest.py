@@ -8,8 +8,8 @@ from typing import Dict, List, Literal, Optional
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field
 
-from nova_harness.core.types.package.enums import SourceScope
-from nova_harness.core.types.package.resolution import PackageFilter
+from nova_harness.types.package.enums import SourceScope
+from nova_harness.types.package.resolution import PackageFilter
 
 
 @dataclass

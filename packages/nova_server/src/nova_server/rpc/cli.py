@@ -10,9 +10,9 @@ from typing import Any
 
 from nova_harness.core.utils.child_process import kill_tracked_detached_children
 from nova_harness.core.utils.output_guard import OutputGuard
-from nova_harness.server.connection import ConnectionOrigin
-from nova_harness.server.protocol import MethodRegistry
-from nova_harness.server.protocol.methods import (
+from nova_server.connection import ConnectionOrigin
+from nova_server.protocol import MethodRegistry
+from nova_server.protocol.methods import (
     register_auth_methods,
     register_model_methods,
     register_package_methods,
@@ -22,9 +22,9 @@ from nova_harness.server.protocol.methods import (
     register_system_methods,
     register_user_tools_methods,
 )
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.server import RpcServer
-from nova_harness.server.transport import StdioTransport
+from nova_server.protocol.methods.state import ServerState
+from nova_server.server import RpcServer
+from nova_server.transport import StdioTransport
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -81,7 +81,7 @@ def _redirect_stderr_to_log() -> None:
             return
         import os
 
-        from nova_harness.core.config.defaults import get_agent_dir
+        from nova_harness.config.defaults import get_agent_dir
 
         log_dir = os.path.join(str(get_agent_dir()), "logs")
         os.makedirs(log_dir, exist_ok=True)
@@ -153,8 +153,8 @@ async def _async_main() -> int:
 
 async def _serve_websocket(server: RpcServer, listen: str, args: Any) -> None:
     """WS 多客户端形态：acceptor 每接入一条即 ``add_connection``。"""
-    from nova_harness.core.config.defaults import get_agent_dir
-    from nova_harness.server.transport.websocket import (
+    from nova_harness.config.defaults import get_agent_dir
+    from nova_server.transport.websocket import (
         WebSocketAcceptor,
         _is_loopback,
         provision_token,

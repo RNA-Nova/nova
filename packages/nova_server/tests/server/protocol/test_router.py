@@ -2,7 +2,7 @@
 
 import pytest
 
-from nova_harness.server.protocol import (
+from nova_server.protocol import (
     JSONRPCError,
     MethodRegistry,
     build_notification,

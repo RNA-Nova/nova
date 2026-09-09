@@ -13,9 +13,9 @@
 
 用法（仓库根目录执行）：
 
-    python -m nova_harness.server.protocol.schema_export \
-        --schema packages/nova-harness/frontend/protocol/nova-wire.schema.json \
-        --ts packages/nova-harness/frontend/src/protocol/nova-wire.gen.ts
+    python -m nova_server.protocol.schema_export \
+        --schema packages/nova_client/protocol/nova-wire.schema.json \
+        --ts packages/nova_client/src/protocol/nova-wire.gen.ts
 
 两个工件均**入仓**：schema 漂移经 git diff 审查；``tests`` 中的漂移测试
 保证类型变更后必须重新导出。
@@ -44,14 +44,19 @@ from typing import (
     get_type_hints,
 )
 
-from nova_harness.core.types.events.unions import AgentSessionEvent
-from nova_harness.core.types.session.entries import SessionEntry, SessionHeader
-from nova_harness.server.types.items import CustomItem, FrameworkItem, NovaItem, NovaWireItem
-from nova_harness.server.types.notifications import (
+from nova_harness.events.unions import AgentSessionEvent
+from nova_server.types.items import (
+    CustomItem,
+    FrameworkItem,
+    NovaItem,
+    NovaWireItem,
+)
+from nova_server.types.notifications import (
     ItemCompletedNotification,
     ItemDeltaNotification,
     ItemStartedNotification,
 )
+from nova_harness.types.session.entries import SessionEntry, SessionHeader
 
 # 契约版本（major/minor 语义）：
 # - MAJOR：事件词汇/方法形状发生**不兼容**变更（删字段/改语义）时递增——
@@ -391,7 +396,7 @@ class _Walker:
 
 def _collect_method_shapes() -> Dict[str, Any]:
     """装配完整方法注册表并读取形状（方法表 = 注册处声明，零漂移）。"""
-    from nova_harness.server.protocol.methods import (
+    from nova_server.protocol.methods import (
         register_auth_methods,
         register_model_methods,
         register_package_methods,
@@ -401,8 +406,8 @@ def _collect_method_shapes() -> Dict[str, Any]:
         register_system_methods,
         register_user_tools_methods,
     )
-    from nova_harness.server.protocol.methods.state import ServerState
-    from nova_harness.server.protocol.router import MethodRegistry
+    from nova_server.protocol.methods.state import ServerState
+    from nova_server.protocol.router import MethodRegistry
 
     registry = MethodRegistry()
     state = ServerState()
@@ -428,16 +433,16 @@ _HEADER = """/**
  * GENERATED — 请勿手改。
  *
  * 由 nova_harness 的线上契约导出生成：
- *   python -m nova_harness.server.protocol.schema_export
+ *   python -m nova_server.protocol.schema_export
  * 类型真理在 Python 运行时（事件即线上事实），本文件是其构建期快照。
  */
 """
 
 
 def _default_repo_root() -> Path:
-    # .../packages/nova-harness/backend/src/nova_harness/rpc/protocol/schema_export.py
-    # parents[7] = <repo>/packages
-    return Path(__file__).resolve().parents[6].parent
+    # .../packages/nova_server/src/nova_server/protocol/schema_export.py
+    # parents[5] = <repo>/packages；parents[6] = 仓库根
+    return Path(__file__).resolve().parents[5]
 
 
 def build_artifacts() -> Tuple[Dict[str, Any], str]:
@@ -573,13 +578,13 @@ def main() -> int:
     parser.add_argument(
         "--schema",
         default=str(
-            root / "packages/nova-harness/frontend/protocol/nova-wire.schema.json"
+            root / "packages/nova_client/protocol/nova-wire.schema.json"
         ),
     )
     parser.add_argument(
         "--ts",
         default=str(
-            root / "packages/nova-harness/frontend/src/protocol/nova-wire.gen.ts"
+            root / "packages/nova_client/src/protocol/nova-wire.gen.ts"
         ),
     )
     parser.add_argument(
@@ -606,7 +611,7 @@ def main() -> int:
             print(
                 "线上契约工件已漂移，请重新导出：\n  "
                 + "\n  ".join(stale)
-                + "\n命令：python -m nova_harness.server.protocol.schema_export"
+                + "\n命令：python -m nova_server.protocol.schema_export"
             )
             return 1
         print("线上契约工件为最新。")

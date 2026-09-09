@@ -16,7 +16,7 @@ from typing import Any, Dict, Literal
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field, SerializeAsAny
 
-from nova_harness.server.types.items import NovaItem
+from nova_server.types.items import NovaItem
 
 
 class ItemStartedNotification(NovaBaseModel):

@@ -5,14 +5,13 @@ from typing import Optional
 
 import pytest
 
-from nova_harness.core.extensions.loader import load_extension_from_factory
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.extensions import (
-    ExtensionFactory,
-    ExtensionRuntime,
+from nova_harness.extensions.loader import load_extension_from_factory
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.types.config.settings import PackageSourceSpec, Settings
+from nova_harness.types.extensions.loading import ExtensionRuntime
+from nova_harness.types.resources.loader import (
+    DefaultResourceLoaderOptions,
 )
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
 
 
 class _FakeSettingsManager:

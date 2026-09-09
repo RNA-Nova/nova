@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nova_harness.core.config.resolve import (
+from nova_harness.config.resolve import (
     get_config_value_env_var_name,
     get_config_value_env_var_names,
     get_missing_config_value_env_var_names,
@@ -114,7 +114,7 @@ def test_command_value_executes_shell():
 
 def test_command_value_caches_result():
     with patch(
-        "nova_harness.core.config.resolve.subprocess.check_output",
+        "nova_harness.config.resolve.subprocess.check_output",
         return_value="first\n",
     ) as mock_subprocess:
         assert resolve_config_value("!echo cache-me") == "first"
@@ -124,7 +124,7 @@ def test_command_value_caches_result():
 
 def test_command_uncached_bypasses_cache():
     with patch(
-        "nova_harness.core.config.resolve.subprocess.check_output",
+        "nova_harness.config.resolve.subprocess.check_output",
         side_effect=["a\n", "b\n"],
     ) as mock_subprocess:
         assert resolve_config_value_uncached("!echo x") == "a"
@@ -136,7 +136,7 @@ def test_command_failure_returns_none():
     import subprocess as sp
 
     with patch(
-        "nova_harness.core.config.resolve.subprocess.check_output",
+        "nova_harness.config.resolve.subprocess.check_output",
         side_effect=sp.CalledProcessError(1, "false"),
     ):
         assert resolve_config_value("!false") is None
@@ -144,7 +144,7 @@ def test_command_failure_returns_none():
 
 def test_command_empty_output_returns_none():
     with patch(
-        "nova_harness.core.config.resolve.subprocess.check_output",
+        "nova_harness.config.resolve.subprocess.check_output",
         return_value="  \n",
     ):
         assert resolve_config_value("!echo -n ''") is None
@@ -216,7 +216,7 @@ def test_or_throw_command_failure_mentions_command():
     import subprocess as sp
 
     with patch(
-        "nova_harness.core.config.resolve.subprocess.check_output",
+        "nova_harness.config.resolve.subprocess.check_output",
         side_effect=sp.CalledProcessError(1, "false"),
     ):
         with pytest.raises(ValueError, match="shell command: false"):

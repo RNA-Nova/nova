@@ -20,8 +20,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Dict, Optional, Set
 
-from nova_harness.core.types.ui.context import UIContext
-from nova_harness.core.types.ui.primitives import UIResponse
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.primitives import UIResponse
 
 
 class ScopedUIContext(UIContext):

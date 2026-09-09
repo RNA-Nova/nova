@@ -12,12 +12,12 @@ from typing import Any, List
 import pytest
 from nova_ai.providers import get_volcengine_model
 
-from nova_harness.core.sdk import create_agent_session_runtime
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
+from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+from nova_harness.types.session.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
-MODEL_ID = "deepseek-v3-2-251201"
+MODEL_ID = "deepseek-v4-flash-260425"
 
 
 def _text_of(msg: Any) -> str:
@@ -35,7 +35,7 @@ def _blocks(msg: Any, block_type: str) -> list:
 
 
 async def _has_key() -> bool:
-    from nova_harness.core.config.auth.storage import AuthStorage
+    from nova_harness.config.auth.storage import AuthStorage
 
     if os.environ.get("VOLCENGINE_API_KEY"):
         return True

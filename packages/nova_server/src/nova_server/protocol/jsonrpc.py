@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from nova_harness.server.protocol.errors import JSONRPCError
+from nova_server.protocol.errors import JSONRPCError
 
 
 class JsonRpcMessage:

@@ -4,17 +4,16 @@ run 终结（含续话 drain）后在 finally 中双发：Bus 2（``_emit``）�
 （runner）。正常结束、异常路径均发射；无 runner 时仅 Bus 2。
 """
 
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nova_harness.core import AgentSession
-from nova_harness.core.extensions.runner import ExtensionRunner
-from nova_harness.core.types.events.constants import AGENT_SETTLED
-from nova_harness.core.types.extensions import Extension, ExtensionRuntime
-from nova_harness.core.types.session.config import AgentSessionConfig
+from nova_harness.events.constants import AGENT_SETTLED
+from nova_harness.extensions.runner import ExtensionRunner
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.types.session.config import AgentSessionConfig
 
 
 def _minimal_runtime() -> ExtensionRuntime:

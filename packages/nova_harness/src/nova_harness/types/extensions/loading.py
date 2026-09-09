@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from nova_harness.core.types.extensions.extension import Extension
-from nova_harness.core.types.extensions.runtime import ExtensionRuntime
+from nova_harness.types.extensions.extension import Extension
+from nova_harness.types.extensions.runtime import ExtensionRuntime
 
 if TYPE_CHECKING:
-    from nova_harness.core.types.resources.diagnostics import ResourceDiagnostic
+    from nova_harness.types.resources.diagnostics import ResourceDiagnostic
 
 
 @dataclass

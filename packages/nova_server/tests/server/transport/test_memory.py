@@ -2,7 +2,7 @@
 
 import pytest
 
-from nova_harness.server.transport import MemoryTransport
+from nova_server.transport import MemoryTransport
 
 
 @pytest.mark.asyncio

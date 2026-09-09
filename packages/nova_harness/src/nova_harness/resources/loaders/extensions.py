@@ -9,17 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from nova_harness.core.extensions.api import NovaExtensionAPI
-from nova_harness.core.extensions.event_bus import ExtensionEventBus
-from nova_harness.core.extensions.loader import ExtensionLoader, ExtensionLoadError
-from nova_harness.core.resources.source_info import source_info_from_metadata
-from nova_harness.core.types.extensions import (
-    Extension,
-    ExtensionRuntime,
-    LoadedExtensionsResult,
-)
-from nova_harness.core.types.package import ResolvedResource
-from nova_harness.core.types.resources.diagnostics import ResourceDiagnostic
+from nova_harness.extensions.api import NovaExtensionAPI
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.extensions.loader import ExtensionLoader, ExtensionLoadError
+from nova_harness.resources.source_info import source_info_from_metadata
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.types.resources.diagnostics import ResourceDiagnostic
+from nova_harness.types.resources.prompts import ResolvedResource
+from nova_harness.types.session.factory import LoadedExtensionsResult
 
 
 def _default_api_factory(
@@ -127,7 +124,7 @@ async def load_extensions(
             error = {"path": str(path), "error": str(exc)}
             errors.append(error)
             if event_bus is not None:
-                from nova_harness.core.types.events import ExtensionErrorEvent
+                from nova_harness.events import ExtensionErrorEvent
 
                 event_bus.emit(
                     "extension_error",
@@ -143,7 +140,7 @@ async def load_extensions(
     if preloaded is not None:
         extensions.extend(inline_preloaded)
     else:
-        from nova_harness.core.extensions.loader import load_extension_from_factory
+        from nova_harness.extensions.loader import load_extension_from_factory
 
         for index, factory in enumerate(extension_factories or []):
             extension_path = f"<inline:{index + 1}>"
@@ -160,7 +157,7 @@ async def load_extensions(
                 error = {"path": extension_path, "error": str(exc)}
                 errors.append(error)
                 if event_bus is not None:
-                    from nova_harness.core.types.events import ExtensionErrorEvent
+                    from nova_harness.events import ExtensionErrorEvent
 
                     event_bus.emit(
                         "extension_error",

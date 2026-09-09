@@ -6,13 +6,13 @@ from nova_ai import AssistantMessage
 from nova_ai.types.model import Cost, Usage
 
 from nova_harness.core.agent_session.controllers.stats import StatsCollector
-from nova_harness.core.harness.session.cache_stats import (
+from nova_harness.sessions.cache_stats import (
     NOISE_FLOOR_TOKENS,
     collect_cache_misses,
     compute_cache_waste,
     detect_cache_miss,
 )
-from nova_harness.core.types.session.entries import (
+from nova_harness.types.session.entries import (
     CompactionEntry,
     SessionMessageEntry,
 )

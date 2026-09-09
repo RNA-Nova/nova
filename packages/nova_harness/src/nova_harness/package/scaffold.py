@@ -8,7 +8,7 @@ import os
 import re
 from typing import Dict, List, Optional
 
-from nova_harness.core.config.defaults import (
+from nova_harness.config.defaults import (
     AGENTS_DIR_NAME,
     EXTENSIONS_DIR_NAME,
     PERSONAS_DIR_NAME,

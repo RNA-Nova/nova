@@ -13,8 +13,8 @@ import pytest
 from nova_agent import CustomAgentMessage
 
 from nova_harness.core.agent_session.controllers.user_tools import UserToolController
-from nova_harness.core.types.events import USER_BASH, UserBashEventResult
-from nova_harness.core.types.resources.user_tools import UserToolDefinition
+from nova_harness.events import USER_BASH, UserBashEventResult
+from nova_harness.types.resources.user_tools import UserToolDefinition
 
 
 class _FakeBashMessage(CustomAgentMessage):
@@ -233,7 +233,7 @@ async def test_result_without_builder_falls_back_with_error():
 
 def test_record_emits_message_events_when_not_streaming():
     """非流式 record：双写之外发射 MessageStart/MessageEnd（前端卡片定稿事件）。"""
-    from nova_harness.core.types.events.agent import MessageEndEvent, MessageStartEvent
+    from nova_harness.events.agent import MessageEndEvent, MessageStartEvent
 
     emitted: List[Any] = []
     session = _make_session(_FakeRunner())
@@ -252,7 +252,7 @@ def test_record_emits_message_events_when_not_streaming():
 
 def test_record_pending_when_streaming_then_flush_emits():
     """流式期间挂起不发事件；flush 时逐条双写并发射定稿事件。"""
-    from nova_harness.core.types.events.agent import MessageEndEvent, MessageStartEvent
+    from nova_harness.events.agent import MessageEndEvent, MessageStartEvent
 
     emitted: List[Any] = []
     session = _make_session(_FakeRunner())

@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional
 
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.methods import shapes
-from nova_harness.server.protocol.methods.shapes import PkgUninstallResult
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.methods import shapes
+from nova_server.protocol.methods.shapes import PkgUninstallResult
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
 
 
 def _package_manager(state: ServerState) -> "PackageManager":

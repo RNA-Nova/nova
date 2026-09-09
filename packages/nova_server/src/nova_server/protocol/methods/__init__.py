@@ -4,26 +4,26 @@
 ``MethodRegistry`` 中。``state`` 是共享的服务器状态（runtime、ui_context）。
 """
 
-from nova_harness.server.protocol.methods.auth import register as register_auth_methods
-from nova_harness.server.protocol.methods.model import (
+from nova_server.protocol.methods.auth import register as register_auth_methods
+from nova_server.protocol.methods.model import (
     register as register_model_methods,
 )
-from nova_harness.server.protocol.methods.package import (
+from nova_server.protocol.methods.package import (
     register as register_package_methods,
 )
-from nova_harness.server.protocol.methods.resources import (
+from nova_server.protocol.methods.resources import (
     register as register_resources_methods,
 )
-from nova_harness.server.protocol.methods.session import (
+from nova_server.protocol.methods.session import (
     register as register_session_methods,
 )
-from nova_harness.server.protocol.methods.settings import (
+from nova_server.protocol.methods.settings import (
     register as register_settings_methods,
 )
-from nova_harness.server.protocol.methods.system import (
+from nova_server.protocol.methods.system import (
     register as register_system_methods,
 )
-from nova_harness.server.protocol.methods.user_tools import (
+from nova_server.protocol.methods.user_tools import (
     register as register_user_tools_methods,
 )
 

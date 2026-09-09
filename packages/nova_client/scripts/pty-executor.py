@@ -11,7 +11,7 @@ import time
 
 NOVA_REPO = "/Users/liujinming/agent/nova"
 PYTHON = f"{NOVA_REPO}/.pixi/envs/dev/bin/python"
-MAIN_JS = f"{NOVA_REPO}/packages/nova-harness/frontend/dist/modes/tui/main.js"
+MAIN_JS = f"{NOVA_REPO}/packages/nova_client/frontend/dist/modes/tui/main.js"
 NODE = os.path.expanduser("~/.pixi/bin/node")
 
 

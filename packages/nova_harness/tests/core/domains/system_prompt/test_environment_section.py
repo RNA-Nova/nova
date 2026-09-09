@@ -4,12 +4,12 @@
 Meta 段不再含 cwd。
 """
 
-from nova_harness.core.harness.system_prompt.builder import (
+from nova_harness.core.domains.system_prompt.builder import (
     compose_system_prompt,
     render_dynamic_section,
     render_environment_section,
 )
-from nova_harness.core.types.resources.agents import AgentConfig, DynamicContext
+from nova_harness.types.resources.agents import AgentConfig, DynamicContext
 
 
 def _compose(context: DynamicContext) -> str:

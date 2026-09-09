@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, List, Literal, Optional
 
-from nova_harness.core.types.ui import UIContext
+from nova_harness.types.ui import UIContext
 
 if TYPE_CHECKING:
-    from nova_harness.core.harness.project_trust.trust_store import ProjectTrustStore
+    from nova_harness.resources.project_trust.trust_store import ProjectTrustStore
 
 DefaultProjectTrust = Literal["always", "never", "ask"]
 

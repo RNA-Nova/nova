@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from nova_harness.core.types.extensions.actions import (
+from nova_harness.types.extensions.actions import (
     ExtensionActions,
     ExtensionContextActions,
     ExtensionProviderActions,
 )
-from nova_harness.core.types.extensions.commands import _ProviderRegistration
-from nova_harness.core.types.extensions.process import SpawnHook
+from nova_harness.types.extensions.commands import _ProviderRegistration
+from nova_harness.types.extensions.process import SpawnHook
 
 if TYPE_CHECKING:
-    from nova_harness.core.extensions.event_bus import ExtensionEventBus
+    from nova_harness.extensions.event_bus import ExtensionEventBus
 
 
 class ExtensionRuntime:

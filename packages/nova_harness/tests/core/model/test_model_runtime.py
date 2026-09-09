@@ -14,12 +14,11 @@ from pathlib import Path
 
 import pytest
 from nova_ai import OpenAICompletionsCompat
-from nova_ai.types.auth import ApiKeyCredential, OAuthCredential
+from nova_ai.types.auth import OAuthCredential
 
-from nova_harness.core.config import AuthStorage
-from nova_harness.core.model import ModelRuntime
-from nova_harness.core.model.composer import compose_provider
-from nova_harness.core.types.model import ProviderConfigInput
+from nova_harness.model import ModelRuntime
+from nova_harness.model.composer import compose_provider
+from nova_harness.types.model import ProviderConfigInput
 from tests._helpers.auth_storage import auth_storage_in_memory
 
 
@@ -50,7 +49,7 @@ def auth_with_volc_key():
 
 def test_loads_builtin_models(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert model is not None
     assert model.provider == "volcengine"
     assert model.base_url == "https://ark.cn-beijing.volces.com/api/v3/"
@@ -197,7 +196,7 @@ def test_provider_override_base_url_on_builtin(auth_with_volc_key, tmp_path):
         {"providers": {"volcengine": {"base_url": "http://proxy/v1"}}},
         storage=auth_with_volc_key,
     )
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert model.base_url == "http://proxy/v1"
 
 
@@ -208,7 +207,7 @@ def test_model_overrides_on_builtin(auth_with_volc_key, tmp_path):
             "providers": {
                 "volcengine": {
                     "model_overrides": {
-                        "deepseek-v3-2-251201": {
+                        "deepseek-v4-flash-260425": {
                             "max_tokens": 9999,
                             "cost": {"input": 1.5},
                         }
@@ -218,7 +217,7 @@ def test_model_overrides_on_builtin(auth_with_volc_key, tmp_path):
         },
         storage=auth_with_volc_key,
     )
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert model.max_tokens == 9999
     assert model.cost.input == 1.5
 
@@ -313,7 +312,7 @@ def test_model_override_preserves_cost_tiers(tmp_path):
 @pytest.mark.asyncio
 async def test_get_api_key_from_runtime_override(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert await runtime.get_api_key(model) == "volc-key"
 
 
@@ -323,7 +322,7 @@ async def test_get_api_key_from_stored_credential():
         {"volcengine": {"type": "api_key", "key": "stored-key"}}
     )
     runtime = ModelRuntime(storage)
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert await runtime.get_api_key(model) == "stored-key"
 
 
@@ -394,7 +393,7 @@ async def test_provider_headers_resolved_at_request_time(auth_with_volc_key, tmp
         {"providers": {"volcengine": {"headers": {"X-Custom": "yes"}}}},
         storage=auth_with_volc_key,
     )
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert not (model.headers or {}).get("X-Custom")
     auth = await runtime.get_request_auth(model)
     assert auth.auth["headers"]["X-Custom"] == "yes"
@@ -451,7 +450,7 @@ def test_get_available_sync_snapshot(auth_with_volc_key):
 
 def test_has_configured_auth(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert runtime.has_configured_auth(model)
     kimi = runtime.find("kimi-coding", "k3")
     assert not runtime.has_configured_auth(kimi)
@@ -513,7 +512,7 @@ def test_register_provider_replaces_models(auth_with_volc_key):
             "models": [{"id": "only-model"}],
         },
     )
-    assert runtime.find("volcengine", "deepseek-v3-2-251201") is None
+    assert runtime.find("volcengine", "deepseek-v4-flash-260425") is None
     assert runtime.find("volcengine", "only-model") is not None
 
 
@@ -529,7 +528,7 @@ def test_unregister_provider_restores_builtin(auth_with_volc_key):
         },
     )
     runtime.unregister_provider("volcengine")
-    assert runtime.find("volcengine", "deepseek-v3-2-251201") is not None
+    assert runtime.find("volcengine", "deepseek-v4-flash-260425") is not None
 
 
 def test_reregister_merges_defined_fields(auth_with_volc_key):
@@ -622,7 +621,7 @@ def test_register_extension_compat_applies_without_models(auth_with_volc_key):
             "thinking_level_map": {"xhigh": "X"},
         },
     )
-    model = runtime.find("volcengine", "deepseek-v3-2-251201")
+    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
     assert model is not None
     assert model.compat.supports_store is True
     assert model.thinking_level_map == {"xhigh": "X"}
@@ -654,7 +653,7 @@ def test_model_overrides_apply_to_extension_models(auth_with_volc_key, tmp_path)
 
 
 def test_provider_config_input_is_pure_data():
-    from nova_harness.core.types.model import ProviderConfigInput
+    from nova_harness.types.model import ProviderConfigInput
 
     assert "stream_simple" not in ProviderConfigInput.model_fields
 
@@ -758,7 +757,7 @@ def _make_dynamic_base(fetch):
         base_url="http://dyn/v1",
         models=[_make_model("old-m")],
         api=openai_completions,
-        auth=ProviderAuth(apiKey=env_api_key_auth("Dyn key", ["NOVA_TEST_DYN_KEY"])),
+        auth=ProviderAuth(api_key=env_api_key_auth("Dyn key", ["NOVA_TEST_DYN_KEY"])),
         fetch_models=fetch,
     )
 
@@ -817,7 +816,7 @@ def test_composed_provider_without_refresh_capability():
 @pytest.mark.asyncio
 async def test_extension_refresh_models_fn(tmp_path):
     """扩展 refresh_models_fn 的结果进入模型列表（先校验再发布）。"""
-    from nova_harness.core.types.model import ModelDefinition
+    from nova_harness.types.model import ModelDefinition
 
     calls = []
 
@@ -850,7 +849,7 @@ async def test_extension_refresh_models_fn(tmp_path):
 @pytest.mark.asyncio
 async def test_extension_oauth_login_and_modify_models(tmp_path):
     """扩展 OAuth：login 持久化 credential，modify_models 在刷新后生效。"""
-    from nova_harness.core.types.model import ExtensionOAuthConfig
+    from nova_harness.types.model import ExtensionOAuthConfig
 
     async def oauth_login(interaction):
         return {"access": "ext-tok", "refresh": "r", "expires": 9999999999999}
@@ -922,7 +921,7 @@ async def test_set_and_remove_runtime_api_key_updates_snapshot(tmp_path):
 async def test_file_models_store_roundtrip(tmp_path):
     from nova_ai.gateway.store import ModelsStoreEntry
 
-    from nova_harness.core.model.store import FileModelsStore
+    from nova_harness.model.store import FileModelsStore
 
     store = FileModelsStore(str(tmp_path / "models-store.json"))
     entry = ModelsStoreEntry(models=[_make_model("m1")], checked_at=123)
@@ -1154,9 +1153,9 @@ async def test_get_request_auth_with_overrides(tmp_path):
         },
     )
     model = runtime.find("custom", "m1")
-    assert (await runtime.get_request_auth(model)).auth["apiKey"] == "json-key"
+    assert (await runtime.get_request_auth(model)).auth["api_key"] == "json-key"
     overridden = await runtime.get_request_auth(model, api_key="override-key")
-    assert overridden.auth["apiKey"] == "override-key"
+    assert overridden.auth["api_key"] == "override-key"
 
 
 @pytest.mark.asyncio
@@ -1206,7 +1205,7 @@ async def test_env_ref_resolves_via_custom_auth_context(tmp_path, monkeypatch):
     )
     auth = await runtime.get_request_auth(runtime.find("custom", "m1"))
     assert auth is not None
-    assert auth.auth["apiKey"] == "from-custom-ctx"
+    assert auth.auth["api_key"] == "from-custom-ctx"
     assert auth.auth["headers"]["X-Token"] == "from-custom-ctx"
 
 
@@ -1214,7 +1213,7 @@ def test_config_types_are_frozen():
     """models.json 配置类型冻结：顶层赋值被拒绝（对齐 TS deepFreeze 的顶层语义）。"""
     from pydantic import ValidationError
 
-    from nova_harness.core.types.model import (
+    from nova_harness.types.model import (
         ModelsConfig,
         ProviderConfig,
     )

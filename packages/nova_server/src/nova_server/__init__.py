@@ -14,6 +14,6 @@
 依赖方向单向：transport ← protocol ← server（connection 归 server 层）。
 """
 
-from nova_harness.server.server import RpcServer
+from nova_server.server import RpcServer
 
 __all__ = ["RpcServer"]

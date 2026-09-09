@@ -14,9 +14,9 @@
 from pathlib import Path
 from typing import List, Optional
 
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.resources.context_files import ContextFile
 from nova_harness.core.utils.git import find_git_root
+from nova_harness.types.resources.context_files import ContextFile
+from nova_harness.types.resources.personas import SourceInfo
 
 CONTEXT_FILE_NAMES = {"AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"}
 

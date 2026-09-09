@@ -4,16 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.resources.loaders.skills import load_skills
-from nova_harness.core.types.package import (
-    PathMetadata,
-    ResolvedResource,
-    SourceOrigin,
-    SourceScope,
-)
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.package import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.resources.loaders.skills import load_skills
+from nova_harness.types.package import PathMetadata, SourceOrigin, SourceScope
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
+from nova_harness.types.resources.prompts import ResolvedResource
 from tests._helpers.settings_manager import settings_manager_in_memory
 
 

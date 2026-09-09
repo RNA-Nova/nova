@@ -1,15 +1,13 @@
 """AgentSession 会话命令相关方法测试。"""
 
 import os
-import tempfile
 from unittest.mock import MagicMock
 
 import pytest
 
 from nova_harness.core import AgentSession
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.types.events import SessionStartEvent
-from nova_harness.core.types.session.config import AgentSessionConfig
+from nova_harness.sessions import SessionManager
+from nova_harness.types.session.config import AgentSessionConfig
 
 
 def _make_config(session_manager, **overrides):
@@ -47,7 +45,6 @@ def persisted_session_manager(tmp_path):
     # 持久化需要至少一条 assistant 消息才会 flush 文件
     from nova_ai import AssistantMessage, TextContent
 
-    from nova_harness.core.types.session import SessionMessageEntry
 
     msg = AssistantMessage(
         role="assistant", content=[TextContent(type="text", text="hi")]

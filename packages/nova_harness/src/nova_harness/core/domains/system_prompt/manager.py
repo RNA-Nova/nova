@@ -12,15 +12,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from nova_harness.core.harness.skills import filter_skills_by_whitelist
-from nova_harness.core.harness.system_prompt.builder import compose_system_prompt
-from nova_harness.core.types.protocols import (
+from nova_harness.core.domains.skills import filter_skills_by_whitelist
+from nova_harness.core.domains.system_prompt.builder import compose_system_prompt
+from nova_harness.types.protocols import (
     ResourceLoaderProtocol,
     ToolsManagerProtocol,
 )
-from nova_harness.core.types.resources.agents import AgentConfig, DynamicContext
-from nova_harness.core.types.resources.skills import Skill
-from nova_harness.core.types.resources.tools import ToolDefinition, ToolInfo
+from nova_harness.types.resources.agents import AgentConfig, DynamicContext
+from nova_harness.types.resources.tools import ToolDefinition, ToolInfo
 
 
 class SystemPromptManager:

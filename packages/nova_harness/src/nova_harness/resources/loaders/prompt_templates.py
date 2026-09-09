@@ -9,25 +9,23 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from nova_harness.core.resources.source_info import (
+from nova_harness.core.utils.files import canonicalize_path
+from nova_harness.core.utils.frontmatter import parse_frontmatter
+from nova_harness.package.resolve.discovery import collect_prompt_entries
+from nova_harness.resources.source_info import (
     default_source_info_for_path,
     find_source_info_for_path,
     source_info_from_metadata,
 )
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.package import ResolvedResource
-from nova_harness.core.types.resources.diagnostics import (
+from nova_harness.types.resources.diagnostics import (
     ResourceCollision,
     ResourceDiagnostic,
 )
-from nova_harness.core.types.resources.extension_paths import ResourceExtensionPathEntry
-from nova_harness.core.types.resources.prompts import (
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.prompts import (
     LoadPromptTemplatesOptions,
     PromptTemplate,
 )
-from nova_harness.core.utils.files import canonicalize_path
-from nova_harness.core.utils.frontmatter import parse_frontmatter
-from nova_harness.package.resolve.discovery import collect_prompt_entries
 
 # ---------------------------------------------------------------------------
 # 命令参数解析 / 模板变量替换

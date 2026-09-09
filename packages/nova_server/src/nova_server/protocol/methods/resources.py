@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.methods import shapes
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods import shapes
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
 
 
 def serialize_source_info(source_info: Any) -> Dict[str, Any]:

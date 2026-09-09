@@ -15,21 +15,21 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from nova_ai.signal import AbortController
 
-from nova_harness.core.config import AuthStorage, SettingsManager
-from nova_harness.core.config.defaults import (
+from nova_harness.config import AuthStorage, SettingsManager
+from nova_harness.config.defaults import (
     AUTH_FILE_NAME,
     MODELS_FILE_NAME,
     get_agent_dir,
 )
-from nova_harness.core.config.migration import migrate_backend_layout
-from nova_harness.core.extensions.api import NovaExtensionAPI
-from nova_harness.core.model import ModelRuntime
-from nova_harness.core.resources.loader import DefaultResourceLoader, ResourceLoader
-from nova_harness.core.types.extensions import ExtensionFlag, LoadedExtensionsResult
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.core.types.resources.tools import ToolContext
-from nova_harness.core.types.session.diagnostics import AgentSessionRuntimeDiagnostic
-from nova_harness.core.types.session.factory import CreateAgentSessionRuntimeResult
+from nova_harness.config.migration import migrate_backend_layout
+from nova_harness.extensions.api import NovaExtensionAPI
+from nova_harness.model import ModelRuntime
+from nova_harness.resources.loader import DefaultResourceLoader, ResourceLoader
+from nova_harness.types.extensions import ExtensionFlag, LoadedExtensionsResult
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
+from nova_harness.types.resources.tools import ToolContext
+from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
 from nova_harness.core.utils.timings import time
 from nova_harness.package import PackageManager
 

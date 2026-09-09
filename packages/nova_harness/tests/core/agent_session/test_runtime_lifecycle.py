@@ -10,12 +10,12 @@ import pytest
 from nova_ai import UserMessage
 
 from nova_harness.core import AgentSession, AgentSessionRuntime, AgentSessionServices
-from nova_harness.core.types.session import (
+from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
+from nova_harness.types.session.options import (
     ForkOptions,
     NavigateOptions,
     NewSessionOptions,
 )
-from nova_harness.core.types.session.factory import CreateAgentSessionRuntimeResult
 
 
 def _make_old_session():
@@ -230,7 +230,7 @@ async def test_switch_session_emits_session_replaced_after_rebind():
     前端靠这条 Bus 2 事件触发全量重同步——先于 rebind 发射会让 RPC
     事件桥把通知丢进旧 session 的订阅里。
     """
-    from nova_harness.core.types.events import SessionReplacedEvent
+    from nova_harness.events import SessionReplacedEvent
 
     old_session = _make_old_session()
     services = _make_services(old_session)
@@ -461,7 +461,7 @@ async def test_import_from_jsonl(tmp_path):
     """import_from_jsonl 复制 JSONL 到 session dir 并切换到该会话。"""
     from nova_ai import UserMessage
 
-    from nova_harness.core.harness.session import SessionManager
+    from nova_harness.sessions import SessionManager
 
     # 准备一个源 JSONL 会话
     source_session_dir = tmp_path / "source_sessions"

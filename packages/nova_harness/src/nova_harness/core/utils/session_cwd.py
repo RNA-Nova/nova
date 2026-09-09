@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Optional, Protocol
 
-from nova_harness.core.types.session.diagnostics import SessionCwdIssue
+from nova_harness.types.session.diagnostics import SessionCwdIssue
 
 
 def format_missing_session_cwd_error(issue: SessionCwdIssue) -> str:

@@ -5,10 +5,10 @@ from typing import Optional
 
 import pytest
 
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.package import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.types.config.settings import PackageSourceSpec, Settings
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 
 
 class _FakeSettingsManager:
@@ -139,7 +139,7 @@ async def test_context_files_override_filters_loaded_files(tmp_path: Path) -> No
 async def test_context_files_override_injects_when_disabled(tmp_path: Path) -> None:
     """no_context_files=True 时基础结果为空，override 仍可注入自定义条目
     （override 在 no* 之后应用，对齐 pi）。"""
-    from nova_harness.core.types.resources.context_files import ContextFile
+    from nova_harness.types.resources.context_files import ContextFile
 
     cwd = tmp_path / "project"
     agent_dir = tmp_path / "agent"
@@ -183,7 +183,7 @@ def _make_loader_full(cwd: Path, agent_dir: Path) -> DefaultResourceLoader:
 
 def test_loader_defaults_agent_dir_when_omitted(tmp_path: Path) -> None:
     """options.agent_dir 为 None 时回退到全局 get_agent_dir()（曾经未导入 NameError）。"""
-    from nova_harness.core.config.defaults import get_agent_dir
+    from nova_harness.config.defaults import get_agent_dir
 
     settings_manager = _FakeSettingsManager()
     package_manager = PackageManager(
@@ -204,7 +204,7 @@ def test_loader_defaults_agent_dir_when_omitted(tmp_path: Path) -> None:
 
 def test_reload_prompts_skips_disabled_resources(tmp_path: Path) -> None:
     """enabled=False 的 prompt 资源不应被加载（filters/override 排除语义）。"""
-    from nova_harness.core.types.package import (
+    from nova_harness.types.package import (
         PathMetadata,
         ResolvedPaths,
         ResolvedResource,
@@ -241,7 +241,7 @@ def test_reload_prompts_skips_disabled_resources(tmp_path: Path) -> None:
 
 def test_reload_tools_skips_disabled_resources(tmp_path: Path) -> None:
     """enabled=False 的 tool 资源不应被加载。"""
-    from nova_harness.core.types.package import (
+    from nova_harness.types.package import (
         PathMetadata,
         ResolvedResource,
         SourceOrigin,
@@ -280,7 +280,7 @@ def test_get_disabled_extension_names_derives_registry_names(tmp_path: Path) -> 
 
     CapabilitySelection 报告据此区分 missing 与 disabled_by_settings。
     """
-    from nova_harness.core.types.package import (
+    from nova_harness.types.package import (
         PathMetadata,
         ResolvedPaths,
         ResolvedResource,

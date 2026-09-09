@@ -1,18 +1,13 @@
 """测试 PackageResolver 的完整解析流程。"""
 
-import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import pytest
 
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.package import (
-    ResolvedPaths,
-    SourceOrigin,
-    SourceScope,
-)
 from nova_harness.package.resolve.resolver import PackageResolver
+from nova_harness.types.config.settings import PackageSourceSpec, Settings
+from nova_harness.types.package import SourceOrigin, SourceScope
 
 
 class _FakeSettingsManager:

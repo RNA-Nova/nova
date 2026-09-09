@@ -17,33 +17,31 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Optional,
     Protocol,
     Set,
 )
 
 from nova_ai import Model
-from nova_ai.types.auth import Credential
 
 if TYPE_CHECKING:
     # 类型检查时才导入具体类型，避免运行时的循环导入。
-    from nova_harness.core.types.config.settings import Settings
-    from nova_harness.core.types.extensions import (
+    from nova_harness.types.config.settings import Settings
+    from nova_harness.types.extensions import (
         Extension,
         ExtensionRuntime,
         LoadedExtensionsResult,
     )
-    from nova_harness.core.types.package import (
+    from nova_harness.types.package import (
         MissingSourceAction,
         PackageMetadata,
         ResolvedPaths,
     )
-    from nova_harness.core.types.resources.context_files import ContextFile
-    from nova_harness.core.types.resources.extension_paths import ResourceExtensionPaths
-    from nova_harness.core.types.resources.prompts import PromptTemplate
-    from nova_harness.core.types.resources.skills import Skill
-    from nova_harness.core.types.resources.tools import (
+    from nova_harness.types.resources.context_files import ContextFile
+    from nova_harness.types.resources.extension_paths import ResourceExtensionPaths
+    from nova_harness.types.resources.prompts import PromptTemplate
+    from nova_harness.types.resources.skills import Skill
+    from nova_harness.types.resources.tools import (
         ToolContextProvider,
         ToolDefinition,
         ToolExecContext,

@@ -5,24 +5,23 @@
 invoke_user_tool 端到端可用。框架自身不内置任何用户工具。
 """
 
-import json
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import pytest
 from nova_agent import CustomAgentMessage
 
 from nova_harness.core.agent_session.services import AgentSessionServices
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.harness.session.message_types import (
+from nova_harness.package import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.core.runtime_manager.assembly import create_agent_session_from_services
+from nova_harness.sessions import SessionManager
+from nova_harness.sessions.message_types import (
     clear_session_message_types,
 )
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.sdk import create_agent_session_from_services
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
-from nova_harness.package import PackageManager
+from nova_harness.types.config.settings import Settings
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
+from nova_harness.types.session.config import CreateAgentSessionOptions
 
 _EXECUTOR = """
 from typing import Literal
@@ -152,7 +151,6 @@ def clean_registry():
 
 
 async def _create_session(cwd, agent_dir, loader, agent_name: str):
-    import asyncio
 
     await loader.reload()
     services = await AgentSessionServices.create(

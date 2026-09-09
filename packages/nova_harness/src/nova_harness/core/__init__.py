@@ -10,7 +10,8 @@ from nova_harness.core.agent_session import (
     AgentSessionServices,
 )
 from nova_harness.core.agent_session.runtime import SessionImportFileNotFoundError
-from nova_harness.core.sdk import (
+from nova_harness.core.runtime_manager import RuntimeManager
+from nova_harness.core.runtime_manager.assembly import (
     create_agent_session,
     create_agent_session_by_name,
     create_agent_session_from_services,
@@ -18,8 +19,8 @@ from nova_harness.core.sdk import (
     create_agent_session_services,
     list_installed_agents,
 )
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
-from nova_harness.core.types.session.factory import (
+from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.types.session.factory import (
     CreateAgentSessionResult,
     CreateAgentSessionRuntimeOptions,
     CreateAgentSessionRuntimeResult,
@@ -34,6 +35,7 @@ __all__ = [
     "CreateAgentSessionResult",
     "CreateAgentSessionRuntimeOptions",
     "CreateAgentSessionRuntimeResult",
+    "RuntimeManager",
     "SessionImportFileNotFoundError",
     "create_agent_session",
     "create_agent_session_runtime",

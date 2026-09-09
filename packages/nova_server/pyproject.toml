@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "nova-server"
+version = "0.1.0"
+description = "Nova Harness JSON-RPC server 宿主（protocol / transport / reduction / rpc 装配）"
+authors = ["Liujinming"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "nova_server", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+# 兄弟包依赖（nova-harness / nova-ai / nova-agent）按仓库约定不在此声明，
+# 统一由根 pyproject.toml 的 [tool.pixi.pypi-dependencies] editable 安装。
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.4.0"
+pytest-asyncio = ">=0.21.0"
+
+[tool.poetry.scripts]
+nova-server = "nova_server.rpc.cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests that call real APIs (deselect with '-m \"not integration\"')",
+]

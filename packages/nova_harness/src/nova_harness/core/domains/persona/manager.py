@@ -23,14 +23,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from nova_harness.core.types.protocols import ResourceLoaderProtocol
-from nova_harness.core.types.resources.agents import AgentConfig, Section
-from nova_harness.core.types.resources.diagnostics import ResourceDiagnostic
-from nova_harness.core.types.resources.personas import Persona
-from nova_harness.core.types.resources.selection import CapabilitySelection
 from nova_harness.core.utils.files import load_text_file
+from nova_harness.types.protocols import ResourceLoaderProtocol
+from nova_harness.types.resources.agents import AgentConfig, Section
+from nova_harness.types.resources.diagnostics import ResourceDiagnostic
+from nova_harness.types.resources.personas import Persona
+from nova_harness.types.resources.selection import CapabilitySelection
 
 
 def _collect_markdown_files(directory: Path) -> List[Path]:

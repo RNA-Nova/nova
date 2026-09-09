@@ -7,8 +7,8 @@
 
 from typing import Iterable
 
-from nova_harness.core.types.extensions import ExtensionCommand
-from nova_harness.core.types.resources.skills import Skill
+from nova_harness.types.extensions.commands import ExtensionCommand
+from nova_harness.types.resources.skills import Skill
 
 
 def _escape_xml(value: str) -> str:

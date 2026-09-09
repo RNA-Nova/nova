@@ -10,53 +10,50 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.extensions.event_bus import ExtensionEventBus
-from nova_harness.core.resources.loaders.agent_config import load_agent_config_from_yaml
-from nova_harness.core.resources.loaders.context_files import load_project_context_files
-from nova_harness.core.resources.loaders.extensions import load_extensions
-from nova_harness.core.resources.loaders.personas import load_personas
-from nova_harness.core.resources.loaders.prompt_templates import (
+from nova_harness.config.defaults import get_agent_dir
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.resources.loaders.agent_config import load_agent_config_from_yaml
+from nova_harness.resources.loaders.context_files import load_project_context_files
+from nova_harness.resources.loaders.extensions import load_extensions
+from nova_harness.resources.loaders.personas import load_personas
+from nova_harness.resources.loaders.prompt_templates import (
     load_prompt_templates_with_diagnostics,
 )
-from nova_harness.core.resources.loaders.skills import load_skills
-from nova_harness.core.resources.loaders.tools import ToolLoader
-from nova_harness.core.resources.loaders.user_tools import UserToolLoader
-from nova_harness.core.resources.source_info import source_info_from_extension_entry
-from nova_harness.core.types.extensions import (
-    ExtensionRuntime,
-    LoadedExtensionsResult,
-    SourceInfo,
-)
-from nova_harness.core.types.package import (
+from nova_harness.resources.loaders.skills import load_skills
+from nova_harness.resources.loaders.tools import ToolLoader
+from nova_harness.resources.loaders.user_tools import UserToolLoader
+from nova_harness.resources.source_info import source_info_from_extension_entry
+from nova_harness.types.extensions.loading import ExtensionRuntime
+from nova_harness.types.package import (
     PathMetadata,
     ResolvedPaths,
-    ResolvedResource,
     SourceOrigin,
     SourceScope,
 )
-from nova_harness.core.types.resources.agents import AgentConfig
-from nova_harness.core.types.resources.context_files import ContextFile
-from nova_harness.core.types.resources.diagnostics import (
+from nova_harness.types.resources.agents import AgentConfig
+from nova_harness.types.resources.context_files import ContextFile
+from nova_harness.types.resources.diagnostics import (
     ResourceCollision,
     ResourceDiagnostic,
 )
-from nova_harness.core.types.resources.extension_paths import (
+from nova_harness.types.resources.extension_paths import (
     ResourceExtensionPathEntry,
     ResourceExtensionPaths,
 )
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.core.types.resources.personas import Persona
-from nova_harness.core.types.resources.prompts import (
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
+from nova_harness.types.resources.personas import Persona, SourceInfo
+from nova_harness.types.resources.prompts import (
     LoadPromptTemplatesOptions,
     PromptTemplate,
+    ResolvedResource,
 )
-from nova_harness.core.types.resources.skills import Skill
-from nova_harness.core.types.resources.tools import (
+from nova_harness.types.resources.skills import Skill
+from nova_harness.types.resources.tools import (
     NULL_TOOL_SETTINGS,
     ToolContext,
     ToolDefinition,
 )
+from nova_harness.types.session.factory import LoadedExtensionsResult
 
 
 class ResourceLoader(ABC):

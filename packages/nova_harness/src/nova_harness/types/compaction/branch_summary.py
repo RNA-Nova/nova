@@ -8,8 +8,8 @@ from nova_ai import AbortSignal, Model
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field
 
-from nova_harness.core.types.compaction.file_ops import FileOperations
-from nova_harness.core.types.session.entries import SessionEntry
+from nova_harness.types.compaction.file_ops import FileOperations
+from nova_harness.types.session.entries import SessionEntry
 
 
 @dataclass(frozen=True)

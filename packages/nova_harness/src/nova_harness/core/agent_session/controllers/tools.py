@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from nova_harness.core.types.protocols import AgentSessionProtocol, ToolsManagerProtocol
+from nova_harness.types.protocols import AgentSessionProtocol, ToolsManagerProtocol
 
 
 class ToolController:

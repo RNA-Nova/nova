@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_harness.core.types.extensions.commands import (
+from nova_harness.types.extensions.commands import (
     ExtensionFlag,
     ExtensionShortcut,
     RegisteredCommand,
 )
-from nova_harness.core.types.extensions.source import SourceInfo
+from nova_harness.types.extensions.source import SourceInfo
 
 
 @dataclass

@@ -5,7 +5,6 @@
 
 import hashlib
 import io
-import json
 import os
 import stat
 import tarfile

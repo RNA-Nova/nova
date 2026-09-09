@@ -23,7 +23,7 @@ from typing import Annotated, Any, List, Literal, Optional, Union
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import ConfigDict, Field
 
-from nova_harness.core.types.messages import CustomMessageContent
+from nova_harness.types.messages import CustomMessageContent
 
 
 class ItemStatus(str, Enum):

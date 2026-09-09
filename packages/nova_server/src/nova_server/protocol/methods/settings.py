@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.methods import shapes
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods import shapes
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
 
 
 def register(registry: MethodRegistry, state: ServerState) -> None:
@@ -24,7 +24,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         if state.fallback_settings_manager is None:
             import os
 
-            from nova_harness.core.config.settings.manager import SettingsManager
+            from nova_harness.config.settings.manager import SettingsManager
 
             state.fallback_settings_manager = SettingsManager.create(
                 cwd=params.cwd or os.getcwd()

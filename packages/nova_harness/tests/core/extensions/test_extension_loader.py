@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from nova_harness.core.extensions.event_bus import ExtensionEventBus
-from nova_harness.core.extensions.loader import load_extensions
-from nova_harness.core.types.extensions import ExtensionRuntime
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.extensions.loader import load_extensions
+from nova_harness.types.extensions.loading import ExtensionRuntime
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,7 @@ def test_package_extension_submodule_purged_on_reload(tmp_path: Path) -> None:
     无命名空间清理时，第二次加载会复用 ``sys.modules`` 里缓存的
     ``__nova_ext__.*.helper``，VALUE 仍是旧值。
     """
-    from nova_harness.core.extensions.loader import _load_module_from_path
+    from nova_harness.extensions.loader import _load_module_from_path
 
     ext_dir = tmp_path / "my-ext"
     ext_dir.mkdir()
@@ -75,7 +75,7 @@ async def test_extension_registers_message_types(tmp_path: Path) -> None:
     """
     from nova_agent import CustomAgentMessage
 
-    from nova_harness.core.harness.session.message_types import (
+    from nova_harness.sessions.message_types import (
         clear_session_message_types,
         get_session_message_type,
     )

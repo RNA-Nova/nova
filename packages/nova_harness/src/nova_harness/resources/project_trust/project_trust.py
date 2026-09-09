@@ -3,17 +3,17 @@
 from pathlib import Path
 from typing import Optional
 
-from nova_harness.core.config.defaults import CONFIG_DIR_NAME, SETTINGS_FILE_NAME
-from nova_harness.core.extensions.runner import emit_project_trust_event
-from nova_harness.core.harness.project_trust.trust_store import ProjectTrustStore
-from nova_harness.core.types.project_trust import (
+from nova_harness.config.defaults import CONFIG_DIR_NAME, SETTINGS_FILE_NAME
+from nova_harness.core.utils.git import find_git_root
+from nova_harness.extensions.runner import emit_project_trust_event
+from nova_harness.resources.project_trust.trust_store import ProjectTrustStore
+from nova_harness.types.project_trust import (
     ProjectTrustEvent,
     ProjectTrustOption,
     ProjectTrustUpdate,
     ResolveProjectTrustedOptions,
 )
-from nova_harness.core.types.ui import UIContext
-from nova_harness.core.utils.git import find_git_root
+from nova_harness.types.ui import UIContext
 
 TRUST_REQUIRING_RESOURCES = {
     SETTINGS_FILE_NAME,

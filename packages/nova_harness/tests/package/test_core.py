@@ -221,8 +221,8 @@ def test_install_bundle_keeps_whole_package(pm, tmp_path):
 
 def test_is_package_resolvable_for_git_does_not_clone(pm, tmp_path, monkeypatch):
     """对未安装的 git 源，PackageCoordinator 只检查本地缓存是否存在，不触发 clone。"""
-    from nova_harness.core.types.package import SourceScope
     from nova_harness.package.source.spec import parse_source
+    from nova_harness.types.package import SourceScope
 
     source = "git:github.com/user/repo"
     source_obj = parse_source(source)
@@ -241,9 +241,9 @@ def test_is_package_resolvable_for_git_does_not_clone(pm, tmp_path, monkeypatch)
 
 def test_is_package_resolvable_git_requires_dist_info(pm, tmp_path):
     """git 缓存存在但无 dist-info（validate clone / 幽灵副本）→ 判未安装，触发自愈重装。"""
-    from nova_harness.core.types.package import SourceScope
     from nova_harness.package.install.store import write_dist_info
     from nova_harness.package.source.spec import parse_source
+    from nova_harness.types.package import SourceScope
 
     source = "git:github.com/user/repo"
     source_obj = parse_source(source)
@@ -261,7 +261,7 @@ def test_is_package_resolvable_git_requires_dist_info(pm, tmp_path):
 
 def test_is_package_resolvable_path_requires_install_copy(pm, tmp_path):
     """path 源：原源在但从未安装（无副本）→ 判未安装，触发自动安装补齐。"""
-    from nova_harness.core.types.package import SourceScope
+    from nova_harness.types.package import SourceScope
 
     pkg = tmp_path / "my-agent"
     _make_agent_pkg(pkg)
@@ -277,7 +277,7 @@ def test_is_package_resolvable_path_copy_survives_missing_original(pm, tmp_path)
     """path 源：原源删除后无法重装，副本存在即视为可解析（避免误杀可用副本）。"""
     import shutil
 
-    from nova_harness.core.types.package import SourceScope
+    from nova_harness.types.package import SourceScope
 
     pkg = tmp_path / "my-agent"
     _make_agent_pkg(pkg)
@@ -921,7 +921,7 @@ def test_install_editable_rejects_git_source(pm, tmp_path):
 
 def test_find_by_name_raises_ambiguous_error():
     """同一名称匹配到多个包时应抛出 AmbiguousPackageNameError。"""
-    from nova_harness.core.types.package import (
+    from nova_harness.types.package import (
         AmbiguousPackageNameError,
         PackageMetadata,
     )

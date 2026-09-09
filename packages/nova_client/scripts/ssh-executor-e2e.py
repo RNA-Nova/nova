@@ -7,7 +7,7 @@
 - ~/.nova/agent/executor/id_ed25519 已装入服务器 authorized_keys；
 - ~/.nova/agent/executor/bin/linux-x86_64/nova-executor 缓存件已就位。
 
-用法：pixi run -e dev python packages/nova-harness/frontend/scripts/ssh-executor-e2e.py
+用法：pixi run -e dev python packages/nova_client/frontend/scripts/ssh-executor-e2e.py
 """
 
 import asyncio

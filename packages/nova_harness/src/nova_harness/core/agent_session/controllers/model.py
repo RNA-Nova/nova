@@ -11,15 +11,15 @@ from nova_ai import (
     get_supported_thinking_levels,
 )
 
-from nova_harness.core.config.defaults import DEFAULT_THINKING_LEVEL
-from nova_harness.core.types.events import (
+from nova_harness.config.defaults import DEFAULT_THINKING_LEVEL
+from nova_harness.core.utils import models_are_equal
+from nova_harness.events import (
     ModelSelectEvent,
     ThinkingLevelChangedEvent,
     ThinkingLevelSelectEvent,
 )
-from nova_harness.core.types.protocols import AgentSessionProtocol
-from nova_harness.core.types.session.model import ModelCycleResult
-from nova_harness.core.utils import models_are_equal
+from nova_harness.types.protocols import AgentSessionProtocol
+from nova_harness.types.session.model import ModelCycleResult
 
 
 def _thinking_level_from_value(
@@ -71,7 +71,7 @@ class ModelController:
         任何切换路径（set/cycle）都必须经此——只发 Bus 3 会让前端镜像
         永远停在旧模型（ctrl+p 循环"无效果"的根因）。
         """
-        from nova_harness.core.types.events import ModelChangedEvent
+        from nova_harness.events import ModelChangedEvent
 
         self._session._emit(
             ModelChangedEvent(

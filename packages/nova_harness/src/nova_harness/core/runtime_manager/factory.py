@@ -1,7 +1,8 @@
-"""AgentSession 内部工厂函数。
+"""AgentSession 内部工厂函数（per-session 组装件）。
 
-把 ``sdk.py`` 中构造底层 ``Agent``、配置 stream/convert 钩子、
-恢复会话状态等细节抽到这里，让 SDK 入口只保留公共工厂 API。
+构造底层 ``Agent``、配置 stream/convert 钩子、恢复会话状态等细节。
+原居 ``core/agent_session/factory.py``，现归 ``runtime_manager`` 包——
+由 ``assembly.py``（组装编排）调用；外部不得直接 import。
 """
 
 from __future__ import annotations
@@ -15,27 +16,25 @@ from typing import Any, Dict, List, Optional
 from nova_agent import Agent, ModelThinkingLevel
 from nova_ai import ImageContent, Model, ProviderResponse, TextContent
 
+from nova_harness.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
-from nova_harness.core.config.defaults import SESSIONS_DIR_NAME
-from nova_harness.core.extensions import ExtensionRunner
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.model.attribution import merge_provider_attribution_headers
-from nova_harness.core.model.resolver import resolve_thinking_level
-from nova_harness.core.types.events import (
+from nova_harness.core.utils import resolve_api_key
+from nova_harness.core.utils.http_idle_timeout import get_http_idle_timeout_seconds
+from nova_harness.core.utils.messages import convert_to_llm
+from nova_harness.events import (
     AfterProviderResponseEvent,
     SessionStartEvent,
 )
-from nova_harness.core.types.events.constants import (
+from nova_harness.events.constants import (
     AFTER_PROVIDER_RESPONSE,
     BEFORE_PROVIDER_HEADERS,
     BEFORE_PROVIDER_REQUEST,
 )
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
-from nova_harness.core.types.session.factory import CreateAgentSessionResult
-from nova_harness.core.types.ui import UIContext
-from nova_harness.core.utils import resolve_api_key
-from nova_harness.core.utils.http_idle_timeout import get_http_idle_timeout_seconds
-from nova_harness.core.utils.messages import convert_to_llm
+from nova_harness.extensions import ExtensionRunner
+from nova_harness.model.attribution import merge_provider_attribution_headers
+from nova_harness.sessions import SessionManager
+from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.types.ui import UIContext
 
 _BLOCK_IMAGE_PLACEHOLDER = "Image reading is disabled."
 

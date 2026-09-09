@@ -10,8 +10,8 @@
 所有前后端通信都统一使用 JSON-RPC 2.0 over Transport。
 """
 
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.jsonrpc import (
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.jsonrpc import (
     JsonRpcMessage,
     build_error,
     build_notification,
@@ -19,7 +19,7 @@ from nova_harness.server.protocol.jsonrpc import (
     build_response,
     parse_message,
 )
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.router import MethodRegistry
 
 __all__ = [
     "JSONRPCError",

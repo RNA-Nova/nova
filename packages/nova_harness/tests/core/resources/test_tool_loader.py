@@ -18,9 +18,9 @@ import pytest
 from nova_agent import AgentToolResult
 from nova_ai import TextContent
 
-from nova_harness.core.harness.tools.dynamic_tool import DynamicTool
-from nova_harness.core.resources.loaders.tools import ToolLoader, _load_tool
-from nova_harness.core.types.resources.tools import (
+from nova_harness.core.domains.tools.dynamic_tool import DynamicTool
+from nova_harness.resources.loaders.tools import ToolLoader, _load_tool
+from nova_harness.types.resources.tools import (
     NULL_TOOL_SETTINGS,
     ToolContext,
     ToolDefinition,

@@ -10,7 +10,7 @@ import os, re, pty, subprocess, select, time, sys
 
 NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova")
 PYTHON = os.environ.get("NOVA_PYTHON", f"{NOVA_REPO}/.pixi/envs/dev/bin/python")
-MAIN = f"{NOVA_REPO}/packages/nova-harness/frontend/dist/modes/tui/main.js"
+MAIN = f"{NOVA_REPO}/packages/nova_client/frontend/dist/modes/tui/main.js"
 
 master, slave = pty.openpty()
 env = dict(os.environ, NOVA_PYTHON=PYTHON, TERM_PROGRAM="vscode")

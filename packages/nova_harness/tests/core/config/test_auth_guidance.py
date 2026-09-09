@@ -6,19 +6,19 @@ import pytest
 from nova_ai.signal import AbortController
 from nova_ai.types.auth import AuthEvent, AuthPrompt, AuthPromptOption
 
-from nova_harness.core.config.auth.guidance import (
+from nova_harness.config.auth.guidance import (
     format_no_api_key_found_message,
     format_no_auth_message,
     format_no_model_selected_message,
     format_no_models_available_message,
     format_oauth_reauth_message,
 )
-from nova_harness.core.config.auth.interaction import (
+from nova_harness.config.auth.interaction import (
     LoginCancelledError,
     UIAuthInteraction,
 )
-from nova_harness.core.types.ui.context import UIContext
-from nova_harness.core.types.ui.primitives import UIResponse
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.primitives import UIResponse
 
 # ---------------------------------------------------------------------------
 # guidance
@@ -172,9 +172,9 @@ def test_notify_device_code_renders_code_and_url():
     interaction.notify(
         AuthEvent(
             type="device_code",
-            userCode="ABCD-1234",
-            verificationUri="https://example.com/device",
-            expiresInSeconds=900,
+            user_code="ABCD-1234",
+            verification_uri="https://example.com/device",
+            expires_in_seconds=900,
         )
     )
     assert ui.messages
@@ -225,16 +225,16 @@ def test_auth_url_auto_opens_via_host_once_per_url():
 
 
 def test_device_code_prefers_complete_uri_and_dedupes_with_auth_url():
-    """device_code 优先 verificationUriComplete；与 auth_url 同 URL 不重复开。"""
+    """device_code 优先 verification_uri_complete；与 auth_url 同 URL 不重复开。"""
     async def _run():
         ui = _FakeUI()
         interaction = UIAuthInteraction(ui)
         interaction.notify(
             AuthEvent(
                 type="device_code",
-                verificationUri="https://auth.example/device",
-                verificationUriComplete="https://auth.example/complete?code=1",
-                userCode="ABCD",
+                verification_uri="https://auth.example/device",
+                verification_uri_complete="https://auth.example/complete?code=1",
+                user_code="ABCD",
             )
         )
         await asyncio.sleep(0)

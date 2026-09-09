@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from nova_harness.server.transport.base import Transport
+from nova_server.transport.base import Transport
 
 
 class MemoryTransport(Transport):

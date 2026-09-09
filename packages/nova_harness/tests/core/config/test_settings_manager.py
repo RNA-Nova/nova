@@ -4,8 +4,8 @@ SettingsManager 测试。
 
 from nova_ai import ModelThinkingLevel
 
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.types.config.settings import ProviderRetrySettings, Settings
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.types.config.settings import ProviderRetrySettings, Settings
 from tests._helpers.settings_manager import settings_manager_in_memory
 
 
@@ -19,9 +19,9 @@ def test_settings_manager_in_memory_defaults():
 def test_settings_manager_get_set_default_provider_model():
     sm = settings_manager_in_memory()
     sm.set_default_provider("volcengine")
-    sm.set_default_model("deepseek-v3-2-251201")
+    sm.set_default_model("deepseek-v4-flash-260425")
     assert sm.get_default_provider() == "volcengine"
-    assert sm.get_default_model() == "deepseek-v3-2-251201"
+    assert sm.get_default_model() == "deepseek-v4-flash-260425"
 
 
 def test_settings_manager_thinking_level_roundtrip():
@@ -60,7 +60,7 @@ def test_settings_manager_apply_overrides():
 
 
 def test_settings_manager_drain_errors():
-    from nova_harness.core.types.config.settings import SettingsScope
+    from nova_harness.types.config.settings import SettingsScope
 
     sm = settings_manager_in_memory()
     sm._record_error(SettingsScope.GLOBAL, ValueError("boom"))

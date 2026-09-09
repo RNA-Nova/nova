@@ -202,14 +202,6 @@ def test_get_package_identity_git_ignores_ref():
     assert get_package_identity(main) == "git:github.com/user/repo"
 
 
-def test_get_package_identity_path_resolves():
-    from nova_harness.package.source.spec import get_package_identity
-
-    identity = get_package_identity("path:./my-agent")
-    assert identity.startswith("local:")
-    assert "/my-agent" in identity
-
-
 def test_parse_source_rejects_editable_prefix():
     from nova_harness.package.source.spec import parse_source
 

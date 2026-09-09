@@ -13,8 +13,8 @@ from typing import Dict, Optional
 
 from nova_ai.gateway.store import ModelsStoreEntry
 
-from nova_harness.core.config.defaults import MODELS_STORE_FILE_NAME, get_agent_dir
-from nova_harness.core.config.storage import FileStorageBackend
+from nova_harness.config.defaults import MODELS_STORE_FILE_NAME, get_agent_dir
+from nova_harness.config.storage import FileStorageBackend
 
 
 class FileModelsStore:

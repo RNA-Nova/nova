@@ -2,17 +2,16 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from nova_harness.core.types.package import PackageUpdate, SourceScope
 from nova_harness.package.install.updates import (
     _git_local_head,
     _git_remote_head,
     _is_pinned_git_ref,
     check_for_available_updates,
 )
+from nova_harness.types.package import PackageUpdate, SourceScope
 
 
 @pytest.mark.parametrize(

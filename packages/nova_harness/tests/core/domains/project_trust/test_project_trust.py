@@ -5,21 +5,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from nova_harness.core.extensions.runner import emit_project_trust_event
-from nova_harness.core.harness.project_trust import (
-    ProjectTrustStore,
+from nova_harness.extensions.runner import emit_project_trust_event
+from nova_harness.resources.project_trust.project_trust import (
     has_trust_requiring_project_resources,
     resolve_project_trusted,
 )
-from nova_harness.core.types.extensions import Extension
-from nova_harness.core.types.project_trust import (
-    ProjectTrustContext,
+from nova_harness.resources.project_trust.trust_store import ProjectTrustStore
+from nova_harness.types.extensions.loading import Extension
+from nova_harness.types.project_trust import (
     ProjectTrustEvent,
     ProjectTrustEventResult,
     ProjectTrustUpdate,
     ResolveProjectTrustedOptions,
 )
-from nova_harness.core.types.ui import NoOpUIContext
+from nova_harness.types.session.factory import ProjectTrustContext
+from nova_harness.types.ui import NoOpUIContext
 
 
 def test_has_trust_requiring_project_resources_detects_settings(tmp_path):

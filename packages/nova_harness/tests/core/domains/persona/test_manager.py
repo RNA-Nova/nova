@@ -17,10 +17,9 @@ from typing import Callable, Dict, Optional
 
 import pytest
 
-from nova_harness.core.harness.persona import PersonaManager
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.resources.agents import AgentConfig
-from nova_harness.core.types.resources.personas import Persona
+from nova_harness.core.domains.persona import PersonaManager
+from nova_harness.types.resources.agents import AgentConfig
+from nova_harness.types.resources.personas import Persona, SourceInfo
 
 
 class _FakeLoader:

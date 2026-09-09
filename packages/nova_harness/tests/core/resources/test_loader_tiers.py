@@ -11,10 +11,10 @@ from typing import Optional
 
 import pytest
 
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.package import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.types.config.settings import PackageSourceSpec, Settings
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 
 
 class _FakeSettingsManager:
@@ -172,7 +172,7 @@ async def test_extend_resources_resolves_against_loader_cwd(tmp_path: Path) -> N
 
     loader = _make_loader(cwd, agent_dir, no_prompt_templates=True)
 
-    from nova_harness.core.types.resources.extension_paths import (
+    from nova_harness.types.resources.extension_paths import (
         ResourceExtensionPathEntry,
         ResourceExtensionPaths,
     )
@@ -194,8 +194,8 @@ async def test_preloaded_inline_extensions_reused_factories_not_rerun(
 ) -> None:
     """preloaded 提供时 inline 扩展实例整体复用，工厂不重跑——
     runtime（共享 event_bus）被复用时，重跑工厂会重复注册事件处理器。"""
-    from nova_harness.core.extensions.event_bus import ExtensionEventBus
-    from nova_harness.core.resources.loaders.extensions import load_extensions
+    from nova_harness.extensions.event_bus import ExtensionEventBus
+    from nova_harness.resources.loaders.extensions import load_extensions
 
     calls = []
 

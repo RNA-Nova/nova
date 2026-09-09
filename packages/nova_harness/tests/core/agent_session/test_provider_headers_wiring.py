@@ -11,11 +11,11 @@ from unittest.mock import MagicMock
 import pytest
 from nova_ai import Model
 
-import nova_harness.core.agent_session.factory as factory_module
-from nova_harness.core.agent_session.factory import create_stream_fn
-from nova_harness.core.extensions.runner import ExtensionRunner
-from nova_harness.core.types.events.constants import BEFORE_PROVIDER_HEADERS
-from nova_harness.core.types.extensions import Extension, ExtensionRuntime
+import nova_harness.core.runtime_manager.factory as factory_module
+from nova_harness.core.runtime_manager.factory import create_stream_fn
+from nova_harness.events.constants import BEFORE_PROVIDER_HEADERS
+from nova_harness.extensions.runner import ExtensionRunner
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
 
 
 def _minimal_runtime() -> ExtensionRuntime:

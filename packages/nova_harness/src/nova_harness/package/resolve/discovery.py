@@ -10,11 +10,6 @@ from typing import Dict, List, Optional, Set
 
 import pathspec
 
-from nova_harness.core.types.package import (
-    RESOURCE_TYPE_DIRS,
-    NovaManifest,
-    ResourceType,
-)
 from nova_harness.core.utils.git import find_git_root
 from nova_harness.package.manifest import (
     read_manifest,
@@ -26,13 +21,13 @@ from nova_harness.package.utils import (
     load_ignore_specs,
 )
 from nova_harness.package.validation import (
-    is_agent_file,
     is_extension_path,
     is_persona_dir,
     is_skill_path,
     is_tool_dir,
     is_user_tool_dir,
 )
+from nova_harness.types.package import RESOURCE_TYPE_DIRS, NovaManifest, ResourceType
 
 logger = logging.getLogger(__name__)
 

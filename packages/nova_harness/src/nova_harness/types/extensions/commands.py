@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
 
-from nova_harness.core.types.extensions.source import SourceInfo
+from nova_harness.types.extensions.source import SourceInfo
 
 
 def _noop_handler(*args: Any, **kwargs: Any) -> Any:

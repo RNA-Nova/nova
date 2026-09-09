@@ -5,20 +5,19 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-import pytest
 from nova_agent import CustomAgentMessage
-from nova_ai import AssistantMessage, ImageContent, TextContent, UserMessage
+from nova_ai import AssistantMessage, TextContent, UserMessage
 
-from nova_harness.core.types.messages import (
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
-    CustomMessage,
-)
 from nova_harness.core.utils.messages import (
     convert_to_llm,
     create_branch_summary_message,
     create_compaction_summary_message,
     create_custom_message,
+)
+from nova_harness.types.messages import (
+    BranchSummaryMessage,
+    CompactionSummaryMessage,
+    CustomMessage,
 )
 
 

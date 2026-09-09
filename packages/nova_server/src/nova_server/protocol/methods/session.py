@@ -8,17 +8,14 @@ import os
 import shutil
 from typing import Any, Dict, List, Optional
 
-from nova_ai.types.base_model import NovaBaseModel
-
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.harness.project_trust import make_resolve_project_trust_callback
-from nova_harness.core.sdk import create_agent_session_runtime
-from nova_harness.core.types.compaction.compaction import CompactionResult
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.jsonrpc import JsonRpcMessage
-from nova_harness.server.protocol.methods.model import resolve_model
-from nova_harness.server.protocol.methods.shapes import (
+from nova_harness.config.defaults import get_agent_dir
+from nova_harness.core.runtime_manager.assembly import list_installed_agents
+from nova_harness.resources.project_trust.callback import (
+    make_resolve_project_trust_callback,
+)
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods.model import resolve_model
+from nova_server.protocol.methods.shapes import (
     AbortResult,
     AgentListItem,
     AppendEntryParams,
@@ -84,17 +81,20 @@ from nova_harness.server.protocol.methods.shapes import (
     SyncSessionResult,
     TokenUsageSummary,
 )
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
-from nova_harness.server.protocol.schema_export import (
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
+from nova_server.protocol.schema_export import (
     CONTRACT_VERSION_MAJOR,
     CONTRACT_VERSION_MINOR,
 )
-from nova_harness.server.reduction import entries_to_items
+from nova_server.reduction import entries_to_items
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.types.ui import NoOpUIContext
 
 
 def _find_session_path(session_id: str, cwd: Optional[str]) -> Optional[str]:
-    from nova_harness.core.harness.session.utils import (
+    from nova_harness.sessions.utils import (
         get_default_session_dir,
         is_valid_session_file,
     )
@@ -122,7 +122,7 @@ def _find_session_path(session_id: str, cwd: Optional[str]) -> Optional[str]:
 
 
 def _find_most_recent_session(cwd: Optional[str]) -> Optional[str]:
-    from nova_harness.core.harness.session.utils import (
+    from nova_harness.sessions.utils import (
         find_most_recent_session,
         get_default_session_dir,
     )
@@ -137,7 +137,7 @@ def _resolve_session_file(session_file: str, cwd: Optional[str]) -> str:
     绝对路径直用；含路径分隔符的相对路径相对 cwd 解析；
     裸 id 在 cwd 的默认会话目录解析为 ``<id>.jsonl``（纯计算，不建目录）。
     """
-    from nova_harness.core.harness.session.utils import get_default_session_dir_path
+    from nova_harness.sessions.utils import get_default_session_dir_path
 
     expanded = os.path.expanduser(session_file)
     if os.path.isabs(expanded):
@@ -242,7 +242,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         # 文件必须存在且为合法会话文件（校验先于 runtime 重建，失败不毁现有会话）
         session_file_path: Optional[str] = None
         if session_file is not None:
-            from nova_harness.core.harness.session.utils import is_valid_session_file
+            from nova_harness.sessions.utils import is_valid_session_file
 
             if not session_file.strip():
                 raise JSONRPCError(
@@ -275,9 +275,28 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         # 与 print 模式 --no-session 同一机制）
         session_manager = None
         if no_session:
-            from nova_harness.core.harness.session import SessionManager
+            from nova_harness.sessions import SessionManager
 
             session_manager = SessionManager.in_memory(params.cwd or os.getcwd())
+
+        # 项目信任三态：exec/headless 显式给出 trust 时走无 UI 覆盖决议
+        # （NoOpUIContext + trust_override）；None 保持交互决议
+        # （trust.json 记录 → default_project_trust 设置 →（有 UI）信任框）
+        if params.trust is not None:
+            resolve_project_trust = make_resolve_project_trust_callback(
+                cwd=params.cwd or os.getcwd(),
+                agent_dir=params.agent_dir or str(get_agent_dir()),
+                ui=NoOpUIContext(),
+                has_ui=False,
+                trust_override=params.trust,
+            )
+        else:
+            resolve_project_trust = make_resolve_project_trust_callback(
+                cwd=params.cwd or os.getcwd(),
+                agent_dir=params.agent_dir or str(get_agent_dir()),
+                ui=state.ui_context,
+                has_ui=True,
+            )
 
         opts = CreateAgentSessionOptions(
             cwd=params.cwd,
@@ -287,17 +306,15 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             agent_dir=params.agent_dir,
             session_manager=session_manager,
             ui_context=state.ui_context,
-            # 信任决议回调（此前 RPC 未接线——启动永远默认不信任且不读
-            # trust.json，"信任过下次还问" 的根因）：trust.json 记录 →
-            # default_project_trust 设置 →（有 UI）启动信任框
-            resolve_project_trust=make_resolve_project_trust_callback(
-                cwd=params.cwd or os.getcwd(),
-                agent_dir=params.agent_dir or str(get_agent_dir()),
-                ui=state.ui_context,
-                has_ui=True,
-            ),
+            # exec/headless 形态参数面（协议承接自 CreateSessionParams）
+            additional_skill_paths=params.additional_skill_paths,
+            additional_prompt_template_paths=params.additional_prompt_template_paths,
+            tools=params.tools,
+            exclude_tools=params.exclude_tools,
+            project_trusted=params.trust,
+            resolve_project_trust=resolve_project_trust,
         )
-        state.set_runtime(await create_agent_session_runtime(opts))
+        state.set_runtime(await state.runtime_manager.open_session(opts))
 
         resumed = False
 
@@ -336,9 +353,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         遍历全局 sessions 根下所有项目目录。listing 层自带并发限量
         （``MAX_CONCURRENT_SESSION_INFO_LOADS``），此处保持简单顺序组装。
         """
-        from nova_harness.core.harness.session.listing import list_sessions_from_dir
-        from nova_harness.core.harness.session.manager import SessionManager
-        from nova_harness.core.harness.session.utils import (
+        from nova_harness.sessions.listing import list_sessions_from_dir
+        from nova_harness.sessions.manager import SessionManager
+        from nova_harness.sessions.utils import (
             get_default_session_dir_path,
         )
 
@@ -414,8 +431,8 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         当前活跃会话走 live 通道（内存索引 + 事件广播保持一致），其余文件
         用独立 SessionManager 绑定追加，不触碰当前会话。
         """
-        from nova_harness.core.harness.session.manager import SessionManager
-        from nova_harness.core.harness.session.utils import is_valid_session_file
+        from nova_harness.sessions.manager import SessionManager
+        from nova_harness.sessions.utils import is_valid_session_file
 
         path = os.path.abspath(os.path.expanduser(params.path))
         name = params.name.strip()
@@ -823,8 +840,6 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         return OkResult(success=True)
 
     async def listAgents(params: EmptyParams) -> ListAgentsResult:
-        from nova_harness.core.sdk import list_installed_agents
-
         agents = list_installed_agents()
         return ListAgentsResult(root=[AgentListItem(name=name) for name in agents])
 
@@ -909,8 +924,6 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         return GetToolsResult(
             tools=state.runtime.session.get_available_tools_info(),
         )
-
-    from nova_harness.server.protocol.methods import shapes
 
     _D = "session"
     registry.register(
@@ -1033,9 +1046,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         setActiveTools,
         domain=_D,
     )
-    registry.register(
-        "navigateTree", navigateTree, domain=_D
-    )
+    registry.register("navigateTree", navigateTree, domain=_D)
     registry.register("fork", fork, domain=_D)
     registry.register(
         "getSessionStats",

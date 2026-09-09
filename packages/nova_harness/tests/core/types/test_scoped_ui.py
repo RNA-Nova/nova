@@ -11,14 +11,14 @@ import asyncio
 
 import pytest
 
-from nova_harness.core.types.ui.scoped import ScopedUIContext
-from nova_harness.server.connection import (
+from nova_server.connection import (
     Connection,
     ConnectionOrigin,
     ConnectionRegistry,
 )
-from nova_harness.server.transport import MemoryTransport
-from nova_harness.server.ui_context import RoutingUIContext
+from nova_server.transport import MemoryTransport
+from nova_server.ui_context import RoutingUIContext
+from nova_harness.types.ui.scoped import ScopedUIContext
 
 
 def _make_base(capabilities=frozenset({"select"})):

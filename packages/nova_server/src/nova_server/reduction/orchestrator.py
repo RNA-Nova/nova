@@ -25,11 +25,12 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
-from nova_ai import AssistantMessage, ToolCall
+from nova_ai import ToolCall
 
-from nova_harness.core.types.events import (
+from nova_harness.core.utils.messages import extract_text_from_content
+from nova_harness.events import (
     AGENT_END,
     COMPACTION_END,
     ITEM_EMISSION,
@@ -41,8 +42,7 @@ from nova_harness.core.types.events import (
     TOOL_EXECUTION_START,
     TOOL_EXECUTION_UPDATE,
 )
-from nova_harness.core.utils.messages import extract_text_from_content
-from nova_harness.server.types.items import (
+from nova_server.types.items import (
     AgentMessageItem,
     CompactionItem,
     CustomItem,
@@ -50,7 +50,7 @@ from nova_harness.server.types.items import (
     NovaItem,
     ToolCallItem,
 )
-from nova_harness.server.types.notifications import (
+from nova_server.types.notifications import (
     ItemCompletedNotification,
     ItemDeltaNotification,
     ItemStartedNotification,

@@ -9,7 +9,7 @@ import tempfile
 import pytest
 from nova_ai import AssistantMessage, ModelThinkingLevel, TextContent, UserMessage
 
-from nova_harness.core.harness.session import (
+from nova_harness.sessions import (
     SessionManager,
     build_session_context,
     load_entries_from_file,
@@ -442,7 +442,7 @@ def test_session_manager_open_invalid_file_raises():
 
 def test_append_compaction_normalizes_pydantic_details(session):
     """pydantic details 在写入关口被归一化为 dict（内存/落盘/重载一种表示）。"""
-    from nova_harness.core.types.compaction import CompactionDetails
+    from nova_harness.types.compaction.compaction import CompactionDetails
 
     session.append_message(_assistant("a"))
     entry = session.append_compaction(
@@ -561,7 +561,7 @@ def test_build_context_after_reset_leaf_is_empty(session):
 
 
 def test_find_most_recent_session_filters_by_cwd():
-    from nova_harness.core.harness.session import find_most_recent_session
+    from nova_harness.sessions import find_most_recent_session
 
     with tempfile.TemporaryDirectory() as tmp:
         m1 = SessionManager.create(cwd="/proj/a", session_dir=tmp)
@@ -587,7 +587,7 @@ def test_find_most_recent_session_filters_by_cwd():
 
 def test_get_last_activity_time_unifies_milliseconds(session):
     """消息时间戳（ms）与条目时间戳（ISO）统一为毫秒，fromtimestamp 不溢出。"""
-    from nova_harness.core.harness.session import get_last_activity_time
+    from nova_harness.sessions import get_last_activity_time
 
     msg = _assistant("a")
     msg.timestamp = 1_700_000_000_000  # epoch 毫秒
@@ -599,7 +599,7 @@ def test_get_last_activity_time_unifies_milliseconds(session):
 
 def test_build_session_info_with_ms_timestamp():
     """带 int(ms) 时间戳消息的会话能正常构建 SessionInfo（不再返回 None）。"""
-    from nova_harness.core.harness.session.listing import _build_session_info_sync
+    from nova_harness.sessions.listing import _build_session_info_sync
 
     with tempfile.TemporaryDirectory() as tmp:
         manager = SessionManager.create(cwd="/tmp", session_dir=tmp)

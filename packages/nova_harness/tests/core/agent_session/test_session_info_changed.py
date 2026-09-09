@@ -12,10 +12,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from nova_harness.core import AgentSession
-from nova_harness.core.extensions.runner import ExtensionRunner
-from nova_harness.core.types.events.constants import SESSION_INFO_CHANGED
-from nova_harness.core.types.extensions import Extension, ExtensionRuntime
-from nova_harness.core.types.session.config import AgentSessionConfig
+from nova_harness.events.constants import SESSION_INFO_CHANGED
+from nova_harness.extensions.runner import ExtensionRunner
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.types.session.config import AgentSessionConfig
 
 
 def _minimal_runtime() -> ExtensionRuntime:

@@ -4,7 +4,7 @@
 → 远程 rg --json 经 process/start 执行 → 同一份解析出结构化匹配；
 以及无 rg 时便携引擎兜底的切换正确性。
 
-用法：pixi run -e dev python packages/nova-harness/frontend/scripts/remote-rg-e2e.py
+用法：pixi run -e dev python packages/nova_client/frontend/scripts/remote-rg-e2e.py
 """
 
 import asyncio

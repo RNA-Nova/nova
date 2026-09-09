@@ -1,5 +1,5 @@
 """Nova Harness CLI."""
 
-from nova_harness.cli.main import main
+from nova_harness.app.main import main
 
 __all__ = ["main"]

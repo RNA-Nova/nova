@@ -11,11 +11,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.types.project_trust import (
-    ProjectTrustContext,
-    ResolveProjectTrustedOptions,
-)
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.types.project_trust import ResolveProjectTrustedOptions
+from nova_harness.types.session.factory import ProjectTrustContext
 
 from .project_trust import resolve_project_trusted
 from .trust_store import ProjectTrustStore

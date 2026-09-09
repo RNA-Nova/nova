@@ -14,27 +14,12 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set
 
-from nova_harness.core.config.defaults import (
+from nova_harness.config.defaults import (
     GIT_PACKAGES_DIR_NAME,
     PACKAGES_DIR_NAME,
     PATH_PACKAGES_DIR_NAME,
     get_project_base_dir,
 )
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.package import (
-    TOP_LEVEL_RESOURCE_TYPE_DIRS,
-    NovaManifest,
-    PackageFilter,
-    PathMetadata,
-    ProgressEvent,
-    ResolvedPaths,
-    ResolvedResource,
-    ResourceType,
-    SourceOrigin,
-    SourceScope,
-)
-from nova_harness.core.types.protocols import SettingsReaderProtocol
-from nova_harness.core.types.resources.diagnostics import ResourceDiagnostic
 from nova_harness.package.install.store import (
     basename,
     install_path_for_source,
@@ -59,6 +44,21 @@ from nova_harness.package.source.spec import (
     parse_source,
 )
 from nova_harness.package.utils import is_ignored_by_specs, load_ignore_specs
+from nova_harness.types.config.settings import PackageSourceSpec, Settings
+from nova_harness.types.package import (
+    TOP_LEVEL_RESOURCE_TYPE_DIRS,
+    NovaManifest,
+    PackageFilter,
+    PathMetadata,
+    ProgressEvent,
+    ResolvedPaths,
+    ResourceType,
+    SourceOrigin,
+    SourceScope,
+)
+from nova_harness.types.protocols import SettingsReaderProtocol
+from nova_harness.types.resources.diagnostics import ResourceDiagnostic
+from nova_harness.types.resources.prompts import ResolvedResource
 
 logger = logging.getLogger(__name__)
 

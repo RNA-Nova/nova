@@ -30,13 +30,13 @@ import asyncio
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
-from nova_harness.core.types.ui.context import UIContext
-from nova_harness.core.types.ui.primitives import UIResponse
-from nova_harness.server.connection import (
+from nova_server.connection import (
     Connection,
     ConnectionRegistry,
     current_connection,
 )
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.primitives import UIResponse
 
 
 class _Pending:

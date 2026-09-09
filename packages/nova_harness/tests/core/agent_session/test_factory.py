@@ -1,10 +1,10 @@
-"""agent_session factory 的会话状态恢复/持久化测试。"""
+"""runtime_manager factory 的会话状态恢复/持久化测试（自 agent_session 迁入）。"""
 
 from unittest.mock import MagicMock
 
 from nova_ai import ModelThinkingLevel
 
-from nova_harness.core.agent_session.factory import restore_or_persist_session_state
+from nova_harness.core.runtime_manager.factory import restore_or_persist_session_state
 
 
 def _session_manager(messages=None, branch=None) -> MagicMock:

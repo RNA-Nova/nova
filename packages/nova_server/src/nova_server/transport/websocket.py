@@ -19,7 +19,6 @@ token 供给：显式 ``--token`` > ``--token-file`` > 自动生成并落
 
 from __future__ import annotations
 
-import asyncio
 import hmac
 import ipaddress
 import json
@@ -28,12 +27,11 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
-import websockets
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request
 
-from nova_harness.server.transport.base import Transport
+from nova_server.transport.base import Transport
 
 # on_connection 回调：每接入一条连接调用一次（服务器 add_connection 的接缝）
 OnConnection = Callable[[Transport], Awaitable[None]]

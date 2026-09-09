@@ -9,15 +9,14 @@ import asyncio
 import time
 
 import pytest
-from nova_ai.signal import AbortController
 
-from nova_harness.server.connection import (
+from nova_server.connection import (
     Connection,
     ConnectionOrigin,
     ConnectionRegistry,
 )
-from nova_harness.server.transport import MemoryTransport
-from nova_harness.server.ui_context import RoutingUIContext
+from nova_server.transport import MemoryTransport
+from nova_server.ui_context import RoutingUIContext
 
 
 def _make_conn(registry, capabilities=()):

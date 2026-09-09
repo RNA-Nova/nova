@@ -13,14 +13,14 @@ from typing import Any, Dict, List, Optional
 import pytest
 from nova_ai import ModelThinkingLevel
 
-from nova_harness.server.protocol import JSONRPCError, MethodRegistry
-from nova_harness.server.protocol.methods import auth as auth_methods
-from nova_harness.server.protocol.methods import model as model_methods
-from nova_harness.server.protocol.methods import package as package_methods
-from nova_harness.server.protocol.methods import session as session_methods
-from nova_harness.server.protocol.methods import settings as settings_methods
-from nova_harness.server.protocol.methods import system as system_methods
-from nova_harness.server.protocol.methods.state import ServerState
+from nova_server.protocol import JSONRPCError, MethodRegistry
+from nova_server.protocol.methods import auth as auth_methods
+from nova_server.protocol.methods import model as model_methods
+from nova_server.protocol.methods import package as package_methods
+from nova_server.protocol.methods import session as session_methods
+from nova_server.protocol.methods import settings as settings_methods
+from nova_server.protocol.methods import system as system_methods
+from nova_server.protocol.methods.state import ServerState
 
 
 def _make_state(runtime: Any = None) -> ServerState:
@@ -280,7 +280,7 @@ async def test_invoke_shortcut_requires_param():
 
 @pytest.mark.asyncio
 async def test_get_settings_without_runtime(monkeypatch):
-    from nova_harness.core.config.settings.manager import SettingsManager
+    from nova_harness.config.settings.manager import SettingsManager
     from tests._helpers.settings_storage import InMemorySettingsStorage
 
     fallback = SettingsManager.from_storage(InMemorySettingsStorage())
@@ -310,7 +310,7 @@ async def test_get_settings_without_runtime(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_auth_status_without_runtime(monkeypatch):
-    from nova_harness.core.config import AuthStorage
+    from nova_harness.config import AuthStorage
 
     class _FakeStorage:
         async def list(self):

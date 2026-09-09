@@ -4,14 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from nova_harness.core.extensions.runner import ExtensionRunner
-from nova_harness.core.types.events import InputEvent, InputEventResult
-from nova_harness.core.types.events.constants import INPUT
-from nova_harness.core.types.extensions import (
-    Extension,
-    ExtensionRuntime,
-    RegisteredCommand,
-)
+from nova_harness.events import InputEvent, InputEventResult
+from nova_harness.events.constants import INPUT
+from nova_harness.extensions.runner import ExtensionRunner
+from nova_harness.types.extensions.extension import RegisteredCommand
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
 
 
 def _minimal_runtime() -> ExtensionRuntime:
@@ -205,7 +202,7 @@ async def test_emit_input_continue_does_not_change_text():
 @pytest.mark.asyncio
 async def test_api_on_input_subscribes_input_event():
     """通过 api.on_input 订阅 input 事件，验证 API 层行为一致。"""
-    from nova_harness.core.extensions.api import create_extension_api
+    from nova_harness.extensions.api import create_extension_api
 
     ext = Extension(path="e1")
     runtime = _minimal_runtime()
@@ -304,8 +301,8 @@ async def test_emit_tool_call_handler_error_blocks_execution():
     拦截类扩展（permission gate 等）崩溃若静默放行，危险操作会径直穿过
     门禁——异常必须表现为拒绝（对齐 TS 的 tool_call 钩子语义）。
     """
-    from nova_harness.core.types.events import ToolCallEvent
-    from nova_harness.core.types.events.constants import TOOL_CALL
+    from nova_harness.events import ToolCallEvent
+    from nova_harness.events.constants import TOOL_CALL
 
     def boom(event, ctx):
         raise RuntimeError("gate crashed")
@@ -327,8 +324,8 @@ async def test_emit_tool_call_handler_error_blocks_execution():
 @pytest.mark.asyncio
 async def test_emit_tool_call_handler_error_skips_remaining_handlers():
     """fail-closed 短路：异常后不再执行后续 handler（对齐 TS 的短路语义）。"""
-    from nova_harness.core.types.events import ToolCallEvent
-    from nova_harness.core.types.events.constants import TOOL_CALL
+    from nova_harness.events import ToolCallEvent
+    from nova_harness.events.constants import TOOL_CALL
 
     calls = []
 
@@ -355,7 +352,7 @@ async def test_emit_tool_call_handler_error_skips_remaining_handlers():
 @pytest.mark.asyncio
 async def test_emit_before_provider_headers_in_place_mutation():
     """handler 原地修改 headers，返回的同一 dict 带修改；返回值被忽略。"""
-    from nova_harness.core.types.events.constants import BEFORE_PROVIDER_HEADERS
+    from nova_harness.events.constants import BEFORE_PROVIDER_HEADERS
 
     def handler(event, ctx):
         event.headers["x-ext"] = "1"
@@ -374,7 +371,7 @@ async def test_emit_before_provider_headers_in_place_mutation():
 @pytest.mark.asyncio
 async def test_emit_before_provider_headers_chain_visibility():
     """串行 handler 后者可见前者的修改。"""
-    from nova_harness.core.types.events.constants import BEFORE_PROVIDER_HEADERS
+    from nova_harness.events.constants import BEFORE_PROVIDER_HEADERS
 
     def first(event, ctx):
         event.headers["x-first"] = "a"
@@ -395,7 +392,7 @@ async def test_emit_before_provider_headers_chain_visibility():
 @pytest.mark.asyncio
 async def test_emit_before_provider_headers_fail_open():
     """handler 异常 fail-open：转 error 事件、请求继续、后续 handler 仍执行。"""
-    from nova_harness.core.types.events.constants import BEFORE_PROVIDER_HEADERS
+    from nova_harness.events.constants import BEFORE_PROVIDER_HEADERS
 
     def boom(event, ctx):
         raise RuntimeError("bad handler")

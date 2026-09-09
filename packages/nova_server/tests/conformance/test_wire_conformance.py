@@ -1,7 +1,7 @@
 """黑盒线上契约一致性套件（v1）。
 
 与白盒测试的根本区别：本套件**从管道另一端说话**——spawn 真实后端进程
-（``python -m nova_harness.modes.rpc.cli``），经 stdio NDJSON 发命令、收事件，
+（``python -m nova_server.rpc.cli``），经 stdio NDJSON 发命令、收事件，
 并用 ``nova-wire.schema.json`` 校验响应与事件形状。后端内部实现一概不碰。
 
 这就是多后端时代的"入网认证"雏形：任何语言的后端实现，只要能被本套件
@@ -21,16 +21,14 @@ from pathlib import Path
 import pytest
 from jsonschema import validate
 
-from nova_harness.server.protocol.schema_export import (
+from nova_server.protocol.schema_export import (
     CONTRACT_VERSION_MAJOR,
     CONTRACT_VERSION_MINOR,
 )
 
 _SCHEMA_PATH = (
-    Path(__file__).resolve().parents[5]
-    / "packages"
-    / "nova-harness"
-    / "frontend"
+    Path(__file__).resolve().parents[3]
+    / "nova_client"
     / "protocol"
     / "nova-wire.schema.json"
 )
@@ -169,7 +167,7 @@ def _spawn_backend(extra_args: list[str] | None = None) -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "nova_harness.modes.rpc.cli", *(extra_args or [])],
+        [sys.executable, "-m", "nova_server.rpc.cli", *(extra_args or [])],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

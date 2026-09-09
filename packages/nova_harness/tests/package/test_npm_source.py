@@ -1,7 +1,6 @@
 """npm 源测试：spec 解析 / semver range 匹配 / resolver 下载链路 / updates 检查。"""
 
 import base64
-import gzip
 import hashlib
 import io
 import json

@@ -2,7 +2,6 @@
 
 import stat
 import sys
-from pathlib import Path
 
 import pytest
 

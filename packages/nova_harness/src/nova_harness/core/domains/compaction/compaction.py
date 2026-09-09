@@ -23,7 +23,7 @@ from nova_ai import (
     to_thinking_level,
 )
 
-from nova_harness.core.harness.compaction.utils import (
+from nova_harness.core.domains.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,
     create_file_ops,
@@ -32,19 +32,19 @@ from nova_harness.core.harness.compaction.utils import (
     get_message_from_entry,
     serialize_conversation,
 )
-from nova_harness.core.harness.session import build_session_context
-from nova_harness.core.types.compaction import (
+from nova_harness.core.utils.messages import convert_to_llm
+from nova_harness.sessions import build_session_context
+from nova_harness.types.compaction.compaction import (
     CompactionDetails,
     CompactionPreparation,
     CompactionResult,
     CompactionSettings,
     ContextUsageEstimate,
     CutPointResult,
-    FileOperations,
 )
-from nova_harness.core.types.messages import ContextInjectable
-from nova_harness.core.types.session.entries import CompactionEntry, SessionEntry
-from nova_harness.core.utils.messages import convert_to_llm
+from nova_harness.types.compaction.file_ops import FileOperations
+from nova_harness.types.messages import ContextInjectable
+from nova_harness.types.session.entries import CompactionEntry, SessionEntry
 
 # ============================================================================
 # File Operation Tracking

@@ -8,7 +8,7 @@ from typing import Optional
 
 from nova_ai.types.base_model import NovaBaseModel
 
-from nova_harness.core.types.extensions import SourceInfo
+from nova_harness.types.resources.personas import SourceInfo
 
 
 class Skill(NovaBaseModel):

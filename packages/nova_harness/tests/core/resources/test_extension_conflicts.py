@@ -4,12 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from nova_harness.core.resources.loaders.extensions import detect_extension_conflicts
-from nova_harness.core.types.extensions import (
+from nova_harness.resources.loaders.extensions import detect_extension_conflicts
+from nova_harness.types.extensions import (
     Extension,
     ExtensionFlag,
-    ExtensionRuntime,
-    SourceInfo,
 )
 
 
@@ -55,7 +53,7 @@ def test_detect_extension_conflicts_first_wins():
 @pytest.mark.asyncio
 async def test_load_extensions_includes_conflict_diagnostics(tmp_path: Path):
     """加载两个同名 flag 的扩展，结果 diagnostics 中应包含冲突。"""
-    from nova_harness.core.resources.loaders.extensions import load_extensions
+    from nova_harness.resources.loaders.extensions import load_extensions
 
     ext_a = tmp_path / "ext_a.py"
     ext_a.write_text(
@@ -70,7 +68,7 @@ async def test_load_extensions_includes_conflict_diagnostics(tmp_path: Path):
         encoding="utf-8",
     )
 
-    from nova_harness.core.types.package import (
+    from nova_harness.types.package import (
         PathMetadata,
         ResolvedResource,
         SourceScope,

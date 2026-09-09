@@ -11,13 +11,13 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from nova_agent import AgentTool, AgentToolResult
 from nova_ai import AbortSignal, TextContent
 
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.resources.tools import (
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContextProvider,
     ToolDefinition,

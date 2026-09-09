@@ -7,9 +7,9 @@
 from pathlib import Path
 from typing import List, Literal, Optional, cast
 
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.package import ResolvedResource
-from nova_harness.core.types.resources.extension_paths import ResourceExtensionPathEntry
+from nova_harness.types.resources.extension_paths import ResourceExtensionPathEntry
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.prompts import ResolvedResource
 
 
 def _maybe_enum_value(value):
@@ -132,8 +132,8 @@ def default_source_info_for_path(
     后端半区）下的路径标记为 user/project scope；
     其余路径标记为 temporary scope（SDK/CLI 显式传入的临时资源）。
     """
-    from nova_harness.core.config.defaults import CONFIG_DIR_NAME
-    from nova_harness.core.types.package import BACKEND_HALF_DIR_NAME
+    from nova_harness.config.defaults import CONFIG_DIR_NAME
+    from nova_harness.types.package import BACKEND_HALF_DIR_NAME
 
     normalized = Path(file_path).resolve()
 

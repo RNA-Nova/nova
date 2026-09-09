@@ -11,11 +11,11 @@ from typing import List, Optional
 from nova_agent import AgentMessage
 from nova_ai import Context, SimpleStreamOptions
 
-from nova_harness.core.harness.compaction.compaction import (
+from nova_harness.core.domains.compaction.compaction import (
     complete_summarization,
     estimate_tokens,
 )
-from nova_harness.core.harness.compaction.utils import (
+from nova_harness.core.domains.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,
     create_file_ops,
@@ -24,15 +24,15 @@ from nova_harness.core.harness.compaction.utils import (
     get_message_from_entry,
     serialize_conversation,
 )
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.types.compaction import (
+from nova_harness.core.utils.messages import convert_to_llm
+from nova_harness.sessions import SessionManager
+from nova_harness.types.compaction.branch_summary import (
     BranchPreparation,
     BranchSummaryResult,
     CollectEntriesResult,
     GenerateBranchSummaryOptions,
 )
-from nova_harness.core.types.session.entries import SessionEntry
-from nova_harness.core.utils.messages import convert_to_llm
+from nova_harness.types.session.entries import SessionEntry
 
 # ============================================================================
 # Entry Collection

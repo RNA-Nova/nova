@@ -12,11 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from nova_harness.core.types.protocols import (
+from nova_harness.types.protocols import (
     ModelRuntimeProtocol,
     SessionManagerProtocol,
 )
-from nova_harness.core.types.ui import UIContext
+from nova_harness.types.ui import UIContext
 
 
 @dataclass(kw_only=True)

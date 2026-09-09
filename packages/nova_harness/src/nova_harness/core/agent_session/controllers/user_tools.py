@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from nova_agent import CustomAgentMessage
 from nova_ai import AbortController
 
-from nova_harness.core.harness.user_tools import UserToolManager
-from nova_harness.core.types.events import USER_BASH, UserBashEvent
-from nova_harness.core.types.protocols import AgentSessionProtocol
-from nova_harness.core.types.resources.user_tools import UserToolEventCallback
+from nova_harness.core.domains.user_tools import UserToolManager
+from nova_harness.events import USER_BASH, UserBashEvent
+from nova_harness.types.protocols import AgentSessionProtocol
+from nova_harness.types.resources.user_tools import UserToolEventCallback
 
 
 class UserToolController:
@@ -145,7 +145,7 @@ class UserToolController:
 
     def _emit_message_events(self, message: CustomAgentMessage) -> None:
         """按会话消息生命周期发射 start/end（mirror 依此完结卡片）。"""
-        from nova_harness.core.types.events.agent import (
+        from nova_harness.events.agent import (
             MessageEndEvent,
             MessageStartEvent,
         )

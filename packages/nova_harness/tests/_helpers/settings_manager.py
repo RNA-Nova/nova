@@ -2,8 +2,8 @@
 
 from typing import Any, Optional
 
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.types.config.settings import Settings
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.types.config.settings import Settings
 from tests._helpers.settings_storage import InMemorySettingsStorage
 
 

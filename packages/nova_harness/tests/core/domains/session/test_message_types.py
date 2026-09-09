@@ -8,19 +8,19 @@
 """
 
 import json
-from typing import Literal, Optional
+from typing import Literal
 
 import pytest
 from nova_agent import CustomAgentMessage
 
-from nova_harness.core.harness.session.message_types import (
+from nova_harness.sessions.message_types import (
     clear_session_message_types,
     get_session_message_type,
     register_message_types,
 )
-from nova_harness.core.harness.session.utils import parse_session_entry_line
-from nova_harness.core.types.messages import OpaqueUserToolMessage
-from nova_harness.core.types.session.entries import SessionMessageEntry
+from nova_harness.sessions.utils import parse_session_entry_line
+from nova_harness.types.messages import OpaqueUserToolMessage
+from nova_harness.types.session.entries import SessionMessageEntry
 
 
 class SearchResultMessage(CustomAgentMessage):

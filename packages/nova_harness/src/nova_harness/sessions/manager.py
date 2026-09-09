@@ -16,13 +16,13 @@ from nova_agent import CustomAgentMessage
 from nova_ai import ImageContent, Message, ModelThinkingLevel, TextContent
 from pydantic import BaseModel
 
-from nova_harness.core.config.defaults import get_sessions_dir
-from nova_harness.core.harness.session.listing import (
+from nova_harness.config.defaults import get_sessions_dir
+from nova_harness.sessions.listing import (
     MAX_CONCURRENT_SESSION_INFO_LOADS,
     build_session_info,
     list_sessions_from_dir,
 )
-from nova_harness.core.harness.session.utils import (
+from nova_harness.sessions.utils import (
     assert_valid_session_id,
     build_context_entries,
     build_session_context,
@@ -34,24 +34,22 @@ from nova_harness.core.harness.session.utils import (
     load_entries_from_file,
     now_iso,
 )
-from nova_harness.core.types.session import (
-    CURRENT_SESSION_VERSION,
-    BranchSummaryEntry,
-    CompactionEntry,
-    CustomEntry,
-    CustomMessageEntry,
-    FileEntry,
-    LabelEntry,
-    ModelChangeEntry,
-    SessionContext,
-    SessionEntry,
-    SessionHeader,
-    SessionInfo,
-    SessionInfoEntry,
-    SessionMessageEntry,
-    SessionTreeNode,
-    ThinkingLevelChangeEntry,
-)
+from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
+from nova_harness.types.session.entries import BranchSummaryEntry
+from nova_harness.types.session.entries import CompactionEntry
+from nova_harness.types.session.entries import CustomEntry
+from nova_harness.types.session.entries import CustomMessageEntry
+from nova_harness.types.session.entries import FileEntry
+from nova_harness.types.session.entries import LabelEntry
+from nova_harness.types.session.entries import ModelChangeEntry
+from nova_harness.types.session.context import SessionContext
+from nova_harness.types.compaction.branch_summary import SessionEntry
+from nova_harness.types.session.entries import SessionHeader
+from nova_harness.types.session.info import SessionInfo
+from nova_harness.types.session.entries import SessionInfoEntry
+from nova_harness.types.session.entries import SessionMessageEntry
+from nova_harness.types.session.tree import SessionTreeNode
+from nova_harness.types.session.entries import ThinkingLevelChangeEntry
 
 # details 字段允许写入的 JSON 原生类型
 _JSON_NATIVE_TYPES = (dict, list, str, int, float, bool)
@@ -474,7 +472,7 @@ class SessionManager:
 
     def get_tree(self) -> List[SessionTreeNode]:
         """获取树结构"""
-        from nova_harness.core.harness.session.builders import build_session_tree
+        from nova_harness.sessions.builders import build_session_tree
 
         return build_session_tree(
             self.get_entries(), self._labels_by_id, self._label_timestamps_by_id
@@ -517,7 +515,7 @@ class SessionManager:
 
     def create_branched_session(self, leaf_id: str) -> Optional[str]:
         """创建分支会话"""
-        from nova_harness.core.harness.session.builders import (
+        from nova_harness.sessions.builders import (
             create_branched_session_entries,
         )
 

@@ -9,18 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from nova_harness.core.resources.loaders.personas import (
+from nova_harness.resources.loaders.personas import (
     load_persona_from_file,
     load_personas,
     load_personas_from_dir,
     persona_name_from_path,
 )
-from nova_harness.core.types.package import (
-    PathMetadata,
-    ResolvedResource,
-    SourceOrigin,
-    SourceScope,
-)
+from nova_harness.types.package import PathMetadata, SourceOrigin, SourceScope
+from nova_harness.types.resources.prompts import ResolvedResource
 
 
 def _resolved(path: Path, *, enabled: bool = True) -> ResolvedResource:

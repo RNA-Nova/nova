@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from nova_agent import CustomAgentMessage
 from nova_ai.types.base_model import NovaBaseModel
 
-from nova_harness.core.types.extensions.source import SourceInfo
+from nova_harness.types.extensions.source import SourceInfo
 
 # 进度事件回调签名：``on_event(event_name, data)``，同步/异步均可。
 UserToolEventCallback = Callable[[str, Dict[str, Any]], Any]
@@ -29,7 +29,7 @@ UserToolEventCallback = Callable[[str, Dict[str, Any]], Any]
 #
 # 返回的消息实例由会话层统一处理：双写 agent state + 会话 JSONL，
 # 流式期间挂 pending、turn 结束 flush。消息应实现
-# ``nova_harness.core.types.messages.ContextInjectable`` 协议，
+# ``nova_harness.types.messages.ContextInjectable`` 协议，
 # 否则无法进入 LLM 上下文。
 UserToolExecute = Callable[
     [Dict[str, Any], Optional[UserToolEventCallback], Any],

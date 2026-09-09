@@ -5,7 +5,7 @@
 归一化（id 按序重写、ts/durationMs/compaction reason 剔除）后逐字段相等。
 """
 
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal
 
 from nova_agent import AgentToolResult, CustomAgentMessage
 from nova_ai import (
@@ -18,8 +18,7 @@ from nova_ai import (
     UserMessage,
 )
 
-from nova_harness.core.types.compaction import CompactionResult
-from nova_harness.core.types.events import (
+from nova_harness.events import (
     AgentEndEvent,
     ItemEmissionEvent,
     MessageEndEvent,
@@ -28,9 +27,16 @@ from nova_harness.core.types.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from nova_harness.core.types.events.session import CompactionEndEvent
-from nova_harness.core.types.messages import CustomMessage
-from nova_harness.core.types.session.entries import (
+from nova_harness.events.session import CompactionEndEvent
+from nova_server.reduction import SessionReducer, entries_to_items
+from nova_server.types.items import (
+    CustomItem,
+    ItemStatus,
+    NovaItem,
+)
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_harness.types.messages import CustomMessage
+from nova_harness.types.session.entries import (
     BranchSummaryEntry,
     CompactionEntry,
     CustomEntry,
@@ -38,12 +44,6 @@ from nova_harness.core.types.session.entries import (
     LabelEntry,
     ModelChangeEntry,
     SessionMessageEntry,
-)
-from nova_harness.server.reduction import SessionReducer, entries_to_items
-from nova_harness.server.types.items import (
-    CustomItem,
-    ItemStatus,
-    NovaItem,
 )
 
 

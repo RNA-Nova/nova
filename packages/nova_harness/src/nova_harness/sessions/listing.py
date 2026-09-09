@@ -7,12 +7,12 @@ import os
 from datetime import datetime
 from typing import Callable, List, Optional
 
-from nova_harness.core.harness.session.utils import (
+from nova_harness.sessions.utils import (
     message_activity_time,
     parse_session_entry_line,
 )
-from nova_harness.core.types.session.entries import SessionHeader
-from nova_harness.core.types.session.info import SessionInfo
+from nova_harness.types.session.entries import SessionHeader
+from nova_harness.types.session.info import SessionInfo
 from nova_harness.core.utils.messages import extract_text_from_content
 
 # 同时加载会话信息的最大并发数

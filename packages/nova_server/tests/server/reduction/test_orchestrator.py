@@ -5,7 +5,7 @@
 ``examples/server-item-layer-design.md`` §5。
 """
 
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal
 
 import pytest
 from nova_agent import CustomAgentMessage
@@ -18,8 +18,7 @@ from nova_ai import (
     UserMessage,
 )
 
-from nova_harness.core.types.compaction import CompactionResult
-from nova_harness.core.types.events import (
+from nova_harness.events import (
     AgentEndEvent,
     EntryAppendedEvent,
     ItemEmissionEvent,
@@ -31,15 +30,9 @@ from nova_harness.core.types.events import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
-from nova_harness.core.types.events.session import CompactionEndEvent
-from nova_harness.core.types.messages import (
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
-    CustomMessage,
-)
-from nova_harness.core.types.session.entries import CustomEntry, LabelEntry
-from nova_harness.server.reduction import SessionReducer, apply_delta
-from nova_harness.server.types.items import (
+from nova_harness.events.session import CompactionEndEvent
+from nova_server.reduction import SessionReducer, apply_delta
+from nova_server.types.items import (
     AgentMessageItem,
     CustomItem,
     ItemStatus,
@@ -48,6 +41,13 @@ from nova_harness.server.types.items import (
     ToolCallItem,
     UserMessageItem,
 )
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_harness.types.messages import (
+    BranchSummaryMessage,
+    CompactionSummaryMessage,
+    CustomMessage,
+)
+from nova_harness.types.session.entries import CustomEntry, LabelEntry
 
 
 @pytest.fixture

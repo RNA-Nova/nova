@@ -1,13 +1,13 @@
 """Tests for resources/loaders/skills.py file-level loading."""
 
-from nova_harness.core.resources.loaders.skills import (
+from nova_harness.resources.loaders.skills import (
     load_skill_from_file,
     load_skills,
     load_skills_from_dir,
     validate_description,
     validate_name,
 )
-from nova_harness.core.types.resources.skills import Skill
+from nova_harness.types.resources.skills import Skill
 
 
 def test_validate_name():

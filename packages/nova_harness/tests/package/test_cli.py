@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nova_harness.cli.package import main
-from nova_harness.core.types.package import PackageMetadata, PackageView
+from nova_harness.app.package import main
+from nova_harness.types.package import PackageMetadata, PackageView
 
 
 def _metadata(name="pkg", version="1.0.0") -> PackageMetadata:
@@ -22,7 +22,7 @@ def _metadata(name="pkg", version="1.0.0") -> PackageMetadata:
 
 
 def _resource_metadata(name="res"):
-    from nova_harness.core.types.package import ResourceMetadata
+    from nova_harness.types.package import ResourceMetadata
 
     return ResourceMetadata(
         name=name,
@@ -32,7 +32,7 @@ def _resource_metadata(name="res"):
     )
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_list_flat_empty(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list.return_value = []
@@ -44,7 +44,7 @@ def test_list_flat_empty(mock_pm_class, capsys):
     assert "No packages installed" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_list_flat_with_packages(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list.return_value = [_metadata("a"), _metadata("t")]
@@ -57,7 +57,7 @@ def test_list_flat_with_packages(mock_pm_class, capsys):
     assert "t" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_list_package_view(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list_with_resources.return_value = {
@@ -85,7 +85,7 @@ def test_list_package_view(mock_pm_class, capsys):
     assert "Extensions: e" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_list_package_view_empty(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list_with_resources.return_value = {}
@@ -96,7 +96,7 @@ def test_list_package_view_empty(mock_pm_class, capsys):
     assert "No packages installed" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_install(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.install_and_persist.return_value = _metadata("x")
@@ -115,7 +115,7 @@ def test_install(mock_pm_class, capsys):
     assert "Installed 'x'" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_install_editable_flag(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.install_and_persist.return_value = _metadata("x")
@@ -134,7 +134,7 @@ def test_install_editable_flag(mock_pm_class, capsys):
     assert "Installed 'x'" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_install_editable_flag_rejects_git(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.install_and_persist.side_effect = ValueError(
@@ -154,9 +154,9 @@ def test_install_editable_flag_rejects_git(mock_pm_class, capsys):
     assert "only supports path sources" in capsys.readouterr().err
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_uninstall_found(mock_pm_class, capsys):
-    from nova_harness.core.types.package import UninstallResult
+    from nova_harness.types.package import UninstallResult
 
     mock_pm = MagicMock()
     mock_pm.uninstall.return_value = UninstallResult(removed=True)
@@ -168,9 +168,9 @@ def test_uninstall_found(mock_pm_class, capsys):
     assert "Uninstalled" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_uninstall_not_found(mock_pm_class, capsys):
-    from nova_harness.core.types.package import UninstallResult
+    from nova_harness.types.package import UninstallResult
 
     mock_pm = MagicMock()
     mock_pm.uninstall.return_value = UninstallResult(removed=False)
@@ -181,7 +181,7 @@ def test_uninstall_not_found(mock_pm_class, capsys):
     assert "not found" in capsys.readouterr().err
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_update(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.update = AsyncMock(return_value=[_metadata("x", "2.0")])
@@ -193,7 +193,7 @@ def test_update(mock_pm_class, capsys):
     assert "Updated 'x'" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_info_found(mock_pm_class, capsys):
     meta = _metadata("x")
     mock_pm = MagicMock()
@@ -206,7 +206,7 @@ def test_info_found(mock_pm_class, capsys):
     assert "Name:        x" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_info_not_found(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.info.return_value = None
@@ -217,7 +217,7 @@ def test_info_not_found(mock_pm_class, capsys):
     assert "not found" in capsys.readouterr().err
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_validate_ok(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.validate.return_value = []
@@ -229,7 +229,7 @@ def test_validate_ok(mock_pm_class, capsys):
     assert "is a valid package" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_validate_failed(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.validate.return_value = ["missing foo"]
@@ -240,7 +240,7 @@ def test_validate_failed(mock_pm_class, capsys):
     assert "Validation failed" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_list_flat(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list.return_value = [_metadata("a")]
@@ -252,9 +252,9 @@ def test_json_list_flat(mock_pm_class, capsys):
     assert '"name": "a"' in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_uninstall(mock_pm_class, capsys):
-    from nova_harness.core.types.package import UninstallResult
+    from nova_harness.types.package import UninstallResult
 
     mock_pm = MagicMock()
     mock_pm.uninstall.return_value = UninstallResult(removed=True)
@@ -265,7 +265,7 @@ def test_json_uninstall(mock_pm_class, capsys):
     assert '"ok": true' in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_install(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.install_and_persist.return_value = _metadata("x")
@@ -276,7 +276,7 @@ def test_json_install(mock_pm_class, capsys):
     assert '"name": "x"' in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_update(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.update = AsyncMock(return_value=[_metadata("x", "2.0")])
@@ -287,7 +287,7 @@ def test_json_update(mock_pm_class, capsys):
     assert '"version": "2.0"' in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_update_all_plain(mock_pm_class, capsys):
     """update 无参时走 update_all。"""
     mock_pm = MagicMock()
@@ -302,7 +302,7 @@ def test_update_all_plain(mock_pm_class, capsys):
     assert "Updated 'x'" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_update_all(mock_pm_class, capsys):
     """--json update 无参时同样走 update_all（修复 None 被当作包名的问题）。"""
     mock_pm = MagicMock()
@@ -317,7 +317,7 @@ def test_json_update_all(mock_pm_class, capsys):
     assert '"version": "2.0"' in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_validate(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.validate.return_value = ["issue"]
@@ -330,7 +330,7 @@ def test_json_validate(mock_pm_class, capsys):
     assert "issue" in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_info_none(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.info.return_value = None
@@ -341,7 +341,7 @@ def test_json_info_none(mock_pm_class, capsys):
     assert "null" in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_json_list_package_view(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list_with_resources.return_value = {
@@ -362,7 +362,7 @@ def test_json_list_package_view(mock_pm_class, capsys):
     assert '"b"' in capsys.readouterr().out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_error_with_json(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list.side_effect = RuntimeError("boom")
@@ -374,7 +374,7 @@ def test_error_with_json(mock_pm_class, capsys):
     assert '"error": "boom"' in captured.out
 
 
-@patch("nova_harness.cli.package.PackageManager")
+@patch("nova_harness.app.package.PackageManager")
 def test_error_plain(mock_pm_class, capsys):
     mock_pm = MagicMock()
     mock_pm.list.side_effect = RuntimeError("boom")

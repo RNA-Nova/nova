@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
-    from nova_harness.core.types.resources.diagnostics import ResourceDiagnostic
+    from nova_harness.types.resources.diagnostics import ResourceDiagnostic
 
-from nova_harness.core.types.package.enums import SourceOrigin, SourceScope
+from nova_harness.types.package.enums import SourceOrigin, SourceScope
 
 
 @dataclass

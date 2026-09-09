@@ -11,11 +11,11 @@ from nova_ai import Message, ModelThinkingLevel
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import BeforeValidator, Field, SerializeAsAny, TypeAdapter
 
-from nova_harness.core.types.messages import (
+from nova_harness.types.messages import (
     CustomMessage,
     CustomMessageContent,
 )
-from nova_harness.core.types.session.constants import CURRENT_SESSION_VERSION
+from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
 
 
 class SessionHeader(NovaBaseModel):

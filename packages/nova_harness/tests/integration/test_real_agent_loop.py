@@ -12,18 +12,18 @@ kimi-coding OAuth。无凭证时自动跳过；全部标记 ``integration``（�
 import asyncio
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Any, List
 
 import pytest
 from nova_ai.providers import get_kimi_coding_model, get_volcengine_model
 
-from nova_harness.core.config.auth.storage import AuthStorage
-from nova_harness.core.sdk import create_agent_session_runtime
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
+from nova_harness.config.auth.storage import AuthStorage
+from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+from nova_harness.types.session.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
-VOLCENGINE_ID = "deepseek-v3-2-251201"
+VOLCENGINE_ID = "deepseek-v4-flash-260425"
 KIMI_ID = "k2p7"
 
 

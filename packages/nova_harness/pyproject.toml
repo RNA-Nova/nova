@@ -45,9 +45,8 @@ nova-ai = { path = "../../nova_ai" }
 nova-agent = { path = "../../nova_agent" }
 
 [tool.poetry.scripts]
-nova-harness = "nova_harness.cli.main:main"
-nova-harness-rpc = "nova_harness.modes.rpc.cli:main"
-nova-pkg = "nova_harness.cli.package:main"
+nova-harness = "nova_harness.app.main:main"
+nova-pkg = "nova_harness.app.package:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

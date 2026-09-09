@@ -16,19 +16,15 @@ import types
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_harness.core.config.defaults import get_agent_dir, get_project_base_dir
-from nova_harness.core.extensions.api import NovaExtensionAPI
-from nova_harness.core.extensions.event_bus import ExtensionEventBus
-from nova_harness.core.types.events import ExtensionErrorEvent
-from nova_harness.core.types.extensions import (
-    Extension,
-    ExtensionFactory,
-    ExtensionRuntime,
-    LoadedExtensionsResult,
-    SourceInfo,
-    SourceOrigin,
-    SourceScope,
-)
+from nova_harness.config.defaults import get_agent_dir, get_project_base_dir
+from nova_harness.events import ExtensionErrorEvent
+from nova_harness.extensions.api import NovaExtensionAPI
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.types.extensions import SourceOrigin, SourceScope
+from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.types.resources.loader import ExtensionFactory
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.session.factory import LoadedExtensionsResult
 
 DEFAULT_FACTORY_NAMES = ("extension", "load")
 

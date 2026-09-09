@@ -21,12 +21,11 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
-from nova_harness.core.config.defaults import (
+from nova_harness.config.defaults import (
     GIT_PACKAGES_DIR_NAME,
     NPM_PACKAGES_DIR_NAME,
     PACKAGES_DIR_NAME,
 )
-from nova_harness.core.types.package import ProgressEvent
 from nova_harness.package.source._semver import (
     NpmRange,
     NpmRangeUnion,
@@ -35,6 +34,7 @@ from nova_harness.package.source._semver import (
 )
 from nova_harness.package.source.spec import PackageSource
 from nova_harness.package.utils import is_offline_mode_enabled
+from nova_harness.types.package import ProgressEvent
 
 # Git 命令默认超时（秒）。克隆/更新在网络异常时不应无限 hang 住。
 GIT_COMMAND_TIMEOUT = 60

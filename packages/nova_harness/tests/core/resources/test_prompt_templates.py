@@ -4,7 +4,7 @@ Prompt template 加载与参数替换测试。
 
 from pathlib import Path
 
-from nova_harness.core.resources.loaders.prompt_templates import (
+from nova_harness.resources.loaders.prompt_templates import (
     _build_path_source_label,
     _dedupe_prompts,
     _load_template_from_file,
@@ -16,7 +16,7 @@ from nova_harness.core.resources.loaders.prompt_templates import (
     parse_command_args,
     substitute_args,
 )
-from nova_harness.core.types.resources.prompts import PromptTemplate
+from nova_harness.types.resources.prompts import PromptTemplate
 
 
 def test_parse_command_args_respects_quotes():
@@ -110,7 +110,7 @@ def test_load_template_from_file_missing(tmp_path: Path):
 
 
 def test_load_prompt_templates_from_dir(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     (tmp_path / "a.md").write_text("content A", encoding="utf-8")
     (tmp_path / "b.md").write_text("content B", encoding="utf-8")
@@ -128,7 +128,7 @@ def test_load_prompt_templates_from_dir(tmp_path: Path):
 
 
 def test_load_prompt_templates_from_dir_nonexistent(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     result = load_prompt_templates(
         LoadPromptTemplatesOptions(
@@ -141,7 +141,7 @@ def test_load_prompt_templates_from_dir_nonexistent(tmp_path: Path):
 
 
 def test_load_prompt_templates_from_dir_recursive(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     (tmp_path / "a.md").write_text("content A", encoding="utf-8")
     nested = tmp_path / "sub"
@@ -160,7 +160,7 @@ def test_load_prompt_templates_from_dir_recursive(tmp_path: Path):
 
 
 def test_load_prompt_templates_from_dir_respects_nested_ignore(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     (tmp_path / "a.md").write_text("content A", encoding="utf-8")
     nested = tmp_path / "sub"
@@ -205,7 +205,7 @@ def test_load_prompt_templates_defaults(tmp_path: Path):
 
 
 def test_load_prompt_templates_with_explicit_paths(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     extra_dir = tmp_path / "extra"
     extra_dir.mkdir()
@@ -223,7 +223,7 @@ def test_load_prompt_templates_with_explicit_paths(tmp_path: Path):
 
 
 def test_load_prompt_templates_with_file_path(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     f = tmp_path / "single.md"
     f.write_text("single", encoding="utf-8")
@@ -238,7 +238,7 @@ def test_load_prompt_templates_with_file_path(tmp_path: Path):
 
 
 def test_load_prompt_templates_skips_missing_path(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     result = load_prompt_templates(
         LoadPromptTemplatesOptions(
@@ -274,7 +274,7 @@ def test_dedupe_prompts_records_collision():
 
 
 def test_load_prompt_templates_with_diagnostics(tmp_path: Path):
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     extra_dir = tmp_path / "extra"
     extra_dir.mkdir()
@@ -293,7 +293,7 @@ def test_load_prompt_templates_with_diagnostics(tmp_path: Path):
 
 def test_load_prompt_templates_warns_on_unreadable_file(tmp_path: Path):
     """畸形 prompt 文件产生 warning 诊断，不再静默消失。"""
-    from nova_harness.core.types.resources.prompts import LoadPromptTemplatesOptions
+    from nova_harness.types.resources.prompts import LoadPromptTemplatesOptions
 
     bad = tmp_path / "bad.md"
     bad.write_bytes(b"\xff\xfe\x00 not valid utf-8 \x80\x81")

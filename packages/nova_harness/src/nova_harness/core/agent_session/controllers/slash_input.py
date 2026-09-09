@@ -11,16 +11,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from nova_harness.core.harness.skills import expand_skill_command
-from nova_harness.core.resources.loaders.prompt_templates import (
+from nova_harness.core.domains.skills import expand_skill_command
+from nova_harness.events import ExtensionErrorEvent
+from nova_harness.resources.loaders.prompt_templates import (
     expand_prompt_template,
 )
-from nova_harness.core.types.events import ExtensionErrorEvent
-from nova_harness.core.types.extensions.commands import RegisteredCommand
-from nova_harness.core.types.protocols import AgentSessionProtocol
+from nova_harness.types.extensions.commands import RegisteredCommand
+from nova_harness.types.protocols import AgentSessionProtocol
 
 if TYPE_CHECKING:
-    from nova_harness.core.extensions import ExtensionRunner
+    from nova_harness.extensions import ExtensionRunner
 
 
 class SlashInputHandler:

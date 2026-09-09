@@ -10,11 +10,11 @@ import json
 import pytest
 import websockets
 
-from nova_harness.server.connection import ConnectionOrigin
-from nova_harness.server.protocol import MethodRegistry
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.server import RpcServer
-from nova_harness.server.transport.websocket import (
+from nova_server.connection import ConnectionOrigin
+from nova_server.protocol import MethodRegistry
+from nova_server.protocol.methods.state import ServerState
+from nova_server.server import RpcServer
+from nova_server.transport.websocket import (
     WebSocketAcceptor,
     _is_loopback,
     provision_token,
@@ -227,7 +227,7 @@ class _StallTransport:
 @pytest.mark.asyncio
 async def test_slow_consumer_disconnect_policy_by_origin():
     """队列满分流：网络来源（WEBSOCKET）主动断连；可信来源（STDIO）等位不断。"""
-    from nova_harness.server.connection import Connection
+    from nova_server.connection import Connection
 
     # 网络来源：满则断连
     ws_conn = Connection(_StallTransport(), ConnectionOrigin.WEBSOCKET, queue_size=2)

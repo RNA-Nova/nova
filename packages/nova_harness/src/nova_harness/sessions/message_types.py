@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Type
 
 from nova_agent import CustomAgentMessage
 
-from nova_harness.core.types.messages import OpaqueUserToolMessage
+from nova_harness.types.messages import OpaqueUserToolMessage
 
 logger = logging.getLogger(__name__)
 

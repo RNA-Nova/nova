@@ -9,14 +9,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nova_harness.config import AuthStorage, SettingsManager
 from nova_harness.core.agent_session.services import (
     AgentSessionServices,
     CreateAgentSessionRuntimeResult,
 )
-from nova_harness.core.config import AuthStorage, SettingsManager
-from nova_harness.core.model import ModelRuntime
-from nova_harness.core.resources.loader import ResourceLoader
-from nova_harness.core.types.session.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.model import ModelRuntime
+from nova_harness.resources.loader import ResourceLoader
+from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
 
 
 class _DummyResourceLoader(ResourceLoader):

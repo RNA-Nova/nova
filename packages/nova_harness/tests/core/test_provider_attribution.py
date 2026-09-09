@@ -2,12 +2,11 @@
 
 from typing import Any, Optional
 
-import pytest
 from nova_ai import Model
 from nova_ai.types.enums import KnownApi
 from nova_ai.types.model import ModelCost
 
-from nova_harness.core.model.attribution import merge_provider_attribution_headers
+from nova_harness.model.attribution import merge_provider_attribution_headers
 
 
 class _FakeSettingsManager:

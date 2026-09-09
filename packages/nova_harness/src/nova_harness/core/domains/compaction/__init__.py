@@ -1,49 +1,6 @@
-"""
-上下文压缩与分支摘要工具。
-"""
+"""上下文压缩与分支摘要工具。
 
-from nova_harness.core.harness.compaction.branch_summarization import (
-    collect_entries_for_branch_summary,
-    generate_branch_summary,
-    prepare_branch_entries,
-)
-from nova_harness.core.harness.compaction.compaction import (
-    calculate_context_tokens,
-    compact,
-    complete_summarization,
-    estimate_context_tokens,
-    estimate_messages_tokens,
-    estimate_tokens,
-    find_cut_point,
-    find_turn_start_index,
-    generate_summary,
-    get_last_assistant_usage,
-    prepare_compaction,
-    should_compact,
-)
-from nova_harness.core.harness.compaction.utils import (
-    compute_file_lists,
-    create_file_ops,
-    extract_file_ops_from_message,
-)
-
-__all__ = [
-    "calculate_context_tokens",
-    "collect_entries_for_branch_summary",
-    "compact",
-    "complete_summarization",
-    "compute_file_lists",
-    "create_file_ops",
-    "estimate_context_tokens",
-    "estimate_messages_tokens",
-    "estimate_tokens",
-    "extract_file_ops_from_message",
-    "find_cut_point",
-    "find_turn_start_index",
-    "generate_branch_summary",
-    "generate_summary",
-    "get_last_assistant_usage",
-    "prepare_branch_entries",
-    "prepare_compaction",
-    "should_compact",
-]
+导入纪律：走完整子模块路径（compaction / branch_summarization / utils / types），
+不在包级 ``__init__`` 做 re-export——events(auto) → 压缩类型 → sessions →
+extensions 的急切级联会形成循环 import（旧约定在此处已被重构掉）。
+"""

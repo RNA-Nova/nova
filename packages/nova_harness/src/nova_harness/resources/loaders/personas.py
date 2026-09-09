@@ -12,24 +12,23 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from nova_harness.core.resources.source_info import (
-    default_source_info_for_path,
-    find_source_info_for_path,
-    source_info_from_metadata,
-)
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.package import ResolvedResource
-from nova_harness.core.types.resources.diagnostics import (
-    ResourceCollision,
-    ResourceDiagnostic,
-)
-from nova_harness.core.types.resources.personas import Persona
 from nova_harness.core.utils.files import canonicalize_path, load_text_file
 from nova_harness.package.utils import (
     IgnoreSpecWithPrefix,
     is_ignored_by_specs,
     load_ignore_specs,
 )
+from nova_harness.resources.source_info import (
+    default_source_info_for_path,
+    find_source_info_for_path,
+    source_info_from_metadata,
+)
+from nova_harness.types.resources.diagnostics import (
+    ResourceCollision,
+    ResourceDiagnostic,
+)
+from nova_harness.types.resources.personas import Persona, SourceInfo
+from nova_harness.types.resources.prompts import ResolvedResource
 
 
 def persona_name_from_path(file_path: Path, root_dir: Path) -> str:

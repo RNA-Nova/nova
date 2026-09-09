@@ -7,8 +7,8 @@ from typing import Any, List, Literal, Optional
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field
 
-from nova_harness.core.types.compaction import CompactionPreparation
-from nova_harness.core.types.session.entries import SessionEntry
+from nova_harness.types.compaction.compaction import CompactionPreparation
+from nova_harness.types.session.entries import SessionEntry
 
 from .constants import (
     COMPACTION_END,

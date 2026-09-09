@@ -30,24 +30,8 @@ import os
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.types.config.settings import PackageSourceSpec
-from nova_harness.core.types.package import (
-    AmbiguousPackageNameError,
-    ConfiguredPackage,
-    MissingSourceAction,
-    PackageMetadata,
-    PackageUpdate,
-    PackageView,
-    ResolvedPaths,
-    SourceScope,
-    UninstallResult,
-)
-from nova_harness.core.types.package.errors import (
-    PackageInstallError,
-    PackageUpdateError,
-)
+from nova_harness.config.defaults import get_agent_dir
+from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.package.install.installer import PackageInstaller
 from nova_harness.package.install.python_backend import uninstall_package
 from nova_harness.package.install.store import (
@@ -70,6 +54,22 @@ from nova_harness.package.source.spec import (
     parse_source,
 )
 from nova_harness.package.utils import is_offline_mode_enabled
+from nova_harness.types.config.settings import PackageSourceSpec
+from nova_harness.types.package import (
+    AmbiguousPackageNameError,
+    ConfiguredPackage,
+    MissingSourceAction,
+    PackageMetadata,
+    PackageUpdate,
+    PackageView,
+    ResolvedPaths,
+    SourceScope,
+    UninstallResult,
+)
+from nova_harness.types.package.errors import (
+    PackageInstallError,
+    PackageUpdateError,
+)
 
 __all__ = ["PackageManager", "PackageInstallError", "PackageUpdateError"]
 

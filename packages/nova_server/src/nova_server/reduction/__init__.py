@@ -7,8 +7,8 @@
 同形性由共享纯映射保证）。设计见 ``examples/server-item-layer-design.md``。
 """
 
-from nova_harness.server.reduction.entries import entries_to_items
-from nova_harness.server.reduction.mapping import apply_delta
-from nova_harness.server.reduction.orchestrator import SessionReducer
+from nova_server.reduction.entries import entries_to_items
+from nova_server.reduction.mapping import apply_delta
+from nova_server.reduction.orchestrator import SessionReducer
 
 __all__ = ["apply_delta", "SessionReducer", "entries_to_items"]

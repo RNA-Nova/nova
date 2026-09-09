@@ -19,9 +19,10 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 from nova_harness.core.agent_session.agent import AgentSession
-from nova_harness.core.types.extensions import Extension, RegisteredCommand
-from nova_harness.core.types.resources.agents import AgentConfig
-from nova_harness.core.types.session.config import AgentSessionConfig
+from nova_harness.types.extensions.extension import RegisteredCommand
+from nova_harness.types.extensions.loading import Extension
+from nova_harness.types.resources.agents import AgentConfig
+from nova_harness.types.session.config import AgentSessionConfig
 
 
 def _extension(name: str, commands: Optional[List[str]] = None) -> Extension:

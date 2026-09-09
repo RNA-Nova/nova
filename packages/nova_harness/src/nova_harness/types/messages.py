@@ -17,7 +17,6 @@ from typing import (
 
 from nova_agent import CustomAgentMessage
 from nova_ai import ImageContent, TextContent
-from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field
 
 # ---------------------------------------------------------------------------

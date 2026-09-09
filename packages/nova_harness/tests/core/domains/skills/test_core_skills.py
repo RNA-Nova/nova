@@ -1,13 +1,13 @@
 """Tests for harness/skills.py runtime management."""
 
-from nova_harness.core.harness.skills import (
+from nova_harness.core.domains.skills import (
     SkillManager,
     expand_skill_command,
     format_skills_for_prompt,
     list_skill_commands,
     parse_skill_block,
 )
-from nova_harness.core.types.resources.skills import Skill
+from nova_harness.types.resources.skills import Skill
 
 
 def _make_skill(tmp_path, name, description="desc", disabled=False):

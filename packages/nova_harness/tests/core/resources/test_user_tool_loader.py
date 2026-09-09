@@ -1,16 +1,14 @@
 """UserToolLoader 测试：UserTool 类的加载、元数据校验与诊断。"""
 
 from pathlib import Path
-from typing import Literal
 
 import pytest
-from nova_agent import CustomAgentMessage
 
-from nova_harness.core.harness.session.message_types import (
+from nova_harness.resources.loaders.user_tools import UserToolLoader
+from nova_harness.sessions.message_types import (
     clear_session_message_types,
     get_session_message_type,
 )
-from nova_harness.core.resources.loaders.user_tools import UserToolLoader
 
 _EXECUTOR = """
 from typing import Literal

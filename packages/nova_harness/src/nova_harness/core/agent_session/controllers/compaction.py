@@ -7,27 +7,27 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from nova_ai import AbortController, Model
 
-from nova_harness.core.config.auth.guidance import (
+from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
 )
-from nova_harness.core.harness.compaction import compaction as _compaction_module
-from nova_harness.core.harness.compaction.compaction import (
+from nova_harness.core.domains.compaction import compaction as _compaction_module
+from nova_harness.core.domains.compaction.compaction import (
     calculate_context_tokens,
     estimate_context_tokens,
     estimate_messages_tokens,
     should_compact,
 )
-from nova_harness.core.harness.session.utils import get_latest_compaction_entry
-from nova_harness.core.types.compaction import CompactionResult
-from nova_harness.core.types.events import (
+from nova_harness.core.utils import is_context_overflow
+from nova_harness.events import (
     CompactionEndEvent,
     CompactionStartEvent,
     SessionCompactEvent,
 )
-from nova_harness.core.types.events.constants import SESSION_BEFORE_COMPACT
-from nova_harness.core.types.protocols import AgentSessionProtocol
-from nova_harness.core.utils import is_context_overflow
+from nova_harness.events.constants import SESSION_BEFORE_COMPACT
+from nova_harness.sessions.utils import get_latest_compaction_entry
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_harness.types.protocols import AgentSessionProtocol
 
 if TYPE_CHECKING:
     from nova_ai import AssistantMessage
@@ -59,7 +59,7 @@ async def get_summarization_request_auth(
       由调用方静默放弃。
     """
     result = await session.model_runtime.get_request_auth(model)
-    api_key = result.auth.get("apiKey") if result else None
+    api_key = result.auth.get("api_key") if result else None
     if api_key:
         return (
             api_key,
@@ -159,7 +159,7 @@ class CompactionController:
 
             runner = self._session._extension_runner
             if runner is not None and runner.has_handlers(SESSION_BEFORE_COMPACT):
-                from nova_harness.core.types.events import SessionBeforeCompactEvent
+                from nova_harness.events import SessionBeforeCompactEvent
 
                 result = await runner.emit(
                     SessionBeforeCompactEvent(
@@ -378,7 +378,7 @@ class CompactionController:
 
             runner = self._session._extension_runner
             if runner is not None and runner.has_handlers(SESSION_BEFORE_COMPACT):
-                from nova_harness.core.types.events import SessionBeforeCompactEvent
+                from nova_harness.events import SessionBeforeCompactEvent
 
                 result = await runner.emit(
                     SessionBeforeCompactEvent(
@@ -467,12 +467,15 @@ class CompactionController:
                 await runner.emit(session_compact_event)
 
             if will_retry:
+                # 溢出/截断响应在 message_end 时已落盘，压缩重建状态可能把
+                # 这条保留条目还原成 assistant 尾——continue_() 拒绝从
+                # assistant 尾续跑，重试前再剥一次（error 与 length 同罪）
                 messages = list(self._session.agent.state.messages)
                 last_msg = messages[-1] if messages else None
                 if (
                     last_msg is not None
                     and last_msg.role == "assistant"
-                    and last_msg.stop_reason == "error"
+                    and last_msg.stop_reason in ("error", "length")
                 ):
                     self._session.agent.state.messages = messages[:-1]
                 return True

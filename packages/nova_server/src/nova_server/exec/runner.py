@@ -1,28 +1,37 @@
-"""Print 模式运行器。
+"""Exec 模式运行器。
 
 提供非交互式运行单个 agent 的能力，支持 text 与 json 两种输出形态。
-Print 模式不使用任何 UI 能力，仅依赖 ``NoOpUIContext`` 降级。
+
+驱动方式对位 codex exec：经 ``InProcessNovaClient`` 走**完整协议栈**
+（进程内 RpcServer + 全域方法表），exec 的 ``--json`` 输出与前端看到的
+item 帧**严格同源**——同一归约层、同一 ``event_seq`` 信封，不存在
+"headless 一套格式、前端另一套格式"的漂移。本模块不使用任何 UI 能力
+（trust 显式覆盖时以 ``NoOpUIContext`` 决议）。
+
+回合流程：``initialize → createSession → prompt（阻塞至回合结束）
+→ 消费通知帧直至 ``agent_end`` → 吸干残余 → shutdown``。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.harness.project_trust import (
-    make_resolve_project_trust_callback,
-)
-from nova_harness.core.harness.session.manager import SessionManager
-from nova_harness.core.sdk import create_agent_session_runtime
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
-from nova_harness.core.types.ui import NoOpUIContext
-from nova_harness.core.utils.child_process import kill_tracked_detached_children
+from nova_harness.config.defaults import get_agent_dir
+from nova_harness.core.utils.child_process import \
+    kill_tracked_detached_children
+from nova_server.client.in_process import InProcessNovaClient
+
+ClientFactory = Callable[[], Awaitable[InProcessNovaClient]]
+
+# 回合终结信号（server 侧把 agent_end 当 run 终结点）
+_TURN_END_EVENT = "agent_end"
 
 
-class PrintRunner:
-    """Print 模式运行器：非交互式执行 agent 任务并输出结果。"""
+class ExecRunner:
+    """Exec 模式运行器：非交互式执行 agent 任务并输出结果。"""
 
     def __init__(
         self,
@@ -34,6 +43,7 @@ class PrintRunner:
         additional_prompt_template_paths: Optional[List[str]] = None,
         tools: Optional[List[str]] = None,
         exclude_tools: Optional[List[str]] = None,
+        client_factory: Optional[ClientFactory] = None,
     ) -> None:
         self._json_output = json_output
         self._no_session = no_session
@@ -42,6 +52,12 @@ class PrintRunner:
         self._additional_prompt_template_paths = additional_prompt_template_paths or []
         self._tools = tools
         self._exclude_tools = exclude_tools
+        # 进程内协议客户端工厂（可注入替身供测试）
+        self._client_factory: ClientFactory = client_factory or (
+            InProcessNovaClient.start
+        )
+        # text 模式的最终回复（item_completed 的最后一条 agentMessage）
+        self._last_text = ""
 
     async def run_task(
         self,
@@ -52,76 +68,103 @@ class PrintRunner:
         """运行一次 agent 任务并输出结果。"""
         import os
 
-        agent_dir = get_agent_dir()
-        resolved_cwd = cwd or os.getcwd()
-        session_manager = None
-        if self._no_session:
-            session_manager = SessionManager.in_memory(resolved_cwd)
-        runtime = await create_agent_session_runtime(
-            CreateAgentSessionOptions(
-                cwd=resolved_cwd,
-                agent_dir=agent_dir,
-                agent_name=agent_name,
-                session_manager=session_manager,
-                additional_skill_paths=self._additional_skill_paths or None,
-                additional_prompt_template_paths=(
-                    self._additional_prompt_template_paths or None
-                ),
-                tools=self._tools,
-                exclude_tools=self._exclude_tools,
-                project_trusted=self._trust,
-                resolve_project_trust=_make_resolve_project_trust(
-                    resolved_cwd, agent_dir, trust_override=self._trust
-                ),
-            )
-        )
-
-        unsubscribe: Optional[Callable[[], None]] = None
+        self._last_text = ""
+        client = await self._client_factory()
         try:
+            await client.request("initialize", {})
+
+            resolved_cwd = cwd or os.getcwd()
+            session: Dict[str, Any] = await client.request(
+                "createSession",
+                {
+                    "cwd": resolved_cwd,
+                    "agentDir": str(get_agent_dir()),
+                    "agentName": agent_name,
+                    "noSession": self._no_session,
+                    "additionalSkillPaths": self._additional_skill_paths or None,
+                    "additionalPromptTemplatePaths": (
+                        self._additional_prompt_template_paths or None
+                    ),
+                    "tools": self._tools,
+                    "excludeTools": self._exclude_tools,
+                    "trust": self._trust,
+                },
+            )
+
             if self._json_output:
-                self._emit_jsonl_header(runtime)
-                unsubscribe = self._subscribe_jsonl(runtime)
-            await runtime.session.prompt(task)
-            await runtime.session.agent.wait_for_idle()
+                self._emit_jsonl(
+                    "session",
+                    {"id": session.get("sessionId"), "cwd": resolved_cwd},
+                )
+
+            # prompt RPC 阻塞至回合结束；通知帧经客户端读泵并发到达
+            prompt_task = asyncio.create_task(client.request("prompt", {"text": task}))
+            final_text = await self._consume_turn(client, prompt_task)
+            await prompt_task
+
+            if not self._json_output and final_text:
+                sys.stdout.write(final_text + "\n")
+                sys.stdout.flush()
+            return 0
         finally:
-            if unsubscribe is not None:
-                unsubscribe()
-            await runtime.dispose()
             # 清场 detached 子进程（对齐 pi：print 模式退出时 kill 所有
             # 被跟踪的后台子进程，不留孤儿）
             kill_tracked_detached_children()
+            await client.shutdown()
 
-        if not self._json_output:
-            self._emit_text(runtime)
-        return 0
+    # ------------------------------------------------------------------
+    # 内部：回合事件消费
+    # ------------------------------------------------------------------
 
-    def _subscribe_jsonl(self, runtime: Any) -> Callable[[], None]:
-        """订阅 Agent 事件并以 JSONL 输出所有事件。"""
+    async def _consume_turn(
+        self, client: InProcessNovaClient, prompt_task: "asyncio.Task[Any]"
+    ) -> str:
+        """消费回合通知帧；text 模式截取最后一条 agentMessage 定稿文本。
 
-        def on_event(event: Any, signal: Any = None) -> None:
+        终结双条件竞速：``agent_end`` 帧 **或** prompt RPC 落定（协议
+        报错时不会有终结帧到达——只等事件会永久死锁）。
+        """
+        next_event = asyncio.create_task(client.next_event())
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {prompt_task, next_event}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if next_event in done:
+                    event = next_event.result()
+                    if event is None:
+                        # 连接关闭：回合提前终结，以 prompt RPC 落定为准
+                        prompt_task.result()
+                        self._drain_pending(client)
+                        return self._last_text
+                    self._on_event(event)
+                    if event.get("type") == _TURN_END_EVENT:
+                        await prompt_task  # 协议错误在此透传
+                        self._drain_pending(client)
+                        return self._last_text
+                    next_event = asyncio.create_task(client.next_event())
+                if prompt_task in done:
+                    prompt_task.result()  # 协议错误在此透传
+                    self._drain_pending(client)
+                    return self._last_text
+        finally:
+            next_event.cancel()
+
+    def _drain_pending(self, client: InProcessNovaClient) -> None:
+        """非阻塞吸干已入队但未消费的残余帧。"""
+        while True:
+            event = client.try_next_event()
+            if event is None:
+                return
+            self._on_event(event)
+
+    def _on_event(self, event: Dict[str, Any]) -> None:
+        if self._json_output:
             self._emit_jsonl_event(event)
-
-        return runtime.session.subscribe(on_event)
-
-    def _emit_jsonl_header(self, runtime: Any) -> None:
-        """输出会话 header（JSON 模式）。"""
-        session_manager = getattr(runtime.session, "session_manager", None)
-        if session_manager is None:
-            return
-        header = session_manager.get_header()
-        if header is None:
-            return
-        self._emit_jsonl("session", _serialize_object(header))
-
-    def _emit_text(self, runtime: Any) -> None:
-        """输出纯文本结果。"""
-        agent = getattr(runtime.session, "agent", None)
-        state = getattr(agent, "state", None)
-        messages = getattr(state, "messages", []) if state else []
-        output = _get_final_output(messages)
-        if output:
-            sys.stdout.write(output + "\n")
-            sys.stdout.flush()
+        if event.get("type") == "item_completed":
+            item = event.get("item") or {}
+            if item.get("type") == "agentMessage":
+                self._last_text = item.get("text") or ""
 
     def _emit_jsonl(self, event_type: str, payload: Dict[str, Any]) -> None:
         """Write a JSONL event to stdout."""
@@ -135,20 +178,7 @@ class PrintRunner:
         sys.stdout.flush()
 
 
-def _make_resolve_project_trust(
-    cwd: str, agent_dir: str, trust_override: Optional[bool] = None
-):
-    """构造 print 模式使用的 project trust 决议回调（共享工厂的无 UI 形态）。"""
-    return make_resolve_project_trust_callback(
-        cwd=cwd,
-        agent_dir=agent_dir,
-        ui=NoOpUIContext(),
-        has_ui=False,
-        trust_override=trust_override,
-    )
-
-
-async def run_print_mode(
+async def run_exec_mode(
     agent_name: str,
     task: str,
     cwd: Optional[str] = None,
@@ -161,8 +191,8 @@ async def run_print_mode(
     tools: Optional[List[str]] = None,
     exclude_tools: Optional[List[str]] = None,
 ) -> int:
-    """以 print 模式运行一次 agent 任务。"""
-    runner = PrintRunner(
+    """以 exec 模式运行一次 agent 任务。"""
+    runner = ExecRunner(
         json_output=json_output,
         no_session=no_session,
         trust=trust,
@@ -172,16 +202,6 @@ async def run_print_mode(
         exclude_tools=exclude_tools,
     )
     return await runner.run_task(agent_name, task, cwd)
-
-
-def _get_final_output(messages: List[Any]) -> str:
-    """Extract the last assistant text from a message list."""
-    for msg in reversed(messages):
-        if getattr(msg, "role", None) == "assistant":
-            for part in getattr(msg, "content", []):
-                if getattr(part, "type", None) == "text":
-                    return part.text or ""
-    return ""
 
 
 def _serialize_object(obj: Any) -> Any:

@@ -11,8 +11,6 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from nova_harness.core.types.config.settings import PackageSourceSpec
-from nova_harness.core.types.package import PackageUpdate, SourceScope
 from nova_harness.package.install.store import install_path_for_source
 from nova_harness.package.source.resolver import git_env
 from nova_harness.package.source.spec import (
@@ -21,6 +19,8 @@ from nova_harness.package.source.spec import (
     parse_source,
 )
 from nova_harness.package.utils import is_offline_mode_enabled
+from nova_harness.types.config.settings import PackageSourceSpec
+from nova_harness.types.package import PackageUpdate, SourceScope
 
 logger = logging.getLogger(__name__)
 

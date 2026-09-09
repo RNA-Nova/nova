@@ -29,9 +29,9 @@ from nova_ai.types.auth import (
     OAuthCredential,
 )
 
-from nova_harness.core.config.defaults import AUTH_FILE_NAME, get_agent_dir
-from nova_harness.core.config.resolve import resolve_config_value
-from nova_harness.core.config.storage import (
+from nova_harness.config.defaults import AUTH_FILE_NAME, get_agent_dir
+from nova_harness.config.resolve import resolve_config_value
+from nova_harness.config.storage import (
     FileStorageBackend,
     StorageBackend,
 )

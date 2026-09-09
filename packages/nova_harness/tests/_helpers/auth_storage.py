@@ -3,8 +3,8 @@
 import json
 from typing import Dict, Optional
 
-from nova_harness.core.config.auth.storage import AuthStorage
-from nova_harness.core.config.storage import InMemoryStorageBackend
+from nova_harness.config.auth.storage import AuthStorage
+from nova_harness.config.storage import InMemoryStorageBackend
 
 AuthStorageData = Dict[str, Dict[str, str]]
 

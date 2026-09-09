@@ -1,6 +1,6 @@
 """请求级 API key 解析辅助。"""
 
-from nova_harness.core.config.auth.guidance import format_no_model_selected_message
+from nova_harness.config.auth.guidance import format_no_model_selected_message
 
 
 async def resolve_api_key(provider, model_runtime):

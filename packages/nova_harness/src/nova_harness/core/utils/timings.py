@@ -7,7 +7,7 @@
 
 import os
 import sys
-import time
+import time as time_module
 from typing import List, Tuple
 
 # 是否启用启动耗时埋点
@@ -54,7 +54,9 @@ def print_timings() -> None:
 
 def _now_ms() -> int:
     """返回当前时间戳（毫秒）。"""
-    return int(time.time() * 1000)
+    # import time as time_module——本模块的公开入口 time(label) 会遮蔽
+    # stdlib 模块名，直接 ``time.time()`` 会拿到函数自身而崩溃
+    return int(time_module.time() * 1000)
 
 
 __all__ = ["reset_timings", "time", "print_timings"]

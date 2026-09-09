@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field
 
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.resources.tools import ToolInfo
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.tools import ToolInfo
 
 
 class DynamicContext(NovaBaseModel):

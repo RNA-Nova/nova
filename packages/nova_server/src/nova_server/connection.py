@@ -26,7 +26,7 @@ import enum
 import itertools
 from typing import Any, Callable, Dict, Optional, Set
 
-from nova_harness.server.transport.base import Transport
+from nova_server.transport.base import Transport
 
 # 进程级连接 id 发号器（codex ConnectionId AtomicU64 对位）
 _connection_ids = itertools.count(1)

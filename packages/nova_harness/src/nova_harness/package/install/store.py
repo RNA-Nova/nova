@@ -20,8 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 from urllib.parse import unquote, urlparse
 
-from nova_harness.core.config.defaults import NPM_PACKAGES_DIR_NAME
-from nova_harness.core.types.package import PackageMetadata, PackageSource
+from nova_harness.config.defaults import NPM_PACKAGES_DIR_NAME
 from nova_harness.package.manifest import (
     is_installable_python_package,
     read_manifest,
@@ -29,6 +28,7 @@ from nova_harness.package.manifest import (
     resolve_package_dependencies,
 )
 from nova_harness.package.source.spec import get_package_identity
+from nova_harness.types.package import PackageMetadata, PackageSource
 
 
 def metadata_dedup_key(pkg: PackageMetadata, base_dir: str) -> str:

@@ -5,6 +5,6 @@
   yaml 写回（/agent save 落地，包来源影子写 user 级）。
 """
 
-from nova_harness.core.harness.agents.manager import BASE_AGENT_NAME, AgentManager
+from nova_harness.core.domains.agents.manager import BASE_AGENT_NAME, AgentManager
 
 __all__ = ["AgentManager", "BASE_AGENT_NAME"]

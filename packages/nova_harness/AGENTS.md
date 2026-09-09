@@ -88,7 +88,7 @@ nova_harness/
 ├── CHANGELOG.md                # 变更日志（当前为空）
 ├── .gitignore                  # 忽略 pycache、venv、poetry.lock、本地会话等
 └── src/nova_harness/
-    ├── __init__.py             # 包入口，对外暴露 sdk 与 runtime 核心符号
+    ├── __init__.py             # 包入口，对外暴露会话工厂与 runtime 核心符号
     ├── main.py                 # 应用主入口
     ├── cli/                    # 所有 CLI 入口与参数解析
     │   ├── __init__.py         # 公开 main（转发自 cli/main.py）
@@ -134,7 +134,10 @@ nova_harness/
     │   └── utils.py        # 离线模式、文件系统操作、ignore 规则
     └── core/                   # 业务核心（会话运行时与能力域）
         ├── __init__.py         # 公开运行时核心符号
-        ├── sdk.py              # 对外 SDK 工厂函数
+        ├── runtime_manager/    # 进程级唯一会话工厂 + 注册表（对位 codex ThreadManager）
+        │   ├── manager.py      # 注册表 + 生命周期（open/close/shutdown_all）
+        │   ├── assembly.py     # 会话组装编排（对位 Session::spawn）
+        │   └── factory.py      # per-session 组装件（create_agent/stream_fn 等）
         ├── agent_session/      # AgentSession 运行时核心
         │   ├── agent.py        # AgentSession 类
         │   ├── runtime.py      # AgentSessionRuntime
@@ -189,15 +192,13 @@ nova_harness/
 
 ## 核心模块职责
 
-### 1. `core/sdk.py` — 入口工厂
-提供 `create_agent_session(options)` 异步函数，负责：
-- 解析/创建 `agent_dir`（默认 `~/.nova/agent`）与 `session_dir`。
-- 初始化 `SessionManager`、`SettingsManager`、`ModelRuntime`、`AuthStorage`，并封装为 `AgentSessionServices`。
-- 解析初始模型：优先恢复现有会话上下文中的模型，其次 settings 默认模型，最后 fallback 到 `volcengine/deepseek-v3-2-251201`。
-- 构建 `Agent` 实例（来自 `nova_agent`）；Agent 层的扩展 hook 由 `AgentSession` 在初始化时直接绑定到它自己创建的 `ExtensionRunner`。
-- 将 `AgentSessionServices` 解包为扁平字段注入 `AgentSessionConfig`，创建 `AgentSession`；`AgentSessionRuntime` 仍持有 `AgentSessionServices`。
-- 调用 `session.bind_extensions()` 触发扩展 `session_start` 生命周期。
-- 包装为 `AgentSessionRuntime` 返回。
+### 1. `core/runtime_manager/` — 进程级唯一会话工厂 + 注册表
+对位 codex `core/src/thread_manager.rs`。会话的创建/注销/列举**必须**经过 `RuntimeManager`（server 与 exec 已接入；外部不得直连 assembly 创建）：
+- `manager.py`：注册表（键 = **open 时刻的 session_id**，switch/fork 原地换会后 id 会漂移）+ 生命周期。纪律移植自 codex——组装失败零注册零回滚（registration last）、ID 冲突在位者赢（新来者销毁 + `SessionIdCollisionError`）、`shutdown_all(timeout)` 有界并发扇出只移除 completed、`asyncio.Lock` 只护注册表不护组装。
+- `assembly.py`：会话组装编排（对位 `Session::spawn`）。`create_agent_session_runtime(options)` 流程：解析 agent_dir/cwd → `AgentSessionServices.create` → 解析 SessionManager → 模型/思考级/工具解析 → `create_agent` + 状态恢复 → `AgentSessionConfig` → `AgentSession` → `bind_extensions`（触发 `session_start` 生命周期）→ 包装 `AgentSessionRuntime`（含 `_create_runtime` 闭包供 switch/fork 重建）。
+- `factory.py`：per-session 组装件（`create_agent`/`create_stream_fn`/`build_agent_session_config` 等），只被 assembly 调用。
+- **导入无环不变量**（冷导入测试守门）：manager 模块级不 import assembly（默认工厂函数体内懒加载）；assembly 及组装链不反向 import core 侧入口。
+- **harness 层无 sdk 模块**（对位 codex：进程内消费走 RuntimeManager；协议嵌入走 nova_server 的 `client/in_process.py`）。守卫测试 `test_imports.py::test_sdk_module_stays_gone`。
 
 ### 2. `core/agent_session/services.py` — AgentSessionServices
 **cwd 绑定的运行时服务容器**（`@dataclass`），只有一个职责：把创建 session 所需的服务实例集中到一起，供 `AgentSessionRuntime` 持有和复用。它是纯运行时容器（持服务实例），因此不序列化。

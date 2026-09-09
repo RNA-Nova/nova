@@ -22,7 +22,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from nova_harness.core.config.defaults import (
+from nova_harness.config.defaults import (
     GIT_PACKAGES_DIR_NAME,
     NPM_PACKAGES_DIR_NAME,
     PACKAGES_DIR_NAME,
@@ -30,18 +30,7 @@ from nova_harness.core.config.defaults import (
     get_agent_dir,
     get_project_base_dir,
 )
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.types.config.settings import PackageSourceSpec
-from nova_harness.core.types.package import (
-    AmbiguousPackageNameError,
-    NovaManifest,
-    PackageFilter,
-    PackageManifest,
-    PackageMetadata,
-    PackageView,
-    ProgressEvent,
-    ResourceMetadata,
-)
+from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.core.utils.binaries import binary_install_guidance, resolve_binary
 from nova_harness.core.utils.telemetry import report_install_telemetry
 from nova_harness.package.binaries import ensure_binary
@@ -93,6 +82,17 @@ from nova_harness.package.validation import (
     is_skill_path,
     is_tool_dir,
     is_user_tool_dir,
+)
+from nova_harness.types.config.settings import PackageSourceSpec
+from nova_harness.types.package import (
+    AmbiguousPackageNameError,
+    NovaManifest,
+    PackageFilter,
+    PackageManifest,
+    PackageMetadata,
+    PackageView,
+    ProgressEvent,
+    ResourceMetadata,
 )
 
 logger = logging.getLogger(__name__)

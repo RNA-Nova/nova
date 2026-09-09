@@ -32,16 +32,16 @@ SettingsManager 独占 settings 写门同构）。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
-from nova_harness.core.config.defaults import get_agent_dir
-from nova_harness.core.types.protocols import ResourceLoaderProtocol
-from nova_harness.core.types.resources.agents import AgentConfig
-from nova_harness.core.types.resources.selection import CapabilitySelection
+from nova_harness.config.defaults import get_agent_dir
+from nova_harness.types.protocols import ResourceLoaderProtocol
+from nova_harness.types.resources.agents import AgentConfig
+from nova_harness.types.resources.selection import CapabilitySelection
 
 BASE_AGENT_NAME = "base_agent"
 """无可用 agent 时的兜底名（注册表为空时的合并默认）。"""

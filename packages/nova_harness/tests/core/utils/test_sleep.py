@@ -5,7 +5,7 @@ Sleep helper 单元测试。
 import asyncio
 
 import pytest
-from nova_ai import AbortController, AbortSignal
+from nova_ai import AbortController
 
 from nova_harness.core.utils.sleep import sleep
 

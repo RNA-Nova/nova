@@ -9,7 +9,7 @@ from nova_ai import ImageContent, TextContent
 from nova_ai.types.base_model import NovaBaseModel
 from pydantic import Field
 
-from nova_harness.core.types.compaction import CompactionResult
+from nova_harness.types.compaction.compaction import CompactionResult
 
 
 class ContextEventResult(NovaBaseModel):

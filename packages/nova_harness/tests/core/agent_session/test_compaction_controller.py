@@ -16,8 +16,8 @@ from nova_ai import AssistantMessage, Model, ModelCost, Usage
 
 from nova_harness.core.agent_session.controllers.compaction import CompactionController
 from nova_harness.core.agent_session.controllers.tree import TreeNavigator
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.types.compaction import CompactionSettings
+from nova_harness.sessions import SessionManager
+from nova_harness.types.compaction import CompactionSettings
 
 
 def _model(context_window: int = 1000) -> Model:
@@ -151,6 +151,69 @@ async def test_error_overflow_retries_once(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_will_retry_strips_length_tail_after_rebuild(tmp_path, monkeypatch):
+    """will_retry 压缩重建状态后，保留窗口里还原的 length/error assistant
+    尾必须剥掉（否则 continue_() 从 assistant 尾续跑直接 RuntimeError）。
+
+    回归：真实集成中 thinking 模型撞 max_tokens 的截断回复已随 message_end
+    落盘，压缩重建把它还原成尾消息——守卫此前只剥 error 不剥 length。
+    """
+    from nova_ai import UserMessage
+    from nova_harness.core.agent_session.controllers import (
+        compaction as compaction_controller_module,
+    )
+
+    model = _model(context_window=1000)
+    session = _session(tmp_path, model, [])
+    sm = session.session_manager
+    # 早期消息要有足够体量，否则全部落进 keep_recent 窗口、无内容可压缩
+    sm.append_message(UserMessage(role="user", content="u1 " + "甲" * 300, timestamp=1))
+    sm.append_message(
+        _assistant(
+            "a1 " + "乙" * 300, usage=Usage(input=10, output=5), timestamp=2
+        )
+    )
+    user2 = sm.append_message(UserMessage(role="user", content="u2", timestamp=3))
+    sm.append_message(
+        _assistant(
+            "a2-truncated",
+            stop_reason="length",
+            usage=Usage(input=900, output=4096),
+            timestamp=4,
+        )
+    )
+
+    # 压缩产物：保留窗口从 user2 开始（length 尾随重建还原进状态）
+    compact_outcome = MagicMock()
+    compact_outcome.summary = "摘要"
+    compact_outcome.first_kept_entry_id = user2
+    compact_outcome.tokens_before = 999
+    compact_outcome.details = None
+
+    monkeypatch.setattr(
+        compaction_controller_module,
+        "get_summarization_request_auth",
+        AsyncMock(return_value=("k", {}, None)),
+    )
+    monkeypatch.setattr(
+        compaction_controller_module._compaction_module,
+        "compact",
+        AsyncMock(return_value=compact_outcome),
+    )
+
+    controller = CompactionController(session)
+    result = await controller.run_auto_compaction("overflow", will_retry=True)
+
+    assert result is True
+    # 尾消息不能再是 length/error 的 assistant（continue_ 只接受 user/toolResult 尾）
+    for message in session.agent.state.messages:
+        assert not (
+            message.role == "assistant"
+            and getattr(message, "stop_reason", None) in ("error", "length")
+        ), "length/error assistant 尾未被剥除"
+
+
+@pytest.mark.asyncio
 async def test_zero_usage_falls_back_to_estimation(tmp_path):
     """usage 缺失/全零（如 529 错误页）不再直接返回 False：
     走最近有效响应的估算路径。"""
@@ -209,7 +272,7 @@ async def test_summarization_auth_returns_headers_filtered_and_env(tmp_path):
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(
         return_value=AuthResult(
-            auth={"apiKey": "k", "headers": {"X-A": "1", "X-B": None}},
+            auth={"api_key": "k", "headers": {"X-A": "1", "X-B": None}},
             env={"FOO": "bar"},
         )
     )
@@ -302,7 +365,7 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
 
     from nova_ai import AuthResult
 
-    from nova_harness.core.types.compaction import (
+    from nova_harness.types.compaction import (
         CompactionPreparation,
         CompactionResult,
     )
@@ -310,7 +373,7 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(
         return_value=AuthResult(
-            auth={"apiKey": "k", "headers": {"X-A": "1"}}, env={"E": "v"}
+            auth={"api_key": "k", "headers": {"X-A": "1"}}, env={"E": "v"}
         )
     )
     session.agent.has_queued_messages.return_value = False

@@ -9,13 +9,13 @@ This module provides comprehensive session management functionality including:
 """
 
 # Builders
-from nova_harness.core.harness.session.builders import (
+from nova_harness.sessions.builders import (
     build_session_tree,
     create_branched_session_entries,
 )
 
 # Cache waste analysis（类型在 types.session.stats，此处汇集函数与常量）
-from nova_harness.core.harness.session.cache_stats import (
+from nova_harness.sessions.cache_stats import (
     CACHE_TTL_MS,
     NOISE_FLOOR_TOKENS,
     collect_cache_misses,
@@ -24,16 +24,16 @@ from nova_harness.core.harness.session.cache_stats import (
 )
 
 # Session listing (async scan of session directories)
-from nova_harness.core.harness.session.listing import (
+from nova_harness.sessions.listing import (
     build_session_info,
     list_sessions_from_dir,
 )
 
 # Main manager class
-from nova_harness.core.harness.session.manager import SessionManager
+from nova_harness.sessions.manager import SessionManager
 
 # Utilities
-from nova_harness.core.harness.session.utils import (
+from nova_harness.sessions.utils import (
     assert_valid_session_id,
     build_context_entries,
     build_session_context,
@@ -51,8 +51,8 @@ from nova_harness.core.harness.session.utils import (
     parse_session_entry_line,
     session_entry_to_context_messages,
 )
-from nova_harness.core.types.session.constants import CURRENT_SESSION_VERSION
-from nova_harness.core.types.session.stats import (
+from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
+from nova_harness.types.session.stats import (
     CacheMiss,
     CacheWasteTotals,
     ModelPriceSource,

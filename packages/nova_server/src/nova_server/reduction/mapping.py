@@ -12,8 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from nova_ai import ImageContent, TextContent, ThinkingContent
 
-from nova_harness.core.types.messages import CustomMessageContent
-from nova_harness.server.types.items import (
+from nova_server.types.items import (
     AgentMessageItem,
     CustomItem,
     ItemStatus,
@@ -21,6 +20,7 @@ from nova_harness.server.types.items import (
     ThinkingItem,
     UserMessageItem,
 )
+from nova_harness.types.messages import CustomMessageContent
 
 # 追加语义的流式文本字段（线上键名）——只有这两名字段做字符串追加，
 # 其余一律替换（status 等 str-Enum 字段若按"字符串即追加"会拼出
@@ -148,7 +148,7 @@ def message_to_final_item(message: Any, fallback_id: str) -> Optional[NovaItem]:
     - 包级消息优先 ``to_item()`` 协议；不支持的降级 CustomItem 兜底；
     - item id 缺省回退 ``fallback_id``（实时=归约器补铸，恢复=条目 id）。
     """
-    from nova_harness.core.types.messages import (
+    from nova_harness.types.messages import (
         BranchSummaryMessage,
         CompactionSummaryMessage,
         CustomMessage,

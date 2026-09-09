@@ -5,16 +5,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from nova_harness.core.types.extensions import ExtensionFactory
-from nova_harness.core.types.protocols import (
+from nova_harness.types.extensions import ExtensionFactory
+from nova_harness.types.protocols import (
     EventBusProtocol,
     ExtensionAPIFactory,
     ModelRuntimeProtocol,
     PackageManagerProtocol,
     SettingsManagerProtocol,
 )
-from nova_harness.core.types.resources.context_files import ContextFile
-from nova_harness.core.types.resources.tools import ToolContext
+from nova_harness.types.resources.context_files import ContextFile
+from nova_harness.types.resources.tools import ToolContext
 
 
 @dataclass

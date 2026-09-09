@@ -9,13 +9,13 @@ from nova_ai import AbortController
 from nova_harness.core.agent_session.controllers.compaction import (
     get_summarization_request_auth,
 )
-from nova_harness.core.harness.compaction import branch_summarization as _branch_module
-from nova_harness.core.types.compaction import GenerateBranchSummaryOptions
-from nova_harness.core.types.events import SessionReplacedEvent, SessionTreeEvent
-from nova_harness.core.types.events.constants import SESSION_BEFORE_TREE
-from nova_harness.core.types.protocols import AgentSessionProtocol
-from nova_harness.core.types.session.options import NavigateOptions
+from nova_harness.core.domains.compaction import branch_summarization as _branch_module
 from nova_harness.core.utils.messages import extract_text_from_content
+from nova_harness.events import SessionReplacedEvent, SessionTreeEvent
+from nova_harness.events.constants import SESSION_BEFORE_TREE
+from nova_harness.types.compaction.branch_summary import GenerateBranchSummaryOptions
+from nova_harness.types.protocols import AgentSessionProtocol
+from nova_harness.types.session.options import NavigateOptions
 
 
 class TreeNavigator:
@@ -64,7 +64,7 @@ class TreeNavigator:
             # session_before_tree 扩展 hook
             runner = self._session._extension_runner
             if runner is not None and runner.has_handlers(SESSION_BEFORE_TREE):
-                from nova_harness.core.types.events import (
+                from nova_harness.events import (
                     SessionBeforeTreeEvent,
                     TreePreparation,
                 )
@@ -186,7 +186,7 @@ class TreeNavigator:
                     new_leaf_id=self._session.session_manager.get_leaf_id(),
                     old_leaf_id=old_leaf_id,
                     summary_entry=summary_entry,
-                    from_extension=from_extension if summary_text else None,
+                    from_extension=from_extension if summary_text else False,
                 )
             )
 

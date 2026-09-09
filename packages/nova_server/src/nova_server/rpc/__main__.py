@@ -1,5 +1,5 @@
-"""Allow running as ``python -m nova_harness.server``."""
+"""Allow running as ``python -m nova_server``."""
 
-from nova_harness.modes.rpc.cli import main
+from nova_server.rpc.cli import main
 
 main()

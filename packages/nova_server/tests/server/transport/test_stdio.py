@@ -14,7 +14,7 @@ import pytest
 # 子进程：StdioTransport 回声服务（读一帧 → 原样写回 → 收到 params.done 或 EOF 关闭）
 _ECHO_SCRIPT = """
 import asyncio
-from nova_harness.server.transport.stdio import StdioTransport
+from nova_server.transport.stdio import StdioTransport
 
 async def main():
     t = StdioTransport()

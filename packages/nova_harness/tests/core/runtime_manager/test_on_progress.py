@@ -1,8 +1,8 @@
 """SDK 包管理进度回调桥接测试。"""
 
-from nova_harness.core.sdk import _resolve_on_progress
-from nova_harness.core.types.package import ProgressEvent
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
+from nova_harness.core.runtime_manager.assembly import _resolve_on_progress
+from nova_harness.types.package import ProgressEvent
+from nova_harness.types.session.config import CreateAgentSessionOptions
 
 
 class _RecordingUIContext:

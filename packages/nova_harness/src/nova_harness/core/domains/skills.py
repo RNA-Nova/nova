@@ -12,8 +12,6 @@ import re
 from pathlib import Path
 from typing import List, Mapping, Optional
 
-from nova_harness.core.types.extensions import ExtensionCommand
-from nova_harness.core.types.resources.skills import ParsedSkillBlock, Skill
 from nova_harness.core.utils.frontmatter import strip_frontmatter
 from nova_harness.core.utils.name_sets import apply_name_list
 from nova_harness.core.utils.skills import (
@@ -21,6 +19,8 @@ from nova_harness.core.utils.skills import (
     format_skills_for_prompt,
     list_skill_commands,
 )
+from nova_harness.types.extensions.commands import ExtensionCommand
+from nova_harness.types.resources.skills import ParsedSkillBlock, Skill
 
 
 def is_package_skill(skill: Skill) -> bool:

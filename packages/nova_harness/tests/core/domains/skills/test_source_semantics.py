@@ -13,21 +13,21 @@ pip/npm 打桩）+ 真 resolver/loader 管线 + 真 SDK 会话运行时（核心
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from unittest.mock import patch
 
 import pytest
 
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.harness.skills import (
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.core.domains.skills import (
     expand_skill_command,
     filter_skills_by_whitelist,
 )
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.types.package.enums import SourceScope
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.core.types.resources.skills import Skill
 from nova_harness.package import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.types.package.enums import SourceScope
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
+from nova_harness.types.resources.skills import Skill
 
 # ---------------------------------------------------------------------------
 # 环境构造
@@ -201,8 +201,8 @@ def _install_pkg(env: Dict[str, Path], pkg_src: Path) -> None:
 async def _make_session(
     env: Dict[str, Path], agent_name: Optional[str] = "test_agent", trusted: bool = True
 ):
-    from nova_harness.core.sdk import create_agent_session_runtime
-    from nova_harness.core.types.session.config import CreateAgentSessionOptions
+    from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+    from nova_harness.types.session.config import CreateAgentSessionOptions
 
     return await create_agent_session_runtime(
         CreateAgentSessionOptions(

@@ -5,7 +5,7 @@
 ``[tool.nova] user_tools`` 类目分发（见 ``examples/user_tools_design.md``）。
 """
 
-from nova_harness.core.harness.user_tools.manager import UserToolManager
+from nova_harness.core.domains.user_tools.manager import UserToolManager
 
 __all__ = [
     "UserToolManager",

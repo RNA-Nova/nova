@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
 
-from nova_harness.core.types.package import NovaManifest, PackageManifest
+from nova_harness.types.package import NovaManifest, PackageManifest
 
 # “path 依赖解析出包根”警告的进程级去重表（按解析后的绝对路径）。
 _warned_outside_paths: set = set()

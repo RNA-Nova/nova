@@ -4,7 +4,7 @@
 → 隧道 → 远程 executor；六个 operations 实现（同一份代码的远程形态）
 逐一实操：write → read → edit → ls → grep → find。
 
-用法：pixi run -e dev python packages/nova-harness/frontend/scripts/remote-fs-e2e.py
+用法：pixi run -e dev python packages/nova_client/frontend/scripts/remote-fs-e2e.py
 """
 
 import asyncio

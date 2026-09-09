@@ -14,12 +14,12 @@ from typing import Any, Callable, Dict, Optional
 import pytest
 import yaml
 
-from nova_harness.core.resources.loaders.agent_config import (
+from nova_harness.core.utils.files import load_text_file
+from nova_harness.resources.loaders.agent_config import (
     load_agent_config_from_yaml,
     load_agents,
 )
-from nova_harness.core.types.resources.tools import ToolInfo
-from nova_harness.core.utils.files import load_text_file
+from nova_harness.types.resources.tools import ToolInfo
 
 
 def _write_yaml(path: Path, data: Dict[str, Any]) -> None:

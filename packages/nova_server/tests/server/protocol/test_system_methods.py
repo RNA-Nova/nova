@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nova_harness.server.protocol import JSONRPCError, build_request
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.methods.system import register
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol import JSONRPCError, build_request
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.methods.system import register
+from nova_server.protocol.router import MethodRegistry
 
 
 class _FakeRunner:
@@ -180,12 +180,12 @@ async def test_cancel_request_cancels_running_task():
 
     连接化后按连接寻址：请求来自哪条连接，就只查那条连接的在飞表。
     """
-    from nova_harness.server.connection import (
+    from nova_server.connection import (
         Connection,
         ConnectionOrigin,
         _current_connection,
     )
-    from nova_harness.server.transport import MemoryTransport
+    from nova_server.transport import MemoryTransport
 
     state = _state_with_session()
     registry = MethodRegistry()
@@ -230,12 +230,12 @@ async def test_cancel_request_idempotent_for_unknown_or_done():
 
     无连接上下文（或本连接没有该 id）同样幂等 false——连接隔离语义。
     """
-    from nova_harness.server.connection import (
+    from nova_server.connection import (
         Connection,
         ConnectionOrigin,
         _current_connection,
     )
-    from nova_harness.server.transport import MemoryTransport
+    from nova_server.transport import MemoryTransport
 
     state = _state_with_session()
     registry = MethodRegistry()

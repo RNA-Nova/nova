@@ -7,14 +7,14 @@ import asyncio
 
 import pytest
 
-from nova_harness.core.types.events.agent import ToolExecutionStartEvent
-from nova_harness.core.types.ui.context import UIContext
-from nova_harness.core.types.ui.primitives import UIResponse
-from nova_harness.server.connection import ConnectionOrigin
-from nova_harness.server.protocol import MethodRegistry
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.server import RpcServer
-from nova_harness.server.transport import MemoryTransport
+from nova_harness.events.agent import ToolExecutionStartEvent
+from nova_server.connection import ConnectionOrigin
+from nova_server.protocol import MethodRegistry
+from nova_server.protocol.methods.state import ServerState
+from nova_server.server import RpcServer
+from nova_server.transport import MemoryTransport
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.primitives import UIResponse
 
 
 class FakeSession:
@@ -324,7 +324,7 @@ async def test_cancel_request_end_to_end(transport_pair):
     """cancelRequest 端到端：在飞长调用被取消并收到 -32800 应答；
     cancelRequest 自身应答 cancelled:true；已完成调用的取消幂等；
     request_tasks 映射清理干净。"""
-    from nova_harness.server.protocol.methods import system as system_methods
+    from nova_server.protocol.methods import system as system_methods
 
     server_transport, client_transport = transport_pair
     state = ServerState()

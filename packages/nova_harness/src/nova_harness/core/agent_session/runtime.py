@@ -20,26 +20,26 @@ from nova_ai import UserMessage
 
 from nova_harness.core.agent_session.agent import AgentSession
 from nova_harness.core.agent_session.services import AgentSessionServices
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.types.events import (
+from nova_harness.core.utils.session_cwd import assert_session_cwd_exists
+from nova_harness.events import (
     SessionBeforeForkEvent,
     SessionBeforeSwitchEvent,
     SessionReplacedEvent,
     SessionShutdownEvent,
     SessionStartEvent,
 )
-from nova_harness.core.types.session import (
-    ForkOptions,
-    NewSessionOptions,
-    SwitchSessionOptions,
-)
-from nova_harness.core.types.session.diagnostics import AgentSessionRuntimeDiagnostic
-from nova_harness.core.types.session.factory import (
+from nova_harness.sessions import SessionManager
+from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.types.session.factory import (
     CreateAgentSessionRuntimeFactory,
     CreateAgentSessionRuntimeOptions,
     CreateAgentSessionRuntimeResult,
 )
-from nova_harness.core.utils.session_cwd import assert_session_cwd_exists
+from nova_harness.types.session.options import (
+    ForkOptions,
+    NewSessionOptions,
+    SwitchSessionOptions,
+)
 
 
 class SessionImportFileNotFoundError(FileNotFoundError):

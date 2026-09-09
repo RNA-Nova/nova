@@ -8,12 +8,12 @@ import asyncio
 
 import pytest
 
-from nova_harness.core.types.events.agent import ToolExecutionStartEvent
-from nova_harness.server.connection import ConnectionOrigin
-from nova_harness.server.protocol import MethodRegistry
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.server import RpcServer
-from nova_harness.server.transport import MemoryTransport
+from nova_harness.events.agent import ToolExecutionStartEvent
+from nova_server.connection import ConnectionOrigin
+from nova_server.protocol import MethodRegistry
+from nova_server.protocol.methods.state import ServerState
+from nova_server.server import RpcServer
+from nova_server.transport import MemoryTransport
 
 
 class FakeSession:
@@ -120,7 +120,7 @@ async def test_events_gated_by_initialize(running_server, methods):
 @pytest.mark.asyncio
 async def test_cancel_request_scoped_to_own_connection(running_server, methods):
     """cancelRequest 只作用本连接：B 取消 A 的在飞调用是幂等空操作。"""
-    from nova_harness.server.protocol.methods import system as system_methods
+    from nova_server.protocol.methods import system as system_methods
 
     system_methods.register(methods, running_server._state)
 
@@ -198,7 +198,7 @@ async def test_exit_on_close_shuts_down_server(methods):
 @pytest.mark.asyncio
 async def test_close_cancels_inflight_handlers(running_server):
     """连接关闭即取消本连接在飞 handler（长任务随连接终止）。"""
-    from nova_harness.server.protocol.methods import system as system_methods
+    from nova_server.protocol.methods import system as system_methods
 
     methods_reg = running_server._methods
     cancelled = asyncio.Event()
@@ -225,7 +225,6 @@ async def test_close_cancels_inflight_handlers(running_server):
 @pytest.mark.asyncio
 async def test_inflight_overload_returns_32004(methods):
     """入站背压：在飞 handler 达上限——请求回 -32004，通知静默丢弃。"""
-    import time as _time
 
     blocker = asyncio.Event()
 

@@ -26,31 +26,32 @@ from nova_ai import (
     UserMessage,
 )
 
-import nova_harness.core.harness.compaction.compaction as compaction_module
-from nova_harness.core.harness.compaction import (
-    calculate_context_tokens,
+import nova_harness.core.domains.compaction.compaction as compaction_module
+from nova_harness.core.domains.compaction.branch_summarization import (
     collect_entries_for_branch_summary,
+    prepare_branch_entries,
+)
+from nova_harness.core.domains.compaction.compaction import (
+    calculate_context_tokens,
     compact,
-    compute_file_lists,
-    create_file_ops,
     estimate_context_tokens,
     estimate_tokens,
-    extract_file_ops_from_message,
     find_cut_point,
     find_turn_start_index,
+    generate_summary,
     get_last_assistant_usage,
-    prepare_branch_entries,
     prepare_compaction,
     should_compact,
 )
-from nova_harness.core.harness.compaction.compaction import generate_summary
-from nova_harness.core.harness.compaction.utils import (
+from nova_harness.core.domains.compaction.utils import (
+    compute_file_lists,
+    create_file_ops,
+    extract_file_ops_from_message,
     format_file_operations,
     serialize_conversation,
 )
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.types.compaction import CompactionSettings, CutPointResult
-from nova_harness.core.types.session.context import SessionContext
+from nova_harness.sessions import SessionManager
+from nova_harness.types.compaction.compaction import CompactionSettings
 
 
 def _user(text: str) -> UserMessage:

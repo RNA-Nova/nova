@@ -16,30 +16,30 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from nova_agent import AgentToolResult
 from nova_ai import ToolCall
 
-from nova_harness.core.types.session.entries import (
-    BranchSummaryEntry,
-    CompactionEntry,
-    CustomEntry,
-    CustomMessageEntry,
-    SessionEntry,
-    SessionMessageEntry,
-)
 from nova_harness.core.utils.messages import (
     create_custom_message,
     extract_text_from_content,
 )
-from nova_harness.server.types.items import (
+from nova_server.types.items import (
     BranchSummaryItem,
     CompactionItem,
     CustomItem,
     ItemStatus,
     NovaItem,
     ToolCallItem,
+)
+from nova_harness.types.session.entries import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomEntry,
+    CustomMessageEntry,
+    SessionEntry,
+    SessionMessageEntry,
 )
 
 from .mapping import (

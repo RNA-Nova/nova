@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nova_harness.core.types.events import SessionStartEvent
-from nova_harness.core.types.session.config import AgentSessionConfig
+from nova_harness.events import SessionStartEvent
+from nova_harness.types.session.config import AgentSessionConfig
 
 
 def _construct_config(**overrides):

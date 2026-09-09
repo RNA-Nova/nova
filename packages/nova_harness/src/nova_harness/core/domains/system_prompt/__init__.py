@@ -10,6 +10,6 @@
 相关数据类型见 `types/resources/agents.py`。
 """
 
-from nova_harness.core.harness.system_prompt.manager import SystemPromptManager
+from nova_harness.core.domains.system_prompt.manager import SystemPromptManager
 
 __all__ = ["SystemPromptManager"]

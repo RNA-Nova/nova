@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Set, Tuple
 
-from nova_harness.core.types.resources.selection import CapabilitySelection
+from nova_harness.types.resources.selection import CapabilitySelection
 
 EXCLUDE_PREFIX = "!"
 FORCE_INCLUDE_PREFIX = "+"

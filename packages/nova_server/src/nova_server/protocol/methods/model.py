@@ -9,14 +9,14 @@ from __future__ import annotations
 import os
 from typing import Any, List
 
-from nova_harness.core.config.defaults import (
+from nova_harness.config.defaults import (
     AUTH_FILE_NAME,
     MODELS_FILE_NAME,
     get_agent_dir,
 )
-from nova_harness.server.protocol.errors import JSONRPCError
-from nova_harness.server.protocol.methods import shapes
-from nova_harness.server.protocol.methods.shapes import (
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods import shapes
+from nova_server.protocol.methods.shapes import (
     CycleModelResult,
     CycleThinkingLevelResult,
     ListModelsResult,
@@ -28,8 +28,8 @@ from nova_harness.server.protocol.methods.shapes import (
     SetScopedModelsResult,
     SetThinkingLevelResult,
 )
-from nova_harness.server.protocol.methods.state import ServerState
-from nova_harness.server.protocol.router import MethodRegistry
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
 
 
 def resolve_model(model_param: Any, model_runtime: Any = None) -> Any:
@@ -59,8 +59,8 @@ def resolve_model(model_param: Any, model_runtime: Any = None) -> Any:
 
 def _find_model(provider: str, model_id: str, model_runtime: Any = None) -> Any:
     if model_runtime is None:
-        from nova_harness.core.config import AuthStorage
-        from nova_harness.core.model import ModelRuntime
+        from nova_harness.config import AuthStorage
+        from nova_harness.model import ModelRuntime
 
         agent_dir = get_agent_dir()
         auth_path = os.path.join(agent_dir, AUTH_FILE_NAME)
@@ -171,7 +171,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         params: shapes.SetScopedModelsParams,
     ) -> SetScopedModelsResult:
         """设置 scoped 模型集合：``[{provider, model_id, thinking_level?}]``。"""
-        from nova_harness.core.types.session.model import ScopedModelConfig
+        from nova_harness.types.session.model import ScopedModelConfig
 
         raw = params.models
         session = _session()

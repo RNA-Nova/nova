@@ -31,24 +31,24 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from nova_harness.core.harness.session.message_types import (
-    register_message_types,
-)
-from nova_harness.core.resources.source_info import (
+from nova_harness.core.utils.files import canonicalize_path
+from nova_harness.resources.source_info import (
     find_source_info_for_path,
     source_info_from_metadata,
 )
-from nova_harness.core.types.extensions import SourceInfo
-from nova_harness.core.types.package import ResolvedResource
-from nova_harness.core.types.resources.diagnostics import (
+from nova_harness.sessions.message_types import (
+    register_message_types,
+)
+from nova_harness.types.resources.diagnostics import (
     ResourceCollision,
     ResourceDiagnostic,
 )
-from nova_harness.core.types.resources.user_tools import (
+from nova_harness.types.resources.personas import SourceInfo
+from nova_harness.types.resources.prompts import ResolvedResource
+from nova_harness.types.resources.user_tools import (
     UserToolDefinition,
     UserToolResource,
 )
-from nova_harness.core.utils.files import canonicalize_path
 
 # UserTool 类必须声明的元数据属性及期望类型
 _REQUIRED_ATTRS: Dict[str, type] = {

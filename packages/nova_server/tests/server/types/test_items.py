@@ -9,7 +9,7 @@
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from nova_harness.server.types.items import (
+from nova_server.types.items import (
     AgentMessageItem,
     BranchSummaryItem,
     CompactionItem,

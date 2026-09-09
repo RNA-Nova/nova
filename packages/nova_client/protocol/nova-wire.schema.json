@@ -110,13 +110,17 @@
     "AgentMessage": {
       "anyOf": [
         {
-          "$ref": "#/$defs/UserMessage"
-        },
-        {
-          "$ref": "#/$defs/AssistantMessage"
-        },
-        {
-          "$ref": "#/$defs/ToolResultMessage"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserMessage"
+            },
+            {
+              "$ref": "#/$defs/AssistantMessage"
+            },
+            {
+              "$ref": "#/$defs/ToolResultMessage"
+            }
+          ]
         },
         {
           "$ref": "#/$defs/CustomAgentMessage"
@@ -302,6 +306,16 @@
           },
           "type": "array"
         },
+        "deferred": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "diagnostics": {
           "anyOf": [
             {
@@ -309,6 +323,16 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endTurn": {
+          "anyOf": [
+            {
+              "type": "boolean"
             },
             {
               "type": "null"
@@ -368,6 +392,16 @@
             }
           ]
         },
+        "rawStopReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "responseId": {
           "anyOf": [
             {
@@ -396,6 +430,7 @@
         },
         "stopReason": {
           "enum": [
+            "pending",
             "stop",
             "length",
             "toolUse",
@@ -419,6 +454,9 @@
         "model",
         "usage",
         "stopReason",
+        "rawStopReason",
+        "endTurn",
+        "deferred",
         "errorMessage",
         "responseId",
         "responseModel",
@@ -1254,6 +1292,32 @@
     "CreateSessionParams": {
       "additionalProperties": false,
       "properties": {
+        "additionalPromptTemplatePaths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "additionalSkillPaths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "agentDir": {
           "anyOf": [
             {
@@ -1281,6 +1345,19 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "excludeTools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             {
               "type": "null"
@@ -1327,6 +1404,29 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "type": "boolean"
             },
             {
               "type": "null"
@@ -1762,6 +1862,7 @@
         },
         "reason": {
           "enum": [
+            "pending",
             "stop",
             "length",
             "toolUse",
@@ -3632,13 +3733,17 @@
         "message": {
           "anyOf": [
             {
-              "$ref": "#/$defs/UserMessage"
-            },
-            {
-              "$ref": "#/$defs/AssistantMessage"
-            },
-            {
-              "$ref": "#/$defs/ToolResultMessage"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UserMessage"
+                },
+                {
+                  "$ref": "#/$defs/AssistantMessage"
+                },
+                {
+                  "$ref": "#/$defs/ToolResultMessage"
+                }
+              ]
             },
             {
               "$ref": "#/$defs/CustomMessage"
@@ -5623,9 +5728,7 @@
         },
         "details": {
           "anyOf": [
-            {
-              "type": "object"
-            },
+            {},
             {
               "type": "null"
             }

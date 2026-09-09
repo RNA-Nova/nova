@@ -2,15 +2,11 @@
 会话构建器单元测试。
 """
 
-from nova_harness.core.harness.session.builders import (
+from nova_harness.sessions.builders import (
     build_session_tree,
     create_branched_session_entries,
 )
-from nova_harness.core.types.session import (
-    CustomEntry,
-    LabelEntry,
-    SessionHeader,
-)
+from nova_harness.types.session.entries import CustomEntry, LabelEntry, SessionHeader
 
 
 def _entry(

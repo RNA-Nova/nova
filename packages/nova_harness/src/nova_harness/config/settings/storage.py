@@ -7,13 +7,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, Optional
 
-from nova_harness.core.config.defaults import (
+from nova_harness.config.defaults import (
     CONFIG_DIR_NAME,
     SETTINGS_FILE_NAME,
     get_agent_dir,
 )
-from nova_harness.core.config.storage import FileStorageBackend
-from nova_harness.core.types.config.settings import SettingsScope
+from nova_harness.config.storage import FileStorageBackend
+from nova_harness.types.config.settings import SettingsScope
 
 
 class SettingsStorage(ABC):

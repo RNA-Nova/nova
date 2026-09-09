@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from nova_harness.core.sdk import create_agent_session_runtime
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
+from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+from nova_harness.types.session.config import CreateAgentSessionOptions
 
 
 @pytest.mark.asyncio

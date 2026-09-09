@@ -13,7 +13,7 @@ from nova_ai import (
     UserMessage,
 )
 
-from nova_harness.core.harness.compaction.utils import (
+from nova_harness.core.domains.compaction.utils import (
     compute_file_lists,
     create_file_ops,
     extract_file_ops_from_message,

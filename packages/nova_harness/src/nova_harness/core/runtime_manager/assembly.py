@@ -1,9 +1,12 @@
 """
-Nova Harness SDK — 创建和管理 AgentSession 的高层工厂函数。
+RuntimeManager 组装编排 — 对位 codex ``Session::spawn`` 的会话创建路径。
 
 - ``create_agent_session`` 返回 ``CreateAgentSessionResult``（session + extensions_result + model_fallback_message）。
 - ``create_agent_session_runtime`` 在此基础上包装为 ``AgentSessionRuntime``，供 CLI/RPC 使用。
 - ``create_agent_session_services`` / ``create_agent_session_from_services`` 拆分服务创建与会话创建。
+
+本模块由 ``manager.py``（对位 ``thread_manager.rs``）与兼容薄壳 ``sdk.py`` 调用；
+外部新代码请走 ``RuntimeManager``，不要直接调用这里的组装函数。
 """
 
 from __future__ import annotations
@@ -12,12 +15,16 @@ import os
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
+from nova_harness.config.defaults import (
+    AGENTS_DIR_NAME,
+    get_agent_dir,
+)
 from nova_harness.core.agent_session import (
     AgentSession,
     AgentSessionRuntime,
     AgentSessionServices,
 )
-from nova_harness.core.agent_session.factory import (
+from nova_harness.core.runtime_manager.factory import (
     build_agent_session_config,
     configure_extension_runner,
     create_agent,
@@ -25,27 +32,23 @@ from nova_harness.core.agent_session.factory import (
     resolve_session_manager,
     restore_or_persist_session_state,
 )
-from nova_harness.core.config.defaults import (
-    AGENTS_DIR_NAME,
-    get_agent_dir,
-)
-from nova_harness.core.harness.session import SessionManager
-from nova_harness.core.model.resolver import (
+from nova_harness.core.utils.session_cwd import assert_session_cwd_exists
+from nova_harness.core.utils.timings import print_timings, reset_timings, time
+from nova_harness.model.resolver import (
     find_initial_model,
     resolve_thinking_level,
     restore_model_from_session,
 )
-from nova_harness.core.types.session.config import CreateAgentSessionOptions
-from nova_harness.core.types.session.factory import (
+from nova_harness.package import PackageManager
+from nova_harness.package.validation import is_agent_file
+from nova_harness.sessions import SessionManager
+from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.types.session.factory import (
     CreateAgentSessionResult,
     CreateAgentSessionRuntimeOptions,
     CreateAgentSessionRuntimeResult,
 )
-from nova_harness.core.types.ui import NoOpUIContext, UIContext
-from nova_harness.core.utils.session_cwd import assert_session_cwd_exists
-from nova_harness.core.utils.timings import print_timings, reset_timings, time
-from nova_harness.package import PackageManager
-from nova_harness.package.validation import is_agent_file
+from nova_harness.types.ui import NoOpUIContext
 
 # ---------------------------------------------------------------------------
 # Public API

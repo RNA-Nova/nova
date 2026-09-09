@@ -5,17 +5,15 @@ SettingsManager 补充测试。
 """
 
 import json
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from nova_ai import ModelThinkingLevel
 
-from nova_harness.core.config.settings.manager import SettingsManager
-from nova_harness.core.config.settings.storage import FileSettingsStorage
-from nova_harness.core.types.config.settings import (
-    MarkdownSettings,
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.config.settings.storage import FileSettingsStorage
+from nova_harness.types.config.settings import (
     Settings,
     SettingsError,
     SettingsScope,
@@ -274,11 +272,6 @@ class TestSettingsManagerGetterSetters:
         sm.set_prompt_template_paths(["/prompt"])
         assert sm.get_prompt_template_paths() == ["/prompt"]
 
-    def test_enabled_models(self):
-        sm = settings_manager_in_memory()
-        sm.set_enabled_models(["gpt-*", "claude-*"])
-        assert sm.get_enabled_models() == ["gpt-*", "claude-*"]
-
     def test_enable_skill_commands(self):
         sm = settings_manager_in_memory()
         assert sm.get_enable_skill_commands() is True
@@ -322,11 +315,6 @@ class TestSettingsManagerGetterSetters:
 
 class TestSettingsManagerProjectScope:
     """覆盖 project 级 setter。"""
-
-    def test_project_packages(self):
-        sm = settings_manager_in_memory()
-        sm.set_project_packages([{"source": "path:./pkg"}])
-        assert sm.get_packages() == [{"source": "path:./pkg"}]
 
     def test_project_extension_paths(self):
         sm = settings_manager_in_memory()
@@ -396,7 +384,7 @@ def test_write_queue_preserves_order(tmp_path: Path):
 
 def test_deep_merge_explicit_null_clears_base():
     """显式 null 覆盖清除（对齐 TS 的 null 语义），未提供的字段保留。"""
-    from nova_harness.core.config.settings.utils import deep_merge_settings
+    from nova_harness.config.settings.utils import deep_merge_settings
 
     base = Settings.model_validate(
         {"default_provider": "volcengine", "default_model": "m1"}
@@ -409,7 +397,7 @@ def test_deep_merge_explicit_null_clears_base():
 
 
 def test_deep_merge_nested_fields_set():
-    from nova_harness.core.config.settings.utils import deep_merge_settings
+    from nova_harness.config.settings.utils import deep_merge_settings
 
     base = Settings.model_validate(
         {"compaction": {"enabled": True, "reserve_tokens": 100}}

@@ -9,14 +9,14 @@ from typing import Optional
 
 import pytest
 
-from nova_harness.core.resources.loader import DefaultResourceLoader
-from nova_harness.core.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.core.types.resources.extension_paths import (
+from nova_harness.package import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.types.config.settings import PackageSourceSpec, Settings
+from nova_harness.types.resources.extension_paths import (
     ResourceExtensionPathEntry,
     ResourceExtensionPaths,
 )
-from nova_harness.core.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.package import PackageManager
+from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 
 
 class _FakeSettingsManager:

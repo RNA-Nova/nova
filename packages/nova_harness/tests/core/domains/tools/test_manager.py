@@ -15,12 +15,12 @@ import pytest
 from nova_agent import AgentTool, AgentToolResult
 from nova_ai import TextContent
 
-from nova_harness.core.harness.tools import ToolsManager
-from nova_harness.core.harness.tools.dynamic_tool import (
+from nova_harness.core.domains.tools import ToolsManager
+from nova_harness.core.domains.tools.dynamic_tool import (
     DynamicTool,
     create_tool_definition_from_agent_tool,
 )
-from nova_harness.core.types.resources.tools import ToolDefinition
+from nova_harness.types.resources.tools import ToolDefinition
 
 
 class _EchoTool(AgentTool):
