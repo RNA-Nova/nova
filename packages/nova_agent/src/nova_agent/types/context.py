@@ -101,9 +101,10 @@ class AgentLoopConfig:
     get_steering_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None
     """
     Returns steering messages to inject into the conversation mid‑run.
-    Called after each tool execution to check for user interruptions.
-    If messages are returned, remaining tool calls are skipped and these messages
-    are added to the context before the next LLM call.
+    Called after the current assistant turn finishes executing its tool calls,
+    unless ``should_stop_after_turn`` exits first. If messages are returned, they
+    are added to the context before the next LLM call. Tool calls from the
+    current assistant message are not skipped.
     """
 
     get_follow_up_messages: Optional[Callable[[], Awaitable[List[AgentMessage]]]] = None
@@ -116,8 +117,10 @@ class AgentLoopConfig:
     tool_execution: ToolExecutionMode = "parallel"
     """
     Tool execution strategy for assistant messages that contain multiple tool calls.
-    - "sequential": each tool call is prepared, executed, and finalized before the next one starts.
-    - "parallel": tool calls are prepared sequentially, then allowed tools execute concurrently.
+    - "sequential": the whole batch runs strictly one call at a time.
+    - "parallel": calls are prepared in submission order, then executed through a
+      fair read‑write gate — tools declaring per‑tool "sequential" take the write
+      gate (exclusive) while the rest share the read gate (concurrent).
     """
 
     before_tool_call: Optional[

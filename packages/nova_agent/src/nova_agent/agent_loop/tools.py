@@ -14,7 +14,6 @@ from ..types import (
     AgentContext,
     AgentEventSink,
     AgentLoopConfig,
-    AgentTool,
     AgentToolCall,
     AgentToolResult,
     BeforeToolCallContext,
@@ -25,7 +24,6 @@ from ..types import (
     MessageStartEvent,
     PreparedToolCall,
     ToolExecutionEndEvent,
-    ToolExecutionMode,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
@@ -96,15 +94,6 @@ async def fail_tool_calls_from_truncated_message(
         await _emit_tool_result_message(tool_result_message, emit)
         messages.append(tool_result_message)
     return ExecutedToolCallBatch(messages=messages, terminate=False)
-
-
-def _tool_execution_mode(
-    tools: Optional[List[AgentTool]], tool_call: AgentToolCall
-) -> ToolExecutionMode:
-    tool = next((t for t in (tools or []) if t.name == tool_call.name), None)
-    if tool and tool.execution_mode:
-        return tool.execution_mode
-    return "parallel"
 
 
 async def _execute_tool_calls_sequential(
@@ -353,6 +342,9 @@ async def _prepare_tool_call(
             result = _create_error_tool_result(
                 before_result.reason or "Tool execution was blocked"
             )
+            if before_result.terminate:
+                # 拦截 + 终止：错误结果带 terminate=True，经批终止判定收口
+                result = result.model_copy(update={"terminate": True})
             return _ImmediateToolCallOutcome(result=result, is_error=True)
         if signal and signal.aborted:
             result = _create_error_tool_result("Operation aborted")

@@ -599,7 +599,7 @@ class TestAgentHooksReal:
         """should_stop_after_turn 返回 True 时 Agent 立即结束。"""
         called = False
 
-        def should_stop(ctx: ShouldStopAfterTurnContext) -> bool:
+        def should_stop(ctx: ShouldStopAfterTurnContext, signal=None) -> bool:
             nonlocal called
             called = True
             return True

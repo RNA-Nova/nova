@@ -12,7 +12,7 @@ import copy
 import inspect
 import json
 import math
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List
 
 import jsonschema
 from nova_ai import Message, Tool, ToolCall

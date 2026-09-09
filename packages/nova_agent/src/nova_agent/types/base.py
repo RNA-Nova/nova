@@ -2,7 +2,7 @@
 基础类型与类型别名。
 """
 
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol, Union
+from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Protocol, Union
 
 from nova_ai import Message, ModelThinkingLevel, ToolCall
 from nova_ai.types.base_model import NovaBaseModel

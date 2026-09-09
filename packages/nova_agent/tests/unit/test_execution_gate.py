@@ -7,14 +7,13 @@
 """
 
 import asyncio
-from typing import Any, List, Optional
+from typing import Any, List
 
 import pytest
 from helpers import EchoTool, SlowTool, multi_tool_call_stream, text_stream
-from nova_ai import TextContent, UserMessage
-
 from nova_agent import Agent, AgentToolResult
 from nova_agent.agent_loop.execution_gate import ToolExecutionGate
+from nova_ai import TextContent, UserMessage
 
 # ---------------------------------------------------------------------------
 # 门单元测试
@@ -210,10 +209,9 @@ async def test_two_sequential_tools_fifo_order(dummy_model) -> None:
 @pytest.mark.asyncio
 async def test_abort_while_waiting_on_gate_never_executes(dummy_model) -> None:
     """sequential 等门期间 abort：永不起跑，结果含 aborted 且批正常收尾。"""
-    from nova_ai import AbortController, SimpleStreamOptions
-
     from nova_agent import AgentContext, AgentLoopConfig
     from nova_agent.agent_loop import run_agent_loop
+    from nova_ai import AbortController, SimpleStreamOptions
 
     ran: List[str] = []
 

@@ -23,11 +23,11 @@ from nova_ai import (
     Transport,
     Usage,
     UserMessage,
-    builtin_models,
     to_thinking_level,
 )
 
 from .agent_loop import run_agent_loop, run_agent_loop_continue
+from .stream_fn import builtin_fallback_stream_fn, get_default_stream_fn
 from .types import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -143,7 +143,7 @@ class Agent:
         ] = None,
         should_stop_after_turn: Optional[
             Callable[
-                [ShouldStopAfterTurnContext],
+                [ShouldStopAfterTurnContext, Optional[AbortSignal]],
                 Union[bool, Awaitable[bool]],
             ]
         ] = None,
@@ -191,12 +191,16 @@ class Agent:
         self._abort_controller: Optional[AbortController] = None
         self._running_task: Optional[asyncio.Task] = None
 
+        # Message queues（先建队列：steering/follow_up mode 以 property 直写队列）
+        self._steering_queue = _PendingMessageQueue(steering_mode)
+        self._follow_up_queue = _PendingMessageQueue(follow_up_mode)
+
         self.convert_to_llm = convert_to_llm or default_convert_to_llm
         self.transform_context = transform_context
-        self.steering_mode = steering_mode
-        self.follow_up_mode = follow_up_mode
-        # 未注入 stream_fn 时惰性构造内置 Models（内存 store 为空 → auth 等价 env-only）
-        self.stream_fn = stream_fn or builtin_models().stream_simple
+        # stream_fn 解析顺序：显式注入 → 全局默认注册点 → 内置目录兜底（缓存）
+        self.stream_fn = (
+            stream_fn or get_default_stream_fn() or builtin_fallback_stream_fn()
+        )
         self._session_id = session_id
         self.get_api_key = get_api_key
         self._thinking_budgets = thinking_budgets
@@ -210,10 +214,6 @@ class Agent:
         self.after_tool_call = after_tool_call
         self.prepare_next_turn = prepare_next_turn
         self.should_stop_after_turn = should_stop_after_turn
-
-        # Message queues
-        self._steering_queue = _PendingMessageQueue(steering_mode)
-        self._follow_up_queue = _PendingMessageQueue(follow_up_mode)
 
     # ----------------------------------------------------------------------
     # Properties (mirroring TypeScript get/set)
@@ -274,16 +274,32 @@ class Agent:
     def set_thinking_level(self, level: ModelThinkingLevel) -> None:
         self._state.thinking_level = level
 
+    @property
+    def steering_mode(self) -> QueueMode:
+        """当前 steering 队列的 drain 模式（赋值即生效——单一事实源在队列上）。"""
+        return self._steering_queue.mode
+
+    @steering_mode.setter
+    def steering_mode(self, mode: QueueMode) -> None:
+        self._steering_queue.mode = mode
+
+    @property
+    def follow_up_mode(self) -> QueueMode:
+        """当前 follow-up 队列的 drain 模式。"""
+        return self._follow_up_queue.mode
+
+    @follow_up_mode.setter
+    def follow_up_mode(self, mode: QueueMode) -> None:
+        self._follow_up_queue.mode = mode
+
     def set_steering_mode(self, mode: QueueMode) -> None:
         self.steering_mode = mode
-        self._steering_queue.mode = mode
 
     def get_steering_mode(self) -> QueueMode:
         return self.steering_mode
 
     def set_follow_up_mode(self, mode: QueueMode) -> None:
         self.follow_up_mode = mode
-        self._follow_up_queue.mode = mode
 
     def get_follow_up_mode(self) -> QueueMode:
         return self.follow_up_mode
@@ -336,6 +352,10 @@ class Agent:
 
     def reset(self) -> None:
         """Reset the agent state (clears messages, queues, and errors)."""
+        if self._state.is_streaming:
+            raise RuntimeError(
+                "Agent is already processing. Wait for completion before resetting."
+            )
         self._state.messages.clear()
         self._state.is_streaming = False
         self._state.streaming_message = None
@@ -461,7 +481,7 @@ class Agent:
             context: ShouldStopAfterTurnContext,
         ) -> bool:
             result = await invoke_hook(
-                self.should_stop_after_turn, context, default=False
+                self.should_stop_after_turn, context, self.signal, default=False
             )
             return bool(result)
 

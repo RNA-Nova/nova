@@ -62,9 +62,10 @@ class AgentTool(Tool[TParameters], Generic[TParameters, TDetails], ABC):
 
     execution_mode: Optional[ToolExecutionMode] = None
     """
-    Per-tool execution mode override.
-    - "sequential": this tool must execute one at a time with other tool calls.
-    - "parallel": this tool can execute concurrently with other tool calls.
+    Per-tool execution mode override (gate semantics).
+    - "sequential": takes the gate's write lock — runs alone, after all
+      previously admitted readers drain.
+    - "parallel": shares the read gate with other parallel calls.
     If omitted, the config-level tool_execution mode applies.
     """
 

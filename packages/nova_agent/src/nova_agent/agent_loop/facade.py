@@ -26,6 +26,9 @@ from .loop import run_agent_loop, run_agent_loop_continue
 class AgentEventStream(EventStream[AgentEvent, List[AgentMessage]]):
     """An asynchronous stream of AgentEvents."""
 
+    task: Optional[asyncio.Task] = None
+    """驱动本流的后台任务引用（防 CPython GC 掉在途任务，便于测试与取消）。"""
+
     def __init__(self):
         super().__init__(
             is_complete=lambda event: event.type == "agent_end",
@@ -55,7 +58,7 @@ def agent_loop(
     """
     stream = AgentEventStream()
 
-    async def _run():
+    async def _run() -> None:
         try:
             messages = await run_agent_loop(
                 prompts,
@@ -69,7 +72,7 @@ def agent_loop(
         except Exception as exc:
             stream.end(exc=exc)
 
-    asyncio.create_task(_run())
+    stream.task = asyncio.create_task(_run())
     return stream
 
 
@@ -91,7 +94,7 @@ def agent_loop_continue(
 
     stream = AgentEventStream()
 
-    async def _run():
+    async def _run() -> None:
         try:
             messages = await run_agent_loop_continue(
                 context,
@@ -104,5 +107,5 @@ def agent_loop_continue(
         except Exception as exc:
             stream.end(exc=exc)
 
-    asyncio.create_task(_run())
+    stream.task = asyncio.create_task(_run())
     return stream
