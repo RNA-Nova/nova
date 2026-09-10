@@ -237,7 +237,9 @@ def test_jsonl_records_structure(tmp_path):
 
     path = audit.write_audit_jsonl(str(tmp_path), record.task_id, records)
     assert path is not None
-    lines = [json.loads(line) for line in Path(path).read_text().splitlines()]
+    lines = [
+        json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()
+    ]
     assert [r["record"] for r in lines] == ["tool_call", "model_call", "task_summary"]
     # 每条记录携带 recall_enabled 分组字段（本任务 recall off）
     assert all(r["recall_enabled"] is False for r in lines)
@@ -478,7 +480,10 @@ def test_audit_pipeline_e2e(tmp_path):
     # jsonl 流水落盘：三种记录齐全、recall_enabled=true
     audit_files = list((tmp_path / "memory" / "audit").glob("*.jsonl"))
     assert len(audit_files) == 1
-    lines = [json.loads(line) for line in audit_files[0].read_text().splitlines()]
+    lines = [
+        json.loads(line)
+        for line in audit_files[0].read_text(encoding="utf-8").splitlines()
+    ]
     assert [r["record"] for r in lines] == ["tool_call", "model_call", "task_summary"]
     assert all(r["recall_enabled"] is True for r in lines)
     assert lines[0]["duration_ms"] is not None and lines[0]["duration_ms"] >= 0
@@ -486,7 +491,9 @@ def test_audit_pipeline_e2e(tmp_path):
     assert lines[2]["status"] == "completed"
 
     # 任务页含审计汇总小节
-    page = next((tmp_path / "memory" / "tasks").glob("*.md")).read_text()
+    page = next((tmp_path / "memory" / "tasks").glob("*.md")).read_text(
+        encoding="utf-8"
+    )
     assert "## 审计汇总" in page
     assert "recall_enabled：true" in page
     assert "缓存命中率" in page
