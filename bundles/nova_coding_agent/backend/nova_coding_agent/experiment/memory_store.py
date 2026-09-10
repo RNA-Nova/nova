@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 MEMORY_DIR_NAME = "memory"
 SYSTEM_DIR_NAME = "system"
 BINDING_FILE_NAME = "binding.json"
+STATE_FILE_NAME = "state.json"
 SCHEMA_FILE_NAME = "skill_schema.json"
 TASKS_DIR_NAME = "tasks"
 LEARNINGS_DIR_NAME = "learnings"
@@ -135,6 +136,22 @@ def write_schema(project_root: str, schema: Dict[str, Any]) -> bool:
     """落盘步骤 schema，后续记录/判定统一消费该文件。"""
     return _write_json(
         memory_root(project_root) / SYSTEM_DIR_NAME / SCHEMA_FILE_NAME, schema
+    )
+
+
+def read_recall_enabled(project_root: str) -> Optional[bool]:
+    """读取项目级召回档位（``memory/system/state.json``；缺省 None=未设置）。"""
+    state = _read_json(memory_root(project_root) / SYSTEM_DIR_NAME / STATE_FILE_NAME)
+    if isinstance(state, dict) and isinstance(state.get("recall_enabled"), bool):
+        return state["recall_enabled"]
+    return None
+
+
+def write_recall_enabled(project_root: str, enabled: bool) -> bool:
+    """写入项目级召回档位（§5.1 双开关按项目持久化）。"""
+    return _write_json(
+        memory_root(project_root) / SYSTEM_DIR_NAME / STATE_FILE_NAME,
+        {"recall_enabled": bool(enabled)},
     )
 
 

@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from . import audit as audit_mod
 from . import steps as steps_mod
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,9 @@ class TaskRecord:
     schema: Dict[str, Any]
     started_at: str  # ISO 日期时间
     started_ms: int
+    recall_enabled: bool = True  # 任务开始时的召回档位快照（§5.1 分组字段）
+    finished_ms: Optional[int] = None  # agent_end 收尾时刻（任务总耗时）
+    audit: audit_mod.AuditTrail = field(default_factory=audit_mod.AuditTrail)
     commands: List[CommandRecord] = field(default_factory=list)
     other_failures: List[Dict[str, str]] = field(default_factory=list)  # 非 bash 失败
     interrupted: bool = False
@@ -548,6 +552,9 @@ def render_task_page(
         f"\n**总体判定：{'成功' if status == 'completed' else ('中断' if status == 'aborted' else '失败')}**"
     )
 
+    # 审计汇总小节（§5 双形态输出的人类可读形态；jsonl 流水由扩展落盘）
+    lines += [""] + audit_mod.render_audit_section(record)
+
     failures = [c for c in record.commands if c.ok is False]
     lines += ["", "## 异常摘要", ""]
     if not failures and not record.other_failures and not record.interrupted:
@@ -578,8 +585,9 @@ def start_record(
     prompt: str,
     schema: Dict[str, Any],
     now: Optional[datetime] = None,
+    recall_enabled: bool = True,
 ) -> TaskRecord:
-    """任务开始：建立记录（任务 ID、提示词数量声明解析）。"""
+    """任务开始：建立记录（任务 ID、提示词数量声明解析、召回档位快照）。"""
     now = now or datetime.now()
     return TaskRecord(
         task_id=new_task_id(now),
@@ -590,4 +598,5 @@ def start_record(
         schema=schema,
         started_at=now.strftime("%Y-%m-%d %H:%M:%S"),
         started_ms=int(time.time() * 1000),
+        recall_enabled=recall_enabled,
     )

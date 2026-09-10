@@ -1,23 +1,30 @@
-"""experiment_mode 扩展（/experiment 模式一期：自动记录 + 自动召回）。
+"""experiment_mode 扩展（/experiment 模式：自动记录 + 自动召回 + 审计）。
 
 长任务（多步骤计算流水线）场景下的自动记忆系统（薄编排层——候选发现 /
-schema 推导 / memory 读写 / 记录判定分别在 ``nova_coding_agent.experiment``
-包的 steps / memory_store / recorder 模块，本文件只做命令与事件接线）。
+schema 推导 / memory 读写 / 记录判定 / 审计采集分别在
+``nova_coding_agent.experiment`` 包的 steps / memory_store / recorder /
+audit 模块，本文件只做命令与事件接线）。
 
 机制全貌：
 
 - ``/experiment`` 切换模式；``/experiment <skill名>`` 直接指定绑定；
-  ``--experiment`` 启动旗标。严格模式：未绑定合格 skill 不允许开启；
-- 模式状态经 ``append_entry("experiment-mode")`` 持久化、``session_start``
-  重建；skill 绑定按项目持久化在 ``memory/system/binding.json``；
+  ``/experiment recall on|off`` 召回双开关（§5.1：只控召回注入，记录/审计
+  照常）；``--experiment`` 启动旗标。严格模式：未绑定合格 skill 不允许开启；
+- 模式状态与召回档位经 ``append_entry("experiment-mode")`` 持久化、
+  ``session_start`` 重建；skill 绑定与 recall 档位按项目持久化在
+  ``memory/system/``（binding.json / state.json）；
 - ``input`` 事件实现绑定决策链（§4.2.1：提示词点名优先 → 持久绑定兜底 →
   现场扫描 1 个直绑 / ≥2 个弹选择器 / 0 个提示并拒绝启动任务）；任务开始
   时现场初始化 memory 骨架 + 推导步骤 schema 落 ``memory/system/``；
-- ``tool_call`` 捕获 bash 命令（命令全文 + 引用 yaml 全文快照）；
+- ``tool_call`` 捕获 bash 命令（命令全文 + 引用 yaml 全文快照）；recall
+  off 时盲态拦截 read/grep/ls/find 及 bash 对 memory/ 路径的访问；
+  ``tool_execution_start/end`` 采集逐步耗时；``turn_end`` 采集 usage；
   ``tool_execution_end`` 产物盘点；``agent_end`` 四标准判定 + 生成
-  ``memory/tasks/<task_id>.md`` 并更新 INDEX；
+  ``memory/tasks/<task_id>.md``（含审计汇总小节）+ 审计流水
+  ``memory/audit/<task_id>.jsonl`` 并更新 INDEX；
 - ``before_agent_start`` 注入召回内容（display=False，
-  custom_type=experiment-memory）；``context`` 事件滤除旧注入防堆积；
+  custom_type=experiment-memory；recall off 时不注入）；``context`` 事件
+  滤除旧注入防堆积；
 - 模式关闭时所有事件钩子首行即退（零开销）；一切写盘/解析失败降级，
   绝不中断用户任务。
 """
@@ -30,13 +37,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from nova_base.ui_primitives import confirm, notify_message, select, set_status
-from nova_coding_agent.experiment import memory_store, recorder, steps
+from nova_coding_agent.experiment import audit, memory_store, recorder, steps
 
 from nova_harness.core.extensions.api import NovaExtensionAPI
 from nova_harness.core.types.events.results import (
     BeforeAgentStartEventResult,
     ContextEventResult,
     InputEventResult,
+    ToolCallEventResult,
 )
 from nova_harness.core.types.messages import CustomMessage
 
@@ -58,6 +66,7 @@ def extension(nova: NovaExtensionAPI) -> None:
         "skill": None,  # 持久绑定的 skill 名
         "schema": None,  # 当前任务的步骤 schema（dict）
         "record": None,  # 当前任务的 TaskRecord（None = 无进行中任务）
+        "recall_enabled": True,  # 召回档位（§5.1 双开关：只控召回，记录照常）
     }
 
     # ------------------------------------------------------------------
@@ -71,16 +80,21 @@ def extension(nova: NovaExtensionAPI) -> None:
     def _persist(ctx: Any) -> None:
         ctx.append_entry(
             "experiment-mode",
-            {"enabled": state["enabled"], "skill": state["skill"]},
+            {
+                "enabled": state["enabled"],
+                "skill": state["skill"],
+                "recall_enabled": state["recall_enabled"],
+            },
         )
 
     def _update_status(ctx: Any) -> None:
-        """footer 扩展状态行：🧪 exp·<skill>；关闭时清除。"""
+        """footer 扩展状态行：🧪 exp·<skill>[·no-recall]；关闭时清除。"""
         if not ctx.has_ui:
             return
         if state["enabled"]:
             skill = state["skill"] or "未绑定"
-            set_status(ctx.ui, "experiment-mode", f"🧪 exp·{skill}")
+            suffix = "" if state["recall_enabled"] else "·no-recall"
+            set_status(ctx.ui, "experiment-mode", f"🧪 exp·{skill}{suffix}")
         else:
             set_status(ctx.ui, "experiment-mode", None)
 
@@ -147,7 +161,11 @@ def extension(nova: NovaExtensionAPI) -> None:
                     memory_store.write_schema(ctx.cwd, schema)
             state["schema"] = schema or {"skill_name": skill_name, "steps": []}
             state["record"] = recorder.start_record(
-                ctx.cwd, skill_name, prompt, state["schema"]
+                ctx.cwd,
+                skill_name,
+                prompt,
+                state["schema"],
+                recall_enabled=state["recall_enabled"],
             )
         except Exception as exc:  # noqa: BLE001 —— 记录失败不阻塞任务
             logger.warning("experiment: 任务记录初始化失败: %s", exc)
@@ -157,15 +175,21 @@ def extension(nova: NovaExtensionAPI) -> None:
             )
 
     def _finish_task(ctx: Any, messages: List[Any]) -> None:
-        """任务结束：四标准判定 + 任务页 + INDEX（失败降级通知，不抛错）。"""
+        """任务结束：四标准判定 + 任务页 + 审计流水 + INDEX（失败降级通知）。"""
         record = state["record"]
         state["record"] = None
         try:
+            record.finished_ms = _now_ms()
             record.interrupted = recorder.detect_interruption(messages)
             criteria = recorder.evaluate_criteria(record)
             status = recorder.overall_status(record, criteria)
             page = recorder.render_task_page(record, criteria, status)
             path = memory_store.write_task_page(ctx.cwd, record.task_id, page)
+            audit.write_audit_jsonl(
+                ctx.cwd,
+                record.task_id,
+                audit.build_jsonl_records(record, criteria, status),
+            )
             memory_store.update_index(
                 ctx.cwd, record.task_id, recorder.index_summary_line(record, status)
             )
@@ -275,9 +299,19 @@ def extension(nova: NovaExtensionAPI) -> None:
     # 记录钩子（§4.5）
     # ------------------------------------------------------------------
 
-    async def _on_tool_call(event: Any, ctx: Any) -> None:
+    async def _on_tool_call(event: Any, ctx: Any) -> Optional[ToolCallEventResult]:
+        if not state["enabled"]:
+            return None
+        # 盲态拦截（§5.1：recall off 时禁止工具访问 memory/ 路径——
+        # 防模型自发阅读记忆污染对照组；记录器写盘不经工具层，不受影响）
+        if not state["recall_enabled"]:
+            reason = audit.should_block_memory_access(
+                getattr(event, "tool_name", ""), event.args
+            )
+            if reason is not None:
+                return ToolCallEventResult(block=True, reason=reason)
         record = state["record"]
-        if not state["enabled"] or record is None:
+        if record is None:
             return None
         if getattr(event, "tool_name", "") != "bash":
             return None
@@ -290,12 +324,54 @@ def extension(nova: NovaExtensionAPI) -> None:
                 logger.warning("experiment: 命令记录失败: %s", exc)
         return None
 
+    async def _on_tool_execution_start(event: Any, ctx: Any) -> None:
+        """审计采集：工具执行开始（耗时起点；归属复用 tool_call 记录）。"""
+        record = state["record"]
+        if not state["enabled"] or record is None:
+            return None
+        try:
+            tool_call_id = getattr(event, "tool_call_id", "")
+            cmd = next(
+                (c for c in record.commands if c.tool_call_id == tool_call_id), None
+            )
+            record.audit.on_tool_start(
+                tool_call_id,
+                getattr(event, "tool_name", ""),
+                cmd.script if cmd else None,
+                cmd.step_id if cmd else None,
+                _now_ms(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("experiment: 审计开始记录失败: %s", exc)
+        return None
+
+    async def _on_turn_end(event: Any, ctx: Any) -> None:
+        """审计采集：逐轮 usage（turn_end 的 assistant 消息携带 usage 字段）。
+
+        注：after_provider_response 载荷只有 {status, headers, model}，
+        没有 usage——usage 唯一可靠来源是 turn_end 消息的 usage 字段。
+        """
+        record = state["record"]
+        if not state["enabled"] or record is None:
+            return None
+        try:
+            message = getattr(event, "message", None)
+            usage = getattr(message, "usage", None) if message is not None else None
+            if usage is not None:
+                record.audit.record_usage(getattr(event, "turn_index", 0), usage)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("experiment: usage 采集失败: %s", exc)
+        return None
+
     async def _on_tool_execution_end(event: Any, ctx: Any) -> None:
         record = state["record"]
         if not state["enabled"] or record is None:
             return None
         try:
             is_error = bool(getattr(event, "is_error", False))
+            record.audit.on_tool_end(
+                getattr(event, "tool_call_id", ""), is_error, _now_ms()
+            )
             record.record_tool_end(
                 getattr(event, "tool_call_id", ""),
                 getattr(event, "tool_name", ""),
@@ -323,7 +399,8 @@ def extension(nova: NovaExtensionAPI) -> None:
     async def _on_before_agent_start(
         event: Any, ctx: Any
     ) -> Optional[BeforeAgentStartEventResult]:
-        if not state["enabled"]:
+        # 召回双开关：recall off 时不注入（记录/审计照常——对照组不丢数据）
+        if not state["enabled"] or not state["recall_enabled"]:
             return None
         schema = state["schema"] or memory_store.read_schema(ctx.cwd)
         if not schema:
@@ -402,6 +479,26 @@ def extension(nova: NovaExtensionAPI) -> None:
 
     async def _cmd_experiment(args: str, ctx: Any) -> None:
         name = (args or "").strip()
+        # /experiment recall on|off：召回双开关（§5.1）——只控召回注入，
+        # 记录/审计照常；档位按项目持久化 + 会话条目持久化
+        if name == "recall" or name.startswith("recall "):
+            setting = name[len("recall") :].strip().lower()
+            if setting in ("on", "off"):
+                state["recall_enabled"] = setting == "on"
+                memory_store.write_recall_enabled(ctx.cwd, state["recall_enabled"])
+                _persist(ctx)
+                _update_status(ctx)
+                _notify(
+                    ctx,
+                    f"Experiment: 召回已{'开启' if state['recall_enabled'] else '关闭'}"
+                    "（记录与审计照常工作）。",
+                )
+            else:
+                current = "on" if state["recall_enabled"] else "off"
+                _notify(
+                    ctx, f"Experiment: 当前召回档位 {current}（recall on|off 切换）。"
+                )
+            return
         if name:
             # /experiment <skill名>：直接指定绑定（含开启）
             try:
@@ -450,6 +547,7 @@ def extension(nova: NovaExtensionAPI) -> None:
             state["enabled"] = True
 
         sm = ctx.session_manager
+        entry_recall_restored = False
         if sm is not None:
             entry = next(
                 (
@@ -464,6 +562,14 @@ def extension(nova: NovaExtensionAPI) -> None:
             if isinstance(data, dict):
                 state["enabled"] = data.get("enabled", state["enabled"])
                 state["skill"] = data.get("skill", state["skill"])
+                if "recall_enabled" in data:
+                    state["recall_enabled"] = data["recall_enabled"]
+                    entry_recall_restored = True
+        # 会话条目缺席 recall 档位时按项目级档位文件兜底（跨会话沿用）
+        if not entry_recall_restored:
+            persisted = memory_store.read_recall_enabled(ctx.cwd)
+            if persisted is not None:
+                state["recall_enabled"] = persisted
 
         if state["enabled"]:
             _restore_binding_from_file(ctx)
@@ -473,7 +579,7 @@ def extension(nova: NovaExtensionAPI) -> None:
     nova.registerCommand(
         "experiment",
         {
-            "description": "切换 experiment 模式（长任务自动记忆与审计）；/experiment <skill名> 直接绑定",
+            "description": "切换 experiment 模式（长任务自动记忆与审计）；/experiment <skill名> 直接绑定；/experiment recall on|off 召回开关",
             "handler": _cmd_experiment,
         },
     )
@@ -487,7 +593,9 @@ def extension(nova: NovaExtensionAPI) -> None:
     )
     nova.on("input", _on_input)
     nova.on("tool_call", _on_tool_call)
+    nova.on("tool_execution_start", _on_tool_execution_start)
     nova.on("tool_execution_end", _on_tool_execution_end)
+    nova.on("turn_end", _on_turn_end)
     nova.on("agent_end", _on_agent_end)
     nova.on("before_agent_start", _on_before_agent_start)
     nova.on("context", _on_context)
