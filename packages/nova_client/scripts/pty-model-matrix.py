@@ -19,7 +19,9 @@ FAILURES: list[str] = []
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
-    print(f"{'✔' if ok else '✘'} {name}" + (f" —— {detail}" if detail and not ok else ""))
+    print(
+        f"{'✔' if ok else '✘'} {name}" + (f" —— {detail}" if detail and not ok else "")
+    )
     if not ok:
         FAILURES.append(name)
 
@@ -96,7 +98,10 @@ def main() -> int:
         checkpoint = len(tui.buffer)
         tui.send("deepseek", 2.5)
         delta = tui.buffer[checkpoint:]
-        check("搜索过滤只剩 volcengine 系", "volcengine/" in delta and "moonshotai/" not in delta)
+        check(
+            "搜索过滤只剩 volcengine 系",
+            "volcengine/" in delta and "moonshotai/" not in delta,
+        )
         tui.send("\x1b", 2.0)
 
         print()

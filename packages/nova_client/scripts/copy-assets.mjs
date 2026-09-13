@@ -25,5 +25,5 @@ console.log('export assets copied to dist/export/');
 // 仓库根 CHANGELOG.md（monorepo 单一出处）→ dist/assets/
 const distAssets = join(root, '..', 'dist', 'assets');
 mkdirSync(distAssets, { recursive: true });
-cpSync(join(root, '..', '..', '..', '..', 'CHANGELOG.md'), join(distAssets, 'CHANGELOG.md'));
+cpSync(join(root, '..', '..', '..', 'CHANGELOG.md'), join(distAssets, 'CHANGELOG.md'));
 console.log('CHANGELOG.md copied to dist/assets/');

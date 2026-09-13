@@ -171,7 +171,9 @@ def main() -> int:
             "模型引用 environment_id（注入实证）",
             after=ask_offset,
         )
-        tui.wait_for(r"<backend>executor</backend>", 30, "backend 标签", after=ask_offset)
+        tui.wait_for(
+            r"<backend>executor</backend>", 30, "backend 标签", after=ask_offset
+        )
         tui.wait_for(
             r"<root>/home/liujinming/\.nova/agent/executor/workspaces/",
             30,

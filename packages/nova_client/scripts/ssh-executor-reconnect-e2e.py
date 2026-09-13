@@ -5,7 +5,11 @@ import os
 import signal
 import sys
 
-from nova_coding_agent.executor import ExecutorBashOperations, get_executor_manager, parse_ssh_target
+from nova_coding_agent.executor import (
+    ExecutorBashOperations,
+    get_executor_manager,
+    parse_ssh_target,
+)
 
 TARGET = "liujinming@180.184.33.245"
 

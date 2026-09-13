@@ -275,6 +275,7 @@ export interface CredentialInfo {
 }
 
 export interface CustomAgentMessage {
+  role: string;
   [key: string]: unknown;
 }
 
@@ -298,12 +299,13 @@ export interface CustomItem {
 }
 
 export interface CustomMessage {
+  role: "custom";
   customType: string;
   content: string | (TextContent | ImageContent)[];
   display: boolean;
   details: unknown | null;
   timestamp: number;
-  role: "custom";
+  [key: string]: unknown;
 }
 
 export interface CustomMessageEntry {
@@ -754,7 +756,7 @@ export interface SessionMessageEntry {
   parentId: string | null;
   timestamp: string;
   type: "message";
-  message: UserMessage | AssistantMessage | ToolResultMessage | CustomMessage | CustomAgentMessage;
+  message: Message | CustomMessage | CustomAgentMessage;
 }
 
 export interface SessionReloadedEvent {
@@ -1213,6 +1215,8 @@ export interface UserMessageItem {
 // ---- Union 别名 ----
 
 export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomAgentMessage;
+
+export type Message = UserMessage | AssistantMessage | ToolResultMessage;
 
 // ---- 信封与根联合 ----
 

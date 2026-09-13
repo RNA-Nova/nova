@@ -41,8 +41,13 @@ def main() -> int:
     master, slave = pty.openpty()
     env = dict(os.environ, NOVA_PYTHON=PYTHON)
     proc = subprocess.Popen(
-        [NODE, MAIN_JS], stdin=slave, stdout=slave, stderr=slave,
-        cwd="/tmp", env=env, close_fds=True,
+        [NODE, MAIN_JS],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        cwd="/tmp",
+        env=env,
+        close_fds=True,
     )
     os.close(slave)
     buffer = ""
@@ -66,7 +71,9 @@ def main() -> int:
         os.write(master, b"\r")
         pump(4)
         picker = buffer
-        assert "executor" in picker and "local" in picker, f"选择器未出现 executor 选项: {picker[-500:]}"
+        assert (
+            "executor" in picker and "local" in picker
+        ), f"选择器未出现 executor 选项: {picker[-500:]}"
         print("✔ /executor 选择器打开（含 local / executor 选项）")
 
         # 选第二项（executor 本地沙箱）后回车

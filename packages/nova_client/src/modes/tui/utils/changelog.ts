@@ -22,12 +22,12 @@ const LAST_SEEN_VERSION_KEY = 'lastSeenVersion';
 /** CHANGELOG.md 候选路径（按优先级——首个存在即取）。 */
 function changelogCandidates(): string[] {
   return [
-    // 构建产物：dist/modes/tui/utils/ → dist/assets/CHANGELOG.md（copy-assets.mjs）
-    fileURLToPath(new URL('../../../assets/CHANGELOG.md', import.meta.url)),
-    // 开发态：包内 CHANGELOG.md（packages/nova-harness/frontend/）
+    // 构建产物：dist/modes/tui/utils/changelog.js → dist/assets/CHANGELOG.md（copy-assets.mjs）
+    fileURLToPath(new URL('../../../../assets/CHANGELOG.md', import.meta.url)),
+    // 开发态：包内 CHANGELOG.md（packages/nova_client/——当前不存在则跳过）
     fileURLToPath(new URL('../../../../CHANGELOG.md', import.meta.url)),
-    // 开发态：仓库根 CHANGELOG.md（monorepo 单一出处——上七级）
-    fileURLToPath(new URL('../../../../../../../CHANGELOG.md', import.meta.url)),
+    // 开发态：仓库根 CHANGELOG.md（monorepo 单一出处——上六级到仓库根）
+    fileURLToPath(new URL('../../../../../../CHANGELOG.md', import.meta.url)),
   ];
 }
 

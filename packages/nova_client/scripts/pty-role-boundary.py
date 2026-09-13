@@ -22,7 +22,9 @@ FAILURES: list[str] = []
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
-    print(f"{'✔' if ok else '✘'} {name}" + (f" —— {detail}" if detail and not ok else ""))
+    print(
+        f"{'✔' if ok else '✘'} {name}" + (f" —— {detail}" if detail and not ok else "")
+    )
     if not ok:
         FAILURES.append(name)
 
@@ -51,20 +53,24 @@ def main() -> int:
         delta = tui.buffer[checkpoint:]
         seen = visible_tools(delta)
         print(f"  [观察] open 态面板可见: {sorted(seen)}")
-        check("open：池外工具可见（write/edit/subagent/todo/question）",
-              POOL_EXTRA <= seen)
+        check(
+            "open：池外工具可见（write/edit/subagent/todo/question）",
+            POOL_EXTRA <= seen,
+        )
         # 激活集应为 reviewer 五件（change_agent 重置——不携带 coding_agent 全量）
-        check("open：激活的是 reviewer 五件（bash 勾选、write 未勾）",
-              re.search(r"\[x\]\s*bash", delta) is not None
-              and re.search(r"\[ \]\s*write", delta) is not None)
+        check(
+            "open：激活的是 reviewer 五件（bash 勾选、write 未勾）",
+            re.search(r"\[x\]\s*bash", delta) is not None
+            and re.search(r"\[ \]\s*write", delta) is not None,
+        )
         tui.send("\x1b", 2.0)
 
         # ---- 2. /settings 切到 strict ----
         tui.send("/settings\r", 3.5)
         tui.send("角色", 2.0)  # 搜索过滤到角色边界项
-        tui.send("\r", 2.0)    # 进二级值选择
+        tui.send("\r", 2.0)  # 进二级值选择
         tui.send("strict", 1.5)  # 搜索过滤（顺序无关）
-        tui.send("\r", 2.5)    # 选中 strict
+        tui.send("\r", 2.5)  # 选中 strict
         tui.send("\x1b", 1.5)
         tui.send("\x1b", 1.5)
 
@@ -74,8 +80,9 @@ def main() -> int:
         delta = tui.buffer[checkpoint:]
         seen = visible_tools(delta)
         print(f"  [观察] strict 态面板可见: {sorted(seen)}")
-        check("strict：只见 reviewer 五件", seen == REVIEWER_FIVE,
-              f"实际: {sorted(seen)}")
+        check(
+            "strict：只见 reviewer 五件", seen == REVIEWER_FIVE, f"实际: {sorted(seen)}"
+        )
         check("strict：池外工具不可见", not (seen & POOL_EXTRA))
         tui.send("\x1b", 2.0)
 
@@ -85,8 +92,11 @@ def main() -> int:
         tui.send("/tools\r", 4.0)
         delta = tui.buffer[checkpoint:]
         seen = visible_tools(delta)
-        check("strict + coding_agent：十件全在（yaml 即全池）",
-              seen == REVIEWER_FIVE | POOL_EXTRA, f"实际: {sorted(seen)}")
+        check(
+            "strict + coding_agent：十件全在（yaml 即全池）",
+            seen == REVIEWER_FIVE | POOL_EXTRA,
+            f"实际: {sorted(seen)}",
+        )
         tui.send("\x1b", 2.0)
 
         # ---- 5. 切回 open（还原用户环境）----
@@ -100,7 +110,9 @@ def main() -> int:
         checkpoint = len(tui.buffer)
         tui.send("/tools\r", 4.0)
         delta = tui.buffer[checkpoint:]
-        check("还原 open：面板仍十件", visible_tools(delta) == REVIEWER_FIVE | POOL_EXTRA)
+        check(
+            "还原 open：面板仍十件", visible_tools(delta) == REVIEWER_FIVE | POOL_EXTRA
+        )
         tui.send("\x1b", 2.0)
 
         print()

@@ -116,7 +116,9 @@ def main() -> int:
             if output_at is None and output_re.search(delta):
                 output_at = time.time()
         if header_at is None or output_at is None:
-            failures.append(f"慢命令渲染缺失：header_at={header_at} output_at={output_at}")
+            failures.append(
+                f"慢命令渲染缺失：header_at={header_at} output_at={output_at}"
+            )
         elif header_at < output_at:
             print(f"✔ 慢命令时序：$ 头先于输出 {output_at - header_at:.1f}s")
         else:

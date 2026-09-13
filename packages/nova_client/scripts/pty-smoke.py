@@ -23,9 +23,7 @@ import time
 from typing import Union
 
 NOVA_REPO = os.environ.get("NOVA_REPO", "/Users/liujinming/agent/nova")
-PYTHON = os.environ.get(
-    "NOVA_PYTHON", f"{NOVA_REPO}/.pixi/envs/dev/bin/python"
-)
+PYTHON = os.environ.get("NOVA_PYTHON", f"{NOVA_REPO}/.pixi/envs/dev/bin/python")
 MAIN_JS = f"{NOVA_REPO}/packages/nova_client/frontend/dist/modes/tui/main.js"
 NODE = os.path.expanduser("~/.pixi/bin/node")
 
@@ -101,7 +99,12 @@ Case = Union[
 ]
 
 CASES: list[Case] = [
-    ("help 命令目录", "/help\r", [r"后端命令", r"提示词模板", r"本地命令", r"/packages"], []),
+    (
+        "help 命令目录",
+        "/help\r",
+        [r"后端命令", r"提示词模板", r"本地命令", r"/packages"],
+        [],
+    ),
     ("help 关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"后端命令"]),
     (
         "session 信息",
@@ -111,11 +114,26 @@ CASES: list[Case] = [
     ),
     ("todos 空态", "/todos\r", [r"还没有 todo 清单|已清空|todo"], []),
     ("tools 开关面板", "/tools\r", [r"工具开关", r"激活 \d+/\d+"], []),
-    ("tools 面板关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"工具开关"]),
+    (
+        "tools 面板关闭",
+        [("\x1b", 2.0), ("/debug\r", 4.0)],
+        [r"debug|dump"],
+        [r"工具开关"],
+    ),
     ("scoped 池面板", "/scoped-models\r", [r"Scoped 模型池"], []),
-    ("scoped 面板关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"Scoped 模型池"]),
+    (
+        "scoped 面板关闭",
+        [("\x1b", 2.0), ("/debug\r", 4.0)],
+        [r"debug|dump"],
+        [r"Scoped 模型池"],
+    ),
     ("model 选择器", "/model\r", [r"选择模型"], []),
-    ("model 选择器关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"选择模型"]),
+    (
+        "model 选择器关闭",
+        [("\x1b", 2.0), ("/debug\r", 4.0)],
+        [r"debug|dump"],
+        [r"选择模型"],
+    ),
     ("resume 选择器", "/resume\r", [r"恢复|会话|没有历史会话"], []),
     ("tree 选择器", "/tree\r", [r"会话树|当前|session"], [], 5.0),
     ("tree 关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"会话树"]),
@@ -131,7 +149,12 @@ CASES: list[Case] = [
     ("settings 面板", "/settings\r", [r"主题|设置"], []),
     # settings 是两级面板（Esc 逐级返回）——中间帧必含一级页，不做 must_not；
     # /debug 探针命中即证明控制已交还编辑器
-    ("settings 关闭", [("\x1b", 1.5), ("\x1b", 1.5), ("/debug\r", 4.0)], [r"debug|dump"], []),
+    (
+        "settings 关闭",
+        [("\x1b", 1.5), ("\x1b", 1.5), ("/debug\r", 4.0)],
+        [r"debug|dump"],
+        [],
+    ),
     ("theme 选择器", "/theme\r", [r"主题|dark|light"], []),
     ("theme 关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"主题"]),
     ("copy 空回复", "/copy\r", [r"没有可复制|已复制|copy"], []),
@@ -142,15 +165,31 @@ CASES: list[Case] = [
     ("plan 开启", "/plan\r", [r"plan|规划"], [], 5.0),
     ("plan 关闭", "/plan\r", [r"plan|规划|执行"], [], 5.0),
     ("packages 面板", "/packages\r", [r"包|packages|nova-coding-agent"], []),
-    ("packages 关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"nova-coding-agent"]),
+    (
+        "packages 关闭",
+        [("\x1b", 2.0), ("/debug\r", 4.0)],
+        [r"debug|dump"],
+        [r"nova-coding-agent"],
+    ),
     ("clone 克隆", "/clone\r", [r"克隆|clone|已|无法克隆|还没有内容"], [], 6.0),
     ("new 新建（确认框选是）", "/new\r", [r"确认|新建|新会话|nova v"], [], 6.0),
     ("login 选择器", "/login\r", [r"登录|provider|OAuth|auth"], []),
     ("login 关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"OAuth"]),
     ("logout 选择器", "/logout\r", [r"移除|provider|登录|OAuth|auth"], []),
-    ("logout 关闭", [("\x1b", 2.0), ("/debug\r", 4.0)], [r"debug|dump"], [r"OAuth|移除"]),
+    (
+        "logout 关闭",
+        [("\x1b", 2.0), ("/debug\r", 4.0)],
+        [r"debug|dump"],
+        [r"OAuth|移除"],
+    ),
     ("share 无 gh 降级", "/share\r", [r"gh|分享|失败|错误"], [], 8.0),
-    ("prompt 模板展开", "/refactor 测试\r", [r"refactor|重构|assistant|⠋|working"], [], 6.0),
+    (
+        "prompt 模板展开",
+        "/refactor 测试\r",
+        [r"refactor|重构|assistant|⠋|working"],
+        [],
+        6.0,
+    ),
     ("prompt 模板中止", [("\x1b", 4.0), ("/debug\r", 4.0)], [r"debug|dump"], []),
     ("真实对话一轮", "回复ok\r", [r"."], [], 45.0),
 ]

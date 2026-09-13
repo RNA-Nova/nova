@@ -44,7 +44,9 @@ async def main() -> int:
 
     print("== write（远程写文件，父目录自动创建）")
     write_ops = LocalWriteOperations(layer)
-    result = await write_ops.write_file(f"{ROOT}/src/hello.py", "def hello():\n    return 'nova'\n")
+    result = await write_ops.write_file(
+        f"{ROOT}/src/hello.py", "def hello():\n    return 'nova'\n"
+    )
     assert result.error is None and result.existed is False, result
 
     print("== read（读回 + 分页）")
@@ -81,9 +83,9 @@ async def main() -> int:
     grep_ops = LocalGrepOperations(layer)
     assert layer.accelerates_search is False  # 便携引擎（不经本机 rg）
     grep_result = await grep_ops.grep(ROOT, GrepOptions(pattern="greetings"))
-    assert grep_result.match_count == 1 and "hello.py:1" in grep_result.content, (
-        grep_result.content
-    )
+    assert (
+        grep_result.match_count == 1 and "hello.py:1" in grep_result.content
+    ), grep_result.content
 
     print("== find（便携引擎：walk + match）")
     find_ops = LocalFindOperations(layer)
