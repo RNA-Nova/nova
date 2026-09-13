@@ -20,11 +20,7 @@ from .provider import (
     RefreshModelsContext,
     create_provider,
 )
-from .store import (
-    InMemoryModelsStore,
-    ModelsStore,
-    ProviderModelsStore,
-)
+from .store import InMemoryModelsStore, ModelsStore, ProviderModelsStore
 from .streams import create_setup_error_message, lazy_stream
 
 __all__ = [

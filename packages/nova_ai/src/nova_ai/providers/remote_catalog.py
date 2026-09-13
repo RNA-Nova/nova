@@ -20,12 +20,7 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from nova_protocol import (
-    AbortSignal,
-    Credential,
-    Model,
-    ModelsStoreEntry,
-)
+from nova_protocol import AbortSignal, Credential, Model, ModelsStoreEntry, is_aborted
 
 from ..gateway.provider import ModelsPublication, Provider, RefreshModelsContext
 from .catalog import (
@@ -113,7 +108,7 @@ def _default_fetch_catalog(
         validator: Optional[str],
         credential: Optional[Credential],
     ) -> CatalogOutcome:
-        if signal is not None and signal.aborted:
+        if is_aborted(signal):
             return CatalogOutcome(status=0)
 
         now = time.monotonic()
@@ -216,7 +211,7 @@ def with_remote_catalog(
             ):
                 return
 
-            if not context.allow_network or (signal is not None and signal.aborted):
+            if not context.allow_network or is_aborted(signal):
                 return
             if (
                 not context.force
@@ -229,7 +224,7 @@ def with_remote_catalog(
             # 只有缓存有 body 时才发 validator，304 永远不会让 overlay 变空
             validator = stored.etag if (stored is not None and stored.models) else None
             outcome = await fetch_catalog(signal, validator, context.credential)
-            if signal is not None and signal.aborted:
+            if is_aborted(signal):
                 return
             checked_at = _now_ms()
 
@@ -272,7 +267,7 @@ def with_remote_catalog(
                 Model(**{**fields, "provider": provider.id})
                 for fields in outcome.models_fields
             ]
-            if signal is not None and signal.aborted:
+            if is_aborted(signal):
                 return
             entry = ModelsStoreEntry(
                 models=refreshed,

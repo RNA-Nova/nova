@@ -1,7 +1,7 @@
 import asyncio
 from typing import Optional
 
-from nova_protocol import AbortSignal
+from nova_protocol import AbortSignal, is_aborted
 
 
 async def sleep(seconds: float, signal: Optional[AbortSignal] = None) -> None:
@@ -16,7 +16,7 @@ async def sleep(seconds: float, signal: Optional[AbortSignal] = None) -> None:
         RuntimeError: If the signal is already aborted when sleep starts
         RuntimeError: If the signal is aborted during sleep or the task is cancelled
     """
-    if signal is not None and signal.aborted:
+    if is_aborted(signal):
         raise RuntimeError("Aborted")
 
     try:

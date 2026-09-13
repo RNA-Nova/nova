@@ -24,6 +24,7 @@ import openai
 from nova_protocol import (
     AbortedError,
     AssistantMessage,
+    CacheRetention,
     Context,
     Cost,
     DoneEvent,
@@ -45,6 +46,7 @@ from nova_protocol import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     Usage,
+    is_aborted,
 )
 
 from ...stream_options import ProviderResponse, SimpleStreamOptions
@@ -320,7 +322,7 @@ def stream(
             )
             cache_session_id = (
                 None
-                if cache_retention == "none"
+                if cache_retention == CacheRetention.NONE
                 else (options.session_id if options else None)
             )
             client = create_client(
@@ -343,7 +345,7 @@ def stream(
             request_timeout = timeout if timeout is not None else openai.NOT_GIVEN
 
             signal = options.signal if options else None
-            if signal and signal.aborted:
+            if is_aborted(signal):
                 raise AbortedError("Request was aborted")
 
             # SDK max_retries=0 + 本层重试：退避可被 signal 打断（对齐 TS）
@@ -392,7 +394,7 @@ def stream(
             event_stream.push(StartEvent(partial=output))
 
             async for chunk in openai_stream:
-                if signal and signal.aborted:
+                if is_aborted(signal):
                     await openai_stream.close()
                     break
 
@@ -541,7 +543,7 @@ def stream(
 
             finish_all_blocks()
 
-            if options and options.signal and options.signal.aborted:
+            if options and is_aborted(options.signal):
                 raise AbortedError("Request was aborted")
 
             if output.stop_reason == StopReason.ABORTED:
@@ -570,8 +572,8 @@ def stream(
             # 再推送 ErrorEvent 终止流
             finish_all_blocks()
 
-            is_aborted = bool(options and options.signal and options.signal.aborted)
-            output.stop_reason = StopReason.ABORTED if is_aborted else StopReason.ERROR
+            aborted = options is not None and is_aborted(options.signal)
+            output.stop_reason = StopReason.ABORTED if aborted else StopReason.ERROR
 
             normalized = normalize_provider_error(e)
             output.error_message = format_provider_error(normalized)
@@ -607,7 +609,8 @@ def stream(
                 except Exception:
                     pass
 
-    asyncio.create_task(process_stream())
+    # 驱动任务归流自持（防 GC 中途回收——裸 create_task 的返回值无强引用）
+    event_stream.drive(process_stream())
     return event_stream
 
 

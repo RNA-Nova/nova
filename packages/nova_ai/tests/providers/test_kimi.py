@@ -3,6 +3,14 @@
 对齐 TS 设计：拆分为 moonshotai、moonshotai-cn、kimi-coding 三个 provider。
 """
 
+from nova_protocol import (
+    Context,
+    KnownApi,
+    KnownProvider,
+    ThinkingFormat,
+    UserMessage,
+)
+
 from nova_ai.api_impls.openai_completions import (
     OpenAICompletionsOptions,
     build_params,
@@ -22,13 +30,6 @@ from nova_ai.providers.moonshotai_cn import (
     MOONSHOTAI_CN_MODELS,
     get_moonshotai_cn_model,
     moonshotai_cn_provider,
-)
-from nova_protocol import (
-    Context,
-    KnownApi,
-    KnownProvider,
-    ThinkingFormat,
-    UserMessage,
 )
 
 

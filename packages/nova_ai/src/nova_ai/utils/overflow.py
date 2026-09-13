@@ -1,14 +1,15 @@
+"""上下文溢出错误检测。
+
+对齐 TS：各 provider 在输入超出模型上下文窗口时返回的错误文案模式库，
+以及非溢出错误（限流/服务器错误）的排除模式。
+"""
+
 import re
 from typing import List, Optional
 
-from nova_protocol import AssistantMessage
+from nova_protocol import AssistantMessage, StopReason
 
-"""
-Regex patterns to detect context overflow errors from different providers.
-
-These patterns match error messages returned when the input exceeds
-the model's context window.
-"""
+# 溢出错误模式：匹配输入超出模型上下文窗口时的错误消息
 OVERFLOW_PATTERNS: List[re.Pattern] = [
     re.compile(r"prompt is too long", re.IGNORECASE),  # Anthropic
     re.compile(r"request_too_large", re.IGNORECASE),  # Anthropic HTTP 413
@@ -56,9 +57,7 @@ OVERFLOW_PATTERNS: List[re.Pattern] = [
     ),  # Cerebras
 ]
 
-"""
-Patterns that indicate non-overflow errors (e.g. rate limiting, server errors).
-"""
+# 非溢出错误模式（限流、服务器错误等）
 NON_OVERFLOW_PATTERNS: List[re.Pattern] = [
     re.compile(r"^(Throttling error|Service unavailable):", re.IGNORECASE),  # Bedrock
     re.compile(r"rate limit", re.IGNORECASE),  # Generic rate limiting
@@ -73,7 +72,7 @@ def is_context_overflow(
     Check if an assistant message represents a context overflow error.
     """
     # Case 1: Error message patterns
-    if message.stop_reason == "error" and message.error_message:
+    if message.stop_reason == StopReason.ERROR and message.error_message:
         is_non_overflow = any(
             pattern.search(message.error_message) for pattern in NON_OVERFLOW_PATTERNS
         )
@@ -83,14 +82,18 @@ def is_context_overflow(
             return True
 
     # Case 2: Silent overflow (z.ai style) - successful but usage exceeds context
-    if context_window and message.stop_reason == "stop":
+    if context_window and message.stop_reason == StopReason.STOP:
         input_tokens = message.usage.input + message.usage.cache_read
         if input_tokens > context_window:
             return True
 
     # Case 3: Length-stop overflow (Xiaomi MiMo style) - server truncates input
     # to fit context window, leaving no room for output.
-    if context_window and message.stop_reason == "length" and message.usage.output == 0:
+    if (
+        context_window
+        and message.stop_reason == StopReason.LENGTH
+        and message.usage.output == 0
+    ):
         input_tokens = message.usage.input + message.usage.cache_read
         if input_tokens >= context_window * 0.99:
             return True

@@ -5,7 +5,6 @@ client.from_environment 构造）
 """
 
 import pytest
-
 from nova_executor_client import (
     ConfigError,
     ExecutorClient,

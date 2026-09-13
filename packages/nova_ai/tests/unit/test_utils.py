@@ -3,10 +3,6 @@
 """
 
 import pytest
-from nova_ai.api_impls._shared import build_base_options, clamp_max_tokens_to_context
-from nova_ai.stream_options import SimpleStreamOptions
-from nova_ai.utils import calculate_cost, get_supported_thinking_levels
-from nova_ai.utils.model_utils import clamp_thinking_level, to_thinking_level
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -22,6 +18,11 @@ from nova_protocol import (
     Usage,
     UserMessage,
 )
+
+from nova_ai.api_impls._shared import build_base_options, clamp_max_tokens_to_context
+from nova_ai.stream_options import SimpleStreamOptions
+from nova_ai.utils import calculate_cost, get_supported_thinking_levels
+from nova_ai.utils.model_utils import clamp_thinking_level, to_thinking_level
 
 
 class TestCalculateCost:

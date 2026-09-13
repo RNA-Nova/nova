@@ -4,11 +4,6 @@ import asyncio
 from typing import Any, Optional
 
 import pytest
-from nova_ai.auth.credential_store import InMemoryCredentialStore
-from nova_ai.auth.helpers import env_api_key_auth
-from nova_ai.gateway import InMemoryModelsStore, Models, create_models
-from nova_ai.providers import create_provider
-from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 from nova_protocol import (
     ApiKeyCredential,
     Context,
@@ -19,6 +14,12 @@ from nova_protocol import (
     ProviderAuth,
     UserMessage,
 )
+
+from nova_ai.auth.credential_store import InMemoryCredentialStore
+from nova_ai.auth.helpers import env_api_key_auth
+from nova_ai.gateway import InMemoryModelsStore, Models, create_models
+from nova_ai.providers import create_provider
+from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 
 
 def _make_model(

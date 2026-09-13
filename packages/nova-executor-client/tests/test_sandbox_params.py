@@ -1,8 +1,6 @@
 """沙箱上下文与进程启动参数的 wire 形态测试（序列化正确性，无需传输层）"""
 
 import pytest
-from pydantic import ValidationError
-
 from nova_executor_client.protocol import (
     ExecFileSystemPath,
     ExecPermissionProfile,
@@ -12,6 +10,7 @@ from nova_executor_client.protocol import (
     ProcessStartParams,
     WindowsSandboxLevel,
 )
+from pydantic import ValidationError
 
 
 def test_read_only_sandbox_serializes_wire_shape():

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from fake_transport import FakeTransport
-
 from nova_executor_client.fs import FileSystemManager
 
 

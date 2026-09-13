@@ -5,13 +5,7 @@
 
 from typing import List, Optional
 
-from nova_protocol import (
-    Cost,
-    Model,
-    ModelThinkingLevel,
-    ThinkingLevel,
-    Usage,
-)
+from nova_protocol import Cost, Model, ModelThinkingLevel, ThinkingLevel, Usage
 
 EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 

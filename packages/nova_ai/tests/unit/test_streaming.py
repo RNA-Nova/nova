@@ -5,7 +5,6 @@
 import asyncio
 
 import pytest
-from nova_ai.streaming import AssistantMessageEventStream
 from nova_protocol import (
     AssistantMessage,
     DoneEvent,
@@ -27,6 +26,8 @@ from nova_protocol import (
     ToolCallStartEvent,
     Usage,
 )
+
+from nova_ai.streaming import AssistantMessageEventStream
 
 
 class TestStreamingEvents:
@@ -191,3 +192,55 @@ class TestEndSemantics:
         stream = AssistantMessageEventStream()
         stream.end(result=message)
         assert asyncio.run(stream.result()) is message
+
+
+class TestDriveOwnership:
+    """drive() 驱动任务归属（流自持后台任务，防 GC 中途回收）。"""
+
+    @pytest.mark.asyncio
+    async def test_drive_sets_task_and_clears_after_done(self):
+        stream = AssistantMessageEventStream()
+
+        async def produce():
+            stream.end(result=AssistantMessage(content=[]))
+
+        task = stream.drive(produce())
+        assert stream.task is task
+
+        await stream.result()
+        await asyncio.sleep(0)  # 让 done callback 跑完
+        assert stream.task is None  # 完成自清
+
+    @pytest.mark.asyncio
+    async def test_driver_survives_gc(self):
+        """无外部引用的驱动任务也能跑完——流是唯一持有者。
+
+        回归：裸 ``asyncio.create_task`` 无强引用时任务可能被 GC 中途回收
+        （流式静默冻死）；drive() 后即使主动 gc.collect() 也必须完成。
+        """
+        import gc
+
+        stream = AssistantMessageEventStream()
+        final = AssistantMessage(content=[TextContent(text="ok")])
+
+        async def produce():
+            await asyncio.sleep(0.01)  # 挂起窗口：给 GC 回收的机会
+            stream.push(DoneEvent(reason=StopReason.STOP, message=final))
+            stream.end(result=final)
+
+        stream.drive(produce())  # 返回值故意不接——无任何外部引用
+        gc.collect()
+        gc.collect()
+
+        assert await asyncio.wait_for(stream.result(), timeout=1.0) is final
+
+    @pytest.mark.asyncio
+    async def test_drive_on_completed_stream_raises(self):
+        stream = AssistantMessageEventStream()
+        stream.end(result=AssistantMessage(content=[]))
+
+        async def noop():
+            return None
+
+        with pytest.raises(RuntimeError, match="completed stream"):
+            stream.drive(noop())

@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from nova_executor_client import ConnectionError, ProtocolError, StdioTransport
 
 FAKE_SERVER = str(Path(__file__).parent / "fake_executor_server.py")

@@ -24,6 +24,7 @@ from nova_protocol import (
     ModelAuth,
     OAuthAuth,
     OAuthCredential,
+    is_aborted,
 )
 
 from ..oauth_page import oauth_error_html, oauth_success_html
@@ -32,6 +33,7 @@ from .device_code import (
     DeviceCodePollResult,
     poll_oauth_device_code_flow,
 )
+from .http import post_with_abort
 from .pkce import generate_pkce
 
 _CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -126,32 +128,32 @@ async def _exchange_authorization_code(
     redirect_uri: str = _REDIRECT_URI,
     signal: Optional[AbortSignal] = None,
 ) -> OAuthCredential:
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            _TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "client_id": _CLIENT_ID,
-                "code": code,
-                "code_verifier": verifier,
-                "redirect_uri": redirect_uri,
-            },
-            timeout=30.0,
-        )
+    response = await post_with_abort(
+        _TOKEN_URL,
+        data={
+            "grant_type": "authorization_code",
+            "client_id": _CLIENT_ID,
+            "code": code,
+            "code_verifier": verifier,
+            "redirect_uri": redirect_uri,
+        },
+        signal=signal,
+    )
     return _read_token_response(response, "exchange")
 
 
-async def _refresh_access_token(refresh_token: str) -> OAuthCredential:
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            _TOKEN_URL,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": _CLIENT_ID,
-            },
-            timeout=30.0,
-        )
+async def _refresh_access_token(
+    refresh_token: str, signal: Optional[AbortSignal] = None
+) -> OAuthCredential:
+    response = await post_with_abort(
+        _TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": _CLIENT_ID,
+        },
+        signal=signal,
+    )
     return _read_token_response(response, "refresh")
 
 
@@ -167,12 +169,11 @@ class _DeviceCodeStart:
 async def _start_openai_codex_device_auth(
     signal: Optional[AbortSignal] = None,
 ) -> _DeviceCodeStart:
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            _DEVICE_USER_CODE_URL,
-            json={"client_id": _CLIENT_ID},
-            timeout=30.0,
-        )
+    response = await post_with_abort(
+        _DEVICE_USER_CODE_URL,
+        json_body={"client_id": _CLIENT_ID},
+        signal=signal,
+    )
 
     if response.status_code >= 400:
         if response.status_code == 404:
@@ -222,15 +223,14 @@ async def _poll_openai_codex_device_auth(
     device: _DeviceCodeStart, signal: Optional[AbortSignal] = None
 ) -> _DeviceCodeGrant:
     async def _poll() -> DeviceCodePollResult[_DeviceCodeGrant]:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                _DEVICE_TOKEN_URL,
-                json={
-                    "device_auth_id": device.device_auth_id,
-                    "user_code": device.user_code,
-                },
-                timeout=30.0,
-            )
+        response = await post_with_abort(
+            _DEVICE_TOKEN_URL,
+            json_body={
+                "device_auth_id": device.device_auth_id,
+                "user_code": device.user_code,
+            },
+            signal=signal,
+        )
 
         if response.status_code < 400:
             data = response.json()
@@ -408,7 +408,9 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
 async def _refresh(
     credential: OAuthCredential, signal: Optional[AbortSignal] = None
 ) -> OAuthCredential:
-    token = await _refresh_access_token(credential.refresh)
+    if is_aborted(signal):
+        raise RuntimeError("Refresh cancelled")
+    token = await _refresh_access_token(credential.refresh, signal)
     return _credentials_from_token(token)
 
 

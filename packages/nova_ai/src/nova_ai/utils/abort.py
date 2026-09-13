@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Iterable, Optional, TypeVar
 
-from nova_protocol import AbortController, AbortedError, AbortSignal
+from nova_protocol import AbortController, AbortedError, AbortSignal, is_aborted
 
 T = TypeVar("T")
 
@@ -50,8 +50,10 @@ async def race_with_abort(operation: Awaitable[T], signal: Optional[AbortSignal]
     controller）而不是依赖本函数。
     """
     sig = signal
-    if sig is not None and sig.aborted:
-        asyncio.ensure_future(_consume(operation))
+    if is_aborted(sig):
+        # 被放弃操作的纯观察通道：调用方已放弃它，不存在天然属主；
+        # 后台 Task 只为吸收其异常（防 never-retrieved 噪音）。
+        asyncio.ensure_future(_consume(operation))  # guard: detached
         raise AbortedError("The operation was aborted")
 
     task = asyncio.ensure_future(operation)

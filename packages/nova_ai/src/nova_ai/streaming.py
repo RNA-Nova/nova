@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from typing import (
+    Any,
     AsyncIterator,
     Callable,
+    Coroutine,
     Deque,
     Generic,
     Optional,
@@ -65,6 +67,11 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         self._pending_result: Optional[R] = None
         self._pending_exception: Optional[BaseException] = None
 
+        # 驱动任务槽位：流自持驱动自己的后台任务（drive() 写入，完成自清）。
+        # 事件循环对在途任务只持弱引用，无强引用的后台任务可能被 GC 中途
+        # 回收（流式静默冻死）——流的寿命即驱动任务的寿命，故由流持有。
+        self._driver_task: Optional[asyncio.Task[None]] = None
+
     # -------------------------
     # Internal
     # -------------------------
@@ -105,6 +112,31 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
     # -------------------------
     # Producer API
     # -------------------------
+
+    @property
+    def task(self) -> Optional[asyncio.Task[None]]:
+        """驱动本流的后台任务（完成即自清；只读）。"""
+        return self._driver_task
+
+    def drive(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        """以本流为宿主驱动后台任务。
+
+        流持有任务的强引用直到其完成——调用方拿到流即拿到任务的命，
+        裸 ``asyncio.create_task`` 的返回值无人持有会被 GC 中途回收
+        （官方文档警告）；流的寿命与驱动任务的寿命天然重合，是最天然的
+        持有者。1:N 的属主台账场景用 ``utils.task_tracker.TaskTracker``。
+        """
+        if self._done:
+            coro.close()  # 不起跑即关：防 "coroutine was never awaited" 警告
+            raise RuntimeError("Cannot drive a task on a completed stream")
+        task = asyncio.get_running_loop().create_task(coro)
+        self._driver_task = task
+        task.add_done_callback(self._on_driver_done)
+        return task
+
+    def _on_driver_done(self, task: asyncio.Task[None]) -> None:
+        if self._driver_task is task:
+            self._driver_task = None
 
     def push(self, event: T) -> None:
         """

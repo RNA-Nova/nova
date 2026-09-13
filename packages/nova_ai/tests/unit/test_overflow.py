@@ -1,7 +1,8 @@
 """is_context_overflow 测试（对齐 TS isContextOverflow）。"""
 
-from nova_ai.utils.overflow import is_context_overflow
 from nova_protocol import AssistantMessage, KnownApi, StopReason, Usage
+
+from nova_ai.utils.overflow import is_context_overflow
 
 
 def _message(

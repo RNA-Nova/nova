@@ -1,14 +1,6 @@
 """新 provider 模型详细字段测试（moonshotai / moonshotai-cn / kimi-coding）。"""
 
 import pytest
-from nova_ai import create_models
-from nova_ai.gateway import create_provider
-from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, get_kimi_coding_model
-from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, get_moonshotai_model
-from nova_ai.providers.moonshotai_cn import (
-    MOONSHOTAI_CN_MODELS,
-    get_moonshotai_cn_model,
-)
 from nova_protocol import (
     Context,
     KnownApi,
@@ -16,6 +8,15 @@ from nova_protocol import (
     Model,
     ModelCost,
     UserMessage,
+)
+
+from nova_ai import create_models
+from nova_ai.gateway import create_provider
+from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, get_kimi_coding_model
+from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, get_moonshotai_model
+from nova_ai.providers.moonshotai_cn import (
+    MOONSHOTAI_CN_MODELS,
+    get_moonshotai_cn_model,
 )
 
 

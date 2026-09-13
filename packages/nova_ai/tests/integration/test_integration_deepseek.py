@@ -15,16 +15,6 @@ import os
 from typing import List, Set
 
 import pytest
-from nova_ai import (
-    builtin_models,
-    get_builtin_model,
-)
-from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
-from nova_ai.providers.volcengine import (
-    VOLCENGINE_MODELS,
-    get_volcengine_model,
-)
-from nova_ai.stream_options import ProviderResponse
 from nova_protocol import (
     AbortController,
     AbortSignal,
@@ -39,6 +29,17 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
+
+from nova_ai import (
+    builtin_models,
+    get_builtin_model,
+)
+from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
+from nova_ai.providers.volcengine import (
+    VOLCENGINE_MODELS,
+    get_volcengine_model,
+)
+from nova_ai.stream_options import ProviderResponse
 
 pytestmark = pytest.mark.integration
 
@@ -356,8 +357,9 @@ class TestReasoningLevels:
     @pytest.mark.asyncio
     async def test_thinking_level_map_applies(self):
         """thinking_level_map 映射生效"""
-        from nova_ai.api_impls.openai_completions import build_params
         from nova_protocol import KnownApi, KnownProvider, Model, ModelCost
+
+        from nova_ai.api_impls.openai_completions import build_params
 
         model = Model(
             id="deepseek-test",

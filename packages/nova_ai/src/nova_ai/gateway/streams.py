@@ -16,14 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Awaitable, Callable, Set
+from typing import Awaitable, Callable
 
 from nova_protocol import AssistantMessage, ErrorEvent, Model, StopReason, Usage
 
 from ..streaming import AssistantMessageEventStream
-
-_INFLIGHT_LAZY_TASKS: Set["asyncio.Task[None]"] = set()
-"""在途 lazy_stream 后台任务的强引用集（防 GC 中途回收，完成即弃）。"""
 
 
 def create_setup_error_message(model: Model, error: BaseException) -> AssistantMessage:
@@ -69,11 +66,9 @@ def lazy_stream(
             )
             outer.end(result=message)
 
-    # 持有任务强引用直到完成——事件循环对在途任务只有弱引用，
-    # 装配耗时挂起时任务可能被 CPython GC 中途回收（CPython 文档警告）
-    task = asyncio.get_running_loop().create_task(_run())
-    _INFLIGHT_LAZY_TASKS.add(task)
-    task.add_done_callback(_INFLIGHT_LAZY_TASKS.discard)
+    # 驱动任务归流自持（drive 的寿命语义：流的寿命即任务的寿命）——
+    # 不再需要进程级在途登记表。
+    outer.drive(_run())
     return outer
 
 

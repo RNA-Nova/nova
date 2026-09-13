@@ -3,7 +3,6 @@
 """
 
 import pytest
-from nova_ai.stream_options import SimpleStreamOptions, StreamOptions, ThinkingBudgets
 from nova_protocol import (
     AssistantMessage,
     CacheRetention,
@@ -39,6 +38,8 @@ from nova_protocol import (
     VercelGatewayRouting,
 )
 from pydantic import ValidationError
+
+from nova_ai.stream_options import SimpleStreamOptions, StreamOptions, ThinkingBudgets
 
 
 class TestEnums:

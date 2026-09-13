@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Literal, Optional, TypeVar
 
-from nova_protocol import AbortSignal
+from nova_protocol import AbortSignal, is_aborted
 
 T = TypeVar("T")
 
@@ -62,12 +62,8 @@ _SLOW_DOWN_TIMEOUT_MESSAGE = (
 )
 
 
-def _is_aborted(signal: Optional[AbortSignal]) -> bool:
-    return signal is not None and signal.aborted
-
-
 async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
-    if _is_aborted(signal):
+    if is_aborted(signal):
         raise asyncio.CancelledError(_CANCEL_MESSAGE)
 
     done_event = asyncio.Event()
@@ -84,7 +80,7 @@ async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
                 await done_event.wait()
         except TimeoutError:
             pass
-        if _is_aborted(signal):
+        if is_aborted(signal):
             raise asyncio.CancelledError(_CANCEL_MESSAGE)
     finally:
         if signal is not None:
@@ -114,7 +110,7 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
             await _abortable_sleep(min(interval_ms, remaining_ms), options.signal)
 
     while _now_ms() < deadline:
-        if _is_aborted(options.signal):
+        if is_aborted(options.signal):
             raise asyncio.CancelledError(_CANCEL_MESSAGE)
 
         result = await options.poll()

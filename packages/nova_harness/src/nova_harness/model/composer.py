@@ -14,10 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from nova_ai import (
-    Provider,
-    create_provider,
-)
+from nova_ai import Provider, create_provider
 from nova_ai.api_impls import openai_completions
 from nova_harness.config.resolve import (
     get_config_value_env_var_names,
@@ -26,10 +23,7 @@ from nova_harness.config.resolve import (
     resolve_config_value_or_throw,
     resolve_headers_or_throw,
 )
-from nova_harness.model.helpers import (
-    apply_model_override,
-    merge_compat,
-)
+from nova_harness.model.helpers import apply_model_override, merge_compat
 from nova_harness.types.model import (
     ExtensionOAuthConfig,
     ModelDefinition,
@@ -51,6 +45,7 @@ from nova_protocol import (
     OAuthAuth,
     OAuthCredential,
     ProviderAuth,
+    is_aborted,
 )
 
 # 当前唯一完整的协议实现；新增协议时在此登记
@@ -725,7 +720,7 @@ class _ComposedProvider(Provider):
                 return
             refreshed = await self._refresh_models_fn(context)
             signal = getattr(context, "signal", None)
-            if not (signal is not None and signal.aborted):
+            if not is_aborted(signal):
                 # 发布前先校验，非法结构不污染线上列表
                 apply_extension(
                     self.id,

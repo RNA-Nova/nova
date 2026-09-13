@@ -19,12 +19,7 @@ from .._shared.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )
-from ._stream import (
-    map_stop_reason,
-    parse_chunk_usage,
-    stream,
-    stream_simple,
-)
+from ._stream import map_stop_reason, parse_chunk_usage, stream, stream_simple
 from .client import _has_header, create_client
 from .compat import detect_compat, get_compat
 from .messages import (

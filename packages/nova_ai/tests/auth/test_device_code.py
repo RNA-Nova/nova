@@ -3,12 +3,13 @@
 import asyncio
 
 import pytest
+from nova_protocol import AbortController
+
 from nova_ai.auth.oauth.device_code import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
     poll_oauth_device_code_flow,
 )
-from nova_protocol import AbortController
 
 
 class _DummySignal:

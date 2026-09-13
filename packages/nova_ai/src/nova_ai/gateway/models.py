@@ -58,11 +58,7 @@ from nova_protocol import (
 
 from ..auth.context import default_provider_auth_context
 from ..auth.credential_store import InMemoryCredentialStore
-from ..auth.resolve import (
-    AuthResolutionOverrides,
-    ModelsError,
-    resolve_provider_auth,
-)
+from ..auth.resolve import AuthResolutionOverrides, ModelsError, resolve_provider_auth
 from ..stream_options import SimpleStreamOptions, StreamOptions
 from ..streaming import AssistantMessageEventStream
 from ..utils.abort import any_signal, operation_signal, race_with_abort

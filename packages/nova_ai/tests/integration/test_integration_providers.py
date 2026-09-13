@@ -13,9 +13,6 @@ import os
 from typing import Any, Optional
 
 import pytest
-from nova_ai import builtin_models
-from nova_ai.auth.credential_store import InMemoryCredentialStore
-from nova_ai.stream_options import ProviderResponse, SimpleStreamOptions
 from nova_protocol import (
     ApiKeyCredential,
     CacheRetention,
@@ -27,6 +24,10 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
+
+from nova_ai import builtin_models
+from nova_ai.auth.credential_store import InMemoryCredentialStore
+from nova_ai.stream_options import ProviderResponse, SimpleStreamOptions
 
 KIMI_API_KEY = os.environ.get("KIMI_API_KEY")
 VOLCENGINE_API_KEY = os.environ.get("VOLCENGINE_API_KEY")

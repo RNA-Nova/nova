@@ -7,12 +7,7 @@ abort；真正的重试由 ``_shared/retry.py`` 的 ``retry_provider_request``
 
 from typing import Any, Dict, Optional
 
-from nova_protocol import (
-    Context,
-    Model,
-    OpenAICompletionsCompat,
-    ProviderHeaders,
-)
+from nova_protocol import Context, Model, OpenAICompletionsCompat, ProviderHeaders
 from openai import AsyncOpenAI
 
 from .._shared.copilot_headers import (

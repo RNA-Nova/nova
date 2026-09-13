@@ -68,10 +68,13 @@ def _get_compat_cache_control(
     compat: OpenAICompletionsCompat, cache_retention: CacheRetention
 ) -> Optional[CacheControl]:
     """根据 compat 和 cache retention 构造 cache_control（对齐 TS getCompatCacheControl）。"""
-    if compat.cache_control_format != "anthropic" or cache_retention == "none":
+    if (
+        compat.cache_control_format != "anthropic"
+        or cache_retention == CacheRetention.NONE
+    ):
         return None
     control: CacheControl = {"type": "ephemeral"}
-    if cache_retention == "long" and compat.supports_long_cache_retention:
+    if cache_retention == CacheRetention.LONG and compat.supports_long_cache_retention:
         control["ttl"] = "1h"
     return control
 

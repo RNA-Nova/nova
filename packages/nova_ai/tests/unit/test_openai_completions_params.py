@@ -2,13 +2,6 @@
 OpenAI Completions 协议参数构建测试（detect_compat / get_compat / build_params / convert_messages）
 """
 
-from nova_ai.api_impls.openai_completions import (
-    OpenAICompletionsOptions,
-    build_params,
-    convert_messages,
-    detect_compat,
-    get_compat,
-)
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -25,6 +18,14 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
     VercelGatewayRouting,
+)
+
+from nova_ai.api_impls.openai_completions import (
+    OpenAICompletionsOptions,
+    build_params,
+    convert_messages,
+    detect_compat,
+    get_compat,
 )
 
 

@@ -23,6 +23,7 @@ from nova_protocol import (
     ModelsStoreEntry,
     ProviderAuth,
     ProviderHeaders,
+    is_aborted,
 )
 
 from ..auth.resolve import ModelsError
@@ -242,10 +243,10 @@ class _DynamicProvider(Provider):
             )
         if not context.allow_network:
             return
-        if context.signal is not None and context.signal.aborted:
+        if is_aborted(context.signal):
             return
         refreshed = await self._fetch_models(context)
-        if context.signal is not None and context.signal.aborted:
+        if is_aborted(context.signal):
             return
         await _publish(
             ModelsPublication(

@@ -83,15 +83,15 @@ from .stream_options import (
 )
 
 # 重新导出 streaming 模块
-from .streaming import (  # 事件流
+from .streaming import EventStream  # 事件流
+from .streaming import (
     AssistantMessageEventStream,
-    EventStream,
     create_assistant_message_event_stream,
 )
 
 # 重新导出utils模块（跨层通用件；实现层共享件从 api_impls._shared 再导出）
-from .utils import (  # 环境变量; JSON解析; 字符串处理; 溢出检测
-    calculate_cost,
+from .utils import calculate_cost  # 环境变量; JSON解析; 字符串处理; 溢出检测
+from .utils import (
     clamp_thinking_level,
     get_env_api_key,
     get_supported_thinking_levels,

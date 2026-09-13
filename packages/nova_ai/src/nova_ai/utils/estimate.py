@@ -14,6 +14,7 @@ from nova_protocol import (
     Context,
     ImageContent,
     Message,
+    StopReason,
     TextContent,
     Tool,
     ToolResultMessage,
@@ -101,7 +102,7 @@ def _last_assistant_usage_info(
             applies_to_prefix = message.timestamp >= latest_prefix_timestamp
             if (
                 applies_to_prefix
-                and message.stop_reason not in ("aborted", "error")
+                and message.stop_reason not in (StopReason.ABORTED, StopReason.ERROR)
                 and calculate_context_tokens(message.usage) > 0
             ):
                 usage_info = (message.usage, i)

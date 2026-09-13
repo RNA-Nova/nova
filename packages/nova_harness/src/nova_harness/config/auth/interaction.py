@@ -25,7 +25,7 @@ from nova_protocol.auth import (
     AuthPrompt,
     LoginCancelledError,
 )
-from nova_protocol.signal import AbortSignal
+from nova_protocol.signal import AbortSignal, is_aborted
 
 
 class UIAuthInteraction(AuthInteraction):
@@ -61,7 +61,7 @@ class UIAuthInteraction(AuthInteraction):
 
     async def prompt(self, prompt: AuthPrompt) -> str:
         signal = self.signal
-        if signal is not None and signal.aborted:
+        if is_aborted(signal):
             raise LoginCancelledError()
 
         if prompt.type == "select" and prompt.options:

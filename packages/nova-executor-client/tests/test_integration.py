@@ -3,11 +3,12 @@
 import os
 
 import pytest
-
 from nova_executor_client import ExecutorClient
 
 EXECUTOR_URL = os.environ.get("NOVA_EXECUTOR_URL", "ws://127.0.0.1:28080")
 EXECUTOR_TOKEN = os.environ.get("NOVA_EXECUTOR_TOKEN", "test-secret-123")
+
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
 @pytest.mark.asyncio

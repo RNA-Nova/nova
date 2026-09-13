@@ -6,12 +6,7 @@ Provider 定义包
 - ``<provider>/provider.py``：provider 工厂函数
 """
 
-from ..gateway import (
-    Provider,
-    ProviderStreams,
-    RefreshModelsContext,
-    create_provider,
-)
+from ..gateway import Provider, ProviderStreams, RefreshModelsContext, create_provider
 from .all import (
     builtin_models,
     builtin_providers,

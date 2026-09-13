@@ -3,8 +3,9 @@ Volcengine 模型目录测试
 """
 
 import pytest
-from nova_ai import VOLCENGINE_MODELS, get_volcengine_model, list_volcengine_models
 from nova_protocol import ModelCost
+
+from nova_ai import VOLCENGINE_MODELS, get_volcengine_model, list_volcengine_models
 
 
 class TestVolcengineModels:

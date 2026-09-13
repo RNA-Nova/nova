@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 from nova_harness.types.ui.context import UIContext
 from nova_protocol.auth import AuthorizationRequest, AuthPrompt, LoginCancelledError
-from nova_protocol.signal import AbortSignal
+from nova_protocol.signal import AbortSignal, is_aborted
 
 
 def _first_qs(parsed: dict, key: str) -> Optional[str]:
@@ -183,7 +183,7 @@ async def acquire_authorization_code(
     取消语义三合一：宿主任务取消（cancelRequest → CancelledError 翻译）、
     signal 举旗、竞速落败清扫——全部汇入 finally 清扫点。
     """
-    if signal is not None and signal.aborted:
+    if is_aborted(signal):
         raise LoginCancelledError()
 
     channels: list[asyncio.Task] = []

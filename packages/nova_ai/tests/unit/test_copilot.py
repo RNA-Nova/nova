@@ -1,17 +1,18 @@
 """GitHub Copilot 请求头构造测试（对齐 TS github-copilot-headers.ts）。"""
 
-from nova_ai.api_impls._shared import (
-    build_copilot_dynamic_headers,
-    build_copilot_headers_from_messages,
-    has_copilot_vision_input,
-    infer_copilot_initiator,
-)
 from nova_protocol import (
     AssistantMessage,
     ImageContent,
     TextContent,
     ToolResultMessage,
     UserMessage,
+)
+
+from nova_ai.api_impls._shared import (
+    build_copilot_dynamic_headers,
+    build_copilot_headers_from_messages,
+    has_copilot_vision_input,
+    infer_copilot_initiator,
 )
 
 

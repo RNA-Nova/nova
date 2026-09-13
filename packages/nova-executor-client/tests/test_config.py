@@ -10,7 +10,6 @@ import logging
 import re
 
 import pytest
-
 from nova_executor_client import (
     ApprovalPolicy,
     ConfigError,

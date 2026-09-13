@@ -5,14 +5,7 @@ import json
 from types import SimpleNamespace
 from typing import Any, List, Optional
 
-# 注意：patch 目标是流式实现子模块（create_client 的消费方绑定处）
-import nova_ai.api_impls.openai_completions._stream as stream_module
 import pytest
-from nova_ai.api_impls import openai_completions
-from nova_ai.api_impls.openai_completions import (
-    OpenAICompletionsOptions,
-    stream,
-)
 from nova_protocol import (
     Context,
     DoneEvent,
@@ -32,6 +25,14 @@ from nova_protocol import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     UserMessage,
+)
+
+# 注意：patch 目标是流式实现子模块（create_client 的消费方绑定处）
+import nova_ai.api_impls.openai_completions._stream as stream_module
+from nova_ai.api_impls import openai_completions
+from nova_ai.api_impls.openai_completions import (
+    OpenAICompletionsOptions,
+    stream,
 )
 
 

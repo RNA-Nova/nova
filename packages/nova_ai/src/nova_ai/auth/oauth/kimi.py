@@ -31,14 +31,15 @@ from nova_protocol import (
     ModelAuth,
     OAuthAuth,
     OAuthCredential,
+    is_aborted,
 )
 
 from .device_code import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
-    _is_aborted,
     poll_oauth_device_code_flow,
 )
+from .http import post_with_abort
 
 _DEFAULT_OAUTH_HOST = "https://auth.kimi.com"
 _CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
@@ -143,47 +144,20 @@ def _token_from_response(data: Dict[str, Any]) -> OAuthCredential:
 async def _post_form(
     url: str,
     params: Dict[str, str],
-    headers: Optional[Dict[str, str]] = None,
     signal: Optional[AbortSignal] = None,
 ) -> httpx.Response:
     """向 Kimi OAuth endpoint 发送 form-encoded POST。
 
-    signal 取消复合进在飞请求（watchdog 模式）：举旗即刻打断，
-    不再等 httpx 超时兜底。
+    走共享的可取消 POST 原语（watchdog 竞速，举旗即取消在飞请求）；
+    本层只叠加 Kimi 的 Accept 约定与设备标识头。
     """
-    merged_headers: Dict[str, str] = {"Accept": "application/json"}
-    if headers:
-        merged_headers.update(headers)
-
-    async def _do_post() -> httpx.Response:
-        try:
-            async with httpx.AsyncClient() as client:
-                return await client.post(
-                    url,
-                    data=params,
-                    headers=merged_headers,
-                    timeout=_REQUEST_TIMEOUT_SECONDS,
-                )
-        except httpx.TransportError as error:
-            raise RuntimeError(f"OAuth request to {url} failed: {error}") from error
-
-    post_task = asyncio.ensure_future(_do_post())
-    if signal is None:
-        return await post_task
-
-    watcher = asyncio.ensure_future(signal.wait())
-    try:
-        done, _pending = await asyncio.wait(
-            [post_task, watcher], return_when=asyncio.FIRST_COMPLETED
-        )
-        if watcher in done and post_task not in done:
-            post_task.cancel()
-            raise asyncio.CancelledError("Request aborted")
-        return post_task.result()
-    finally:
-        watcher.cancel()
-        if not post_task.done():
-            post_task.cancel()
+    return await post_with_abort(
+        url,
+        data=params,
+        headers={"Accept": "application/json", **_default_device_headers()},
+        timeout=_REQUEST_TIMEOUT_SECONDS,
+        signal=signal,
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -206,7 +180,6 @@ async def _request_device_authorization(
     response = await _post_form(
         url,
         {"client_id": _CLIENT_ID},
-        headers=_default_device_headers(),
         signal=signal,
     )
 
@@ -270,7 +243,6 @@ async def _poll_once(
             "device_code": device_code,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         },
-        headers=_default_device_headers(),
         signal=signal,
     )
 
@@ -342,7 +314,7 @@ async def _login_device_code(
 
     轮询复用 ``poll_oauth_device_code_flow``，slow_down / 超时有统一处理。
     """
-    if _is_aborted(signal):
+    if is_aborted(signal):
         raise asyncio.CancelledError("Login cancelled")
 
     oauth_host = _get_oauth_host()
@@ -385,7 +357,7 @@ async def _refresh(
     max_retries = 3
     last_error: Optional[Exception] = None
     for attempt in range(max_retries):
-        if _is_aborted(signal):
+        if is_aborted(signal):
             raise RuntimeError("Refresh cancelled")
 
         try:
@@ -396,15 +368,16 @@ async def _refresh(
                     "grant_type": "refresh_token",
                     "refresh_token": credential.refresh,
                 },
-                headers=_default_device_headers(),
                 signal=signal,
             )
-        except httpx.TransportError as error:
+        except RuntimeError as error:
+            # 传输失败（_post_form 已将 httpx.TransportError 包装为 RuntimeError）：
+            # 可重试；状态码类失败走下方响应处理，不进本分支
             last_error = error
             if attempt < max_retries - 1:
                 await asyncio.sleep(2**attempt)
                 continue
-            raise RuntimeError(f"Kimi token refresh failed: {error}") from error
+            raise
 
         if response.status_code == 200 and isinstance(
             response.json().get("access_token"), str

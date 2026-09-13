@@ -63,7 +63,7 @@ def lazy_oauth(
     load: Callable[[], Awaitable[OAuthAuth]],
     login_label: Optional[str] = None,
 ) -> OAuthAuth:
-    """延迟加载 OAuth 实现，避免在导入时引入 Node-only 代码。"""
+    """延迟加载 OAuth 实现（首次使用时才加载完整流程代码）。"""
     promise: Optional[Awaitable[OAuthAuth]] = None
 
     async def loaded() -> OAuthAuth:

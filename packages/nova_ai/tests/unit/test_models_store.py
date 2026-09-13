@@ -4,12 +4,6 @@ import asyncio
 from typing import List
 
 import pytest
-from nova_ai.gateway import (
-    InMemoryModelsStore,
-    Models,
-    RefreshModelsContext,
-)
-from nova_ai.providers import create_provider
 from nova_protocol import (
     Context,
     KnownApi,
@@ -18,6 +12,13 @@ from nova_protocol import (
     ModelsStoreEntry,
     UserMessage,
 )
+
+from nova_ai.gateway import (
+    InMemoryModelsStore,
+    Models,
+    RefreshModelsContext,
+)
+from nova_ai.providers import create_provider
 
 
 def _make_model(model_id: str = "test", provider: str = "test") -> Model:

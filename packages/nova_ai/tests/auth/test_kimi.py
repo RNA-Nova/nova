@@ -6,8 +6,9 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from nova_ai.auth.oauth.kimi import _get_oauth_host, kimi_oauth
 from nova_protocol import AuthEvent, AuthInteraction, AuthPrompt, OAuthCredential
+
+from nova_ai.auth.oauth.kimi import _get_oauth_host, kimi_oauth
 
 
 class _FakeInteraction(AuthInteraction):

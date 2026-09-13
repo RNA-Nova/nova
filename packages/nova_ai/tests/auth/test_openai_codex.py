@@ -1,6 +1,7 @@
 """OpenAI Codex OAuth flow 单元测试。"""
 
 import pytest
+
 from nova_ai.auth.oauth.openai_codex import _create_authorization_flow
 
 

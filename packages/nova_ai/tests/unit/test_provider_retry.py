@@ -3,8 +3,9 @@
 import asyncio
 
 import pytest
-from nova_ai.api_impls._shared.retry import retry_provider_request
 from nova_protocol import AbortController, AbortedError
+
+from nova_ai.api_impls._shared.retry import retry_provider_request
 
 
 class _FakeProviderError(Exception):

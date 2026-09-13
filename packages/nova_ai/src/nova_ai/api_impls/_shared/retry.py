@@ -15,7 +15,7 @@ import time
 from email.utils import parsedate_to_datetime
 from typing import Any, Awaitable, Callable, Optional, TypedDict, TypeVar
 
-from nova_protocol import AbortedError, AbortSignal
+from nova_protocol import AbortedError, AbortSignal, is_aborted
 
 T = TypeVar("T")
 
@@ -107,7 +107,7 @@ def _get_retry_delay_ms(
 
 async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
     """至多睡 ``ms`` 毫秒；期间 signal 中断则抛 AbortedError（asyncio.timeout 惯用法）。"""
-    if signal is not None and signal.aborted:
+    if is_aborted(signal):
         raise _abort_error()
     seconds = max(0.0, ms / 1000)
     if signal is None:
@@ -153,7 +153,7 @@ async def retry_provider_request(
         except Exception as error:
             if isinstance(error, AbortedError):
                 raise
-            if signal is not None and signal.aborted:
+            if is_aborted(signal):
                 raise _abort_error()
             if retries_remaining <= 0 or not _is_retryable_provider_error(error):
                 raise

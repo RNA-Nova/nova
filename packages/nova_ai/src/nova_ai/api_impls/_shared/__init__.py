@@ -17,12 +17,6 @@ from .copilot_headers import (
 )
 from .prompt_cache import (
     OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH,
-    _add_cache_control_to_last_conversation_message,
-    _add_cache_control_to_last_tool,
-    _add_cache_control_to_system_prompt,
-    _add_cache_control_to_text_content,
-    _apply_anthropic_cache_control,
-    _get_compat_cache_control,
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )

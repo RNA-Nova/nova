@@ -14,7 +14,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from nova_executor_client import ExecutorClient, ProcessError
 
 _REPO_TARGET = (

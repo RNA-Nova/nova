@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 
 import pytest
-
 from nova_executor_client.notifications import (
     READ_STREAM_QUEUE_CAPACITY,
     NotificationRouter,

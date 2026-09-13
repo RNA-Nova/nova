@@ -3,7 +3,6 @@
 import asyncio
 
 import pytest
-
 from nova_executor_client import ApprovalPolicy
 
 pytestmark = pytest.mark.asyncio

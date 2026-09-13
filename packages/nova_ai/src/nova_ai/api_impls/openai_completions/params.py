@@ -220,12 +220,15 @@ def build_params(
     # prompt cache（对齐 TS 顶层 prompt_cache_key/retention——Python 侧经 extra_body 上线）
     session_id = options.session_id if options else None
     use_prompt_cache_key = session_id is not None and (
-        ("api.openai.com" in model.base_url and cache_retention != "none")
-        or (cache_retention == "long" and compat.supports_long_cache_retention)
+        ("api.openai.com" in model.base_url and cache_retention != CacheRetention.NONE)
+        or (
+            cache_retention == CacheRetention.LONG
+            and compat.supports_long_cache_retention
+        )
     )
     if use_prompt_cache_key:
         extra_body["prompt_cache_key"] = clamp_openai_prompt_cache_key(session_id)
-    if cache_retention == "long" and compat.supports_long_cache_retention:
+    if cache_retention == CacheRetention.LONG and compat.supports_long_cache_retention:
         extra_body["prompt_cache_retention"] = "24h"
 
     level_map: ThinkingLevelMap = model.thinking_level_map or {}

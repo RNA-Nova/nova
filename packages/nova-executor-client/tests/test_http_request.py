@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from nova_executor_client import StdioTransport
 from nova_executor_client.client import ExecutorClient
 from nova_executor_client.notifications import NotificationRouter

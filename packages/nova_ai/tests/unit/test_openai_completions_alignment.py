@@ -8,6 +8,19 @@ baseten chat_template_args、streamSimple thinking_budgets 透传。
 import json
 
 import pytest
+from nova_protocol import (
+    AssistantMessage,
+    Context,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    OpenAICompletionsCompat,
+    ThinkingContent,
+    ToolCall,
+    UserMessage,
+)
+
 from nova_ai.api_impls._shared.simple_options import (
     clamp_thinking_budget_to_answer_room,
     thinking_budget_for_level,
@@ -22,18 +35,6 @@ from nova_ai.api_impls.openai_completions import (
     parse_openai_reasoning_details,
 )
 from nova_ai.stream_options import ThinkingBudgets
-from nova_protocol import (
-    AssistantMessage,
-    Context,
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
-    OpenAICompletionsCompat,
-    ThinkingContent,
-    ToolCall,
-    UserMessage,
-)
 
 
 def _model(**overrides) -> Model:

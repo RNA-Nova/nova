@@ -6,7 +6,6 @@ import asyncio
 
 import pytest
 from fake_transport import FakeTransport
-
 from nova_executor_client import (
     ExecutorClient,
     StdioTransport,

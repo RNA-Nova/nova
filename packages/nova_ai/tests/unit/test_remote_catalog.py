@@ -3,12 +3,6 @@
 import asyncio
 
 import pytest
-from nova_ai.gateway.provider import ModelsPublication, Provider, RefreshModelsContext
-from nova_ai.providers.remote_catalog import (
-    merge_models,
-    remote_models,
-    with_remote_catalog,
-)
 from nova_protocol import (
     AbortController,
     Context,
@@ -18,6 +12,13 @@ from nova_protocol import (
     ModelCost,
     ModelsStoreEntry,
     UserMessage,
+)
+
+from nova_ai.gateway.provider import ModelsPublication, Provider, RefreshModelsContext
+from nova_ai.providers.remote_catalog import (
+    merge_models,
+    remote_models,
+    with_remote_catalog,
 )
 
 GENERATED_AT = 1000
