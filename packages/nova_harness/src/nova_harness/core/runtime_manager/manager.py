@@ -63,9 +63,7 @@ def _default_runtime_factory(
 ) -> Awaitable[AgentSessionRuntime]:
     # 延迟导入：manager 不在包初始化期拉起 assembly（导入顺序不变量，
     # 见包 __init__ 注释），也方便测试注入工厂后无需真实组装链。
-    from nova_harness.core.runtime_manager.assembly import (
-        create_agent_session_runtime,
-    )
+    from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
 
     return create_agent_session_runtime(options)
 

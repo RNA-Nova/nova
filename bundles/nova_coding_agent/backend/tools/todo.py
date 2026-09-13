@@ -11,7 +11,6 @@
 
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_agent import AgentToolResult
 from nova_harness.types.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContext,
@@ -19,6 +18,7 @@ from nova_harness.types.resources.tools import (
 )
 from nova_protocol import (
     AbortSignal,
+    AgentToolResult,
     TextContent,
 )
 

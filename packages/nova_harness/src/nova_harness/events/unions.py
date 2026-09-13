@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Union
 
-from nova_agent import AgentEvent
+from nova_protocol import AgentEvent
 
 from .agent import (
     AfterProviderResponseEvent,

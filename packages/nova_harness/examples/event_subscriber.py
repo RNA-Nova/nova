@@ -4,9 +4,9 @@ import json
 import sys
 from typing import Any, TextIO
 
-from nova_agent import AgentEvent
-from nova_agent.types.events import (
+from nova_protocol import (
     AgentEndEvent,
+    AgentEvent,
     AgentStartEvent,
     MessageEndEvent,
     MessageStartEvent,

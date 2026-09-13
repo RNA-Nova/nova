@@ -1,7 +1,6 @@
 """MemoryTransport 测试。"""
 
 import pytest
-
 from nova_server.transport import MemoryTransport
 
 

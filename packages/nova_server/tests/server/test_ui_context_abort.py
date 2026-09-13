@@ -9,7 +9,6 @@ import asyncio
 import time
 
 import pytest
-
 from nova_server.connection import (
     Connection,
     ConnectionOrigin,

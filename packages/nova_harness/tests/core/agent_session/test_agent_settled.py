@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import AGENT_SETTLED
 from nova_harness.extensions.runner import ExtensionRunner

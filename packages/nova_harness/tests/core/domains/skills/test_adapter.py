@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.package import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader
 from nova_harness.resources.loaders.skills import load_skills

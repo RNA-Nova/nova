@@ -22,11 +22,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from nova_ai import (
-    Provider,
-    builtin_models,
-    create_models,
-)
+from nova_ai import Provider, builtin_models, create_models
 from nova_ai.auth.resolve import AuthResolutionOverrides
 from nova_ai.gateway.store import InMemoryModelsStore
 from nova_ai.providers.all import get_builtin_model_data_generated_at
@@ -46,10 +42,7 @@ from nova_harness.config.resolve import (
     resolve_headers_or_throw,
 )
 from nova_harness.core.utils.json import strip_json_comments
-from nova_harness.model.composer import (
-    compose_provider,
-    validate_extension_provider,
-)
+from nova_harness.model.composer import compose_provider, validate_extension_provider
 from nova_harness.model.store import FileModelsStore
 from nova_harness.package.utils import is_offline_mode_enabled
 from nova_harness.types.model import (

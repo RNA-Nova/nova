@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.resources.loaders.extensions import detect_extension_conflicts
 from nova_harness.types.extensions import (
     Extension,

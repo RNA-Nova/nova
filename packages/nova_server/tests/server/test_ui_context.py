@@ -7,7 +7,6 @@
 import asyncio
 
 import pytest
-
 from nova_server.connection import (
     Connection,
     ConnectionOrigin,

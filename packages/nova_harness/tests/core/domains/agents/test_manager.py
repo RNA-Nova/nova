@@ -18,7 +18,6 @@ from typing import Callable, Dict, Optional
 
 import pytest
 import yaml
-
 from nova_harness.core.domains.agents import AgentManager
 from nova_harness.types.resources.agents import AgentConfig
 from nova_harness.types.resources.personas import SourceInfo

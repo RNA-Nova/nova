@@ -1,30 +1,19 @@
 """
-基础类型与类型别名。
+基础类型与类型别名（组件内部：行为签名与循环局部 Literal 词汇）。
+
+跨组件序列化的消息/事件词汇已迁 ``nova_protocol``（批次 ②）；
+本模块只留行为契约与运行时别名。
 """
 
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Protocol, Union
 
-from nova_protocol import (
-    Message,
-    ModelThinkingLevel,
-    ToolCall,
-)
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import ToolCall
 
 if TYPE_CHECKING:
     from nova_ai import AssistantMessageEventStream
     from nova_ai.stream_options import SimpleStreamOptions
-    from nova_protocol import Context, Model
+    from nova_protocol import AgentEvent, Context, Model
 
-
-class CustomAgentMessage(NovaBaseModel):
-    """Base class for custom agent messages. Extend this to add your own message types."""
-
-    pass
-
-
-# AgentMessage can be either a standard Message or any custom message
-AgentMessage = Union[Message, CustomAgentMessage]
 
 # A single tool call content block emitted by an assistant message.
 AgentToolCall = ToolCall
@@ -46,9 +35,6 @@ class StreamFn(Protocol):
     ]: ...
 
 
-if TYPE_CHECKING:
-    from .events import AgentEvent
-
 # Event sink used by the agent loop to emit AgentEvents.
 AgentEventSink = Callable[["AgentEvent"], Awaitable[None]]
 
@@ -59,11 +45,9 @@ ToolExecutionMode = Literal["sequential", "parallel"]
 QueueMode = Literal["all", "one-at-a-time"]
 
 __all__ = [
-    "CustomAgentMessage",
-    "AgentMessage",
     "AgentToolCall",
     "StreamFn",
-    "ModelThinkingLevel",
+    "AgentEventSink",
     "ToolExecutionMode",
     "QueueMode",
 ]

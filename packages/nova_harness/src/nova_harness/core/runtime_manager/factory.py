@@ -13,17 +13,14 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from nova_agent import Agent, ModelThinkingLevel
+from nova_agent import Agent
 from nova_ai import ProviderResponse
 from nova_harness.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
 from nova_harness.core.utils import resolve_api_key
 from nova_harness.core.utils.http_idle_timeout import get_http_idle_timeout_seconds
 from nova_harness.core.utils.messages import convert_to_llm
-from nova_harness.events import (
-    AfterProviderResponseEvent,
-    SessionStartEvent,
-)
+from nova_harness.events import AfterProviderResponseEvent, SessionStartEvent
 from nova_harness.events.constants import (
     AFTER_PROVIDER_RESPONSE,
     BEFORE_PROVIDER_HEADERS,
@@ -34,11 +31,7 @@ from nova_harness.model.attribution import merge_provider_attribution_headers
 from nova_harness.sessions import SessionManager
 from nova_harness.types.session.config import CreateAgentSessionOptions
 from nova_harness.types.ui import UIContext
-from nova_protocol import (
-    ImageContent,
-    Model,
-    TextContent,
-)
+from nova_protocol import ImageContent, Model, ModelThinkingLevel, TextContent
 
 _BLOCK_IMAGE_PLACEHOLDER = "Image reading is disabled."
 

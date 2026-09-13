@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 import pytest
-
 from nova_harness.core.agent_session.services import AgentSessionServices
 from nova_harness.package import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader

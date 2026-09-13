@@ -1,12 +1,10 @@
 """
 Nova Agent - 智能代理框架
 提供状态管理、事件订阅、消息队列和生命周期控制的Agent类
-"""
 
-from nova_protocol import (
-    AbortController,
-    AbortSignal,
-)
+跨组件序列化词汇（消息/事件/AgentToolResult 等）一律住 ``nova_protocol``，
+本包门面不中转再导出——消费方用 ``from nova_protocol import X``。
+"""
 
 from .agent import Agent
 from .agent_loop import (
@@ -17,43 +15,26 @@ from .agent_loop import (
     run_agent_loop_continue,
 )
 from .stream_fn import get_default_stream_fn, set_default_stream_fn
-from .types import (  # 事件类型; 核心类型; 类型别名与枚举; 钩子上下文与结果
+from .types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
-    AgentEndEvent,
-    AgentEvent,
+    AgentEventSink,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
-    AgentMessage,
-    AgentStartEvent,
     AgentState,
     AgentTool,
     AgentToolCall,
-    AgentToolResult,
     AgentToolUpdateCallback,
     BeforeToolCallContext,
     BeforeToolCallResult,
-    CustomAgentMessage,
-    MessageEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    ModelThinkingLevel,
     PrepareNextTurnContext,
     QueueMode,
     ShouldStopAfterTurnContext,
     StreamFn,
-    ToolExecutionEndEvent,
     ToolExecutionMode,
-    ToolExecutionStartEvent,
-    ToolExecutionUpdateEvent,
-    TurnEndEvent,
-    TurnStartEvent,
 )
-from .utils import (
-    validate_tool_arguments,
-    validate_tool_call,
-)
+from .utils import validate_tool_arguments, validate_tool_call
 
 # 版本信息
 __version__ = "0.1.0"
@@ -70,30 +51,15 @@ __all__ = [
     "agent_loop_continue",
     "run_agent_loop",
     "run_agent_loop_continue",
-    # 事件类型
-    "AgentEvent",
-    "AgentStartEvent",
-    "AgentEndEvent",
-    "TurnStartEvent",
-    "TurnEndEvent",
-    "MessageStartEvent",
-    "MessageUpdateEvent",
-    "MessageEndEvent",
-    "ToolExecutionStartEvent",
-    "ToolExecutionUpdateEvent",
-    "ToolExecutionEndEvent",
-    # 核心类型
-    "AgentMessage",
+    # 核心类型（组件内部：运行时容器与行为契约）
     "AgentContext",
     "AgentState",
     "AgentLoopConfig",
     "AgentTool",
-    "AgentToolResult",
-    "CustomAgentMessage",
     "AgentToolCall",
     # 类型别名
-    "ModelThinkingLevel",
     "StreamFn",
+    "AgentEventSink",
     "AgentToolUpdateCallback",
     "ToolExecutionMode",
     "QueueMode",
@@ -108,7 +74,4 @@ __all__ = [
     # 工具函数
     "validate_tool_call",
     "validate_tool_arguments",
-    # 信号函数
-    "AbortController",
-    "AbortSignal",
 ]

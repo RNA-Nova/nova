@@ -6,7 +6,6 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from nova_server.rpc.cli import _async_main, _build_parser, main
 
 _EXPECTED_SIGNAL_COUNT = 3 if sys.platform != "win32" else 2

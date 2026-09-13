@@ -13,17 +13,14 @@ from __future__ import annotations
 import inspect
 from typing import Any, Dict, Optional
 
-from nova_agent import AgentTool, AgentToolResult
+from nova_agent import AgentTool
 from nova_harness.types.resources.personas import SourceInfo
 from nova_harness.types.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContextProvider,
     ToolDefinition,
 )
-from nova_protocol import (
-    AbortSignal,
-    TextContent,
-)
+from nova_protocol import AbortSignal, AgentToolResult, TextContent
 
 
 class DynamicTool(AgentTool):

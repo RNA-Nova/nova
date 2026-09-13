@@ -16,10 +16,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from nova_harness.package import PackageManager
 from nova_harness.package.install.installer import PackageInstaller
 from nova_harness.package.manager import SourceScope
+
 
 @pytest.fixture()
 def pm(tmp_path):
@@ -29,6 +29,7 @@ def pm(tmp_path):
         project_trusted=True,
     )
 
+
 @pytest.fixture(autouse=True)
 def no_dependency_install():
     """避免测试执行真实 pip/uv 命令。"""
@@ -37,6 +38,7 @@ def no_dependency_install():
             with patch("nova_harness.package.install.installer.uninstall_package"):
                 with patch("nova_harness.package.manager.uninstall_package"):
                     yield
+
 
 def _plant_npm_cache(pm: PackageManager, name: str, version: str) -> Path:
     """在 user scope 的 npm 缓存目录（即安装态）写入一个已装包。"""
@@ -49,6 +51,7 @@ def _plant_npm_cache(pm: PackageManager, name: str, version: str) -> Path:
         json.dumps({"name": name, "version": version}), encoding="utf-8"
     )
     return pkg_dir
+
 
 class TestNpmLocalResolvability:
     """npm 源本地可解析判定（不触网）。"""
@@ -88,6 +91,7 @@ class TestNpmLocalResolvability:
         assert (
             pm._is_package_resolvable("npm:demo-pkg@^1.0.0", SourceScope.USER) is False
         )
+
 
 class TestInstallLock:
     """跨进程安装锁（同进程多线程验证串行化——OS 文件锁跨进程由 filelock 保证）。"""
@@ -135,6 +139,7 @@ class TestInstallLock:
         assert not errors, errors
         # 串行化证据：in/out 严格成对嵌套或顺序，绝不交错（in,in,...,out,out）
         assert markers == ["in", "out", "in", "out"]
+
 
 class TestEnsureRechecksInsideLock:
     """锁内复查：并发 ensure 同时判"未装"，实际只装一次。"""

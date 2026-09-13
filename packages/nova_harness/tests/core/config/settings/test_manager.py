@@ -9,11 +9,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nova_protocol import ModelThinkingLevel
-
 from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.config.settings.storage import FileSettingsStorage
 from nova_harness.types.config.settings import Settings, SettingsError, SettingsScope
+from nova_protocol import ModelThinkingLevel
 from tests._helpers.settings_manager import settings_manager_in_memory
 from tests._helpers.settings_storage import InMemorySettingsStorage
 

@@ -9,7 +9,6 @@ import json
 
 import pytest
 import websockets
-
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods.state import ServerState

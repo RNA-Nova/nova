@@ -9,9 +9,7 @@ from nova_harness.core.agent_session.controllers.slash_input import SlashInputHa
 from nova_harness.core.agent_session.controllers.stats import StatsCollector
 from nova_harness.core.agent_session.controllers.tools import ToolController
 from nova_harness.core.agent_session.controllers.tree import TreeNavigator
-from nova_harness.core.agent_session.controllers.user_tools import (
-    UserToolController,
-)
+from nova_harness.core.agent_session.controllers.user_tools import UserToolController
 
 __all__ = [
     "CompactionController",

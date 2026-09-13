@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_server.protocol import JSONRPCError, build_request
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.methods.system import register

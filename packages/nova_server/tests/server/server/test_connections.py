@@ -7,7 +7,6 @@
 import asyncio
 
 import pytest
-
 from nova_harness.events.agent import ToolExecutionStartEvent
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol import MethodRegistry

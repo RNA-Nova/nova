@@ -15,19 +15,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from nova_agent import AgentTool
-
 from nova_harness.core.domains.tools.dynamic_tool import (
     DynamicTool,
     create_tool_definition_from_agent_tool,
 )
-from nova_harness.core.utils.name_sets import (
-    apply_name_list,
-    build_selection_report,
-)
-from nova_harness.types.protocols import (
-    ExtensionRunnerProtocol,
-    ResourceLoaderProtocol,
-)
+from nova_harness.core.utils.name_sets import apply_name_list, build_selection_report
+from nova_harness.types.protocols import ExtensionRunnerProtocol, ResourceLoaderProtocol
 from nova_harness.types.resources.selection import CapabilitySelection
 from nova_harness.types.resources.tools import (
     ToolContextProvider,

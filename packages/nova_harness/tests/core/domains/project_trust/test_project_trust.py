@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from nova_harness.extensions.runner import emit_project_trust_event
 from nova_harness.resources.project_trust.project_trust import (
     has_trust_requiring_project_resources,

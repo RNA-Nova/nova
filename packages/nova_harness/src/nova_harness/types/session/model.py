@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from nova_protocol import (
-    Model,
-    ModelThinkingLevel,
-)
+from nova_protocol import Model, ModelThinkingLevel
 from nova_protocol.base_model import NovaBaseModel
 
 

@@ -2,15 +2,7 @@
 核心消息类型定义
 """
 
-from typing import (
-    Annotated,
-    Any,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Union,
-)
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import ConfigDict, Field
 

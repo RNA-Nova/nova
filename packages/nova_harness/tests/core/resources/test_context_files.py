@@ -8,7 +8,6 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.resources.loaders.context_files import (
     load_project_context_files,
 )

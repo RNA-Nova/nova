@@ -23,8 +23,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional
 
-from nova_server.client.base import (FrameChannel, MultiplexedClient,
-                                     ProtocolError)
+from nova_server.client.base import FrameChannel, MultiplexedClient, ProtocolError
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol.methods.state import ServerState
 from nova_server.rpc.cli import build_rpc_methods

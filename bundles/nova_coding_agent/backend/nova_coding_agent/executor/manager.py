@@ -23,9 +23,6 @@ import subprocess
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
-from nova_executor_client import ExecutorClient
-from nova_harness.config.defaults import get_agent_dir
-
 from nova_coding_agent.executor.provision import (
     BootstrapFn,
     ProgressFn,
@@ -35,6 +32,8 @@ from nova_coding_agent.executor.provision import (
     parse_ssh_target,
     provision,
 )
+from nova_executor_client import ExecutorClient
+from nova_harness.config.defaults import get_agent_dir
 
 # 等待本地 executor 打印监听地址的超时
 _SPAWN_READY_TIMEOUT_S = 10.0

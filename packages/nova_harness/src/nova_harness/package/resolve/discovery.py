@@ -9,12 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import pathspec
-
 from nova_harness.core.utils.git import find_git_root
-from nova_harness.package.manifest import (
-    read_manifest,
-    resolve_extension_entries,
-)
+from nova_harness.package.manifest import read_manifest, resolve_extension_entries
 from nova_harness.package.utils import (
     is_ignored_by_specs,
     iter_sorted_entries,

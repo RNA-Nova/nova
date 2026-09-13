@@ -12,15 +12,10 @@ Agent 提供的四个 hook：
 
 import asyncio
 
-from nova_agent import (
-    Agent,
-    AgentLoopTurnUpdate,
-    AgentTool,
-    AgentToolResult,
-    BeforeToolCallResult,
-)
+from nova_agent import Agent, AgentLoopTurnUpdate, AgentTool, BeforeToolCallResult
 from nova_ai import EventStream
 from nova_protocol import (
+    AgentToolResult,
     DoneEvent,
     KnownApi,
     KnownProvider,

@@ -6,7 +6,6 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.extensions.event_bus import ExtensionEventBus
 from nova_harness.extensions.loader import load_extensions
 from nova_harness.types.extensions.loading import ExtensionRuntime
@@ -73,17 +72,18 @@ async def test_extension_registers_message_types(tmp_path: Path) -> None:
     与工具/用户工具的 ``MESSAGE_TYPES`` 类属性约定共用同一注册表——
     扩展（如 permission_gate 的审批留痕消息）由此获得回载身份。
     """
-    from nova_agent import CustomAgentMessage
-
     from nova_harness.sessions.message_types import (
         clear_session_message_types,
         get_session_message_type,
+    )
+    from nova_protocol import (
+        CustomAgentMessage,
     )
 
     ext = tmp_path / "extension.py"
     ext.write_text(
         "from typing import Literal\n"
-        "from nova_agent import CustomAgentMessage\n"
+        "from nova_protocol import CustomAgentMessage\n"
         "\n"
         "class DecisionMessage(CustomAgentMessage):\n"
         "    role: Literal['permissionDecision'] = 'permissionDecision'\n"

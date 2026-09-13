@@ -36,19 +36,14 @@ from nova_harness.resources.source_info import (
     find_source_info_for_path,
     source_info_from_metadata,
 )
-from nova_harness.sessions.message_types import (
-    register_message_types,
-)
+from nova_harness.sessions.message_types import register_message_types
 from nova_harness.types.resources.diagnostics import (
     ResourceCollision,
     ResourceDiagnostic,
 )
 from nova_harness.types.resources.personas import SourceInfo
 from nova_harness.types.resources.prompts import ResolvedResource
-from nova_harness.types.resources.user_tools import (
-    UserToolDefinition,
-    UserToolResource,
-)
+from nova_harness.types.resources.user_tools import UserToolDefinition, UserToolResource
 
 # UserTool 类必须声明的元数据属性及期望类型
 _REQUIRED_ATTRS: Dict[str, type] = {

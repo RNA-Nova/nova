@@ -16,10 +16,9 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from nova_harness.types.config.settings import ExecutorSettings
-
 from nova_coding_agent.executor.policy import SpawnPolicy, resolve_spawn_policy
 from nova_coding_agent.tools_common.path_utils import normalize_input, resolve_path
+from nova_harness.types.config.settings import ExecutorSettings
 
 
 @dataclass

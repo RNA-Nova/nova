@@ -1,31 +1,13 @@
 """
-Nova Agent 类型定义统一导出。
+Nova Agent 类型定义统一导出（组件内部类型）。
+
+跨组件序列化词汇（AgentMessage / AgentEvent 家族 / AgentToolResult /
+CustomAgentMessage）已迁 ``nova_protocol``——消费方一律
+``from nova_protocol import X``，本包不中转再导出。
 """
 
-from .base import (
-    AgentEventSink,
-    AgentMessage,
-    AgentToolCall,
-    CustomAgentMessage,
-    ModelThinkingLevel,
-    QueueMode,
-    StreamFn,
-    ToolExecutionMode,
-)
+from .base import AgentEventSink, AgentToolCall, QueueMode, StreamFn, ToolExecutionMode
 from .context import AgentContext, AgentLoopConfig
-from .events import (
-    AgentEndEvent,
-    AgentEvent,
-    AgentStartEvent,
-    MessageEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    ToolExecutionEndEvent,
-    ToolExecutionStartEvent,
-    ToolExecutionUpdateEvent,
-    TurnEndEvent,
-    TurnStartEvent,
-)
 from .hooks import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -36,39 +18,26 @@ from .hooks import (
     ShouldStopAfterTurnContext,
 )
 from .state import AgentState
-from .tool import AgentTool, AgentToolResult, AgentToolUpdateCallback
+from .tool import AgentTool, AgentToolUpdateCallback
 from .tool_execution import (
     ExecutedToolCallBatch,
     ExecutedToolCallOutcome,
     FinalizedToolCallOutcome,
+    ImmediateToolCallOutcome,
     PreparedToolCall,
+    PreparedToolCallModel,
 )
 
 __all__ = [
     # base
     "AgentEventSink",
-    "AgentMessage",
     "AgentToolCall",
-    "CustomAgentMessage",
     "QueueMode",
     "StreamFn",
-    "ModelThinkingLevel",
     "ToolExecutionMode",
     # context
     "AgentContext",
     "AgentLoopConfig",
-    # events
-    "AgentEvent",
-    "AgentStartEvent",
-    "AgentEndEvent",
-    "TurnStartEvent",
-    "TurnEndEvent",
-    "MessageStartEvent",
-    "MessageUpdateEvent",
-    "MessageEndEvent",
-    "ToolExecutionStartEvent",
-    "ToolExecutionUpdateEvent",
-    "ToolExecutionEndEvent",
     # hooks
     "BeforeToolCallContext",
     "BeforeToolCallResult",
@@ -81,11 +50,12 @@ __all__ = [
     "AgentState",
     # tool
     "AgentTool",
-    "AgentToolResult",
     "AgentToolUpdateCallback",
     # tool execution
     "ExecutedToolCallOutcome",
     "FinalizedToolCallOutcome",
     "ExecutedToolCallBatch",
+    "ImmediateToolCallOutcome",
     "PreparedToolCall",
+    "PreparedToolCallModel",
 ]

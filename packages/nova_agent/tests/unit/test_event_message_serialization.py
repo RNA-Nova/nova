@@ -7,9 +7,9 @@
 
 from typing import Literal
 
-from nova_agent.types.base import CustomAgentMessage
-from nova_agent.types.events import (
+from nova_protocol import (
     AgentEndEvent,
+    CustomAgentMessage,
     MessageEndEvent,
     MessageStartEvent,
 )

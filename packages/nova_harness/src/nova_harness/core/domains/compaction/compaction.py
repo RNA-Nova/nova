@@ -10,12 +10,8 @@ import json
 import time
 from typing import Dict, List, Optional, Tuple
 
-from nova_agent import AgentMessage, StreamFn
-from nova_ai import (
-    SimpleStreamOptions,
-    builtin_models,
-    to_thinking_level,
-)
+from nova_agent import StreamFn
+from nova_ai import SimpleStreamOptions, builtin_models, to_thinking_level
 from nova_harness.core.domains.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,
@@ -40,6 +36,7 @@ from nova_harness.types.messages import ContextInjectable
 from nova_harness.types.session.entries import CompactionEntry, SessionEntry
 from nova_protocol import (
     AbortSignal,
+    AgentMessage,
     AssistantMessage,
     Context,
     Model,

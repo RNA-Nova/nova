@@ -12,32 +12,37 @@ import copy
 import inspect
 import json
 import math
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import jsonschema
 from nova_protocol import (
+    AgentMessage,
+    AssistantMessage,
     Message,
     Tool,
     ToolCall,
+    ToolResultMessage,
+    UserMessage,
 )
-
-from .types.base import AgentMessage
 
 
 def default_convert_to_llm(messages: List[AgentMessage]) -> List[Message]:
     """Default converter: keep only LLM-compatible messages.
 
-    用 getattr 而不是直接访问 ``.role``：CustomAgentMessage 可以不带 role 字段，
-    此时应被过滤掉而不是抛 AttributeError（与 TS defaultConvertToLlm 对齐）。
+    只保留框架三角色消息（``UserMessage``/``AssistantMessage``/
+    ``ToolResultMessage``）；包级自定义消息（``CustomAgentMessage`` 子类，
+    ``role`` 是包专属词汇）被过滤掉（与 TS defaultConvertToLlm 对齐）。
     """
     return [
         m
         for m in messages
-        if getattr(m, "role", None) in ("user", "assistant", "toolResult")
+        if isinstance(m, (UserMessage, AssistantMessage, ToolResultMessage))
     ]
 
 
-async def invoke_hook(hook: Callable[..., Any], *args: Any, default: Any = None) -> Any:
+async def invoke_hook(
+    hook: Optional[Callable[..., Any]], *args: Any, default: Any = None
+) -> Any:
     """调用一个可同步可异步的 hook；hook 为 None 时返回 default。
 
     仓库内所有 hook 调用点统一走这里，避免"判空 → 调用 → isawaitable → 条件 await"

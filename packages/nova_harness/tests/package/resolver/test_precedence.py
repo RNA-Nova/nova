@@ -1,7 +1,6 @@
 """测试 resolver 元数据与优先级。"""
 
 import pytest
-
 from nova_harness.package.resolve.resolver import (
     resource_precedence_rank,
     sort_resolved_resources,

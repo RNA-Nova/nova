@@ -20,10 +20,9 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from nova_harness.extensions.api import NovaExtensionAPI
-from nova_harness.events.results import ToolCallEventResult
-
 from nova_coding_agent.ui_primitives import notify_message, select
+from nova_harness.events.results import ToolCallEventResult
+from nova_harness.extensions.api import NovaExtensionAPI
 
 # bash 危险命令模式（pi permission-gate.ts 同款三条）
 _DANGEROUS_PATTERNS = [

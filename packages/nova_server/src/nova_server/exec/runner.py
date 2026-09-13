@@ -20,8 +20,7 @@ import sys
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from nova_harness.config.defaults import get_agent_dir
-from nova_harness.core.utils.child_process import \
-    kill_tracked_detached_children
+from nova_harness.core.utils.child_process import kill_tracked_detached_children
 from nova_server.client.in_process import InProcessNovaClient
 
 ClientFactory = Callable[[], Awaitable[InProcessNovaClient]]

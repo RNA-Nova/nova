@@ -11,23 +11,24 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, List, Optional, Set, Tuple
 
 import uuid6
-from nova_agent import AgentMessage
-from pydantic import Field, TypeAdapter
-
 from nova_harness.config.defaults import SESSIONS_DIR_NAME, get_agent_dir
-from nova_harness.sessions.message_types import get_session_message_type
-from nova_harness.types.messages import OpaqueUserToolMessage
-from nova_harness.types.session.entries import CompactionEntry
-from nova_harness.types.session.entries import FileEntry
-from nova_harness.types.session.context import SessionContext
-from nova_harness.types.compaction.branch_summary import SessionEntry
-from nova_harness.types.session.entries import SessionHeader
-from nova_harness.types.session.entries import SessionMessageEntry
 from nova_harness.core.utils.messages import (
     create_branch_summary_message,
     create_compaction_summary_message,
     create_custom_message,
 )
+from nova_harness.sessions.message_types import get_session_message_type
+from nova_harness.types.compaction.branch_summary import SessionEntry
+from nova_harness.types.messages import OpaqueUserToolMessage
+from nova_harness.types.session.context import SessionContext
+from nova_harness.types.session.entries import (
+    CompactionEntry,
+    FileEntry,
+    SessionHeader,
+    SessionMessageEntry,
+)
+from nova_protocol import AgentMessage
+from pydantic import Field, TypeAdapter
 
 logger = logging.getLogger(__name__)
 

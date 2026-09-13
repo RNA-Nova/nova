@@ -1,5 +1,4 @@
 import yaml
-
 from nova_harness.types.resources.prompts import ParsedFrontmatter
 
 

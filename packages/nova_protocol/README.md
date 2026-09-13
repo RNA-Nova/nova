@@ -1,8 +1,10 @@
 # nova_protocol —— Nova 词汇枢纽
 
 本包是 Nova 全部**跨组件边界词汇**的唯一住所。当前已入住：LLM 消息/内容/模型/用量/
-流式事件、枚举与 compat、auth 词汇、模型目录存储条目（`ModelsStoreEntry`）、语义 id、
-取消原语（`signal.py`，登记制唯一成员）。按迁移路线待迁入：agent 循环事件、
+流式事件、枚举与 compat、auth 词汇、模型目录存储条目（`ModelsStoreEntry`）、
+agent 循环事件与 agent 消息词汇（`agent_events.py`：AgentEvent 家族 + AgentMessage
+开放集 + CustomAgentMessage 基座 + AgentToolResult + `dump_agent_message`）、
+语义 id、取消原语（`signal.py`，登记制唯一成员）。按迁移路线待迁入：
 session 落盘 entries、线上 item 正典、共享 config 形状。
 
 ## 收录标准（唯一一条）

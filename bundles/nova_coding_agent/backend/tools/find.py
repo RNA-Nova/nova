@@ -2,17 +2,6 @@
 
 from typing import Any, Dict, List, Optional
 
-from nova_agent import AgentToolResult
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-from nova_protocol import (
-    AbortSignal,
-    TextContent,
-)
-
 from nova_coding_agent.executor import (
     backend_file_layer,
     backend_process_runner,
@@ -27,6 +16,16 @@ from nova_coding_agent.tools_common.truncate import (
     UNLIMITED_MAX_LINES,
     TruncationOptions,
     truncate_head,
+)
+from nova_harness.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+from nova_protocol import (
+    AbortSignal,
+    AgentToolResult,
+    TextContent,
 )
 
 

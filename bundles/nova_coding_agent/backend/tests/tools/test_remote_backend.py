@@ -10,7 +10,6 @@ import importlib.util
 import os
 
 import pytest
-
 from nova_coding_agent.executor import (
     BackendSelection,
     reset_backend_selection,

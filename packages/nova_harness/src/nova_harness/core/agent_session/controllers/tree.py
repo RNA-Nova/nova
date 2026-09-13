@@ -63,10 +63,7 @@ class TreeNavigator:
             # session_before_tree 扩展 hook
             runner = self._session._extension_runner
             if runner is not None and runner.has_handlers(SESSION_BEFORE_TREE):
-                from nova_harness.events import (
-                    SessionBeforeTreeEvent,
-                    TreePreparation,
-                )
+                from nova_harness.events import SessionBeforeTreeEvent, TreePreparation
 
                 prep = TreePreparation(
                     target_id=target_id,

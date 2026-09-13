@@ -5,7 +5,6 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from nova_agent import CustomAgentMessage
 from nova_harness.core.utils.messages import (
     convert_to_llm,
     create_branch_summary_message,
@@ -19,6 +18,7 @@ from nova_harness.types.messages import (
 )
 from nova_protocol import (
     AssistantMessage,
+    CustomAgentMessage,
     TextContent,
     UserMessage,
 )

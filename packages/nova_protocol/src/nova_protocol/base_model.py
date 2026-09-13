@@ -20,9 +20,8 @@ class NovaBaseModel(BaseModel):
       惯例）；``populate_by_name=True`` 反序列化双收（snake/camel 都认）。
     - 序列化出口两形态：``model_dump()``（持久化/内部——snake_case 字段名，
       磁盘格式与存量兼容）；``dump_wire()``（RPC 线上——by_alias=True camel）。
-    - Enum 序列化时使用 .value（字符串），而非 Enum 对象
+      两者默认 ``mode='json'``，确保输出纯 Python 原生类型（Enum → str）。
     - 允许通过属性名赋值（类似 dataclass 的行为）
-    - model_dump() 默认 mode='json'，与 mashumaro 的 to_dict() 行为对齐
     """
 
     model_config = ConfigDict(

@@ -25,10 +25,7 @@ from nova_harness.types.package.manifest import (
     ResourceMetadata,
     UninstallResult,
 )
-from nova_harness.types.package.progress import (
-    ProgressCallback,
-    ProgressEvent,
-)
+from nova_harness.types.package.progress import ProgressCallback, ProgressEvent
 from nova_harness.types.package.resolution import (
     PackageFilter,
     PathMetadata,

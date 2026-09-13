@@ -18,7 +18,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List
 
-from nova_agent import AgentToolResult
 from nova_harness.core.utils.messages import (
     create_custom_message,
     extract_text_from_content,
@@ -31,7 +30,7 @@ from nova_harness.types.session.entries import (
     SessionEntry,
     SessionMessageEntry,
 )
-from nova_protocol import ToolCall
+from nova_protocol import AgentToolResult, ToolCall
 from nova_server.types.items import (
     BranchSummaryItem,
     CompactionItem,

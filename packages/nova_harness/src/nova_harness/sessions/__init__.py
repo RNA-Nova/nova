@@ -24,10 +24,7 @@ from nova_harness.sessions.cache_stats import (
 )
 
 # Session listing (async scan of session directories)
-from nova_harness.sessions.listing import (
-    build_session_info,
-    list_sessions_from_dir,
-)
+from nova_harness.sessions.listing import build_session_info, list_sessions_from_dir
 
 # Main manager class
 from nova_harness.sessions.manager import SessionManager

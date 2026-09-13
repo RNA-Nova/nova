@@ -5,10 +5,9 @@ Tool execution intermediate types used by the agent loop.
 from dataclasses import dataclass, field
 from typing import Any, List, Literal, Union
 
-from nova_protocol import ToolResultMessage
+from nova_protocol import AgentToolResult, ToolResultMessage
 
 from .base import AgentToolCall
-from .tool import AgentToolResult
 
 
 @dataclass(frozen=True)
@@ -37,7 +36,7 @@ class ExecutedToolCallBatch:
 
 
 @dataclass(frozen=True)
-class _ImmediateToolCallOutcome:
+class ImmediateToolCallOutcome:
     """A tool call whose outcome was determined during preparation (e.g. error or block)."""
 
     result: AgentToolResult[Any]
@@ -46,7 +45,7 @@ class _ImmediateToolCallOutcome:
 
 
 @dataclass(frozen=True)
-class _PreparedToolCallModel:
+class PreparedToolCallModel:
     """A tool call that has been prepared and is ready for execution."""
 
     tool_call: AgentToolCall
@@ -55,11 +54,13 @@ class _PreparedToolCallModel:
     kind: Literal["prepared"] = field(default="prepared", init=False)
 
 
-PreparedToolCall = Union[_PreparedToolCallModel, _ImmediateToolCallOutcome]
+PreparedToolCall = Union[PreparedToolCallModel, ImmediateToolCallOutcome]
 
 __all__ = [
     "ExecutedToolCallOutcome",
     "FinalizedToolCallOutcome",
     "ExecutedToolCallBatch",
+    "ImmediateToolCallOutcome",
     "PreparedToolCall",
+    "PreparedToolCallModel",
 ]

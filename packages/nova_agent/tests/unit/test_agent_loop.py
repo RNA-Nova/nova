@@ -41,23 +41,18 @@ from nova_agent import (
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentTool,
-    AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
-    CustomAgentMessage,
-    MessageUpdateEvent,
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
-    ToolExecutionUpdateEvent,
 )
 from nova_agent.agent_loop import run_agent_loop, run_agent_loop_continue
-from nova_ai import (
-    EventStream,
-    SimpleStreamOptions,
-)
 from nova_protocol import (
     AbortController,
+    AgentToolResult,
+    CustomAgentMessage,
     DoneEvent,
+    MessageUpdateEvent,
     Model,
     ModelThinkingLevel,
     StartEvent,
@@ -65,8 +60,14 @@ from nova_protocol import (
     ThinkingLevel,
     ToolCall,
     ToolCallEndEvent,
+    ToolExecutionUpdateEvent,
     ToolResultMessage,
     UserMessage,
+)
+
+from nova_ai import (
+    EventStream,
+    SimpleStreamOptions,
 )
 
 # ----------------------------------------------------------------------

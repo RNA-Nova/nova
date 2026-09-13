@@ -17,7 +17,6 @@ from typing import Dict, List, Optional
 from unittest.mock import patch
 
 import pytest
-
 from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.core.domains.skills import (
     expand_skill_command,

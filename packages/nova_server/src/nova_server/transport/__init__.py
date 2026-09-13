@@ -11,10 +11,7 @@
 from nova_server.transport.base import Transport
 from nova_server.transport.memory import MemoryTransport
 from nova_server.transport.stdio import StdioTransport
-from nova_server.transport.websocket import (
-    WebSocketAcceptor,
-    WebSocketTransport,
-)
+from nova_server.transport.websocket import WebSocketAcceptor, WebSocketTransport
 
 __all__ = [
     "Transport",

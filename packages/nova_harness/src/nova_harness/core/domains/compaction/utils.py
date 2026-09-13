@@ -5,11 +5,10 @@ Shared utilities for compaction and branch summarization.
 import json
 from typing import List, Optional, Tuple
 
-from nova_agent import AgentMessage
 from nova_harness.sessions.utils import session_entry_to_context_messages
 from nova_harness.types.compaction.branch_summary import SessionEntry
 from nova_harness.types.compaction.file_ops import FileOperations
-from nova_protocol import Message
+from nova_protocol import AgentMessage, Message
 
 # ============================================================================
 # Message Extraction

@@ -6,15 +6,14 @@
 import asyncio
 
 import pytest
-
 from nova_harness.events.agent import ToolExecutionStartEvent
+from nova_harness.types.ui.context import UIContext
+from nova_harness.types.ui.primitives import UIResponse
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods.state import ServerState
 from nova_server.server import RpcServer
 from nova_server.transport import MemoryTransport
-from nova_harness.types.ui.context import UIContext
-from nova_harness.types.ui.primitives import UIResponse
 
 
 class FakeSession:

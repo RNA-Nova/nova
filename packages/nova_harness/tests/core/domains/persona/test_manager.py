@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 
 import pytest
-
 from nova_harness.core.domains.persona import PersonaManager
 from nova_harness.types.resources.agents import AgentConfig
 from nova_harness.types.resources.personas import Persona, SourceInfo

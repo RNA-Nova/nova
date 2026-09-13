@@ -13,7 +13,6 @@ from typing import Any, Callable, Dict, Optional
 
 import pytest
 import yaml
-
 from nova_harness.core.utils.files import load_text_file
 from nova_harness.resources.loaders.agent_config import (
     load_agent_config_from_yaml,

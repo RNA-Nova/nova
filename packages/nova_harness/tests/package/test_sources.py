@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from nova_harness.package.source.resolver import SourceResolver
 from nova_harness.package.source.spec import parse_source
 

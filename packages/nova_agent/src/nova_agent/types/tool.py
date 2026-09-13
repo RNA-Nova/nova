@@ -1,17 +1,14 @@
 """
-工具相关类型定义。
+工具相关类型定义（组件内部：工具行为契约）。
+
+``AgentToolResult`` 等跨组件词汇已迁 ``nova_protocol``（批次 ②）；
+本模块只剩 ``AgentTool`` 行为契约（ABC）与回调签名别名。
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Generic, List, Optional, TypeVar, Union
+from typing import Any, Callable, Generic, List, Optional, TypeVar
 
-from nova_protocol import (
-    AbortSignal,
-    ImageContent,
-    NovaBaseModel,
-    TextContent,
-    Tool,
-)
+from nova_protocol import AbortSignal, AgentToolResult, Tool
 
 from .base import ToolExecutionMode
 
@@ -19,29 +16,7 @@ TDetails = TypeVar("TDetails")
 """Type variable for tool execution details."""
 
 TParameters = TypeVar("TParameters")
-"""Type variable for tool parameters (schema)."""
-
-
-class AgentToolResult(NovaBaseModel, Generic[TDetails]):
-    """Result of a tool execution."""
-
-    content: List[Union[TextContent, ImageContent]]
-    """Content blocks supporting text and images."""
-    details: TDetails
-    """Details to be displayed in a UI or logged."""
-    added_tool_names: Optional[List[str]] = None
-    """Names of tools introduced by this result and available from this transcript point onward."""
-    terminate: Optional[bool] = None
-    """
-    Hint that the agent should stop after the current tool batch.
-    Early termination only happens when every finalized tool result in the batch sets this to true.
-    """
-    is_error: bool = False
-    """
-    结果级错误标记（pi 对齐）：工具对**预期内失败**（非零退出、文件不存在、
-    参数非法等）返回结果时置 True——驱动 toolResult.is_error 与 UI 错误卡片。
-    异常路径（未捕获异常）由执行框架另行标记，不走此字段。
-    """
+"""Type variable for tool parameters."""
 
 
 AgentToolUpdateCallback = Callable[[AgentToolResult[Any]], None]
@@ -94,9 +69,8 @@ class AgentTool(Tool, Generic[TParameters, TDetails], ABC):
 
 
 __all__ = [
-    "AgentToolResult",
-    "AgentToolUpdateCallback",
     "AgentTool",
+    "AgentToolUpdateCallback",
     "TDetails",
     "TParameters",
 ]

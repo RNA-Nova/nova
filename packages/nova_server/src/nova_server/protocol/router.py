@@ -9,11 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, get_typ
 
 from nova_protocol.base_model import NovaBaseModel
 from nova_server.protocol.errors import JSONRPCError
-from nova_server.protocol.jsonrpc import (
-    JsonRpcMessage,
-    build_error,
-    build_response,
-)
+from nova_server.protocol.jsonrpc import JsonRpcMessage, build_error, build_response
 from pydantic import BaseModel, RootModel, ValidationError
 
 Handler = Callable[[Dict[str, Any]], Any | Awaitable[Any]]

@@ -8,7 +8,6 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.resources.loaders.personas import (
     load_persona_from_file,
     load_personas,

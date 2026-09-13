@@ -5,7 +5,6 @@ nova-pkg CLI 单元测试。
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from nova_harness.app.package import main
 from nova_harness.types.package import PackageMetadata, PackageView
 

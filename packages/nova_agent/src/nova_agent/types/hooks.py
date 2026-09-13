@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from .context import AgentContext
 
 from nova_protocol import (
+    AgentMessage,
+    AgentToolResult,
     AssistantMessage,
     ImageContent,
     Model,
@@ -19,8 +21,7 @@ from nova_protocol import (
     ToolResultMessage,
 )
 
-from .base import AgentMessage, AgentToolCall
-from .tool import AgentToolResult
+from .base import AgentToolCall
 
 
 @dataclass(frozen=True)

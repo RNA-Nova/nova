@@ -174,10 +174,7 @@ def _check_npm_update(
     if not installed_version:
         return None
 
-    from nova_harness.package.source.resolver import (
-        npm_fetch_json,
-        npm_registry_base,
-    )
+    from nova_harness.package.source.resolver import npm_fetch_json, npm_registry_base
 
     try:
         metadata = npm_fetch_json(f"{npm_registry_base()}/{source.npm_name}")

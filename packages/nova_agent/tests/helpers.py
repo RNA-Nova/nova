@@ -2,9 +2,9 @@
 
 from typing import Any, Callable, List
 
-from nova_agent import AgentTool, AgentToolResult
-from nova_ai import EventStream
+from nova_agent import AgentTool
 from nova_protocol import (
+    AgentToolResult,
     AssistantMessage,
     DoneEvent,
     Model,
@@ -15,6 +15,8 @@ from nova_protocol import (
     ToolCall,
     ToolCallEndEvent,
 )
+
+from nova_ai import EventStream
 
 
 class EchoTool(AgentTool):

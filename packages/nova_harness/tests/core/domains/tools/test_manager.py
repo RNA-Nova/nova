@@ -12,14 +12,19 @@
 from unittest.mock import MagicMock
 
 import pytest
-from nova_agent import AgentTool, AgentToolResult
+from nova_agent import (
+    AgentTool,
+)
 from nova_harness.core.domains.tools import ToolsManager
 from nova_harness.core.domains.tools.dynamic_tool import (
     DynamicTool,
     create_tool_definition_from_agent_tool,
 )
 from nova_harness.types.resources.tools import ToolDefinition
-from nova_protocol import TextContent
+from nova_protocol import (
+    AgentToolResult,
+    TextContent,
+)
 
 
 class _EchoTool(AgentTool):

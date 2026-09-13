@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from nova_harness.events import InputEvent, InputEventResult
 from nova_harness.events.constants import INPUT
 from nova_harness.extensions.runner import ExtensionRunner

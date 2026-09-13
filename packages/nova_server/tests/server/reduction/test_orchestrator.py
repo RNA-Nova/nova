@@ -8,7 +8,6 @@
 from typing import Any, List, Literal
 
 import pytest
-from nova_agent import CustomAgentMessage
 from nova_harness.events import (
     AgentEndEvent,
     EntryAppendedEvent,
@@ -31,6 +30,7 @@ from nova_harness.types.messages import (
 from nova_harness.types.session.entries import CustomEntry, LabelEntry
 from nova_protocol import (
     AssistantMessage,
+    CustomAgentMessage,
     StopReason,
     TextContent,
     ThinkingContent,

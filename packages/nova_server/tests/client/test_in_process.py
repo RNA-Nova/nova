@@ -9,8 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import pytest
-from nova_server.client.in_process import (InProcessNovaClient,
-                                           InProcessServerError)
+from nova_server.client.in_process import InProcessNovaClient, InProcessServerError
 
 
 @pytest.fixture

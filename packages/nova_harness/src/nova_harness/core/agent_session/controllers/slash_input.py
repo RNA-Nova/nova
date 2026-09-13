@@ -13,9 +13,7 @@ from typing import TYPE_CHECKING, Optional
 
 from nova_harness.core.domains.skills import expand_skill_command
 from nova_harness.events import ExtensionErrorEvent
-from nova_harness.resources.loaders.prompt_templates import (
-    expand_prompt_template,
-)
+from nova_harness.resources.loaders.prompt_templates import expand_prompt_template
 from nova_harness.types.extensions.commands import RegisteredCommand
 from nova_harness.types.protocols import AgentSessionProtocol
 

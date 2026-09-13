@@ -7,7 +7,6 @@
 
 from typing import Any, List, Literal
 
-from nova_agent import AgentToolResult, CustomAgentMessage
 from nova_harness.events import (
     AgentEndEvent,
     ItemEmissionEvent,
@@ -30,7 +29,9 @@ from nova_harness.types.session.entries import (
     SessionMessageEntry,
 )
 from nova_protocol import (
+    AgentToolResult,
     AssistantMessage,
+    CustomAgentMessage,
     StopReason,
     TextContent,
     ThinkingContent,

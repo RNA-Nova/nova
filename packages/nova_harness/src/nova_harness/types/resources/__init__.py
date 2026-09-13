@@ -1,10 +1,6 @@
 """资源加载相关类型。"""
 
-from nova_harness.types.resources.agents import (
-    AgentConfig,
-    DynamicContext,
-    Section,
-)
+from nova_harness.types.resources.agents import AgentConfig, DynamicContext, Section
 from nova_harness.types.resources.context_files import ContextFile
 from nova_harness.types.resources.diagnostics import (
     ResourceCollision,
@@ -25,10 +21,7 @@ from nova_harness.types.resources.prompts import (
 from nova_harness.types.resources.selection import CapabilitySelection
 from nova_harness.types.resources.skills import ParsedSkillBlock, Skill
 from nova_harness.types.resources.tools import ToolDefinition, ToolInfo
-from nova_harness.types.resources.user_tools import (
-    UserToolDefinition,
-    UserToolInfo,
-)
+from nova_harness.types.resources.user_tools import UserToolDefinition, UserToolInfo
 
 __all__ = [
     "AgentConfig",

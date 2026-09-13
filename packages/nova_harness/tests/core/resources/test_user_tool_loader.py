@@ -11,7 +11,7 @@ from nova_harness.sessions.message_types import (
 
 _EXECUTOR = """
 from typing import Literal
-from nova_agent import CustomAgentMessage
+from nova_protocol import CustomAgentMessage
 
 class FakeResultMessage(CustomAgentMessage):
     text: str = ""

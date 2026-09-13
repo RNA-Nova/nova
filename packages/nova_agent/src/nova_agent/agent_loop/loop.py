@@ -3,31 +3,36 @@ Agent loop core: main loop and assistant streaming.
 """
 
 import dataclasses
-from typing import List, Optional
+from typing import List, Optional, cast
 
-from nova_ai import to_thinking_level
+from nova_ai import AssistantMessageEventStream, to_thinking_level
 from nova_protocol import (
     AbortSignal,
-    AssistantMessage,
-    Context,
-)
-
-from ..stream_fn import builtin_fallback_stream_fn, get_default_stream_fn
-from ..types import (
-    AgentContext,
     AgentEndEvent,
-    AgentEventSink,
-    AgentLoopConfig,
     AgentMessage,
     AgentStartEvent,
+    AssistantMessage,
+    Context,
+    DoneEvent,
+    ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
+    StartEvent,
+    StopReason,
+    Tool,
+    TurnEndEvent,
+    TurnStartEvent,
+)
+
+from ..stream_fn import get_default_stream_fn
+from ..types import (
+    AgentContext,
+    AgentEventSink,
+    AgentLoopConfig,
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
     StreamFn,
-    TurnEndEvent,
-    TurnStartEvent,
 )
 from ..utils import default_convert_to_llm, invoke_hook
 from .tools import execute_tool_calls, fail_tool_calls_from_truncated_message
@@ -127,7 +132,7 @@ async def _run_loop(
             )
             new_messages.append(assistant_msg)
 
-            if assistant_msg.stop_reason in ("error", "aborted"):
+            if assistant_msg.stop_reason in (StopReason.ERROR, StopReason.ABORTED):
                 await emit(TurnEndEvent(message=assistant_msg, tool_results=[]))
                 await emit(AgentEndEvent(messages=new_messages))
                 return
@@ -140,7 +145,7 @@ async def _run_loop(
             if tool_calls:
                 # "length" 停止意味着输出被 token 上限截断，该消息里每个 tool call
                 # 的参数都可能被截断。全部 fail，而不是执行可能残缺的调用。
-                if assistant_msg.stop_reason == "length":
+                if assistant_msg.stop_reason == StopReason.LENGTH:
                     executed_batch = await fail_tool_calls_from_truncated_message(
                         tool_calls, emit
                     )
@@ -254,10 +259,11 @@ async def _stream_assistant_response(
     llm_context = Context(
         system_prompt=context.system_prompt,
         messages=llm_messages,
-        tools=context.tools or [],
+        # AgentTool 是 Tool 子类；List 不变性要求显式收口（下游只读工具列表）
+        tools=cast(List[Tool], context.tools) if context.tools else [],
     )
 
-    stream_func = stream_fn or get_default_stream_fn() or builtin_fallback_stream_fn()
+    stream_func = stream_fn or get_default_stream_fn()
 
     # Resolve API key (important for expiring tokens)
     resolved_api_key = config.stream_options.api_key
@@ -271,34 +277,30 @@ async def _stream_assistant_response(
     )
 
     # Call the underlying streaming function (returns async iterator of events)
-    response = await invoke_hook(
-        stream_func,
-        config.model,
-        llm_context,
-        stream_options,
+    # invoke_hook 的返回是 Any；StreamFn 契约保证是 AssistantMessageEventStream
+    response = cast(
+        AssistantMessageEventStream,
+        await invoke_hook(
+            stream_func,
+            config.model,
+            llm_context,
+            stream_options,
+        ),
     )
 
     partial_message: Optional[AssistantMessage] = None
     added_partial = False
 
     async for event in response:
-        if event.type == "start":
-            partial_message = event.partial
-            context.messages.append(partial_message)
+        if isinstance(event, StartEvent):
+            partial = event.partial
+            partial_message = partial
+            context.messages.append(partial)
             added_partial = True
-            await emit(MessageStartEvent(message=partial_message.model_copy()))
-        elif event.type in (
-            "text_start",
-            "text_delta",
-            "text_end",
-            "thinking_start",
-            "thinking_delta",
-            "thinking_end",
-            "toolcall_start",
-            "toolcall_delta",
-            "toolcall_end",
-        ):
-            if partial_message:
+            await emit(MessageStartEvent(message=partial.model_copy()))
+        elif not isinstance(event, (DoneEvent, ErrorEvent)):
+            # 中间增量事件（text/thinking/toolcall 九种）——均携带 partial
+            if partial_message is not None:
                 partial_message = event.partial
                 context.messages[-1] = partial_message
                 await emit(
@@ -307,7 +309,7 @@ async def _stream_assistant_response(
                         message=partial_message.model_copy(),
                     )
                 )
-        elif event.type in ("done", "error"):
+        else:  # DoneEvent | ErrorEvent
             final_message = await response.result()
             if added_partial:
                 context.messages[-1] = final_message

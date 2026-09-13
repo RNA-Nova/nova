@@ -9,18 +9,21 @@ from __future__ import annotations
 import os
 from typing import Any, List
 
-from nova_harness.config.defaults import (AUTH_FILE_NAME, MODELS_FILE_NAME,
-                                          get_agent_dir)
+from nova_harness.config.defaults import AUTH_FILE_NAME, MODELS_FILE_NAME, get_agent_dir
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.methods import shapes
-from nova_server.protocol.methods.shapes import (CycleModelResult,
-                                                 CycleThinkingLevelResult,
-                                                 ListModelsResult,
-                                                 ListScopedModelsResult,
-                                                 ModelListItem, ModelRef,
-                                                 OkResult, ScopedModelItem,
-                                                 SetScopedModelsResult,
-                                                 SetThinkingLevelResult)
+from nova_server.protocol.methods.shapes import (
+    CycleModelResult,
+    CycleThinkingLevelResult,
+    ListModelsResult,
+    ListScopedModelsResult,
+    ModelListItem,
+    ModelRef,
+    OkResult,
+    ScopedModelItem,
+    SetScopedModelsResult,
+    SetThinkingLevelResult,
+)
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.router import MethodRegistry
 

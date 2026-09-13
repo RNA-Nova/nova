@@ -4,7 +4,6 @@ import os
 import tempfile
 
 import pytest
-
 from nova_harness.package import manifest as manifest_module
 from nova_harness.package.manifest import read_pyproject_dependencies
 

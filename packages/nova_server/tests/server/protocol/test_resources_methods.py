@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import pytest
-
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import resources as resources_methods
 from nova_server.protocol.methods.state import ServerState

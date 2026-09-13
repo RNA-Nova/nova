@@ -11,7 +11,6 @@ import os
 from unittest.mock import patch
 
 import pytest
-
 from nova_harness.config.resolve import (
     get_config_value_env_var_name,
     get_config_value_env_var_names,

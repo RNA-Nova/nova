@@ -3,13 +3,9 @@
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
-from nova_agent import AgentMessage
 from nova_harness.types.compaction.file_ops import FileOperations
 from nova_harness.types.session.entries import SessionEntry
-from nova_protocol import (
-    AbortSignal,
-    Model,
-)
+from nova_protocol import AbortSignal, AgentMessage, Model
 from nova_protocol.base_model import NovaBaseModel
 from pydantic import Field
 

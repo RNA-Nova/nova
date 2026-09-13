@@ -14,11 +14,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from nova_harness.config import AuthStorage, SettingsManager
-from nova_harness.config.defaults import (
-    AUTH_FILE_NAME,
-    MODELS_FILE_NAME,
-    get_agent_dir,
-)
+from nova_harness.config.defaults import AUTH_FILE_NAME, MODELS_FILE_NAME, get_agent_dir
 from nova_harness.config.migration import migrate_backend_layout
 from nova_harness.core.utils.timings import time
 from nova_harness.extensions.api import NovaExtensionAPI

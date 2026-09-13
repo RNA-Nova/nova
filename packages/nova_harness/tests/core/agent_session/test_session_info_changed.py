@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import SESSION_INFO_CHANGED
 from nova_harness.extensions.runner import ExtensionRunner

@@ -67,7 +67,9 @@ class TestWireItemRoundtrip:
     def test_framework_variants_keep_own_fields(self) -> None:
         items = _roundtrip(
             [
-                ThinkingItem(id="a:th0", status="done", source="agent", ts=1, text="思考"),
+                ThinkingItem(
+                    id="a:th0", status="done", source="agent", ts=1, text="思考"
+                ),
                 AgentMessageItem(
                     id="a:t1", status="done", source="agent", ts=1, text="正文"
                 ),

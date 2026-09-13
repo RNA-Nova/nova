@@ -25,13 +25,12 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_protocol import AbortSignal
-
 from nova_coding_agent.subagent.types import (
     SubagentCall,
     SubagentResult,
     SubagentUsage,
 )
+from nova_protocol import AbortSignal
 
 # on_update 聚合回调：始终携带**全量结果列表**（parallel 含 exit_code=-1
 # 的"运行中"占位，chain 含已完成步骤 + 当前流式步骤），渲染器据此展示

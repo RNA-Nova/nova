@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import TOOL_CALL
 from nova_harness.extensions.runner import ExtensionRunner

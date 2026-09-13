@@ -11,7 +11,6 @@ from typing import Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from nova_harness.package import PackageManager
 from nova_harness.package.install.installer import PackageInstaller
 

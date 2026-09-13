@@ -8,8 +8,9 @@ from nova_agent import (
     agent_loop,
     agent_loop_continue,
 )
-from nova_ai import SimpleStreamOptions
 from nova_protocol import UserMessage
+
+from nova_ai import SimpleStreamOptions
 
 
 def _config(dummy_model) -> AgentLoopConfig:

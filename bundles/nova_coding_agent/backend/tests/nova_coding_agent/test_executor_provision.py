@@ -9,7 +9,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
 from nova_coding_agent.executor import provision
 
 

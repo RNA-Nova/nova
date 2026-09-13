@@ -7,8 +7,6 @@
 """
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
-
 from nova_server.types.items import (
     AgentMessageItem,
     BranchSummaryItem,
@@ -20,6 +18,7 @@ from nova_server.types.items import (
     ToolCallItem,
     UserMessageItem,
 )
+from pydantic import TypeAdapter, ValidationError
 
 # ---------------------------------------------------------------------------
 # 框架变体

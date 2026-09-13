@@ -15,10 +15,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-from nova_harness.config.defaults import (
-    AGENTS_DIR_NAME,
-    get_agent_dir,
-)
+from nova_harness.config.defaults import AGENTS_DIR_NAME, get_agent_dir
 from nova_harness.core.agent_session import (
     AgentSession,
     AgentSessionRuntime,

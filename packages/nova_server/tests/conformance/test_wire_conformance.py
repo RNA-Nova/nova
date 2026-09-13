@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 from jsonschema import validate
-
 from nova_server.protocol.schema_export import (
     CONTRACT_VERSION_MAJOR,
     CONTRACT_VERSION_MINOR,

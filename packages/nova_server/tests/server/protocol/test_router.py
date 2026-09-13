@@ -1,7 +1,6 @@
 """JSON-RPC 方法路由测试。"""
 
 import pytest
-
 from nova_server.protocol import (
     JSONRPCError,
     MethodRegistry,

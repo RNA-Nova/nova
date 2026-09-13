@@ -23,9 +23,8 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Type
 
-from nova_agent import CustomAgentMessage
-
 from nova_harness.types.messages import OpaqueUserToolMessage
+from nova_protocol import CustomAgentMessage
 
 logger = logging.getLogger(__name__)
 

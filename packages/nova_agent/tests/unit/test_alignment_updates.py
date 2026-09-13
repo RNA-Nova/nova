@@ -14,9 +14,12 @@ from nova_agent import (
     BeforeToolCallResult,
     set_default_stream_fn,
 )
-from nova_agent.types import AgentToolResult, ShouldStopAfterTurnContext
+from nova_agent.types import (
+    ShouldStopAfterTurnContext,
+)
 from nova_agent.types.tool import AgentTool
 from nova_protocol import (
+    AgentToolResult,
     TextContent,
     UserMessage,
 )
@@ -117,7 +120,7 @@ async def test_reset_during_run_raises(dummy_model):
 
 
 def test_reset_when_idle_clears_state():
-    agent = Agent()
+    agent = Agent(stream_fn=lambda m, c, o: final_stream(m))
     agent.steer(UserMessage(role="user", content=[]))
     agent.reset()
     assert agent.state.messages == []
@@ -184,7 +187,9 @@ async def test_should_stop_hook_receives_signal(dummy_model):
 
 
 def test_steering_mode_property_writes_queue():
-    agent = Agent(steering_mode="one-at-a-time")
+    agent = Agent(
+        stream_fn=lambda m, c, o: final_stream(m), steering_mode="one-at-a-time"
+    )
     agent.steering_mode = "all"
     assert agent.steering_mode == "all"
     assert agent._steering_queue.mode == "all"
@@ -218,11 +223,13 @@ async def test_set_default_stream_fn_used_when_stream_fn_omitted(dummy_model):
         set_default_stream_fn(None)
 
 
-def test_builtin_fallback_when_no_default_registered():
-    """未注册默认且未显式注入时：回退内置目录（nova 特有）。"""
-    from nova_agent.stream_fn import builtin_fallback_stream_fn
+def test_get_default_stream_fn_raises_when_unregistered():
+    """未注册且未显式注入时 fail-fast 抛错（pi getDefaultStreamFn 对位，无内置兜底）。"""
+    from nova_agent import get_default_stream_fn
 
-    fn = builtin_fallback_stream_fn()
-    assert callable(fn)
-    # 不做进程级缓存：网关是可变运行时容器，跨 Agent 共享会陈旧化
-    assert builtin_fallback_stream_fn() is not fn
+    set_default_stream_fn(None)  # 防御：清掉前序测试的注册
+    with pytest.raises(RuntimeError, match="No default stream function"):
+        get_default_stream_fn()
+    # Agent 构造期解析 stream_fn，同样立即抛错
+    with pytest.raises(RuntimeError, match="No default stream function"):
+        Agent()

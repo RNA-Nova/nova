@@ -20,10 +20,6 @@ from nova_agent import (
     Agent,
     BeforeToolCallContext,
 )
-from nova_ai import (
-    EventStream,
-    ProviderResponse,
-)
 from nova_protocol import (
     DoneEvent,
     ImageContent,
@@ -37,13 +33,18 @@ from nova_protocol import (
     UserMessage,
 )
 
+from nova_ai import (
+    EventStream,
+    ProviderResponse,
+)
+
 # ------------------------------------------------------------------------------
 # 初始化与状态
 # ------------------------------------------------------------------------------
 
 
 def test_agent_init_defaults(dummy_model):
-    agent = Agent()
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     assert agent.state is not None
     assert agent.state.messages == []
     assert agent.state.tools == []
@@ -52,23 +53,28 @@ def test_agent_init_defaults(dummy_model):
 
 def test_agent_init_custom_state(dummy_model):
     agent = Agent(
+        stream_fn=lambda m, c, o: text_stream(m, "ok"),
         initial_state={
             "system_prompt": "hello",
             "messages": [UserMessage(role="user", content=[TextContent(text="hi")])],
-        }
+        },
     )
     assert agent.state.system_prompt == "hello"
     assert len(agent.state.messages) == 1
 
 
 def test_agent_timeout_propagates_to_loop_config(dummy_model):
-    agent = Agent(initial_state={"model": dummy_model}, timeout=123.0)
+    agent = Agent(
+        stream_fn=lambda m, c, o: text_stream(m, "ok"),
+        initial_state={"model": dummy_model},
+        timeout=123.0,
+    )
     config = agent._create_loop_config()
     assert config.stream_options.timeout == 123.0
 
 
 def test_agent_state_mutators(dummy_model):
-    agent = Agent()
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_system_prompt("sys")
     agent.set_model(dummy_model)
     agent.set_thinking_level("medium")
@@ -560,8 +566,10 @@ def test_initial_state_rejects_unknown_keys(dummy_model):
 
 def test_default_convert_to_llm_filters_messages_without_role(dummy_model):
     """不带 role 字段的自定义消息应被默认 convert_to_llm 过滤而不是炸掉。"""
-    from nova_agent import CustomAgentMessage
     from nova_agent.utils import default_convert_to_llm
+    from nova_protocol import (
+        CustomAgentMessage,
+    )
 
     class Notification(CustomAgentMessage):
         text: str = ""

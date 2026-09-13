@@ -7,7 +7,6 @@ import sys
 from unittest.mock import patch
 
 import pytest
-
 from nova_harness.package.install.python_backend import (
     PipBackend,
     UvBackend,

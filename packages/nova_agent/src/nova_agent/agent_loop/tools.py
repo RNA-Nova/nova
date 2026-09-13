@@ -9,9 +9,16 @@ from typing import Any, Awaitable, Callable, List, Optional, Union
 
 from nova_protocol import (
     AbortSignal,
+    AgentToolResult,
     AssistantMessage,
+    MessageEndEvent,
+    MessageStartEvent,
     TextContent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
     ToolResultMessage,
+    is_aborted,
 )
 
 from ..types import (
@@ -20,21 +27,13 @@ from ..types import (
     AgentEventSink,
     AgentLoopConfig,
     AgentToolCall,
-    AgentToolResult,
     BeforeToolCallContext,
     ExecutedToolCallBatch,
     ExecutedToolCallOutcome,
     FinalizedToolCallOutcome,
-    MessageEndEvent,
-    MessageStartEvent,
+    ImmediateToolCallOutcome,
     PreparedToolCall,
-    ToolExecutionEndEvent,
-    ToolExecutionStartEvent,
-    ToolExecutionUpdateEvent,
-)
-from ..types.tool_execution import (
-    _ImmediateToolCallOutcome,
-    _PreparedToolCallModel,
+    PreparedToolCallModel,
 )
 from ..utils import invoke_hook, validate_tool_arguments
 from .execution_gate import ToolExecutionGate
@@ -148,7 +147,7 @@ async def _execute_tool_calls_sequential(
         finalized_calls.append(finalized)
         messages.append(tool_result_message)
 
-        if signal and signal.aborted:
+        if is_aborted(signal):
             break
 
     return ExecutedToolCallBatch(
@@ -198,12 +197,12 @@ async def _execute_tool_calls_parallel(
             )
             await _emit_tool_execution_end(finalized, emit)
             finalized_entries.append(finalized)
-            if signal and signal.aborted:
+            if is_aborted(signal):
                 break
             continue
 
         def _make_executor(
-            prep: _PreparedToolCallModel,
+            prep: PreparedToolCallModel,
         ) -> Callable[[], Awaitable[FinalizedToolCallOutcome]]:
             # sequential 声明的工具取写门（独占），其余读门（重叠）
             write = prep.tool.execution_mode == "sequential"
@@ -237,7 +236,7 @@ async def _execute_tool_calls_parallel(
             return executor
 
         finalized_entries.append(_make_executor(preparation))
-        if signal and signal.aborted:
+        if is_aborted(signal):
             break
 
     ordered_finalized = await asyncio.gather(
@@ -269,7 +268,7 @@ async def _acquire_gate_or_aborted(
     返回 ``True`` = 已持门（调用方负责 release）；``False`` = 等门期间
     被 abort——门的取消安全逻辑已自摘，调用方不得起跑、无需 release。
     """
-    if signal is not None and signal.aborted:
+    if is_aborted(signal):
         return False
     if signal is None:
         await gate.acquire(write)
@@ -318,7 +317,7 @@ async def _prepare_tool_call(
     )
     if not tool:
         result = _create_error_tool_result(f"Tool {tool_call.name} not found")
-        return _ImmediateToolCallOutcome(result=result, is_error=True)
+        return ImmediateToolCallOutcome(result=result, is_error=True)
 
     try:
         prepared_args = tool.prepare_arguments(tool_call.arguments)
@@ -340,9 +339,9 @@ async def _prepare_tool_call(
             ),
             signal,
         )
-        if signal and signal.aborted:
+        if is_aborted(signal):
             result = _create_error_tool_result("Operation aborted")
-            return _ImmediateToolCallOutcome(result=result, is_error=True)
+            return ImmediateToolCallOutcome(result=result, is_error=True)
         if before_result and before_result.block:
             result = _create_error_tool_result(
                 before_result.reason or "Tool execution was blocked"
@@ -350,25 +349,25 @@ async def _prepare_tool_call(
             if before_result.terminate:
                 # 拦截 + 终止：错误结果带 terminate=True，经批终止判定收口
                 result = result.model_copy(update={"terminate": True})
-            return _ImmediateToolCallOutcome(result=result, is_error=True)
-        if signal and signal.aborted:
+            return ImmediateToolCallOutcome(result=result, is_error=True)
+        if is_aborted(signal):
             result = _create_error_tool_result("Operation aborted")
-            return _ImmediateToolCallOutcome(result=result, is_error=True)
+            return ImmediateToolCallOutcome(result=result, is_error=True)
 
-        return _PreparedToolCallModel(
+        return PreparedToolCallModel(
             tool_call=tool_call,
             tool=tool,
             args=validated_args,
         )
     except Exception as e:
-        return _ImmediateToolCallOutcome(
+        return ImmediateToolCallOutcome(
             result=_create_error_tool_result(str(e)),
             is_error=True,
         )
 
 
 async def _execute_prepared_tool_call(
-    prepared: _PreparedToolCallModel,
+    prepared: PreparedToolCallModel,
     signal: Optional[AbortSignal],
     emit: AgentEventSink,
 ) -> ExecutedToolCallOutcome:
@@ -386,7 +385,7 @@ async def _execute_prepared_tool_call(
     一定排在所有 ``tool_execution_update`` 之后。
     """
     loop = asyncio.get_running_loop()
-    update_tasks: List[asyncio.Task] = []
+    update_tasks: List["asyncio.Future[None]"] = []
     accepting_updates = True
 
     def on_update(partial_result: AgentToolResult[Any]) -> None:
@@ -395,8 +394,10 @@ async def _execute_prepared_tool_call(
 
         def _schedule() -> None:
             try:
+                # ensure_future 接受任意 Awaitable（AgentEventSink 签名不是
+                # 严格 Coroutine）；协程输入下行为与 create_task 一致
                 update_tasks.append(
-                    asyncio.create_task(
+                    asyncio.ensure_future(
                         emit(
                             ToolExecutionUpdateEvent(
                                 tool_call_id=prepared.tool_call.id,
@@ -459,7 +460,7 @@ async def _execute_prepared_tool_call(
 async def _finalize_executed_tool_call(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
-    prepared: _PreparedToolCallModel,
+    prepared: PreparedToolCallModel,
     executed: ExecutedToolCallOutcome,
     config: AgentLoopConfig,
     signal: Optional[AbortSignal],
@@ -468,7 +469,7 @@ async def _finalize_executed_tool_call(
     result = executed.result
     # 结果级错误标记（工具预期内失败，pi 对齐）与执行级错误（异常路径）合并；
     # afterToolCall 钩子仍拥有最终覆盖权
-    is_error = executed.is_error or getattr(result, "is_error", False)
+    is_error = executed.is_error or result.is_error
 
     if config.after_tool_call:
         try:

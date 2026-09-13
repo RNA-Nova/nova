@@ -26,10 +26,7 @@ from nova_harness.events.constants import SESSION_BEFORE_COMPACT
 from nova_harness.sessions.utils import get_latest_compaction_entry
 from nova_harness.types.compaction.compaction import CompactionResult
 from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import (
-    AbortController,
-    Model,
-)
+from nova_protocol import AbortController, Model
 
 if TYPE_CHECKING:
     from nova_protocol import AssistantMessage

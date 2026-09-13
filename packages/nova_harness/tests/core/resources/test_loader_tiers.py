@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
-
 from nova_harness.package import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader
 from nova_harness.types.config.settings import PackageSourceSpec, Settings

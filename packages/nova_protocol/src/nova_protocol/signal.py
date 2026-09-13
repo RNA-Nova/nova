@@ -149,4 +149,13 @@ class AbortController:
         self._signal._trigger()
 
 
-__all__ = ["AbortController", "AbortedError", "AbortSignal"]
+def is_aborted(signal: Optional[AbortSignal]) -> bool:
+    """Optional 信号的统一判定（``signal is not None and signal.aborted``）。
+
+    全仓惯用法单点化：跨包共享的判定从这里取，不在各模块重复手写
+    （也不跨模块 import 私有实现）。
+    """
+    return signal is not None and signal.aborted
+
+
+__all__ = ["AbortController", "AbortedError", "AbortSignal", "is_aborted"]

@@ -11,17 +11,6 @@ import errno
 import json
 from typing import Any, Dict, List, Optional
 
-from nova_agent import AgentToolResult
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-from nova_protocol import (
-    AbortSignal,
-    TextContent,
-)
-
 from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.edit_engine import (
     Edit,
@@ -37,6 +26,16 @@ from nova_coding_agent.tools_common.file_queue import with_file_write_lock
 from nova_coding_agent.tools_common.operations import (
     EditOperations,
     create_local_edit_operations,
+)
+from nova_harness.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+from nova_protocol import (
+    AbortSignal,
+    AgentToolResult,
+    TextContent,
 )
 
 

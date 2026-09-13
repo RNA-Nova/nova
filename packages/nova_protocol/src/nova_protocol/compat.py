@@ -94,7 +94,7 @@ class OpenAICompletionsCompat(NovaBaseModel):
 
     # thinking_format 为 "chat-template" 时发送的 chat_template_kwargs。
     # 值可以是字面量，也可以是 {"$var": "thinking.enabled"|"thinking.effort", "omitWhenOff": bool}
-    # 的变量引用，由 pi 按当前思考级别解析。默认：{}
+    # 的变量引用，由请求构建层（nova_ai params.py）按当前思考级别解析。默认：{}
     chat_template_kwargs: Optional[Dict[str, Any]] = None
 
     # 是否支持工具定义中的 `strict` 字段。默认：true

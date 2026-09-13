@@ -15,8 +15,6 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from nova_protocol import ModelThinkingLevel
-
 from nova_harness.config.defaults import get_agent_dir, get_project_base_dir
 from nova_harness.config.settings.storage import FileSettingsStorage, SettingsStorage
 from nova_harness.config.settings.utils import deep_merge_settings
@@ -36,6 +34,7 @@ from nova_harness.types.config.settings import (
     ThinkingBudgetsSettings,
 )
 from nova_harness.types.project_trust import ProjectNotTrustedError
+from nova_protocol import ModelThinkingLevel
 
 
 class SettingsManager:

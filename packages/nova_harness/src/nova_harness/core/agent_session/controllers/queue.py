@@ -6,11 +6,7 @@ from typing import Dict, List, Optional
 
 from nova_harness.events import QueueUpdateEvent
 from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import (
-    ImageContent,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import ImageContent, TextContent, UserMessage
 
 
 class QueueController:

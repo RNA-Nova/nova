@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import List, Optional
 
 import pytest
-from nova_agent import CustomAgentMessage
-
 from nova_harness.core.agent_session.services import AgentSessionServices
+from nova_harness.core.runtime_manager.assembly import (
+    create_agent_session_from_services,
+)
 from nova_harness.package import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader
-from nova_harness.core.runtime_manager.assembly import create_agent_session_from_services
 from nova_harness.sessions import SessionManager
 from nova_harness.sessions.message_types import (
     clear_session_message_types,
@@ -22,10 +22,13 @@ from nova_harness.sessions.message_types import (
 from nova_harness.types.config.settings import Settings
 from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_protocol import (
+    CustomAgentMessage,
+)
 
 _EXECUTOR = """
 from typing import Literal
-from nova_agent import CustomAgentMessage
+from nova_protocol import CustomAgentMessage
 
 
 class FakeResultMessage(CustomAgentMessage):

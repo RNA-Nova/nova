@@ -15,11 +15,7 @@ from typing import (
     runtime_checkable,
 )
 
-from nova_agent import CustomAgentMessage
-from nova_protocol import (
-    ImageContent,
-    TextContent,
-)
+from nova_protocol import CustomAgentMessage, ImageContent, TextContent
 from pydantic import Field
 
 # ---------------------------------------------------------------------------

@@ -9,11 +9,10 @@ import asyncio
 import socket
 
 import pytest
-from nova_protocol.auth import AuthorizationRequest, AuthPrompt, LoginCancelledError
-from nova_protocol.signal import AbortController
-
 from nova_harness.config.auth.acquisition import acquire_authorization_code
 from nova_harness.types.ui.context import UIContext, UIResponse
+from nova_protocol.auth import AuthorizationRequest, AuthPrompt, LoginCancelledError
+from nova_protocol.signal import AbortController
 
 
 def _free_port() -> int:

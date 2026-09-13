@@ -26,6 +26,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from nova_harness.events.constants import ITEM_EMISSION
+from nova_harness.types.ui.context import UIContext
 from nova_server.connection import (
     Connection,
     ConnectionOrigin,
@@ -44,7 +45,6 @@ from nova_server.protocol.serialize import serialize_event, to_json_safe
 from nova_server.reduction import SessionReducer
 from nova_server.transport.base import Transport
 from nova_server.ui_context import RoutingUIContext
-from nova_harness.types.ui.context import UIContext
 
 
 class RpcServer:

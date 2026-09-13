@@ -18,13 +18,7 @@ import traceback
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from nova_agent import (
-    AbortController,
-    Agent,
-    AgentMessage,
-    CustomAgentMessage,
-    ModelThinkingLevel,
-)
+from nova_agent import Agent
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
@@ -83,10 +77,7 @@ from nova_harness.events.constants import (
     TOOL_CALL,
     TOOL_RESULT,
 )
-from nova_harness.extensions import (
-    ExtensionRunner,
-    emit_session_shutdown_event,
-)
+from nova_harness.extensions import ExtensionRunner, emit_session_shutdown_event
 from nova_harness.resources.loaders.prompt_templates import expand_prompt_template
 from nova_harness.sessions import SessionManager
 from nova_harness.types.compaction.compaction import CompactionResult
@@ -112,22 +103,20 @@ from nova_harness.types.resources.extension_paths import (
 )
 from nova_harness.types.resources.personas import SourceInfo
 from nova_harness.types.resources.selection import CapabilitySelection
-from nova_harness.types.resources.tools import (
-    ToolDefinition,
-    ToolExecContext,
-)
+from nova_harness.types.resources.tools import ToolDefinition, ToolExecContext
 from nova_harness.types.resources.user_tools import UserToolInfo
 from nova_harness.types.session.config import AgentSessionConfig
-from nova_harness.types.session.model import (
-    ModelCycleResult,
-    ScopedModelConfig,
-)
+from nova_harness.types.session.model import ModelCycleResult, ScopedModelConfig
 from nova_harness.types.session.options import NavigateOptions, PromptOptions
 from nova_harness.types.session.stats import SessionStats
 from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
 from nova_protocol import (
+    AbortController,
+    AgentMessage,
     AssistantMessage,
+    CustomAgentMessage,
     ImageContent,
+    ModelThinkingLevel,
     TextContent,
     UserMessage,
 )
@@ -2175,9 +2164,7 @@ class AgentSession:
         if not os.path.exists(session_file):
             raise RuntimeError("当前会话还没有内容，无法克隆")
 
-        from nova_harness.sessions.utils import (
-            generate_session_id,
-        )
+        from nova_harness.sessions.utils import generate_session_id
 
         new_session_id = generate_session_id()
         timestamp = datetime.now().isoformat().replace(":", "-").replace(".", "-")

@@ -6,13 +6,9 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, List, Optional, Union
 
 from nova_ai import SimpleStreamOptions
-from nova_protocol import (
-    AbortSignal,
-    Message,
-    Model,
-)
+from nova_protocol import AbortSignal, AgentMessage, Message, Model
 
-from .base import AgentMessage, ToolExecutionMode
+from .base import ToolExecutionMode
 from .hooks import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -95,7 +91,7 @@ class AgentLoopConfig:
     prepare_next_turn: Optional[
         Callable[
             [PrepareNextTurnContext],
-            Union[AgentLoopTurnUpdate, Awaitable[AgentLoopTurnUpdate], None],
+            Union[AgentLoopTurnUpdate, Awaitable[Optional[AgentLoopTurnUpdate]], None],
         ]
     ] = None
     """

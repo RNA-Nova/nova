@@ -22,13 +22,13 @@
 
 | 层 | 内容 | 纪律 |
 |---|---|---|
-| **`nova_protocol` 枢纽** | 已入住：LLM 消息/内容/模型/用量/流式事件/枚举/compat/auth 词汇（原 `nova_ai/types`）、模型目录存储条目（`ModelsStoreEntry`，原 `nova_ai/gateway/store.py`）、`signal.py`（取消原语，有名例外）、`ids.py`。待迁入：`agent_events`（原 `nova_agent/types`）、`session` 落盘 entries（原 `nova_harness/types/session`）、`items` 呈现形正典（原 `nova_server/types/items`）、共享 config/permissions/trust 形状 | 三纪律：依赖仅 pydantic；零行为零 I/O；收录只看"是否跨组件序列化"。**纯洁性审计测试机械执法**（`tests/test_purity.py`：无兄弟 import + 无行为 IO + 依赖最小） |
+| **`nova_protocol` 枢纽** | 已入住：LLM 消息/内容/模型/用量/流式事件/枚举/compat/auth 词汇（原 `nova_ai/types`）、模型目录存储条目（`ModelsStoreEntry`，原 `nova_ai/gateway/store.py`）、agent 循环事件与 agent 消息词汇（`agent_events.py`：AgentEvent 家族 + AgentMessage 开放集 + CustomAgentMessage 基座 + AgentToolResult，原 `nova_agent/types`）、`signal.py`（取消原语，有名例外）、`ids.py`。待迁入：`session` 落盘 entries（原 `nova_harness/types/session`）、`items` 呈现形正典（原 `nova_server/types/items`）、共享 config/permissions/trust 形状 | 三纪律：依赖仅 pydantic；零行为零 I/O；收录只看"是否跨组件序列化"。**纯洁性审计测试机械执法**（`tests/test_purity.py`：无兄弟 import + 无行为 IO + 依赖最小） |
 | **边界协议包**（一条边界一个） | `nova_server/protocol`：方法表 + 信封 + 握手 + 错误码（对外契约的版本面）；`nova_executor/PROTOCOL.md`：执行器线（Rust 宇宙独立演进） | 线上唯一海关；枢纽形状可经 `reduction`/`shapes` 引用上线，组件内部类型永不直接上线 |
 | **组件内部类型** | `nova_ai`：provider 内部形状 + `stream_options`（AI 调用面参数包）；`nova_agent`：`AgentState`/`AgentContext`/hook 上下文（可变容器，规则 1/4）；`nova_harness`：services/manager 中间态；UI：`UIContext` transport | 留在组件内绝不外溢；出了边界就搬家，不留副本 |
 
 **两种正典形态并列（终点，非过渡）**：消息形（LLM 上下文 + 落盘）与 item 形（呈现 + 线上通信）是并列的两种正典表示，都住枢纽；`reduction` 是翻译**行为**，住 `nova_server`——两种正典形状都住枢纽，翻译集中一处。
 
-**迁移路线（原子批次，无 shim——主分支未发布，零兼容包袱）**：每批 = 挪文件（`git mv` 保历史）+ 全仓 import 一次改完 + 五套件全绿。不留 re-export 过渡产物，历史无 shim 遗址。批次序：① LLM 词汇（已完成）→ ② agent 事件 → ③ session entries + 事件联合 → ④ harness 其余类型 → ⑤ items + notifications（bundle 开放集基座换挂枢纽，放最后）。
+**迁移路线（原子批次，无 shim——主分支未发布，零兼容包袱）**：每批 = 挪文件（`git mv` 保历史）+ 全仓 import 一次改完 + 五套件全绿。不留 re-export 过渡产物，历史无 shim 遗址。批次序：① LLM 词汇（已完成）→ ② agent 事件（已完成——含 AgentMessage 开放集升格：框架判别联合 + `CustomAgentMessage` 兜底 + `union_mode="left_to_right"`，基座补 `role: str = "custom"` 与 `extra="allow"`；`AgentToolResult` 同迁；nova_agent 门面不再中转枢纽类型）→ ③ session entries + 事件联合 → ④ harness 其余类型 → ⑤ items + notifications（bundle 开放集基座换挂枢纽，放最后）。
 
 ## 二、表示选型
 

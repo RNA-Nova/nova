@@ -7,6 +7,23 @@
 内部文件布局自由）。
 """
 
+from .agent_events import (
+    AgentEndEvent,
+    AgentEvent,
+    AgentMessage,
+    AgentStartEvent,
+    AgentToolResult,
+    CustomAgentMessage,
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+    TurnEndEvent,
+    TurnStartEvent,
+    dump_agent_message,
+)
 from .aliases import ProviderEnv, ProviderHeaders
 from .auth import (
     ApiKeyAuth,
@@ -89,7 +106,7 @@ from .model import (
     ModelsStoreEntry,
     Usage,
 )
-from .signal import AbortController, AbortedError, AbortSignal
+from .signal import AbortController, AbortedError, AbortSignal, is_aborted
 
 __all__ = [
     # 基类
@@ -103,6 +120,7 @@ __all__ = [
     "AbortController",
     "AbortSignal",
     "AbortedError",
+    "is_aborted",
     # 枚举
     "Api",
     "KnownApi",
@@ -138,7 +156,24 @@ __all__ = [
     "Message",
     "Tool",
     "Context",
-    # 事件类型
+    # Agent 消息与事件（批次 ②）
+    "CustomAgentMessage",
+    "AgentMessage",
+    "AgentToolResult",
+    "AgentEvent",
+    "dump_agent_message",
+    # Agent 循环事件
+    "AgentStartEvent",
+    "AgentEndEvent",
+    "TurnStartEvent",
+    "TurnEndEvent",
+    "MessageStartEvent",
+    "MessageUpdateEvent",
+    "MessageEndEvent",
+    "ToolExecutionStartEvent",
+    "ToolExecutionUpdateEvent",
+    "ToolExecutionEndEvent",
+    # 流式助手事件
     "AssistantMessageEvent",
     "StartEvent",
     "TextStartEvent",

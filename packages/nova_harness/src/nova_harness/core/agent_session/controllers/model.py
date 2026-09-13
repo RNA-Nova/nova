@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from nova_ai import (
-    clamp_thinking_level,
-    get_supported_thinking_levels,
-)
+from nova_ai import clamp_thinking_level, get_supported_thinking_levels
 from nova_harness.config.defaults import DEFAULT_THINKING_LEVEL
 from nova_harness.core.utils import models_are_equal
 from nova_harness.events import (
@@ -17,10 +14,7 @@ from nova_harness.events import (
 )
 from nova_harness.types.protocols import AgentSessionProtocol
 from nova_harness.types.session.model import ModelCycleResult
-from nova_protocol import (
-    Model,
-    ModelThinkingLevel,
-)
+from nova_protocol import Model, ModelThinkingLevel
 
 
 def _thinking_level_from_value(

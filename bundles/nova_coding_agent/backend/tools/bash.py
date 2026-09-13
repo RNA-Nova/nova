@@ -12,18 +12,6 @@ import math
 import os
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from nova_agent import AgentToolResult
-from nova_harness.types.extensions.process import SpawnHook
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-from nova_protocol import (
-    AbortSignal,
-    TextContent,
-)
-
 from nova_coding_agent.bash.engine import (
     BashOperations,
     create_local_bash_operations,
@@ -41,6 +29,17 @@ from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
     format_size,
+)
+from nova_harness.types.extensions.process import SpawnHook
+from nova_harness.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+from nova_protocol import (
+    AbortSignal,
+    AgentToolResult,
+    TextContent,
 )
 
 # 对齐 pi bash.ts：timeout 上限（毫秒）。超过即参数非法，显式报错反馈给 LLM。

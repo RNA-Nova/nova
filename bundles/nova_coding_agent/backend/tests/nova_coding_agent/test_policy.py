@@ -6,7 +6,6 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 import pytest
-
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,

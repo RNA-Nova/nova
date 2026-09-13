@@ -17,43 +17,45 @@ from nova_ai import (
 from nova_protocol import (
     AbortController,
     AbortSignal,
+    AgentEndEvent,
+    AgentEvent,
+    AgentMessage,
     AssistantMessage,
     ImageContent,
     Message,
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
     Model,
     ModelThinkingLevel,
+    StopReason,
     TextContent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
     Transport,
+    TurnEndEvent,
     Usage,
     UserMessage,
+    is_aborted,
 )
 
 from .agent_loop import run_agent_loop, run_agent_loop_continue
-from .stream_fn import builtin_fallback_stream_fn, get_default_stream_fn
+from .stream_fn import get_default_stream_fn
 from .types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
-    AgentEndEvent,
-    AgentEvent,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
-    AgentMessage,
     AgentState,
     AgentTool,
     BeforeToolCallContext,
     BeforeToolCallResult,
-    MessageEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
     PrepareNextTurnContext,
     QueueMode,
     ShouldStopAfterTurnContext,
     StreamFn,
-    ToolExecutionEndEvent,
     ToolExecutionMode,
-    ToolExecutionStartEvent,
-    TurnEndEvent,
 )
 from .utils import default_convert_to_llm, invoke_hook
 
@@ -67,7 +69,7 @@ class _PendingMessageQueue:
 
     def __init__(self, mode: QueueMode = "one-at-a-time"):
         self._messages: List[AgentMessage] = []
-        self.mode = mode
+        self.mode: QueueMode = mode
 
     def enqueue(self, message: AgentMessage) -> None:
         self._messages.append(message)
@@ -199,17 +201,15 @@ class Agent:
 
         self.convert_to_llm = convert_to_llm or default_convert_to_llm
         self.transform_context = transform_context
-        # stream_fn 解析顺序：显式注入 → 全局默认注册点 → 内置目录兜底（缓存）
-        self.stream_fn = (
-            stream_fn or get_default_stream_fn() or builtin_fallback_stream_fn()
-        )
+        # stream_fn 解析顺序：显式注入 → 全局默认注册点（未注册抛错，对齐 pi）
+        self.stream_fn = stream_fn or get_default_stream_fn()
         self._session_id = session_id
         self.get_api_key = get_api_key
         self._thinking_budgets = thinking_budgets
         self._transport = transport
         self.max_retry_delay_ms = max_retry_delay_ms
         self._timeout = timeout
-        self.tool_execution = tool_execution
+        self.tool_execution: ToolExecutionMode = tool_execution
         self.on_payload = on_payload
         self.on_response = on_response
         self.before_tool_call = before_tool_call
@@ -570,7 +570,7 @@ class Agent:
         )
 
     async def _handle_run_failure(self, error: Exception) -> None:
-        aborted = self.signal is not None and self.signal.aborted
+        aborted = is_aborted(self.signal)
         model = self._state.model
         failure_message = AssistantMessage(
             role="assistant",
@@ -579,7 +579,7 @@ class Agent:
             provider=model.provider,
             model=model.id,
             usage=Usage(),
-            stop_reason="aborted" if aborted else "error",
+            stop_reason=StopReason.ABORTED if aborted else StopReason.ERROR,
             error_message=str(error),
             timestamp=int(time.time() * 1000),
         )
@@ -610,8 +610,9 @@ class Agent:
         elif isinstance(event, ToolExecutionEndEvent):
             self._state.pending_tool_calls.discard(event.tool_call_id)
         elif isinstance(event, TurnEndEvent):
-            if event.message.role == "assistant" and event.message.error_message:
-                self._state.error_message = event.message.error_message
+            message = event.message
+            if isinstance(message, AssistantMessage) and message.error_message:
+                self._state.error_message = message.error_message
         elif isinstance(event, AgentEndEvent):
             self._state.streaming_message = None
 

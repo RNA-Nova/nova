@@ -5,11 +5,9 @@ Builder functions for session management
 from typing import Dict, List, Optional, Tuple
 
 from nova_harness.sessions.utils import generate_id, generate_session_id
-from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
-from nova_harness.types.session.entries import FileEntry
-from nova_harness.types.session.entries import LabelEntry
 from nova_harness.types.compaction.branch_summary import SessionEntry
-from nova_harness.types.session.entries import SessionHeader
+from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
+from nova_harness.types.session.entries import FileEntry, LabelEntry, SessionHeader
 from nova_harness.types.session.tree import SessionTreeNode
 
 

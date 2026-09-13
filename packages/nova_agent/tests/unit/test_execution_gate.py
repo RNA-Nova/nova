@@ -11,9 +11,12 @@ from typing import Any, List
 
 import pytest
 from helpers import EchoTool, SlowTool, multi_tool_call_stream, text_stream
-from nova_agent import Agent, AgentToolResult
+from nova_agent import (
+    Agent,
+)
 from nova_agent.agent_loop.execution_gate import ToolExecutionGate
 from nova_protocol import (
+    AgentToolResult,
     TextContent,
     UserMessage,
 )
@@ -214,8 +217,9 @@ async def test_abort_while_waiting_on_gate_never_executes(dummy_model) -> None:
     """sequential 等门期间 abort：永不起跑，结果含 aborted 且批正常收尾。"""
     from nova_agent import AgentContext, AgentLoopConfig
     from nova_agent.agent_loop import run_agent_loop
-    from nova_ai.stream_options import SimpleStreamOptions
     from nova_protocol import AbortController
+
+    from nova_ai.stream_options import SimpleStreamOptions
 
     ran: List[str] = []
 

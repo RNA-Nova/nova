@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
 from nova_harness.package.install.updates import (
     _git_local_head,
     _git_remote_head,

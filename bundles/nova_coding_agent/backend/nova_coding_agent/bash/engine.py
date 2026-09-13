@@ -21,22 +21,21 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
-from nova_harness.types.extensions.process import (
-    SpawnContext,
-    SpawnHook,
+from nova_coding_agent.tools_common.output_accumulator import (
+    OutputAccumulator,
+    OutputAccumulatorOptions,
 )
+from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
 from nova_harness.core.utils.binaries import prepend_managed_bins_to_path
 from nova_harness.core.utils.child_process import (
     kill_process_tree,
     track_detached_child_pid,
     untrack_detached_child_pid,
 )
-
-from nova_coding_agent.tools_common.output_accumulator import (
-    OutputAccumulator,
-    OutputAccumulatorOptions,
+from nova_harness.types.extensions.process import (
+    SpawnContext,
+    SpawnHook,
 )
-from nova_coding_agent.tools_common.shell import get_shell_config, sanitize_shell_output
 
 
 @dataclass

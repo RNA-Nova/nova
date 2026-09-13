@@ -12,7 +12,6 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from nova_agent import CustomAgentMessage
 from nova_harness.config.defaults import get_sessions_dir
 from nova_harness.sessions.listing import (
     MAX_CONCURRENT_SESSION_INFO_LOADS,
@@ -50,6 +49,7 @@ from nova_harness.types.session.entries import (
 from nova_harness.types.session.info import SessionInfo
 from nova_harness.types.session.tree import SessionTreeNode
 from nova_protocol import (
+    CustomAgentMessage,
     ImageContent,
     Message,
     ModelThinkingLevel,
@@ -521,9 +521,7 @@ class SessionManager:
 
     def create_branched_session(self, leaf_id: str) -> Optional[str]:
         """创建分支会话"""
-        from nova_harness.sessions.builders import (
-            create_branched_session_entries,
-        )
+        from nova_harness.sessions.builders import create_branched_session_entries
 
         previous_session_file = self._session_file
         path = self.get_branch(leaf_id)

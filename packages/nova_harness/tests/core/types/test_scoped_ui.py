@@ -10,7 +10,7 @@ base 层为连接化后的 ``RoutingUIContext``（单连接注册表 + 内存传
 import asyncio
 
 import pytest
-
+from nova_harness.types.ui.scoped import ScopedUIContext
 from nova_server.connection import (
     Connection,
     ConnectionOrigin,
@@ -18,7 +18,6 @@ from nova_server.connection import (
 )
 from nova_server.transport import MemoryTransport
 from nova_server.ui_context import RoutingUIContext
-from nova_harness.types.ui.scoped import ScopedUIContext
 
 
 def _make_base(capabilities=frozenset({"select"})):

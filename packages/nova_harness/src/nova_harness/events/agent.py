@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from nova_agent import AgentMessage
-from nova_agent.types.events import _dump_agent_message
 from nova_protocol import (
+    AgentMessage,
     AssistantMessage,
     ImageContent,
     ModelThinkingLevel,
+    NovaBaseModel,
     TextContent,
+    dump_agent_message,
 )
-from nova_protocol.base_model import NovaBaseModel
 from pydantic import Field, field_serializer
 
 from .constants import (
@@ -143,7 +143,7 @@ class MessageStartEvent(NovaBaseModel):
 
     @field_serializer("message")
     def _ser_message(self, value: Any) -> Any:
-        return _dump_agent_message(value)
+        return dump_agent_message(value)
 
 
 class MessageUpdateEvent(NovaBaseModel):
@@ -153,7 +153,7 @@ class MessageUpdateEvent(NovaBaseModel):
 
     @field_serializer("message")
     def _ser_message(self, value: Any) -> Any:
-        return _dump_agent_message(value)
+        return dump_agent_message(value)
 
 
 class MessageEndEvent(NovaBaseModel):
@@ -162,7 +162,7 @@ class MessageEndEvent(NovaBaseModel):
 
     @field_serializer("message")
     def _ser_message(self, value: Any) -> Any:
-        return _dump_agent_message(value)
+        return dump_agent_message(value)
 
 
 class ToolExecutionStartEvent(NovaBaseModel):

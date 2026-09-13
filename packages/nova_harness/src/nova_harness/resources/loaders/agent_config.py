@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
-
 from nova_harness.types.resources.agents import AgentConfig
 from nova_harness.types.resources.diagnostics import ResourceDiagnostic
 from nova_harness.types.resources.tools import ToolInfo

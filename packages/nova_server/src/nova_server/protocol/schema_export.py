@@ -46,12 +46,7 @@ from typing import (
 
 from nova_harness.events.unions import AgentSessionEvent
 from nova_harness.types.session.entries import SessionEntry, SessionHeader
-from nova_server.types.items import (
-    CustomItem,
-    FrameworkItem,
-    NovaItem,
-    NovaWireItem,
-)
+from nova_server.types.items import CustomItem, FrameworkItem, NovaItem, NovaWireItem
 from nova_server.types.notifications import (
     ItemCompletedNotification,
     ItemDeltaNotification,
@@ -99,6 +94,21 @@ def _unwrap(annotation: Any) -> Any:
 def _is_union(annotation: Any) -> bool:
     origin = get_origin(annotation)
     return origin is Union or (origin is not None and origin is _py_types.UnionType)
+
+
+def _union_members(annotation: Any) -> List[Any]:
+    """展开联合成员：穿透 Annotated/SerializeAsAny 包装，嵌套联合拍平。
+
+    typing 只在裸 ``Union[Union[A, B], C]`` 自动拍平；``Annotated[Union[...]]``
+    包装会挡住拍平（判别联合的常态），联合根/别名展开必须穿透。
+    """
+    annotation = _unwrap(annotation)
+    if not _is_union(annotation):
+        return [annotation]
+    members: List[Any] = []
+    for arg in get_args(annotation):
+        members.extend(_union_members(arg))
+    return members
 
 
 def _enum_ts_and_schema(enum_cls: type) -> Tuple[str, Dict[str, Any]]:
@@ -181,8 +191,7 @@ class _Walker:
 
     def __init__(self) -> None:
         self.reg = _Registry()
-        from nova_agent import AgentMessage
-        from nova_protocol import Message
+        from nova_protocol import AgentMessage, Message
 
         # 具名 Union 别名：字段引用处发射别名而非内联（TS 消费方需要
         # ``AgentMessage`` 这样的具名类型做参数标注）
@@ -221,11 +230,16 @@ class _Walker:
 
         # 具名 Union 别名：发射别名引用并确保成员已注册
         for alias_name, alias_ann in self._aliases:
-            if annotation is alias_ann:
+            # 身份或结构同构都算命中——pydantic 会剥掉字段注解外层的
+            # Annotated（Field 元数据落 field.metadata），重建的联合与别名
+            # 不再是同一对象，但成员序列一致
+            if annotation is alias_ann or _union_members(annotation) == _union_members(
+                alias_ann
+            ):
                 if alias_name not in self.ts_type_aliases:
                     member_ts: List[str] = []
                     member_refs: List[Dict[str, Any]] = []
-                    for member in get_args(alias_ann):
+                    for member in _union_members(alias_ann):
                         ts, schema = self.map(member)
                         member_ts.append(ts)
                         member_refs.append(schema)
@@ -389,9 +403,8 @@ class _Walker:
 
     def add_union_root(self, root: Any) -> List[Any]:
         """展开 Union 根，注册全部成员，返回成员类型列表。"""
-        members = list(get_args(root)) if _is_union(root) else [root]
+        members = _union_members(root)
         for member in members:
-            member = _unwrap(member)
             if is_dataclass(member) or _is_pydantic_model(member):
                 self._named_model(member)
         return members

@@ -3,9 +3,6 @@
 import asyncio
 
 import pytest
-from nova_protocol.auth import AuthEvent, AuthPrompt, AuthPromptOption
-from nova_protocol.signal import AbortController
-
 from nova_harness.config.auth.guidance import (
     format_no_api_key_found_message,
     format_no_auth_message,
@@ -16,6 +13,8 @@ from nova_harness.config.auth.guidance import (
 from nova_harness.config.auth.interaction import LoginCancelledError, UIAuthInteraction
 from nova_harness.types.ui.context import UIContext
 from nova_harness.types.ui.primitives import UIResponse
+from nova_protocol.auth import AuthEvent, AuthPrompt, AuthPromptOption
+from nova_protocol.signal import AbortController
 
 # ---------------------------------------------------------------------------
 # guidance

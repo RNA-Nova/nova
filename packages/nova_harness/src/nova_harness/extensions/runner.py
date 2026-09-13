@@ -15,8 +15,6 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
-from nova_agent import AgentMessage
-
 from nova_harness.events import (
     AfterProviderResponseEvent,
     BeforeAgentStartEvent,
@@ -83,10 +81,9 @@ from nova_harness.types.extensions.extension import (
 from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
 from nova_harness.types.project_trust import ProjectTrustEvent, ProjectTrustEventResult
 from nova_harness.types.protocols import ModelRuntimeProtocol
-from nova_harness.types.session.factory import (
-    ProjectTrustContext,
-)
+from nova_harness.types.session.factory import ProjectTrustContext
 from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
+from nova_protocol import AgentMessage
 
 
 @dataclass

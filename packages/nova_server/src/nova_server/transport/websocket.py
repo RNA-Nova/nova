@@ -27,11 +27,10 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
+from nova_server.transport.base import Transport
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request
-
-from nova_server.transport.base import Transport
 
 # on_connection 回调：每接入一条连接调用一次（服务器 add_connection 的接缝）
 OnConnection = Callable[[Transport], Awaitable[None]]

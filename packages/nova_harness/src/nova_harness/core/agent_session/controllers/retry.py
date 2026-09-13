@@ -8,10 +8,7 @@ from typing import Any
 from nova_harness.core.utils import is_context_overflow
 from nova_harness.events import AutoRetryEndEvent, AutoRetryStartEvent
 from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import (
-    AbortController,
-    AssistantMessage,
-)
+from nova_protocol import AbortController, AssistantMessage
 
 
 class RetryController:

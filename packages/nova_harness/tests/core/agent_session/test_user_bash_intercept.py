@@ -10,11 +10,12 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Literal, Optional
 
 import pytest
-from nova_agent import CustomAgentMessage
-
 from nova_harness.core.agent_session.controllers.user_tools import UserToolController
 from nova_harness.events import USER_BASH, UserBashEventResult
 from nova_harness.types.resources.user_tools import UserToolDefinition
+from nova_protocol import (
+    CustomAgentMessage,
+)
 
 
 class _FakeBashMessage(CustomAgentMessage):

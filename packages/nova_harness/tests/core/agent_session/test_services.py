@@ -8,7 +8,6 @@ from typing import Any, Dict
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_harness.config import AuthStorage, SettingsManager
 from nova_harness.core.agent_session.services import (
     AgentSessionServices,

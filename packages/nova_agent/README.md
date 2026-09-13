@@ -36,10 +36,10 @@ import asyncio
 
 from nova_agent import Agent
 
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     AssistantMessage,
     DoneEvent,
-    EventStream,
     KnownApi,
     KnownProvider,
     Model,
@@ -103,21 +103,31 @@ async def main():
 asyncio.run(main())
 ```
 
-接入真实模型时不传 `stream_fn`：解析顺序为「构造参数 → `set_default_stream_fn()` 注册的全局函数 → `nova_ai` 内置模型目录兜底」，兜底即 `builtin_models().stream_simple`（鉴权从环境变量解析）：
+接入真实模型时 `stream_fn` 有两级解析（对齐 pi）：**构造参数 → `set_default_stream_fn()` 注册的全局函数**。两级都缺席时构造即抛错（fail-fast，无静默兜底——避免"忘了配"变成悄悄用环境变量凭据发真实请求）：
 
 ```python
-from nova_ai import get_volcengine_model
+from nova_ai import builtin_models, get_volcengine_model
 
-agent = Agent()  # stream_fn 走 nova_ai 内置模型目录
+# 库消费者：显式注入（推荐示范）
+agent = Agent(stream_fn=builtin_models().stream_simple)
 agent.set_model(get_volcengine_model("deepseek-v4-flash-260425"))
 await agent.prompt("你好")  # 需要 VOLCENGINE_API_KEY 环境变量
+```
+
+应用宿主可在启动时注册一次全局默认，之后各处省略（harness 即走此路径）：
+
+```python
+from nova_agent import set_default_stream_fn
+from nova_ai import builtin_models
+
+set_default_stream_fn(builtin_models().stream_simple)  # 鉴权从环境变量解析
 ```
 
 ## 核心概念
 
 ### AgentMessage 与 LLM 消息
 
-`AgentMessage = Union[Message, CustomAgentMessage]`。其中 `Message` 是 `nova_ai` 的判别联合（判别键 `role`）：
+`AgentMessage = Union[Message, CustomAgentMessage]`（开放集：判别联合 + 兜底成员 + `union_mode="left_to_right"`）。其中 `Message` 是 `nova_protocol` 的判别联合（判别键 `role`）：
 
 - `UserMessage`：用户输入，`content` 为字符串或 `TextContent` / `ImageContent` 列表；
 - `AssistantMessage`：助手回复，`content` 为 `TextContent` / `ThinkingContent` / `ToolCall` 列表，附带 `usage`、`stop_reason`、`error_message` 等元数据；
@@ -347,11 +357,11 @@ agent.has_queued_messages()
 
 ## 工具
 
-继承 `AgentTool`（`nova_ai.Tool` 的子类，pydantic 模型）定义工具：
+继承 `AgentTool`（`nova_protocol.Tool` 的子类，pydantic 模型）定义工具：
 
 ```python
-from nova_agent import AgentTool, AgentToolResult
-from nova_ai import TextContent
+from nova_agent import AgentTool
+from nova_protocol import AgentToolResult, TextContent
 
 
 class SquareTool(AgentTool):
@@ -409,10 +419,10 @@ class SquareTool(AgentTool):
 
 ## 自定义消息类型
 
-继承 `CustomAgentMessage` 定义应用私有消息（UI 通知、审计记录等）：
+继承 `CustomAgentMessage`（住 `nova_protocol`）定义应用私有消息（UI 通知、审计记录等）：
 
 ```python
-from nova_agent import CustomAgentMessage
+from nova_protocol import CustomAgentMessage
 
 
 class NotificationMessage(CustomAgentMessage):
@@ -421,7 +431,7 @@ class NotificationMessage(CustomAgentMessage):
     timestamp: int = 0
 ```
 
-自定义消息会进入 `state.messages` 与事件流，但 LLM 看不懂——默认 `convert_to_llm` 会过滤无 `role` 或 role 非标准的消息。需要让模型感知时，自定义 `convert_to_llm` 把它们转成标准消息：
+自定义消息会进入 `state.messages` 与事件流，但 LLM 看不懂——默认 `convert_to_llm` 会过滤非框架三角色的消息。需要让模型感知时，自定义 `convert_to_llm` 把它们转成标准消息：
 
 ```python
 def convert(messages):
@@ -441,7 +451,8 @@ agent = Agent(convert_to_llm=convert)
 
 ```python
 from nova_agent import AgentContext, AgentLoopConfig, agent_loop
-from nova_ai import SimpleStreamOptions, UserMessage
+from nova_ai import SimpleStreamOptions
+from nova_protocol import UserMessage
 
 config = AgentLoopConfig(stream_options=SimpleStreamOptions(), model=model)
 context = AgentContext(system_prompt="你是一个简洁的助手", messages=[])

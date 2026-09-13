@@ -7,11 +7,7 @@ SystemPromptBuilder — 把 Agent 配置渲染成系统提示词字符串。
 from typing import Dict, List, Optional, Set
 
 from nova_harness.core.utils.skills import format_skills_for_prompt
-from nova_harness.types.resources.agents import (
-    AgentConfig,
-    DynamicContext,
-    Section,
-)
+from nova_harness.types.resources.agents import AgentConfig, DynamicContext, Section
 from nova_harness.types.resources.context_files import ContextFile
 from nova_harness.types.resources.skills import Skill
 from nova_harness.types.resources.tools import ToolDefinition, ToolInfo

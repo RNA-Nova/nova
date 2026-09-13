@@ -7,7 +7,6 @@ AgentSessionConfig 配置类测试。
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_harness.events import SessionStartEvent
 from nova_harness.types.session.config import AgentSessionConfig
 

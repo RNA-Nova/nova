@@ -5,12 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from nova_agent import CustomAgentMessage
 from nova_harness.core.domains.user_tools import UserToolManager
 from nova_harness.events import USER_BASH, UserBashEvent
 from nova_harness.types.protocols import AgentSessionProtocol
 from nova_harness.types.resources.user_tools import UserToolEventCallback
-from nova_protocol import AbortController
+from nova_protocol import AbortController, CustomAgentMessage
 
 
 class UserToolController:
@@ -144,10 +143,7 @@ class UserToolController:
 
     def _emit_message_events(self, message: CustomAgentMessage) -> None:
         """按会话消息生命周期发射 start/end（mirror 依此完结卡片）。"""
-        from nova_harness.events.agent import (
-            MessageEndEvent,
-            MessageStartEvent,
-        )
+        from nova_harness.events.agent import MessageEndEvent, MessageStartEvent
 
         self._session._emit(MessageStartEvent(message=message))
         self._session._emit(MessageEndEvent(message=message))

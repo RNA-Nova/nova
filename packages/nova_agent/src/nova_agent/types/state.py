@@ -7,12 +7,8 @@ AgentState 是运行时可变状态容器，不是 JSON 边界类型，因此不
 
 from typing import List, Optional, Set
 
-from nova_protocol import (
-    Model,
-    ModelThinkingLevel,
-)
+from nova_protocol import AgentMessage, Model, ModelCost, ModelThinkingLevel
 
-from .base import AgentMessage
 from .tool import AgentTool
 
 _PLACEHOLDER_MODEL_ID = "unknown"
@@ -33,7 +29,7 @@ def _default_placeholder_model() -> Model:
         base_url="",
         reasoning=False,
         input_types=["text"],
-        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+        cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
         context_window=0,
         max_tokens=0,
     )

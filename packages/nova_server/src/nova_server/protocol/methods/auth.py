@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from nova_harness.config.auth.interaction import UIAuthInteraction
 from nova_protocol.auth import ApiKeyCredential
 from nova_protocol.signal import AbortController
 from nova_server.protocol.errors import JSONRPCError
@@ -25,8 +26,6 @@ from nova_server.protocol.methods.shapes import (
 )
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.router import MethodRegistry
-
-from nova_harness.config.auth.interaction import UIAuthInteraction
 
 _AUTH_TYPES = ("api_key", "oauth")
 

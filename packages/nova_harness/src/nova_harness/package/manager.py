@@ -73,10 +73,7 @@ from nova_harness.types.package import (
     SourceScope,
     UninstallResult,
 )
-from nova_harness.types.package.errors import (
-    PackageInstallError,
-    PackageUpdateError,
-)
+from nova_harness.types.package.errors import PackageInstallError, PackageUpdateError
 
 __all__ = ["PackageManager", "PackageInstallError", "PackageUpdateError"]
 

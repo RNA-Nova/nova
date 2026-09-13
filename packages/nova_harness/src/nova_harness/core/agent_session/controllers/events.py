@@ -6,8 +6,6 @@ import time
 import uuid
 from typing import Any
 
-from nova_agent import AgentMessage
-
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.events import (
     AGENT_END,
@@ -34,6 +32,7 @@ from nova_harness.events import (
     TurnStartEvent,
 )
 from nova_harness.types.protocols import AgentSessionProtocol
+from nova_protocol import AgentMessage
 
 
 class EventController:
@@ -214,9 +213,7 @@ class EventController:
         if not getattr(settings, "show_cache_miss_notices", False):
             return
         try:
-            from nova_harness.sessions.cache_stats import (
-                detect_cache_miss,
-            )
+            from nova_harness.sessions.cache_stats import detect_cache_miss
 
             miss = detect_cache_miss(
                 session.session_manager.get_entries(),

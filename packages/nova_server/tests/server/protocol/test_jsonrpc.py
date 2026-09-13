@@ -1,7 +1,6 @@
 """JSON-RPC 协议测试。"""
 
 import pytest
-
 from nova_server.protocol import (
     JSONRPCError,
     build_notification,

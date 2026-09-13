@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from nova_agent import CustomAgentMessage
-
 from nova_harness.extensions.event_bus import ExtensionEventBus
 from nova_harness.sessions import message_types as _message_types
 from nova_harness.types.extensions.extension import (
@@ -23,6 +21,7 @@ from nova_harness.types.extensions.extension import (
     RegisteredCommand,
 )
 from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_protocol import CustomAgentMessage
 
 
 def _noop_handler(*args: Any, **kwargs: Any) -> Any:

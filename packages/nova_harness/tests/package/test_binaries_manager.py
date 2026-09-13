@@ -11,7 +11,6 @@ import tarfile
 import zipfile
 
 import pytest
-
 from nova_harness.package.binaries import manager
 from nova_harness.package.binaries.manager import (
     detect_platform_key,

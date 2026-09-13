@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_harness.core.utils.session_cwd import (
     MissingSessionCwdError,
     assert_session_cwd_exists,

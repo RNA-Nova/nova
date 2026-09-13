@@ -19,10 +19,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 
-from nova_harness.extensions.api import NovaExtensionAPI
-from nova_harness.events.results import ToolCallEventResult
-
 from nova_coding_agent.ui_primitives import select
+from nova_harness.events.results import ToolCallEventResult
+from nova_harness.extensions.api import NovaExtensionAPI
 
 _CHOICE_ONCE = "允许一次"
 _CHOICE_ALWAYS = "本会话始终允许"

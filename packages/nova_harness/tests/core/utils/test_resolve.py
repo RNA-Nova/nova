@@ -3,7 +3,6 @@ utils.resolve_api_key 测试。
 """
 
 import pytest
-
 from nova_harness.core.utils import resolve_api_key
 
 

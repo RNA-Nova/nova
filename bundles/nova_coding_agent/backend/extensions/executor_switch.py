@@ -25,8 +25,6 @@ from __future__ import annotations
 import shlex
 from typing import Any, Dict, List, Optional, Tuple
 
-from nova_harness.extensions.api import NovaExtensionAPI
-
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
@@ -44,6 +42,7 @@ from nova_coding_agent.ui_primitives import (
     select_items,
     set_status,
 )
+from nova_harness.extensions.api import NovaExtensionAPI
 
 _ENTRY_TYPE = "executor_backend"
 # 供给进度的 footer 状态位（同 key 幂等覆盖，结束清除）

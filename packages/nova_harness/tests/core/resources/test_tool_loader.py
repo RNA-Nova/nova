@@ -15,7 +15,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from nova_agent import AgentToolResult
 from nova_harness.core.domains.tools.dynamic_tool import DynamicTool
 from nova_harness.resources.loaders.tools import ToolLoader, _load_tool
 from nova_harness.types.resources.tools import (
@@ -24,7 +23,10 @@ from nova_harness.types.resources.tools import (
     ToolDefinition,
     ToolExecContext,
 )
-from nova_protocol import TextContent
+from nova_protocol import (
+    AgentToolResult,
+    TextContent,
+)
 
 _EXECUTOR = """
 class Tool:

@@ -1,8 +1,6 @@
 """测试资源自动发现。"""
 
-
 import pytest
-
 from nova_harness.package.resolve.discovery import (
     collect_auto_prompt_entries,
     collect_extension_entries,

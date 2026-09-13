@@ -15,24 +15,23 @@ from typing import Any, List, Optional
 
 import pytest
 from nova_agent import (
-    AbortSignal,
     AfterToolCallContext,
     AfterToolCallResult,
     Agent,
     AgentContext,
     AgentLoopTurnUpdate,
-    AgentMessage,
     AgentState,
     AgentTool,
-    AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
+    set_default_stream_fn,
 )
-from nova_ai import ProviderResponse
-from nova_ai.providers.volcengine import get_volcengine_model
 from nova_protocol import (
+    AbortSignal,
+    AgentMessage,
+    AgentToolResult,
     AssistantMessage,
     Model,
     ModelCost,
@@ -42,6 +41,9 @@ from nova_protocol import (
     UserMessage,
 )
 from nova_protocol.enums import KnownApi, KnownProvider
+
+from nova_ai import ProviderResponse, builtin_models
+from nova_ai.providers.volcengine import get_volcengine_model
 
 pytestmark = pytest.mark.integration
 
@@ -67,6 +69,20 @@ def _extract_text(message) -> str:
 @pytest.fixture(params=MODEL_IDS)
 def model(request):
     return _get_model(request.param)
+
+
+@pytest.fixture(autouse=True)
+def _register_default_stream_fn():
+    """模拟宿主职责：注册全局默认 stream 函数（真实模型走 nova_ai 内置目录）。
+
+    nova_agent 无内置兜底——未注册时 ``Agent()`` 构造即抛错（pi 对位），
+    集成测试以注册点注入，与 harness 装配路径一致。
+    """
+    set_default_stream_fn(builtin_models().stream_simple)
+    try:
+        yield
+    finally:
+        set_default_stream_fn(None)
 
 
 # ---------------------------------------------------------------------------

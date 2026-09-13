@@ -4,7 +4,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from nova_harness.package.source.resolver import SourceResolver
 from nova_harness.types.package import PackageSource
 

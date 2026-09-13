@@ -7,7 +7,6 @@
 from datetime import datetime
 from typing import Any, List, Optional, Union
 
-from nova_agent import AgentMessage
 from nova_harness.types.messages import (
     BRANCH_SUMMARY_PREFIX,
     BRANCH_SUMMARY_SUFFIX,
@@ -18,12 +17,7 @@ from nova_harness.types.messages import (
     ContextInjectable,
     CustomMessage,
 )
-from nova_protocol import (
-    ImageContent,
-    Message,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import AgentMessage, ImageContent, Message, TextContent, UserMessage
 
 
 def extract_text_from_content(

@@ -11,9 +11,10 @@
 
 import asyncio
 
-from nova_agent import Agent, AgentTool, AgentToolResult
+from nova_agent import Agent, AgentTool
 from nova_ai import EventStream
 from nova_protocol import (
+    AgentToolResult,
     DoneEvent,
     KnownApi,
     KnownProvider,

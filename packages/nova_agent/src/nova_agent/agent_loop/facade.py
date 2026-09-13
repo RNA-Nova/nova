@@ -6,29 +6,17 @@ async loop implementation in `loop.py`. It is not the API itself;
 `nova_agent.agent_loop.__init__` re-exports these symbols.
 """
 
-import asyncio
 from typing import List, Optional
 
 from nova_ai import EventStream
-from nova_protocol import AbortSignal
+from nova_protocol import AbortSignal, AgentEndEvent, AgentEvent, AgentMessage
 
-from ..types import (
-    AgentContext,
-    AgentEndEvent,
-    AgentEvent,
-    AgentEventSink,
-    AgentLoopConfig,
-    AgentMessage,
-    StreamFn,
-)
+from ..types import AgentContext, AgentEventSink, AgentLoopConfig, StreamFn
 from .loop import run_agent_loop, run_agent_loop_continue
 
 
 class AgentEventStream(EventStream[AgentEvent, List[AgentMessage]]):
     """An asynchronous stream of AgentEvents."""
-
-    task: Optional[asyncio.Task] = None
-    """驱动本流的后台任务引用（防 CPython GC 掉在途任务，便于测试与取消）。"""
 
     def __init__(self):
         super().__init__(
@@ -73,7 +61,7 @@ def agent_loop(
         except Exception as exc:
             stream.end(exc=exc)
 
-    stream.task = asyncio.create_task(_run())
+    stream.drive(_run())
     return stream
 
 
@@ -108,5 +96,5 @@ def agent_loop_continue(
         except Exception as exc:
             stream.end(exc=exc)
 
-    stream.task = asyncio.create_task(_run())
+    stream.drive(_run())
     return stream

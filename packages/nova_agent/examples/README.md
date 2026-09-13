@@ -29,16 +29,16 @@ python examples/01_quickstart.py
 
 ## 接入真实模型
 
-示例中的 mock `stream_fn` 可直接替换为真实调用：不传 `stream_fn` 时 Agent 默认使用 `builtin_models().stream_simple`（auth 从环境变量解析）：
+示例中的 mock `stream_fn` 可直接替换为真实调用——`stream_fn` 两级解析「构造参数 → `set_default_stream_fn()` 注册的全局函数」，都缺席时构造即抛错（fail-fast，无静默兜底）：
 
 ```bash
 export VOLCENGINE_API_KEY="<your-key>"
 ```
 
 ```python
-from nova_ai import get_volcengine_model
+from nova_ai import builtin_models, get_volcengine_model
 
-agent = Agent()  # 默认 stream_fn 走内置 Models
+agent = Agent(stream_fn=builtin_models().stream_simple)  # auth 从环境变量解析
 agent.set_model(get_volcengine_model("deepseek-v4-flash-260425"))
 await agent.prompt("你好")
 ```

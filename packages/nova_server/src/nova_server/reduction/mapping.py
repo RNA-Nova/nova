@@ -11,11 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from nova_harness.types.messages import CustomMessageContent
-from nova_protocol import (
-    ImageContent,
-    TextContent,
-    ThinkingContent,
-)
+from nova_protocol import ImageContent, TextContent, ThinkingContent
 from nova_server.types.items import (
     AgentMessageItem,
     CustomItem,

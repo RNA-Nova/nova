@@ -23,14 +23,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from nova_coding_agent.ui_primitives import confirm, select_items
 from nova_harness.config.auth.interaction import (
     LoginCancelledError,
     UIAuthInteraction,
 )
 from nova_harness.extensions.api import NovaExtensionAPI
 from nova_harness.sessions.listing import list_sessions_from_dir
-
-from nova_coding_agent.ui_primitives import confirm, select_items
 
 
 def _parse_args(text: str) -> tuple[str, list[str]]:

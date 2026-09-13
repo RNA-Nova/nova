@@ -6,16 +6,9 @@
 
 from typing import Annotated, Any, List, Literal, Optional, Union
 
-from nova_agent import CustomAgentMessage
-from nova_harness.types.messages import (
-    CustomMessage,
-    CustomMessageContent,
-)
+from nova_harness.types.messages import CustomMessage, CustomMessageContent
 from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
-from nova_protocol import (
-    Message,
-    ModelThinkingLevel,
-)
+from nova_protocol import CustomAgentMessage, Message, ModelThinkingLevel
 from nova_protocol.base_model import NovaBaseModel
 from pydantic import BeforeValidator, Field, SerializeAsAny, TypeAdapter
 

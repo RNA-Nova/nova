@@ -5,18 +5,6 @@ import base64
 import os
 from typing import Any, Dict, Optional
 
-from nova_agent import AgentToolResult
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-from nova_protocol import (
-    AbortSignal,
-    ImageContent,
-    TextContent,
-)
-
 from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.image import process_image
 from nova_coding_agent.tools_common.operations import (
@@ -27,6 +15,17 @@ from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     format_size,
     truncate_head,
+)
+from nova_harness.types.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+from nova_protocol import (
+    AbortSignal,
+    AgentToolResult,
+    ImageContent,
+    TextContent,
 )
 
 
