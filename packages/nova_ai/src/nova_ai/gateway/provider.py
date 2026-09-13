@@ -14,16 +14,20 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
+from nova_protocol import (
+    AbortSignal,
+    Context,
+    Credential,
+    KnownApi,
+    Model,
+    ModelsStoreEntry,
+    ProviderAuth,
+    ProviderHeaders,
+)
+
 from ..auth.resolve import ModelsError
-from ..signal import AbortSignal
+from ..stream_options import SimpleStreamOptions, StreamOptions
 from ..streaming import AssistantMessageEventStream
-from ..types.aliases import ProviderHeaders
-from ..types.auth import Credential, ProviderAuth
-from ..types.enums import KnownApi
-from ..types.messages import Context
-from ..types.model import Model
-from ..types.stream_options import SimpleStreamOptions, StreamOptions
-from .store import ModelsStoreEntry
 from .streams import lazy_stream
 
 

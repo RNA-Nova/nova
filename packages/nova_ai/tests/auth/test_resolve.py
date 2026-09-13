@@ -3,7 +3,6 @@
 import time
 
 import pytest
-
 from nova_ai.auth.context import default_provider_auth_context
 from nova_ai.auth.credential_store import InMemoryCredentialStore
 from nova_ai.auth.helpers import env_api_key_auth
@@ -12,7 +11,7 @@ from nova_ai.auth.resolve import (
     ModelsError,
     resolve_provider_auth,
 )
-from nova_ai.types.auth import (
+from nova_protocol import (
     ApiKeyCredential,
     AuthResult,
     ModelAuth,

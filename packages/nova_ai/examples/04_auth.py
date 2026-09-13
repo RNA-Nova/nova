@@ -16,7 +16,7 @@
 
 import os
 
-from nova_ai import SimpleStreamOptions
+from nova_ai.stream_options import SimpleStreamOptions
 from nova_ai.utils.env import get_env_api_key
 
 

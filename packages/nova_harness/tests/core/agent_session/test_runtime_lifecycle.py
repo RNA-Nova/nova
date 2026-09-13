@@ -7,8 +7,6 @@ AgentSessionRuntime 生命周期测试。
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nova_ai import UserMessage
-
 from nova_harness.core import AgentSession, AgentSessionRuntime, AgentSessionServices
 from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
 from nova_harness.types.session.options import (
@@ -16,6 +14,7 @@ from nova_harness.types.session.options import (
     NavigateOptions,
     NewSessionOptions,
 )
+from nova_protocol import UserMessage
 
 
 def _make_old_session():
@@ -459,9 +458,8 @@ async def test_rebind_and_with_session_callbacks():
 @pytest.mark.asyncio
 async def test_import_from_jsonl(tmp_path):
     """import_from_jsonl 复制 JSONL 到 session dir 并切换到该会话。"""
-    from nova_ai import UserMessage
-
     from nova_harness.sessions import SessionManager
+    from nova_protocol import UserMessage
 
     # 准备一个源 JSONL 会话
     source_session_dir = tmp_path / "source_sessions"

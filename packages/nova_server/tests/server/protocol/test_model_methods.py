@@ -5,8 +5,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import pytest
-from nova_ai import Model
-
+from nova_protocol import Model
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import model as model_methods
 from nova_server.protocol.methods.state import ServerState

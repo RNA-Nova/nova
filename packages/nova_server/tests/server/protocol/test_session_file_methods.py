@@ -17,15 +17,18 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 import pytest
-from nova_ai import AssistantMessage, TextContent, UserMessage
-
 from nova_harness.core import AgentSession
-from nova_server.protocol import JSONRPCError, MethodRegistry
-from nova_server.protocol.methods import session as session_methods
-from nova_server.protocol.methods.state import ServerState
 from nova_harness.sessions import SessionManager
 from nova_harness.sessions.utils import get_default_session_dir_path
 from nova_harness.types.session.config import AgentSessionConfig
+from nova_protocol import (
+    AssistantMessage,
+    TextContent,
+    UserMessage,
+)
+from nova_server.protocol import JSONRPCError, MethodRegistry
+from nova_server.protocol.methods import session as session_methods
+from nova_server.protocol.methods.state import ServerState
 
 
 def _make_state(runtime: Any = None, runtime_manager: Any = None) -> ServerState:

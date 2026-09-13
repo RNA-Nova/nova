@@ -5,11 +5,11 @@ Agent loop core: main loop and assistant streaming.
 import dataclasses
 from typing import List, Optional
 
-from nova_ai import (
+from nova_ai import to_thinking_level
+from nova_protocol import (
     AbortSignal,
     AssistantMessage,
     Context,
-    to_thinking_level,
 )
 
 from ..stream_fn import builtin_fallback_stream_fn, get_default_stream_fn

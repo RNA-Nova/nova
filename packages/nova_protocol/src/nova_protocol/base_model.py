@@ -1,6 +1,7 @@
 """
 Nova 基础模型
-所有 nova_ai 数据模型的基类，统一序列化行为。
+
+词汇枢纽（``nova_protocol``）全部 Pydantic 数据模型的基类，统一序列化行为。
 """
 
 from typing import Any, Dict

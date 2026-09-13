@@ -14,20 +14,23 @@ import os
 from types import SimpleNamespace
 
 from nova_ai import (
-    AssistantMessage,
-    Context,
-    DoneEvent,
     EventStream,
-    Model,
-    StartEvent,
-    TextContent,
-    UserMessage,
     builtin_models,
     create_models,
     create_provider,
 )
-from nova_ai.types.enums import KnownApi, KnownProvider
-from nova_ai.types.model import ModelCost
+from nova_protocol import (
+    AssistantMessage,
+    Context,
+    DoneEvent,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    StartEvent,
+    TextContent,
+    UserMessage,
+)
 
 
 def make_echo_api():
@@ -79,7 +82,7 @@ async def demo_custom():
         max_tokens=4096,
     )
     from nova_ai.auth.helpers import env_api_key_auth
-    from nova_ai.types.auth import ProviderAuth
+    from nova_protocol import ProviderAuth
 
     provider = create_provider(
         id="my-provider",

@@ -15,24 +15,10 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from nova_ai import (
-    Model,
-    ModelCost,
     Provider,
     create_provider,
 )
 from nova_ai.api_impls import openai_completions
-from nova_ai.types.auth import (
-    ApiKeyAuth,
-    ApiKeyCredential,
-    AuthCheck,
-    AuthResult,
-    OAuthAuth,
-    OAuthCredential,
-    ProviderAuth,
-)
-from nova_ai.types.enums import KnownApi
-from nova_ai.types.messages import Context
-
 from nova_harness.config.resolve import (
     get_config_value_env_var_names,
     is_command_config_value,
@@ -49,6 +35,22 @@ from nova_harness.types.model import (
     ModelDefinition,
     ProviderConfig,
     ProviderConfigInput,
+)
+from nova_protocol import (
+    ApiKeyAuth,
+    ApiKeyAuthInput,
+    ApiKeyCredential,
+    AuthCheck,
+    AuthInteraction,
+    AuthPrompt,
+    AuthResult,
+    Context,
+    KnownApi,
+    Model,
+    ModelCost,
+    OAuthAuth,
+    OAuthCredential,
+    ProviderAuth,
 )
 
 # 当前唯一完整的协议实现；新增协议时在此登记
@@ -397,9 +399,9 @@ def compose_api_key_auth(
     raw_headers = _configured_headers(config, extension)
     auth_header = _configured_auth_header(config, extension)
 
-    async def resolve(input: Dict[str, Any]) -> Optional[AuthResult]:
+    async def resolve(input: ApiKeyAuthInput) -> Optional[AuthResult]:
         ctx = input["ctx"]
-        credential: Optional[ApiKeyCredential] = input.get("credential")
+        credential = input["credential"]
 
         result: Optional[AuthResult]
         if credential is not None:
@@ -446,8 +448,8 @@ def compose_api_key_auth(
             result, provider_id, raw_headers, auth_header, header_env
         )
 
-    async def check(input: Dict[str, Any]) -> Optional[AuthCheck]:
-        credential: Optional[ApiKeyCredential] = input.get("credential")
+    async def check(input: ApiKeyAuthInput) -> Optional[AuthCheck]:
+        credential = input["credential"]
         if credential is not None:
             if inherited is not None and inherited.check is not None:
                 return await inherited.check(input)
@@ -469,10 +471,9 @@ def compose_api_key_auth(
         resolved = await inherited.resolve(input) if inherited is not None else None
         return AuthCheck(type="api_key", source=resolved.source) if resolved else None
 
-    async def login(interaction: Any) -> ApiKeyCredential:
+    async def login(interaction: AuthInteraction) -> ApiKeyCredential:
         if inherited is not None and inherited.login is not None:
             return await inherited.login(interaction)
-        from nova_ai.types.auth import AuthPrompt
 
         key = await interaction.prompt(
             AuthPrompt(type="secret", message="Enter API key")

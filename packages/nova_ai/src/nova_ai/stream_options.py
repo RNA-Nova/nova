@@ -7,19 +7,22 @@ dataclass 的构造签名即契约（传错字段直接 TypeError），
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
-from ..signal import AbortSignal
-from .aliases import ProviderEnv, ProviderHeaders
-from .enums import CacheRetention, ThinkingLevel, Transport
+from nova_protocol import (
+    AbortSignal,
+    CacheRetention,
+    Model,
+    ProviderEnv,
+    ProviderHeaders,
+    ThinkingLevel,
+    Transport,
+)
 
-if TYPE_CHECKING:
-    from .model import Model
 
-
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class ProviderResponse:
-    """HTTP 响应元数据"""
+    """HTTP 响应元数据（不可变值对象——规则 5）。"""
 
     status: int
     headers: Dict[str, str]
@@ -68,8 +71,9 @@ class StreamOptions:
 
     # 运行时回调/信号，不参与任何序列化
     signal: Optional[AbortSignal] = None
-    on_payload: Optional[Callable[[Any, "Model"], Optional[Any]]] = None
-    on_response: Optional[Callable[[ProviderResponse, Any], None]] = None
+    # 请求体/响应观测钩子；可同步返回或返回 awaitable（实现侧 isawaitable 兼容）
+    on_payload: Optional[Callable[[Any, Model], Any]] = None
+    on_response: Optional[Callable[[ProviderResponse, Any], Any]] = None
     # Models 层专属（对齐 TS ModelsStreamTransforms.transformHeaders）：
     # 在 auth/model/options headers 合并完成后、provider 派发前运行一次，
     # 可同步或异步返回新的 headers；``Models`` 负责消费并在派发前移除，

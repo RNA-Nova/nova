@@ -5,8 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
-from nova_ai import AbortController, Model
-
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
@@ -28,9 +26,13 @@ from nova_harness.events.constants import SESSION_BEFORE_COMPACT
 from nova_harness.sessions.utils import get_latest_compaction_entry
 from nova_harness.types.compaction.compaction import CompactionResult
 from nova_harness.types.protocols import AgentSessionProtocol
+from nova_protocol import (
+    AbortController,
+    Model,
+)
 
 if TYPE_CHECKING:
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
 
 def _without_deleted_headers(

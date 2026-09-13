@@ -15,7 +15,11 @@ import math
 from typing import Any, Callable, Dict, List
 
 import jsonschema
-from nova_ai import Message, Tool, ToolCall
+from nova_protocol import (
+    Message,
+    Tool,
+    ToolCall,
+)
 
 from .types.base import AgentMessage
 
@@ -297,7 +301,8 @@ def validate_tool_arguments(tool: Tool, tool_call: ToolCall) -> Any:
     """
     schema = tool.parameters
     if schema is None:
-        # 没有schema，无需验证
+        # 无 schema 直通（防御 construct 路径绕过校验构造出的实例；
+        # 校验路径下 parameters 恒为 dict）
         return tool_call.arguments
 
     # 克隆参数以避免修改原始数据，然后按 schema 矫正类型

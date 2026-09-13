@@ -52,12 +52,14 @@ from nova_agent import (
 )
 from nova_agent.agent_loop import run_agent_loop, run_agent_loop_continue
 from nova_ai import (
+    EventStream,
+    SimpleStreamOptions,
+)
+from nova_protocol import (
     AbortController,
     DoneEvent,
-    EventStream,
     Model,
     ModelThinkingLevel,
-    SimpleStreamOptions,
     StartEvent,
     TextContent,
     ThinkingLevel,

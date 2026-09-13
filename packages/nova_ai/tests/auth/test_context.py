@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from nova_ai.auth.context import default_provider_auth_context
 
 

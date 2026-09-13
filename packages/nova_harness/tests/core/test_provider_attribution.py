@@ -2,11 +2,10 @@
 
 from typing import Any, Optional
 
-from nova_ai import Model
-from nova_ai.types.enums import KnownApi
-from nova_ai.types.model import ModelCost
-
 from nova_harness.model.attribution import merge_provider_attribution_headers
+from nova_protocol import Model
+from nova_protocol.enums import KnownApi
+from nova_protocol.model import ModelCost
 
 
 class _FakeSettingsManager:

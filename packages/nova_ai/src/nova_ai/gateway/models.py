@@ -19,7 +19,42 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from dataclasses import replace as _dataclass_replace
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
+
+from nova_protocol import (
+    AbortController,
+    AbortedError,
+    AbortSignal,
+    ApiKeyCredential,
+    AssistantMessage,
+    AuthCheck,
+    AuthContext,
+    AuthInteraction,
+    AuthResult,
+    AuthType,
+    Context,
+    Credential,
+    CredentialStore,
+    Model,
+    ModelsStoreEntry,
+    ProviderAuth,
+    ProviderEnv,
+    ProviderHeaders,
+)
 
 from ..auth.context import default_provider_auth_context
 from ..auth.credential_store import InMemoryCredentialStore
@@ -28,36 +63,40 @@ from ..auth.resolve import (
     ModelsError,
     resolve_provider_auth,
 )
-from ..signal import AbortController, AbortedError, AbortSignal
+from ..stream_options import SimpleStreamOptions, StreamOptions
 from ..streaming import AssistantMessageEventStream
-from ..types.aliases import ProviderHeaders
-from ..types.auth import (
-    ApiKeyCredential,
-    AuthCheck,
-    AuthContext,
-    AuthResult,
-    AuthType,
-    Credential,
-    CredentialStore,
-    ProviderAuth,
-)
-from ..types.messages import AssistantMessage, Context
-from ..types.model import Model
-from ..types.stream_options import SimpleStreamOptions, StreamOptions
 from ..utils.abort import any_signal, operation_signal, race_with_abort
 from .provider import UNSET, ModelsPublication, Provider, RefreshModelsContext
-from .store import InMemoryModelsStore, ModelsStore, ModelsStoreEntry
+from .store import InMemoryModelsStore, ModelsStore
 from .streams import lazy_stream
 
 
+class ModelsRefreshResult(TypedDict):
+    """``Models.refresh`` 的汇总结果（规则 10 声明形状）。
+
+    - ``aborted``：整个刷新是否因 signal 中断而提前收场；
+    - ``errors``：按 provider id 归集的刷新错误（中断不计入）。
+    """
+
+    aborted: bool
+    errors: Dict[str, Exception]
+
+
+# per-model headers 请求时解析钩子的签名：(model, env) → headers（可异步返回）
+ModelHeadersResolver = Callable[
+    [Model, Optional[ProviderEnv]],
+    Union[Optional[ProviderHeaders], Awaitable[Optional[ProviderHeaders]]],
+]
+
+
 def _merge_headers(
-    base: Optional[ProviderHeaders],
-    override: Optional[ProviderHeaders],
+    base: Optional[Mapping[str, Optional[str]]],
+    override: Optional[Mapping[str, Optional[str]]],
 ) -> Optional[ProviderHeaders]:
     """大小写不敏感地合并 headers（对齐 TS mergeHeaders）。"""
     if not base and not override:
         return None
-    merged: Dict[str, Any] = dict(base or {})
+    merged: ProviderHeaders = dict(base or {})
     for name, value in (override or {}).items():
         lower_name = name.lower()
         for existing_name in list(merged.keys()):
@@ -75,7 +114,7 @@ class Models:
         credential_store: Optional[CredentialStore] = None,
         models_store: Optional[ModelsStore] = None,
         auth_context: Optional[AuthContext] = None,
-        model_headers_resolver: Optional[Callable[..., Any]] = None,
+        model_headers_resolver: Optional[ModelHeadersResolver] = None,
     ) -> None:
         self._providers: Dict[str, Provider] = {}
         self._credential_store = credential_store or InMemoryCredentialStore()
@@ -190,14 +229,14 @@ class Models:
                 or self._refresh_generations.get(provider_id) != generation
             ):
                 return False
-            if publication.persist is UNSET:
-                pass
-            elif publication.persist is None:
-                await self._models_store.delete(provider_id)
-            else:
+            persist = publication.persist
+            if isinstance(persist, ModelsStoreEntry):
                 await self._models_store.write(
-                    provider_id, publication.persist.model_copy(deep=True)
+                    provider_id, persist.model_copy(deep=True)
                 )
+            elif persist is None:
+                await self._models_store.delete(provider_id)
+            # UNSET（未提及）：不动存储
             if (
                 signal.aborted
                 or self._refresh_generations.get(provider_id) != generation
@@ -228,8 +267,13 @@ class Models:
         signal: AbortSignal,
     ) -> None:
         """跑一个刷新阶段（离线恢复或网络拉取）。"""
+        # refresh_models 是 _DynamicProvider 的鸭子方法（refresh() 的
+        # refreshable 过滤保证只会走到动态 provider）
+        refresh_models = getattr(provider, "refresh_models", None)
+        if refresh_models is None:
+            return
         stored = await self._models_store.read(provider.id)
-        await provider.refresh_models(
+        await refresh_models(
             RefreshModelsContext(
                 credential=credential,
                 stored=stored.model_copy(deep=True) if stored is not None else None,
@@ -237,7 +281,7 @@ class Models:
                     provider.id, generation, signal, publication
                 ),
                 allow_network=allow_network,
-                force=force if allow_network else False,
+                force=bool(force) if allow_network else False,
                 signal=signal,
             )
         )
@@ -248,7 +292,7 @@ class Models:
         force: bool = False,
         signal: Optional[AbortSignal] = None,
         providers: Optional[Sequence[str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> ModelsRefreshResult:
         """刷新动态 provider 的模型列表（对齐 TS Models.refresh，两阶段）。
 
         - ``providers``：限定只刷这些 provider id（未知/静态 provider 忽略）；
@@ -371,7 +415,7 @@ class Models:
             oauth = provider.auth.oauth if provider.auth else None
             if oauth is None:
                 return None
-            if getattr(stored, "expires", 0) > int(time.time() * 1000):
+            if stored.expires > int(time.time() * 1000):
                 return stored
             if signal.aborted:
                 return None
@@ -381,7 +425,7 @@ class Models:
             ) -> Optional[Credential]:
                 if current is None or current.type != "oauth":
                     return None
-                if getattr(current, "expires", 0) > int(time.time() * 1000):
+                if current.expires > int(time.time() * 1000):
                     return None
                 return await oauth.refresh(current, signal)
 
@@ -393,7 +437,7 @@ class Models:
             return None
         credential = stored if stored is not None and stored.type == "api_key" else None
         result = await api_key.resolve(
-            {"ctx": self._auth_context, "credential": credential}
+            {"ctx": self._auth_context, "credential": credential, "signal": signal}
         )
         if result is None:
             return None
@@ -424,10 +468,10 @@ class Models:
         self,
         provider_or_model: Union[str, Model],
         overrides: Optional[AuthResolutionOverrides] = None,
-    ) -> Optional[Any]:
+    ) -> Optional[AuthResult]:
         """解析 provider 或 model 的鉴权（对齐 TS Models.getAuth）。"""
         overrides = overrides or AuthResolutionOverrides()
-        signal = operation_signal(getattr(overrides, "signal", None))
+        signal = operation_signal(overrides.signal)
         provider_id = (
             provider_or_model
             if isinstance(provider_or_model, str)
@@ -472,7 +516,7 @@ class Models:
         self,
         model: Model,
         overrides: Optional[AuthResolutionOverrides] = None,
-    ) -> Optional[Any]:
+    ) -> Optional[AuthResult]:
         """按 model.provider 解析鉴权。"""
         return await self.get_auth(model, overrides)
 
@@ -483,14 +527,15 @@ class Models:
         signal: AbortSignal,
     ) -> Optional[AuthCheck]:
         """检查 provider auth 是否配置（对齐 TS checkProviderAuth）。"""
+        provider_auth = provider.auth
         if credential is not None and credential.type == "oauth":
             return (
                 AuthCheck(type="oauth", source="OAuth")
-                if provider.auth and provider.auth.oauth
+                if provider_auth and provider_auth.oauth
                 else None
             )
-        api_key = provider.auth.api_key if provider.auth else None
-        if api_key is None:
+        api_key = provider_auth.api_key if provider_auth else None
+        if api_key is None or provider_auth is None:
             return None
         if api_key.check:
             try:
@@ -504,6 +549,7 @@ class Models:
                                 and credential.type == "api_key"
                                 else None
                             ),
+                            "signal": signal,
                         }
                     ),
                     signal,
@@ -519,7 +565,7 @@ class Models:
         resolution = await race_with_abort(
             resolve_provider_auth(
                 provider.id,
-                provider.auth,
+                provider_auth,
                 self._credential_store,
                 self._auth_context,
             ),
@@ -581,16 +627,16 @@ class Models:
         self,
         provider_id: str,
         type: AuthType,
-        interaction: Any,
+        interaction: AuthInteraction,
         signal: Optional[AbortSignal] = None,
-    ) -> Optional[Any]:
+    ) -> Credential:
         """执行 provider 的登录流程并持久化 credential。
 
         abort 语义对齐 TS：mutation 已开始则等它完成（凭据不会"半写入"），
         尚未开始则拒绝写入并按 abort 收场。
         """
         op_signal = operation_signal(
-            signal if signal is not None else getattr(interaction, "signal", None)
+            signal if signal is not None else interaction.signal
         )
         op_signal.throw_if_aborted()
         provider = self._providers.get(provider_id)
@@ -696,9 +742,8 @@ class Models:
             if options is not None and options.api_key is not None
             else auth.get("api_key")
         )
-        headers = _merge_headers(
-            auth.get("headers"), options.headers if options else None
-        )
+        options_headers = options.headers if options else None
+        headers = _merge_headers(auth.get("headers"), options_headers)
         # Models 层 transform_headers 最后运行（对齐 TS applyAuth），
         # 并在派发给 provider 前从 options 中移除。
         transform = options.transform_headers if options else None
@@ -707,15 +752,17 @@ class Models:
             if inspect.isawaitable(transformed):
                 transformed = await transformed
             headers = transformed
+        options_env = options.env if options else None
         env = (
-            {**(resolution.env or {}), **(options.env or {})}
-            if resolution.env or (options and options.env)
+            {**(resolution.env or {}), **(options_env or {})}
+            if resolution.env or options_env
             else None
         )
 
         request_model = model
-        if auth.get("base_url"):
-            request_model = model.model_copy(update={"base_url": auth["base_url"]})
+        base_url_override = auth.get("base_url")
+        if base_url_override:
+            request_model = model.model_copy(update={"base_url": base_url_override})
 
         if options is None:
             request_options = SimpleStreamOptions(
@@ -770,7 +817,13 @@ class Models:
         async def _setup() -> AssistantMessageEventStream:
             provider = self._require_provider(model)
             request_model, request_options = await self._apply_auth(model, options)
-            return provider.stream_simple(request_model, context, request_options)
+            # _apply_auth 的不变量：None → 新造 SimpleStreamOptions；
+            # 否则 dataclasses.replace 保留原类（输入恒为 SimpleStreamOptions）
+            return provider.stream_simple(
+                request_model,
+                context,
+                cast(Optional[SimpleStreamOptions], request_options),
+            )
 
         return lazy_stream(model, _setup)
 
@@ -784,18 +837,11 @@ class Models:
         return await self.stream_simple(model, context, options).result()
 
 
-def _dataclass_replace(options: StreamOptions, **update: Any) -> StreamOptions:
-    """dataclasses.replace 的模块间接层（便于测试与将来自定义选项类）。"""
-    from dataclasses import replace
-
-    return replace(options, **update)
-
-
 def create_models(
     credential_store: Optional[CredentialStore] = None,
     models_store: Optional[ModelsStore] = None,
     auth_context: Optional[AuthContext] = None,
-    model_headers_resolver: Optional[Callable[..., Any]] = None,
+    model_headers_resolver: Optional[ModelHeadersResolver] = None,
 ) -> Models:
     """构造空的 Models 集合。"""
     return Models(

@@ -22,7 +22,7 @@ from typing import (
     Set,
 )
 
-from nova_ai import Model
+from nova_protocol import Model
 
 if TYPE_CHECKING:
     # 类型检查时才导入具体类型，避免运行时的循环导入。
@@ -381,7 +381,6 @@ class AgentSessionServicesProtocol(Protocol):
 
 ResolveProjectTrustCallback = Callable[[LoadedExtensionsResult], Awaitable[bool]]
 """Project Trust 决议回调类型：接收预加载的扩展结果，返回是否信任当前项目。"""
-
 
 __all__ = [
     "AgentSessionProtocol",

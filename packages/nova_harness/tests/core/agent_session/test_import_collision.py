@@ -3,9 +3,10 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.core.agent_session.services import AgentSessionServices
-from nova_harness.core.runtime_manager.assembly import create_agent_session_from_services
+from nova_harness.core.runtime_manager.assembly import (
+    create_agent_session_from_services,
+)
 from nova_harness.sessions import SessionManager
 from nova_harness.types.session.config import CreateAgentSessionOptions
 
@@ -21,7 +22,7 @@ async def test_import_session_does_not_overwrite_existing_file(tmp_path: Path):
         d.mkdir(parents=True)
 
     # 造一个合法的源会话文件（含 assistant 消息触发落盘），并改名为与目标冲突的 foo.jsonl
-    from nova_ai import AssistantMessage, TextContent, UserMessage
+    from nova_protocol import AssistantMessage, TextContent, UserMessage
 
     src_manager = SessionManager.create(str(cwd), str(external_dir))
     src_manager.append_message(

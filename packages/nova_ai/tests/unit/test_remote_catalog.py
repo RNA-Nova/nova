@@ -3,21 +3,20 @@
 import asyncio
 
 import pytest
-
 from nova_ai.gateway.provider import ModelsPublication, Provider, RefreshModelsContext
-from nova_ai.gateway.store import ModelsStoreEntry
 from nova_ai.providers.remote_catalog import (
     merge_models,
     remote_models,
     with_remote_catalog,
 )
-from nova_ai.signal import AbortController
-from nova_ai.types import (
+from nova_protocol import (
+    AbortController,
     Context,
     KnownApi,
     KnownProvider,
     Model,
     ModelCost,
+    ModelsStoreEntry,
     UserMessage,
 )
 

@@ -11,8 +11,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
-from nova_ai import ModelThinkingLevel
-
+from nova_protocol import ModelThinkingLevel
 from nova_server.protocol import JSONRPCError, MethodRegistry
 from nova_server.protocol.methods import auth as auth_methods
 from nova_server.protocol.methods import model as model_methods

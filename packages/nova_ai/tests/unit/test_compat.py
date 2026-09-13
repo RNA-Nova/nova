@@ -2,7 +2,7 @@
 兼容性层测试
 """
 
-from nova_ai.types import (
+from nova_protocol import (
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     OpenRouterRouting,
@@ -118,7 +118,7 @@ class TestModelCompatResolution:
     """Model.compat union 按 api 显式判别，不依赖 smart-union 猜测。"""
 
     def _make_model(self, api: str, compat: dict):
-        from nova_ai import Model
+        from nova_protocol import Model
 
         return Model.model_validate(
             {
@@ -154,7 +154,7 @@ class TestModelCompatResolution:
         assert model.compat.supports_store is False
 
     def test_anthropic_field_resolves_anthropic_compat(self):
-        from nova_ai.types import AnthropicMessagesCompat
+        from nova_protocol import AnthropicMessagesCompat
 
         model = self._make_model("anthropic-messages", {"supports_temperature": False})
         assert isinstance(model.compat, AnthropicMessagesCompat)

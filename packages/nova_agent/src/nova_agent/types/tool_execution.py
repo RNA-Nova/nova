@@ -5,7 +5,7 @@ Tool execution intermediate types used by the agent loop.
 from dataclasses import dataclass, field
 from typing import Any, List, Literal, Union
 
-from nova_ai import ToolResultMessage
+from nova_protocol import ToolResultMessage
 
 from .base import AgentToolCall
 from .tool import AgentToolResult
@@ -56,7 +56,6 @@ class _PreparedToolCallModel:
 
 
 PreparedToolCall = Union[_PreparedToolCallModel, _ImmediateToolCallOutcome]
-
 
 __all__ = [
     "ExecutedToolCallOutcome",

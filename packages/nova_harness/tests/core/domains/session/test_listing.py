@@ -6,8 +6,6 @@ import asyncio
 import json
 
 import pytest
-from nova_ai import AssistantMessage, TextContent, UserMessage
-
 from nova_harness.sessions.listing import (
     _build_session_info_sync,
     build_session_info,
@@ -16,6 +14,11 @@ from nova_harness.sessions.listing import (
 from nova_harness.sessions.utils import generate_session_id
 from nova_harness.types.session.entries import SessionHeader, SessionMessageEntry
 from nova_harness.types.session.info import SessionInfo
+from nova_protocol import (
+    AssistantMessage,
+    TextContent,
+    UserMessage,
+)
 
 
 def _write_session(path, header, entries):
@@ -77,7 +80,7 @@ def test_build_session_info_sync_with_session_info_name(tmp_path):
 
 
 def test_build_session_info_sync_skips_non_user_assistant_roles(tmp_path):
-    from nova_ai import ToolResultMessage
+    from nova_protocol import ToolResultMessage
 
     session_id = generate_session_id()
     header = SessionHeader(
@@ -99,7 +102,7 @@ def test_build_session_info_sync_skips_non_user_assistant_roles(tmp_path):
 
 
 def test_build_session_info_sync_skips_empty_text_content(tmp_path):
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     session_id = generate_session_id()
     header = SessionHeader(

@@ -5,15 +5,14 @@
 
 from typing import Dict, Optional
 
-from nova_ai import (
+from nova_harness.types.model import ModelOverride, OpenAICompat
+from nova_protocol import (
     Model,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     OpenRouterRouting,
     VercelGatewayRouting,
 )
-
-from nova_harness.types.model import ModelOverride, OpenAICompat
 
 
 def merge_compat(

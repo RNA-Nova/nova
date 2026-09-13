@@ -16,8 +16,6 @@ import shutil
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from nova_ai import UserMessage
-
 from nova_harness.core.agent_session.agent import AgentSession
 from nova_harness.core.agent_session.services import AgentSessionServices
 from nova_harness.core.utils.session_cwd import assert_session_cwd_exists
@@ -40,6 +38,7 @@ from nova_harness.types.session.options import (
     NewSessionOptions,
     SwitchSessionOptions,
 )
+from nova_protocol import UserMessage
 
 
 class SessionImportFileNotFoundError(FileNotFoundError):

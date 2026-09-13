@@ -5,8 +5,6 @@
 """
 
 import pytest
-from nova_ai import ModelThinkingLevel
-
 from nova_harness.types.compaction.compaction import CompactionSettings
 from nova_harness.types.config.settings import (
     RetrySettings,
@@ -25,6 +23,7 @@ from nova_harness.types.session.entries import (
     SessionHeader,
     ThinkingLevelChangeEntry,
 )
+from nova_protocol import ModelThinkingLevel
 
 SIMPLE_TYPES = [
     (
@@ -98,7 +97,7 @@ def test_type_roundtrip(factory, cls):
 
 def test_model_definition_with_compat():
     """ModelDefinition 可携带 nova_ai 的 ModelCost/OpenAICompletionsCompat 并正确序列化。"""
-    from nova_ai import ModelCost, OpenAICompletionsCompat
+    from nova_protocol import ModelCost, OpenAICompletionsCompat
 
     md = ModelDefinition(
         id="test-model",
@@ -147,7 +146,9 @@ def test_models_config_roundtrip():
         providers={
             "volcengine": ProviderConfig(
                 base_url="https://ark.cn-beijing.volces.com/api/v3/",
-                models=[ModelDefinition(id="deepseek-v4-flash-260425", name="DeepSeek")],
+                models=[
+                    ModelDefinition(id="deepseek-v4-flash-260425", name="DeepSeek")
+                ],
             )
         }
     )

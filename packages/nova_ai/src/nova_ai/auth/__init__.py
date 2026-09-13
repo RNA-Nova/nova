@@ -1,38 +1,18 @@
 """Auth 模块
 
 对齐 TypeScript ``src/auth``：包含 OAuth、API key、credential store、auth resolve
-等鉴权相关能力。类型定义统一住在 ``nova_ai.types.auth``，此处重导出作为
-auth 命名空间的公共门面。
+等鉴权相关能力。类型词汇（Credential/OAuth 形状）已迁 ``nova_protocol.auth``——
+本命名空间只保留鉴权行为（流程/存储/解析）。
 """
 
-from ..types.auth import (
-    ApiKeyAuth,
-    ApiKeyCredential,
-    AuthCheck,
-    AuthContext,
-    AuthEvent,
-    AuthInfoLink,
-    AuthInteraction,
-    AuthPrompt,
-    AuthPromptOption,
-    AuthResult,
-    AuthType,
-    Credential,
-    CredentialInfo,
-    CredentialStore,
-    ModelAuth,
-    OAuthAuth,
-    OAuthCredential,
-    ProviderAuth,
-    ProviderEnv,
-    ProviderHeaders,
-)
 from .context import DefaultAuthContext, default_provider_auth_context
 from .credential_store import InMemoryCredentialStore
 from .helpers import env_api_key_auth, lazy_oauth
 from .oauth import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
+    DeviceCodePollStatus,
+    PkceCodes,
     generate_pkce,
     kimi_oauth,
     openai_codex_oauth,
@@ -58,6 +38,8 @@ __all__ = [
     # oauth
     "DeviceCodePollOptions",
     "DeviceCodePollResult",
+    "DeviceCodePollStatus",
+    "PkceCodes",
     "generate_pkce",
     "kimi_oauth",
     "openai_codex_oauth",
@@ -70,25 +52,4 @@ __all__ = [
     "ModelsError",
     "ModelsErrorCode",
     "resolve_provider_auth",
-    # types（住在 nova_ai.types.auth）
-    "ApiKeyAuth",
-    "ApiKeyCredential",
-    "AuthCheck",
-    "AuthContext",
-    "AuthEvent",
-    "AuthInfoLink",
-    "AuthInteraction",
-    "AuthPrompt",
-    "AuthPromptOption",
-    "AuthResult",
-    "AuthType",
-    "Credential",
-    "CredentialInfo",
-    "CredentialStore",
-    "ModelAuth",
-    "OAuthAuth",
-    "OAuthCredential",
-    "ProviderAuth",
-    "ProviderEnv",
-    "ProviderHeaders",
 ]

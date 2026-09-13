@@ -102,7 +102,7 @@ def test_read_image_non_vision_model_omits_image(tmpdir):
         executor.execute("id", {"path": path}, ctx=_make_exec_context(["text"]))
     )
 
-    from nova_ai import ImageContent
+    from nova_protocol import ImageContent
 
     assert "does not support images" in result.content[0].text
     assert not any(isinstance(c, ImageContent) for c in result.content)
@@ -121,7 +121,7 @@ def test_read_image_vision_model_returns_image(tmpdir):
         )
     )
 
-    from nova_ai import ImageContent
+    from nova_protocol import ImageContent
 
     assert any(isinstance(c, ImageContent) for c in result.content)
 
@@ -175,7 +175,7 @@ def test_read_image_does_not_block_event_loop(tmpdir):
 
 def test_read_image_process_failure_not_error(tmpdir):
     """图片无法解码：给提示文本让模型继续，不标 is_error（对齐 pi read.ts）。"""
-    from nova_ai import ImageContent
+    from nova_protocol import ImageContent
 
     path = os.path.join(tmpdir, "broken.png")
     with open(path, "wb") as f:
@@ -214,7 +214,7 @@ def test_read_image_resize_dimension_hint(tmpdir):
 
 def test_read_bmp_conversion_hint(tmpdir):
     """bmp 归一为 PNG 并附转换提示（对齐 pi conversionHint 文案）。"""
-    from nova_ai import ImageContent
+    from nova_protocol import ImageContent
     from PIL import Image
 
     path = os.path.join(tmpdir, "shot.bmp")
@@ -340,7 +340,7 @@ def test_read_riff_non_webp_treated_as_text(tmpdir):
 
 def test_read_image_mime_sniffed_from_magic_bytes(tmpdir):
     """JPEG 字节配 .png 扩展名：MIME 以魔数为准，不按扩展名张冠李戴。"""
-    from nova_ai import ImageContent
+    from nova_protocol import ImageContent
     from PIL import Image
 
     path = os.path.join(tmpdir, "mislabeled.png")
@@ -358,7 +358,7 @@ def test_read_image_mime_sniffed_from_magic_bytes(tmpdir):
 
 def test_read_image_extensionless_sniffed(tmpdir):
     """无扩展名图片：魔数嗅探命中，走图片管线且 MIME 正确。"""
-    from nova_ai import ImageContent
+    from nova_protocol import ImageContent
 
     path = os.path.join(tmpdir, "noext")
     _write_tiny_png(path)

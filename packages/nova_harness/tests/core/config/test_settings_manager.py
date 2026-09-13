@@ -2,7 +2,7 @@
 SettingsManager 测试。
 """
 
-from nova_ai import ModelThinkingLevel
+from nova_protocol import ModelThinkingLevel
 
 from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.types.config.settings import ProviderRetrySettings, Settings

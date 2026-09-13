@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Protocol
 
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol.base_model import NovaBaseModel
 from pydantic import Field, model_validator
 
 

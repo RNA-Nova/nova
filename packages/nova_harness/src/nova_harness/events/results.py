@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import Any, List, Literal, Optional, Union
 
 from nova_agent import AgentMessage
-from nova_ai import ImageContent, TextContent
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field
-
 from nova_harness.types.compaction.compaction import CompactionResult
+from nova_protocol import (
+    ImageContent,
+    TextContent,
+)
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import Field
 
 
 class ContextEventResult(NovaBaseModel):

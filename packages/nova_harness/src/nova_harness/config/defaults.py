@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
-from nova_ai import ModelThinkingLevel
+from nova_protocol import ModelThinkingLevel
 
 # =============================================================================
 # App Config
@@ -41,7 +41,6 @@ AUTH_FILE_NAME = "auth.json"
 MODELS_FILE_NAME = "models.json"
 MODELS_STORE_FILE_NAME = "models-store.json"
 TRUST_FILE_NAME = "trust.json"
-
 
 # =============================================================================
 # User Config Paths

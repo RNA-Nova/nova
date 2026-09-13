@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
-from ...types.enums import KnownApi
-from ...types.stream_options import StreamOptions, ThinkingBudgets
+from nova_protocol import KnownApi
+
+from ...stream_options import StreamOptions, ThinkingBudgets
 
 # API 协议标识（对齐 TS Provider.api 自描述）
 api = KnownApi.OPENAI_COMPLETIONS

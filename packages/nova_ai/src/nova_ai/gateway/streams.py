@@ -16,20 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Awaitable, Callable, Set
+from typing import Awaitable, Callable, Set
+
+from nova_protocol import AssistantMessage, ErrorEvent, Model, StopReason, Usage
 
 from ..streaming import AssistantMessageEventStream
-from ..types.enums import StopReason
-from ..types.events import ErrorEvent
-from ..types.messages import AssistantMessage
-from ..types.model import Model, Usage
-
 
 _INFLIGHT_LAZY_TASKS: Set["asyncio.Task[None]"] = set()
 """在途 lazy_stream 后台任务的强引用集（防 GC 中途回收，完成即弃）。"""
 
 
-def create_setup_error_message(model: Model, error: Exception) -> AssistantMessage:
+def create_setup_error_message(model: Model, error: BaseException) -> AssistantMessage:
     """构造装配阶段失败的终态消息（对齐 TS createSetupErrorMessage）。"""
     return AssistantMessage(
         role="assistant",
@@ -46,7 +43,7 @@ def create_setup_error_message(model: Model, error: Exception) -> AssistantMessa
 
 def lazy_stream(
     model: Model,
-    setup: Callable[[], Awaitable[Any]],
+    setup: Callable[[], Awaitable[AssistantMessageEventStream]],
 ) -> AssistantMessageEventStream:
     """同步返回流，``setup`` 在后台异步执行；失败以 error 事件结束（对齐 TS lazyStream）。"""
     outer = AssistantMessageEventStream()

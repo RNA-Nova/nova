@@ -2,18 +2,24 @@
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set, cast
 
+from nova_protocol import (
+    Context,
+    Message,
+    Model,
+    OpenAICompletionsCompat,
+    Tool,
+    ToolResultMessage,
+)
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
+    ChatCompletionContentPartTextParam,
     ChatCompletionMessageParam,
     ChatCompletionToolMessageParam,
     ChatCompletionToolParam,
 )
 
-from ...types.compat import OpenAICompletionsCompat
-from ...types.messages import Context, Message, Tool
-from ...types.model import Model
 from ...utils.hash import short_hash
 from ...utils.surrogate import sanitize_surrogates
 from .._shared.transform_messages import transform_messages
@@ -22,6 +28,18 @@ from .reasoning import (
     parse_legacy_encrypted_reasoning_detail,
     parse_openai_reasoning_details,
 )
+
+
+class _AssistantMessageParam(ChatCompletionAssistantMessageParam, total=False):
+    """SDK 助手消息形状 + 厂商扩展键（非标准但会被端点消费的回放字段）。
+
+    ``reasoning_details``（OpenRouter 系结构化推理回放）与
+    ``reasoning_content``（DeepSeek/llama.cpp 系推理回放）不在
+    openai SDK 的 TypedDict 里，但 SDK 对未知键原样透传上线。
+    """
+
+    reasoning_details: List[Dict[str, Any]]
+    reasoning_content: str
 
 
 def has_tool_history(messages: List[Message]) -> bool:
@@ -40,7 +58,7 @@ def get_deferred_tool_names(messages: List[Message]) -> Set[str]:
     names: Set[str] = set()
     for message in messages:
         if message.role == "toolResult":
-            for name in getattr(message, "added_tool_names", None) or []:
+            for name in message.added_tool_names or []:
                 names.add(name)
     return names
 
@@ -88,9 +106,14 @@ def convert_messages(
 
     if context.system_prompt:
         use_developer_role = model.reasoning and compat.supports_developer_role
-        role = "developer" if use_developer_role else "system"
+        role: Literal["developer", "system"] = (
+            "developer" if use_developer_role else "system"
+        )
         params.append(
-            {"role": role, "content": sanitize_surrogates(context.system_prompt)}
+            cast(
+                ChatCompletionMessageParam,
+                {"role": role, "content": sanitize_surrogates(context.system_prompt)},
+            )
         )
 
     last_role: Optional[str] = None
@@ -136,14 +159,14 @@ def convert_messages(
 
         elif msg.role == "assistant":
             assistant_msg = msg
-            assistant_param: ChatCompletionAssistantMessageParam = {
+            assistant_param: _AssistantMessageParam = {
                 "role": "assistant",
                 "content": "" if compat.requires_assistant_after_tool_result else None,
             }
 
             text_blocks = [b for b in assistant_msg.content if b.type == "text"]
             non_empty_text = [b for b in text_blocks if b.text and b.text.strip()]
-            assistant_text_parts = [
+            assistant_text_parts: List[ChatCompletionContentPartTextParam] = [
                 {"type": "text", "text": sanitize_surrogates(b.text)}
                 for b in non_empty_text
             ]
@@ -224,7 +247,11 @@ def convert_messages(
                     for tc in tool_calls
                 ]
             if preserved_reasoning_details is not None:
-                assistant_param["reasoning_details"] = preserved_reasoning_details
+                # ReasoningDetail（TypedDict 联合）以线上 dict 视图写入
+                # （TD 不可直接赋值给 Dict[str, Any]，归档形状运行时同为 dict）
+                assistant_param["reasoning_details"] = cast(
+                    List[Dict[str, Any]], preserved_reasoning_details
+                )
 
             if (
                 compat.requires_reasoning_content_on_assistant_messages
@@ -248,11 +275,10 @@ def convert_messages(
             deferred_tool_names: Set[str] = set()
 
             j = i
-            while (
-                j < len(transformed_messages)
-                and transformed_messages[j].role == "toolResult"
-            ):
+            while j < len(transformed_messages):
                 curr = transformed_messages[j]
+                if not isinstance(curr, ToolResultMessage):
+                    break
 
                 text_result = "\n".join(
                     c.text for c in curr.content if c.type == "text"
@@ -276,7 +302,7 @@ def convert_messages(
                 params.append(tool_result_param)
 
                 if compat.deferred_tools_mode == "kimi":
-                    for name in getattr(curr, "added_tool_names", None) or []:
+                    for name in curr.added_tool_names or []:
                         deferred_tool_names.add(name)
 
                 if has_images and "image" in model.input_types:
@@ -321,11 +347,16 @@ def convert_messages(
             if compat.deferred_tools_mode == "kimi" and deferred_tool_names:
                 deferred_tools = get_tools_by_name(context.tools, deferred_tool_names)
                 if deferred_tools:
+                    # Kimi deferred tools 的 system+tools 形状是端点专有扩展，
+                    # 不在 SDK 消息类型里（SDK 透传未知键上线）
                     params.append(
-                        {
-                            "role": "system",
-                            "tools": convert_tools(deferred_tools, compat),
-                        }
+                        cast(
+                            ChatCompletionMessageParam,
+                            {
+                                "role": "system",
+                                "tools": convert_tools(deferred_tools, compat),
+                            },
+                        )
                     )
 
             i += 1

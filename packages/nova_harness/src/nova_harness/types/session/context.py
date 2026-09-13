@@ -3,8 +3,8 @@
 from typing import List, Optional, Tuple
 
 from nova_agent import AgentMessage
-from nova_ai import ModelThinkingLevel
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import ModelThinkingLevel
+from nova_protocol.base_model import NovaBaseModel
 from pydantic import Field
 
 

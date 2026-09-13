@@ -1,24 +1,13 @@
 """Models 持久化存储。
 
 对齐 TS ``src/models-store.ts``：按 provider id 持久化动态模型目录。
+落盘 schema ``ModelsStoreEntry`` 住 ``nova_protocol``（跨组件序列化词汇）；
+本模块只有存储契约（Protocol）与内存实现。
 """
 
-from typing import Dict, List, Optional, Protocol
+from typing import Dict, Optional, Protocol
 
-from ..types.base_model import NovaBaseModel
-from ..types.model import Model
-
-
-class ModelsStoreEntry(NovaBaseModel):
-    """单个 provider 的模型目录条目（文件型 store 的 JSON schema）。"""
-
-    models: List[Model]
-    checked_at: Optional[int] = None
-    # 远程目录 Last-Modified 头的 Unix 毫秒时间戳（对齐 TS lastModified）。
-    # 与基线 generatedAt 做新鲜度竞速：早于基线的 overlay 被忽略。
-    last_modified: Optional[int] = None
-    # 远程目录 ETag 原样存储（含引号），条件请求时回传 If-None-Match
-    etag: Optional[str] = None
+from nova_protocol import ModelsStoreEntry
 
 
 class ModelsStore(Protocol):
@@ -63,12 +52,10 @@ class InMemoryModelsStore:
         entry = self._entries.get(provider_id)
         if entry is None:
             return None
-        return ModelsStoreEntry(models=list(entry.models), checked_at=entry.checked_at)
+        return entry.model_copy(deep=True)
 
     async def write(self, provider_id: str, entry: ModelsStoreEntry) -> None:
-        self._entries[provider_id] = ModelsStoreEntry(
-            models=list(entry.models), checked_at=entry.checked_at
-        )
+        self._entries[provider_id] = entry.model_copy(deep=True)
 
     async def delete(self, provider_id: str) -> None:
         self._entries.pop(provider_id, None)
@@ -77,6 +64,5 @@ class InMemoryModelsStore:
 __all__ = [
     "InMemoryModelsStore",
     "ModelsStore",
-    "ModelsStoreEntry",
     "ProviderModelsStore",
 ]

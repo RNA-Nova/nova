@@ -14,6 +14,7 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Protocol
 
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.output_guard import is_stdout_taken_over
 
 
@@ -49,12 +50,23 @@ def _stdio_kwargs(*, capture_output: bool = False) -> Dict[str, Any]:
     must not write to stdout (which belongs to the JSON-RPC protocol). In that
     case we redirect child stdout/stderr to Nova's stderr and close stdin.
     Otherwise we let the child inherit Nova's stdio for progress visibility.
+
+    另合一档 ``hidden_console_kwargs``：冻结/隐藏控制台形态下子进程
+    （pip/uv/git/npm）缺省会新建可见控制台——Windows 黑窗闪烁源。
     """
+    kwargs: Dict[str, Any]
     if capture_output:
-        return {"capture_output": True, "text": True}
-    if is_stdout_taken_over():
-        return {"stdin": subprocess.DEVNULL, "stdout": sys.stderr, "stderr": sys.stderr}
-    return {}
+        kwargs = {"capture_output": True, "text": True}
+    elif is_stdout_taken_over():
+        kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": sys.stderr,
+            "stderr": sys.stderr,
+        }
+    else:
+        kwargs = {}
+    kwargs.update(hidden_console_kwargs())
+    return kwargs
 
 
 def _expand_targets(targets: List[str]) -> List[str]:

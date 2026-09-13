@@ -5,9 +5,8 @@
 import asyncio
 
 import pytest
-
 from nova_ai.streaming import AssistantMessageEventStream
-from nova_ai.types import (
+from nova_protocol import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,

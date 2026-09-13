@@ -49,7 +49,7 @@ class TestExecutorBashOperationsIntegration:
 
     def test_abort(self, executor_available):
         async def run():
-            from nova_ai import AbortController
+            from nova_protocol import AbortController
 
             ctl = AbortController()
             ops = ExecutorBashOperations(get_executor_manager())

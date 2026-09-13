@@ -470,7 +470,7 @@ model = Model(
 )
 ```
 
-常用字段（全部 `Optional`，缺省走自动检测）：`supports_store`、`supports_developer_role`、`supports_reasoning_effort`、`supports_usage_in_streaming`、`supports_finish_reason`、`max_tokens_field`、`requires_tool_result_name`、`requires_assistant_after_tool_result`、`requires_thinking_as_text`、`thinking_format`、`supports_strict_mode`、`requires_reasoning_content_on_assistant_messages`、`supports_long_cache_retention`、`cache_control_format`、`deferred_tools_mode`、`zai_tool_stream`、`open_router_routing`、`vercel_gateway_routing` 等，完整定义见 `src/nova_ai/types/compat.py`。
+常用字段（全部 `Optional`，缺省走自动检测）：`supports_store`、`supports_developer_role`、`supports_reasoning_effort`、`supports_usage_in_streaming`、`supports_finish_reason`、`max_tokens_field`、`requires_tool_result_name`、`requires_assistant_after_tool_result`、`requires_thinking_as_text`、`thinking_format`、`supports_strict_mode`、`requires_reasoning_content_on_assistant_messages`、`supports_long_cache_retention`、`cache_control_format`、`deferred_tools_mode`、`zai_tool_stream`、`open_router_routing`、`vercel_gateway_routing` 等，完整定义见 `nova_protocol` 枢纽的 `compat.py`。
 
 ## 流式事件参考
 

@@ -7,11 +7,10 @@ AgentConfig 是**运行时选配状态的初始值**（纯声明快照）：名�
 
 from typing import Any, Dict, List, Optional
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field
-
 from nova_harness.types.resources.personas import SourceInfo
 from nova_harness.types.resources.tools import ToolInfo
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import Field
 
 
 class DynamicContext(NovaBaseModel):

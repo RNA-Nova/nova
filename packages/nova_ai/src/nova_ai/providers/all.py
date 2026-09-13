@@ -7,8 +7,9 @@
 
 from typing import List, Optional
 
+from nova_protocol import Model
+
 from ..gateway import Models, ModelsStore, Provider, create_models
-from ..types.model import Model
 from .kimi_coding.provider import kimi_coding_provider
 from .moonshotai.provider import moonshotai_provider
 from .moonshotai_cn.provider import moonshotai_cn_provider

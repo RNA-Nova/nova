@@ -6,8 +6,16 @@
 
 from typing import Optional
 
+import nova_harness.core.domains.compaction.branch_summarization as branch_module
 import pytest
-from nova_ai import (
+from nova_harness.core.domains.compaction.branch_summarization import (
+    collect_entries_for_branch_summary,
+    generate_branch_summary,
+    prepare_branch_entries,
+)
+from nova_harness.sessions import SessionManager
+from nova_harness.types.compaction.branch_summary import GenerateBranchSummaryOptions
+from nova_protocol import (
     AbortController,
     AssistantMessage,
     KnownApi,
@@ -19,15 +27,6 @@ from nova_ai import (
     Usage,
     UserMessage,
 )
-
-import nova_harness.core.domains.compaction.branch_summarization as branch_module
-from nova_harness.core.domains.compaction.branch_summarization import (
-    collect_entries_for_branch_summary,
-    generate_branch_summary,
-    prepare_branch_entries,
-)
-from nova_harness.sessions import SessionManager
-from nova_harness.types.compaction.branch_summary import GenerateBranchSummaryOptions
 
 
 def _make_model(context_window: int = 128000, max_tokens: int = 4096) -> Model:

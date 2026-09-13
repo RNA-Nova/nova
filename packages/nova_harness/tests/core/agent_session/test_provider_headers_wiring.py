@@ -8,14 +8,13 @@ provider 请求链：有 runner + handler 时改写生效，无 runner 时 trans
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-from nova_ai import Model
-
 import nova_harness.core.runtime_manager.factory as factory_module
+import pytest
 from nova_harness.core.runtime_manager.factory import create_stream_fn
 from nova_harness.events.constants import BEFORE_PROVIDER_HEADERS
 from nova_harness.extensions.runner import ExtensionRunner
 from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
+from nova_protocol import Model
 
 
 def _minimal_runtime() -> ExtensionRuntime:
@@ -133,7 +132,7 @@ async def test_stream_fn_no_runner_no_transform(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_fn_chains_existing_transform(monkeypatch):
     """调用方已有 transform_headers 时链接：先跑既有，再跑扩展钩子。"""
-    from nova_ai.types.stream_options import SimpleStreamOptions
+    from nova_ai.stream_options import SimpleStreamOptions
 
     monkeypatch.setattr(
         factory_module, "merge_provider_attribution_headers", lambda *a: None

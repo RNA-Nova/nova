@@ -7,9 +7,11 @@ provider 可通过 ``providerEnv`` 配置覆盖进程环境变量。
 import os
 from typing import Optional
 
+from nova_protocol import ProviderEnv
+
 
 def get_provider_env_value(
-    name: str, provider_env: Optional[dict] = None
+    name: str, provider_env: Optional[ProviderEnv] = None
 ) -> Optional[str]:
     """按优先级读取 provider-scoped 环境变量。
 

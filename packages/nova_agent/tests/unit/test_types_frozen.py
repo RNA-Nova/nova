@@ -17,7 +17,8 @@ from nova_agent import (
     MessageStartEvent,
 )
 from nova_agent.types.tool_execution import ExecutedToolCallBatch
-from nova_ai import SimpleStreamOptions, UserMessage
+from nova_ai import SimpleStreamOptions
+from nova_protocol import UserMessage
 
 
 def test_agent_event_is_frozen():

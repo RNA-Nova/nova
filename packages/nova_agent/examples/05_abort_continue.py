@@ -11,10 +11,9 @@
 import asyncio
 
 from nova_agent import Agent, AgentTool, AgentToolResult
-
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     DoneEvent,
-    EventStream,
     KnownApi,
     KnownProvider,
     Model,
@@ -59,7 +58,7 @@ def make_model() -> Model:
 
 
 def make_stream(model: Model, with_tool_call: bool) -> EventStream:
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     content = (
         [ToolCall(id="tc-1", name="slow", arguments={})]

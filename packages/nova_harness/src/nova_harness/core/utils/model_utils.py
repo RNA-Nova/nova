@@ -7,12 +7,12 @@
 
 from typing import Optional
 
-from nova_ai import Model
 from nova_ai.utils.model_utils import (
     clamp_thinking_level,
     get_supported_thinking_levels,
     to_thinking_level,
 )
+from nova_protocol import Model
 
 
 def models_are_equal(

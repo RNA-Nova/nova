@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, List, Optional, Union
 if TYPE_CHECKING:
     from .context import AgentContext
 
-from nova_ai import (
+from nova_protocol import (
     AssistantMessage,
     ImageContent,
     Model,

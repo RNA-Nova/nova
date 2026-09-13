@@ -6,7 +6,7 @@ from nova_ai.api_impls._shared import (
     has_copilot_vision_input,
     infer_copilot_initiator,
 )
-from nova_ai.types import (
+from nova_protocol import (
     AssistantMessage,
     ImageContent,
     TextContent,

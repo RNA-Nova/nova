@@ -3,7 +3,10 @@ Nova Agent - 智能代理框架
 提供状态管理、事件订阅、消息队列和生命周期控制的Agent类
 """
 
-from nova_ai import AbortController, AbortSignal
+from nova_protocol import (
+    AbortController,
+    AbortSignal,
+)
 
 from .agent import Agent
 from .agent_loop import (

@@ -3,8 +3,10 @@
 import asyncio
 
 import pytest
-
-from nova_ai import AbortController, AbortSignal
+from nova_protocol import (
+    AbortController,
+    AbortSignal,
+)
 
 
 class TestAbortSignal:

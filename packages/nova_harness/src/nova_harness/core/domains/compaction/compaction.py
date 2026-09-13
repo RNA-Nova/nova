@@ -12,17 +12,10 @@ from typing import Dict, List, Optional, Tuple
 
 from nova_agent import AgentMessage, StreamFn
 from nova_ai import (
-    AbortSignal,
-    AssistantMessage,
-    Context,
-    Model,
-    ModelThinkingLevel,
     SimpleStreamOptions,
-    Usage,
     builtin_models,
     to_thinking_level,
 )
-
 from nova_harness.core.domains.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,
@@ -45,6 +38,14 @@ from nova_harness.types.compaction.compaction import (
 from nova_harness.types.compaction.file_ops import FileOperations
 from nova_harness.types.messages import ContextInjectable
 from nova_harness.types.session.entries import CompactionEntry, SessionEntry
+from nova_protocol import (
+    AbortSignal,
+    AssistantMessage,
+    Context,
+    Model,
+    ModelThinkingLevel,
+    Usage,
+)
 
 # ============================================================================
 # File Operation Tracking
@@ -91,7 +92,6 @@ def _extract_file_operations(
 # ============================================================================
 
 DEFAULT_COMPACTION_SETTINGS = CompactionSettings()
-
 
 # ============================================================================
 # Token calculation

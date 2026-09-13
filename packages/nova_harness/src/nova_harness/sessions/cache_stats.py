@@ -24,14 +24,13 @@
 
 from typing import Dict, List, Optional, Tuple
 
-from nova_ai import Message
-
 from nova_harness.types.session.entries import SessionEntry
 from nova_harness.types.session.stats import (
     CacheMiss,
     CacheWasteTotals,
     ModelPriceSource,
 )
+from nova_protocol import Message
 
 # Prompt 缓存参考 TTL：空闲超过该间隔的 miss 多半可归因于缓存过期
 # （Anthropic 默认缓存 TTL 为 5 分钟）。

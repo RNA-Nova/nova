@@ -3,7 +3,6 @@
 from typing import Any, Dict, List
 
 import pytest
-
 from nova_ai.api_impls import openai_completions
 from nova_ai.api_impls.openai_completions import (
     OpenAICompletionsOptions,
@@ -14,20 +13,21 @@ from nova_ai.api_impls.openai_completions import (
     create_client,
     parse_chunk_usage,
 )
-from nova_ai.types import (
+from nova_ai.stream_options import StreamOptions
+from nova_protocol import (
     AssistantMessage,
+    CacheRetention,
     Context,
     Cost,
+    KnownApi,
     Model,
     ModelCost,
+    OpenAICompletionsCompat,
     StopReason,
+    Tool,
     Usage,
     UserMessage,
 )
-from nova_ai.types.compat import OpenAICompletionsCompat
-from nova_ai.types.enums import CacheRetention, KnownApi
-from nova_ai.types.messages import Tool
-from nova_ai.types.stream_options import StreamOptions
 
 
 def _make_model(
@@ -285,8 +285,7 @@ class TestCreateClientSessionAffinity:
 class TestDeferredToolsMode:
     def test_kimi_deferred_tools_adds_system_message(self):
         from nova_ai.api_impls.openai_completions import convert_messages
-        from nova_ai.types.content import TextContent
-        from nova_ai.types.messages import ToolResultMessage
+        from nova_protocol import TextContent, ToolResultMessage
 
         tool_def = Tool(
             name="dynamic_tool",
@@ -318,8 +317,7 @@ class TestDeferredToolsMode:
 
     def test_kimi_deferred_tools_not_duplicated_in_top_level_tools(self):
         """deferred tools 不应同时出现在顶层 tools 和 system 消息中。"""
-        from nova_ai.types.content import TextContent
-        from nova_ai.types.messages import ToolResultMessage
+        from nova_protocol import TextContent, ToolResultMessage
 
         tool_def = Tool(
             name="dynamic_tool",
@@ -350,7 +348,7 @@ class TestDeferredToolsMode:
     def test_tool_result_empty_content_uses_no_output_placeholder(self):
         """无文本且无图片的 tool result 应使用 '(no tool output)' 占位。"""
         from nova_ai.api_impls.openai_completions import convert_messages
-        from nova_ai.types.messages import ToolResultMessage
+        from nova_protocol import ToolResultMessage
 
         model = _make_model()
         ctx = Context(
@@ -372,8 +370,7 @@ class TestDeferredToolsMode:
     def test_kimi_deferred_tools_inserted_after_image_blocks(self):
         """deferred tools system 消息应紧跟在 imageBlocks 之后，对齐 TS。"""
         from nova_ai.api_impls.openai_completions import convert_messages
-        from nova_ai.types.content import ImageContent, TextContent
-        from nova_ai.types.messages import ToolResultMessage
+        from nova_protocol import ImageContent, TextContent, ToolResultMessage
 
         tool_def = Tool(
             name="dynamic_tool",
@@ -415,7 +412,7 @@ class TestConvertMessagesUserContent:
     def test_empty_user_content_array_is_skipped(self):
         """空 content 数组的 user 消息应直接跳过，对齐 TS。"""
         from nova_ai.api_impls.openai_completions import convert_messages
-        from nova_ai.types.content import TextContent
+        from nova_protocol import TextContent
 
         model = _make_model()
         ctx = Context(
@@ -433,7 +430,7 @@ class TestConvertMessagesUserContent:
     def test_unsupported_image_user_content_gets_placeholder(self):
         """只有图片但模型不支持时保留占位，避免消息完全丢失。"""
         from nova_ai.api_impls.openai_completions import convert_messages
-        from nova_ai.types.content import ImageContent
+        from nova_protocol import ImageContent
 
         model = _make_model(input_types=["text"])
         ctx = Context(

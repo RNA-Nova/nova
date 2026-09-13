@@ -27,8 +27,6 @@ import time
 import uuid
 from typing import Any, Callable, Dict
 
-from nova_ai import ToolCall
-
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.events import (
     AGENT_END,
@@ -42,6 +40,7 @@ from nova_harness.events import (
     TOOL_EXECUTION_START,
     TOOL_EXECUTION_UPDATE,
 )
+from nova_protocol import ToolCall
 from nova_server.types.items import (
     AgentMessageItem,
     CompactionItem,

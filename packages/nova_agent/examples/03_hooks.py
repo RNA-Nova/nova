@@ -19,10 +19,9 @@ from nova_agent import (
     AgentToolResult,
     BeforeToolCallResult,
 )
-
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     DoneEvent,
-    EventStream,
     KnownApi,
     KnownProvider,
     Model,
@@ -67,7 +66,7 @@ def make_model() -> Model:
 
 
 def make_stream(model: Model, with_tool_call: bool, text: str = "完成") -> EventStream:
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     content = []
     if with_tool_call:

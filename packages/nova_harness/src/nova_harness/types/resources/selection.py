@@ -10,7 +10,7 @@ yaml 的选配是"请求"不是"命令"：点名的资源可能不存在（missi
 
 from typing import Literal
 
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol.base_model import NovaBaseModel
 
 SelectionStatus = Literal[
     "ok",

@@ -5,9 +5,11 @@
 """
 
 import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
-from ..types.auth import Credential, CredentialInfo, CredentialStore
+from nova_protocol import Credential, CredentialInfo, CredentialStore
+
+T = TypeVar("T")
 
 
 class InMemoryCredentialStore(CredentialStore):
@@ -18,18 +20,20 @@ class InMemoryCredentialStore(CredentialStore):
 
     def __init__(self) -> None:
         self._credentials: Dict[str, Credential] = {}
-        self._chains: Dict[str, Any] = {}
+        # 链上节点的值类型异质（modify 产 Credential / delete 产 None），
+        # 链条只依赖可等待性，不关心值
+        self._chains: Dict[str, "asyncio.Future[Any]"] = {}
 
     def _enqueue(
         self,
         provider_id: str,
-        task: Callable[[], Awaitable[Any]],
-    ) -> Any:
+        task: Callable[[], Awaitable[T]],
+    ) -> "asyncio.Task[T]":
         previous = self._chains.get(provider_id)
         if previous is None:
-            previous = _resolved_promise()
+            previous = _resolved_future()
 
-        async def _run() -> Any:
+        async def _run() -> T:
             try:
                 await previous
             except Exception:
@@ -74,7 +78,7 @@ class InMemoryCredentialStore(CredentialStore):
         await self._enqueue(provider_id, _task)
 
 
-def _resolved_promise() -> Any:
+def _resolved_future() -> "asyncio.Future[Any]":
     """返回一个已经 resolve 的 future。"""
     future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
     future.set_result(None)

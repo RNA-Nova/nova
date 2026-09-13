@@ -5,7 +5,12 @@ Agent 上下文与循环配置类型定义。
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, List, Optional, Union
 
-from nova_ai import AbortSignal, Message, Model, SimpleStreamOptions
+from nova_ai import SimpleStreamOptions
+from nova_protocol import (
+    AbortSignal,
+    Message,
+    Model,
+)
 
 from .base import AgentMessage, ToolExecutionMode
 from .hooks import (

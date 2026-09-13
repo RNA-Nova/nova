@@ -3,11 +3,11 @@
 处理模型请求的选项配置
 """
 
-from typing import Optional
+from typing import Optional, Union
 
-from ...types.messages import Context
-from ...types.model import Model
-from ...types.stream_options import SimpleStreamOptions, StreamOptions
+from nova_protocol import Context, Model, ThinkingLevel
+
+from ...stream_options import SimpleStreamOptions, StreamOptions, ThinkingBudgets
 from ...utils.estimate import CONTEXT_SAFETY_TOKENS, estimate_context_tokens
 
 MIN_MAX_TOKENS = 1
@@ -47,6 +47,14 @@ def build_base_options(
     Returns:
         流式选项对象
     """
+    # 对齐 pi buildBaseOptions：模型默认与请求级采样参数按键合并，请求级优先
+    base_sampling = model.sampling_params
+    override_sampling = options.sampling_params if options else None
+    sampling_params = (
+        {**(base_sampling or {}), **(override_sampling or {})}
+        if base_sampling or override_sampling
+        else None
+    )
     requested_max_tokens = (
         options.max_tokens
         if options and options.max_tokens is not None
@@ -71,6 +79,7 @@ def build_base_options(
         ),
         max_retries=options.max_retries if options else None,
         max_retry_delay_ms=options.max_retry_delay_ms if options else None,
+        sampling_params=sampling_params,
     )
 
 
@@ -83,11 +92,19 @@ def build_base_options(
 # 共享响应上限下始终留给答案的 token 数
 MIN_ANSWER_TOKENS = 1024
 
+# 默认思考预算表（自定义表覆盖；对齐 TS）
+_DEFAULT_THINKING_BUDGETS = {
+    "minimal": 1024,
+    "low": 2048,
+    "medium": 8192,
+    "high": 16384,
+}
 
-def clamp_reasoning(effort) -> str:
+
+def clamp_reasoning(
+    effort: Union[ThinkingLevel, str, None],
+) -> Union[ThinkingLevel, str, None]:
     """把 xhigh/max 降为 high（预算表只到 high；对齐 TS clampReasoning）。"""
-    from ...types.enums import ThinkingLevel
-
     if effort in (ThinkingLevel.XHIGH, ThinkingLevel.MAX) or effort in (
         "xhigh",
         "max",
@@ -96,38 +113,31 @@ def clamp_reasoning(effort) -> str:
     return effort
 
 
-def thinking_budget_for_level(reasoning_level, custom_budgets=None) -> int:
+def thinking_budget_for_level(
+    reasoning_level: Union[ThinkingLevel, str, None],
+    custom_budgets: Optional[ThinkingBudgets] = None,
+) -> int:
     """按思考级别取 token 预算（自定义表覆盖默认表；对齐 TS thinkingBudgetForLevel）。"""
-    from ...types.stream_options import ThinkingBudgets
-
-    budgets = {
-        "minimal": 1024,
-        "low": 2048,
-        "medium": 8192,
-        "high": 16384,
-    }
+    budgets = dict(_DEFAULT_THINKING_BUDGETS)
     if custom_budgets is not None:
-        if isinstance(custom_budgets, dict):
-            budgets.update({k: v for k, v in custom_budgets.items() if v is not None})
-        else:
-            budgets.update(
-                {
-                    k: v
-                    for k, v in {
-                        "minimal": custom_budgets.minimal,
-                        "low": custom_budgets.low,
-                        "medium": custom_budgets.medium,
-                        "high": custom_budgets.high,
-                    }.items()
-                    if v is not None
-                }
-            )
+        budgets.update(
+            {
+                k: v
+                for k, v in {
+                    "minimal": custom_budgets.minimal,
+                    "low": custom_budgets.low,
+                    "medium": custom_budgets.medium,
+                    "high": custom_budgets.high,
+                }.items()
+                if v is not None
+            }
+        )
     level = clamp_reasoning(reasoning_level)
-    value = budgets.get(level)
+    # str 枚举与字符串键天然互命中（ThinkingLevel 继承 str）
+    key = level.value if isinstance(level, ThinkingLevel) else level
+    value = budgets.get(key) if key else None
     if value is None:
-        # 级别枚举或字符串
-        key = getattr(level, "value", level)
-        value = budgets.get(key, budgets["medium"])
+        value = budgets["medium"]
     return int(value)
 
 

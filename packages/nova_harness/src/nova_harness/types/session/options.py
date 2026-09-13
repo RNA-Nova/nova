@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, List, Literal, Optional
 
-from nova_ai import ImageContent
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import ImageContent
+from nova_protocol.base_model import NovaBaseModel
 
 
 @dataclass

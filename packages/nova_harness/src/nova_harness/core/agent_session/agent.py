@@ -25,13 +25,6 @@ from nova_agent import (
     CustomAgentMessage,
     ModelThinkingLevel,
 )
-from nova_ai import (
-    AssistantMessage,
-    ImageContent,
-    TextContent,
-    UserMessage,
-)
-
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
@@ -58,6 +51,7 @@ from nova_harness.core.domains.skills import (
 from nova_harness.core.domains.system_prompt import SystemPromptManager
 from nova_harness.core.domains.tools import ToolsManager
 from nova_harness.core.domains.user_tools import UserToolManager
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.core.utils.name_sets import (
     apply_name_list,
@@ -131,11 +125,16 @@ from nova_harness.types.session.model import (
 from nova_harness.types.session.options import NavigateOptions, PromptOptions
 from nova_harness.types.session.stats import SessionStats
 from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
+from nova_protocol import (
+    AssistantMessage,
+    ImageContent,
+    TextContent,
+    UserMessage,
+)
 
 # ============================================================================
 # Extension action 具体实现（替代 SimpleNamespace，提供类型安全）
 # ============================================================================
-
 
 # ============================================================================
 # AgentSession
@@ -1063,6 +1062,8 @@ class AgentSession:
                     cwd=cwd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    # 隐藏控制台形态下不弹黑窗（Windows）
+                    **hidden_console_kwargs(),
                 )
                 if opts.timeout and opts.timeout > 0:
                     try:

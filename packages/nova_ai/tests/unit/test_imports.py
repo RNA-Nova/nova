@@ -15,7 +15,7 @@ class TestRootImports:
 
     def test_types_imports(self):
         self._assert_can_import(
-            "nova_ai.types",
+            "nova_protocol",
             [
                 "NovaBaseModel",
                 "TextContent",
@@ -49,8 +49,17 @@ class TestRootImports:
                 "KnownProvider",
                 "ThinkingFormat",
                 "StopReason",
+            ],
+        )
+
+    def test_stream_options_imports(self):
+        self._assert_can_import(
+            "nova_ai.stream_options",
+            [
                 "SimpleStreamOptions",
                 "StreamOptions",
+                "ThinkingBudgets",
+                "ProviderResponse",
             ],
         )
 

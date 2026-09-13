@@ -4,15 +4,21 @@ import asyncio
 from typing import Any, Optional
 
 import pytest
-
-from nova_ai import Context, UserMessage
 from nova_ai.auth.credential_store import InMemoryCredentialStore
 from nova_ai.auth.helpers import env_api_key_auth
 from nova_ai.gateway import InMemoryModelsStore, Models, create_models
 from nova_ai.providers import create_provider
-from nova_ai.types import KnownApi, Model, ModelCost
-from nova_ai.types.auth import ApiKeyCredential, OAuthCredential, ProviderAuth
-from nova_ai.types.stream_options import SimpleStreamOptions, StreamOptions
+from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
+from nova_protocol import (
+    ApiKeyCredential,
+    Context,
+    KnownApi,
+    Model,
+    ModelCost,
+    OAuthCredential,
+    ProviderAuth,
+    UserMessage,
+)
 
 
 def _make_model(
@@ -236,6 +242,18 @@ class TestModelsAuth:
         assert available == [m1]
 
 
+class _FakeInteraction:
+    """最小 AuthInteraction 桩（login 路径只读 signal；prompt/notify 不消费）。"""
+
+    signal = None
+
+    async def prompt(self, prompt):  # pragma: no cover - 本测试不触发
+        raise AssertionError("unexpected prompt")
+
+    def notify(self, event):  # pragma: no cover - 本测试不触发
+        raise AssertionError("unexpected notify")
+
+
 class TestModelsLoginLogout:
     @pytest.mark.asyncio
     async def test_login_api_key(self):
@@ -253,7 +271,7 @@ class TestModelsLoginLogout:
         models = Models(credential_store=store)
         models.set_provider(provider)
 
-        credential = await models.login("test", "api_key", None)
+        credential = await models.login("test", "api_key", _FakeInteraction())
         assert credential.key == "sk-login"
 
         stored = await store.read("test")
@@ -373,7 +391,7 @@ class TestModelsStream:
         async for event in stream:
             events.append(event)
 
-        from nova_ai.types.events import ErrorEvent
+        from nova_protocol import ErrorEvent
 
         errors = [e for e in events if isinstance(e, ErrorEvent)]
         assert len(errors) == 1

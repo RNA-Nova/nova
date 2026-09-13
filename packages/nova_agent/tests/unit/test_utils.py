@@ -7,7 +7,10 @@ validate_tool_arguments 在 jsonschema 校验前按 schema 做类型矫正（coe
 
 import pytest
 from nova_agent.utils import validate_tool_arguments
-from nova_ai import Tool, ToolCall
+from nova_protocol import (
+    Tool,
+    ToolCall,
+)
 
 
 def _tool(schema: dict) -> Tool:
@@ -230,7 +233,8 @@ def test_original_arguments_not_mutated():
 
 
 def test_no_schema_returns_arguments_as_is():
-    tool = Tool(name="t", description="d", parameters=None)
+    # 空 schema（{}）语义即"无约束"：jsonschema 全过、类型矫正无操作
+    tool = Tool(name="t", description="d", parameters={})
     assert validate_tool_arguments(tool, _call({"x": "5"})) == {"x": "5"}
 
 

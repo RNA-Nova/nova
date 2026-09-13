@@ -8,16 +8,16 @@ from pathlib import Path
 from typing import Dict
 
 from nova_ai.model_catalog import flatten_model_catalog
-from nova_ai.types.model import Model
+from nova_protocol import Model
 
 KIMI_CODING_BASE_URL = "https://api.kimi.com/coding/v1"
 
 KIMI_CODING_MODELS: Dict[str, Model] = flatten_model_catalog(
     "kimi-coding",
     json.loads(
-        (Path(__file__).resolve().parent.parent / "data" / "kimi-coding.json").read_text(
-            "utf-8"
-        )
+        (
+            Path(__file__).resolve().parent.parent / "data" / "kimi-coding.json"
+        ).read_text("utf-8")
     ),
 )
 

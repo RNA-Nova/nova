@@ -13,9 +13,6 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from nova_agent import CustomAgentMessage
-from nova_ai import ImageContent, Message, ModelThinkingLevel, TextContent
-from pydantic import BaseModel
-
 from nova_harness.config.defaults import get_sessions_dir
 from nova_harness.sessions.listing import (
     MAX_CONCURRENT_SESSION_INFO_LOADS,
@@ -34,22 +31,31 @@ from nova_harness.sessions.utils import (
     load_entries_from_file,
     now_iso,
 )
-from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
-from nova_harness.types.session.entries import BranchSummaryEntry
-from nova_harness.types.session.entries import CompactionEntry
-from nova_harness.types.session.entries import CustomEntry
-from nova_harness.types.session.entries import CustomMessageEntry
-from nova_harness.types.session.entries import FileEntry
-from nova_harness.types.session.entries import LabelEntry
-from nova_harness.types.session.entries import ModelChangeEntry
-from nova_harness.types.session.context import SessionContext
 from nova_harness.types.compaction.branch_summary import SessionEntry
-from nova_harness.types.session.entries import SessionHeader
+from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
+from nova_harness.types.session.context import SessionContext
+from nova_harness.types.session.entries import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomEntry,
+    CustomMessageEntry,
+    FileEntry,
+    LabelEntry,
+    ModelChangeEntry,
+    SessionHeader,
+    SessionInfoEntry,
+    SessionMessageEntry,
+    ThinkingLevelChangeEntry,
+)
 from nova_harness.types.session.info import SessionInfo
-from nova_harness.types.session.entries import SessionInfoEntry
-from nova_harness.types.session.entries import SessionMessageEntry
 from nova_harness.types.session.tree import SessionTreeNode
-from nova_harness.types.session.entries import ThinkingLevelChangeEntry
+from nova_protocol import (
+    ImageContent,
+    Message,
+    ModelThinkingLevel,
+    TextContent,
+)
+from pydantic import BaseModel
 
 # details 字段允许写入的 JSON 原生类型
 _JSON_NATIVE_TYPES = (dict, list, str, int, float, bool)

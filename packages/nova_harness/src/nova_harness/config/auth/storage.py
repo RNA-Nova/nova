@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from nova_ai import get_env_api_key
-from nova_ai.types.auth import (
+from nova_protocol.auth import (
     ApiKeyCredential,
     Credential,
     CredentialInfo,
@@ -31,10 +31,7 @@ from nova_ai.types.auth import (
 
 from nova_harness.config.defaults import AUTH_FILE_NAME, get_agent_dir
 from nova_harness.config.resolve import resolve_config_value
-from nova_harness.config.storage import (
-    FileStorageBackend,
-    StorageBackend,
-)
+from nova_harness.config.storage import FileStorageBackend, StorageBackend
 
 
 class AuthStorage(CredentialStore):

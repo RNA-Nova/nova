@@ -7,8 +7,11 @@ Agent 事件类型定义。
 
 from typing import Any, List, Literal, Union
 
-from nova_ai import AssistantMessageEvent, ToolResultMessage
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import (
+    AssistantMessageEvent,
+    ToolResultMessage,
+)
+from nova_protocol.base_model import NovaBaseModel
 from pydantic import ConfigDict, field_serializer
 
 from .base import AgentMessage
@@ -114,7 +117,6 @@ AgentEvent = Union[
     ToolExecutionUpdateEvent,
     ToolExecutionEndEvent,
 ]
-
 
 __all__ = [
     "AgentStartEvent",

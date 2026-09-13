@@ -11,12 +11,18 @@ from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nova_ai import AssistantMessage, Model, ModelCost, Usage, UserMessage
-from nova_harness.core.agent_session.controllers.tree import TreeNavigator
 from nova_harness.core.agent_session.controllers import tree as tree_module
+from nova_harness.core.agent_session.controllers.tree import TreeNavigator
 from nova_harness.sessions import SessionManager
 from nova_harness.types.config.settings import BranchSummarySettings
 from nova_harness.types.session.options import NavigateOptions
+from nova_protocol import (
+    AssistantMessage,
+    Model,
+    ModelCost,
+    Usage,
+    UserMessage,
+)
 
 
 def _model() -> Model:
@@ -192,9 +198,7 @@ async def test_navigate_with_summary_appends_entry_and_moves_leaf(
             modified_files=[],
         )
     )
-    monkeypatch.setattr(
-        tree_module._branch_module, "generate_branch_summary", generate
-    )
+    monkeypatch.setattr(tree_module._branch_module, "generate_branch_summary", generate)
 
     navigator = TreeNavigator(session)
     result = await navigator.navigate(u2, NavigateOptions(summarize=True))
@@ -232,9 +236,7 @@ async def test_navigate_summary_aborted_returns_cancelled(tmp_path, monkeypatch)
     assert result == {"cancelled": True, "aborted": True}
     assert session.session_manager.get_leaf_id() == a2
     assert session._branch_summary_abort_controller is None
-    assert not any(
-        getattr(e, "reason", None) == "navigate" for e in _emitted(session)
-    )
+    assert not any(getattr(e, "reason", None) == "navigate" for e in _emitted(session))
 
 
 @pytest.mark.asyncio
@@ -276,9 +278,7 @@ async def test_navigate_cancelled_by_extension_hook(tmp_path, monkeypatch):
     session._extension_runner = runner
 
     generate = AsyncMock()
-    monkeypatch.setattr(
-        tree_module._branch_module, "generate_branch_summary", generate
-    )
+    monkeypatch.setattr(tree_module._branch_module, "generate_branch_summary", generate)
 
     navigator = TreeNavigator(session)
     result = await navigator.navigate(u2, NavigateOptions(summarize=True))

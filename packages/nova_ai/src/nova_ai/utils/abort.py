@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Iterable, Optional, TypeVar
 
-from ..signal import AbortController, AbortedError, AbortSignal
+from nova_protocol import AbortController, AbortedError, AbortSignal
 
 T = TypeVar("T")
 

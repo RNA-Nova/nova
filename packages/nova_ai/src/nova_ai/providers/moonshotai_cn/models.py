@@ -8,16 +8,16 @@ from pathlib import Path
 from typing import Dict
 
 from nova_ai.model_catalog import flatten_model_catalog
-from nova_ai.types.model import Model
+from nova_protocol import Model
 
 MOONSHOTAI_CN_BASE_URL = "https://api.moonshot.cn/v1"
 
 MOONSHOTAI_CN_MODELS: Dict[str, Model] = flatten_model_catalog(
     "moonshotai-cn",
     json.loads(
-        (Path(__file__).resolve().parent.parent / "data" / "moonshotai-cn.json").read_text(
-            "utf-8"
-        )
+        (
+            Path(__file__).resolve().parent.parent / "data" / "moonshotai-cn.json"
+        ).read_text("utf-8")
     ),
 )
 

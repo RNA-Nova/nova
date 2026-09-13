@@ -5,10 +5,17 @@
 volces.com / googleapis.com 判定（pi 无此 provider）。
 """
 
-from typing import Optional
+from typing import Optional, TypeVar
 
-from ...types.compat import OpenAICompletionsCompat
-from ...types.model import Model
+from nova_protocol import (
+    Model,
+    OpenAICompletionsCompat,
+    OpenRouterRouting,
+    ThinkingFormat,
+    VercelGatewayRouting,
+)
+
+T = TypeVar("T")
 
 
 def detect_compat(model: Model) -> OpenAICompletionsCompat:
@@ -91,17 +98,17 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         else None
     )
 
-    thinking_format = "openai"
+    thinking_format = ThinkingFormat.OPENAI
     if is_deepseek:
-        thinking_format = "deepseek"
+        thinking_format = ThinkingFormat.DEEPSEEK
     elif is_zai:
-        thinking_format = "zai"
+        thinking_format = ThinkingFormat.ZAI
     elif is_together:
-        thinking_format = "together"
+        thinking_format = ThinkingFormat.TOGETHER
     elif is_ant_ling:
-        thinking_format = "ant-ling"
+        thinking_format = ThinkingFormat.ANT_LING
     elif is_openrouter:
-        thinking_format = "openrouter"
+        thinking_format = ThinkingFormat.OPENROUTER
 
     return OpenAICompletionsCompat(
         supports_store=not is_non_standard,
@@ -126,8 +133,8 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         requires_thinking_as_text=False,
         requires_reasoning_content_on_assistant_messages=is_deepseek,
         thinking_format=thinking_format,
-        open_router_routing={},
-        vercel_gateway_routing={},
+        open_router_routing=OpenRouterRouting(),
+        vercel_gateway_routing=VercelGatewayRouting(),
         chat_template_kwargs={},
         chat_template_args={},
         zai_tool_stream=False,
@@ -160,7 +167,8 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
 
     compat = model.compat
 
-    def _pick(explicit, auto):
+    def _pick(explicit: Optional[T], auto: T) -> T:
+        """显式配置优先于检测值（None = 未显式配置）。"""
         return explicit if explicit is not None else auto
 
     return OpenAICompletionsCompat(
@@ -193,7 +201,9 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             detected.requires_reasoning_content_on_assistant_messages,
         ),
         thinking_format=_pick(compat.thinking_format, detected.thinking_format),
-        open_router_routing=compat.open_router_routing or {},
+        open_router_routing=_pick(
+            compat.open_router_routing, detected.open_router_routing
+        ),
         vercel_gateway_routing=_pick(
             compat.vercel_gateway_routing, detected.vercel_gateway_routing
         ),

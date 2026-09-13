@@ -5,9 +5,12 @@ Volcengine provider 工厂
 API 实现模块的 ``stream`` / ``stream_simple`` 函数。
 """
 
+from typing import cast
+
+from nova_protocol import ProviderAuth
+
 from ...auth.helpers import env_api_key_auth
-from ...gateway import Provider, create_provider
-from ...types.auth import ProviderAuth
+from ...gateway import Provider, ProviderStreams, create_provider
 from .models import VOLCENGINE_MODELS
 
 
@@ -24,7 +27,8 @@ def volcengine_provider() -> "Provider":
         name="Volcengine",
         base_url="https://ark.cn-beijing.volces.com/api/v3/",
         models=list(VOLCENGINE_MODELS.values()),
-        api=openai_completions,
+        # 模块结构上满足 ProviderStreams，cast 收口（见 kimi_coding）
+        api=cast(ProviderStreams, openai_completions),
         auth=ProviderAuth(
             api_key=env_api_key_auth(
                 "Volcengine API Key",

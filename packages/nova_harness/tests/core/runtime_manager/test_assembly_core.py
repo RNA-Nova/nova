@@ -5,9 +5,7 @@ assembly 组装编排的工厂与解析逻辑测试（原 tests/core/sdk/test_co
 from unittest.mock import MagicMock
 
 import pytest
-from nova_ai import Model, ModelThinkingLevel
-
-from nova_harness.sessions import SessionManager
+from nova_harness.core.runtime_manager.assembly import CreateAgentSessionOptions
 from nova_harness.model import ModelRuntime
 from nova_harness.model.resolver import (
     find_initial_model,
@@ -17,7 +15,11 @@ from nova_harness.model.resolver import (
     resolve_thinking_level,
     restore_model_from_session,
 )
-from nova_harness.core.runtime_manager.assembly import CreateAgentSessionOptions
+from nova_harness.sessions import SessionManager
+from nova_protocol import (
+    Model,
+    ModelThinkingLevel,
+)
 from tests._helpers.auth_storage import auth_storage_in_memory
 from tests._helpers.settings_manager import settings_manager_in_memory
 

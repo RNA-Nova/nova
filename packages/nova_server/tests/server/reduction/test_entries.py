@@ -8,16 +8,6 @@
 from typing import Any, List, Literal
 
 from nova_agent import AgentToolResult, CustomAgentMessage
-from nova_ai import (
-    AssistantMessage,
-    StopReason,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    ToolResultMessage,
-    UserMessage,
-)
-
 from nova_harness.events import (
     AgentEndEvent,
     ItemEmissionEvent,
@@ -28,12 +18,6 @@ from nova_harness.events import (
     ToolExecutionStartEvent,
 )
 from nova_harness.events.session import CompactionEndEvent
-from nova_server.reduction import SessionReducer, entries_to_items
-from nova_server.types.items import (
-    CustomItem,
-    ItemStatus,
-    NovaItem,
-)
 from nova_harness.types.compaction.compaction import CompactionResult
 from nova_harness.types.messages import CustomMessage
 from nova_harness.types.session.entries import (
@@ -44,6 +28,21 @@ from nova_harness.types.session.entries import (
     LabelEntry,
     ModelChangeEntry,
     SessionMessageEntry,
+)
+from nova_protocol import (
+    AssistantMessage,
+    StopReason,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+from nova_server.reduction import SessionReducer, entries_to_items
+from nova_server.types.items import (
+    CustomItem,
+    ItemStatus,
+    NovaItem,
 )
 
 

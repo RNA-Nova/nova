@@ -10,10 +10,9 @@
 import asyncio
 
 from nova_agent import Agent
-
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     DoneEvent,
-    EventStream,
     KnownApi,
     KnownProvider,
     Model,
@@ -40,7 +39,7 @@ def make_demo_model() -> Model:
 
 def make_text_stream(model: Model, text: str) -> EventStream:
     """mock stream_fn 的返回：一个固定文本的助手事件流。"""
-    from nova_ai import TextDeltaEvent, TextEndEvent
+    from nova_protocol import TextDeltaEvent, TextEndEvent
 
     partial = make_assistant_message(model, text)
     stream = EventStream(
@@ -56,7 +55,7 @@ def make_text_stream(model: Model, text: str) -> EventStream:
 
 
 def make_assistant_message(model: Model, text: str):
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     return AssistantMessage(
         role="assistant",

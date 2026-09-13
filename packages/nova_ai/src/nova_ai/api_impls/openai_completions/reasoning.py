@@ -56,7 +56,9 @@ class ReasoningTextDetail(_ReasoningDetailCommon):
     signature: NotRequired[str]
 
 
-ReasoningDetail = Union[ReasoningSummaryDetail, ReasoningEncryptedDetail, ReasoningTextDetail]
+ReasoningDetail = Union[
+    ReasoningSummaryDetail, ReasoningEncryptedDetail, ReasoningTextDetail
+]
 """判别键 ``type``（规则 6：解析边界手写判别已有——``is_openai_reasoning_detail``；
 形状在此声明供归档/重放路径引用）。"""
 

@@ -5,9 +5,8 @@ SessionManager 单元测试：验证 context 构建、leaf 指针语义、持久
 import tempfile
 
 import pytest
-from nova_ai import ModelThinkingLevel
-
 from nova_harness.sessions import SessionManager
+from nova_protocol import ModelThinkingLevel
 
 
 @pytest.fixture
@@ -92,7 +91,7 @@ def test_session_file_roundtrip_uses_camelcase():
 
 def __assistant_message(text: str):
     """构造一个最简的 assistant message。"""
-    from nova_ai import AssistantMessage, TextContent
+    from nova_protocol import AssistantMessage, TextContent
 
     return AssistantMessage(
         role="assistant",

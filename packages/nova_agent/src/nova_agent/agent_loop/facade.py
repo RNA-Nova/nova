@@ -9,7 +9,8 @@ async loop implementation in `loop.py`. It is not the API itself;
 import asyncio
 from typing import List, Optional
 
-from nova_ai import AbortSignal, EventStream
+from nova_ai import EventStream
+from nova_protocol import AbortSignal
 
 from ..types import (
     AgentContext,

@@ -8,7 +8,6 @@ Provider 运行时单元测试
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
-
 from nova_ai.providers import (
     Provider,
     ProviderStreams,
@@ -16,7 +15,7 @@ from nova_ai.providers import (
     create_provider,
     volcengine_provider,
 )
-from nova_ai.types import Context, KnownApi, Model, ModelCost, StopReason, UserMessage
+from nova_protocol import Context, KnownApi, Model, ModelCost, StopReason, UserMessage
 
 
 class _FakeApiImpl:

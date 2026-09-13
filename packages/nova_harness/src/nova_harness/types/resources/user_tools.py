@@ -14,9 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from nova_agent import CustomAgentMessage
-from nova_ai.types.base_model import NovaBaseModel
-
 from nova_harness.types.extensions.source import SourceInfo
+from nova_protocol.base_model import NovaBaseModel
 
 # 进度事件回调签名：``on_event(event_name, data)``，同步/异步均可。
 UserToolEventCallback = Callable[[str, Dict[str, Any]], Any]

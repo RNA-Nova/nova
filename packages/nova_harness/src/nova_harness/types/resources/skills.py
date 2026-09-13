@@ -6,9 +6,8 @@ Skill 是一份可被发现的 Markdown 指令文件，通常命名为 ``SKILL.m
 from dataclasses import dataclass
 from typing import Optional
 
-from nova_ai.types.base_model import NovaBaseModel
-
 from nova_harness.types.resources.personas import SourceInfo
+from nova_protocol.base_model import NovaBaseModel
 
 
 class Skill(NovaBaseModel):

@@ -4,11 +4,17 @@
 
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Protocol, Union
 
-from nova_ai import Message, ModelThinkingLevel, ToolCall
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import (
+    Message,
+    ModelThinkingLevel,
+    ToolCall,
+)
+from nova_protocol.base_model import NovaBaseModel
 
 if TYPE_CHECKING:
-    from nova_ai import AssistantMessageEventStream, Context, Model, SimpleStreamOptions
+    from nova_ai import AssistantMessageEventStream
+    from nova_ai.stream_options import SimpleStreamOptions
+    from nova_protocol import Context, Model
 
 
 class CustomAgentMessage(NovaBaseModel):
@@ -46,13 +52,11 @@ if TYPE_CHECKING:
 # Event sink used by the agent loop to emit AgentEvents.
 AgentEventSink = Callable[["AgentEvent"], Awaitable[None]]
 
-
 # Configuration for how tool calls from a single assistant message are executed.
 ToolExecutionMode = Literal["sequential", "parallel"]
 
 # Controls how many queued user messages are injected at a queue drain point.
 QueueMode = Literal["all", "one-at-a-time"]
-
 
 __all__ = [
     "CustomAgentMessage",

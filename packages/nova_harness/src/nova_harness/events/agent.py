@@ -6,8 +6,13 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from nova_agent import AgentMessage
 from nova_agent.types.events import _dump_agent_message
-from nova_ai import AssistantMessage, ImageContent, ModelThinkingLevel, TextContent
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import (
+    AssistantMessage,
+    ImageContent,
+    ModelThinkingLevel,
+    TextContent,
+)
+from nova_protocol.base_model import NovaBaseModel
 from pydantic import Field, field_serializer
 
 from .constants import (

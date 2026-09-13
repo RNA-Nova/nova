@@ -1,31 +1,31 @@
 """OpenAI Codex (ChatGPT OAuth) flow。
 
 对齐 TypeScript ``src/auth/oauth/openai-codex.ts``：
-支持浏览器登录（本地回调服务器）和设备码登录两种模式。
+支持浏览器登录（收货经 ``AuthInteraction.acquire_authorization_code``，
+渠道装配归 nova_harness 接线层）和设备码登录两种模式。
 """
 
-import asyncio
 import base64
 import json
 import secrets
 import time
-import webbrowser
-from typing import Any, Optional
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+from urllib.parse import quote, urlencode
 
 import httpx
-
-from ...signal import AbortSignal
-from ...types.auth import (
+from nova_protocol import (
+    AbortSignal,
     AuthEvent,
     AuthInteraction,
+    AuthorizationRequest,
     AuthPrompt,
     AuthPromptOption,
     ModelAuth,
     OAuthAuth,
     OAuthCredential,
 )
-from ...utils.provider_env import get_provider_env_value
+
 from ..oauth_page import oauth_error_html, oauth_success_html
 from .device_code import (
     DeviceCodePollOptions,
@@ -50,54 +50,11 @@ _SCOPE = "openid profile email offline_access"
 _JWT_CLAIM_PATH = "https://api.openai.com/auth"
 
 
-def _get_callback_host() -> str:
-    return get_provider_env_value("NOVA_OAUTH_CALLBACK_HOST") or "127.0.0.1"
-
-
 def _create_state() -> str:
     return secrets.token_hex(16)
 
 
-def _parse_authorization_input(value: str) -> dict:
-    value = value.strip()
-    if not value:
-        return {}
-
-    try:
-        url = urlparse(value)
-        if url.scheme and url.netloc:
-            return {
-                "code": _first(url.query, "code"),
-                "state": _first(url.query, "state"),
-            }
-    except Exception:
-        pass
-
-    if "#" in value:
-        code, state = value.split("#", 1)
-        return {"code": code, "state": state}
-
-    if "code=" in value:
-        qs = parse_qs(value)
-        return {
-            "code": _first_qs(qs, "code"),
-            "state": _first_qs(qs, "state"),
-        }
-
-    return {"code": value}
-
-
-def _first(query: str, key: str) -> Optional[str]:
-    parsed = parse_qs(query)
-    return _first_qs(parsed, key)
-
-
-def _first_qs(parsed: dict, key: str) -> Optional[str]:
-    values = parsed.get(key)
-    return values[0] if values else None
-
-
-def _decode_jwt(token: str) -> Optional[dict]:
+def _decode_jwt(token: str) -> Optional[Dict[str, Any]]:
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -107,7 +64,8 @@ def _decode_jwt(token: str) -> Optional[dict]:
         if padding != 4:
             payload += "=" * padding
         decoded = base64.urlsafe_b64decode(payload)
-        return json.loads(decoded)
+        result = json.loads(decoded)
+        return result if isinstance(result, dict) else None
     except Exception:
         return None
 
@@ -124,7 +82,8 @@ def _get_account_id(access_token: str) -> Optional[str]:
     return None
 
 
-def _read_token_response(response: httpx.Response, operation: str) -> dict:
+def _read_token_response(response: httpx.Response, operation: str) -> OAuthCredential:
+    """解析 token endpoint 响应为 credential 基底（边界校验后直达正典形状）。"""
     if response.status_code >= 400:
         text = response.text or response.reason_phrase
         raise RuntimeError(
@@ -136,7 +95,9 @@ def _read_token_response(response: httpx.Response, operation: str) -> dict:
     refresh_token = data.get("refresh_token")
     expires_in = data.get("expires_in")
     if (
-        not access_token
+        not isinstance(access_token, str)
+        or not access_token
+        or not isinstance(refresh_token, str)
         or not refresh_token
         or not isinstance(expires_in, (int, float))
     ):
@@ -144,23 +105,19 @@ def _read_token_response(response: httpx.Response, operation: str) -> dict:
             f"OpenAI Codex token {operation} response missing fields: {data}"
         )
 
-    return {
-        "access": access_token,
-        "refresh": refresh_token,
-        "expires": int(time.time() * 1000) + int(expires_in) * 1000,
-    }
+    return OAuthCredential(
+        access=access_token,
+        refresh=refresh_token,
+        expires=int(time.time() * 1000) + int(expires_in) * 1000,
+    )
 
 
-def _credentials_from_token(token: dict) -> OAuthCredential:
-    account_id = _get_account_id(token["access"])
+def _credentials_from_token(token: OAuthCredential) -> OAuthCredential:
+    """补上从 access token JWT 提取的 accountId，产出完整 credential。"""
+    account_id = _get_account_id(token.access)
     if not account_id:
         raise RuntimeError("Failed to extract accountId from token")
-    return OAuthCredential(
-        access=token["access"],
-        refresh=token["refresh"],
-        expires=token["expires"],
-        accountId=account_id,
-    )
+    return token.model_copy(update={"accountId": account_id})
 
 
 async def _exchange_authorization_code(
@@ -168,7 +125,7 @@ async def _exchange_authorization_code(
     verifier: str,
     redirect_uri: str = _REDIRECT_URI,
     signal: Optional[AbortSignal] = None,
-) -> dict:
+) -> OAuthCredential:
     async with httpx.AsyncClient() as client:
         response = await client.post(
             _TOKEN_URL,
@@ -184,7 +141,7 @@ async def _exchange_authorization_code(
     return _read_token_response(response, "exchange")
 
 
-async def _refresh_access_token(refresh_token: str) -> dict:
+async def _refresh_access_token(refresh_token: str) -> OAuthCredential:
     async with httpx.AsyncClient() as client:
         response = await client.post(
             _TOKEN_URL,
@@ -198,7 +155,18 @@ async def _refresh_access_token(refresh_token: str) -> dict:
     return _read_token_response(response, "refresh")
 
 
-async def _start_openai_codex_device_auth(signal: Optional[AbortSignal] = None) -> dict:
+@dataclass(frozen=True, kw_only=True)
+class _DeviceCodeStart:
+    """设备码登录的初始响应（模块内值对象——规则 5）。"""
+
+    device_auth_id: str
+    user_code: str
+    interval_seconds: float
+
+
+async def _start_openai_codex_device_auth(
+    signal: Optional[AbortSignal] = None,
+) -> _DeviceCodeStart:
     async with httpx.AsyncClient() as client:
         response = await client.post(
             _DEVICE_USER_CODE_URL,
@@ -223,31 +191,43 @@ async def _start_openai_codex_device_auth(signal: Optional[AbortSignal] = None) 
     interval_seconds = (
         float(interval.strip()) if isinstance(interval, str) else interval
     )
+    device_auth_id = data.get("device_auth_id")
+    user_code = data.get("user_code")
     if (
-        not data.get("device_auth_id")
-        or not data.get("user_code")
+        not isinstance(device_auth_id, str)
+        or not device_auth_id
+        or not isinstance(user_code, str)
+        or not user_code
         or not isinstance(interval_seconds, (int, float))
         or interval_seconds < 0
     ):
         raise RuntimeError(f"Invalid OpenAI Codex device code response: {data}")
 
-    return {
-        "deviceAuthId": data["device_auth_id"],
-        "userCode": data["user_code"],
-        "intervalSeconds": interval_seconds,
-    }
+    return _DeviceCodeStart(
+        device_auth_id=device_auth_id,
+        user_code=user_code,
+        interval_seconds=interval_seconds,
+    )
+
+
+@dataclass(frozen=True, kw_only=True)
+class _DeviceCodeGrant:
+    """设备码轮询终值：授权码 + 配对的 PKCE verifier（模块内值对象）。"""
+
+    authorization_code: str
+    code_verifier: str
 
 
 async def _poll_openai_codex_device_auth(
-    device: dict, signal: Optional[AbortSignal] = None
-) -> dict:
-    async def _poll() -> DeviceCodePollResult[dict]:
+    device: _DeviceCodeStart, signal: Optional[AbortSignal] = None
+) -> _DeviceCodeGrant:
+    async def _poll() -> DeviceCodePollResult[_DeviceCodeGrant]:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 _DEVICE_TOKEN_URL,
                 json={
-                    "device_auth_id": device["deviceAuthId"],
-                    "user_code": device["userCode"],
+                    "device_auth_id": device.device_auth_id,
+                    "user_code": device.user_code,
                 },
                 timeout=30.0,
             )
@@ -263,7 +243,9 @@ async def _poll_openai_codex_device_auth(
                 )
             return DeviceCodePollResult(
                 status="complete",
-                value={"authorizationCode": auth_code, "codeVerifier": verifier},
+                value=_DeviceCodeGrant(
+                    authorization_code=auth_code, code_verifier=verifier
+                ),
             )
 
         if response.status_code in (403, 404):
@@ -297,14 +279,23 @@ async def _poll_openai_codex_device_auth(
     return await poll_oauth_device_code_flow(
         DeviceCodePollOptions(
             poll=_poll,
-            interval_seconds=device["intervalSeconds"],
+            interval_seconds=device.interval_seconds,
             expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
             signal=signal,
         )
     )
 
 
-async def _create_authorization_flow(originator: str = "nova") -> dict:
+@dataclass(frozen=True, kw_only=True)
+class _AuthorizationFlow:
+    """浏览器授权流的初始参数（模块内值对象）。"""
+
+    verifier: str
+    state: str
+    url: str
+
+
+async def _create_authorization_flow(originator: str = "nova") -> _AuthorizationFlow:
     pkce = generate_pkce()
     state = _create_state()
     params = {
@@ -312,7 +303,7 @@ async def _create_authorization_flow(originator: str = "nova") -> dict:
         "client_id": _CLIENT_ID,
         "redirect_uri": _REDIRECT_URI,
         "scope": _SCOPE,
-        "code_challenge": pkce["challenge"],
+        "code_challenge": pkce.challenge,
         "code_challenge_method": "S256",
         "state": state,
         "id_token_add_organizations": "true",
@@ -320,107 +311,10 @@ async def _create_authorization_flow(originator: str = "nova") -> dict:
         "originator": originator,
     }
     url = f"{_AUTHORIZE_URL}?{urlencode(params, quote_via=quote)}"
-    return {"verifier": pkce["verifier"], "state": state, "url": url}
+    return _AuthorizationFlow(verifier=pkce.verifier, state=state, url=url)
 
 
 _CALLBACK_PORT = 1455
-
-
-async def _start_local_oauth_server(state: str) -> dict:
-    """启动本地临时 HTTP 服务器接收 OAuth 回调。
-
-    与 TS 对齐：固定使用 ``localhost:1455``，因为 OpenAI Codex 的
-    ``redirect_uri`` 已在 OAuth app 中注册为 ``http://localhost:1455/auth/callback``。
-    """
-    host = _get_callback_host()
-    port = _CALLBACK_PORT
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[Optional[dict]] = loop.create_future()
-    server: Optional[asyncio.AbstractServer] = None
-
-    async def _handler(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        try:
-            request = await reader.readline()
-            headers = []
-            while True:
-                line = await reader.readline()
-                if line == b"\r\n":
-                    break
-                headers.append(line)
-
-            request_str = request.decode("latin-1")
-            parts = request_str.split(" ")
-            path_and_query = parts[1] if len(parts) > 1 else "/"
-            parsed = urlparse(path_and_query)
-
-            if parsed.path != "/auth/callback":
-                html = oauth_error_html("Callback route not found.")
-                status = "404 Not Found"
-            else:
-                query = parse_qs(parsed.query)
-                got_state = _first_qs(query, "state")
-                code = _first_qs(query, "code")
-
-                if got_state != state:
-                    html = oauth_error_html("State mismatch.")
-                    status = "400 Bad Request"
-                elif not code:
-                    html = oauth_error_html("Missing authorization code.")
-                    status = "400 Bad Request"
-                else:
-                    html = oauth_success_html(
-                        "OpenAI authentication completed. You can close this window."
-                    )
-                    status = "200 OK"
-                    if not future.done():
-                        future.set_result({"code": code})
-
-            body = html.encode("utf-8")
-            response = (
-                f"HTTP/1.1 {status}\r\n"
-                f"Content-Type: text/html; charset=utf-8\r\n"
-                f"Content-Length: {len(body)}\r\n"
-                f"Connection: close\r\n\r\n"
-            ).encode("latin-1") + body
-            writer.write(response)
-            await writer.drain()
-        except Exception as exc:
-            if not future.done():
-                future.set_exception(exc)
-        finally:
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-
-    try:
-        server = await asyncio.start_server(_handler, host, port)
-    except Exception as exc:
-        future.set_result(None)
-        return {
-            "port": port,
-            "close": lambda: None,
-            "cancelWait": lambda: None if future.done() else future.set_result(None),
-            "waitForCode": lambda: future,
-        }
-
-    def _close() -> None:
-        if server is not None:
-            server.close()
-
-    def _cancel() -> None:
-        if not future.done():
-            future.set_result(None)
-
-    return {
-        "port": port,
-        "close": _close,
-        "cancelWait": _cancel,
-        "waitForCode": lambda: future,
-    }
 
 
 async def _login_openai_codex_device_code(
@@ -430,16 +324,16 @@ async def _login_openai_codex_device_code(
     interaction.notify(
         AuthEvent(
             type="device_code",
-            user_code=device["userCode"],
+            user_code=device.user_code,
             verification_uri=_DEVICE_VERIFICATION_URI,
-            interval_seconds=device["intervalSeconds"],
+            interval_seconds=device.interval_seconds,
             expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
         )
     )
-    code = await _poll_openai_codex_device_auth(device, interaction.signal)
+    grant = await _poll_openai_codex_device_auth(device, interaction.signal)
     token = await _exchange_authorization_code(
-        code["authorizationCode"],
-        code["codeVerifier"],
+        grant.authorization_code,
+        grant.code_verifier,
         _DEVICE_REDIRECT_URI,
         interaction.signal,
     )
@@ -448,87 +342,42 @@ async def _login_openai_codex_device_code(
 
 async def _login_openai_codex_browser(interaction: AuthInteraction) -> OAuthCredential:
     flow = await _create_authorization_flow()
-    server = await _start_local_oauth_server(flow["state"])
 
     interaction.notify(
         AuthEvent(
             type="auth_url",
-            url=flow["url"],
+            url=flow.url,
             instructions="A browser window should open. Complete login to finish.",
         )
     )
 
-    # 尝试自动打开浏览器
-    try:
-        webbrowser.open(flow["url"])
-    except Exception:
-        pass
-
-    manual_code: Optional[str] = None
-    manual_error: Optional[Exception] = None
-
-    try:
-
-        async def _prompt_manual() -> None:
-            nonlocal manual_code, manual_error
-            try:
-                manual_code = await interaction.prompt(
-                    AuthPrompt(
-                        type="manual_code",
-                        message=(
-                            "Complete login in your browser, or paste the "
-                            "authorization code / redirect URL here:"
-                        ),
-                        placeholder=_REDIRECT_URI,
-                    )
-                )
-                server["cancelWait"]()
-            except Exception as exc:
-                manual_error = (
-                    exc if isinstance(exc, Exception) else RuntimeError(str(exc))
-                )
-                server["cancelWait"]()
-
-        prompt_task = asyncio.create_task(_prompt_manual())
-
-        try:
-            result = await server["waitForCode"]()
-        except Exception:
-            result = None
-
-        if manual_error:
-            raise manual_error
-
-        code = None
-        if result and result.get("code"):
-            code = result["code"]
-        elif manual_code:
-            parsed = _parse_authorization_input(manual_code)
-            if parsed.get("state") and parsed["state"] != flow["state"]:
-                raise RuntimeError("State mismatch")
-            code = parsed.get("code")
-
-        if not code:
-            await prompt_task
-            if manual_error:
-                raise manual_error
-            if manual_code:
-                parsed = _parse_authorization_input(manual_code)
-                if parsed.get("state") and parsed["state"] != flow["state"]:
-                    raise RuntimeError("State mismatch")
-                code = parsed.get("code")
-
-        if not code:
-            raise RuntimeError("Missing authorization code")
-
-        token = await _exchange_authorization_code(
-            code, flow["verifier"], _REDIRECT_URI, interaction.signal
+    # 收货渠道装配（宿主监听/本地监听/粘贴框竞速）归接线层——流程只声明
+    # 需求；开浏览器归宿主（host:openUrl，由交互层经 auth_url 事件触发）。
+    code = await interaction.acquire_authorization_code(
+        AuthorizationRequest(
+            auth_url=flow.url,
+            state=flow.state,
+            redirect_port=_CALLBACK_PORT,
+            timeout_seconds=300.0,
+            manual_prompt=AuthPrompt(
+                type="manual_code",
+                message=(
+                    "Complete login in your browser, or paste the "
+                    "authorization code / redirect URL here:"
+                ),
+                placeholder=_REDIRECT_URI,
+            ),
+            success_html=oauth_success_html(
+                "OpenAI authentication completed. You can close this window."
+            ),
+            error_html=oauth_error_html("Authentication failed."),
         )
-        return _credentials_from_token(token)
-    finally:
-        if not prompt_task.done():
-            prompt_task.cancel()
-        server["close"]()
+    )
+
+    token = await _exchange_authorization_code(
+        code, flow.verifier, _REDIRECT_URI, interaction.signal
+    )
+    return _credentials_from_token(token)
 
 
 async def _login(interaction: AuthInteraction) -> OAuthCredential:
@@ -573,6 +422,5 @@ openai_codex_oauth = OAuthAuth(
     refresh=_refresh,
     to_auth=_to_auth,
 )
-
 
 __all__ = ["openai_codex_oauth"]

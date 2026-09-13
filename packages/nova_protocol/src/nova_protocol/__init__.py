@@ -1,23 +1,23 @@
-"""核心类型模块（契约层）
+"""nova_protocol —— Nova 词汇枢纽。
 
-包含所有共享类型定义。分层规则：
+跨组件边界的全部纯数据形状（零行为、零兄弟包依赖）。收录标准、三纪律与
+序列化出口约定见包 README。
 
-- 本包只放**类型契约**（数据类、TypedDict、Protocol、别名），
-  禁止运行时行为（工厂、I/O、流调度）——那些属于包根的运行时层
-  （``nova_ai.models`` / ``nova_ai.streaming`` / ``nova_ai.signal``）。
-- 依赖只允许指向 types/ 内部或包根叶子（``nova_ai.signal``），
-  不得反向依赖运行时层。
+消费方一律 ``from nova_protocol import X``（本模块全量门面再导出，
+内部文件布局自由）。
 """
 
 from .aliases import ProviderEnv, ProviderHeaders
 from .auth import (
     ApiKeyAuth,
+    ApiKeyAuthInput,
     ApiKeyCredential,
     AuthCheck,
     AuthContext,
     AuthEvent,
     AuthInfoLink,
     AuthInteraction,
+    AuthorizationRequest,
     AuthPrompt,
     AuthPromptOption,
     AuthResult,
@@ -25,6 +25,7 @@ from .auth import (
     Credential,
     CredentialInfo,
     CredentialStore,
+    LoginCancelledError,
     ModelAuth,
     OAuthAuth,
     OAuthCredential,
@@ -33,9 +34,11 @@ from .auth import (
 from .base_model import NovaBaseModel
 from .compat import (
     AnthropicMessagesCompat,
+    DeferredToolsMode,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     OpenRouterRouting,
+    SessionAffinityFormat,
     VercelGatewayRouting,
 )
 from .content import ContentUnion, ImageContent, TextContent, ThinkingContent, ToolCall
@@ -50,6 +53,7 @@ from .enums import (
     ThinkingFormat,
     ThinkingLevel,
     ThinkingLevelMap,
+    ThinkingTokenBudgetField,
     Transport,
 )
 from .events import (
@@ -67,6 +71,7 @@ from .events import (
     ToolCallEndEvent,
     ToolCallStartEvent,
 )
+from .ids import EntryId, RunId, SessionId, ToolCallId
 from .messages import (
     AssistantMessage,
     Context,
@@ -75,17 +80,29 @@ from .messages import (
     ToolResultMessage,
     UserMessage,
 )
-from .model import Cost, Model, ModelCost, ModelCostRates, ModelCostTier, Usage
-from .stream_options import (
-    ProviderResponse,
-    SimpleStreamOptions,
-    StreamOptions,
-    ThinkingBudgets,
+from .model import (
+    Cost,
+    Model,
+    ModelCost,
+    ModelCostRates,
+    ModelCostTier,
+    ModelsStoreEntry,
+    Usage,
 )
+from .signal import AbortController, AbortedError, AbortSignal
 
 __all__ = [
     # 基类
     "NovaBaseModel",
+    # 语义 id
+    "SessionId",
+    "EntryId",
+    "RunId",
+    "ToolCallId",
+    # 取消原语
+    "AbortController",
+    "AbortSignal",
+    "AbortedError",
     # 枚举
     "Api",
     "KnownApi",
@@ -98,6 +115,7 @@ __all__ = [
     "Transport",
     "ThinkingFormat",
     "ThinkingLevelMap",
+    "ThinkingTokenBudgetField",
     # 内容类型
     "TextContent",
     "ThinkingContent",
@@ -112,6 +130,7 @@ __all__ = [
     "ModelCost",
     "ModelCostRates",
     "ModelCostTier",
+    "ModelsStoreEntry",
     # 消息类型
     "AssistantMessage",
     "UserMessage",
@@ -119,11 +138,6 @@ __all__ = [
     "Message",
     "Tool",
     "Context",
-    # 流选项
-    "ThinkingBudgets",
-    "StreamOptions",
-    "SimpleStreamOptions",
-    "ProviderResponse",
     # 事件类型
     "AssistantMessageEvent",
     "StartEvent",
@@ -144,11 +158,14 @@ __all__ = [
     "OpenAIResponsesCompat",
     "OpenRouterRouting",
     "VercelGatewayRouting",
+    "SessionAffinityFormat",
+    "DeferredToolsMode",
     # 共享别名
     "ProviderEnv",
     "ProviderHeaders",
     # Auth 类型
     "ApiKeyAuth",
+    "ApiKeyAuthInput",
     "ApiKeyCredential",
     "AuthCheck",
     "AuthContext",
@@ -159,7 +176,9 @@ __all__ = [
     "AuthPromptOption",
     "AuthResult",
     "AuthType",
+    "AuthorizationRequest",
     "Credential",
+    "LoginCancelledError",
     "CredentialInfo",
     "CredentialStore",
     "ModelAuth",

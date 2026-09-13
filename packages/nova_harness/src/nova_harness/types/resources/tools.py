@@ -6,12 +6,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol
 
 from nova_agent import ToolExecutionMode
-from nova_ai import Model
-from nova_ai.types.base_model import NovaBaseModel
-
 from nova_harness.types.extensions.source import SourceInfo
 from nova_harness.types.ui.context import UIContext
 from nova_harness.types.ui.noop import NoOpUIContext
+from nova_protocol import Model
+from nova_protocol.base_model import NovaBaseModel
 
 if TYPE_CHECKING:
     # 仅类型检查视角（运行期不导入——agents.py 反向 import 本模块的 ToolInfo，

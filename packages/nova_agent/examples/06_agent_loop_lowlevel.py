@@ -14,15 +14,16 @@
 import asyncio
 
 from nova_agent import AgentContext, AgentLoopConfig, agent_loop
-
 from nova_ai import (
-    DoneEvent,
     EventStream,
+    SimpleStreamOptions,
+)
+from nova_protocol import (
+    DoneEvent,
     KnownApi,
     KnownProvider,
     Model,
     ModelCost,
-    SimpleStreamOptions,
     StartEvent,
     TextContent,
     UserMessage,
@@ -45,7 +46,7 @@ def make_model() -> Model:
 
 
 def text_stream(model: Model, text: str) -> EventStream:
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     partial = AssistantMessage(
         role="assistant",

@@ -32,7 +32,6 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PACKAGE_ROOT / "scripts"))
 
 import model_data as mdata  # noqa: E402
-
 from nova_ai.providers.catalog import (  # noqa: E402
     API,
     PROVIDERS,
@@ -53,7 +52,7 @@ from pathlib import Path
 from typing import Dict
 
 from nova_ai.model_catalog import flatten_model_catalog
-from nova_ai.types.model import Model
+from nova_protocol import Model
 
 {prefix}_BASE_URL = "{base_url}"
 
@@ -66,13 +65,11 @@ from nova_ai.types.model import Model
     ),
 )
 
-
 def get_{module}_model(model_id: str) -> Model:
     """通过 ID 获取 {label} 模型。"""
     if model_id not in {prefix}_MODELS:
         raise KeyError(f"{label} model not found: {{model_id}}")
     return {prefix}_MODELS[model_id]
-
 
 def list_{module}_models() -> Dict[str, Model]:
     """列出所有 {label} 模型。"""

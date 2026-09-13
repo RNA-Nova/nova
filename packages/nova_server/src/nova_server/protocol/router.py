@@ -7,15 +7,14 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, get_type_hints
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import BaseModel, RootModel, ValidationError
-
+from nova_protocol.base_model import NovaBaseModel
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.jsonrpc import (
     JsonRpcMessage,
     build_error,
     build_response,
 )
+from pydantic import BaseModel, RootModel, ValidationError
 
 Handler = Callable[[Dict[str, Any]], Any | Awaitable[Any]]
 
@@ -199,7 +198,7 @@ class MethodRegistry:
                     result = result.model_dump(mode="json", by_alias=True)
                 elif shape is not None and shape.result_model is not None:
                     # 声明了 result_model 但返回散装 dict——契约违约
-                    #（自由负载方法不声明 result_model，dict 直出不进此分支）
+                    # （自由负载方法不声明 result_model，dict 直出不进此分支）
                     return build_error(
                         msg.id,
                         JSONRPCError(

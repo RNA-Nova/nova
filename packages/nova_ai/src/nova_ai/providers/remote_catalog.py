@@ -20,9 +20,14 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from ..gateway.provider import ModelsPublication
-from ..gateway.store import ModelsStoreEntry
-from ..types.model import Model
+from nova_protocol import (
+    AbortSignal,
+    Credential,
+    Model,
+    ModelsStoreEntry,
+)
+
+from ..gateway.provider import ModelsPublication, Provider, RefreshModelsContext
 from .catalog import (
     ModelFields,
     build_provider_models,
@@ -95,13 +100,20 @@ _MODELS_DEV_ROUND_CACHE: Dict[str, Any] = {"at": 0.0, "data": None}
 _MODELS_DEV_ROUND_TTL_S = 60.0
 
 
-def _default_fetch_catalog(provider_id: str):
+def _default_fetch_catalog(
+    provider_id: str,
+) -> Callable[
+    [Optional[AbortSignal], Optional[str], Optional[Credential]],
+    Awaitable[CatalogOutcome],
+]:
     """构造该 provider 的目录拉取器（models.dev 内容 + volcengine 方舟过滤）。"""
 
     async def _fetch(
-        signal: Any, validator: Optional[str], credential: Any
+        signal: Optional[AbortSignal],
+        validator: Optional[str],
+        credential: Optional[Credential],
     ) -> CatalogOutcome:
-        if signal is not None and getattr(signal, "aborted", False):
+        if signal is not None and signal.aborted:
             return CatalogOutcome(status=0)
 
         now = time.monotonic()
@@ -113,12 +125,12 @@ def _default_fetch_catalog(provider_id: str):
         # 注：models.dev 为单体目录，无 per-provider 条件请求语义；
         # etag/304 机制保留在 CatalogOutcome 契约里，供 per-provider 源启用。
 
-        api_key = None
+        api_key: Optional[str] = None
         if credential is not None:
-            if getattr(credential, "type", None) == "oauth":
-                api_key = getattr(credential, "access", None)
+            if credential.type == "oauth":
+                api_key = credential.access
             else:
-                api_key = getattr(credential, "key", None)
+                api_key = credential.key
 
         try:
             payload = cached if cached is not None else fetch_models_dev()
@@ -151,12 +163,15 @@ def _default_fetch_catalog(provider_id: str):
 
 
 def with_remote_catalog(
-    provider: Any,
+    provider: Provider,
     local_generated_at: Optional[int] = None,
     fetch_catalog: Optional[
-        Callable[[Any, Optional[str], Any], Awaitable[CatalogOutcome]]
+        Callable[
+            [Optional[AbortSignal], Optional[str], Optional[Credential]],
+            Awaitable[CatalogOutcome],
+        ]
     ] = None,
-) -> Any:
+) -> Provider:
     """给静态内置 provider 叠加可持久化的远程目录 overlay（对齐 TS withRemoteCatalog）。
 
     ``fetch_catalog(signal, validator, credential) -> CatalogOutcome`` 缺省为
@@ -181,21 +196,27 @@ def with_remote_catalog(
         def get_models(self) -> List[Model]:
             return merge_models(self._base_provider.get_models(), self._dynamic_models)
 
-        async def refresh_models(self, context) -> None:
+        async def refresh_models(self, context: RefreshModelsContext) -> None:
+            # publish 与 signal 在 Models 驱动路径上恒存在；缺 publish 的直调
+            # （无世代校验的测试桩场景）按 _DynamicProvider 同款宽容跳过
+            publish = context.publish
+            if publish is None:
+                return
+            signal = context.signal
             stored = context.stored
             restored = [
                 m
                 for m in remote_models(stored, local_generated_at)
                 if m.provider == provider.id
             ]
-            if not await context.publish(
+            if not await publish(
                 ModelsPublication(
                     update=lambda: setattr(self, "_dynamic_models", restored)
                 )
             ):
                 return
 
-            if not context.allow_network or context.signal.aborted:
+            if not context.allow_network or (signal is not None and signal.aborted):
                 return
             if (
                 not context.force
@@ -207,14 +228,14 @@ def with_remote_catalog(
 
             # 只有缓存有 body 时才发 validator，304 永远不会让 overlay 变空
             validator = stored.etag if (stored is not None and stored.models) else None
-            outcome = await fetch_catalog(context.signal, validator, context.credential)
-            if context.signal.aborted:
+            outcome = await fetch_catalog(signal, validator, context.credential)
+            if signal is not None and signal.aborted:
                 return
             checked_at = _now_ms()
 
             if outcome.status == 304 and stored is not None:
                 # 未变：overlay 已在内存，仅推进新鲜度窗口
-                await context.publish(
+                await publish(
                     ModelsPublication(
                         persist=stored.model_copy(update={"checked_at": checked_at})
                     )
@@ -223,7 +244,7 @@ def with_remote_catalog(
             if outcome.status in (404, 501):
                 # 该 provider 无远程目录：主动退出，不再硬重试
                 base_entry = stored or ModelsStoreEntry(models=[])
-                await context.publish(
+                await publish(
                     ModelsPublication(
                         persist=base_entry.model_copy(
                             update={
@@ -238,7 +259,7 @@ def with_remote_catalog(
             if outcome.status != 200:
                 # 瞬时失败：缓存体与 validator 保持有效，下次 revalidate
                 base_entry = stored or ModelsStoreEntry(models=[])
-                await context.publish(
+                await publish(
                     ModelsPublication(
                         persist=base_entry.model_copy(update={"checked_at": checked_at})
                     )
@@ -251,7 +272,7 @@ def with_remote_catalog(
                 Model(**{**fields, "provider": provider.id})
                 for fields in outcome.models_fields
             ]
-            if context.signal.aborted:
+            if signal is not None and signal.aborted:
                 return
             entry = ModelsStoreEntry(
                 models=refreshed,
@@ -264,7 +285,7 @@ def with_remote_catalog(
                 etag=outcome.etag,
             )
             published = remote_models(entry, local_generated_at)
-            await context.publish(
+            await publish(
                 ModelsPublication(
                     persist=entry,
                     update=lambda: setattr(self, "_dynamic_models", published),

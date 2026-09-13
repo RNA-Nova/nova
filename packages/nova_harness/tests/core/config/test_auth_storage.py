@@ -3,7 +3,7 @@ AuthStorage 测试。
 """
 
 import pytest
-from nova_ai.types.auth import ApiKeyCredential, OAuthCredential
+from nova_protocol.auth import ApiKeyCredential, OAuthCredential
 
 from nova_harness.config.auth.storage import AuthStorage
 from tests._helpers.auth_storage import auth_storage_in_memory
@@ -303,7 +303,7 @@ async def test_modify_preserves_unparseable_entries(tmp_path):
     )
     storage = AuthStorage.create(auth_path=auth_path)
 
-    from nova_ai.types.auth import ApiKeyCredential
+    from nova_protocol.auth import ApiKeyCredential
 
     async def _set(_current):
         return ApiKeyCredential(type="api_key", key="new-key")

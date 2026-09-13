@@ -81,7 +81,7 @@ class AbortSignal:
         return controller.signal
 
     @classmethod
-    def any(cls, signals: Iterable["AbortSignal"]) -> Optional["AbortSignal"]:
+    def any(cls, signals: Iterable[Optional["AbortSignal"]]) -> Optional["AbortSignal"]:
         """构造一个任一输入中断即中断的组合信号（对齐 TS AbortSignal.any）。
 
         全部输入为空时返回 ``None``；单一输入直接返回它本身（零开销）。

@@ -14,10 +14,12 @@ OAuth 刷新语义（对齐 TS ``resolveStoredOAuth`` 的双重检查锁）：
 """
 
 import time
+from dataclasses import dataclass
 from typing import Literal, Optional
 
-from ..signal import AbortedError, AbortSignal
-from ..types.auth import (
+from nova_protocol import (
+    AbortedError,
+    AbortSignal,
     ApiKeyAuth,
     ApiKeyCredential,
     AuthContext,
@@ -29,6 +31,7 @@ from ..types.auth import (
     ProviderAuth,
     ProviderEnv,
 )
+
 from ..utils.abort import operation_signal, race_with_abort
 
 ModelsErrorCode = Literal[
@@ -39,21 +42,21 @@ DEFAULT_OAUTH_MINIMUM_VALIDITY_MS = 5 * 60 * 1000
 DEFAULT_OAUTH_REFRESH_TIMEOUT_MS = 15_000
 
 
+@dataclass(frozen=True, kw_only=True)
 class AuthResolutionOverrides:
-    """调用方可传入的鉴权覆盖。"""
+    """调用方可传入的鉴权覆盖（不可变参数包——规则 4/5）。
 
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        env: Optional[ProviderEnv] = None,
-        signal: Optional["AbortSignal"] = None,
-        min_oauth_validity_ms: Optional[int] = None,
-    ):
-        self.api_key = api_key
-        self.env = env
-        self.signal = signal
-        """要求 OAuth token 至少剩余这么多有效期；缺省用 5 分钟默认窗。"""
-        self.min_oauth_validity_ms = min_oauth_validity_ms
+    - ``api_key``：调用方显式 key（最高优先级）；``None`` = 不覆盖；
+    - ``env``：provider 级环境变量覆盖；``None`` = 用进程环境；
+    - ``signal``：取消信号；``None`` = 不取消；
+    - ``min_oauth_validity_ms``：要求 OAuth token 至少剩余这么多有效期；
+      ``None`` = 用 5 分钟默认窗。
+    """
+
+    api_key: Optional[str] = None
+    env: Optional[ProviderEnv] = None
+    signal: Optional[AbortSignal] = None
+    min_oauth_validity_ms: Optional[int] = None
 
 
 def _with_cause_detail(message: str, cause: Optional[BaseException]) -> str:

@@ -10,94 +10,43 @@ from typing import Any, Dict, List, Optional
 
 from nova_harness.config.defaults import get_agent_dir
 from nova_harness.core.runtime_manager.assembly import list_installed_agents
-from nova_harness.resources.project_trust.callback import (
-    make_resolve_project_trust_callback,
-)
-from nova_server.protocol.errors import JSONRPCError
-from nova_server.protocol.methods.model import resolve_model
-from nova_server.protocol.methods.shapes import (
-    AbortResult,
-    AgentListItem,
-    AppendEntryParams,
-    AppendEntryResult,
-    CapabilitiesInfo,
-    ChangeAgentParams,
-    ChangeAgentResult,
-    ClearQueueResult,
-    CloneSessionResult,
-    CompactParams,
-    CreateSessionParams,
-    CreateSessionResult,
-    DeleteSessionParams,
-    DeleteSessionResult,
-    EmptyParams,
-    ExportSessionParams,
-    ExportSessionResult,
-    FollowUpParams,
-    ForkParams,
-    GetAgentsResult,
-    GetContextUsageResult,
-    GetPersonasResult,
-    GetSessionEntriesParams,
-    GetSessionEntriesResult,
-    GetToolsResult,
-    ImportSessionParams,
-    ImportSessionResult,
-    InitializeResult,
-    ListAgentsResult,
-    ListSessionsParams,
-    ListSessionsResult,
-    ModelRef,
-    NavigateTreeParams,
-    NewSessionResult,
-    OkResult,
-    PromptParams,
-    RenameSessionParams,
-    RenameSessionResult,
-    SaveAgentParams,
-    SaveAgentResult,
-    SessionListItem,
-    SessionStateResult,
-    SessionStatsResult,
-    SetActiveToolsParams,
-    SetActiveToolsResult,
-    SetAutoCompactionEnabledParams,
-    SetAutoCompactionEnabledResult,
-    SetAutoRetryParams,
-    SetAutoRetryResult,
-    SetFollowUpModeParams,
-    SetFollowUpModeResult,
-    SetLabelParams,
-    SetPersonaOverrideParams,
-    SetPersonaOverrideResult,
-    SetSessionNameParams,
-    SetSessionNameResult,
-    SetSteeringModeParams,
-    SetSteeringModeResult,
-    SteerParams,
-    SwitchSessionParams,
-    SwitchSessionResult,
-    SyncSessionParams,
-    SyncSessionResult,
-    TokenUsageSummary,
-)
-from nova_server.protocol.methods.state import ServerState
-from nova_server.protocol.router import MethodRegistry
-from nova_server.protocol.schema_export import (
-    CONTRACT_VERSION_MAJOR,
-    CONTRACT_VERSION_MINOR,
-)
-from nova_server.reduction import entries_to_items
+from nova_harness.resources.project_trust.callback import \
+    make_resolve_project_trust_callback
 from nova_harness.types.compaction.compaction import CompactionResult
 from nova_harness.types.session.config import CreateAgentSessionOptions
 from nova_harness.types.ui import NoOpUIContext
+from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.methods.model import resolve_model
+from nova_server.protocol.methods.shapes import (
+    AbortResult, AgentListItem, AppendEntryParams, AppendEntryResult,
+    CapabilitiesInfo, ChangeAgentParams, ChangeAgentResult, ClearQueueResult,
+    CloneSessionResult, CompactParams, CreateSessionParams,
+    CreateSessionResult, DeleteSessionParams, DeleteSessionResult, EmptyParams,
+    ExportSessionParams, ExportSessionResult, FollowUpParams, ForkParams,
+    GetAgentsResult, GetContextUsageResult, GetPersonasResult,
+    GetSessionEntriesParams, GetSessionEntriesResult, GetToolsResult,
+    ImportSessionParams, ImportSessionResult, InitializeResult,
+    ListAgentsResult, ListSessionsParams, ListSessionsResult, ModelRef,
+    NavigateTreeParams, NewSessionResult, OkResult, PromptParams,
+    RenameSessionParams, RenameSessionResult, SaveAgentParams, SaveAgentResult,
+    SessionListItem, SessionStateResult, SessionStatsResult,
+    SetActiveToolsParams, SetActiveToolsResult, SetAutoCompactionEnabledParams,
+    SetAutoCompactionEnabledResult, SetAutoRetryParams, SetAutoRetryResult,
+    SetFollowUpModeParams, SetFollowUpModeResult, SetLabelParams,
+    SetPersonaOverrideParams, SetPersonaOverrideResult, SetSessionNameParams,
+    SetSessionNameResult, SetSteeringModeParams, SetSteeringModeResult,
+    SteerParams, SwitchSessionParams, SwitchSessionResult, SyncSessionParams,
+    SyncSessionResult, TokenUsageSummary)
+from nova_server.protocol.methods.state import ServerState
+from nova_server.protocol.router import MethodRegistry
+from nova_server.protocol.schema_export import (CONTRACT_VERSION_MAJOR,
+                                                CONTRACT_VERSION_MINOR)
+from nova_server.reduction import entries_to_items
 
 
 def _find_session_path(session_id: str, cwd: Optional[str]) -> Optional[str]:
-    from nova_harness.sessions.utils import (
-        get_default_session_dir,
-        is_valid_session_file,
-    )
+    from nova_harness.sessions.utils import (get_default_session_dir,
+                                             is_valid_session_file)
 
     session_dir = get_default_session_dir(cwd or os.getcwd())
     if not os.path.exists(session_dir):
@@ -122,10 +71,8 @@ def _find_session_path(session_id: str, cwd: Optional[str]) -> Optional[str]:
 
 
 def _find_most_recent_session(cwd: Optional[str]) -> Optional[str]:
-    from nova_harness.sessions.utils import (
-        find_most_recent_session,
-        get_default_session_dir,
-    )
+    from nova_harness.sessions.utils import (find_most_recent_session,
+                                             get_default_session_dir)
 
     session_dir = get_default_session_dir(cwd or os.getcwd())
     return find_most_recent_session(session_dir)
@@ -355,9 +302,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         """
         from nova_harness.sessions.listing import list_sessions_from_dir
         from nova_harness.sessions.manager import SessionManager
-        from nova_harness.sessions.utils import (
-            get_default_session_dir_path,
-        )
+        from nova_harness.sessions.utils import get_default_session_dir_path
 
         if params.scope == "all":
             infos = await SessionManager.list_all_sessions()
@@ -484,7 +429,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
     def _parse_images(raw: Any) -> Optional[list]:
         if not raw:
             return None
-        from nova_ai import ImageContent
+        from nova_protocol import ImageContent
 
         return [ImageContent.model_validate(img) for img in raw]
 

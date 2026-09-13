@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from nova_harness.resources.loaders.user_tools import UserToolLoader
 from nova_harness.sessions.message_types import (
     clear_session_message_types,
@@ -14,7 +13,6 @@ _EXECUTOR = """
 from typing import Literal
 from nova_agent import CustomAgentMessage
 
-
 class FakeResultMessage(CustomAgentMessage):
     text: str = ""
     timestamp: int = 0
@@ -23,7 +21,6 @@ class FakeResultMessage(CustomAgentMessage):
 
     def to_context_text(self) -> str:
         return self.text
-
 
 class UserTool:
     name = "fake"

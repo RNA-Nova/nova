@@ -14,8 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from nova_agent import Agent, ModelThinkingLevel
-from nova_ai import ImageContent, Model, ProviderResponse, TextContent
-
+from nova_ai import ProviderResponse
 from nova_harness.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
 from nova_harness.core.utils import resolve_api_key
@@ -35,6 +34,11 @@ from nova_harness.model.attribution import merge_provider_attribution_headers
 from nova_harness.sessions import SessionManager
 from nova_harness.types.session.config import CreateAgentSessionOptions
 from nova_harness.types.ui import UIContext
+from nova_protocol import (
+    ImageContent,
+    Model,
+    TextContent,
+)
 
 _BLOCK_IMAGE_PLACEHOLDER = "Image reading is disabled."
 
@@ -49,7 +53,11 @@ def resolve_session_manager(
 
     agent_dir = Path(services.agent_dir)
     cwd = services.cwd
-    cleaned_cwd = cwd.lstrip("/\\").replace("/", "-").replace("\\", "-")
+    # 清洗规则与 sessions/utils.get_default_session_dir_path 保持一致
+    # （曾漏 ":" → Windows 盘符冒号带进目录名，WinError 267）
+    cleaned_cwd = (
+        cwd.lstrip("/\\").replace("/", "-").replace("\\", "-").replace(":", "-")
+    )
     safe_path = f"--{cleaned_cwd}--"
     session_dir = os.path.join(agent_dir, SESSIONS_DIR_NAME, safe_path)
     os.makedirs(session_dir, exist_ok=True)
@@ -96,7 +104,7 @@ def create_stream_fn(
     """
 
     async def _stream_fn(model: Model, context: Any, options: Any) -> Any:
-        from nova_ai.types.stream_options import SimpleStreamOptions
+        from nova_ai.stream_options import SimpleStreamOptions
 
         if options is None:
             options = SimpleStreamOptions()

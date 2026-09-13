@@ -1,5 +1,7 @@
 """Auth / credential storage."""
 
+from nova_protocol.auth import LoginCancelledError
+
 from nova_harness.config.auth.guidance import (
     format_no_api_key_found_message,
     format_no_model_selected_message,
@@ -7,14 +9,8 @@ from nova_harness.config.auth.guidance import (
     format_oauth_reauth_message,
     get_provider_login_help,
 )
-from nova_harness.config.auth.interaction import (
-    LoginCancelledError,
-    UIAuthInteraction,
-)
-from nova_harness.config.auth.storage import (
-    ApiKeyCredential,
-    AuthStorage,
-)
+from nova_harness.config.auth.interaction import UIAuthInteraction
+from nova_harness.config.auth.storage import ApiKeyCredential, AuthStorage
 
 __all__ = [
     "ApiKeyCredential",

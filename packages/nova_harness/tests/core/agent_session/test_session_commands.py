@@ -4,7 +4,6 @@ import os
 from unittest.mock import MagicMock
 
 import pytest
-
 from nova_harness.core import AgentSession
 from nova_harness.sessions import SessionManager
 from nova_harness.types.session.config import AgentSessionConfig
@@ -43,8 +42,7 @@ def persisted_session_manager(tmp_path):
         cwd="/tmp", session_dir=session_dir, session_file=None, persist=True
     )
     # 持久化需要至少一条 assistant 消息才会 flush 文件
-    from nova_ai import AssistantMessage, TextContent
-
+    from nova_protocol import AssistantMessage, TextContent
 
     msg = AssistantMessage(
         role="assistant", content=[TextContent(type="text", text="hi")]

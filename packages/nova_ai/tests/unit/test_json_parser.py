@@ -206,8 +206,21 @@ class TestStreamingJsonParserDifferentialFuzz:
 
     def _gen_string(self, rng):
         alphabet = [
-            "a", "z", "0", "9", " ", "\n", "\t", '"', "\\", "/", "é", "中",
-            "😀", "\x00", "\x1f",
+            "a",
+            "z",
+            "0",
+            "9",
+            " ",
+            "\n",
+            "\t",
+            '"',
+            "\\",
+            "/",
+            "é",
+            "中",
+            "😀",
+            "\x00",
+            "\x1f",
         ]
         return "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
 
@@ -219,7 +232,7 @@ class TestStreamingJsonParserDifferentialFuzz:
         if roll < 0.3:
             return self._gen_string(rng)
         if roll < 0.45:
-            return rng.randint(-10**6, 10**6)
+            return rng.randint(-(10**6), 10**6)
         if roll < 0.55:
             return rng.choice([0, 1, -1, 15, 100])  # 触发数字前缀截断
         if roll < 0.62:
@@ -229,8 +242,7 @@ class TestStreamingJsonParserDifferentialFuzz:
         if roll < 0.85:
             return [self._gen_value(rng, depth - 1) for _ in range(rng.randint(0, 4))]
         return {
-            f"k{i}": self._gen_value(rng, depth - 1)
-            for i in range(rng.randint(0, 4))
+            f"k{i}": self._gen_value(rng, depth - 1) for i in range(rng.randint(0, 4))
         }
 
     def _gen_doc(self, rng):
@@ -262,7 +274,10 @@ class TestStreamingJsonParserDifferentialFuzz:
                     value = parser.value
                     assert isinstance(value, (dict, list)), (case, text)
                     assert _FuzzOracle.consistent(value, doc), (
-                        case, ensure_ascii, piece, value,
+                        case,
+                        ensure_ascii,
+                        piece,
+                        value,
                     )
                 assert parser.finish() == doc, (case, text)
 

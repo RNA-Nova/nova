@@ -6,12 +6,11 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from nova_agent import CustomAgentMessage
-from nova_ai import AbortController
-
 from nova_harness.core.domains.user_tools import UserToolManager
 from nova_harness.events import USER_BASH, UserBashEvent
 from nova_harness.types.protocols import AgentSessionProtocol
 from nova_harness.types.resources.user_tools import UserToolEventCallback
+from nova_protocol import AbortController
 
 
 class UserToolController:

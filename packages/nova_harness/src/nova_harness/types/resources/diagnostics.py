@@ -2,7 +2,7 @@
 
 from typing import Literal, Optional
 
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol.base_model import NovaBaseModel
 
 
 class ResourceCollision(NovaBaseModel):

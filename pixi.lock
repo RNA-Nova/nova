@@ -50,6 +50,7 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_harness
+      - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/8f/d2f3f532616be4d06c316ef119683e832bd3d41e112bf3a88f4151c95b17/rpds_py-2026.6.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -100,6 +101,7 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_harness
+      - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl
@@ -152,6 +154,7 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_harness
+      - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
       - pypi: https://files.pythonhosted.org/packages/04/3a/f0ee4d4dde9d3b69dedf1b5f74e7a40017046d55052d173e418c6a94f960/rpds_py-2026.6.3-cp312-cp312-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
@@ -218,6 +221,7 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_harness
+      - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
       - pypi: https://files.pythonhosted.org/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl
@@ -288,6 +292,7 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_harness
+      - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
       - pypi: https://files.pythonhosted.org/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl
@@ -360,6 +365,7 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_harness
+      - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
       - pypi: https://files.pythonhosted.org/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl
@@ -1135,7 +1141,7 @@ packages:
   requires_dist:
   - httpx>=0.27.0
   - json-repair>=0.58.4
-  - openai>=2.0
+  - openai>=2.0,<3.10.0
   - pydantic>=2.0
   - setuptools
   requires_python: '>=3.12,<3.14'
@@ -1148,6 +1154,11 @@ packages:
   - pyyaml>=6.0.1,<7.0.0
   - tomli>=2.0.1,<3.0.0 ; python_full_version < '3.11'
   - uuid6>=2024.7.10
+  requires_python: '>=3.12,<3.14'
+- pypi: ./packages/nova_protocol
+  name: nova-protocol
+  requires_dist:
+  - pydantic>=2.0
   requires_python: '>=3.12,<3.14'
 - pypi: ./packages/nova_server
   name: nova-server

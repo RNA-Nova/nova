@@ -13,20 +13,20 @@ import os
 from typing import Any, Optional
 
 import pytest
-
-from nova_ai import Context, UserMessage, builtin_models
+from nova_ai import builtin_models
 from nova_ai.auth.credential_store import InMemoryCredentialStore
-from nova_ai.types import (
+from nova_ai.stream_options import ProviderResponse, SimpleStreamOptions
+from nova_protocol import (
+    ApiKeyCredential,
     CacheRetention,
+    Context,
     Model,
-    ProviderResponse,
-    SimpleStreamOptions,
     TextContent,
     ThinkingLevel,
     Tool,
     ToolResultMessage,
+    UserMessage,
 )
-from nova_ai.types.auth import ApiKeyCredential
 
 KIMI_API_KEY = os.environ.get("KIMI_API_KEY")
 VOLCENGINE_API_KEY = os.environ.get("VOLCENGINE_API_KEY")
@@ -367,7 +367,7 @@ class TestKimiCodingIntegration:
     @pytest.mark.asyncio
     async def test_k3_abort(self, models):
         """k3 abort signal。"""
-        from nova_ai import AbortController
+        from nova_protocol import AbortController
 
         model = models.get_model("kimi-coding", "k3")
         context = Context(messages=[UserMessage(content="Tell me a very long story")])
@@ -413,7 +413,7 @@ class TestKimiCodingIntegration:
         import base64
         from pathlib import Path
 
-        from nova_ai.types import ImageContent
+        from nova_protocol import ImageContent
 
         model = models.get_model("kimi-coding", "k3")
         image_path = Path(__file__).parent.parent / "fixtures" / "test.png"
@@ -439,7 +439,7 @@ class TestKimiCodingIntegration:
         import base64
         from pathlib import Path
 
-        from nova_ai.types import ImageContent
+        from nova_protocol import ImageContent
 
         model = models.get_model("kimi-coding", "kimi-for-coding")
         image_path = Path(__file__).parent.parent / "fixtures" / "test.png"
@@ -508,7 +508,7 @@ class TestVolcengineIntegration:
     @pytest.mark.asyncio
     async def test_deepseek_streaming(self, models):
         """DeepSeek 流式调用测试。"""
-        from nova_ai.types import TextDeltaEvent, ThinkingDeltaEvent
+        from nova_protocol import TextDeltaEvent, ThinkingDeltaEvent
 
         model = models.get_model("volcengine", "deepseek-v4-flash-260425")
         context = Context(messages=[UserMessage(content="你好")])
@@ -598,7 +598,7 @@ class TestVolcengineIntegration:
     @pytest.mark.asyncio
     async def test_deepseek_abort(self, models):
         """DeepSeek abort signal。"""
-        from nova_ai import AbortController
+        from nova_protocol import AbortController
 
         model = models.get_model("volcengine", "deepseek-v4-flash-260425")
         context = Context(messages=[UserMessage(content="Tell me a very long story")])
@@ -675,7 +675,7 @@ class TestVolcengineIntegration:
         import base64
         from pathlib import Path
 
-        from nova_ai.types import ImageContent
+        from nova_protocol import ImageContent
 
         model = models.get_model("volcengine", "deepseek-v4-flash-260425")
         image_path = Path(__file__).parent.parent / "fixtures" / "test.png"

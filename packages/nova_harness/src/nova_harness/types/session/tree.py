@@ -2,10 +2,9 @@
 
 from typing import List, Optional
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field
-
 from nova_harness.types.session.entries import SessionEntry
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import Field
 
 
 class SessionTreeNode(NovaBaseModel):
@@ -19,6 +18,5 @@ class SessionTreeNode(NovaBaseModel):
 
 # 由于 SessionTreeNode 存在自引用，需要重建模型图
 SessionTreeNode.model_rebuild()
-
 
 __all__ = ["SessionTreeNode"]

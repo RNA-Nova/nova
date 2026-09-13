@@ -95,7 +95,7 @@ def test_write_content_not_string(tmpdir):
 
 def test_write_pre_aborted_signal(tmpdir):
     """spawn 前 signal 已中止：is_error 返回且不产生任何文件副作用（对齐 pi）。"""
-    from nova_ai import AbortController
+    from nova_protocol import AbortController
 
     executor = _load_executor()
     controller = AbortController()

@@ -3,9 +3,8 @@
 """
 
 import pytest
-from pydantic import ValidationError
-
-from nova_ai.types import (
+from nova_ai.stream_options import SimpleStreamOptions, StreamOptions, ThinkingBudgets
+from nova_protocol import (
     AssistantMessage,
     CacheRetention,
     Context,
@@ -21,14 +20,11 @@ from nova_ai.types import (
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     OpenRouterRouting,
-    SimpleStreamOptions,
     StartEvent,
     StopReason,
-    StreamOptions,
     TextContent,
     TextDeltaEvent,
     TextEndEvent,
-    ThinkingBudgets,
     ThinkingContent,
     ThinkingEndEvent,
     ThinkingFormat,
@@ -42,6 +38,7 @@ from nova_ai.types import (
     UserMessage,
     VercelGatewayRouting,
 )
+from pydantic import ValidationError
 
 
 class TestEnums:

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from ..types.auth import AuthContext
+from nova_protocol import AuthContext
 
 
 class DefaultAuthContext(AuthContext):

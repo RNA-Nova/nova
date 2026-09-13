@@ -1,9 +1,8 @@
 """InMemoryCredentialStore 测试。"""
 
 import pytest
-
 from nova_ai.auth.credential_store import InMemoryCredentialStore
-from nova_ai.types.auth import ApiKeyCredential, OAuthCredential
+from nova_protocol import ApiKeyCredential, OAuthCredential
 
 
 @pytest.mark.asyncio

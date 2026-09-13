@@ -86,9 +86,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
 
     _D = "package"
     registry.register("pkgList", pkgList, domain=_D)
-    registry.register(
-        "pkgInstall", pkgInstall, domain=_D
-    )
+    registry.register("pkgInstall", pkgInstall, domain=_D)
     registry.register(
         "pkgUninstall",
         pkgUninstall,

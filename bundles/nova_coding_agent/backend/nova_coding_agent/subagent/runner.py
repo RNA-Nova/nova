@@ -25,7 +25,7 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_ai import AbortSignal
+from nova_protocol import AbortSignal
 
 from nova_coding_agent.subagent.types import (
     SubagentCall,

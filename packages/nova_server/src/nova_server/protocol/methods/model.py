@@ -9,25 +9,18 @@ from __future__ import annotations
 import os
 from typing import Any, List
 
-from nova_harness.config.defaults import (
-    AUTH_FILE_NAME,
-    MODELS_FILE_NAME,
-    get_agent_dir,
-)
+from nova_harness.config.defaults import (AUTH_FILE_NAME, MODELS_FILE_NAME,
+                                          get_agent_dir)
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.methods import shapes
-from nova_server.protocol.methods.shapes import (
-    CycleModelResult,
-    CycleThinkingLevelResult,
-    ListModelsResult,
-    ListScopedModelsResult,
-    ModelListItem,
-    ModelRef,
-    OkResult,
-    ScopedModelItem,
-    SetScopedModelsResult,
-    SetThinkingLevelResult,
-)
+from nova_server.protocol.methods.shapes import (CycleModelResult,
+                                                 CycleThinkingLevelResult,
+                                                 ListModelsResult,
+                                                 ListScopedModelsResult,
+                                                 ModelListItem, ModelRef,
+                                                 OkResult, ScopedModelItem,
+                                                 SetScopedModelsResult,
+                                                 SetThinkingLevelResult)
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.router import MethodRegistry
 
@@ -47,7 +40,7 @@ def resolve_model(model_param: Any, model_runtime: Any = None) -> Any:
             )
         return _find_model(parts[0], parts[1], model_runtime)
     elif isinstance(model_param, dict):
-        from nova_ai import Model
+        from nova_protocol import Model
 
         return Model.model_validate(model_param)
     else:
@@ -115,7 +108,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
     async def setThinkingLevel(
         params: shapes.SetThinkingLevelParams,
     ) -> SetThinkingLevelResult:
-        from nova_ai import ModelThinkingLevel
+        from nova_protocol import ModelThinkingLevel
 
         # 走会话级 API：持久化变更并广播 thinking_level_select 事件
         level = params.level

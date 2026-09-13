@@ -5,7 +5,7 @@ Copilot 特定的工具函数
 
 from typing import Dict, List, Literal
 
-from ...types.messages import Message
+from nova_protocol import Message
 
 
 def infer_copilot_initiator(messages: List[Message]) -> Literal["user", "agent"]:
@@ -45,13 +45,13 @@ def has_copilot_vision_input(messages: List[Message]) -> bool:
         # 检查用户消息中的图像
         if msg.role == "user" and isinstance(msg.content, list):
             for content in msg.content:
-                if hasattr(content, "type") and content.type == "image":
+                if content.type == "image":
                     return True
 
         # 检查工具结果中的图像
         elif msg.role == "toolResult" and isinstance(msg.content, list):
             for content in msg.content:
-                if hasattr(content, "type") and content.type == "image":
+                if content.type == "image":
                     return True
 
     return False

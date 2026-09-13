@@ -5,12 +5,19 @@
 
 import time
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Union
 
-from ...types.content import ContentUnion, TextContent, ToolCall
-from ...types.enums import StopReason
-from ...types.messages import AssistantMessage, Message, ToolResultMessage
-from ...types.model import Model
+from nova_protocol import (
+    AssistantMessage,
+    ContentUnion,
+    ImageContent,
+    Message,
+    Model,
+    StopReason,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+)
 
 NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)"
 NON_VISION_TOOL_IMAGE_PLACEHOLDER = (
@@ -19,10 +26,10 @@ NON_VISION_TOOL_IMAGE_PLACEHOLDER = (
 
 
 def _replace_images_with_placeholder(
-    content: List[ContentUnion], placeholder: str
-) -> List[TextContent]:
+    content: List[Union[TextContent, ImageContent]], placeholder: str
+) -> List[ContentUnion]:
     """把 content 中的 image 替换为 placeholder 文本（对齐 TS）。"""
-    result: List[TextContent] = []
+    result: List[ContentUnion] = []
     previous_was_placeholder = False
     for block in content:
         if block.type == "image":

@@ -20,10 +20,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Any, List, Literal, Optional, Union
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import ConfigDict, Field
-
 from nova_harness.types.messages import CustomMessageContent
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import ConfigDict, Field
 
 
 class ItemStatus(str, Enum):
@@ -177,7 +176,6 @@ WireItem = Annotated[
     Union[FrameworkItem, CustomItem, NovaItem],
     Field(union_mode="left_to_right"),
 ]
-
 
 __all__ = [
     "ItemStatus",

@@ -144,7 +144,7 @@ export class NovaTuiApp {
     const python = process.env.NOVA_PYTHON ?? 'python3';
     this.runtime = new NovaUIRuntime({
       command: [python, '-m', 'nova_harness.modes.rpc.cli'],
-      capabilities: ['select', 'confirm', 'input', 'notify', 'form', 'set_status', 'host:openUrl'],
+      capabilities: ['select', 'confirm', 'input', 'notify', 'form', 'set_status', 'host:openUrl', 'host:listenOnce'],
       session: {
         cwd: options.cwd,
         model: options.model,

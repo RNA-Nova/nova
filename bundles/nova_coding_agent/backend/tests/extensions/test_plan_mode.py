@@ -253,8 +253,8 @@ def test_context_filters_stale_plan_messages_when_disabled():
     module.extension(api)
     ctx = _fake_ctx()
 
-    from nova_ai import UserMessage
     from nova_harness.types.messages import CustomMessage
+    from nova_protocol import UserMessage
 
     stale = CustomMessage(
         custom_type="plan-mode-context",

@@ -14,19 +14,6 @@ import os
 from typing import Any, List, Optional
 
 import pytest
-from nova_ai import (
-    AssistantMessage,
-    Model,
-    ModelCost,
-    ProviderResponse,
-    TextContent,
-    ToolCall,
-    ToolResultMessage,
-    UserMessage,
-)
-from nova_ai.providers.volcengine import get_volcengine_model
-from nova_ai.types.enums import KnownApi, KnownProvider
-
 from nova_agent import (
     AbortSignal,
     AfterToolCallContext,
@@ -43,6 +30,18 @@ from nova_agent import (
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
 )
+from nova_ai import ProviderResponse
+from nova_ai.providers.volcengine import get_volcengine_model
+from nova_protocol import (
+    AssistantMessage,
+    Model,
+    ModelCost,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+from nova_protocol.enums import KnownApi, KnownProvider
 
 pytestmark = pytest.mark.integration
 

@@ -13,10 +13,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Literal
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field, SerializeAsAny
-
+from nova_protocol.base_model import NovaBaseModel
 from nova_server.types.items import NovaItem
+from pydantic import Field, SerializeAsAny
 
 
 class ItemStartedNotification(NovaBaseModel):

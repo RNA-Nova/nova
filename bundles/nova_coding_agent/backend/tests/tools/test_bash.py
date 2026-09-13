@@ -89,7 +89,7 @@ def test_bash_timeout(tmpdir):
 
 
 def test_bash_cancel(tmpdir):
-    from nova_ai import AbortController
+    from nova_protocol import AbortController
 
     executor = _load_executor()
     controller = AbortController()
@@ -239,7 +239,7 @@ def test_bash_no_default_timeout(tmpdir):
 
 def test_bash_pre_spawn_aborted_signal(tmpdir):
     """spawn 前 signal 已中止：直接 is_error 返回，不启动进程（对齐 pi）。"""
-    from nova_ai import AbortController
+    from nova_protocol import AbortController
 
     executor = _load_executor()
     controller = AbortController()
@@ -328,7 +328,7 @@ def test_bash_timeout_keeps_partial_output(tmpdir):
 
 def test_bash_cancel_keeps_partial_output(tmpdir):
     """取消结果保留已产出的部分输出（对齐 pi：aborted 时输出 + 状态行）。"""
-    from nova_ai import AbortController
+    from nova_protocol import AbortController
 
     executor = _load_executor()
     controller = AbortController()

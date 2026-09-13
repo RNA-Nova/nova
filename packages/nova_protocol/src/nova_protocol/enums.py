@@ -154,6 +154,7 @@ class ThinkingLevelMap(TypedDict, total=False):
     xhigh: Optional[str]
     max: Optional[str]
 
+
 # 顶层思考预算字段名（vLLM / Qwen-DashScope+SGLang / llama.cpp；
 # 对齐 TS ``ThinkingTokenBudgetField``）
 ThinkingTokenBudgetField = Literal[

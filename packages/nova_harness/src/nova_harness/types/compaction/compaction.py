@@ -4,10 +4,9 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from nova_agent import AgentMessage
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field
-
 from nova_harness.types.compaction.file_ops import FileOperations
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import Field
 
 
 class CompactionDetails(NovaBaseModel):

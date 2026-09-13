@@ -2,7 +2,7 @@
 
 from typing import Callable, Literal, Optional
 
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol.base_model import NovaBaseModel
 
 
 class ProgressEvent(NovaBaseModel):
@@ -26,6 +26,5 @@ class ProgressEvent(NovaBaseModel):
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
-
 
 __all__ = ["ProgressEvent", "ProgressCallback"]

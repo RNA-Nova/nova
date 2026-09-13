@@ -10,9 +10,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from nova_ai.types.base_model import NovaBaseModel
-
 from nova_harness import create_agent_session
+from nova_protocol.base_model import NovaBaseModel
 
 
 class _SampleModel(NovaBaseModel):

@@ -1,7 +1,7 @@
 import re
 from typing import List, Optional
 
-from ..types.messages import AssistantMessage
+from nova_protocol import AssistantMessage
 
 """
 Regex patterns to detect context overflow errors from different providers.

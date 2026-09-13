@@ -11,10 +11,9 @@
 import asyncio
 
 from nova_agent import Agent
-
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     DoneEvent,
-    EventStream,
     KnownApi,
     KnownProvider,
     Model,
@@ -41,7 +40,7 @@ def make_model() -> Model:
 
 
 def text_stream(model: Model, text: str) -> EventStream:
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     partial = AssistantMessage(
         role="assistant",

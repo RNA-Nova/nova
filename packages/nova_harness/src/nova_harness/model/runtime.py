@@ -22,16 +22,16 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from nova_ai import Model, Provider, builtin_models, create_models
+from nova_ai import (
+    Provider,
+    builtin_models,
+    create_models,
+)
 from nova_ai.auth.resolve import AuthResolutionOverrides
 from nova_ai.gateway.store import InMemoryModelsStore
 from nova_ai.providers.all import get_builtin_model_data_generated_at
 from nova_ai.providers.remote_catalog import with_remote_catalog
-from nova_ai.signal import AbortSignal
-from nova_ai.types.auth import AuthCheck, AuthResult, AuthType, CredentialInfo
-from nova_ai.types.messages import AssistantMessage, Context
-from nova_ai.types.stream_options import SimpleStreamOptions, StreamOptions
-
+from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.config.defaults import (
     MODELS_FILE_NAME,
@@ -57,6 +57,10 @@ from nova_harness.types.model import (
     ModelsConfig,
     ProviderConfigInput,
 )
+from nova_protocol import Model
+from nova_protocol.auth import AuthCheck, AuthResult, AuthType, CredentialInfo
+from nova_protocol.messages import AssistantMessage, Context
+from nova_protocol.signal import AbortSignal
 
 # 无远程数据源的内置 provider（订阅制单模型，目录静态）
 _STATIC_CATALOG_PROVIDERS = {"kimi-coding"}

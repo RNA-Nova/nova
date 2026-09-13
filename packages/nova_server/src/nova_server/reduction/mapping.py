@@ -10,8 +10,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from nova_ai import ImageContent, TextContent, ThinkingContent
-
+from nova_harness.types.messages import CustomMessageContent
+from nova_protocol import (
+    ImageContent,
+    TextContent,
+    ThinkingContent,
+)
 from nova_server.types.items import (
     AgentMessageItem,
     CustomItem,
@@ -20,7 +24,6 @@ from nova_server.types.items import (
     ThinkingItem,
     UserMessageItem,
 )
-from nova_harness.types.messages import CustomMessageContent
 
 # 追加语义的流式文本字段（线上键名）——只有这两名字段做字符串追加，
 # 其余一律替换（status 等 str-Enum 字段若按"字符串即追加"会拼出

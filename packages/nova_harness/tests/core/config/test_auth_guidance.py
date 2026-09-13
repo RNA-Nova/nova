@@ -3,8 +3,8 @@
 import asyncio
 
 import pytest
-from nova_ai.signal import AbortController
-from nova_ai.types.auth import AuthEvent, AuthPrompt, AuthPromptOption
+from nova_protocol.auth import AuthEvent, AuthPrompt, AuthPromptOption
+from nova_protocol.signal import AbortController
 
 from nova_harness.config.auth.guidance import (
     format_no_api_key_found_message,
@@ -13,10 +13,7 @@ from nova_harness.config.auth.guidance import (
     format_no_models_available_message,
     format_oauth_reauth_message,
 )
-from nova_harness.config.auth.interaction import (
-    LoginCancelledError,
-    UIAuthInteraction,
-)
+from nova_harness.config.auth.interaction import LoginCancelledError, UIAuthInteraction
 from nova_harness.types.ui.context import UIContext
 from nova_harness.types.ui.primitives import UIResponse
 
@@ -149,6 +146,7 @@ async def test_prompt_task_cancellation_aborts_pending_request():
 
     取消语义在路由层（CancelledError 路径发 ui/cancel 后 re-raise），
     UIAuthInteraction 把 task 取消翻译为流程的取消词汇。"""
+
     class _SlowUI(_FakeUI):
         async def _respond(self, method):
             await asyncio.sleep(10)
@@ -226,6 +224,7 @@ def test_auth_url_auto_opens_via_host_once_per_url():
 
 def test_device_code_prefers_complete_uri_and_dedupes_with_auth_url():
     """device_code 优先 verification_uri_complete；与 auth_url 同 URL 不重复开。"""
+
     async def _run():
         ui = _FakeUI()
         interaction = UIAuthInteraction(ui)
@@ -245,6 +244,7 @@ def test_device_code_prefers_complete_uri_and_dedupes_with_auth_url():
 
 def test_browser_open_without_capability_noop():
     """无 host:openUrl 能力即不开（URL 在授权等待框——显示是主通道）。"""
+
     async def _run():
         ui = _FakeUI()
         ui.__class__.capabilities = property(lambda self: {"select", "input"})

@@ -4,15 +4,20 @@ import asyncio
 from typing import List
 
 import pytest
-
 from nova_ai.gateway import (
     InMemoryModelsStore,
     Models,
-    ModelsStoreEntry,
     RefreshModelsContext,
 )
 from nova_ai.providers import create_provider
-from nova_ai.types import Context, KnownApi, Model, ModelCost, UserMessage
+from nova_protocol import (
+    Context,
+    KnownApi,
+    Model,
+    ModelCost,
+    ModelsStoreEntry,
+    UserMessage,
+)
 
 
 def _make_model(model_id: str = "test", provider: str = "test") -> Model:
@@ -65,10 +70,10 @@ class TestInMemoryModelsStore:
 
 def _resolving_auth(key: str = "sk-test"):
     """始终可解析的 apiKey auth 桩（网络阶段需要有效凭据）。"""
-    from nova_ai.types import ApiKeyAuth, AuthResult, ProviderAuth
+    from nova_protocol import ApiKeyAuth, AuthResult, ProviderAuth
 
     async def _resolve(_ctx):
-        return AuthResult(auth={"apiKey": key}, env=None, source="test")
+        return AuthResult(auth={"api_key": key}, env=None, source="test")
 
     return ProviderAuth(api_key=ApiKeyAuth(name="test", resolve=_resolve))
 

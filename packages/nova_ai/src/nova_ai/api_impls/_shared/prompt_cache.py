@@ -8,15 +8,17 @@ cache_control 段——Anthropic 系模型的缓存标记逻辑对将来的 anth
 
 from typing import Any, Dict, List, Literal, NotRequired, Optional, TypedDict
 
-from ...types.compat import OpenAICompletionsCompat
+from nova_protocol import CacheRetention, OpenAICompletionsCompat
 
 
 def resolve_cache_retention(
-    cache_retention: Optional[str], env: Optional[Dict[str, str]] = None
-) -> str:
+    cache_retention: Optional[CacheRetention],
+    env: Optional[Dict[str, str]] = None,
+) -> CacheRetention:
     """解析缓存保留策略（对齐 TS resolveCacheRetention）。
 
-    环境变量只认 ``NOVA_CACHE_RETENTION``。
+    环境变量只认 ``NOVA_CACHE_RETENTION``；显式值优先，其次环境变量
+    （仅 "long" 生效），默认 "short"。
     """
     if cache_retention:
         return cache_retention
@@ -27,7 +29,7 @@ def resolve_cache_retention(
         import os
 
         env_value = os.environ.get("NOVA_CACHE_RETENTION")
-    return "long" if env_value == "long" else "short"
+    return CacheRetention.LONG if env_value == "long" else CacheRetention.SHORT
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +65,7 @@ class CacheControl(TypedDict):
 
 
 def _get_compat_cache_control(
-    compat: OpenAICompletionsCompat, cache_retention: str
+    compat: OpenAICompletionsCompat, cache_retention: CacheRetention
 ) -> Optional[CacheControl]:
     """根据 compat 和 cache retention 构造 cache_control（对齐 TS getCompatCacheControl）。"""
     if compat.cache_control_format != "anthropic" or cache_retention == "none":

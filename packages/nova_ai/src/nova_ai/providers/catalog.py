@@ -120,6 +120,7 @@ MODEL_CORRECTIONS: Dict[Tuple[str, str], Dict[str, Any]] = {
     },
 }
 
+
 class ModelCostFields(TypedDict, total=False):
     """模型种子数据的 cost 形状。"""
 
@@ -525,6 +526,8 @@ __all__ = [
     "CORRECTION_ALIASES",
     "KIMI_CODING_SOURCE",
     "MODEL_CORRECTIONS",
+    "ModelCostFields",
+    "ModelFields",
     "PINNED_MODELS",
     "PROVIDERS",
     "PROVIDER_COMPAT_DEFAULTS",

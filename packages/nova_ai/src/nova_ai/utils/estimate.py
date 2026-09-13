@@ -8,10 +8,18 @@ usage 为锚点（其统计覆盖了此前全部前缀），只估算其后的�
 import json
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
-from ..types.messages import Context, Message, Tool
-from ..types.model import Usage
+from nova_protocol import (
+    Context,
+    ImageContent,
+    Message,
+    TextContent,
+    Tool,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+)
 
 CHARS_PER_TOKEN = 4
 ESTIMATED_IMAGE_CHARS = 4800
@@ -48,18 +56,20 @@ def estimate_text_tokens(text: str) -> int:
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 
-def _estimate_text_and_image_chars(content: object) -> int:
+def _estimate_text_and_image_chars(
+    content: Union[str, List[Union[TextContent, ImageContent]]],
+) -> int:
     if isinstance(content, str):
         return len(content)
     chars = 0
-    for block in content:  # type: ignore[union-attr]
+    for block in content:
         chars += len(block.text) if block.type == "text" else ESTIMATED_IMAGE_CHARS
     return chars
 
 
 def estimate_message_tokens(message: Message) -> int:
     """估算单条消息 token 数。"""
-    if message.role in ("user", "toolResult"):
+    if isinstance(message, (UserMessage, ToolResultMessage)):
         return math.ceil(
             _estimate_text_and_image_chars(message.content) / CHARS_PER_TOKEN
         )
@@ -95,9 +105,7 @@ def _last_assistant_usage_info(
                 and calculate_context_tokens(message.usage) > 0
             ):
                 usage_info = (message.usage, i)
-        latest_prefix_timestamp = max(
-            latest_prefix_timestamp, getattr(message, "timestamp", 0) or 0
-        )
+        latest_prefix_timestamp = max(latest_prefix_timestamp, message.timestamp)
 
     return usage_info
 
@@ -138,7 +146,7 @@ def estimate_context_tokens(context: Context) -> ContextUsageEstimate:
         added_names = set()
         for message in context.messages[estimate.last_usage_index + 1 :]:
             if message.role == "toolResult":
-                added_names.update(getattr(message, "added_tool_names", None) or [])
+                added_names.update(message.added_tool_names or [])
         added_tools = [
             tool for tool in (context.tools or []) if tool.name in added_names
         ]

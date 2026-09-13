@@ -12,10 +12,9 @@
 import asyncio
 
 from nova_agent import Agent, AgentTool, AgentToolResult
-
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     DoneEvent,
-    EventStream,
     KnownApi,
     KnownProvider,
     Model,
@@ -64,7 +63,7 @@ def make_model() -> Model:
 
 def tool_call_stream(model: Model) -> EventStream:
     """模拟 LLM 发起 tool call：注意 x 给的是字符串 "5"（会被自动矫正为整数）。"""
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     tool_call = ToolCall(id="tc-1", name="square", arguments={"x": "5"})
     partial = AssistantMessage(
@@ -87,7 +86,7 @@ def tool_call_stream(model: Model) -> EventStream:
 
 
 def text_stream(model: Model, text: str) -> EventStream:
-    from nova_ai import AssistantMessage
+    from nova_protocol import AssistantMessage
 
     partial = AssistantMessage(
         role="assistant",

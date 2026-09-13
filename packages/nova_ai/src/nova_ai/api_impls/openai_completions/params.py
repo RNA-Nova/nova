@@ -8,9 +8,14 @@ extra_body 纪律：openai-python 拒绝未知 kwarg——所有非标准字段
 
 from typing import Any, Dict, Optional
 
-from ...types.compat import OpenAICompletionsCompat
-from ...types.messages import Context
-from ...types.model import Model
+from nova_protocol import (
+    CacheRetention,
+    Context,
+    Model,
+    OpenAICompletionsCompat,
+    ThinkingLevelMap,
+)
+
 from .._shared.prompt_cache import (
     _apply_anthropic_cache_control,
     _get_compat_cache_control,
@@ -44,7 +49,7 @@ def _resolve_thinking_token_budget_field(
     return None
 
 
-def _map_level(level_map: Dict[str, Optional[str]], level: str) -> Optional[str]:
+def _map_level(level_map: ThinkingLevelMap, level: str) -> Optional[str]:
     """映射思考级别；键缺失或显式 ``None``（该级别不受支持）→ ``None``。
 
     两种"不映射"必须区分——键缺失回落原值；显式 ``None``（该级别不受支持）
@@ -52,7 +57,7 @@ def _map_level(level_map: Dict[str, Optional[str]], level: str) -> Optional[str]
     """
     if level not in level_map:
         return level
-    return level_map[level]
+    return level_map.get(level)
 
 
 def _resolve_clamped_thinking_budget(
@@ -117,11 +122,11 @@ def _resolve_chat_template_kwarg_value(
         return bool(reasoning_effort)
     if var == "thinking.budget":
         return thinking_budget if thinking_budget is not None else _OMIT
-    level_map = model.thinking_level_map or {}
+    level_map: ThinkingLevelMap = model.thinking_level_map or {}
     key = reasoning_effort if reasoning_effort else "off"
     if key not in level_map:
         return reasoning_effort if reasoning_effort else _OMIT
-    mapped = level_map[key]
+    mapped = level_map.get(key)
     return mapped if isinstance(mapped, str) else _OMIT
 
 
@@ -130,9 +135,13 @@ def build_params(
     context: Context,
     options: Optional[OpenAICompletionsOptions] = None,
     compat: Optional[OpenAICompletionsCompat] = None,
-    cache_retention: Optional[str] = None,
+    cache_retention: Optional[CacheRetention] = None,
 ) -> Dict[str, Any]:
-    """构建 OpenAI API 请求体参数（对齐 TS buildParams 终态）。"""
+    """构建 OpenAI API 请求体参数（对齐 TS buildParams 终态）。
+
+    返回的是厂商线上形状的开放 dict（自由负载语义）——标准字段 +
+    ``extra_body`` 累积的非标准字段，直交 openai SDK。
+    """
     compat = compat or get_compat(model)
     cache_retention = cache_retention or resolve_cache_retention(
         options.cache_retention if options else None,
@@ -209,22 +218,17 @@ def build_params(
     extra_body: Dict[str, Any] = {}
 
     # prompt cache（对齐 TS 顶层 prompt_cache_key/retention——Python 侧经 extra_body 上线）
-    use_prompt_cache_key = (
-        options
-        and options.session_id
-        and (
-            ("api.openai.com" in model.base_url and cache_retention != "none")
-            or (cache_retention == "long" and compat.supports_long_cache_retention)
-        )
+    session_id = options.session_id if options else None
+    use_prompt_cache_key = session_id is not None and (
+        ("api.openai.com" in model.base_url and cache_retention != "none")
+        or (cache_retention == "long" and compat.supports_long_cache_retention)
     )
     if use_prompt_cache_key:
-        extra_body["prompt_cache_key"] = clamp_openai_prompt_cache_key(
-            options.session_id
-        )
+        extra_body["prompt_cache_key"] = clamp_openai_prompt_cache_key(session_id)
     if cache_retention == "long" and compat.supports_long_cache_retention:
         extra_body["prompt_cache_retention"] = "24h"
 
-    level_map = model.thinking_level_map or {}
+    level_map: ThinkingLevelMap = model.thinking_level_map or {}
 
     def _off_value() -> Optional[str]:
         off = level_map.get("off")

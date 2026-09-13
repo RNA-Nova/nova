@@ -5,12 +5,11 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
-from nova_ai import ModelThinkingLevel
-
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_protocol import ModelThinkingLevel
 from nova_server.protocol import JSONRPCError, MethodRegistry
 from nova_server.protocol.methods import session as session_methods
 from nova_server.protocol.methods.state import ServerState
-from nova_harness.types.compaction.compaction import CompactionResult
 
 
 class FakeSession:

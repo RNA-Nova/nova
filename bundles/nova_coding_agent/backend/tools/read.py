@@ -6,11 +6,15 @@ import os
 from typing import Any, Dict, Optional
 
 from nova_agent import AgentToolResult
-from nova_ai import AbortSignal, ImageContent, TextContent
 from nova_harness.types.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContext,
     ToolExecContext,
+)
+from nova_protocol import (
+    AbortSignal,
+    ImageContent,
+    TextContent,
 )
 
 from nova_coding_agent.executor import backend_file_layer, resolve_backend_path

@@ -16,7 +16,10 @@ from typing import (
 )
 
 from nova_agent import CustomAgentMessage
-from nova_ai import ImageContent, TextContent
+from nova_protocol import (
+    ImageContent,
+    TextContent,
+)
 from pydantic import Field
 
 # ---------------------------------------------------------------------------
@@ -38,11 +41,9 @@ BRANCH_SUMMARY_PREFIX = """The following is a summary of a branch that this conv
 
 BRANCH_SUMMARY_SUFFIX = """</summary>"""
 
-
 # ---------------------------------------------------------------------------
 # 类型
 # ---------------------------------------------------------------------------
-
 
 # 自定义消息的内容块：按 type 字段判别反序列化（对齐 TS TextContent | ImageContent）
 CustomMessageContent = Annotated[

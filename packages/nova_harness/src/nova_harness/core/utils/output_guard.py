@@ -10,6 +10,12 @@ This mirrors pi's ``output-guard.ts``. In addition to the context-manager API,
 module-level helpers ``take_over_stdout`` / ``restore_stdout`` /
 ``write_raw_stdout`` / ``flush_raw_stdout`` are provided for callers that
 prefer an explicit global singleton style.
+
+**激活状态单一事实源**：任何 ``install()``（上下文管理器或单例路径）都把
+实例登记进安装栈；``is_stdout_taken_over()`` 认栈顶的活动实例——两种入口
+语义合一（历史事故：RPC 入口用 ``with OutputGuard()`` 局部实例，而探针只
+看单例，导致装包世界的子进程 stdio 决策恒判"未接管"，pip 输出泄漏进协议
+通道）。
 """
 
 import logging
@@ -17,7 +23,7 @@ import sys
 import threading
 from contextlib import contextmanager
 from types import TracebackType
-from typing import Optional, TextIO, Type
+from typing import List, Optional, TextIO, Type
 
 
 class OutputGuard:
@@ -75,6 +81,7 @@ class OutputGuard:
         self._original_write = self._stdout.write
         self._stdout.write = self._guarded_write
         self._redirect_logging_handlers()
+        _installed_stack.append(self)
 
     def uninstall(self) -> None:
         """Restore original stdout.write and logging handlers."""
@@ -82,6 +89,8 @@ class OutputGuard:
             self._stdout.write = self._original_write
             self._original_write = None
         self._restore_logging_handlers()
+        if self in _installed_stack:
+            _installed_stack.remove(self)
 
     def write_raw_stdout(self, text: str) -> None:
         """Write text to the original stdout, bypassing redirection to stderr.
@@ -151,6 +160,15 @@ class OutputGuard:
 # ---------------------------------------------------------------------------
 
 _global_guard: Optional[OutputGuard] = None
+# 安装栈：任何 install() 登记的实例（上下文管理器与单例路径同权）。
+# is_stdout_taken_over 认栈顶——两个入口不可能再语义脱节
+_installed_stack: List["OutputGuard"] = []
+
+
+def _active_guard() -> Optional[OutputGuard]:
+    if _installed_stack:
+        return _installed_stack[-1]
+    return None
 
 
 def take_over_stdout(
@@ -177,17 +195,19 @@ def restore_stdout() -> None:
 
 
 def is_stdout_taken_over() -> bool:
-    """Return whether stdout is currently taken over by the global guard."""
-    return _global_guard is not None and _global_guard.is_installed
+    """Return whether stdout is currently taken over by **any** installed guard."""
+    guard = _active_guard()
+    return guard is not None and guard.is_installed
 
 
 def write_raw_stdout(text: str) -> None:
-    """Write raw text to stdout when a global takeover is active.
+    """Write raw text to stdout when a takeover is active.
 
     Falls back to plain ``sys.stdout.write`` if no takeover is active.
     """
-    if _global_guard is not None:
-        _global_guard.write_raw_stdout(text)
+    guard = _active_guard()
+    if guard is not None:
+        guard.write_raw_stdout(text)
     else:
         sys.stdout.write(text)
 
@@ -204,8 +224,9 @@ async def wait_for_raw_stdout_backpressure() -> None:
 async def flush_raw_stdout() -> None:
     """Flush raw stdout output."""
     await wait_for_raw_stdout_backpressure()
-    if _global_guard is not None:
-        _global_guard.flush_raw_stdout()
+    guard = _active_guard()
+    if guard is not None:
+        guard.flush_raw_stdout()
     else:
         sys.stdout.flush()
 

@@ -21,11 +21,13 @@ from nova_agent import (
     BeforeToolCallContext,
 )
 from nova_ai import (
-    DoneEvent,
     EventStream,
+    ProviderResponse,
+)
+from nova_protocol import (
+    DoneEvent,
     ImageContent,
     Model,
-    ProviderResponse,
     StartEvent,
     TextContent,
     ThinkingContent,

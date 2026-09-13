@@ -24,8 +24,7 @@ from typing import (
     TypeVar,
 )
 
-from .types.events import AssistantMessageEvent
-from .types.messages import AssistantMessage
+from nova_protocol import AssistantMessage, AssistantMessageEvent
 
 T = TypeVar("T")
 R = TypeVar("R")

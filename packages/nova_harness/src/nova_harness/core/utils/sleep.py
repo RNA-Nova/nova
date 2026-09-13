@@ -1,7 +1,7 @@
 import asyncio
 from typing import Optional
 
-from nova_ai import AbortSignal
+from nova_protocol import AbortSignal
 
 
 async def sleep(seconds: float, signal: Optional[AbortSignal] = None) -> None:

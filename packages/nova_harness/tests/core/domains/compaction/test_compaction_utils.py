@@ -4,21 +4,20 @@ compaction/utils.py 单元测试。
 覆盖文件操作提取、对话序列化、文件列表计算与格式化。
 """
 
-from nova_ai import (
-    AssistantMessage,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    ToolResultMessage,
-    UserMessage,
-)
-
 from nova_harness.core.domains.compaction.utils import (
     compute_file_lists,
     create_file_ops,
     extract_file_ops_from_message,
     format_file_operations,
     serialize_conversation,
+)
+from nova_protocol import (
+    AssistantMessage,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
 )
 
 

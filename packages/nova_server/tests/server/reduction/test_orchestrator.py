@@ -9,15 +9,6 @@ from typing import Any, List, Literal
 
 import pytest
 from nova_agent import CustomAgentMessage
-from nova_ai import (
-    AssistantMessage,
-    StopReason,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    UserMessage,
-)
-
 from nova_harness.events import (
     AgentEndEvent,
     EntryAppendedEvent,
@@ -31,6 +22,21 @@ from nova_harness.events import (
     ToolExecutionUpdateEvent,
 )
 from nova_harness.events.session import CompactionEndEvent
+from nova_harness.types.compaction.compaction import CompactionResult
+from nova_harness.types.messages import (
+    BranchSummaryMessage,
+    CompactionSummaryMessage,
+    CustomMessage,
+)
+from nova_harness.types.session.entries import CustomEntry, LabelEntry
+from nova_protocol import (
+    AssistantMessage,
+    StopReason,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    UserMessage,
+)
 from nova_server.reduction import SessionReducer, apply_delta
 from nova_server.types.items import (
     AgentMessageItem,
@@ -41,13 +47,6 @@ from nova_server.types.items import (
     ToolCallItem,
     UserMessageItem,
 )
-from nova_harness.types.compaction.compaction import CompactionResult
-from nova_harness.types.messages import (
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
-    CustomMessage,
-)
-from nova_harness.types.session.entries import CustomEntry, LabelEntry
 
 
 @pytest.fixture

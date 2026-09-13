@@ -35,6 +35,7 @@ import { SearchableSelector, type SearchableItem } from '../components/pickers/s
 import type { RegionEnv } from '../components/layout/region-host.js';
 import { editorTheme } from '../themes/index.js';
 import { openUrl } from '../utils/open-url.js';
+import { listenOnce, type ListenOnceHandle, type ListenOnceResult } from '../utils/listen-once.js';
 
 const selectListTheme: SelectListTheme = {
   selectedPrefix: (s) => chalk.cyan(s),
@@ -43,6 +44,21 @@ const selectListTheme: SelectListTheme = {
   scrollInfo: (s) => chalk.dim(s),
   noMatch: (s) => chalk.yellow(s),
 };
+
+/** 遮蔽输入框（secret 类 prompt——API key 等密钥输入不回显明文）。
+ * pi-tui Input 无内建遮蔽：渲染时临时换入等长掩码（长度一致故光标位置
+ * 不受影响），真实值只在提交时经 getValue() 取出。 */
+class MaskedInput extends Input {
+  override render(width: number): string[] {
+    const real = this.getValue();
+    this.setValue('•'.repeat(real.length));
+    try {
+      return super.render(width);
+    } finally {
+      this.setValue(real);
+    }
+  }
+}
 
 /** 多行编辑对话框（editor 原语组件）：enter 提交、esc 取消。 */
 class EditorDialog extends Container implements Focusable {
@@ -122,6 +138,8 @@ export class DialogController {
   private authDialog: AuthWaitingDialog | undefined;
   /** 在飞 slash 命令调用的取消句柄（cancelRequest；settle 即清）。 */
   private pendingCommandCancel: (() => void) | undefined;
+  /** 在飞 host:listenOnce 监听（id → 句柄；撤销帧撤监听 + cancelled 应答）。 */
+  private readonly listenOnceHandles = new Map<string, ListenOnceHandle>();
   /** 前端本地对话框（/theme 选择器等——无 RPC id，本地开关）。 */
   private localDialog = false;
 
@@ -139,7 +157,17 @@ export class DialogController {
     private readonly openUrlFn: (url: string) => void = openUrl,
   ) {
     this.runtime.onUIRequest((req) => this.handle(req));
-    this.runtime.onUICancel((id) => this.dismiss(id));
+    this.runtime.onUICancel((id) => {
+      // host:listenOnce 在飞监听走自己的取消（无对话框可关——撤监听即收尾）
+      const handle = this.listenOnceHandles.get(id);
+      if (handle) {
+        this.listenOnceHandles.delete(id);
+        handle.close();
+        this.runtime.sendUIResponse(id, { cancelled: true });
+        return;
+      }
+      this.dismiss(id);
+    });
     this.runtime.onUINotice((notice) => this.showNotice(notice));
     // 能力消失自答（根本治理）：包 reload 整体替换 slots——在飞的 dialog:*
     // 弹窗若槽位被卸（后端对它在飞的 await 再无应答者），本地仲裁：
@@ -220,6 +248,9 @@ export class DialogController {
       case 'host:openUrl':
         this.handleOpenUrl(req);
         return;
+      case 'host:listenOnce':
+        this.handleListenOnce(req);
+        return;
       default:
         // dialog:<name>：包侧自定义对话框（slot 键即 componentType——工厂产
         // 组件挂模态，done(result) 应答；未注册按 cancelled（不挂起后端）
@@ -248,6 +279,38 @@ export class DialogController {
     } catch {
       this.runtime.sendUIResponse(req.id, { opened: false });
     }
+  }
+
+  /**
+   * host:listenOnce（执行调用宿主原语）：本机起一次性 HTTP 监听收货
+   * （OAuth 回调的远程形态——收货点必须在用户机器）。哑信使语义：
+   * 原样转发 query 参数，不做 OAuth 校验（state/PKCE 归后端）。
+   * 超时/端口占用/取消都有明确落定，不挂起后端。
+   */
+  private handleListenOnce(req: UIRequest): void {
+    const port = typeof req.params.port === 'number' ? req.params.port : 0;
+    const path = typeof req.params.path === 'string' ? req.params.path : '';
+    if (!port || !path) {
+      this.runtime.sendUIResponse(req.id, {
+        value: { status: 'error', message: 'missing port/path' },
+      });
+      return;
+    }
+    const handle = listenOnce({
+      port,
+      path,
+      timeoutMs:
+        typeof req.params.timeoutMs === 'number' ? req.params.timeoutMs : undefined,
+      successHtml:
+        typeof req.params.successHtml === 'string' ? req.params.successHtml : undefined,
+      errorHtml:
+        typeof req.params.errorHtml === 'string' ? req.params.errorHtml : undefined,
+    });
+    this.listenOnceHandles.set(req.id, handle);
+    void handle.result.then((result: ListenOnceResult) => {
+      if (!this.listenOnceHandles.delete(req.id)) return; // 已被取消路径应答
+      this.runtime.sendUIResponse(req.id, { value: result });
+    });
   }
 
   /**
@@ -338,7 +401,8 @@ export class DialogController {
   private showInput(req: UIRequest): void {
     const title = str(req.params.title);
     const placeholder = str(req.params.placeholder);
-    const input = new Input();
+    const secret = req.params.secret === true;
+    const input = secret ? new MaskedInput() : new Input();
     if (placeholder) input.setValue(placeholder);
     input.onSubmit = (value) => {
       this.restore();

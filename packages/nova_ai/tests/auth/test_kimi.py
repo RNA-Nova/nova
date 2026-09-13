@@ -6,9 +6,8 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-
 from nova_ai.auth.oauth.kimi import _get_oauth_host, kimi_oauth
-from nova_ai.types.auth import AuthEvent, AuthInteraction, AuthPrompt, OAuthCredential
+from nova_protocol import AuthEvent, AuthInteraction, AuthPrompt, OAuthCredential
 
 
 class _FakeInteraction(AuthInteraction):
@@ -40,7 +39,7 @@ async def _noop_abortable_sleep(_ms: float, _signal: Optional[Any] = None) -> No
 @pytest.mark.asyncio
 async def test_device_code_login_success():
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         if "/device_authorization" in url:
             return _response(
@@ -89,7 +88,7 @@ async def test_device_code_slow_down_then_success():
     calls: List[Dict[str, str]] = []
 
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         if "/device_authorization" in url:
             return _response(
@@ -129,7 +128,7 @@ async def test_device_code_slow_down_then_success():
 @pytest.mark.asyncio
 async def test_device_code_access_denied_raises():
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         if "/device_authorization" in url:
             return _response(
@@ -159,7 +158,7 @@ async def test_device_code_access_denied_raises():
 @pytest.mark.asyncio
 async def test_device_code_timeout():
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         if "/device_authorization" in url:
             return _response(
@@ -191,7 +190,7 @@ async def test_device_code_cancel_with_signal():
         aborted = True
 
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         if "/device_authorization" in url:
             return _response(
@@ -220,7 +219,7 @@ async def test_device_code_cancel_with_signal():
 @pytest.mark.asyncio
 async def test_refresh_success():
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         assert params.get("grant_type") == "refresh_token"
         assert params.get("refresh_token") == "refresh-old"
@@ -245,7 +244,7 @@ async def test_refresh_success():
 @pytest.mark.asyncio
 async def test_refresh_unauthorized():
     async def _fake_post(
-        url: str, params: Dict[str, str], headers=None
+        url: str, params: Dict[str, str], headers=None, **_kwargs
     ) -> httpx.Response:
         return _response(
             401, {"error": "invalid_grant", "error_description": "token revoked"}

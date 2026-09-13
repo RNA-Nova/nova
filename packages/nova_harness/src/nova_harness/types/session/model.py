@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from nova_ai import Model, ModelThinkingLevel
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import (
+    Model,
+    ModelThinkingLevel,
+)
+from nova_protocol.base_model import NovaBaseModel
 
 
 class ScopedModelConfig(NovaBaseModel):

@@ -2,7 +2,9 @@
 事件类型定义
 """
 
-from typing import Literal, Union
+from typing import Annotated, Literal, Union
+
+from pydantic import Field
 
 from .base_model import NovaBaseModel
 from .content import ToolCall
@@ -111,18 +113,21 @@ class ErrorEvent(NovaBaseModel):
     error: AssistantMessage
 
 
-# 助手消息事件联合类型
-AssistantMessageEvent = Union[
-    StartEvent,
-    TextStartEvent,
-    TextDeltaEvent,
-    TextEndEvent,
-    ThinkingStartEvent,
-    ThinkingDeltaEvent,
-    ThinkingEndEvent,
-    ToolCallStartEvent,
-    ToolCallDeltaEvent,
-    ToolCallEndEvent,
-    DoneEvent,
-    ErrorEvent,
+# 助手消息事件联合类型（判别键 ``type``——规则 6：显式判别，不靠 smart-union 猜）
+AssistantMessageEvent = Annotated[
+    Union[
+        StartEvent,
+        TextStartEvent,
+        TextDeltaEvent,
+        TextEndEvent,
+        ThinkingStartEvent,
+        ThinkingDeltaEvent,
+        ThinkingEndEvent,
+        ToolCallStartEvent,
+        ToolCallDeltaEvent,
+        ToolCallEndEvent,
+        DoneEvent,
+        ErrorEvent,
+    ],
+    Field(discriminator="type"),
 ]

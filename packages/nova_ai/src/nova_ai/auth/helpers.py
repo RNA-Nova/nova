@@ -5,14 +5,14 @@
 - ``lazy_oauth``：延迟加载 OAuth 实现
 """
 
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Awaitable, Callable, List, Optional
 
-from ..signal import AbortSignal
-from ..types.auth import (
+from nova_protocol import (
+    AbortSignal,
     ApiKeyAuth,
+    ApiKeyAuthInput,
     ApiKeyCredential,
     AuthCheck,
-    AuthContext,
     AuthInteraction,
     AuthPrompt,
     AuthResult,
@@ -25,9 +25,9 @@ from ..types.auth import (
 def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
     """标准 API key 鉴权：优先用存储的 key，否则依次读取环境变量。"""
 
-    async def resolve(input: dict) -> Optional[AuthResult]:
-        ctx: AuthContext = input["ctx"]
-        credential: Optional[ApiKeyCredential] = input.get("credential")
+    async def resolve(input: ApiKeyAuthInput) -> Optional[AuthResult]:
+        ctx = input["ctx"]
+        credential = input["credential"]
 
         if credential and credential.key:
             return AuthResult(
@@ -49,7 +49,7 @@ def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
         )
         return ApiKeyCredential(key=key)
 
-    async def check(input: dict) -> Optional[AuthCheck]:
+    async def check(input: ApiKeyAuthInput) -> Optional[AuthCheck]:
         result = await resolve(input)
         if result and result.auth.get("api_key"):
             return AuthCheck(type="api_key", source=result.source)

@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from nova_agent import Agent, AgentTool
-from nova_ai import Model, ModelThinkingLevel
-
 from nova_harness.types.protocols import (
     AuthStorageProtocol,
     ExtensionRunnerProtocol,
@@ -23,6 +21,10 @@ from nova_harness.types.protocols import (
 from nova_harness.types.resources.tools import ToolDefinition
 from nova_harness.types.session.model import ScopedModelConfig
 from nova_harness.types.ui import UIContext
+from nova_protocol import (
+    Model,
+    ModelThinkingLevel,
+)
 
 if TYPE_CHECKING:
     # 仅注解引用（dataclass 字段，运行时不求值）；types.events 的包级

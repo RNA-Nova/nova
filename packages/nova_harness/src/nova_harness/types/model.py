@@ -3,15 +3,15 @@
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
-from nova_ai import (
+from nova_protocol import (
     Model,
     ModelCost,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     ThinkingLevelMap,
 )
-from nova_ai.types.auth import OAuthCredential
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol.auth import OAuthCredential
+from nova_protocol.base_model import NovaBaseModel
 from pydantic import ConfigDict, Field
 
 # 类型别名

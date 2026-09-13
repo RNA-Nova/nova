@@ -9,6 +9,12 @@ import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from nova_ai import (
+    ProviderResponse,
+    SimpleStreamOptions,
+    ThinkingBudgets,
+    to_thinking_level,
+)
+from nova_protocol import (
     AbortController,
     AbortSignal,
     AssistantMessage,
@@ -16,14 +22,10 @@ from nova_ai import (
     Message,
     Model,
     ModelThinkingLevel,
-    ProviderResponse,
-    SimpleStreamOptions,
     TextContent,
-    ThinkingBudgets,
     Transport,
     Usage,
     UserMessage,
-    to_thinking_level,
 )
 
 from .agent_loop import run_agent_loop, run_agent_loop_continue

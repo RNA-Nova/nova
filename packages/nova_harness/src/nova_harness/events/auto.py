@@ -5,11 +5,10 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from nova_ai import ModelThinkingLevel
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field
-
 from nova_harness.types.compaction.compaction import CompactionResult
+from nova_protocol import ModelThinkingLevel
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import Field
 
 from .constants import (
     AUTO_COMPACTION_END,

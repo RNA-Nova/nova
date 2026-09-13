@@ -13,12 +13,10 @@ import json
 from pathlib import Path
 
 import pytest
-from nova_ai import OpenAICompletionsCompat
-from nova_ai.types.auth import OAuthCredential
-
 from nova_harness.model import ModelRuntime
 from nova_harness.model.composer import compose_provider
 from nova_harness.types.model import ProviderConfigInput
+from nova_protocol import OAuthCredential, OpenAICompletionsCompat
 from tests._helpers.auth_storage import auth_storage_in_memory
 
 
@@ -729,7 +727,7 @@ def test_compose_provider_requires_no_api_key():
 
 
 def _make_model(model_id: str, provider: str = "dyn", max_tokens: int = 8192):
-    from nova_ai import Model, ModelCost
+    from nova_protocol import Model, ModelCost
 
     return Model(
         id=model_id,
@@ -749,7 +747,7 @@ def _make_dynamic_base(fetch):
     from nova_ai import create_provider
     from nova_ai.api_impls import openai_completions
     from nova_ai.auth.helpers import env_api_key_auth
-    from nova_ai.types.auth import ProviderAuth
+    from nova_protocol import ProviderAuth
 
     return create_provider(
         id="dyn",
@@ -919,9 +917,8 @@ async def test_set_and_remove_runtime_api_key_updates_snapshot(tmp_path):
 
 @pytest.mark.asyncio
 async def test_file_models_store_roundtrip(tmp_path):
-    from nova_ai.gateway.store import ModelsStoreEntry
-
     from nova_harness.model.store import FileModelsStore
+    from nova_protocol import ModelsStoreEntry
 
     store = FileModelsStore(str(tmp_path / "models-store.json"))
     entry = ModelsStoreEntry(models=[_make_model("m1")], checked_at=123)
@@ -939,7 +936,8 @@ async def test_file_models_store_roundtrip(tmp_path):
 @pytest.mark.asyncio
 async def test_refresh_restores_models_from_store_when_offline(tmp_path, monkeypatch):
     """离线刷新：从 models-store 缓存恢复动态模型，不触网。"""
-    from nova_ai.gateway.store import InMemoryModelsStore, ModelsStoreEntry
+    from nova_ai.gateway.store import InMemoryModelsStore
+    from nova_protocol import ModelsStoreEntry
 
     monkeypatch.setenv("NOVA_TEST_DYN_KEY", "dyn-key")
 
@@ -1211,12 +1209,11 @@ async def test_env_ref_resolves_via_custom_auth_context(tmp_path, monkeypatch):
 
 def test_config_types_are_frozen():
     """models.json 配置类型冻结：顶层赋值被拒绝（对齐 TS deepFreeze 的顶层语义）。"""
-    from pydantic import ValidationError
-
     from nova_harness.types.model import (
         ModelsConfig,
         ProviderConfig,
     )
+    from pydantic import ValidationError
 
     cfg = ModelsConfig.model_validate({"providers": {"p": {"base_url": "http://x"}}})
     with pytest.raises(ValidationError):

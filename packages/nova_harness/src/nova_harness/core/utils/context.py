@@ -4,7 +4,7 @@
 
 from typing import Optional
 
-from nova_ai import AssistantMessage
+from nova_protocol import AssistantMessage
 
 
 def is_context_overflow(

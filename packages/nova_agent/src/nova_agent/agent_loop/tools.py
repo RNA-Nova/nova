@@ -7,7 +7,12 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
-from nova_ai import AbortSignal, AssistantMessage, TextContent, ToolResultMessage
+from nova_protocol import (
+    AbortSignal,
+    AssistantMessage,
+    TextContent,
+    ToolResultMessage,
+)
 
 from ..types import (
     AfterToolCallContext,

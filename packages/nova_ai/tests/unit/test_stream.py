@@ -5,16 +5,15 @@ import json
 from types import SimpleNamespace
 from typing import Any, List, Optional
 
-import pytest
-
 # 注意：patch 目标是流式实现子模块（create_client 的消费方绑定处）
 import nova_ai.api_impls.openai_completions._stream as stream_module
+import pytest
 from nova_ai.api_impls import openai_completions
 from nova_ai.api_impls.openai_completions import (
     OpenAICompletionsOptions,
     stream,
 )
-from nova_ai.types import (
+from nova_protocol import (
     Context,
     DoneEvent,
     ErrorEvent,
@@ -163,16 +162,13 @@ class _FakeClient:
             )
         )
         self._chunks = chunks
-        self.aclosed = False
+        self.closed = False
 
     async def _create_with_raw_response(self, **_kwargs):
         return _FakeRawResponse(self._chunks)
 
     async def close(self):
-        pass
-
-    async def aclose(self):
-        self.aclosed = True
+        self.closed = True
 
 
 async def _collect(stream):
@@ -401,7 +397,7 @@ class TestStreamUsage:
 class TestStreamAbort:
     @pytest.mark.asyncio
     async def test_abort_signal(self, monkeypatch):
-        from nova_ai import AbortController
+        from nova_protocol import AbortController
 
         controller = AbortController()
         chunks = [
@@ -440,7 +436,7 @@ class TestStreamAbort:
     @pytest.mark.asyncio
     async def test_watchdog_closes_blocked_stream_on_abort(self, monkeypatch):
         """上游无数据时，abort 看门狗主动 close 流，而非干等下一个 chunk。"""
-        from nova_ai import AbortController
+        from nova_protocol import AbortController
 
         close_called = asyncio.Event()
         never = asyncio.Event()  # 永不触发，模拟上游一直无数据
@@ -623,7 +619,7 @@ class TestEventPairingGuarantee:
     @pytest.mark.asyncio
     async def test_abort_pairing(self, monkeypatch):
         """abort 时所有打开的块都有且仅有一个 end，error 收尾。"""
-        from nova_ai import AbortController
+        from nova_protocol import AbortController
 
         controller = AbortController()
         chunks = [
@@ -722,7 +718,7 @@ class TestEventPairingGuarantee:
     @pytest.mark.asyncio
     async def test_watchdog_abort_pairing(self, monkeypatch):
         """看门狗关闭路径同样保证配对（text + thinking 块）。"""
-        from nova_ai import AbortController
+        from nova_protocol import AbortController
 
         controller = AbortController()
         never = asyncio.Event()
@@ -785,7 +781,7 @@ class TestStreamSimpleGuards:
     def test_no_api_key_and_no_env_raises(self, monkeypatch):
         """无 api_key、无 authorization 头、无环境变量时直接抛错（对齐 TS getClientApiKey）。"""
         from nova_ai.api_impls.openai_completions import stream_simple
-        from nova_ai.types import SimpleStreamOptions
+        from nova_ai.stream_options import SimpleStreamOptions
 
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         with pytest.raises(ValueError, match="No API key for provider"):
@@ -801,7 +797,7 @@ class TestStreamSimpleGuards:
         env 注入是上游（Models.applyAuth）的职责；本层只认 options.api_key 与 headers。
         """
         from nova_ai.api_impls.openai_completions import stream_simple
-        from nova_ai.types import SimpleStreamOptions
+        from nova_ai.stream_options import SimpleStreamOptions
 
         monkeypatch.setenv("OPENAI_API_KEY", "env-key-present")
         with pytest.raises(ValueError, match="No API key for provider"):
@@ -815,7 +811,7 @@ class TestStreamSimpleGuards:
     async def test_authorization_header_satisfies_key_requirement(self, monkeypatch):
         """headers 里带 authorization 时不需要 api_key（对齐 TS）。"""
         from nova_ai.api_impls.openai_completions import stream_simple
-        from nova_ai.types import SimpleStreamOptions
+        from nova_ai.stream_options import SimpleStreamOptions
 
         chunks = [_chunk(content="ok", finish="stop", usage=_usage(5, 3))]
         _setup_fake_client(monkeypatch, chunks)
@@ -831,11 +827,11 @@ class TestStreamSimpleGuards:
 
 
 class TestClientLifecycle:
-    """客户端按次现造、用完即关（finally 里 aclose）——连接池的异步
-    生成器不得活到事件循环拆除（冻结态进程收尾的 athrow 噪音根因）。"""
+    """客户端按次现造、用完即关（finally 里 close——openai 2.x 异步关闭方法）——
+    连接池的异步生成器不得活到事件循环拆除（冻结态进程收尾的 athrow 噪音根因）。"""
 
     @pytest.mark.asyncio
-    async def test_client_acclosed_after_done(self, monkeypatch):
+    async def test_client_closed_after_done(self, monkeypatch):
         chunks = [_chunk(content="ok", finish="stop")]
         holder = {}
 
@@ -851,10 +847,10 @@ class TestClientLifecycle:
         )
         events = await _collect(event_stream)
         assert events[-1].type == "done"
-        assert holder["client"].aclosed is True
+        assert holder["client"].closed is True
 
     @pytest.mark.asyncio
-    async def test_client_acclosed_on_error(self, monkeypatch):
+    async def test_client_closed_on_error(self, monkeypatch):
         """错误路径（finally 兜底）同样关闭。"""
         holder = {}
 
@@ -882,4 +878,4 @@ class TestClientLifecycle:
         )
         events = await _collect(event_stream)
         assert events[-1].type == "error"
-        assert holder["client"].aclosed is True
+        assert holder["client"].closed is True

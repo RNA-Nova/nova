@@ -13,8 +13,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
-from nova_ai.signal import AbortController
-
 from nova_harness.config import AuthStorage, SettingsManager
 from nova_harness.config.defaults import (
     AUTH_FILE_NAME,
@@ -22,16 +20,17 @@ from nova_harness.config.defaults import (
     get_agent_dir,
 )
 from nova_harness.config.migration import migrate_backend_layout
+from nova_harness.core.utils.timings import time
 from nova_harness.extensions.api import NovaExtensionAPI
 from nova_harness.model import ModelRuntime
+from nova_harness.package import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader, ResourceLoader
 from nova_harness.types.extensions import ExtensionFlag, LoadedExtensionsResult
 from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.types.resources.tools import ToolContext
 from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
 from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
-from nova_harness.core.utils.timings import time
-from nova_harness.package import PackageManager
+from nova_protocol.signal import AbortController
 
 __all__ = ["AgentSessionServices"]
 

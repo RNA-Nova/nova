@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.package.install.store import install_path_for_source
 from nova_harness.package.source.resolver import git_env
 from nova_harness.package.source.spec import (
@@ -55,6 +56,7 @@ def _git_run(
         cwd=str(cwd) if cwd else None,
         env=git_env(),
         timeout=timeout or GIT_REMOTE_TIMEOUT,
+        **hidden_console_kwargs(),
     )
 
 

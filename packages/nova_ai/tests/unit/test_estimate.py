@@ -1,6 +1,7 @@
 """estimate_context_tokens 测试（对齐 TS estimateContextTokens）。"""
 
-from nova_ai.types import (
+from nova_ai.utils.estimate import estimate_context_tokens
+from nova_protocol import (
     AssistantMessage,
     Context,
     KnownApi,
@@ -13,7 +14,6 @@ from nova_ai.types import (
     Usage,
     UserMessage,
 )
-from nova_ai.utils.estimate import estimate_context_tokens
 
 
 def _model() -> Model:

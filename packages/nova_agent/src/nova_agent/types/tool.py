@@ -5,8 +5,13 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Generic, List, Optional, TypeVar, Union
 
-from nova_ai import AbortSignal, ImageContent, TextContent, Tool
-from nova_ai.types.base_model import NovaBaseModel
+from nova_protocol import (
+    AbortSignal,
+    ImageContent,
+    NovaBaseModel,
+    TextContent,
+    Tool,
+)
 
 from .base import ToolExecutionMode
 
@@ -43,10 +48,11 @@ AgentToolUpdateCallback = Callable[[AgentToolResult[Any]], None]
 """Callback for streaming tool execution updates."""
 
 
-class AgentTool(Tool[TParameters], Generic[TParameters, TDetails], ABC):
+class AgentTool(Tool, Generic[TParameters, TDetails], ABC):
     """
     Extends Tool with an execute method and a human‑readable label.
-    TParameters: schema type (should match Tool's parameter schema)
+    TParameters: 参数类型（与工具包侧 params_model 对应；线上载体
+    ``Tool.parameters`` 恒为 JSON Schema dict）
     TDetails: type of the details returned in AgentToolResult
     """
 

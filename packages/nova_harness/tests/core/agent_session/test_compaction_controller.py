@@ -12,12 +12,16 @@ from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nova_ai import AssistantMessage, Model, ModelCost, Usage
-
 from nova_harness.core.agent_session.controllers.compaction import CompactionController
 from nova_harness.core.agent_session.controllers.tree import TreeNavigator
 from nova_harness.sessions import SessionManager
 from nova_harness.types.compaction import CompactionSettings
+from nova_protocol import (
+    AssistantMessage,
+    Model,
+    ModelCost,
+    Usage,
+)
 
 
 def _model(context_window: int = 1000) -> Model:
@@ -158,10 +162,10 @@ async def test_will_retry_strips_length_tail_after_rebuild(tmp_path, monkeypatch
     回归：真实集成中 thinking 模型撞 max_tokens 的截断回复已随 message_end
     落盘，压缩重建把它还原成尾消息——守卫此前只剥 error 不剥 length。
     """
-    from nova_ai import UserMessage
     from nova_harness.core.agent_session.controllers import (
         compaction as compaction_controller_module,
     )
+    from nova_protocol import UserMessage
 
     model = _model(context_window=1000)
     session = _session(tmp_path, model, [])
@@ -169,9 +173,7 @@ async def test_will_retry_strips_length_tail_after_rebuild(tmp_path, monkeypatch
     # 早期消息要有足够体量，否则全部落进 keep_recent 窗口、无内容可压缩
     sm.append_message(UserMessage(role="user", content="u1 " + "甲" * 300, timestamp=1))
     sm.append_message(
-        _assistant(
-            "a1 " + "乙" * 300, usage=Usage(input=10, output=5), timestamp=2
-        )
+        _assistant("a1 " + "乙" * 300, usage=Usage(input=10, output=5), timestamp=2)
     )
     user2 = sm.append_message(UserMessage(role="user", content="u2", timestamp=3))
     sm.append_message(
@@ -237,7 +239,7 @@ async def test_zero_usage_falls_back_to_estimation(tmp_path):
 async def test_tree_navigate_without_summary_clears_abort_controller(tmp_path):
     """不做摘要的树导航后，branch summary abort controller 必须清理
     （否则 is_compacting 永久为 True）。"""
-    from nova_ai import UserMessage
+    from nova_protocol import UserMessage
 
     session = _session(tmp_path, _model(), [])
     first = session.session_manager.append_message(
@@ -263,11 +265,10 @@ async def test_tree_navigate_without_summary_clears_abort_controller(tmp_path):
 async def test_summarization_auth_returns_headers_filtered_and_env(tmp_path):
     """有 auth 时返回 (api_key, headers, env)，headers 中 None 值被过滤
     （None 表示抑制同名默认头，对齐 TS withoutDeletedHeaders）。"""
-    from nova_ai import AuthResult
-
     from nova_harness.core.agent_session.controllers.compaction import (
         get_summarization_request_auth,
     )
+    from nova_protocol import AuthResult
 
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(
@@ -363,12 +364,11 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
     provider headers 与 env（对齐 TS：摘要请求保持 SDK 请求行为一致）。"""
     from types import SimpleNamespace
 
-    from nova_ai import AuthResult
-
     from nova_harness.types.compaction import (
         CompactionPreparation,
         CompactionResult,
     )
+    from nova_protocol import AuthResult
 
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(

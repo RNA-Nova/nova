@@ -17,8 +17,8 @@ from nova_agent.types.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from nova_ai.types.content import ImageContent, TextContent, ThinkingContent, ToolCall
-from nova_ai.types.messages import AssistantMessage, ToolResultMessage, UserMessage
+from nova_protocol.content import ImageContent, TextContent, ThinkingContent, ToolCall
+from nova_protocol.messages import AssistantMessage, ToolResultMessage, UserMessage
 
 
 def on_print(event: AgentEvent, file: TextIO = sys.stdout) -> None:

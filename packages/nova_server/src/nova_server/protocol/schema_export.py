@@ -45,6 +45,7 @@ from typing import (
 )
 
 from nova_harness.events.unions import AgentSessionEvent
+from nova_harness.types.session.entries import SessionEntry, SessionHeader
 from nova_server.types.items import (
     CustomItem,
     FrameworkItem,
@@ -56,7 +57,6 @@ from nova_server.types.notifications import (
     ItemDeltaNotification,
     ItemStartedNotification,
 )
-from nova_harness.types.session.entries import SessionEntry, SessionHeader
 
 # 契约版本（major/minor 语义）：
 # - MAJOR：事件词汇/方法形状发生**不兼容**变更（删字段/改语义）时递增——
@@ -182,7 +182,7 @@ class _Walker:
     def __init__(self) -> None:
         self.reg = _Registry()
         from nova_agent import AgentMessage
-        from nova_ai import Message
+        from nova_protocol import Message
 
         # 具名 Union 别名：字段引用处发射别名而非内联（TS 消费方需要
         # ``AgentMessage`` 这样的具名类型做参数标注）
@@ -206,7 +206,10 @@ class _Walker:
         # WireItem 校验联合（SyncSessionResult.items）的字段，线上实际是
         # NovaWireItem 联合（包级子类经 SerializeAsAny 落线）——契约按联合
         # 表达，而非按基类的骨架形状收窄
-        if annotation is NovaItem or annotation == Union[FrameworkItem, CustomItem, NovaItem]:
+        if (
+            annotation is NovaItem
+            or annotation == Union[FrameworkItem, CustomItem, NovaItem]
+        ):
             member_refs: List[Dict[str, Any]] = []
             for member in get_args(NovaWireItem):
                 member = _unwrap(member)
@@ -577,15 +580,11 @@ def main() -> int:
     root = _default_repo_root()
     parser.add_argument(
         "--schema",
-        default=str(
-            root / "packages/nova_client/protocol/nova-wire.schema.json"
-        ),
+        default=str(root / "packages/nova_client/protocol/nova-wire.schema.json"),
     )
     parser.add_argument(
         "--ts",
-        default=str(
-            root / "packages/nova_client/src/protocol/nova-wire.gen.ts"
-        ),
+        default=str(root / "packages/nova_client/src/protocol/nova-wire.gen.ts"),
     )
     parser.add_argument(
         "--check",

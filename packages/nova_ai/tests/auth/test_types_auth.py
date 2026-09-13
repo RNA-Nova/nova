@@ -1,9 +1,7 @@
 """types/auth 中 Credential 持久化 schema 的测试。"""
 
 import pytest
-from pydantic import ValidationError
-
-from nova_ai.types.auth import (
+from nova_protocol import (
     ApiKeyAuth,
     ApiKeyCredential,
     AuthCheck,
@@ -12,6 +10,7 @@ from nova_ai.types.auth import (
     OAuthCredential,
     ProviderAuth,
 )
+from pydantic import ValidationError
 
 
 class TestCredentials:
@@ -57,7 +56,7 @@ class TestCredentials:
 
 class TestAuthContainers:
     def test_dataclass_containers(self):
-        result = AuthResult(auth={"apiKey": "k"}, source="test")
+        result = AuthResult(auth={"api_key": "k"}, source="test")
         assert result.env is None
         check = AuthCheck(type="api_key", source="s")
         assert check.type == "api_key"

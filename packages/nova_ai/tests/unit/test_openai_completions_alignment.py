@@ -8,7 +8,6 @@ baseten chat_template_args、streamSimple thinking_budgets 透传。
 import json
 
 import pytest
-
 from nova_ai.api_impls._shared.simple_options import (
     clamp_thinking_budget_to_answer_room,
     thinking_budget_for_level,
@@ -22,18 +21,19 @@ from nova_ai.api_impls.openai_completions import (
     parse_legacy_encrypted_reasoning_detail,
     parse_openai_reasoning_details,
 )
-from nova_ai.types import (
+from nova_ai.stream_options import ThinkingBudgets
+from nova_protocol import (
+    AssistantMessage,
     Context,
     KnownApi,
     KnownProvider,
     Model,
     ModelCost,
+    OpenAICompletionsCompat,
     ThinkingContent,
     ToolCall,
     UserMessage,
 )
-from nova_ai.types.compat import OpenAICompletionsCompat
-from nova_ai.types.messages import AssistantMessage
 
 
 def _model(**overrides) -> Model:
@@ -144,7 +144,7 @@ class TestReasoningDetails:
             ),
         )
         # 直接驱动 convert_messages（经 build_params 产物检查）
-        from nova_ai.types.messages import AssistantMessage
+        from nova_protocol import AssistantMessage
 
         same_model_msg = AssistantMessage(
             role="assistant",
@@ -240,7 +240,7 @@ def test_tool_choice_omitted_without_tools():
 
 def test_cache_control_covers_tool_result_message():
     """openrouter+anthropic 模型：最后一条消息是 tool 结果时 marker 落在它上面。"""
-    from nova_ai.types import ToolResultMessage
+    from nova_protocol import ToolResultMessage
 
     model = _model(
         provider="openrouter",
@@ -285,7 +285,7 @@ class TestThinkingBudget:
     def test_budget_table_and_custom_override(self):
         assert thinking_budget_for_level("low") == 2048
         assert thinking_budget_for_level("xhigh") == 16384  # clamp 到 high
-        custom = {"low": 100}
+        custom = ThinkingBudgets(low=100)
         assert thinking_budget_for_level("low", custom) == 100
 
     def test_answer_room_clamp(self):
@@ -331,7 +331,7 @@ class TestThinkingBudget:
         stream_module.stream = _fake_stream
         try:
             from nova_ai.api_impls.openai_completions import stream_simple
-            from nova_ai.types import SimpleStreamOptions, ThinkingBudgets
+            from nova_ai.stream_options import SimpleStreamOptions, ThinkingBudgets
 
             budgets = ThinkingBudgets(low=999)
             stream_simple(
@@ -405,7 +405,7 @@ def test_build_params_with_generic_base_options():
     （reasoning_effort 等）在基类上不存在，必须 getattr 防御。
     集成测试曾抓到此处 AttributeError。
     """
-    from nova_ai.types import SimpleStreamOptions, StreamOptions
+    from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 
     model = _model(reasoning=True)
     ctx = _ctx(UserMessage(content="hi"))

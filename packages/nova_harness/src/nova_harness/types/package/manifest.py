@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional
 
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field
-
 from nova_harness.types.package.enums import SourceScope
 from nova_harness.types.package.resolution import PackageFilter
+from nova_protocol.base_model import NovaBaseModel
+from pydantic import Field
 
 
 @dataclass

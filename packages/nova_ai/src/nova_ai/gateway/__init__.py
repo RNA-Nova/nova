@@ -23,7 +23,6 @@ from .provider import (
 from .store import (
     InMemoryModelsStore,
     ModelsStore,
-    ModelsStoreEntry,
     ProviderModelsStore,
 )
 from .streams import create_setup_error_message, lazy_stream
@@ -34,7 +33,6 @@ __all__ = [
     "Models",
     "ModelsPublication",
     "ModelsStore",
-    "ModelsStoreEntry",
     "Provider",
     "ProviderModelsStore",
     "ProviderStreams",

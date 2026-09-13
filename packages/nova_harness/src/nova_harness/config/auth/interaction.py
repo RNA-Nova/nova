@@ -4,9 +4,11 @@
 对齐 TS ``interactive-mode.ts`` 的 ``showAuthPrompt`` / ``notifyAuthDialog``：
 
 - prompt ``select`` → 选择器（label 展示，返回 option id）
-- prompt 其他类型（secret/text/manual_code）→ 文本输入框
+- prompt 其他类型（secret/text/manual_code）→ 文本输入框（``secret`` 带遮蔽标记）
 - 取消、前端不支持、或宿主 task 取消（cancelRequest）→ 抛 ``LoginCancelledError``
 - notify ``auth_url`` / ``device_code`` / ``info`` / ``progress`` → 通知与状态
+- ``acquire_authorization_code`` → 委托 ``acquisition`` 模块装配收货通道
+  （宿主监听 / 本地监听 / 粘贴框竞速——流程层不感知拓扑）
 """
 
 from __future__ import annotations
@@ -14,17 +16,16 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional
 
-from nova_ai.signal import AbortSignal
-from nova_ai.types.auth import AuthEvent, AuthInteraction, AuthPrompt
-
+from nova_harness.config.auth.acquisition import acquire_authorization_code
 from nova_harness.types.ui.context import UIContext
-
-
-class LoginCancelledError(Exception):
-    """登录流程被用户取消或被 signal 中止。"""
-
-    def __init__(self) -> None:
-        super().__init__("Login cancelled")
+from nova_protocol.auth import (
+    AuthEvent,
+    AuthInteraction,
+    AuthorizationRequest,
+    AuthPrompt,
+    LoginCancelledError,
+)
+from nova_protocol.signal import AbortSignal
 
 
 class UIAuthInteraction(AuthInteraction):
@@ -59,7 +60,7 @@ class UIAuthInteraction(AuthInteraction):
             pass
 
     async def prompt(self, prompt: AuthPrompt) -> str:
-        signal = prompt.signal or self.signal
+        signal = self.signal
         if signal is not None and signal.aborted:
             raise LoginCancelledError()
 
@@ -90,7 +91,9 @@ class UIAuthInteraction(AuthInteraction):
                 url=event.url,
             )
         elif event.type == "device_code":
-            self._open_browser(event.verification_uri_complete or event.verification_uri)
+            self._open_browser(
+                event.verification_uri_complete or event.verification_uri
+            )
             lines = []
             if event.verification_uri:
                 lines.append(f"Open: {event.verification_uri}")
@@ -155,10 +158,19 @@ class UIAuthInteraction(AuthInteraction):
         params: Dict[str, Any] = {"title": prompt.message}
         if prompt.placeholder is not None:
             params["placeholder"] = prompt.placeholder
+        if prompt.type == "secret":
+            # 密钥类输入的类型保真——前端据此遮蔽回显（缺失按明文旧行为渲染）
+            params["secret"] = True
         resp = await self.ui.request("input", params)
         if resp.cancelled or not isinstance(resp.value, str):
             return None
         return resp.value
+
+    async def acquire_authorization_code(self, request: AuthorizationRequest) -> str:
+        """收货通道装配委托给 acquisition 模块（竞速/取消/降级在其内）。"""
+        return await acquire_authorization_code(
+            self.ui, self.signal, request, prompt_fn=self.prompt
+        )
 
 
 __all__ = ["LoginCancelledError", "UIAuthInteraction"]

@@ -23,6 +23,7 @@ nova-ai = { path = "packages/nova_ai", editable = true }
 nova-agent = { path = "packages/nova_agent", editable = true }
 nova-harness = { path = "packages/nova_harness", editable = true }
 nova-server = { path = "packages/nova_server", editable = true }
+nova-protocol = { path = "packages/nova_protocol", editable = true }
 nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
 nova-executor-client = { path = "packages/nova-executor-client", editable = true }
 websockets = ">=12.0"
@@ -60,8 +61,9 @@ test-ai = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_ai" 
 test-agent = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_agent" }
 test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_harness" }
 test-server = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_server" }
+test-protocol = { cmd = "pytest tests", cwd = "packages/nova_protocol" }
 test-coding = { cmd = "pytest tests", cwd = "bundles/nova_coding_agent/backend" }
-test-all = { cmd = "pytest tests -m 'not integration'", depends-on = ["test-ai", "test-agent", "test-harness", "test-server", "test-coding"] }
+test-all = { cmd = "pytest tests -m 'not integration'", depends-on = ["test-ai", "test-agent", "test-harness", "test-server", "test-protocol", "test-coding"] }
 generate-models = { cmd = "python scripts/generate_models.py", cwd = "packages/nova_ai" }
 check-model-data = { cmd = "python scripts/check_model_data.py", cwd = "packages/nova_ai" }
 format = "black packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend && isort packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src bundles/nova_coding_agent/backend"

@@ -7,26 +7,13 @@ Compaction 与分支摘要模块全面测试。
 
 from typing import Literal, Optional
 
+import nova_harness.core.domains.compaction.compaction as compaction_module
 import pytest
 from nova_agent import CustomAgentMessage
 from nova_ai import (
-    AssistantMessage,
     AssistantMessageEventStream,
-    Context,
-    DoneEvent,
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
     SimpleStreamOptions,
-    TextContent,
-    ToolCall,
-    ToolResultMessage,
-    Usage,
-    UserMessage,
 )
-
-import nova_harness.core.domains.compaction.compaction as compaction_module
 from nova_harness.core.domains.compaction.branch_summarization import (
     collect_entries_for_branch_summary,
     prepare_branch_entries,
@@ -52,6 +39,20 @@ from nova_harness.core.domains.compaction.utils import (
 )
 from nova_harness.sessions import SessionManager
 from nova_harness.types.compaction.compaction import CompactionSettings
+from nova_protocol import (
+    AssistantMessage,
+    Context,
+    DoneEvent,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+)
 
 
 def _user(text: str) -> UserMessage:

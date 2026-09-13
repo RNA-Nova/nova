@@ -3,7 +3,7 @@
 包含模型定义、模型成本、用量统计
 """
 
-from typing import Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import Field, model_validator
 
@@ -45,7 +45,14 @@ class ModelCost(ModelCostRates):
 
 
 class Model(NovaBaseModel):
-    """模型定义"""
+    """模型定义。
+
+    - ``headers``：静态默认请求头；``None`` = 无；
+    - ``compat``：显式兼容性配置（逐字段覆盖自动检测）；``None`` = 全自动检测；
+    - ``sampling_params``：模型级默认采样参数（对齐 pi ``Model.samplingParams``），
+      合并进请求体顶层，请求级 ``StreamOptions.sampling_params`` 按键覆盖；
+      ``None`` = 无默认。
+    """
 
     id: str
     name: str
@@ -62,6 +69,7 @@ class Model(NovaBaseModel):
     compat: Optional[
         Union[OpenAICompletionsCompat, OpenAIResponsesCompat, AnthropicMessagesCompat]
     ] = None
+    sampling_params: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -78,7 +86,12 @@ class Model(NovaBaseModel):
             if isinstance(compat, dict):
                 api = data.get("api")
                 api_value = getattr(api, "value", api)
-                compat_cls = _COMPAT_CLASS_BY_API.get(api_value)
+                # 非字符串的 api（异常输入）不做判别——交 pydantic 默认处理
+                compat_cls = (
+                    _COMPAT_CLASS_BY_API.get(api_value)
+                    if isinstance(api_value, str)
+                    else None
+                )
                 if compat_cls is not None:
                     data = dict(data)
                     data["compat"] = compat_cls.model_validate(compat)
@@ -108,15 +121,40 @@ class Cost(NovaBaseModel):
 
 
 class Usage(NovaBaseModel):
-    """令牌使用统计"""
+    """令牌使用统计。
+
+    - ``cache_write_1h``：Anthropic 1h 缓存写入量（``cache_write`` 的子集）；
+      ``None`` = provider 未区分；
+    - ``reasoning``：reasoning/thinking tokens（``output`` 的子集）；
+      ``None`` = provider 未报告。
+    """
 
     input: int = 0
     output: int = 0
     cache_read: int = 0
     cache_write: int = 0
-    # Anthropic 1h 缓存写入量（cache_write 的子集）
     cache_write_1h: Optional[int] = None
-    # reasoning/thinking tokens（output 的子集，provider 报告时填充）
     reasoning: Optional[int] = None
     total_tokens: int = 0
     cost: Cost = Field(default_factory=Cost)
+
+
+class ModelsStoreEntry(NovaBaseModel):
+    """单个 provider 的动态模型目录条目（``models-store.json`` 的落盘 schema）。
+
+    跨组件序列化词汇：schema 归枢纽，存储实现归消费方
+    （nova_ai 内存实现 / nova_harness 文件实现）。
+
+    - ``checked_at``：上次成功校验的 Unix 毫秒时间戳；``None`` = 未知
+      （新鲜度窗口不生效，下次刷新走网络）；
+    - ``last_modified``：远程目录 Last-Modified 的 Unix 毫秒时间戳，
+      与基线 ``generatedAt`` 做新鲜度竞速——早于基线的 overlay 被忽略；
+      ``None`` = 无条件请求锚点；
+    - ``etag``：远程目录 ETag 原样存储（含引号），条件请求回传
+      If-None-Match；``None`` = 无。
+    """
+
+    models: List[Model]
+    checked_at: Optional[int] = None
+    last_modified: Optional[int] = None
+    etag: Optional[str] = None

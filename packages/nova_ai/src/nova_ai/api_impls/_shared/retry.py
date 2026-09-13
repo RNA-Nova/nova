@@ -13,9 +13,9 @@ import asyncio
 import random
 import time
 from email.utils import parsedate_to_datetime
-from typing import Any, Awaitable, Callable, Optional, TypeVar, TypedDict
+from typing import Any, Awaitable, Callable, Optional, TypedDict, TypeVar
 
-from ...signal import AbortedError, AbortSignal
+from nova_protocol import AbortedError, AbortSignal
 
 T = TypeVar("T")
 

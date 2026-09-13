@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
 
-from nova_ai import AbortController
-
 from nova_harness.core.agent_session.controllers.compaction import (
     get_summarization_request_auth,
 )
@@ -16,6 +14,7 @@ from nova_harness.events.constants import SESSION_BEFORE_TREE
 from nova_harness.types.compaction.branch_summary import GenerateBranchSummaryOptions
 from nova_harness.types.protocols import AgentSessionProtocol
 from nova_harness.types.session.options import NavigateOptions
+from nova_protocol import AbortController
 
 
 class TreeNavigator:

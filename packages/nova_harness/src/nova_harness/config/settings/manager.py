@@ -15,13 +15,10 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from nova_ai import ModelThinkingLevel
+from nova_protocol import ModelThinkingLevel
 
 from nova_harness.config.defaults import get_agent_dir, get_project_base_dir
-from nova_harness.config.settings.storage import (
-    FileSettingsStorage,
-    SettingsStorage,
-)
+from nova_harness.config.settings.storage import FileSettingsStorage, SettingsStorage
 from nova_harness.config.settings.utils import deep_merge_settings
 from nova_harness.core.utils.http_idle_timeout import DEFAULT_HTTP_IDLE_TIMEOUT_MS
 from nova_harness.types.compaction.compaction import CompactionSettings

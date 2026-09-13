@@ -18,31 +18,37 @@ import asyncio
 import inspect
 import json
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
 import openai
-
-from ...signal import AbortedError
-from ...streaming import AssistantMessageEventStream
-from ...types.content import TextContent, ThinkingContent, ToolCall
-from ...types.enums import ModelThinkingLevel, StopReason
-from ...types.events import (
+from nova_protocol import (
+    AbortedError,
+    AssistantMessage,
+    Context,
+    Cost,
     DoneEvent,
     ErrorEvent,
+    Model,
+    ModelThinkingLevel,
     StartEvent,
+    StopReason,
+    TextContent,
     TextDeltaEvent,
     TextEndEvent,
     TextStartEvent,
+    ThinkingContent,
     ThinkingDeltaEvent,
     ThinkingEndEvent,
     ThinkingStartEvent,
+    ToolCall,
     ToolCallDeltaEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
+    Usage,
 )
-from ...types.messages import AssistantMessage, Context
-from ...types.model import Cost, Model, Usage
-from ...types.stream_options import ProviderResponse, SimpleStreamOptions
+
+from ...stream_options import ProviderResponse, SimpleStreamOptions
+from ...streaming import AssistantMessageEventStream
 from ...utils import calculate_cost
 from ...utils.error_body import format_provider_error, normalize_provider_error
 from ...utils.json_parser import StreamingJsonParser, parse_streaming_json
@@ -59,6 +65,9 @@ from .reasoning import (
     is_openai_reasoning_detail,
     parse_openai_reasoning_details,
 )
+
+# 流式期内的内容块（文档化的可变累积器——数据建模标准规则 1 例外）
+ContentBlock = Union[TextContent, ThinkingContent, ToolCall]
 
 
 def parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
@@ -157,7 +166,7 @@ def stream(
             stop_reason=StopReason.PENDING,
             timestamp=int(time.time() * 1000),
         )
-        abort_watcher: Optional[asyncio.Task] = None
+        abort_watcher: Optional[asyncio.Task[None]] = None
         # 提前绑定，保证请求阶段的早期异常也能走 finish_all_blocks 收尾
         blocks = output.content
         text_block: Optional[TextContent] = None
@@ -169,7 +178,7 @@ def stream(
         # 节流后全程修复工作量 O(n)（见 StreamingJsonParser）
         tool_call_parsers: Dict[int, StreamingJsonParser] = {}
 
-        def get_content_index(block) -> int:
+        def get_content_index(block: ContentBlock) -> int:
             # 按引用相等查找（对齐 JS indexOf）：pydantic 的 __eq__ 是按值比较，
             # 值相等的不同块对象会拿错 index，破坏 start/end 配对
             for i, b in enumerate(blocks):
@@ -180,7 +189,7 @@ def stream(
         # 已发 end 事件的块，保证任何终止路径下 end 不重不漏
         finished_content_indexes: Set[int] = set()
 
-        def finish_block(block) -> None:
+        def finish_block(block: Optional[ContentBlock]) -> None:
             if block is None:
                 return
             content_index = get_content_index(block)
@@ -257,7 +266,7 @@ def stream(
                 )
             return thinking_block
 
-        def ensure_tool_call_block(tool_call_delta) -> ToolCall:
+        def ensure_tool_call_block(tool_call_delta: Any) -> ToolCall:
             stream_index = getattr(tool_call_delta, "index", None)
             if isinstance(stream_index, int):
                 block = tool_call_blocks_by_index.get(stream_index)
@@ -299,7 +308,7 @@ def stream(
 
             return block
 
-        client: Any = (
+        client: Optional[openai.AsyncOpenAI] = (
             None  # finally 里显式关闭（否则进程收尾时连接池的异步生成器拆不干净）
         )
         try:
@@ -369,12 +378,11 @@ def stream(
 
             # TS 的 OpenAI SDK 支持 fetch 级 signal abort；Python SDK 不支持，
             # 用看门狗任务在 abort 时主动关闭流，达到同等的即时中断效果。
-            signal_wait = getattr(signal, "wait", None) if signal is not None else None
-            if callable(signal_wait):
+            if signal is not None:
 
                 async def _watch_abort() -> None:
                     try:
-                        await signal_wait()
+                        await signal.wait()
                         await openai_stream.close()
                     except Exception:
                         pass
@@ -533,12 +541,7 @@ def stream(
 
             finish_all_blocks()
 
-            if (
-                options
-                and options.signal
-                and hasattr(options.signal, "aborted")
-                and options.signal.aborted
-            ):
+            if options and options.signal and options.signal.aborted:
                 raise AbortedError("Request was aborted")
 
             if output.stop_reason == StopReason.ABORTED:
@@ -575,7 +578,11 @@ def stream(
 
             raw_metadata = None
             try:
-                raw_metadata = e.error.metadata.raw
+                # 探测部分 provider 错误对象的 error.metadata.raw 嵌套形状
+                # （形状不定——getattr 链 + 下方 isinstance 双保险）
+                raw_metadata = getattr(
+                    getattr(getattr(e, "error", None), "metadata", None), "raw", None
+                )
             except Exception:
                 pass
             if (
@@ -584,7 +591,7 @@ def stream(
             ):
                 output.error_message += f"\n{raw_metadata}"
 
-            event_stream.push(ErrorEvent(reason=output.stop_reason, error=output))
+            event_stream.push(ErrorEvent(reason=output.stop_reason.value, error=output))
             event_stream.end()
         finally:
             if abort_watcher is not None:
@@ -594,7 +601,9 @@ def stream(
             # "generator didn't stop after athrow()" 噪音）
             if client is not None:
                 try:
-                    await client.aclose()
+                    # openai 2.x 异步客户端的关闭方法是 close()（协程）；
+                    # 1.x 时代的 aclose() 已不存在
+                    await client.close()
                 except Exception:
                     pass
 

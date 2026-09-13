@@ -2,9 +2,6 @@
 
 from types import SimpleNamespace
 
-from nova_ai import AssistantMessage
-from nova_ai.types.model import Cost, Usage
-
 from nova_harness.core.agent_session.controllers.stats import StatsCollector
 from nova_harness.sessions.cache_stats import (
     NOISE_FLOOR_TOKENS,
@@ -16,6 +13,8 @@ from nova_harness.types.session.entries import (
     CompactionEntry,
     SessionMessageEntry,
 )
+from nova_protocol import AssistantMessage
+from nova_protocol.model import Cost, Usage
 
 T0 = 1_700_000_000_000
 

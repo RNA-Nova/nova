@@ -1,7 +1,7 @@
 """transform_messages 测试（对齐 TS transformMessages）。"""
 
 from nova_ai.api_impls._shared.transform_messages import transform_messages
-from nova_ai.types import (
+from nova_protocol import (
     AssistantMessage,
     ImageContent,
     KnownApi,
@@ -306,7 +306,7 @@ class TestThinkingBlocks:
 
 class TestErrorMessages:
     def test_error_assistant_removed(self):
-        from nova_ai.types import StopReason
+        from nova_protocol import StopReason
 
         assistant = AssistantMessage(
             content=[TextContent(text="partial")],
@@ -318,7 +318,7 @@ class TestErrorMessages:
         assert len(result) == 0
 
     def test_aborted_assistant_removed(self):
-        from nova_ai.types import StopReason
+        from nova_protocol import StopReason
 
         assistant = AssistantMessage(
             content=[TextContent(text="partial")],

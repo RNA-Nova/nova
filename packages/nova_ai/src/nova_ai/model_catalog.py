@@ -12,13 +12,14 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .types.enums import KnownApi
-from .types.model import Model
+from nova_protocol import KnownApi, Model
 
 __all__ = ["flatten_model_catalog"]
 
 
-def flatten_model_catalog(provider_id: str, groups: Dict[str, Any]) -> Dict[str, Model]:
+def flatten_model_catalog(
+    provider_id: str, groups: Dict[str, Dict[str, Dict[str, Any]]]
+) -> Dict[str, Model]:
     """把 ``{api: {模型 id: 字段}}`` 拍平为 ``{模型 id: Model}``。
 
     - ``api`` 以分组键为准（字段里若带 ``api``，两者必须一致）；

@@ -7,13 +7,17 @@
 ``nova_ai/tests``。
 """
 
-from nova_ai import Model, ModelCost, ModelThinkingLevel, ThinkingLevel
-
 from nova_harness.core.utils.model_utils import (
     clamp_thinking_level,
     get_supported_thinking_levels,
     models_are_equal,
     to_thinking_level,
+)
+from nova_protocol import (
+    Model,
+    ModelCost,
+    ModelThinkingLevel,
+    ThinkingLevel,
 )
 
 

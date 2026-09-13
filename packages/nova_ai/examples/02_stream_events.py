@@ -12,10 +12,10 @@
 
 import asyncio
 
-from nova_ai import (
+from nova_ai import EventStream
+from nova_protocol import (
     AssistantMessage,
     DoneEvent,
-    EventStream,
     Model,
     StartEvent,
     TextContent,
@@ -66,7 +66,7 @@ def build_demo_stream(model: Model) -> EventStream:
 
 
 async def main():
-    from nova_ai import KnownApi, KnownProvider, ModelCost
+    from nova_protocol import KnownApi, KnownProvider, ModelCost
 
     model = Model(
         id="demo",

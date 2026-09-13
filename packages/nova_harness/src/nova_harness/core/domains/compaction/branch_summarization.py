@@ -9,8 +9,7 @@ import time
 from typing import List, Optional
 
 from nova_agent import AgentMessage
-from nova_ai import Context, SimpleStreamOptions
-
+from nova_ai import SimpleStreamOptions
 from nova_harness.core.domains.compaction.compaction import (
     complete_summarization,
     estimate_tokens,
@@ -33,6 +32,7 @@ from nova_harness.types.compaction.branch_summary import (
     GenerateBranchSummaryOptions,
 )
 from nova_harness.types.session.entries import SessionEntry
+from nova_protocol import Context
 
 # ============================================================================
 # Entry Collection

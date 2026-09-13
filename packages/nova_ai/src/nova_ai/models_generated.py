@@ -8,11 +8,11 @@ from nova_ai.providers.moonshotai.models import MOONSHOTAI_MODELS
 from nova_ai.providers.moonshotai_cn.models import MOONSHOTAI_CN_MODELS
 from nova_ai.providers.volcengine.models import VOLCENGINE_MODELS
 
-PROVIDER_IDS = ['kimi-coding', 'moonshotai', 'moonshotai-cn', 'volcengine']
+PROVIDER_IDS = ["kimi-coding", "moonshotai", "moonshotai-cn", "volcengine"]
 
 GENERATED_PROVIDER_MODELS = {
     "kimi-coding": KIMI_CODING_MODELS,
     "moonshotai": MOONSHOTAI_MODELS,
     "moonshotai-cn": MOONSHOTAI_CN_MODELS,
-    "volcengine": VOLCENGINE_MODELS
+    "volcengine": VOLCENGINE_MODELS,
 }

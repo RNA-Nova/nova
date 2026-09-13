@@ -19,19 +19,9 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from nova_agent import AgentToolResult
-from nova_ai import ToolCall
-
 from nova_harness.core.utils.messages import (
     create_custom_message,
     extract_text_from_content,
-)
-from nova_server.types.items import (
-    BranchSummaryItem,
-    CompactionItem,
-    CustomItem,
-    ItemStatus,
-    NovaItem,
-    ToolCallItem,
 )
 from nova_harness.types.session.entries import (
     BranchSummaryEntry,
@@ -40,6 +30,15 @@ from nova_harness.types.session.entries import (
     CustomMessageEntry,
     SessionEntry,
     SessionMessageEntry,
+)
+from nova_protocol import ToolCall
+from nova_server.types.items import (
+    BranchSummaryItem,
+    CompactionItem,
+    CustomItem,
+    ItemStatus,
+    NovaItem,
+    ToolCallItem,
 )
 
 from .mapping import (

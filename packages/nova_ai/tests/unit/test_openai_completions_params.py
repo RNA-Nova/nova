@@ -9,7 +9,7 @@ from nova_ai.api_impls.openai_completions import (
     detect_compat,
     get_compat,
 )
-from nova_ai.types import (
+from nova_protocol import (
     AssistantMessage,
     Context,
     KnownApi,
@@ -221,7 +221,7 @@ class TestGetCompat:
 
     def test_openai_responses_compat_ignored(self):
         """OpenAIResponsesCompat 不适用于 completions API"""
-        from nova_ai.types import OpenAIResponsesCompat
+        from nova_protocol import OpenAIResponsesCompat
 
         model = Model(
             id="test",

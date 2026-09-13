@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict
 
 from nova_ai.model_catalog import flatten_model_catalog
-from nova_ai.types.model import Model
+from nova_protocol import Model
 
 VOLCENGINE_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/"
 

@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-from nova_ai.types.base_model import NovaBaseModel
-
 from nova_harness.types.extensions import SourceInfo
 from nova_harness.types.package import ResolvedResource
+from nova_protocol.base_model import NovaBaseModel
 
 
 class PromptTemplate(NovaBaseModel):

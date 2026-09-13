@@ -19,18 +19,20 @@ import os
 import platform
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import httpx
-
-from ...signal import AbortSignal
-from ...types.auth import (
+from nova_protocol import (
+    AbortSignal,
     AuthEvent,
     AuthInteraction,
     ModelAuth,
     OAuthAuth,
     OAuthCredential,
 )
+
 from .device_code import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
@@ -49,6 +51,24 @@ _REQUEST_TIMEOUT_SECONDS = 30
 # 进程内稳定的 device id。持久化到磁盘需要上层传入 homeDir，目前先用环境变量 +
 # 模块级缓存兜底；跨进程重启会重新生成，不影响功能正确性，仅影响 Kimi 侧设备归因。
 _DEVICE_ID: Optional[str] = None
+
+
+def _trusted_http_url(value: Any) -> Optional[str]:
+    """服务器返回 URL 的协议白名单校验（仅 http/https）。
+
+    这些 URL 的下游是 ``host:openUrl``——会在用户本机直接打开；
+    服务器（或中间人）返回 file:// / 自定义 scheme 会被本机原样执行，
+    OAuth 响应面按半不可信输入对待（数据建模标准规则 3）。
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in ("https", "http"):
+            return None
+        return value
+    except Exception:
+        return None
 
 
 def _get_oauth_host() -> str:
@@ -89,8 +109,8 @@ def _ascii_header(value: str, fallback: str = "unknown") -> str:
     return cleaned or fallback
 
 
-def _token_from_response(data: Dict[str, Any]) -> Dict[str, Any]:
-    """从 token endpoint 响应解析 token 字段。"""
+def _token_from_response(data: Dict[str, Any]) -> OAuthCredential:
+    """从 token endpoint 响应解析并构造 OAuth credential（边界校验后直达正典形状）。"""
     access_token = data.get("access_token")
     refresh_token = data.get("refresh_token")
     expires_in = data.get("expires_in")
@@ -113,43 +133,81 @@ def _token_from_response(data: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError(f"OAuth response invalid expires_in: {expires_in}")
 
     expires_at_ms = int(time.time() * 1000) + int(expires_in_seconds) * 1000
-    return {
-        "access": access_token,
-        "refresh": refresh_token,
-        "expires": expires_at_ms,
-    }
+    return OAuthCredential(
+        access=access_token,
+        refresh=refresh_token,
+        expires=expires_at_ms,
+    )
 
 
 async def _post_form(
     url: str,
     params: Dict[str, str],
     headers: Optional[Dict[str, str]] = None,
+    signal: Optional[AbortSignal] = None,
 ) -> httpx.Response:
-    """向 Kimi OAuth endpoint 发送 form-encoded POST。"""
+    """向 Kimi OAuth endpoint 发送 form-encoded POST。
+
+    signal 取消复合进在飞请求（watchdog 模式）：举旗即刻打断，
+    不再等 httpx 超时兜底。
+    """
     merged_headers: Dict[str, str] = {"Accept": "application/json"}
     if headers:
         merged_headers.update(headers)
 
+    async def _do_post() -> httpx.Response:
+        try:
+            async with httpx.AsyncClient() as client:
+                return await client.post(
+                    url,
+                    data=params,
+                    headers=merged_headers,
+                    timeout=_REQUEST_TIMEOUT_SECONDS,
+                )
+        except httpx.TransportError as error:
+            raise RuntimeError(f"OAuth request to {url} failed: {error}") from error
+
+    post_task = asyncio.ensure_future(_do_post())
+    if signal is None:
+        return await post_task
+
+    watcher = asyncio.ensure_future(signal.wait())
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                data=params,
-                headers=merged_headers,
-                timeout=_REQUEST_TIMEOUT_SECONDS,
-            )
-    except httpx.TransportError as error:
-        raise RuntimeError(f"OAuth request to {url} failed: {error}") from error
-    return response
+        done, _pending = await asyncio.wait(
+            [post_task, watcher], return_when=asyncio.FIRST_COMPLETED
+        )
+        if watcher in done and post_task not in done:
+            post_task.cancel()
+            raise asyncio.CancelledError("Request aborted")
+        return post_task.result()
+    finally:
+        watcher.cancel()
+        if not post_task.done():
+            post_task.cancel()
 
 
-async def _request_device_authorization(oauth_host: str) -> Dict[str, Any]:
+@dataclass(frozen=True, kw_only=True)
+class _DeviceAuthorization:
+    """设备码授权响应的已校验形态（模块内值对象——规则 5）。"""
+
+    user_code: str
+    device_code: str
+    verification_uri: str
+    verification_uri_complete: str
+    expires_in: float
+    interval: float
+
+
+async def _request_device_authorization(
+    oauth_host: str, signal: Optional[AbortSignal] = None
+) -> _DeviceAuthorization:
     """请求设备码。"""
     url = f"{oauth_host}{_DEVICE_AUTH_PATH}"
     response = await _post_form(
         url,
         {"client_id": _CLIENT_ID},
         headers=_default_device_headers(),
+        signal=signal,
     )
 
     if response.status_code >= 400:
@@ -162,28 +220,46 @@ async def _request_device_authorization(oauth_host: str) -> Dict[str, Any]:
     user_code = data.get("user_code")
     device_code = data.get("device_code")
     verification_uri_complete = data.get("verification_uri_complete")
+    verification_uri = data.get("verification_uri")
     if (
         not isinstance(user_code, str)
         or not user_code
         or not isinstance(device_code, str)
         or not device_code
-        or not isinstance(verification_uri_complete, str)
-        or not verification_uri_complete
+        or _trusted_http_url(verification_uri_complete) is None
+        or (
+            verification_uri is not None and _trusted_http_url(verification_uri) is None
+        )
     ):
         raise RuntimeError(f"Invalid Kimi device authorization response: {data}")
 
-    return {
-        "userCode": user_code,
-        "deviceCode": device_code,
-        "verificationUri": data.get("verification_uri", ""),
-        "verificationUriComplete": verification_uri_complete,
-        "expiresIn": data.get("expires_in"),
-        "interval": data.get("interval", _DEFAULT_POLL_INTERVAL_SECONDS),
-    }
+    interval = data.get("interval")
+    if (
+        not isinstance(interval, (int, float))
+        or isinstance(interval, bool)
+        or interval <= 0
+    ):
+        interval = _DEFAULT_POLL_INTERVAL_SECONDS
+    expires_in = data.get("expires_in")
+    if (
+        not isinstance(expires_in, (int, float))
+        or isinstance(expires_in, bool)
+        or expires_in <= 0
+    ):
+        expires_in = _DEVICE_CODE_TIMEOUT_SECONDS
+
+    return _DeviceAuthorization(
+        user_code=user_code,
+        device_code=device_code,
+        verification_uri=verification_uri if isinstance(verification_uri, str) else "",
+        verification_uri_complete=verification_uri_complete,
+        expires_in=expires_in,
+        interval=interval,
+    )
 
 
 async def _poll_once(
-    oauth_host: str, device_code: str
+    oauth_host: str, device_code: str, signal: Optional[AbortSignal] = None
 ) -> DeviceCodePollResult[OAuthCredential]:
     """单次轮询 device token，转换为通用 DeviceCodePollResult。"""
     url = f"{oauth_host}{_TOKEN_PATH}"
@@ -195,19 +271,16 @@ async def _poll_once(
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         },
         headers=_default_device_headers(),
+        signal=signal,
     )
 
     if response.status_code == 200 and isinstance(
         response.json().get("access_token"), str
     ):
-        token = _token_from_response(response.json())
+        credential = _token_from_response(response.json())
         return DeviceCodePollResult(
             status="complete",
-            value=OAuthCredential(
-                access=token["access"],
-                refresh=token["refresh"],
-                expires=token["expires"],
-            ),
+            value=credential,
         )
 
     if response.status_code >= 500:
@@ -230,7 +303,18 @@ async def _poll_once(
     if error_code == "authorization_pending":
         return DeviceCodePollResult(status="pending")
     if error_code == "slow_down":
-        return DeviceCodePollResult(status="slow_down")
+        # 服务器动态降速指令透传给轮询器（合法正值才用，否则走默认退避）
+        interval = data.get("interval")
+        interval_seconds = (
+            float(interval)
+            if isinstance(interval, (int, float))
+            and not isinstance(interval, bool)
+            and interval > 0
+            else None
+        )
+        return DeviceCodePollResult(
+            status="slow_down", interval_seconds=interval_seconds
+        )
     if error_code == "expired_token":
         return DeviceCodePollResult(
             status="failed",
@@ -262,25 +346,25 @@ async def _login_device_code(
         raise asyncio.CancelledError("Login cancelled")
 
     oauth_host = _get_oauth_host()
-    device = await _request_device_authorization(oauth_host)
+    device = await _request_device_authorization(oauth_host, signal=signal)
     interaction.notify(
         AuthEvent(
             type="device_code",
-            user_code=device["userCode"],
-            verification_uri=device["verificationUri"],
-            verification_uri_complete=device["verificationUriComplete"],
-            interval_seconds=device["interval"],
-            expires_in_seconds=device["expiresIn"],
+            user_code=device.user_code,
+            verification_uri=device.verification_uri,
+            verification_uri_complete=device.verification_uri_complete,
+            interval_seconds=device.interval,
+            expires_in_seconds=device.expires_in,
         )
     )
 
     async def _poll() -> DeviceCodePollResult[OAuthCredential]:
-        return await _poll_once(oauth_host, device["deviceCode"])
+        return await _poll_once(oauth_host, device.device_code, signal=signal)
 
     return await poll_oauth_device_code_flow(
         DeviceCodePollOptions(
             poll=_poll,
-            interval_seconds=float(device["interval"]),
+            interval_seconds=device.interval,
             expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
             signal=signal,
         )
@@ -288,7 +372,7 @@ async def _login_device_code(
 
 
 async def _login(interaction: AuthInteraction) -> OAuthCredential:
-    return await _login_device_code(interaction, getattr(interaction, "signal", None))
+    return await _login_device_code(interaction, interaction.signal)
 
 
 async def _refresh(
@@ -313,6 +397,7 @@ async def _refresh(
                     "refresh_token": credential.refresh,
                 },
                 headers=_default_device_headers(),
+                signal=signal,
             )
         except httpx.TransportError as error:
             last_error = error
@@ -324,12 +409,7 @@ async def _refresh(
         if response.status_code == 200 and isinstance(
             response.json().get("access_token"), str
         ):
-            token = _token_from_response(response.json())
-            return OAuthCredential(
-                access=token["access"],
-                refresh=token["refresh"],
-                expires=token["expires"],
-            )
+            return _token_from_response(response.json())
 
         data = response.json()
         error_code = data.get("error") if isinstance(data.get("error"), str) else ""
@@ -352,7 +432,11 @@ async def _refresh(
             continue
         raise last_error
 
-    raise last_error or RuntimeError("Kimi token refresh failed after retries")
+    raise (
+        last_error
+        if last_error is not None
+        else RuntimeError("Kimi token refresh failed after retries")
+    )
 
 
 async def _to_auth(credential: OAuthCredential) -> ModelAuth:
@@ -365,6 +449,5 @@ kimi_oauth = OAuthAuth(
     refresh=_refresh,
     to_auth=_to_auth,
 )
-
 
 __all__ = ["kimi_oauth"]

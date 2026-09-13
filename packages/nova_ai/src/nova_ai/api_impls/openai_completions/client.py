@@ -7,11 +7,14 @@ abort；真正的重试由 ``_shared/retry.py`` 的 ``retry_provider_request``
 
 from typing import Any, Dict, Optional
 
+from nova_protocol import (
+    Context,
+    Model,
+    OpenAICompletionsCompat,
+    ProviderHeaders,
+)
 from openai import AsyncOpenAI
 
-from ...types.compat import OpenAICompletionsCompat
-from ...types.messages import Context
-from ...types.model import Model
 from .._shared.copilot_headers import (
     build_copilot_dynamic_headers,
     has_copilot_vision_input,
@@ -21,7 +24,7 @@ from .compat import get_compat
 from .options import api
 
 
-def _has_header(headers: Optional[Dict[str, Optional[str]]], name: str) -> bool:
+def _has_header(headers: Optional[ProviderHeaders], name: str) -> bool:
     """检查 headers 中是否已存在非空指定头部（对齐 TS hasHeader）。"""
     if not headers:
         return False
@@ -36,7 +39,7 @@ def create_client(
     model: Model,
     context: Context,
     api_key: Optional[str] = None,
-    options_headers: Optional[Dict[str, Optional[str]]] = None,
+    options_headers: Optional[ProviderHeaders] = None,
     session_id: Optional[str] = None,
     compat: Optional[OpenAICompletionsCompat] = None,
 ) -> AsyncOpenAI:
@@ -47,7 +50,7 @@ def create_client(
     """
     resolved_compat = compat or get_compat(model)
 
-    headers: Dict[str, Optional[str]] = {"User-Agent": get_nova_user_agent()}
+    headers: ProviderHeaders = {"User-Agent": get_nova_user_agent()}
     if model.headers:
         headers.update(model.headers)
 
@@ -81,7 +84,7 @@ def create_client(
 
     # Cloudflare AI Gateway 特殊鉴权头部
     if model.provider == "cloudflare-ai-gateway":
-        default_headers: Dict[str, Optional[str]] = {
+        default_headers: ProviderHeaders = {
             **headers,
             "Authorization": headers.get("Authorization") or "",
             "cf-aig-authorization": f"Bearer {api_key}",

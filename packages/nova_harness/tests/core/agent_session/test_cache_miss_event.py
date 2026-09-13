@@ -8,10 +8,14 @@ from types import SimpleNamespace
 from typing import Any, List, Optional
 
 import pytest
-from nova_ai import AssistantMessage, Cost, TextContent, Usage
-
 from nova_harness.core.agent_session.controllers.events import EventController
 from nova_harness.events import CacheMissEvent
+from nova_protocol import (
+    AssistantMessage,
+    Cost,
+    TextContent,
+    Usage,
+)
 
 
 class _FakeQueue:

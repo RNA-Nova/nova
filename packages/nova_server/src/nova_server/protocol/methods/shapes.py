@@ -17,13 +17,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from nova_ai import ImageContent
-from nova_ai.types.base_model import NovaBaseModel
-from pydantic import Field, RootModel, SerializeAsAny, StrictBool
-
-from nova_server.types.items import WireItem
 from nova_harness.types.resources.selection import CapabilitySelection
 from nova_harness.types.resources.tools import ToolInfo
+from nova_protocol import ImageContent
+from nova_protocol.base_model import NovaBaseModel
+from nova_server.types.items import WireItem
+from pydantic import Field, RootModel, SerializeAsAny, StrictBool
 
 # ---------------------------------------------------------------------------
 # 公共小模型

@@ -5,27 +5,20 @@
 """
 
 from nova_server.protocol.methods.auth import register as register_auth_methods
-from nova_server.protocol.methods.model import (
-    register as register_model_methods,
-)
-from nova_server.protocol.methods.package import (
-    register as register_package_methods,
-)
-from nova_server.protocol.methods.resources import (
-    register as register_resources_methods,
-)
-from nova_server.protocol.methods.session import (
-    register as register_session_methods,
-)
-from nova_server.protocol.methods.settings import (
-    register as register_settings_methods,
-)
-from nova_server.protocol.methods.system import (
-    register as register_system_methods,
-)
-from nova_server.protocol.methods.user_tools import (
-    register as register_user_tools_methods,
-)
+from nova_server.protocol.methods.model import \
+    register as register_model_methods
+from nova_server.protocol.methods.package import \
+    register as register_package_methods
+from nova_server.protocol.methods.resources import \
+    register as register_resources_methods
+from nova_server.protocol.methods.session import \
+    register as register_session_methods
+from nova_server.protocol.methods.settings import \
+    register as register_settings_methods
+from nova_server.protocol.methods.system import \
+    register as register_system_methods
+from nova_server.protocol.methods.user_tools import \
+    register as register_user_tools_methods
 
 __all__ = [
     "register_session_methods",

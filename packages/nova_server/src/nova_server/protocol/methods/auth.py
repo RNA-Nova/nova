@@ -10,11 +10,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
-from nova_ai.types.auth import ApiKeyCredential
-
-from nova_harness.config.auth.interaction import UIAuthInteraction
+from nova_protocol.auth import ApiKeyCredential
+from nova_protocol.signal import AbortController
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.methods import shapes
 from nova_server.protocol.methods.shapes import (
@@ -25,6 +25,8 @@ from nova_server.protocol.methods.shapes import (
 )
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.router import MethodRegistry
+
+from nova_harness.config.auth.interaction import UIAuthInteraction
 
 _AUTH_TYPES = ("api_key", "oauth")
 
@@ -102,7 +104,14 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
                 JSONRPCError.INVALID_PARAMS,
                 f"Interactive login requires frontend capability '{required}'",
             )
-        interaction = UIAuthInteraction(state.ui_context)
+        # 流程级取消总闸接线：当前 handler task 被宿主取消（cancelRequest）
+        # 或结束时联动 abort——轮询循环等持 signal 的环节获得协作式停止信号
+        # （不再只有硬掐任务一条路）。
+        controller = AbortController("login")
+        current = asyncio.current_task()
+        if current is not None:
+            current.add_done_callback(lambda _t: controller.abort())
+        interaction = UIAuthInteraction(state.ui_context, signal=controller.signal)
         credential = await session.model_runtime.login(
             provider, auth_type, interaction  # type: ignore[arg-type]
         )

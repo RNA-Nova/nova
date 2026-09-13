@@ -9,16 +9,23 @@ import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Literal, Optional, TypeVar
 
-from ...signal import AbortSignal
+from nova_protocol import AbortSignal
 
 T = TypeVar("T")
 
 DeviceCodePollStatus = Literal["pending", "slow_down", "failed", "complete"]
+"""单次轮询状态：继续等 / 降速继续 / 失败终态 / 成功终态。"""
 
 
 @dataclass(frozen=True, kw_only=True)
 class DeviceCodePollResult(Generic[T]):
-    """单次轮询结果（不可变值对象——规则 5）。"""
+    """单次轮询结果（不可变值对象——规则 5）。
+
+    - ``value``：``status == "complete"`` 时的终值；其余状态为 ``None``；
+    - ``message``：``status == "failed"`` 时的错误描述；
+    - ``interval_seconds``：``status == "slow_down"`` 时服务器要求的
+      新轮询间隔；``None`` = 走默认退避。
+    """
 
     status: DeviceCodePollStatus
     value: Optional[T] = None
@@ -26,22 +33,21 @@ class DeviceCodePollResult(Generic[T]):
     interval_seconds: Optional[float] = None
 
 
+@dataclass(frozen=True, kw_only=True)
 class DeviceCodePollOptions(Generic[T]):
-    """轮询配置（持 ``poll`` Callable 与 ``signal``——规则 4，不冻结/不进 Pydantic）。"""
+    """轮询配置（持 ``poll`` Callable 与 ``signal``——规则 4，不进 Pydantic）。
 
-    def __init__(
-        self,
-        poll: Callable[[], Awaitable[DeviceCodePollResult[T]]],
-        interval_seconds: Optional[float] = None,
-        expires_in_seconds: Optional[float] = None,
-        wait_before_first_poll: bool = False,
-        signal: Optional[AbortSignal] = None,
-    ):
-        self.poll = poll
-        self.interval_seconds = interval_seconds
-        self.expires_in_seconds = expires_in_seconds
-        self.wait_before_first_poll = wait_before_first_poll
-        self.signal = signal
+    - ``interval_seconds``：初始轮询间隔（秒）；``None`` = 默认 5 秒；
+    - ``expires_in_seconds``：整个流程的超时（秒）；``None`` = 不超时；
+    - ``wait_before_first_poll``：首次轮询前先等一个间隔；
+    - ``signal``：取消信号；中断以 ``asyncio.CancelledError`` 收场。
+    """
+
+    poll: Callable[[], Awaitable[DeviceCodePollResult[T]]]
+    interval_seconds: Optional[float] = None
+    expires_in_seconds: Optional[float] = None
+    wait_before_first_poll: bool = False
+    signal: Optional[AbortSignal] = None
 
 
 _MINIMUM_INTERVAL_MS = 1000
@@ -80,8 +86,6 @@ async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
             pass
         if _is_aborted(signal):
             raise asyncio.CancelledError(_CANCEL_MESSAGE)
-    except asyncio.TimeoutError:
-        pass
     finally:
         if signal is not None:
             signal.remove_event_listener(_on_abort)
@@ -89,9 +93,12 @@ async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
 
 async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
     """按 RFC 8628 轮询 device code。"""
-    now_ms = lambda: time.time() * 1000
+
+    def _now_ms() -> float:
+        return time.time() * 1000
+
     deadline = (
-        now_ms() + options.expires_in_seconds * 1000
+        _now_ms() + options.expires_in_seconds * 1000
         if options.expires_in_seconds is not None
         else float("inf")
     )
@@ -102,11 +109,11 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
 
     slow_down_count = 0
     if options.wait_before_first_poll:
-        remaining_ms = deadline - now_ms()
+        remaining_ms = deadline - _now_ms()
         if remaining_ms > 0:
             await _abortable_sleep(min(interval_ms, remaining_ms), options.signal)
 
-    while now_ms() < deadline:
+    while _now_ms() < deadline:
         if _is_aborted(options.signal):
             raise asyncio.CancelledError(_CANCEL_MESSAGE)
 
@@ -124,7 +131,7 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
             else:
                 interval_ms += _SLOW_DOWN_INCREMENT_MS
 
-        remaining_ms = deadline - now_ms()
+        remaining_ms = deadline - _now_ms()
         if remaining_ms <= 0:
             break
         await _abortable_sleep(min(interval_ms, remaining_ms), options.signal)
@@ -137,5 +144,6 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
 __all__ = [
     "DeviceCodePollOptions",
     "DeviceCodePollResult",
+    "DeviceCodePollStatus",
     "poll_oauth_device_code_flow",
 ]

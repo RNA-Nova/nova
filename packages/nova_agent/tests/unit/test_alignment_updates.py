@@ -16,7 +16,10 @@ from nova_agent import (
 )
 from nova_agent.types import AgentToolResult, ShouldStopAfterTurnContext
 from nova_agent.types.tool import AgentTool
-from nova_ai import TextContent, UserMessage
+from nova_protocol import (
+    TextContent,
+    UserMessage,
+)
 
 # ---------------------------------------------------------------------------
 # B1：非 dict details 透传
@@ -100,7 +103,9 @@ async def test_reset_during_run_raises(dummy_model):
     agent.set_model(dummy_model)
     agent.set_tools([_HangingTool()])
 
-    _run_task = asyncio.create_task(agent.prompt("run"))  # 持引用防 GC；由 abort+wait_for_idle 收尾
+    _run_task = asyncio.create_task(
+        agent.prompt("run")
+    )  # 持引用防 GC；由 abort+wait_for_idle 收尾
     await asyncio.sleep(0.1)  # 等 run 起来（工具挂起中，is_streaming=True）
     assert agent.state.is_streaming is True
 
