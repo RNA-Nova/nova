@@ -57,6 +57,23 @@ executor 本体**无入站鉴权**——只做本地回环承载（stdio 管道 
 - `NOVA_EXECUTOR_EXEC_SERVER_EXIT_ON_STDIN_CLOSE` — stdio 托管 spawn 时
   父进程管道关闭即退出（父死子随）
 
+### 遥测（可选，默认全静默）
+
+`config.toml` 的 `[otel]` 段配置 OTLP metrics 出口（对位 codex `[otel]` 语义——
+没配 = 零外发 noop；配了只流向自配收集端，无官方通道）：
+
+```toml
+[otel]
+environment = "prod"           # 可选，默认 production
+metrics_exporter = { OtlpGrpc = { endpoint = "http://127.0.0.1:4317" } }
+# 或 HTTP：metrics_exporter = { OtlpHttp = { endpoint = "...", protocol = "Json" } }
+```
+
+daemon 启动时读取并装配 provider（`executor-otel::load_otel_settings` +
+`OtelProvider::try_new`，对位 codex `build_provider`），退出时 flush。
+本批只接 metrics 出口（`exporter`/`trace_exporter` 字段暂忽略并告警——
+traces/logs 接线归后续批次）。
+
 ## 与 Nova 集成
 
 Nova 侧的接法是把 executor 作为工具引擎后面的可插拔执行后端（本地

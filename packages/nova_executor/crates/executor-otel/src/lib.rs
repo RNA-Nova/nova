@@ -10,6 +10,7 @@ pub use crate::config::OtelExporter;
 pub use crate::config::OtelHttpProtocol;
 pub use crate::config::OtelSettings;
 pub use crate::config::OtelTlsConfig;
+pub use crate::config::load_otel_settings;
 pub use crate::config::validate_span_attributes;
 pub use crate::metrics::*;
 pub use crate::provider::OtelProvider;

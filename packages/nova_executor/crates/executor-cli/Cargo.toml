@@ -19,6 +19,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 url = { workspace = true }
 nova-executor-server = { workspace = true }
 nova-executor-http-client = { workspace = true }
+nova-executor-otel = { workspace = true }
+nova-executor-utils-home-dir = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

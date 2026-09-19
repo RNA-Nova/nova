@@ -59,6 +59,33 @@ fn spawn_stdin_lifetime_leash() {
     });
 }
 
+/// 遥测装配（codex build_provider 对位）：读 executor 配置根 config.toml 的
+/// [otel] 段 → 装全局 provider。无配置/无出口 = None（静默 noop）；
+/// 配置损坏/装配失败 = warn 后 None（响亮但不炸服务）。
+fn assemble_otel_provider() -> Option<nova_executor_otel::OtelProvider> {
+    let home = match nova_executor_utils_home_dir::find_nova_executor_home() {
+        Ok(home) => home,
+        Err(error) => {
+            tracing::warn!(%error, "executor home 解析失败，遥测按静默 noop 继续");
+            return None;
+        }
+    };
+    let settings = match nova_executor_otel::load_otel_settings(home.as_path()) {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::warn!(%error, "[otel] 配置读取失败，遥测按静默 noop 继续");
+            return None;
+        }
+    };
+    match nova_executor_otel::OtelProvider::try_new(&settings) {
+        Ok(provider) => provider,
+        Err(error) => {
+            tracing::warn!(%error, "OTEL provider 装配失败，遥测按静默 noop 继续");
+            None
+        }
+    }
+}
+
 fn main() -> Result<()> {
     // 隐藏 helper 模式先于 clap 与 tokio 运行时分派：沙箱化 fs 操作与 arg0
     // 执行辅助分别以隐藏 flag 重启本二进制，helper 自建运行时并直接退出
@@ -90,6 +117,12 @@ async fn run_server() -> Result<()> {
     if cli.exit_on_stdin_close && !cli.listen.starts_with("stdio") {
         spawn_stdin_lifetime_leash();
     }
+
+    // 遥测装配：executor 配置根 config.toml 的 [otel] 段配了 metrics 出口则
+    // 装全局 provider（对位 codex build_provider 的配置→装配形状）；
+    // 没配 = 全静默 noop（零外发，可选语义）。配置损坏/装配失败不炸服务——
+    // warn 后按 noop 继续（配置是用户资产，坏文件要响亮但服务不能死）。
+    let otel_provider = assemble_otel_provider();
 
     // 构建 runtime paths
     let executor_self_exe = cli
@@ -123,6 +156,11 @@ async fn run_server() -> Result<()> {
     )
     .await
     .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+    // 退出前 flush：把队列里剩的指标推完再走（provider 有界关闭语义）
+    if let Some(provider) = otel_provider {
+        provider.shutdown();
+    }
 
     Ok(())
 }
