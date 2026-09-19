@@ -3,9 +3,9 @@
 
 version: 2
 updates:
-  # Rust：executor workspace
+  # Rust：exec-server workspace
   - package-ecosystem: cargo
-    directory: packages/nova_executor
+    directory: packages/nova-exec-server
     schedule:
       interval: weekly
     cooldown:

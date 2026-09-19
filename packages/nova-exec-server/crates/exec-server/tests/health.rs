@@ -1,0 +1,90 @@
+#![cfg(unix)]
+
+mod common;
+
+use common::exec_server::exec_server;
+use nova_exec_server_protocol::JSONRPCMessage;
+use nova_exec_server_protocol::JSONRPCResponse;
+use nova_exec_server::EnvironmentInfo;
+use nova_exec_server::EnvironmentStatus;
+use nova_exec_server::EnvironmentStatusKind;
+use nova_exec_server::InitializeParams;
+use nova_exec_server::InitializeResponse;
+use pretty_assertions::assert_eq;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_server_serves_readyz_alongside_websocket_endpoint() -> anyhow::Result<()> {
+    let mut server = exec_server().await?;
+    let http_base_url = server
+        .websocket_url()
+        .strip_prefix("ws://")
+        .expect("websocket URL should use ws://");
+
+    let client = nova_exec_server_http_client::HttpClientBuilder::new().build_direct()?;
+    let response = client
+        .get(format!("http://{http_base_url}/readyz"))
+        .send()
+        .await?;
+    assert_eq!(response.status(), http::StatusCode::OK);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_environment_fetches_info_from_exec_server() -> anyhow::Result<()> {
+    let mut server = exec_server().await?;
+    let client = common::connect_remote_exec_client(server.websocket_url()).await?;
+
+    // 远程 environment/info 应回放执行端本机元数据，与本地 EnvironmentInfo 等价
+    let remote_info = client.environment_info().await?;
+    let local_info = EnvironmentInfo::local();
+    assert_eq!(remote_info, local_info);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_server_reports_environment_status_over_websocket() -> anyhow::Result<()> {
+    let mut server = exec_server().await?;
+    let initialize_id = server
+        .send_request(
+            "initialize",
+            serde_json::to_value(InitializeParams {
+                client_name: "exec-server-health-test".to_string(),
+                resume_session_id: None,
+            })?,
+        )
+        .await?;
+    let JSONRPCMessage::Response(JSONRPCResponse {
+        id,
+        result: initialize_result,
+    }) = server.next_event().await?
+    else {
+        panic!("expected initialize response");
+    };
+    assert_eq!(id, initialize_id);
+    let _: InitializeResponse = serde_json::from_value(initialize_result)?;
+    server
+        .send_notification("initialized", serde_json::json!({}))
+        .await?;
+
+    let status_id = server
+        .send_request("environment/status", serde_json::json!({}))
+        .await?;
+    let JSONRPCMessage::Response(JSONRPCResponse { id, result }) = server.next_event().await?
+    else {
+        panic!("expected environment status response");
+    };
+    assert_eq!(id, status_id);
+    assert_eq!(
+        serde_json::from_value::<EnvironmentStatus>(result)?,
+        EnvironmentStatus {
+            status: EnvironmentStatusKind::Ready,
+        }
+    );
+
+    server.shutdown().await?;
+    Ok(())
+}
