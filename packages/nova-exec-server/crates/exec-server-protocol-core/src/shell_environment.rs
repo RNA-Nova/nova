@@ -210,7 +210,7 @@ mod windows_tests {
         let vars = make_vars(&[
             ("Shell", "C:\\Program Files\\Git\\bin\\bash.exe"),
             ("SystemRoot", "C:\\Windows"),
-            ("AppData", "C:\\Users\\codex\\AppData\\Roaming"),
+            ("AppData", "C:\\Users\\nova\\AppData\\Roaming"),
             ("TmpDir", "C:\\Temp\\custom"),
             ("OPENAI_API_KEY", "secret"),
         ]);
@@ -231,7 +231,7 @@ mod windows_tests {
             ("SystemRoot".to_string(), "C:\\Windows".to_string()),
             (
                 "AppData".to_string(),
-                "C:\\Users\\codex\\AppData\\Roaming".to_string(),
+                "C:\\Users\\nova\\AppData\\Roaming".to_string(),
             ),
             ("TmpDir".to_string(), "C:\\Temp\\custom".to_string()),
         ]);
@@ -271,7 +271,7 @@ mod non_windows_tests {
     fn core_inherit_preserves_non_windows_core_vars_case_insensitively() {
         let vars = make_vars(&[
             ("path", "/usr/bin"),
-            ("home", "/home/codex"),
+            ("home", "/home/nova"),
             ("TmpDir", "/tmp/custom"),
             ("OPENAI_API_KEY", "secret"),
         ]);
@@ -285,7 +285,7 @@ mod non_windows_tests {
         let result = populate_env(vars, &policy);
         let expected = HashMap::from([
             ("path".to_string(), "/usr/bin".to_string()),
-            ("home".to_string(), "/home/codex".to_string()),
+            ("home".to_string(), "/home/nova".to_string()),
             ("TmpDir".to_string(), "/tmp/custom".to_string()),
         ]);
 

@@ -2425,7 +2425,6 @@ dependencies = [
  "nova-exec-server-utils-absolute-path",
  "pretty_assertions",
  "tempfile",
- "tracing",
 ]
 
 [[package]]

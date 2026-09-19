@@ -12,7 +12,8 @@ use tracing_subscriber::prelude::*;
 
 use super::ConcurrentRequestLimit;
 use super::RequestDispatchMode;
-use super::request_span;
+use crate::connection::JsonRpcConnectionEvent;
+use nova_exec_server_protocol::JSONRPCMessage;
 
 /// Public limits reject values that cannot safely enable semaphore-backed concurrency.
 #[test]
@@ -85,13 +86,26 @@ fn request_span_uses_bounded_name_wire_method_and_inbound_trace_parent() {
             params: None,
             trace: Some(trace),
         };
-        let request_span = request_span("unknown", &request);
+        let JsonRpcConnectionEvent::QueuedRequest { request_span, .. } =
+            JsonRpcConnectionEvent::message(JSONRPCMessage::Request(request))
+        else {
+            panic!("requests should start a server span before dispatch");
+        };
+        assert!(
+            span_exporter
+                .get_finished_spans()
+                .expect("request span export")
+                .is_empty(),
+            "the request span must remain open while the request is waiting"
+        );
+        request_span.record("otel.name", "unknown");
         request_span.in_scope(|| {});
         drop(request_span);
     });
 
     tracer_provider.force_flush().expect("flush traces");
     let spans = span_exporter.get_finished_spans().expect("span export");
+    assert_eq!(spans.len(), 1);
     let request_span = spans
         .iter()
         .find(|span| span.name.as_ref() == "unknown")

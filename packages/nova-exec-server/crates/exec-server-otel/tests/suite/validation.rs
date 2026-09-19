@@ -34,7 +34,7 @@ fn invalid_tag_component_is_rejected() -> Result<()> {
 fn counter_rejects_invalid_tag_key() -> Result<()> {
     let metrics = build_in_memory_client()?;
     let err = metrics
-        .counter("codex.turns", /*inc*/ 1, &[("bad key", "value")])
+        .counter("nova.turns", /*inc*/ 1, &[("bad key", "value")])
         .unwrap_err();
     assert!(matches!(
         err,
@@ -51,7 +51,7 @@ fn histogram_rejects_invalid_tag_value() -> Result<()> {
     let metrics = build_in_memory_client()?;
     let err = metrics
         .histogram(
-            "codex.request_latency",
+            "nova.request_latency",
             /*value*/ 3,
             &[("route", "bad value")],
         )
@@ -81,10 +81,10 @@ fn counter_rejects_invalid_metric_name() -> Result<()> {
 #[test]
 fn counter_rejects_negative_increment() -> Result<()> {
     let metrics = build_in_memory_client()?;
-    let err = metrics.counter("codex.turns", /*inc*/ -1, &[]).unwrap_err();
+    let err = metrics.counter("nova.turns", /*inc*/ -1, &[]).unwrap_err();
     assert!(matches!(
         err,
-        MetricsError::NegativeCounterIncrement { name, inc } if name == "codex.turns" && inc == -1
+        MetricsError::NegativeCounterIncrement { name, inc } if name == "nova.turns" && inc == -1
     ));
     metrics.shutdown()?;
     Ok(())
