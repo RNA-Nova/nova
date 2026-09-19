@@ -130,6 +130,10 @@ pub struct EnvironmentCapabilities {
     /// Whether this executor supports `fs/writeStream`（大文件流式写，客户端分片推）。
     #[serde(default)]
     pub write_stream: bool,
+    /// Whether `http/request` header values can resolve from the executor
+    /// environment（valueEnvVar——凭证留执行机，敏感变量保护名单拒代发）。
+    #[serde(default)]
+    pub http_header_env_vars: bool,
     /// Whether shell state can be cached and restored entirely inside the executor.
     #[serde(default)]
     pub shell_snapshot_v2: bool,
@@ -209,6 +213,10 @@ impl EnvironmentInfo {
                 // 并含沙箱化实现）——如实宣告 true，客户端可据此选用流式通道
                 read_stream: true,
                 write_stream: true,
+                // http/request 的 valueEnvVar（header 值从执行机环境变量解析）已实现
+                // 于 route_aware_http_client（敏感变量保护名单拒代发，有测试）——
+                // 如实宣告 true（此前机制在但宣告缺位，v1.5 补齐）
+                http_header_env_vars: true,
                 // shell snapshot（登录 shell 状态缓存/恢复）仅在 unix 落地——
                 // 非 unix 端如实宣告 false，客户端按位门控后再下发 shellSnapshot
                 shell_snapshot_v2: cfg!(unix),
@@ -975,6 +983,7 @@ mod tests {
                 environment_config_read: false,
                 read_stream: false,
                 write_stream: false,
+                http_header_env_vars: false,
                 shell_snapshot_v2: false,
             }
         );
@@ -994,6 +1003,7 @@ mod tests {
                 "environmentConfigRead": false,
                 "readStream": false,
                 "writeStream": false,
+                "httpHeaderEnvVars": false,
                 "shellSnapshotV2": false,
             },
         });
@@ -1023,6 +1033,7 @@ mod tests {
                     "environmentConfigRead": false,
                     "readStream": true,
                     "writeStream": true,
+                    "httpHeaderEnvVars": false,
                     "shellSnapshotV2": true,
                 },
             },

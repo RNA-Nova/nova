@@ -161,3 +161,16 @@ fn local_environment_info_advertises_environment_config_read() {
             .environment_config_read
     );
 }
+
+#[test]
+fn local_environment_info_advertises_http_header_env_vars() {
+    // 能力位如实宣告：http/request 的 valueEnvVar 机制已实现（v1.5 补宣告）。
+    let capabilities = EnvironmentInfo::local().capabilities;
+    assert!(capabilities.http_header_env_vars);
+    // 全部能力位的线上形状 pin（防漏宣告/漂移）
+    let json = serde_json::to_value(&capabilities).expect("serialize capabilities");
+    assert_eq!(json["httpHeaderEnvVars"], serde_json::json!(true));
+    assert_eq!(json["networkProxyLaunch"], serde_json::json!(true));
+    assert_eq!(json["readStream"], serde_json::json!(true));
+    assert_eq!(json["writeStream"], serde_json::json!(true));
+}

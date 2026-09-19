@@ -59,6 +59,30 @@ def test_initialize_response_with_environment_info():
     assert info.temporary_directories == ["file:///tmp"]
 
 
+def test_environment_capabilities_full_wire_shape():
+    """能力位镜像完整性：v1.5 全部能力位 camelCase 别名解析（防漏位）"""
+    from nova_executor_client.protocol import EnvironmentCapabilities
+
+    caps = EnvironmentCapabilities.model_validate(
+        {
+            "networkProxyLaunch": True,
+            "environmentConfigRead": True,
+            "readStream": True,
+            "writeStream": True,
+            "httpHeaderEnvVars": True,
+            "shellSnapshotV2": True,
+        }
+    )
+    assert caps.network_proxy_launch is True
+    assert caps.environment_config_read is True
+    assert caps.read_stream is True
+    assert caps.write_stream is True
+    assert caps.http_header_env_vars is True
+    assert caps.shell_snapshot_v2 is True
+    wire = caps.model_dump(by_alias=True)
+    assert wire["httpHeaderEnvVars"] is True
+
+
 def test_initialize_response_without_environment_info():
     """旧服务端缺省形态：无 environmentInfo 字段 → None（回退单次调用）"""
     from nova_executor_client.protocol import InitializeResponse

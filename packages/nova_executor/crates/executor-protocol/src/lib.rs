@@ -24,4 +24,6 @@ pub use rpc::*;
 ///       user 层 ~/.nova/executor/config.toml（TOML）与 project 层
 ///       <cwd>/.nova/settings.json（JSON），按键路径投影回传层栈，不合并不裁决），
 ///       environmentConfigRead 能力位回 true（可选增量，向后兼容）。
-pub const PROTOCOL_VERSION: &str = "1.4";
+/// 1.5 = 补 httpHeaderEnvVars 能力位（http/request 的 valueEnvVar 机制早已实现，
+///       仅宣告缺位——如实宣告 true；可选增量，向后兼容）。
+pub const PROTOCOL_VERSION: &str = "1.5";
