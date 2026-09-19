@@ -4,8 +4,8 @@
 不进 agent core——harness settings 不携带任何执行词汇。本模块是 PROTOCOL
 v1.4 `environmentConfig/read` 层栈的客户端半边，同两层、同格式：
 
-- user 层：`<executor home>/config.toml`（TOML；home = `NOVA_EXECUTOR_HOME`
-  覆盖，缺省 `~/.nova/executor`）
+- user 层：`<executor home>/config.toml`（TOML；home = `NOVA_EXEC_SERVER_HOME`
+  覆盖，缺省 `~/.nova/exec-server`）
 - project 层：`<cwd>/.nova/settings.json` 的 `executor` 段（JSON；
   **仅当 `project_trusted=True` 时读取**——Project Trust 裁决归 harness，
   本层只消费布尔结论，不做信任判断）
@@ -39,7 +39,7 @@ from .protocol import NetworkMode
 logger = logging.getLogger(__name__)
 
 #: executor 家目录环境变量覆盖（对位 rust executor 的同名旋钮）
-NOVA_EXECUTOR_HOME_ENV = "NOVA_EXECUTOR_HOME"
+NOVA_EXEC_SERVER_HOME_ENV = "NOVA_EXEC_SERVER_HOME"
 
 #: user 层配置文件名（位于 executor home 下；对位 executor-protocol v1.4 层栈）
 USER_CONFIG_FILE_NAME = "config.toml"
@@ -138,8 +138,8 @@ class ExecutorConfig(BaseModel):
 
 
 def default_executor_home() -> Path:
-    """executor 家目录：`NOVA_EXECUTOR_HOME` 覆盖，缺省 `~/.nova/executor`"""
-    override = os.environ.get(NOVA_EXECUTOR_HOME_ENV, "").strip()
+    """executor 家目录：`NOVA_EXEC_SERVER_HOME` 覆盖，缺省 `~/.nova/exec-server`"""
+    override = os.environ.get(NOVA_EXEC_SERVER_HOME_ENV, "").strip()
     if override:
         return Path(override).expanduser()
     return Path.home() / ".nova" / "executor"

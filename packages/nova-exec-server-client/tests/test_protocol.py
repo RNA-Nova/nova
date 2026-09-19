@@ -202,13 +202,13 @@ def test_environment_config_read_response():
     response = EnvironmentConfigReadResponse.model_validate(
         {
             "userHomeDir": "file:///home/u",
-            "executorHomeDir": "file:///home/u/.nova/executor",
+            "executorHomeDir": "file:///home/u/.nova/exec-server",
             "hostname": "devbox",
             "config": {
                 "layers": [
                     {
-                        "source": "user:/home/u/.nova/executor/config.toml",
-                        "baseDir": "file:///home/u/.nova/executor",
+                        "source": "user:/home/u/.nova/exec-server/config.toml",
+                        "baseDir": "file:///home/u/.nova/exec-server",
                         "format": "toml",
                         "content": '[sandbox]\nlevel = "workspace-write"\n',
                     },
@@ -226,11 +226,11 @@ def test_environment_config_read_response():
     )
 
     assert response.user_home_dir == "file:///home/u"
-    assert response.executor_home_dir == "file:///home/u/.nova/executor"
+    assert response.executor_home_dir == "file:///home/u/.nova/exec-server"
     assert response.hostname == "devbox"
     assert response.config.cloud_insertion_index == 2
     user, project = response.config.layers
-    assert user.source == "user:/home/u/.nova/executor/config.toml"
+    assert user.source == "user:/home/u/.nova/exec-server/config.toml"
     assert user.format == "toml"
     assert user.error is None
     assert project.format == "json"
@@ -243,7 +243,7 @@ def test_environment_config_read_response_without_optional_fields():
 
     response = EnvironmentConfigReadResponse.model_validate(
         {
-            "executorHomeDir": "file:///home/u/.nova/executor",
+            "executorHomeDir": "file:///home/u/.nova/exec-server",
             "config": {"layers": [], "cloudInsertionIndex": 0},
         }
     )

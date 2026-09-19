@@ -2,7 +2,7 @@
 
 from .client import ExecutorClient
 from .config import (
-    NOVA_EXECUTOR_HOME_ENV,
+    NOVA_EXEC_SERVER_HOME_ENV,
     ApprovalPolicy,
     ExecutorConfig,
     ExecutorEnvironment,
@@ -172,7 +172,7 @@ __all__ = [
     "SandboxWorkspaceWriteConfig",
     "NetworkProxySettings",
     "ApprovalPolicy",
-    "NOVA_EXECUTOR_HOME_ENV",
+    "NOVA_EXEC_SERVER_HOME_ENV",
     "resolve_execution_policy",
     "resolve_file_system_sandbox",
     "resolve_network_proxy",

@@ -17,7 +17,7 @@ from nova_exec_server_client import (
     SandboxMode,
     load_executor_config,
 )
-from nova_exec_server_client.config import NOVA_EXECUTOR_HOME_ENV
+from nova_exec_server_client.config import NOVA_EXEC_SERVER_HOME_ENV
 from nova_exec_server_client.protocol import NetworkMode
 
 
@@ -79,7 +79,7 @@ class TestUserLayer:
 
     def test_env_override(self, home, monkeypatch):
         (home / "config.toml").write_text('sandbox_mode = "read-only"\n')
-        monkeypatch.setenv(NOVA_EXECUTOR_HOME_ENV, str(home))
+        monkeypatch.setenv(NOVA_EXEC_SERVER_HOME_ENV, str(home))
         cfg = load_executor_config()
         assert cfg.sandbox_mode is SandboxMode.READ_ONLY
 
@@ -87,7 +87,7 @@ class TestUserLayer:
         (home / "config.toml").write_text('sandbox_mode = "read-only"\n')
         other = tmp_path / "other"
         other.mkdir()
-        monkeypatch.setenv(NOVA_EXECUTOR_HOME_ENV, str(other))
+        monkeypatch.setenv(NOVA_EXEC_SERVER_HOME_ENV, str(other))
         cfg = load_executor_config(executor_home=home)
         assert cfg.sandbox_mode is SandboxMode.READ_ONLY
 

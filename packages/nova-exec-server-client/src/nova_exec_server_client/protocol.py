@@ -225,7 +225,7 @@ class EnvironmentConfigReadResponse(BaseModel):
 
     #: executor 用户家目录（客户端展开 ~ 的目标）
     user_home_dir: str | None = Field(default=None, alias="userHomeDir")
-    #: executor 家目录（~/.nova/executor，或 NOVA_EXECUTOR_HOME 覆盖）
+    #: executor 家目录（~/.nova/exec-server，或 NOVA_EXEC_SERVER_HOME 覆盖）
     executor_home_dir: str = Field(..., alias="executorHomeDir")
     #: executor 主机名（诊断用途）
     hostname: str | None = None

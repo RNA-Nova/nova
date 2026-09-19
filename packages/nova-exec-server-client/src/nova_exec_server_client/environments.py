@@ -2,7 +2,7 @@
 
 codex 对位关系：`~/.codex/environments.toml`（exec-server crate 自持解析）
 + `EnvironmentDefault` 解析。我们把注册表词汇合并在同一个
-`~/.nova/executor/config.toml`（层栈已定单文件），`[[environments]]` 条目
+`~/.nova/exec-server/config.toml`（层栈已定单文件），`[[environments]]` 条目
 字段逐一对位 codex `EnvironmentToml`。
 
 选择/切换编排（哪个会话用哪个环境）不归本层——归调用方（对位 codex core

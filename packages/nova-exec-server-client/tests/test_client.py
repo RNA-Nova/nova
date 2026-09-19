@@ -93,13 +93,13 @@ async def test_read_environment_config():
             "initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"},
             "environmentConfig/read": {
                 "userHomeDir": "file:///home/u",
-                "executorHomeDir": "file:///home/u/.nova/executor",
+                "executorHomeDir": "file:///home/u/.nova/exec-server",
                 "hostname": "devbox",
                 "config": {
                     "layers": [
                         {
-                            "source": "user:/home/u/.nova/executor/config.toml",
-                            "baseDir": "file:///home/u/.nova/executor",
+                            "source": "user:/home/u/.nova/exec-server/config.toml",
+                            "baseDir": "file:///home/u/.nova/exec-server",
                             "format": "toml",
                             "content": '[sandbox]\nlevel = "workspace-write"\n',
                         },
@@ -130,7 +130,7 @@ async def test_read_environment_config():
         "cwd": "file:///repo",
         "configPaths": [["sandbox"], ["network", "mode"]],
     }
-    assert response.executor_home_dir == "file:///home/u/.nova/executor"
+    assert response.executor_home_dir == "file:///home/u/.nova/exec-server"
     assert [layer.format for layer in response.config.layers] == ["toml", "json"]
     assert response.config.layers[0].error is None
     await client.disconnect()

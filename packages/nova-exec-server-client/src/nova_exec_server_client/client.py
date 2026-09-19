@@ -402,7 +402,7 @@ class ExecutorClient:
     ) -> EnvironmentConfigReadResponse:
         """代读执行端本机配置层栈（environmentConfig/read，v1.4 起）
 
-        executor 读自己所在机器的配置层（user 层 ~/.nova/executor/config.toml
+        executor 读自己所在机器的配置层（user 层 ~/.nova/exec-server/config.toml
         TOML + project 层 <cwd>/.nova/settings.json JSON），按 config_paths
         键路径投影后如实回传——不合并不裁决（层合并与 trust 裁决归客户端）。
         调用前先经 environment_info() 的 capabilities.environment_config_read
