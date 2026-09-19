@@ -139,9 +139,16 @@ fn has_retryable_tls_error(error: &(dyn Error + 'static)) -> bool {
             == Some(SCHANNEL_PROTOCOL_VERSION_ERROR)
             || message.contains("(os error -2146893054)")
             || message.contains("0x80090302");
+        // nova 增补（codex 无此分支——其 CI 基线恒为 native-tls）：基线即 rustls
+        // 的环境（SSL_CERT_FILE/NOVA CA 注入面下 pool 客户端全部 rustls 化）里
+        // 同款协议版本警报以 "received fatal alert: ProtocolVersion" 文案出现
+        // （实测错误链元素是不可 downcast 的 dyn 包装，与同文件其他平台一致走文案）。
+        let is_rustls_protocol_version_error =
+            message.contains("received fatal alert: protocolversion");
         if is_macos_protocol_version_error
             || is_linux_protocol_version_error
             || is_schannel_protocol_version_error
+            || is_rustls_protocol_version_error
         {
             recognized_negotiation_failure = true;
         }

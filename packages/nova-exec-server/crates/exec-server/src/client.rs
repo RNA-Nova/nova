@@ -3275,7 +3275,7 @@ mod tests {
         // 启动在停滞中，此时刷新应作废旧启动并连出新会话。
         let client_for_startup = client.clone();
         let stalled_startup = tokio::spawn(async move { client_for_startup.get().await });
-        sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         serve_replacement_tx
             .send(())
             .expect("server should accept the stalled connection");
