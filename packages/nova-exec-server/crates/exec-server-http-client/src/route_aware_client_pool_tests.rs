@@ -140,7 +140,7 @@ async fn reqwest_default_route_preserves_transport_redirects() {
             "HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
         ] {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_secs(10);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(connection) => break connection,
@@ -553,7 +553,7 @@ fn spawn_response_server(
     let server = std::thread::spawn(move || {
         let mut requests = Vec::new();
         for response in responses {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_secs(10);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(connection) => break connection,

@@ -11,6 +11,7 @@ use crate::ExecProcessEventReceiver;
 use crate::ExecProcessFuture;
 use crate::ExecServerClient;
 use crate::StartedExecProcess;
+use crate::client::LazyRemoteExecServerClient;
 use crate::client::Session;
 use crate::process::sandbox_type_from_protocol;
 use crate::protocol::ExecParams;
@@ -22,7 +23,7 @@ use crate::protocol::WriteResponse;
 /// 执行端运行，输出经连接级推送路由回流（会话注册表 + wake 通道）。
 #[derive(Clone)]
 pub struct RemoteProcess {
-    client: ExecServerClient,
+    client: LazyRemoteExecServerClient,
 }
 
 struct RemoteExecProcess {
@@ -30,7 +31,7 @@ struct RemoteExecProcess {
 }
 
 impl RemoteProcess {
-    pub fn new(client: ExecServerClient) -> Self {
+    pub fn new(client: LazyRemoteExecServerClient) -> Self {
         trace!("remote process new");
         Self { client }
     }
@@ -40,10 +41,8 @@ impl RemoteProcess {
         params: ExecParams,
         network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     ) -> Result<StartedExecProcess, crate::ExecServerError> {
-        let session = self
-            .client
-            .start_process(params, network_policy_decider)
-            .await?;
+        let client = self.client.get().await?;
+        let session = client.start_process(params, network_policy_decider).await?;
         let sandbox_type = sandbox_type_from_protocol(session.sandbox_type());
 
         Ok(StartedExecProcess {

@@ -11,7 +11,6 @@ use tracing::trace;
 
 use crate::CopyOptions;
 use crate::CreateDirectoryOptions;
-use crate::ExecServerClient;
 use crate::ExecServerError;
 use crate::ExecutorFileSystem;
 use crate::ExecutorFileSystemFuture;
@@ -21,6 +20,7 @@ use crate::FileSystemResult;
 use crate::FileSystemSandboxContext;
 use crate::GetMetadataOptions;
 use crate::ReadDirectoryEntry;
+use crate::client::LazyRemoteExecServerClient;
 use crate::ReadFileOptions;
 use crate::RemoveOptions;
 use crate::WalkOptions;
@@ -48,12 +48,12 @@ type InFlightMetadataRequest = OnceCell<Result<FileMetadata, Arc<io::Error>>>;
 /// 以 [`ExecServerClient`] 为后座的 [`ExecutorFileSystem`] 适配：fs/* 请求经
 /// JSON-RPC 到达执行端，fs/readStream 走服务端推送。
 pub struct RemoteFileSystem {
-    client: ExecServerClient,
+    client: LazyRemoteExecServerClient,
     metadata_requests: Mutex<HashMap<PathUri, Arc<InFlightMetadataRequest>>>,
 }
 
 impl RemoteFileSystem {
-    pub fn new(client: ExecServerClient) -> Self {
+    pub fn new(client: LazyRemoteExecServerClient) -> Self {
         trace!("remote fs new");
         Self {
             client,
@@ -67,8 +67,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<PathUri> {
         trace!("remote fs canonicalize");
-        let response = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = client
             .fs_canonicalize(FsCanonicalizeParams {
                 path: path.clone(),
                 sandbox: remote_sandbox_context(sandbox),
@@ -85,8 +85,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<u8>> {
         trace!("remote fs read_file");
-        let response = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = client
             .fs_read_file(FsReadFileParams {
                 path: path.clone(),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
@@ -111,8 +111,9 @@ impl RemoteFileSystem {
         // 开门（fd 传递）同样支持；优于 fs/open+readBlock 拉模式（每块一个
         // 往返，且不支持沙箱）。
         trace!("remote fs read_file_stream");
+        let client = self.client.get().await.map_err(map_remote_error)?;
         file_stream::open_push(
-            self.client.clone(),
+            client.clone(),
             path.clone(),
             remote_sandbox_context(sandbox),
         )
@@ -127,8 +128,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
         trace!("remote fs write_file");
-        let result = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let result = client
             .fs_write_file(FsWriteFileParams {
                 path: path.clone(),
                 data_base64: STANDARD.encode(contents),
@@ -148,8 +149,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
         trace!("remote fs create_directory");
-        let result = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let result = client
             .fs_create_directory(FsCreateDirectoryParams {
                 path: path.clone(),
                 recursive: Some(options.recursive),
@@ -210,8 +211,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileMetadata> {
         trace!("remote fs get_metadata");
-        let response = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = client
             .fs_get_metadata(FsGetMetadataParams {
                 path: path.clone(),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
@@ -235,8 +236,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<ReadDirectoryEntry>> {
         trace!("remote fs read_directory");
-        let response = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = client
             .fs_read_directory(FsReadDirectoryParams {
                 path: path.clone(),
                 sandbox: remote_sandbox_context(sandbox),
@@ -261,8 +262,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<WalkOutcome> {
         trace!("remote fs walk");
-        let response = match self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = match client
             .fs_walk(FsWalkParams {
                 path: path.clone(),
                 options,
@@ -292,8 +293,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
         trace!("remote fs remove");
-        let result = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let result = client
             .fs_remove(FsRemoveParams {
                 path: path.clone(),
                 recursive: Some(options.recursive),
@@ -315,8 +316,8 @@ impl RemoteFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
         trace!("remote fs copy");
-        let result = self
-            .client
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let result = client
             .fs_copy(FsCopyParams {
                 source_path: source_path.clone(),
                 destination_path: destination_path.clone(),

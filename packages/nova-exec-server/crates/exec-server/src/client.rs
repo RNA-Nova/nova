@@ -36,6 +36,8 @@ use crate::client::http_client::response_body_stream::QueuedHttpBodyDelta;
 use crate::client_api::ExecServerClientConnectOptions;
 use crate::client_api::ExecServerTransportParams;
 use crate::client_api::HttpClient;
+use crate::environment::EnvironmentConnectionState;
+use crate::environment::EnvironmentObservedStatus;
 use crate::client_api::RemoteExecServerConnectArgs;
 use crate::client_api::StdioExecServerConnectArgs;
 use crate::client_transport::ExecServerReconnectStrategy;
@@ -136,30 +138,6 @@ use crate::rpc::RpcCallError;
 use crate::rpc::RpcClient;
 use crate::rpc_server_requests::MAX_IN_FLIGHT_SERVER_CALLS;
 use nova_exec_server_http_client::HttpClientFactory;
-
-/// 客户端与 exec-server 连接的状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnvironmentConnectionState {
-    /// An initialized exec-server connection is available.
-    Connected,
-    /// No initialized exec-server connection is currently available.
-    Disconnected,
-}
-
-/// 连接的观测状态：由只读探针（`LazyRemoteExecServerClient::status`）汇报，
-/// 不触发连接建立或恢复。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnvironmentObservedStatus {
-    /// 现有连接应答了探针。
-    Ready,
-    /// 尚无可用的连接，也未观测到连接失败（含从未启动的惰性传输）。
-    Pending,
-    /// 连接尝试、既有连接或 fail-fast 探针观测到失败（不保证终态）。
-    Disconnected {
-        /// 失败原因的人类可读描述。
-        error: String,
-    },
-}
 
 pub(crate) mod http_client;
 mod network_policy_audit;
@@ -774,6 +752,11 @@ impl ExecServerClient {
                 .call_with_timeout(ENVIRONMENT_INFO_METHOD, &(), ENVIRONMENT_INFO_TIMEOUT)
                 .await,
         )
+    }
+
+    /// 拉取执行端元数据（不读缓存、不写缓存的强制刷新）。
+    pub async fn force_environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
+        self.fetch_environment_info().await
     }
 
     /// 代读执行端本机配置层栈（environmentConfig/read，v1.4 起——能力位

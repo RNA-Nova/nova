@@ -89,9 +89,10 @@ enum ProcessEventSnapshot {
 async fn create_process_context(use_remote: bool) -> Result<ProcessContext> {
     if use_remote {
         let server = exec_server().await?;
-        let client = common::connect_remote_exec_client(server.websocket_url()).await?;
         Ok(ProcessContext {
-            backend: Arc::new(RemoteProcess::new(client)),
+            backend: Arc::new(RemoteProcess::new(common::lazy_remote_exec_client(
+                server.websocket_url(),
+            ))),
             _server: Some(server),
         })
     } else {
@@ -1416,8 +1417,9 @@ async fn assert_exec_process_preserves_queued_events_before_subscribe(
 async fn remote_exec_process_recovers_after_transport_disconnect() -> Result<()> {
     let server = exec_server().await?;
     let mut proxy = server.disconnectable_websocket_proxy().await?;
-    let client = common::connect_remote_exec_client(proxy.websocket_url()).await?;
-    let backend: Arc<dyn ExecBackend> = Arc::new(RemoteProcess::new(client));
+    let backend: Arc<dyn ExecBackend> = Arc::new(RemoteProcess::new(
+        common::lazy_remote_exec_client(proxy.websocket_url()),
+    ));
     let temp_dir = TempDir::new()?;
     let gate_path = temp_dir.path().join("release-output");
     let emitted_path = temp_dir.path().join("output-emitted");

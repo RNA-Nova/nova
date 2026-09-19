@@ -29,7 +29,7 @@ use super::ExecServerClient;
 use super::ExecServerError;
 use super::Inner;
 use super::LazyRemoteExecServerClient;
-use super::EnvironmentConnectionState;
+use crate::environment::EnvironmentConnectionState;
 use super::fail_all_in_flight_work;
 
 /// 共享的启动/重连结果 + 刷新作废旧工作的取消令牌；可选传输参数供刷新

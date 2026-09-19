@@ -10,6 +10,7 @@ use crate::HttpRequestParams;
 use crate::HttpRequestResponse;
 use crate::HttpResponseBodyStream;
 
+pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Connection options for any exec-server client transport.

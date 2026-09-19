@@ -362,8 +362,9 @@ async fn open_rejects_handle_ids_longer_than_32_bytes() -> Result<()> {
 }
 
 async fn connect_file_system(websocket_url: &str) -> Result<Arc<dyn ExecutorFileSystem>> {
-    let client = common::connect_remote_exec_client(websocket_url).await?;
-    Ok(Arc::new(RemoteFileSystem::new(client)))
+    Ok(Arc::new(RemoteFileSystem::new(
+        common::lazy_remote_exec_client(websocket_url),
+    )))
 }
 
 // Only the Unix stream tests above need this sandbox builder.

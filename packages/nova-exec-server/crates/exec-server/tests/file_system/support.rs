@@ -63,9 +63,10 @@ pub(crate) async fn create_file_system_context(
         }
         FileSystemImplementation::Remote => {
             let server = exec_server().await?;
-            let client = crate::common::connect_remote_exec_client(server.websocket_url()).await?;
             Ok(FileSystemContext {
-                file_system: Arc::new(RemoteFileSystem::new(client)),
+                file_system: Arc::new(RemoteFileSystem::new(
+                    crate::common::lazy_remote_exec_client(server.websocket_url()),
+                )),
                 _helper_paths: None,
                 _server: Some(server),
             })

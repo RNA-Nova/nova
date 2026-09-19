@@ -136,6 +136,21 @@ pub(crate) async fn connect_remote_exec_client(
     .await?)
 }
 
+/// Remote* 后座的惰性客户端包装（每次调用现取连接、断线自动恢复——
+/// 对位 codex RemoteProcess/RemoteFileSystem 的 Lazy 后座）。
+#[allow(dead_code)]
+pub(crate) fn lazy_remote_exec_client(websocket_url: &str) -> nova_exec_server::LazyRemoteExecServerClient {
+    use std::time::Duration;
+
+    nova_exec_server::LazyRemoteExecServerClient::new(
+        nova_exec_server::ExecServerTransportParams::websocket_url(
+            websocket_url.to_string(),
+            Duration::from_secs(10),
+        ),
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    )
+}
+
 fn next_release_path_arg(mut args: impl Iterator<Item = std::ffi::OsString>) -> PathBuf {
     let Some(release_path) = args.next() else {
         eprintln!("expected release path");

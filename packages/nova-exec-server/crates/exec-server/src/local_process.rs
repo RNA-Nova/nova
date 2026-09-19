@@ -183,6 +183,10 @@ impl Default for LocalProcess {
 }
 
 impl LocalProcess {
+    pub(crate) fn with_local_runtime_paths(runtime_paths: ExecServerRuntimePaths) -> Self {
+        Self::with_discarded_notifications(Some(runtime_paths))
+    }
+
     fn with_discarded_notifications(runtime_paths: Option<ExecServerRuntimePaths>) -> Self {
         let (outgoing_tx, mut outgoing_rx) =
             mpsc::channel::<RpcServerOutboundMessage>(NOTIFICATION_CHANNEL_CAPACITY);

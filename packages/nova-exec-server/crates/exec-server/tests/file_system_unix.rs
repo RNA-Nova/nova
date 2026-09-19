@@ -541,7 +541,7 @@ async fn sandboxed_file_system_helper_finds_bwrap_on_preserved_path() -> Result<
 
     let server = exec_server_with_env([("PATH", helper_path.as_os_str())], &[]).await?;
     let file_system: Arc<dyn nova_exec_server::ExecutorFileSystem> = Arc::new(
-        RemoteFileSystem::new(common::connect_remote_exec_client(server.websocket_url()).await?),
+        RemoteFileSystem::new(common::lazy_remote_exec_client(server.websocket_url())),
     );
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace)?;
