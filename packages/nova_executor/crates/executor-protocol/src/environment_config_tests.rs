@@ -171,6 +171,8 @@ fn local_environment_info_advertises_http_header_env_vars() {
     let json = serde_json::to_value(&capabilities).expect("serialize capabilities");
     assert_eq!(json["httpHeaderEnvVars"], serde_json::json!(true));
     assert_eq!(json["networkProxyLaunch"], serde_json::json!(true));
-    assert_eq!(json["readStream"], serde_json::json!(true));
-    assert_eq!(json["writeStream"], serde_json::json!(true));
+    assert_eq!(json["sandboxedFileStreaming"], serde_json::json!(true));
+    // v1.6 撤除的端点位不得再出现（端点存在不配位——约束位才配位）
+    assert!(json.get("readStream").is_none());
+    assert!(json.get("writeStream").is_none());
 }

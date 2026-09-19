@@ -124,12 +124,10 @@ pub struct EnvironmentCapabilities {
     /// Whether this executor supports the `environmentConfig/read` request.
     #[serde(default)]
     pub environment_config_read: bool,
-    /// Whether this executor supports `fs/readStream`（大文件流式读，服务端推送）。
+    /// Whether filesystem streams run inside the platform sandbox sent with the
+    /// request（fs 流式通道可按请求装配沙箱执行——约束能力，对位 codex 同名位）。
     #[serde(default)]
-    pub read_stream: bool,
-    /// Whether this executor supports `fs/writeStream`（大文件流式写，客户端分片推）。
-    #[serde(default)]
-    pub write_stream: bool,
+    pub sandboxed_file_streaming: bool,
     /// Whether `http/request` header values can resolve from the executor
     /// environment（valueEnvVar——凭证留执行机，敏感变量保护名单拒代发）。
     #[serde(default)]
@@ -209,10 +207,11 @@ impl EnvironmentInfo {
                 // environmentConfig/read 已恢复（v1.4 nova 语义：executor 代读
                 // 本机 user/project 配置层回传，不合并不裁决）——能力位如实宣告 true
                 environment_config_read: true,
-                // fs/readStream 与 fs/writeStream 为本 executor 自有端点（已注册
-                // 并含沙箱化实现）——如实宣告 true，客户端可据此选用流式通道
-                read_stream: true,
-                write_stream: true,
+                // fs 流式通道可随单装配沙箱执行（readStream 经沙箱开门取 fd、
+                // writeStream 走长命沙箱 helper——按下发权限档执法）——
+                // 如实宣告 true（v1.6 补回 codex 原约束位；端点存在不配位，
+                // readStream/writeStream 端点位随本版撤除）
+                sandboxed_file_streaming: true,
                 // http/request 的 valueEnvVar（header 值从执行机环境变量解析）已实现
                 // 于 route_aware_http_client（敏感变量保护名单拒代发，有测试）——
                 // 如实宣告 true（此前机制在但宣告缺位，v1.5 补齐）
@@ -981,8 +980,7 @@ mod tests {
             EnvironmentCapabilities {
                 network_proxy_launch: true,
                 environment_config_read: false,
-                read_stream: false,
-                write_stream: false,
+                sandboxed_file_streaming: false,
                 http_header_env_vars: false,
                 shell_snapshot_v2: false,
             }
@@ -1001,8 +999,7 @@ mod tests {
             "capabilities": {
                 "networkProxyLaunch": false,
                 "environmentConfigRead": false,
-                "readStream": false,
-                "writeStream": false,
+                "sandboxedFileStreaming": false,
                 "httpHeaderEnvVars": false,
                 "shellSnapshotV2": false,
             },
@@ -1031,8 +1028,7 @@ mod tests {
                 "capabilities": {
                     "networkProxyLaunch": false,
                     "environmentConfigRead": false,
-                    "readStream": true,
-                    "writeStream": true,
+                    "sandboxedFileStreaming": true,
                     "httpHeaderEnvVars": false,
                     "shellSnapshotV2": true,
                 },

@@ -1,4 +1,4 @@
-# nova-executor 线上协议（v1.5）
+# nova-executor 线上协议（v1.6）
 
 > 本文件是 nova-executor 服务端与客户端之间的**唯一契约**。任何语言照本文档
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
@@ -43,7 +43,7 @@ client → initialized（notification）
 
 | 方法 | 参数 | 结果 | 说明 |
 |---|---|---|---|
-| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`readStream`、`writeStream`、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
+| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
 | `environment/status` | — | `EnvironmentStatus` | 环境状态 |
 | `environmentConfig/read` | `EnvironmentConfigReadParams` | `EnvironmentConfigReadResponse` | 代读 executor 本机配置层栈（v1.4 起，能力位 `environmentConfigRead` 门控，见下节） |
 

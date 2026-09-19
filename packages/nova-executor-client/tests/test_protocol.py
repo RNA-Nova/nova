@@ -60,27 +60,29 @@ def test_initialize_response_with_environment_info():
 
 
 def test_environment_capabilities_full_wire_shape():
-    """能力位镜像完整性：v1.5 全部能力位 camelCase 别名解析（防漏位）"""
+    """能力位镜像完整性：v1.6 全部能力位 camelCase 别名解析（防漏位）"""
     from nova_executor_client.protocol import EnvironmentCapabilities
 
     caps = EnvironmentCapabilities.model_validate(
         {
             "networkProxyLaunch": True,
             "environmentConfigRead": True,
-            "readStream": True,
-            "writeStream": True,
+            "sandboxedFileStreaming": True,
             "httpHeaderEnvVars": True,
             "shellSnapshotV2": True,
         }
     )
     assert caps.network_proxy_launch is True
     assert caps.environment_config_read is True
-    assert caps.read_stream is True
-    assert caps.write_stream is True
+    assert caps.sandboxed_file_streaming is True
     assert caps.http_header_env_vars is True
     assert caps.shell_snapshot_v2 is True
     wire = caps.model_dump(by_alias=True)
+    assert wire["sandboxedFileStreaming"] is True
     assert wire["httpHeaderEnvVars"] is True
+    # v1.6 撤除的端点位不得再出现在线上形态
+    assert "readStream" not in wire
+    assert "writeStream" not in wire
 
 
 def test_initialize_response_without_environment_info():

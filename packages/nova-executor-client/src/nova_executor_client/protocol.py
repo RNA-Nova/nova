@@ -22,7 +22,7 @@ from pydantic import (
 
 #: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
 #: 跟随服务端 crates/executor-protocol/src/lib.rs::PROTOCOL_VERSION）
-PROTOCOL_VERSION = "1.5"
+PROTOCOL_VERSION = "1.6"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
@@ -167,8 +167,7 @@ class EnvironmentCapabilities(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     network_proxy_launch: bool = Field(default=False, alias="networkProxyLaunch")
     environment_config_read: bool = Field(default=False, alias="environmentConfigRead")
-    read_stream: bool = Field(default=False, alias="readStream")
-    write_stream: bool = Field(default=False, alias="writeStream")
+    sandboxed_file_streaming: bool = Field(default=False, alias="sandboxedFileStreaming")
     http_header_env_vars: bool = Field(default=False, alias="httpHeaderEnvVars")
     shell_snapshot_v2: bool = Field(default=False, alias="shellSnapshotV2")
 

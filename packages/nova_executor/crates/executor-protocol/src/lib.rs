@@ -26,4 +26,8 @@ pub use rpc::*;
 ///       environmentConfigRead 能力位回 true（可选增量，向后兼容）。
 /// 1.5 = 补 httpHeaderEnvVars 能力位（http/request 的 valueEnvVar 机制早已实现，
 ///       仅宣告缺位——如实宣告 true；可选增量，向后兼容）。
-pub const PROTOCOL_VERSION: &str = "1.5";
+/// 1.6 = 能力位归位：补回 sandboxedFileStreaming 约束位（fs 流式通道可按请求
+///       装配沙箱执行——readStream 沙箱开门取 fd、writeStream 长命沙箱 helper，
+///       如实宣告 true）；撤除 readStream/writeStream 两个端点存在位
+///       （端点存在不配位——约束才配位；端点本身不变，可选增量，向后兼容）。
+pub const PROTOCOL_VERSION: &str = "1.6";
