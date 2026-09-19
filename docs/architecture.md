@@ -13,7 +13,7 @@ nova/
 │   ├── nova_server/        # JSON-RPC 协议服务层（protocol/transport/reduction/client 家族/exec）
 │   ├── nova_client/        # 前端运行时（TS 厚应用层 + 内置 TUI 宿主；npm 包）
 │   ├── nova_executor/      # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over stdio/WS）
-│   ├── nova-executor-client/   # executor 的 Python 薄客户端（连接 + 配置发现 + 物化）
+│   ├── nova-exec-server-client/   # executor 的 Python 薄客户端（连接 + 配置发现 + 物化）
 │   └── nova-agent-rs/      # Rust 侧实验性代码（非发布路径）
 ├── bundles/
 │   └── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具（官方包住 bundles/，框架住 packages/）
@@ -34,7 +34,7 @@ nova/
 5. **`nova_coding_agent`** —— 官方 bundle。同时是一个可 import 的 Python 包，提供 `coding_agent` 等 5 个 Agent 组合声明（含 scout/planner/reviewer/worker 子代理）、八个扩展（`session_commands`/`permission_gate`/`plan_mode`/`tools_panel`/`interactive_shell`/`confirm_destructive`/`subagent_gate`/`executor_switch`）、10 个本地工具（bash、edit、find、grep、ls、question、read、subagent、todo、write）以及 `bash` 用户工具（`user_tools/`，LLM 工具与会话 bash 共享同一引擎）。
    **bash 与六个 fs 工具（read/write/edit/ls/find/grep）均可随后端切换**（执行期读 `BackendSelection` 模式格；question/todo/subagent 不触碰执行环境不在切换面）——进程走 ExecutorBashOperations，文件系统走 FileSystemLayer 双实现（本地/远程同一实现类），详见 `packages/nova_harness/examples/executor-integration.md`。
 6. **`nova_client`** —— 前端运行时。TypeScript 厚应用层，TUI 是包内的一种宿主形态；与将来的 Web 宿主共享运行时主体。纯 npm 包（无 Python 源码；运行时需 Python 环境中可导入 `nova_harness`，`NOVA_PYTHON` 可指定后端解释器）。
-7. **`nova_executor` + `nova-executor-client`** —— 通用执行后端与其 Python 客户端（见下文专节）。
+7. **`nova_executor` + `nova-exec-server-client`** —— 通用执行后端与其 Python 客户端（见下文专节）。
 
 > **依赖声明现状**：
 > - 各 Python 子包的 `[tool.poetry.dependencies]` **只声明各自的第三方依赖**，不再声明兄弟包的 path 依赖（pip 对"同一包同时被 editable 与非 editable path 依赖引用"会报 ResolutionImpossible；互依关系到发布时再恢复）。
@@ -194,11 +194,11 @@ npm start       # node 运行编译产物（dist/modes/tui/main.js）
 npm link        # 全局注册 `nova` 命令
 ```
 
-### `nova_executor`（Rust 通用执行后端）与 `nova-executor-client`（Python SDK）
+### `nova_executor`（Rust 通用执行后端）与 `nova-exec-server-client`（Python SDK）
 
-- **定位**：编程无绑定的通用执行后端——进程/文件系统/PTY + 三平台沙箱（macOS Seatbelt、Linux bwrap+landlock、Windows restricted token）+ managed network sandbox，JSON-RPC over stdio / WebSocket（stdio 为主：CLI/桌面/SSH 隧道场景；WS 用于回环与将来服务器托管）。fs 含大文件流式端点 `fs/readStream`（服务端推送，支持平台沙箱）/ `fs/writeStream`（客户端分片推）。**协议即产品**：线上契约在 `packages/nova_executor/PROTOCOL.md`，任何语言照文档可实现客户端。
+- **定位**：编程无绑定的通用执行后端——进程/文件系统/PTY + 三平台沙箱（macOS Seatbelt、Linux bwrap+landlock、Windows restricted token）+ managed network sandbox，JSON-RPC over stdio / WebSocket（stdio 为主：CLI/桌面/SSH 隧道场景；WS 用于回环与将来服务器托管）。fs 含大文件流式端点 `fs/readStream`（服务端推送，支持平台沙箱）/ `fs/writeStream`（客户端分片推）。**协议即产品**：线上契约在 `packages/nova-exec-server/PROTOCOL.md`，任何语言照文档可实现客户端。
 - **边界（重要）**：executor 不知道 agent/模型/工具/会话概念。已移除：模型 API 层、agent 配置体系、Rust 侧工具注册处、`capabilityRoots/discoverV1` 端点。**不要在 executor 里重新引入这些概念**——工具契约在 Nova 包体系（Python），正确接法是在 `nova_coding_agent` 的 bash 引擎后面挂 executor 实现（本地 subprocess ↔ executor 同缝切换）。
-- **`nova-executor-client`**：executor 栈的客户端运行时（连接 + 发现 + 物化）。
+- **`nova-exec-server-client`**：executor 栈的客户端运行时（连接 + 发现 + 物化）。
   连接面：`ExecutorClient`（process/fs/pty + errors），initialize 时做 `protocolVersion` major 匹配；
   传输双形态 `WebSocketTransport` + `StdioTransport`（spawn 子进程 NDJSON，command 参数化——本地/SSH 同一实现）；
   `TransportPool` 多连接按通道路由（控制面/数据面分离，大文件流不阻塞工具调用）。
@@ -207,7 +207,7 @@ npm link        # 全局注册 `nova` 命令
   **多 executor 环境注册表（config.py/environments.py）**：`[[environments]]` 词汇 + 校验 + 默认解析链（`resolve_environment`）+ `ExecutorClient.from_environment` 构造（含 local 内建环境、"none" 禁用默认；选择/切换编排归调用方，将来归 bundle 扩展）。
   已删除其自带的 Tool/Plugin/ExecutorBackend 三件套（与 Nova 契约冲突），不要恢复。
 - 鉴权：executor 只做本地回环（stdio / WS 回环承载），**无入站鉴权**；对外暴露与鉴权归上层中继层（未落地），不归 executor。
-- 构建/测试：`cargo build --workspace` / `cargo test --workspace`（在 `packages/nova_executor` 下）。
+- 构建/测试：`cargo build --workspace` / `cargo test --workspace`（在 `packages/nova-exec-server` 下）。
 
 ---
 

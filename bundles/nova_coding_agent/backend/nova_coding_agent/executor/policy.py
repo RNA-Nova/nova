@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from nova_executor_client.protocol import FileSystemSandboxContext
+from nova_exec_server_client.protocol import FileSystemSandboxContext
 
 #: ExecutorSettings.sandbox 支持的档位（None = 不沙箱，现状默认）
 SANDBOX_TIERS = ("read-only", "workspace-write")

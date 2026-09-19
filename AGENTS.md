@@ -34,8 +34,8 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | `packages/nova_harness` | 高阶 SDK：会话树/压缩/资源/包管理/RuntimeManager |
 | `packages/nova_server` | JSON-RPC 协议服务层 + client 家族 + headless exec |
 | `packages/nova_client` | TS 前端运行时（TUI 宿主在内） |
-| `packages/nova_executor` | Rust 通用执行后端（进程/fs/PTY/沙箱） |
-| `packages/nova-executor-client` | executor 的 Python 薄客户端 |
+| `packages/nova-exec-server` | Rust 通用执行后端（进程/fs/PTY/沙箱） |
+| `packages/nova-exec-server-client` | executor 的 Python 薄客户端 |
 | `bundles/nova_coding_agent` | 官方编程 bundle（10 工具 + 8 扩展 + agents） |
 
 数据建模终态：`nova_protocol` 词汇枢纽（已建成，批次迁移中）＋边界协议包＋组件内部类型——见 `docs/data-modeling.md`「住所」。

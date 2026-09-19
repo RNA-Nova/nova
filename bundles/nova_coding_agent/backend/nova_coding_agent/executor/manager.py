@@ -32,7 +32,7 @@ from nova_coding_agent.executor.provision import (
     parse_ssh_target,
     provision,
 )
-from nova_executor_client import ExecutorClient
+from nova_exec_server_client import ExecutorClient
 from nova_harness.config.defaults import get_agent_dir
 
 # 等待本地 executor 打印监听地址的超时
@@ -52,7 +52,7 @@ def resolve_executor_binary() -> Optional[str]:
     # 开发态兜底：仓库内 cargo 构建产物
     repo = Path(__file__).resolve()
     for parent in repo.parents:
-        candidate = parent / "packages" / "nova_executor_client"
+        candidate = parent / "packages" / "nova_exec_server_client"
         if candidate.is_dir():
             for profile in ("release", "debug"):
                 built = candidate / "target" / profile / "nova-executor"

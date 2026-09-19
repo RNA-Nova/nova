@@ -29,7 +29,7 @@ def make_transport(
 
 
 @pytest.mark.asyncio
-async def test_default_command_is_nova_executor_stdio():
+async def test_default_command_is_nova_exec_server_stdio():
     """默认命令对齐 nova-exec-server --listen stdio（SSH 只需换 program/args）"""
     transport = StdioTransport()
     assert transport.program == "nova-exec-server"

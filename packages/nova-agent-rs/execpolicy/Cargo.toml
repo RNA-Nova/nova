@@ -1,17 +1,17 @@
 [package]
-name = "nova-executor-execpolicy"
+name = "nova-exec-server-execpolicy"
 version = "0.1.0"
 edition.workspace = true
 license = "Apache-2.0"
 description = "Exec policy engine: prefix-based Starlark rules for command decisions (derived from Codex execpolicy)."
 
 [lib]
-name = "nova_executor_execpolicy"
+name = "nova_exec_server_execpolicy"
 path = "src/lib.rs"
 doctest = false
 
 [[bin]]
-name = "nova-executor-execpolicy"
+name = "nova-exec-server-execpolicy"
 path = "src/main.rs"
 
 
@@ -19,7 +19,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-nova-executor-utils-absolute-path = { path = "../executor-utils-absolute-path"  }
+nova-exec-server-utils-absolute-path = { path = "../nova-exec-server/crates/exec-server-utils-absolute-path"  }
 multimap = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

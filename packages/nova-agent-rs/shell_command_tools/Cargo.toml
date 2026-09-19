@@ -1,5 +1,5 @@
 # 存档 crate（不进 workspace、不参与构建）——agent 层命令解析与安全判定备件。
-# 从 nova-executor-shell-command 挪出；启用时接回 workspace 并修复漂移。
+# 从 nova-exec-server-shell-command 挪出；启用时接回 workspace 并修复漂移。
 [package]
 name = "nova-agent-shell-command-tools"
 version = "0.1.0"
@@ -7,8 +7,8 @@ edition = "2024"
 license = "Apache-2.0"
 
 [dependencies]
-# 依赖 nova-executor-shell-command 的 shell_detect（ShellType/detect_shell_type）
-nova-executor-shell-command = { path = "../../nova_executor/crates/executor-shell-command" }
+# 依赖 nova-exec-server-shell-command 的 shell_detect（ShellType/detect_shell_type）
+nova-exec-server-shell-command = { path = "../../nova-exec-server/crates/exec-server-shell-command" }
 base64 = "1"
 libc = "0.2"
 once_cell = "1"

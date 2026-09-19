@@ -1,7 +1,7 @@
 # nova-agent-rs —— agent 运行时的 Rust 备件存档
 
 **这里不是 executor 的一部分。** 这里存放的是 fork 自 codex 时连锅端进 executor 仓库、但
-**生产消费方在 agent 层（core）而非执行后端**的 crate/模块。executor（`packages/nova_executor`）
+**生产消费方在 agent 层（core）而非执行后端**的 crate/模块。exec-server（`packages/nova-exec-server`）
 只保留执行端面（进程/fs/PTY/沙箱/传输）。
 
 ## 收录内容

@@ -88,6 +88,12 @@
 
 取消、审批、打断这类控制流，**优先建模为消息/方法词汇**（事件联合的成员、RPC 方法），不在数据形状上挂可取消 token 字段——消息通道天然是控制总线。
 
+**取消的三海拔模型**（对齐 codex `CancelErr` / `CodexErrorDetails` / `EventMsg::TurnAborted` 的分层）：
+
+1. **原语层**：signal 中断一律抛 `AbortedError`（Exception 子类——可精确匹配、可带消息）。禁用两种假冒：裸 `asyncio.CancelledError`（那是"任务自身被取消"的 asyncio 内部语义，混用会干扰 Task/TaskGroup 的取消判定）与 `RuntimeError("...cancelled")` 式字符串假冒（会被泛型兜底误报成故障）。可中断等待原语单点归 `nova_ai/utils/abort.py`（`race_with_abort` / `abortable_sleep` / `any_signal` / `operation_signal`），不复制第三份实现。
+2. **领域层**：`except` 包装点必须先显式直通取消词汇，再进泛型兜底（`if isinstance(error, AbortedError): raise`——`auth/resolve.py` 先例）。取消落进 `ModelsError` 这类领域错误包装，就是把用户取消误报成故障。登录交互的"用户主动取消"用 `LoginCancelledError`（交互层词汇：宿主 Esc/关框/任务取消 → 流程优雅收尾），与传输层 abort 是两回事。
+3. **线上层**：取消以事件/终态出网（`StopReason.ABORTED` + `AgentEndEvent`；codex 的 `EventMsg::TurnAborted` 同构），不在错误载荷里夹带字符串供下游嗅探。
+
 现状注记：`AuthPrompt.signal` 死字段已删除——它在 TS 侧承载浏览器登录的 manual_code 竞速取消（JS 无结构化任务取消，只能给 prompt 挂 token）；nova 移植时竞速改走 `prompt_task.cancel()`（asyncio 原生取消），字段随之失效。**回来之门常开**：将来若需要"取消某个在飞 prompt 而不杀整个流程"的跨边界 per-prompt 取消，把它加回来是干净的 minor 演化（加 optional 字段）。`AuthInteraction.signal` 保留——它是 OAuth 设备码轮询的真实取消通道，属行为契约而非数据形状。`signal.py` 作为**基础原语**登记住枢纽（见第八节登记制）。新增控制流交互时先按本节原则设计（能否建模为事件/方法/任务取消），token 字段是存量兼容手段不是新代码默认。
 
 ## 八、行为名分

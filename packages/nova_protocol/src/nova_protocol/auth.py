@@ -171,7 +171,13 @@ class CredentialStore(Protocol):
         provider_id: str,
         fn: Callable[[Optional[Credential]], Awaitable[Optional[Credential]]],
     ) -> Optional[Credential]:
-        """串行化读写 mutation。"""
+        """串行化读写 mutation。
+
+        承重契约（resolve 的双重检查锁依赖）：``fn`` 返回 ``None`` 表示
+        **不改写**存储，此时 ``modify`` 必须返回**当前值**（而非 None）——
+        调用方据此区分"期间已登出"（当前值本来就是 None）与"另一请求刚
+        刷新过"（当前值是新凭据，直接复用）。
+        """
         ...
 
     async def delete(self, provider_id: str) -> None:

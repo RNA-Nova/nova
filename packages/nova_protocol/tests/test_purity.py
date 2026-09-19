@@ -3,7 +3,7 @@
 Python 没有编译期 crate 闸，本测试就是那道闸：
 
 1. **零兄弟包依赖**：包内任何模块不得 import nova_ai / nova_agent /
-   nova_harness / nova_server / nova_coding_agent / nova_executor*；
+   nova_harness / nova_server / nova_coding_agent / nova-exec-server*；
 2. **零行为零 I/O**：包内任何模块不得 import 行为/IO 模块
    （asyncio / subprocess / socket / urllib / httpx / requests / os / sys /
    io / logging / pathlib）；

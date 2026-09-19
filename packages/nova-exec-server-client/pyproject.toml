@@ -21,7 +21,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nova_exec_server_client", "src/nova_executor_client"]
+packages = ["src/nova_exec_server_client"]
 
 [tool.black]
 target-version = ['py312']

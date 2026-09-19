@@ -58,7 +58,7 @@ class KnownProvider(str, Enum):
 
 
 # 允许任意字符串值的 provider id 类型（对齐 TS ``ProviderId``；
-# 与 ``nova_ai.models.Provider`` 运行时单元区分）
+# 与 ``nova_ai/gateway/provider.py`` 的 ``Provider`` 运行时单元区分）
 ProviderId = Union[KnownProvider, str]
 
 
