@@ -6,6 +6,7 @@ mod outbound_proxy;
 mod request;
 mod route_aware_client_pool;
 mod route_aware_redirect;
+mod tls_backend_fallback;
 mod transport;
 
 pub use crate::client::HttpClient;

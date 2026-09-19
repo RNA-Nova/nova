@@ -57,6 +57,23 @@ const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(25);
 const SESSION_RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 const NETWORK_POLICY_DENIAL_REASON: &str = "not_allowed";
 
+struct ClientRequestOutcome {
+    span: tracing::Span,
+    result: &'static str,
+}
+
+impl ClientRequestOutcome {
+    fn complete(&mut self, result: &'static str) {
+        self.result = result;
+    }
+}
+
+impl Drop for ClientRequestOutcome {
+    fn drop(&mut self) {
+        self.span.record("result", self.result);
+    }
+}
+
 impl SessionState {
     fn last_published_seq(&self) -> u64 {
         self.ordered_events
@@ -544,7 +561,14 @@ impl ExecServerClient {
                     return;
                 };
                 match event {
-                    RpcClientEvent::Request { request, .. } => {
+                    RpcClientEvent::Request {
+                        request,
+                        request_span,
+                    } => {
+                        let mut request_outcome = ClientRequestOutcome {
+                            span: request_span,
+                            result: "disconnected",
+                        };
                         if request.method != NETWORK_POLICY_REQUEST_METHOD {
                             let error = method_not_found(format!(
                                 "exec-server client does not implement `{}` yet",
@@ -557,8 +581,12 @@ impl ExecServerClient {
                                 );
                                 return;
                             }
+                            request_outcome.complete("error");
                             continue;
                         }
+                        request_outcome
+                            .span
+                            .record("otel.name", NETWORK_POLICY_REQUEST_METHOD);
 
                         let request_guard = match rpc_client
                             .admit_inbound_request(&request.id, &rpc_inbound_request_slots)
@@ -593,6 +621,7 @@ impl ExecServerClient {
                                     );
                                     return;
                                 }
+                                request_outcome.complete("success");
                                 continue;
                             }
                         };
@@ -611,6 +640,7 @@ impl ExecServerClient {
                                         );
                                         return;
                                     }
+                                    request_outcome.complete("error");
                                     continue;
                                 }
                             };
@@ -728,6 +758,8 @@ impl ExecServerClient {
                                     ?error,
                                     "failed to send network policy decision to exec-server"
                                 );
+                            } else {
+                                request_outcome.complete("success");
                             }
                         });
                     }

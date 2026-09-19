@@ -16,6 +16,7 @@ use crate::HttpClientFactory;
 use crate::OutboundProxyRoute;
 use crate::client::RequestLogging;
 use crate::custom_ca::build_reqwest_client_with_custom_ca;
+use nova_exec_server_utils_rustls_provider::ensure_rustls_crypto_provider;
 
 /// Configures an [`HttpClient`] without exposing the underlying HTTP implementation.
 ///
@@ -28,6 +29,13 @@ pub struct HttpClientBuilder {
     follow_redirects: bool,
     connect_timeout: Option<Duration>,
     request_logging: RequestLogging,
+    tls_backend: TlsBackend,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TlsBackend {
+    TransportDefault,
+    Rustls,
 }
 
 impl HttpClientFactory {
@@ -89,6 +97,11 @@ impl HttpClientBuilder {
     /// Suppresses request URL and response-header diagnostics.
     pub fn without_request_logging(mut self) -> Self {
         self.request_logging = RequestLogging::Disabled;
+        self
+    }
+
+    pub(crate) fn with_rustls_tls(mut self) -> Self {
+        self.tls_backend = TlsBackend::Rustls;
         self
     }
 
@@ -161,6 +174,10 @@ impl HttpClientBuilder {
 
     fn base_reqwest_builder(self) -> reqwest::ClientBuilder {
         let mut builder = reqwest::Client::builder();
+        if self.tls_backend == TlsBackend::Rustls {
+            ensure_rustls_crypto_provider();
+            builder = builder.use_rustls_tls();
+        }
         if let Some(default_headers) = self.default_headers {
             builder = builder.default_headers(default_headers);
         }
@@ -181,6 +198,7 @@ impl Default for HttpClientBuilder {
             follow_redirects: true,
             connect_timeout: None,
             request_logging: RequestLogging::Enabled,
+            tls_backend: TlsBackend::TransportDefault,
         }
     }
 }

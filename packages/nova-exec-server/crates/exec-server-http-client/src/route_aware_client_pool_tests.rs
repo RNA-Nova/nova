@@ -524,7 +524,7 @@ async fn resolve_with(
     request_url: &str,
 ) -> Result<HttpClient, RouteAwareClientPoolError> {
     let resolver = resolver.clone();
-    let (_, client) = pool
+    let (_, client, _) = pool
         .client_for_url_with_resolver(request_url, move |request_url| async move {
             resolver.resolve(request_url).await
         })
