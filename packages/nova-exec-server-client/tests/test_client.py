@@ -134,3 +134,76 @@ async def test_read_environment_config():
     assert [layer.format for layer in response.config.layers] == ["toml", "json"]
     assert response.config.layers[0].error is None
     await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_refresh_connects_fresh_session_and_retires_old():
+    """refresh（对位 Rust refresh_connection）：全新会话不 resume + 退役旧传输"""
+    made: list[FakeTransport] = []
+
+    def factory() -> FakeTransport:
+        transport = FakeTransport(
+            {
+                "initialize": {
+                    "sessionId": f"session-{len(made)}",
+                    "protocolVersion": "1.0",
+                },
+                "environment/status": {"status": "ready"},
+            }
+        )
+        made.append(transport)
+        return transport
+
+    client = ExecutorClient(transport_factory=factory)
+    await client.connect()
+    assert client.session_id == "session-0"
+
+    await client.refresh_connection()
+
+    assert client.session_id == "session-1"
+    init_params = [p for m, p, _ in made[1].requests if m == "initialize"][0]
+    assert init_params.get("resumeSessionId") is None
+    assert not made[0].is_connected
+    assert made[1].is_connected
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_leaves_disconnected_and_later_connect_retries():
+    """refresh 失败不恢复旧会话：状态落 disconnected，后续 connect 全新重试"""
+
+    class FailingTransport(FakeTransport):
+        async def connect(self) -> None:
+            raise ConnectionError("dial refused")
+
+    made: list[FakeTransport] = []
+
+    def factory() -> FakeTransport:
+        if len(made) == 1:
+            transport: FakeTransport = FailingTransport({})
+        else:
+            transport = FakeTransport(
+                {
+                    "initialize": {
+                        "sessionId": f"session-{len(made)}",
+                        "protocolVersion": "1.0",
+                    },
+                    "environment/status": {"status": "ready"},
+                }
+            )
+        made.append(transport)
+        return transport
+
+    client = ExecutorClient(transport_factory=factory)
+    await client.connect()
+    assert client.session_id == "session-0"
+
+    import pytest as _pytest
+
+    with _pytest.raises(Exception):
+        await client.refresh_connection()
+    assert client._control.state == "disconnected"
+
+    await client.connect()
+    assert client.session_id == "session-2"
+    await client.disconnect()

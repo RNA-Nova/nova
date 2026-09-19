@@ -385,6 +385,25 @@ class ExecutorClient:
         """断开连接（全部通道）"""
         await self._pool.disconnect()
 
+    async def refresh_connection(self) -> None:
+        """计划内更换后的显式连接刷新（对位 Rust Environment::refresh_connection）。
+
+        取消全部通道的在途恢复 → 退役旧会话 → 全新连接（不 resume）→
+        探活。调用场景：executor 已更换（重供给/端点变更），需要全新会话而
+        非等待旧会话恢复放弃。刷新失败不恢复旧会话；后续 connect() 重试。
+        """
+        for channel in self._pool._channels.values():
+            if isinstance(channel, ManagedTransport):
+                await channel.refresh_connection()
+            else:
+                raise ConnectionError(
+                    "connection refresh requires factory-backed managed transports"
+                )
+        # 元数据缓存属于旧会话：清空让下次访问重新拉取
+        self._environment_info = None
+        # 探活（对位 Rust 刷新末尾的 environment_status 实况检查）
+        await self.environment_status()
+
     async def environment_info(self) -> EnvironmentInfo:
         """获取环境信息（initialize 捎带/首次拉取后缓存，连接生命周期内不重复请求）"""
         if self._environment_info is None:

@@ -150,6 +150,8 @@ class ManagedTransport:
         self._failure_message: str | None = None
         self._recover_task: asyncio.Task | None = None
         self._closing = False
+        #: 显式刷新串行化（普通连接/恢复工作可并发；对位 Rust refresh_lock）
+        self._refresh_lock = asyncio.Lock()
         # 状态变化广播：每次变化 set 当前事件并换代（等待者持引用不失效）
         self._state_changed = asyncio.Event()
         self._notification_handlers: list = []
@@ -221,6 +223,53 @@ class ManagedTransport:
             self._recover_task = None
         await self._transport.disconnect()
         self._set_state("disconnected")
+
+    async def refresh_connection(self) -> None:
+        """计划内更换后的显式刷新（对位 Rust refresh_connection）。
+
+        普通恢复在瞬时断线后恢复**同一个**会话；刷新面向"executor 已更换"
+        场景：取消在途恢复 → 退役旧会话 → 全新连接（不 resume）。刷新失败
+        不恢复旧会话——状态落回 disconnected，后续 connect() 重试全新连接。
+        实例直传（无工场）不可刷新。
+        """
+        if self._factory is None:
+            raise ConnectionError("connection refresh requires a transport factory")
+        async with self._refresh_lock:
+            # 1. 取消在途恢复（半成品候选随 CancelledError 分支清理）
+            self._closing = True
+            if self._recover_task is not None:
+                self._recover_task.cancel()
+                try:
+                    await self._recover_task
+                except asyncio.CancelledError:
+                    pass
+                self._recover_task = None
+            # 2. 退役旧传输（_closing 拦截其断线回调，不再触发恢复）
+            old = self._transport
+            self._session_id = None
+            self._set_state("disconnected")
+            try:
+                await old.disconnect()
+            except Exception:
+                pass
+            # 3. 全新连接（不 resume）；失败不恢复旧会话
+            candidate = self._factory()
+            self._transport = candidate
+            self._closing = False
+            try:
+                await candidate.connect()
+                response = await self._handshake(candidate, None)
+                self._install(candidate, response)
+            except Exception:
+                try:
+                    await candidate.disconnect()
+                except Exception:
+                    pass
+                # 后续 connect() 走 self._transport——换新实例避免复用失败候选
+                self._transport = self._factory()
+                self._set_state("disconnected")
+                raise
+            self._set_state("connected")
 
     async def send_request(
         self,

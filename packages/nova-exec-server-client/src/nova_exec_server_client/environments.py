@@ -219,6 +219,19 @@ class EnvironmentManager:
         environments.append(environment)
         self._config = self._config.model_copy(update={"environments": environments})
 
+    async def refresh_environment(self, name: str | None = None) -> None:
+        """计划内更换后刷新环境连接（对位 codex Environment::refresh_connection）。
+
+        环境尚未建立连接时按当前注册表新建连接；已有连接则退役旧会话、
+        全新重连（不 resume）。
+        """
+        environment = resolve_environment(self._config, name)
+        client = self._clients.get(environment.id)
+        if client is None:
+            await self.get_client(environment.id)
+            return
+        await client.refresh_connection()
+
     async def remove_environment(self, name: str) -> bool:
         """移除环境（断开并丢弃缓存连接）；返回是否真的存在过"""
         client = self._clients.pop(name, None)
