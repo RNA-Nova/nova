@@ -25,7 +25,7 @@ nova-harness = { path = "packages/nova_harness", editable = true }
 nova-server = { path = "packages/nova_server", editable = true }
 nova-protocol = { path = "packages/nova_protocol", editable = true }
 nova-coding-agent = { path = "bundles/nova_coding_agent", editable = true }
-nova-executor-client = { path = "packages/nova-executor-client", editable = true }
+nova-exec-server-client = { path = "packages/nova-exec-server-client", editable = true }
 websockets = ">=12.0"
 # 上限钉在 <3.10.0：3.10.0（2026-09-08）引入流式收尾回归——
 # PoolByteStream 生成器在 athrow 后无法停止，即使显式关流+关客户端也压不住
@@ -67,11 +67,11 @@ test-agent = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_a
 test-harness = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_harness" }
 test-server = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova_server" }
 test-protocol = { cmd = "pytest tests", cwd = "packages/nova_protocol" }
-test-executor-client = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova-executor-client" }
+test-executor-client = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova-exec-server-client" }
 test-coding = { cmd = "pytest tests", cwd = "bundles/nova_coding_agent/backend" }
 test-all = { cmd = "pytest tests -m 'not integration'", depends-on = ["test-ai", "test-agent", "test-harness", "test-server", "test-protocol", "test-executor-client", "test-coding"] }
 generate-models = { cmd = "python scripts/generate_models.py", cwd = "packages/nova_ai" }
 check-model-data = { cmd = "python scripts/check_model_data.py", cwd = "packages/nova_ai" }
-format = "black packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-executor-client/src bundles/nova_coding_agent/backend && isort packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-executor-client/src bundles/nova_coding_agent/backend"
+format = "black packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src bundles/nova_coding_agent/backend && isort packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src bundles/nova_coding_agent/backend"
 typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent"
 nova = "nova-harness run"

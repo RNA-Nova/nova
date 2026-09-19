@@ -21,7 +21,7 @@ updates:
       - packages/nova_harness
       - packages/nova_server
       - bundles/nova_coding_agent
-      - packages/nova-executor-client
+      - packages/nova-exec-server-client
     schedule:
       interval: weekly
     cooldown:
