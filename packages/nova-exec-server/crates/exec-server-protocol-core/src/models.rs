@@ -25,56 +25,12 @@ use schemars::JsonSchema;
 
 
 
-/// Controls the per-command sandbox override requested by a shell-like tool call.
-#[derive(
-    Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Serialize, Deserialize, JsonSchema, TS,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SandboxPermissions {
-    /// Run with the turn's configured sandbox policy unchanged.
-    #[default]
-    UseDefault,
-    /// Request to run outside the sandbox.
-    RequireEscalated,
-    /// Request to stay in the sandbox while widening permissions for this
-    /// command only.
-    WithAdditionalPermissions,
-}
-
-impl SandboxPermissions {
-    /// True if SandboxPermissions requires full unsandboxed execution (i.e. RequireEscalated)
-    pub fn requires_escalated_permissions(self) -> bool {
-        matches!(self, SandboxPermissions::RequireEscalated)
-    }
-
-    /// True if SandboxPermissions requests any explicit per-command override
-    /// beyond `UseDefault`.
-    pub fn requests_sandbox_override(self) -> bool {
-        !matches!(self, SandboxPermissions::UseDefault)
-    }
-
-    /// True if SandboxPermissions uses the sandboxed per-command permission
-    /// widening flow.
-    pub fn uses_additional_permissions(self) -> bool {
-        matches!(self, SandboxPermissions::WithAdditionalPermissions)
-    }
-}
-
 #[derive(Debug, Clone, Default, Eq, Hash, PartialEq, JsonSchema, TS)]
 pub struct FileSystemPermissions {
     #[schemars(with = "Vec<RawFileSystemSandboxEntry>")]
     #[ts(as = "Vec<RawFileSystemSandboxEntry>")]
     pub entries: Vec<FileSystemSandboxEntry>,
     pub glob_scan_max_depth: Option<NonZeroUsize>,
-}
-
-#[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LegacyReadWriteRoots {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub read: Option<Vec<AbsolutePathBuf>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub write: Option<Vec<AbsolutePathBuf>>,
 }
 
 impl FileSystemPermissions {
@@ -120,36 +76,6 @@ impl FileSystemPermissions {
             glob_scan_max_depth: None,
         }
     }
-
-    pub fn legacy_read_write_roots(&self) -> Option<LegacyReadWriteRoots> {
-        self.as_legacy_permissions()
-    }
-
-    fn as_legacy_permissions(&self) -> Option<LegacyReadWriteRoots> {
-        if self.glob_scan_max_depth.is_some() {
-            return None;
-        }
-
-        let mut read = Vec::new();
-        let mut write = Vec::new();
-
-        for entry in &self.entries {
-            let FileSystemPath::Path { path } = &entry.path else {
-                return None;
-            };
-            let path = path.to_abs_path().ok()?;
-            match entry.access {
-                FileSystemAccessMode::Read => read.push(path),
-                FileSystemAccessMode::Write => write.push(path),
-                FileSystemAccessMode::Deny => return None,
-            }
-        }
-
-        Some(LegacyReadWriteRoots {
-            read: (!read.is_empty()).then_some(read),
-            write: (!write.is_empty()).then_some(write),
-        })
-    }
 }
 
 #[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -161,33 +87,22 @@ struct CanonicalFileSystemPermissions {
     glob_scan_max_depth: Option<NonZeroUsize>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum FileSystemPermissionsDe {
-    Canonical(CanonicalFileSystemPermissions),
-    Legacy(LegacyReadWriteRoots),
-}
-
 impl Serialize for FileSystemPermissions {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        if let Some(legacy) = self.as_legacy_permissions() {
-            legacy.serialize(serializer)
-        } else {
-            CanonicalFileSystemPermissions {
-                entries: self
-                    .entries
-                    .clone()
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<_, _>>()
-                    .map_err(serde::ser::Error::custom)?,
-                glob_scan_max_depth: self.glob_scan_max_depth,
-            }
-            .serialize(serializer)
+        CanonicalFileSystemPermissions {
+            entries: self
+                .entries
+                .clone()
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()
+                .map_err(serde::ser::Error::custom)?,
+            glob_scan_max_depth: self.glob_scan_max_depth,
         }
+        .serialize(serializer)
     }
 }
 
@@ -196,22 +111,18 @@ impl<'de> Deserialize<'de> for FileSystemPermissions {
     where
         D: Deserializer<'de>,
     {
-        match FileSystemPermissionsDe::deserialize(deserializer)? {
-            FileSystemPermissionsDe::Canonical(CanonicalFileSystemPermissions {
-                entries,
-                glob_scan_max_depth,
-            }) => Ok(Self {
-                entries: entries
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<_, _>>()
-                    .map_err(serde::de::Error::custom)?,
-                glob_scan_max_depth,
-            }),
-            FileSystemPermissionsDe::Legacy(LegacyReadWriteRoots { read, write }) => {
-                Ok(Self::from_read_write_roots(read, write))
-            }
-        }
+        let CanonicalFileSystemPermissions {
+            entries,
+            glob_scan_max_depth,
+        } = CanonicalFileSystemPermissions::deserialize(deserializer)?;
+        Ok(Self {
+            entries: entries
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()
+                .map_err(serde::de::Error::custom)?,
+            glob_scan_max_depth,
+        })
     }
 }
 
@@ -377,15 +288,6 @@ impl ManagedFileSystemPermissions {
     }
 }
 
-/// Reserved identifier for the built-in read-only permission profile.
-pub const BUILT_IN_PERMISSION_PROFILE_READ_ONLY: &str = ":read-only";
-
-/// Reserved identifier for the built-in workspace-write permission profile.
-pub const BUILT_IN_PERMISSION_PROFILE_WORKSPACE: &str = ":workspace";
-
-/// Reserved identifier for the built-in full-access permission profile.
-pub const BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS: &str = ":danger-full-access";
-
 /// Canonical active runtime permissions for a conversation, turn, or command.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -404,39 +306,6 @@ pub enum PermissionProfile {
     #[serde(rename_all = "snake_case")]
     #[ts(rename_all = "snake_case")]
     External { network: NetworkSandboxPolicy },
-}
-
-/// Metadata for the named or implicit built-in permissions profile that
-/// produced the active `PermissionProfile`.
-///
-/// The runtime must honor `PermissionProfile`; this sidecar exists so clients
-/// can display stable profile identity without trying to reverse-engineer a
-/// name from the compiled permissions.
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
-pub struct ActivePermissionProfile {
-    /// Profile identifier from `default_permissions` or the implicit built-in
-    /// default, such as `:workspace` or a user-defined `[permissions.<id>]`
-    /// profile.
-    pub id: String,
-
-    /// Optional parent profile identifier from the selected permissions
-    /// profile's `extends` setting.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub extends: Option<String>,
-}
-
-impl ActivePermissionProfile {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            extends: None,
-        }
-    }
-
-    pub fn read_only() -> Self {
-        Self::new(BUILT_IN_PERMISSION_PROFILE_READ_ONLY)
-    }
 }
 
 impl Default for PermissionProfile {

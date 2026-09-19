@@ -476,7 +476,9 @@ fn spawn_protocol_version_rejection_server(
     thread::spawn(move || {
         let result = (|| -> io::Result<usize> {
             let mut attempts = 0;
-            let deadline = Instant::now() + Duration::from_secs(15);
+            // 负载无关同步：等到预期次数或测试显式停止；兜底上限只防意外悬挂
+            // （工作区全量并行时墙钟 deadline 必现竞态）。
+            let deadline = Instant::now() + Duration::from_secs(120);
             while attempts < maximum_attempts && Instant::now() < deadline {
                 if stop_rx.try_recv().is_ok() {
                     break;
@@ -484,7 +486,7 @@ fn spawn_protocol_version_rejection_server(
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         stream.set_nonblocking(false)?;
-                        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+                        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
                         let mut client_hello = [0_u8; 2_048];
                         if stream.read(&mut client_hello)? == 0 {
                             return Err(io::Error::new(
