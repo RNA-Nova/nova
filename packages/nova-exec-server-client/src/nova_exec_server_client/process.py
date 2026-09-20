@@ -8,8 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-from .errors import ProcessError
-from .protocol import (
+from nova_protocol import (
     PROCESS_READ,
     PROCESS_SIGNAL,
     PROCESS_START,
@@ -29,6 +28,8 @@ from .protocol import (
     ProcessWriteResponse,
     ShellSnapshotRequest,
 )
+
+from .errors import ProcessError
 from .transport import Transport
 
 

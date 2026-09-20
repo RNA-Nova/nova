@@ -20,12 +20,13 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from .protocol import (
+from nova_protocol import (
     FS_READ_STREAM,
     FS_WRITE_STREAM,
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
 )
+
 from .transport import Transport
 
 #: 控制面通道（默认通道）：生命周期/环境/进程/小文件等低开销方法

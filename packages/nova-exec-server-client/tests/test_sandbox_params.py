@@ -1,7 +1,7 @@
 """沙箱上下文与进程启动参数的 wire 形态测试（序列化正确性，无需传输层）"""
 
 import pytest
-from nova_exec_server_client.protocol import (
+from nova_protocol import (
     ExecFileSystemPath,
     ExecPermissionProfile,
     FileSystemAccessMode,
@@ -38,10 +38,8 @@ def test_workspace_write_sandbox_serializes_roots_and_network():
     profile = ctx.model_dump(by_alias=True, exclude_none=True)["permissions"]
     assert profile["network"] == "restricted"
     entries = profile["fileSystem"]["entries"]
-    # _file_url 会 resolve 真实路径（macOS /tmp → /private/tmp），按同规则算期望
-    from pathlib import Path
-
-    extra_uri = Path("/tmp/extra").resolve().as_uri()
+    # _file_url 不 resolve（对位 rust from_host_native_path 只查绝对性），按字面路径算期望
+    extra_uri = "file:///tmp/extra"
     assert [(e["path"], e["access"]) for e in entries] == [
         ({"type": "special", "value": {"kind": "root"}}, "read"),
         ({"type": "special", "value": {"kind": "project_roots"}}, "write"),

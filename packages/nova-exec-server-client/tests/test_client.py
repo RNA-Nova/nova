@@ -233,7 +233,5 @@ async def test_force_environment_info_bypasses_cache():
     assert len(forced_calls) == 3  # 1 次缓存填充 + 2 次强制
     # 缓存未被强刷污染
     await client.environment_info()
-    assert (
-        len([m for m, _, _ in transport.requests if m == "environment/info"]) == 3
-    )
+    assert len([m for m, _, _ in transport.requests if m == "environment/info"]) == 3
     await client.disconnect()

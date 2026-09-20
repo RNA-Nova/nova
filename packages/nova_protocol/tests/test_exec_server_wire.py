@@ -1,8 +1,8 @@
-"""协议类型测试"""
+"""exec-server 线上词汇测试（批次 A 随词汇迁入枢纽）"""
 
 import base64
 
-from nova_exec_server_client.protocol import (
+from nova_protocol import (
     FileMetadata,
     FsReadStreamParams,
     InitializeParams,
@@ -34,7 +34,7 @@ def test_initialize_params_with_resume_session_id():
 
 def test_initialize_response_with_environment_info():
     """initialize 响应捎带 environmentInfo（含新增三字段）的解析"""
-    from nova_exec_server_client.protocol import InitializeResponse
+    from nova_protocol import InitializeResponse
 
     response = InitializeResponse.model_validate(
         {
@@ -61,7 +61,7 @@ def test_initialize_response_with_environment_info():
 
 def test_environment_capabilities_full_wire_shape():
     """能力位镜像完整性：v1.6 全部能力位 camelCase 别名解析（防漏位）"""
-    from nova_exec_server_client.protocol import EnvironmentCapabilities
+    from nova_protocol import EnvironmentCapabilities
 
     caps = EnvironmentCapabilities.model_validate(
         {
@@ -87,7 +87,7 @@ def test_environment_capabilities_full_wire_shape():
 
 def test_initialize_response_without_environment_info():
     """旧服务端缺省形态：无 environmentInfo 字段 → None（回退单次调用）"""
-    from nova_exec_server_client.protocol import InitializeResponse
+    from nova_protocol import InitializeResponse
 
     response = InitializeResponse.model_validate(
         {"sessionId": "session-1", "protocolVersion": "1.0"}
@@ -149,7 +149,7 @@ def test_file_metadata():
 
 def test_walk_params_and_outcome():
     """fs/walk 参数序列化与结果反序列化（camelCase 对齐 Rust 契约）。"""
-    from nova_exec_server_client.protocol import FsWalkParams, WalkOptions, WalkOutcome
+    from nova_protocol import FsWalkParams, WalkOptions, WalkOutcome
 
     params = FsWalkParams(
         path="file:///home/user",
@@ -184,7 +184,7 @@ def test_walk_params_and_outcome():
 
 def test_environment_config_read_params():
     """environmentConfig/read 请求参数序列化（camelCase 对齐 Rust 契约）"""
-    from nova_exec_server_client.protocol import EnvironmentConfigReadParams
+    from nova_protocol import EnvironmentConfigReadParams
 
     params = EnvironmentConfigReadParams(
         cwd="file:///repo", configPaths=[["sandbox"], ["network", "mode"]]
@@ -197,7 +197,7 @@ def test_environment_config_read_params():
 
 def test_environment_config_read_response():
     """environmentConfig/read 响应解析（层栈 + error 字段 + 可选字段缺省）"""
-    from nova_exec_server_client.protocol import EnvironmentConfigReadResponse
+    from nova_protocol import EnvironmentConfigReadResponse
 
     response = EnvironmentConfigReadResponse.model_validate(
         {
@@ -239,7 +239,7 @@ def test_environment_config_read_response():
 
 def test_environment_config_read_response_without_optional_fields():
     """可选字段（userHomeDir/hostname/error）缺省也能反序列化"""
-    from nova_exec_server_client.protocol import EnvironmentConfigReadResponse
+    from nova_protocol import EnvironmentConfigReadResponse
 
     response = EnvironmentConfigReadResponse.model_validate(
         {

@@ -1,4 +1,10 @@
-"""nova-exec-server JSON-RPC 协议类型和常量"""
+"""exec-server 线上词汇（nova-exec-server 协议的 Python 正典）。
+
+从 nova-exec-server-client 迁入（批次 A——词汇归枢纽）。本模块是 PROTOCOL.md
+的 Python 镜像：端点常量 + 全部 params/response/notification 模型，逐字段显式
+alias 与 rust serde camelCase 形状互锁——因此刻意不继承 NovaBaseModel 的
+alias_generator 通道（出厂配置面向 nova 内部词汇；本模块对齐外部协议金标）。
+"""
 
 from __future__ import annotations
 
@@ -167,7 +173,9 @@ class EnvironmentCapabilities(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     network_proxy_launch: bool = Field(default=False, alias="networkProxyLaunch")
     environment_config_read: bool = Field(default=False, alias="environmentConfigRead")
-    sandboxed_file_streaming: bool = Field(default=False, alias="sandboxedFileStreaming")
+    sandboxed_file_streaming: bool = Field(
+        default=False, alias="sandboxedFileStreaming"
+    )
     http_header_env_vars: bool = Field(default=False, alias="httpHeaderEnvVars")
     shell_snapshot_v2: bool = Field(default=False, alias="shellSnapshotV2")
 
@@ -939,12 +947,22 @@ class ManagedNetworkSandboxContext(BaseModel):
 
 
 def _file_url(path: str) -> str:
-    """本地路径 → file:// URL（SDK 侧 PathUri wire 形态）"""
+    """本地路径 → file:// URL（SDK 侧 PathUri wire 形态）。
+
+    纯字符串构造（枢纽纪律：禁 pathlib/urllib——前者带文件系统 I/O）。
+    调用方传入的已是绝对路径；仅对 URL path 保留集之外的字符做百分号编码。
+    """
     if path.startswith("file://"):
         return path
-    from pathlib import Path
-
-    return Path(path).resolve().as_uri()
+    if not path.startswith("/"):
+        raise ValueError(f"路径须为绝对路径：{path}")
+    safe = "/:@-._~!$&'()*+,;="
+    encoded = "".join(
+        ch if (ch.isascii() and (ch.isalnum() or ch in safe)) else f"%{b:02X}"
+        for ch in path
+        for b in ch.encode("utf-8")
+    )
+    return "file://" + encoded
 
 
 # =============================================================================

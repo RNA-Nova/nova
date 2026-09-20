@@ -1,25 +1,19 @@
-"""物化层测试（policy.py）
+"""exec-server 配置物化测试（批次 A 随词汇迁入枢纽）
 
 覆盖：套餐展开对位 codex 语义、workspace-write 微调旋钮、网络代理物化、
 ask 行为降级（fail-closed）、wire 形状 pin（camelCase 对位 rust serde）。
 """
 
-from nova_exec_server_client import (
+from nova_protocol import (
     ApprovalPolicy,
-    ExecutorConfig,
-    NetworkProxySettings,
-    SandboxMode,
-    SandboxWorkspaceWriteConfig,
-    resolve_ask_behavior,
-    resolve_execution_policy,
-    resolve_file_system_sandbox,
-    resolve_network_proxy,
-)
-from nova_exec_server_client.protocol import (
     ExecFileSystemPath,
+    ExecutorConfig,
     FileSystemAccessMode,
     NetworkMode,
+    NetworkProxySettings,
     NetworkSandboxPolicy,
+    SandboxMode,
+    SandboxWorkspaceWriteConfig,
 )
 
 CWD = "/tmp/workspace"
@@ -31,16 +25,16 @@ def _entries(ctx):
 
 class TestFileSystemSandbox:
     def test_absent_mode_returns_none(self):
-        assert resolve_file_system_sandbox(ExecutorConfig(), CWD) is None
+        assert ExecutorConfig().to_file_system_sandbox(CWD) is None
 
     def test_missing_cwd_returns_none(self):
         cfg = ExecutorConfig(sandbox_mode=SandboxMode.READ_ONLY)
-        assert resolve_file_system_sandbox(cfg, None) is None
-        assert resolve_file_system_sandbox(cfg, "") is None
+        assert cfg.to_file_system_sandbox(None) is None
+        assert cfg.to_file_system_sandbox("") is None
 
     def test_read_only_expansion(self):
         cfg = ExecutorConfig(sandbox_mode=SandboxMode.READ_ONLY)
-        ctx = resolve_file_system_sandbox(cfg, CWD)
+        ctx = cfg.to_file_system_sandbox(CWD)
         assert ctx is not None
         assert ctx.permissions.type == "managed"
         assert ctx.permissions.network is NetworkSandboxPolicy.RESTRICTED
@@ -51,7 +45,7 @@ class TestFileSystemSandbox:
 
     def test_workspace_write_defaults(self):
         cfg = ExecutorConfig(sandbox_mode=SandboxMode.WORKSPACE_WRITE)
-        ctx = resolve_file_system_sandbox(cfg, CWD)
+        ctx = cfg.to_file_system_sandbox(CWD)
         assert ctx is not None
         # 网络默认受限（放行归 network_proxy 名单，不靠档位默认开）
         assert ctx.permissions.network is NetworkSandboxPolicy.RESTRICTED
@@ -71,7 +65,7 @@ class TestFileSystemSandbox:
                 writable_roots=["/data"]
             ),
         )
-        ctx = resolve_file_system_sandbox(cfg, CWD)
+        ctx = cfg.to_file_system_sandbox(CWD)
         assert ctx is not None
         extra = [e for e in _entries(ctx) if e.access is FileSystemAccessMode.WRITE]
         assert ExecFileSystemPath.of_path("/data") in [e.path for e in extra]
@@ -81,7 +75,7 @@ class TestFileSystemSandbox:
             sandbox_mode=SandboxMode.WORKSPACE_WRITE,
             sandbox_workspace_write=SandboxWorkspaceWriteConfig(network_access=True),
         )
-        ctx = resolve_file_system_sandbox(cfg, CWD)
+        ctx = cfg.to_file_system_sandbox(CWD)
         assert ctx is not None
         assert ctx.permissions.network is NetworkSandboxPolicy.ENABLED
 
@@ -92,7 +86,7 @@ class TestFileSystemSandbox:
                 exclude_slash_tmp=True, exclude_tmpdir_env_var=True
             ),
         )
-        ctx = resolve_file_system_sandbox(cfg, CWD)
+        ctx = cfg.to_file_system_sandbox(CWD)
         assert ctx is not None
         paths = [e.path for e in _entries(ctx)]
         assert ExecFileSystemPath.slash_tmp() not in paths
@@ -103,11 +97,11 @@ class TestFileSystemSandbox:
 
 class TestNetworkProxy:
     def test_absent_returns_none(self):
-        assert resolve_network_proxy(ExecutorConfig()) is None
+        assert ExecutorConfig().to_network_proxy_launch() is None
 
     def test_disabled_returns_none(self):
         cfg = ExecutorConfig(network_proxy=NetworkProxySettings(enabled=False))
-        assert resolve_network_proxy(cfg) is None
+        assert cfg.to_network_proxy_launch() is None
 
     def test_enabled_expands_domains(self):
         cfg = ExecutorConfig(
@@ -117,7 +111,7 @@ class TestNetworkProxy:
                 denied_domains=["evil.example.com"],
             )
         )
-        launch = resolve_network_proxy(cfg)
+        launch = cfg.to_network_proxy_launch()
         assert launch is not None
         assert launch.proxy.enabled is True
         assert launch.proxy.mode is NetworkMode.PROXY
@@ -130,7 +124,7 @@ class TestNetworkProxy:
 
     def test_empty_domains_omitted(self):
         cfg = ExecutorConfig(network_proxy=NetworkProxySettings(enabled=True))
-        launch = resolve_network_proxy(cfg)
+        launch = cfg.to_network_proxy_launch()
         assert launch is not None
         assert launch.proxy.domains is None
 
@@ -141,7 +135,9 @@ class TestNetworkProxy:
                 enabled=True, allowed_domains=["example.com"]
             )
         )
-        wire = resolve_network_proxy(cfg).model_dump(by_alias=True, exclude_none=True)
+        wire = cfg.to_network_proxy_launch().model_dump(
+            by_alias=True, exclude_none=True
+        )
         assert wire == {
             "proxy": {
                 "enabled": True,
@@ -159,23 +155,6 @@ class TestNetworkProxy:
         }
 
 
-class TestAskBehavior:
-    def test_never_downgrades_to_deny(self):
-        assert resolve_ask_behavior(ApprovalPolicy.NEVER, ui_available=True) == "deny"
-
-    def test_no_ui_downgrades_to_deny(self):
-        for policy in ApprovalPolicy:
-            assert resolve_ask_behavior(policy, ui_available=False) == "deny"
-
-    def test_ask_when_policy_allows_and_ui_available(self):
-        assert (
-            resolve_ask_behavior(ApprovalPolicy.ON_REQUEST, ui_available=True) == "ask"
-        )
-        assert (
-            resolve_ask_behavior(ApprovalPolicy.ON_FAILURE, ui_available=True) == "ask"
-        )
-
-
 class TestComposite:
     def test_resolve_execution_policy(self):
         cfg = ExecutorConfig(
@@ -183,7 +162,7 @@ class TestComposite:
             network_proxy=NetworkProxySettings(enabled=True),
             approval_policy=ApprovalPolicy.NEVER,
         )
-        resolved = resolve_execution_policy(cfg, CWD)
+        resolved = cfg.resolve_execution(CWD)
         assert resolved.sandbox is not None
         assert resolved.network_proxy is not None
         assert resolved.approval_policy is ApprovalPolicy.NEVER

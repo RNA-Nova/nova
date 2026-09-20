@@ -16,33 +16,18 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal
 
-from .config import ExecutorConfig, ExecutorEnvironment
+from nova_protocol import ExecutorConfig, ExecutorEnvironment, ResolvedEnvironment
+
 from .errors import ConfigError
 
 if TYPE_CHECKING:
     from .client import ExecutorClient  # 防循环：client.py 依赖本模块的解析件
 
-from .protocol import NetworkPolicyDecision, NetworkPolicyRequestParams
-
-#: 内建本地环境 id（对位 codex LOCAL_ENVIRONMENT_ID）
-LOCAL_ENVIRONMENT_ID = "local"
-
-
-@dataclass(frozen=True)
-class ResolvedEnvironment:
-    """解析后的环境（transport 构造参数已归位；frozen 值对象）"""
-
-    id: str
-    kind: Literal["local", "ws", "stdio"]
-    #: kind="ws" 时的 WS URL
-    url: str | None = None
-    #: kind="stdio" 时的 spawn 命令（SSH 承载：program="ssh"）
-    program: str | None = None
-    args: tuple[str, ...] = ()
-    env: dict[str, str] | None = None
-    cwd: str | None = None
-    #: 连接总时限（秒；None = 不限制）
-    connect_timeout_sec: float | None = None
+from nova_protocol import (
+    LOCAL_ENVIRONMENT_ID,
+    NetworkPolicyDecision,
+    NetworkPolicyRequestParams,
+)
 
 
 def resolve_environment(

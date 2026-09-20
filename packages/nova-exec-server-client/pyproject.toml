@@ -12,6 +12,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "websockets>=12.0",
     "pydantic>=2.0",
+    "nova-protocol",
 ]
 
 [project.optional-dependencies]

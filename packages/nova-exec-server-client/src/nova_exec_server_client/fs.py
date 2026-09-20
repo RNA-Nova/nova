@@ -7,10 +7,7 @@ import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Iterable
 from dataclasses import dataclass
 
-from .errors import FileSystemError, ProtocolError
-from .notifications import NotificationRouter, ReadStreamEvent
-from .pool import CHANNEL_DATA
-from .protocol import (
+from nova_protocol import (
     FS_CANONICALIZE,
     FS_CLOSE,
     FS_COPY,
@@ -57,6 +54,10 @@ from .protocol import (
     WalkOptions,
     WalkOutcome,
 )
+
+from .errors import FileSystemError, ProtocolError
+from .notifications import NotificationRouter, ReadStreamEvent
+from .pool import CHANNEL_DATA
 from .transport import Transport
 
 

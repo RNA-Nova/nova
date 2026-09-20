@@ -21,11 +21,13 @@ client = ExecutorClient(url, network_policy=gate.decide)
 from __future__ import annotations
 
 from enum import Enum
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal
 
-from .config import ApprovalPolicy
-from .policy import resolve_ask_behavior
-from .protocol import NetworkPolicyDecision, NetworkPolicyRequestParams
+from nova_protocol import (
+    ApprovalPolicy,
+    NetworkPolicyDecision,
+    NetworkPolicyRequestParams,
+)
 
 #: deny 理由（进审计通知，面向用户）
 REASON_NOT_LISTED = "主机不在网络放行名单"
@@ -45,6 +47,20 @@ class AskOutcome(str, Enum):
 
 #: ask 注入点签名：收裁决请求，回用户裁决
 OnAsk = Callable[[NetworkPolicyRequestParams], Awaitable[AskOutcome]]
+
+
+def resolve_ask_behavior(
+    policy: ApprovalPolicy, *, ui_available: bool
+) -> Literal["ask", "deny"]:
+    """ask 类中间态的最终行为（fail-closed）：
+
+    - `approval_policy = "never"` → ask 降级为 deny（对位 codex：
+      prompt 在 approval_policy=never 下视为拒绝）；
+    - 无 UI（headless/RPC 无交互能力）→ ask 无法完成，同样降级 deny。
+    """
+    if policy is ApprovalPolicy.NEVER or not ui_available:
+        return "deny"
+    return "ask"
 
 
 class NetworkPolicyGate:

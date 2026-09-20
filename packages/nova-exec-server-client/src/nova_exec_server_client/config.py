@@ -4,9 +4,9 @@
 不进 agent core——harness settings 不携带任何执行词汇。本模块是 PROTOCOL
 v1.4 `environmentConfig/read` 层栈的客户端半边，同两层、同格式：
 
-- user 层：`<executor home>/config.toml`（TOML；home = `NOVA_EXEC_SERVER_HOME`
+- user 层：`<exec-server home>/config.toml`（TOML；home = `NOVA_EXEC_SERVER_HOME`
   覆盖，缺省 `~/.nova/exec-server`）
-- project 层：`<cwd>/.nova/settings.json` 的 `executor` 段（JSON；
+- project 层：`<cwd>/.nova/settings.json` 的 `exec-server` 段（JSON；
   **仅当 `project_trusted=True` 时读取**——Project Trust 裁决归 harness，
   本层只消费布尔结论，不做信任判断）
 
@@ -27,14 +27,22 @@ import json
 import logging
 import os
 import tomllib
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from nova_protocol import (
+    MAX_ENVIRONMENT_ID_LENGTH,
+    ApprovalPolicy,
+    ExecutorConfig,
+    ExecutorEnvironment,
+    NetworkMode,
+    NetworkProxySettings,
+    SandboxMode,
+    SandboxWorkspaceWriteConfig,
+)
+from pydantic import BaseModel, ValidationError
 
 from .errors import ConfigError
-from .protocol import NetworkMode
 
 logger = logging.getLogger(__name__)
 
@@ -47,102 +55,18 @@ USER_CONFIG_FILE_NAME = "config.toml"
 #: project 层位置（与 nova 体系项目级配置一致；executor 词汇住其中的 executor 段）
 PROJECT_CONFIG_DIR_NAME = ".nova"
 PROJECT_CONFIG_FILE_NAME = "settings.json"
-PROJECT_SECTION_KEY = "executor"
+PROJECT_SECTION_KEY = "exec-server"
 
 #: 端点 id 最大长度（对位 codex MAX_ENVIRONMENT_ID_LEN）
 MAX_ENVIRONMENT_ID_LENGTH = 64
 
 
-class SandboxMode(str, Enum):
-    """文件系统沙箱套餐名（配置词汇，永不上线——上线的是展开对象）"""
-
-    READ_ONLY = "read-only"
-    WORKSPACE_WRITE = "workspace-write"
-
-
-class SandboxWorkspaceWriteConfig(BaseModel):
-    """workspace-write 套餐微调旋钮（逐字段对位 codex SandboxWorkspaceWrite）"""
-
-    writable_roots: list[str] = Field(default_factory=list)
-    network_access: bool = False
-    exclude_tmpdir_env_var: bool = False
-    exclude_slash_tmp: bool = False
-
-
-class NetworkProxySettings(BaseModel):
-    """`[network_proxy]` 段（nova 自有词汇——codex config 无对应键（其托管
-    网络由组织/云配置驱动）；字段形状照线上 RemoteNetworkProxyConfig 推导）"""
-
-    enabled: bool = False
-    #: 托管模式："proxy" = 经代理按名单放行；"none" = 无网络访问全拒
-    mode: NetworkMode = NetworkMode.PROXY
-    allowed_domains: list[str] = Field(default_factory=list)
-    denied_domains: list[str] = Field(default_factory=list)
-
-
-class ApprovalPolicy(str, Enum):
-    """审批档（对位 codex AskForApproval；untrusted 已被上游废弃，不收）"""
-
-    ON_REQUEST = "on-request"
-    ON_FAILURE = "on-failure"
-    NEVER = "never"
-
-
-class ExecutorEnvironment(BaseModel):
-    """`[[environments]]` 条目（逐字段对位 codex environments.toml 的
-    EnvironmentToml——executor 环境注册表条目）。
-
-    `url` 与 `program` 必须二选一（codex：must set exactly one of url or
-    program）：url = WS 环境（ws:// 或 wss://）；program = stdio spawn
-    命令（SSH 承载同款：`program = "ssh"`, `args = ["host", ...]`）。
-    """
-
-    id: str
-    url: str | None = None
-    program: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    cwd: str | None = None
-    #: 连接超时（秒；from_environment 接线为 connect 总时限）
-    connect_timeout_sec: float | None = None
-    #: codex 对位字段（initialize 等待）——我们的握手随 connect 完成，
-    #: 无独立阶段，收下保留兼容但暂不接消费
-    initialize_timeout_sec: float | None = None
-
-
-class ExecutorConfig(BaseModel):
-    """合并后的有效 executor 配置（物化层的输入）。
-
-    词汇平铺对位 codex config.toml：`sandbox_mode` / `[sandbox_workspace_write]`
-    / `approval_policy`（+ nova 自有的 `[network_proxy]`）；`[[environments]]`
-    注册表对位 codex environments.toml（我们合并在同一 config.toml——层栈
-    已定单文件）。project 层（`.nova/settings.json` 的 `executor` 段）内为
-    同一词汇的 JSON 形态。
-    """
-
-    #: 沙箱套餐档（缺席 = 不物化、不下发——保持 nova 现状：未配置不沙箱，
-    #: executor 按自身缺省姿态执行。注：codex 对 trusted 目录默认
-    #: workspace-write——产品姿态差异，刻意不跟）
-    sandbox_mode: SandboxMode | None = None
-    sandbox_workspace_write: SandboxWorkspaceWriteConfig = Field(
-        default_factory=SandboxWorkspaceWriteConfig
-    )
-    network_proxy: NetworkProxySettings | None = None
-    approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
-    #: 默认环境 id（对位 codex default；"none"（大小写不敏感）= 禁用默认；
-    #: 缺席时按 include_local 落 local）
-    default_environment: str | None = None
-    #: 是否包含内建 local 环境（对位 codex include_local）
-    include_local: bool = True
-    environments: list[ExecutorEnvironment] = Field(default_factory=list)
-
-
-def default_executor_home() -> Path:
-    """executor 家目录：`NOVA_EXEC_SERVER_HOME` 覆盖，缺省 `~/.nova/exec-server`"""
+def default_exec_server_home() -> Path:
+    """exec-server 家目录：`NOVA_EXEC_SERVER_HOME` 覆盖，缺省 `~/.nova/exec-server`"""
     override = os.environ.get(NOVA_EXEC_SERVER_HOME_ENV, "").strip()
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".nova" / "executor"
+    return Path.home() / ".nova" / "exec-server"
 
 
 def load_executor_config(
@@ -158,7 +82,9 @@ def load_executor_config(
       project 层即使存在也不读（恶意仓库无法经配置弱化执行姿态）
     - `executor_home`：测试/特殊部署的显式覆盖（优先级高于环境变量）
     """
-    home = Path(executor_home) if executor_home is not None else default_executor_home()
+    home = (
+        Path(executor_home) if executor_home is not None else default_exec_server_home()
+    )
     layers: list[tuple[str, dict[str, Any]]] = []
 
     user_file = home / USER_CONFIG_FILE_NAME

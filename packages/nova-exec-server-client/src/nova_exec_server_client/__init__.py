@@ -1,23 +1,66 @@
 """nova-exec-server Python SDK"""
 
+from nova_protocol import (
+    LOCAL_ENVIRONMENT_ID,
+    NETWORK_POLICY_DECISION,
+    NETWORK_POLICY_REQUEST,
+    ApprovalPolicy,
+    EnvironmentCapabilities,
+    EnvironmentConfigLayer,
+    EnvironmentConfigLayerStack,
+    EnvironmentConfigReadParams,
+    EnvironmentConfigReadResponse,
+    EnvironmentInfo,
+    EnvironmentStatus,
+    ExecEnvPolicy,
+    ExecFileSystemPath,
+    ExecFileSystemSandboxEntry,
+    ExecFileSystemSpecialPath,
+    ExecManagedFileSystemPermissions,
+    ExecPermissionProfile,
+    ExecServerNetworkPolicyRequest,
+    ExecServerNetworkProtocol,
+    ExecutorConfig,
+    ExecutorEnvironment,
+    FileSystemAccessMode,
+    FileSystemSandboxContext,
+    HttpHeader,
+    HttpRedirectPolicy,
+    HttpRequestParams,
+    HttpRequestResponse,
+    ManagedNetworkSandboxContext,
+    NetworkDomainPermission,
+    NetworkDomainPermissionEntry,
+    NetworkDomainPermissions,
+    NetworkMode,
+    NetworkPolicyDecision,
+    NetworkPolicyDecisionNotification,
+    NetworkPolicyRequestParams,
+    NetworkPolicyRequestResponse,
+    NetworkProxyAuditMetadata,
+    NetworkProxySettings,
+    NetworkSandboxPolicy,
+    RemoteNetworkProxyConfig,
+    RemoteNetworkProxyLaunchConfig,
+    ResolvedEnvironment,
+    ResolvedExecutionPolicy,
+    SandboxMode,
+    SandboxWorkspaceWriteConfig,
+    ShellSnapshotRequest,
+    WindowsSandboxLevel,
+    WindowsSandboxProxySettingsMode,
+)
+
 from .client import ExecutorClient
 from .config import (
     NOVA_EXEC_SERVER_HOME_ENV,
-    ApprovalPolicy,
-    ExecutorConfig,
-    ExecutorEnvironment,
-    NetworkProxySettings,
-    SandboxMode,
-    SandboxWorkspaceWriteConfig,
-    default_executor_home,
+    default_exec_server_home,
     load_executor_config,
 )
 from .environments import (
-    LOCAL_ENVIRONMENT_ID,
     EnvironmentConnectionState,
     EnvironmentManager,
     EnvironmentStatus,
-    ResolvedEnvironment,
     resolve_environment,
 )
 from .errors import (
@@ -38,58 +81,10 @@ from .errors import (
     TransportError,
 )
 from .fs import FileSystemManager
-from .gate import AskOutcome, NetworkPolicyGate
+from .gate import AskOutcome, NetworkPolicyGate, resolve_ask_behavior
 from .notifications import NotificationRouter, ReadStreamEvent
-from .policy import (
-    ResolvedExecutionPolicy,
-    resolve_ask_behavior,
-    resolve_execution_policy,
-    resolve_file_system_sandbox,
-    resolve_network_proxy,
-)
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, DATA_CHANNEL_METHODS, TransportPool
 from .process import ProcessHandle, ProcessManager, ProcessOutput
-from .protocol import (
-    NETWORK_POLICY_DECISION,
-    NETWORK_POLICY_REQUEST,
-    EnvironmentCapabilities,
-    EnvironmentConfigLayer,
-    EnvironmentConfigLayerStack,
-    EnvironmentConfigReadParams,
-    EnvironmentConfigReadResponse,
-    EnvironmentInfo,
-    EnvironmentStatus,
-    ExecEnvPolicy,
-    ExecFileSystemPath,
-    ExecFileSystemSandboxEntry,
-    ExecFileSystemSpecialPath,
-    ExecManagedFileSystemPermissions,
-    ExecPermissionProfile,
-    ExecServerNetworkPolicyRequest,
-    ExecServerNetworkProtocol,
-    FileSystemAccessMode,
-    FileSystemSandboxContext,
-    HttpHeader,
-    HttpRedirectPolicy,
-    HttpRequestParams,
-    HttpRequestResponse,
-    ManagedNetworkSandboxContext,
-    NetworkDomainPermission,
-    NetworkDomainPermissionEntry,
-    NetworkDomainPermissions,
-    NetworkMode,
-    NetworkPolicyDecision,
-    NetworkPolicyDecisionNotification,
-    NetworkPolicyRequestParams,
-    NetworkPolicyRequestResponse,
-    NetworkProxyAuditMetadata,
-    NetworkSandboxPolicy,
-    RemoteNetworkProxyConfig,
-    RemoteNetworkProxyLaunchConfig,
-    ShellSnapshotRequest,
-    WindowsSandboxLevel,
-    WindowsSandboxProxySettingsMode,
-)
 from .pty import PtyHandle, PtyManager
 from .recovery import ManagedTransport, ReconnectStrategy
 from .transport import StdioTransport, Transport, WebSocketTransport
@@ -166,16 +161,13 @@ __all__ = [
     "NETWORK_POLICY_DECISION",
     # executor 配置根（发现+物化——执行词汇归 executor 栈自持）
     "load_executor_config",
-    "default_executor_home",
+    "default_exec_server_home",
     "ExecutorConfig",
     "SandboxMode",
     "SandboxWorkspaceWriteConfig",
     "NetworkProxySettings",
     "ApprovalPolicy",
     "NOVA_EXEC_SERVER_HOME_ENV",
-    "resolve_execution_policy",
-    "resolve_file_system_sandbox",
-    "resolve_network_proxy",
     "resolve_ask_behavior",
     "ResolvedExecutionPolicy",
     # 网络裁决门（policyRequest 回调底座：会话记忆 + ask 注入 + fail-closed）

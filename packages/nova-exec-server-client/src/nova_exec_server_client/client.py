@@ -6,13 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from .environments import ResolvedEnvironment
-from .errors import ProtocolError
-from .fs import FileSystemManager
-from .notifications import NotificationRouter
-from .pool import CHANNEL_CONTROL, CHANNEL_DATA, TransportPool
-from .process import ProcessManager
-from .protocol import (
+from nova_protocol import (
     ENVIRONMENT_CONFIG_READ,
     ENVIRONMENT_INFO,
     ENVIRONMENT_STATUS,
@@ -39,7 +33,14 @@ from .protocol import (
     NetworkPolicyDecisionNotification,
     NetworkPolicyRequestParams,
     NetworkPolicyRequestResponse,
+    ResolvedEnvironment,
 )
+
+from .errors import ProtocolError
+from .fs import FileSystemManager
+from .notifications import NotificationRouter
+from .pool import CHANNEL_CONTROL, CHANNEL_DATA, TransportPool
+from .process import ProcessManager
 from .pty import PtyManager
 from .recovery import ManagedTransport, ReconnectStrategy
 from .transport import StdioTransport, Transport, WebSocketTransport

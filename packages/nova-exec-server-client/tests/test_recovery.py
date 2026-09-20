@@ -13,8 +13,8 @@ from nova_exec_server_client import (
     ReconnectStrategy,
 )
 from nova_exec_server_client.errors import SESSION_ALREADY_ATTACHED
-from nova_exec_server_client.protocol import InitializeResponse
 from nova_exec_server_client.recovery import ManagedTransport
+from nova_protocol import InitializeResponse
 
 FAST = ReconnectStrategy(interval=0.01, timeout=2.0)
 

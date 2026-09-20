@@ -9,8 +9,9 @@ pytestmark = pytest.mark.asyncio
 from nova_exec_server_client.gate import (
     AskOutcome,
     NetworkPolicyGate,
+    resolve_ask_behavior,
 )
-from nova_exec_server_client.protocol import (
+from nova_protocol import (
     ExecServerNetworkPolicyRequest,
     ExecServerNetworkProtocol,
     NetworkPolicyRequestParams,
@@ -118,7 +119,7 @@ class TestGateAskFlow:
 class TestPolicyDecisionSugar:
     async def test_typed_subscription_and_filter(self, monkeypatch):
         from nova_exec_server_client import ExecutorClient
-        from nova_exec_server_client.protocol import NetworkPolicyDecisionNotification
+        from nova_protocol import NetworkPolicyDecisionNotification
 
         client = ExecutorClient(transport_factory=lambda: None)  # 不连接，仅测糖
         router = client.notifications
@@ -156,3 +157,20 @@ class TestPolicyDecisionSugar:
         await asyncio.wait_for(task, 2)
         assert [e.host for e in seen] == ["hit.example.com"]
         assert seen[0].process_id == "proc-1"
+
+
+class TestAskBehavior:
+    def test_never_downgrades_to_deny(self):
+        assert resolve_ask_behavior(ApprovalPolicy.NEVER, ui_available=True) == "deny"
+
+    def test_no_ui_downgrades_to_deny(self):
+        for policy in ApprovalPolicy:
+            assert resolve_ask_behavior(policy, ui_available=False) == "deny"
+
+    def test_ask_when_policy_allows_and_ui_available(self):
+        assert (
+            resolve_ask_behavior(ApprovalPolicy.ON_REQUEST, ui_available=True) == "ask"
+        )
+        assert (
+            resolve_ask_behavior(ApprovalPolicy.ON_FAILURE, ui_available=True) == "ask"
+        )

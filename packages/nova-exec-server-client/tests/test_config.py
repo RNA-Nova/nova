@@ -18,7 +18,7 @@ from nova_exec_server_client import (
     load_executor_config,
 )
 from nova_exec_server_client.config import NOVA_EXEC_SERVER_HOME_ENV
-from nova_exec_server_client.protocol import NetworkMode
+from nova_protocol import NetworkMode
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def project(tmp_path):
 
 def _write_project(project, executor_section: dict):
     (project / ".nova" / "settings.json").write_text(
-        json.dumps({"executor": executor_section}), encoding="utf-8"
+        json.dumps({"exec-server": executor_section}), encoding="utf-8"
     )
 
 
@@ -105,9 +105,9 @@ class TestProjectLayerTrustGate:
 
     def test_project_section_must_be_object(self, home, project):
         (project / ".nova" / "settings.json").write_text(
-            json.dumps({"executor": "oops"}), encoding="utf-8"
+            json.dumps({"exec-server": "oops"}), encoding="utf-8"
         )
-        with pytest.raises(ConfigError, match="executor"):
+        with pytest.raises(ConfigError, match="exec-server"):
             load_executor_config(project, project_trusted=True, executor_home=home)
 
     def test_malformed_project_json_raises(self, home, project):

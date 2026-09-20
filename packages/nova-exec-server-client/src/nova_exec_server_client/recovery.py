@@ -36,7 +36,8 @@ from .errors import (
 )
 
 if TYPE_CHECKING:
-    from .protocol import InitializeResponse
+    from nova_protocol import InitializeResponse
+
     from .transport import Transport
 
 logger = logging.getLogger(__name__)

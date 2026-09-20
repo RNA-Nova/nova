@@ -23,7 +23,9 @@ def _ws(id_: str = "server") -> ExecutorEnvironment:
 
 def _stdio(id_: str = "dev-box") -> ExecutorEnvironment:
     return ExecutorEnvironment(
-        id=id_, program="ssh", args=["user@host", "nova-exec-server", "--listen", "stdio"]
+        id=id_,
+        program="ssh",
+        args=["user@host", "nova-exec-server", "--listen", "stdio"],
     )
 
 

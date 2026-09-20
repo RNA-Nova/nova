@@ -19,7 +19,9 @@ from pathlib import Path
 PKG_ROOT = Path(__file__).resolve().parent.parent / "src" / "nova_protocol"
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
-SIBLING_BAN = re.compile(r"^nova_(ai|agent|harness|server|coding_agent|executor)(\.|$)")
+SIBLING_BAN = re.compile(
+    r"^nova_(ai|agent|harness|server|coding_agent|executor|exec_server_client)(\.|$)"
+)
 
 BEHAVIOR_BAN = {
     "asyncio",
