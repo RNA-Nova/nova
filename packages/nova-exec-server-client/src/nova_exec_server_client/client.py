@@ -411,6 +411,11 @@ class ExecutorClient:
             self._environment_info = EnvironmentInfo.model_validate(result)
         return self._environment_info
 
+    async def force_environment_info(self) -> EnvironmentInfo:
+        """强制拉取环境信息——不读缓存、不写缓存（对位 rust force_environment_info）"""
+        result = await self._pool.send_request(ENVIRONMENT_INFO)
+        return EnvironmentInfo.model_validate(result)
+
     async def environment_status(self) -> EnvironmentStatus:
         """获取环境状态"""
         result = await self._pool.send_request(ENVIRONMENT_STATUS)

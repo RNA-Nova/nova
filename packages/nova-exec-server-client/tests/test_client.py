@@ -207,3 +207,33 @@ async def test_refresh_failure_leaves_disconnected_and_later_connect_retries():
     await client.connect()
     assert client.session_id == "session-2"
     await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_force_environment_info_bypasses_cache():
+    """force_environment_info（对位 rust 同名）：不读缓存、不写缓存——
+    environment_info 依旧缓存，force 每次都发请求"""
+    transport = FakeTransport(
+        {
+            "initialize": {"sessionId": "fake-session", "protocolVersion": "1.0"},
+            "environment/info": ENVIRONMENT_INFO_PAYLOAD,
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    await client.environment_info()
+    await client.environment_info()
+    cached_calls = [m for m, _, _ in transport.requests if m == "environment/info"]
+    assert len(cached_calls) == 1
+
+    await client.force_environment_info()
+    await client.force_environment_info()
+    forced_calls = [m for m, _, _ in transport.requests if m == "environment/info"]
+    assert len(forced_calls) == 3  # 1 次缓存填充 + 2 次强制
+    # 缓存未被强刷污染
+    await client.environment_info()
+    assert (
+        len([m for m, _, _ in transport.requests if m == "environment/info"]) == 3
+    )
+    await client.disconnect()
