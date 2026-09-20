@@ -163,6 +163,7 @@ pub use protocol::TerminateResponse;
 pub use protocol::WriteParams;
 pub use protocol::WriteResponse;
 pub use protocol::WriteStatus;
+pub use regular_file::read_sensitive_file_to_string;
 pub use remote_file_system::RemoteFileSystem;
 pub use remote_process::RemoteProcess;
 pub use runtime_paths::ExecServerRuntimePaths;
