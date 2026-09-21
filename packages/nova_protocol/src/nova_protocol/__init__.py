@@ -222,6 +222,53 @@ __all__ = [
     "ProviderAuth",
 ]
 
+
+# ── exec 前置管线词汇（①分析/②裁决——批次 C） ──
+from .exec_server_intent import (
+    Intent,
+    intent_from_argv,
+    intent_from_shell,
+    extract_bash_command,
+    parse_shell_lc_literal_commands,
+    parse_shell_script_into_commands,
+    DangerousCommandMatch,
+    MAX_DANGEROUS_COMMAND_WRAPPER_DEPTH,
+    dangerous_command_match,
+    executable_name_lookup_key,
+    find_git_subcommand,
+    is_dangerous_command,
+)
+
+from .exec_server_verdict import (
+    Decision,
+    ExecPolicyAmendment,
+    NetworkPolicyRuleAction,
+    NetworkPolicyAmendment,
+    ExecApprovalRequirement,
+    ReviewDecision,
+    ReviewDecisionPayload,
+    ToolDecisionSource,
+)
+
+from .exec_server_policy import (
+    PolicyParseError,
+    PatternToken,
+    PrefixPattern,
+    PrefixRule,
+    NetworkRuleProtocol,
+    normalize_network_rule_host,
+    NetworkRule,
+    PrefixRuleMatch,
+    HeuristicsRuleMatch,
+    Evaluation,
+    Policy,
+    parse_policy,
+    format_prefix_rule,
+    format_network_rule,
+    is_likely_executor_managed_sandbox_denied,
+    is_likely_sandbox_denied,
+)
+
 # ---------------------------------------------------------------------------
 # exec-server 词汇域（批次 A 迁入——线上/配置/环境注册表三类）
 # ---------------------------------------------------------------------------

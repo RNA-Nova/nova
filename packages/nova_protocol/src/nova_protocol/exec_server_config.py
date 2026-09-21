@@ -34,10 +34,14 @@ MAX_ENVIRONMENT_ID_LENGTH = 64
 
 
 class SandboxMode(str, Enum):
-    """文件系统沙箱套餐名（配置词汇，永不上线——上线的是展开对象）"""
+    """文件系统沙箱套餐名（配置词汇，永不上线——上线的是展开对象；
+    对位 codex SandboxMode 三档）"""
 
     READ_ONLY = "read-only"
     WORKSPACE_WRITE = "workspace-write"
+    #: danger-full-access：显式不沙箱（物化为 None——与未配置的语义区分：
+    #: 未配置 = executor 缺省姿态；本档 = 用户显式选择脱沙箱）
+    DANGER_FULL_ACCESS = "danger-full-access"
 
 
 class SandboxWorkspaceWriteConfig(BaseModel):
@@ -133,6 +137,9 @@ class ExecutorConfig(BaseModel):
         """
         mode = self.sandbox_mode
         if mode is None or not cwd:
+            return None
+        if mode is SandboxMode.DANGER_FULL_ACCESS:
+            # 显式脱沙箱：不下发沙箱上下文
             return None
         if mode is SandboxMode.READ_ONLY:
             return FileSystemSandboxContext.read_only(cwd)
