@@ -53,7 +53,7 @@ nova-exec-server-linux-sandbox = { path = "crates/exec-server-linux-sandbox" }
 # 基础
 anyhow = "1"
 arc-swap = "1.9.0"
-base64 = "0.22.1"
+base64 = "0.23.1"
 bytes = "1.10.1"
 dirs = "6"
 dunce = "1.0.4"
