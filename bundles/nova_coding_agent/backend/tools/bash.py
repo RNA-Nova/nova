@@ -13,9 +13,11 @@ import os
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from nova_coding_agent.bash.engine import (
+
     BashOperations,
     create_local_bash_operations,
 )
+from nova_coding_agent.orchestration import get_adjudication_engine, new_orchestrator
 from nova_coding_agent.executor import (
     ExecutorBashOperations,
     get_backend_selection,
@@ -29,6 +31,12 @@ from nova_coding_agent.tools_common.truncate import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
     format_size,
+)
+from nova_harness.core.agent_session.controllers.orchestrator import (
+    ApprovalAction,
+    ExecAttemptOutput,
+    OrchestratorRequest,
+    ToolRejected,
 )
 from nova_harness.types.extensions.process import SpawnHook
 from nova_harness.types.resources.tools import (
@@ -241,6 +249,46 @@ class Tool:
                 details={"error": "Working directory does not exist", "cwd": cwd},
             )
 
+
+        # ── 裁决编排（pull 模型：对位 codex handler 内 ToolOrchestrator::new()）──
+        orchestrator = new_orchestrator()
+        if orchestrator is not None:
+            runtime = _BashExecRuntime(self, command, cwd)
+            request = OrchestratorRequest(
+                tool_name="bash",
+                call_id=tool_call_id,
+                params={"command": command, "cwd": cwd},
+            )
+            try:
+                await orchestrator.run(runtime, request, ctx)
+            except ToolRejected as e:
+                return AgentToolResult(
+                    content=[
+                        TextContent(
+                            type="text",
+                            text=f"## 🚫 命令被拦截\n\n{e.reason}\n\n**命令**: `{command}`",
+                        )
+                    ],
+                    details={"error": e.reason, "command": command},
+                    is_error=True,
+                )
+            return runtime.tool_result
+
+        return await self._run_engine(
+            command, cwd, env_extra, spawn_hook, timeout, signal, on_update
+        )
+
+    async def _run_engine(
+        self,
+        command: str,
+        cwd: str,
+        env_extra: Dict[str, Any],
+        spawn_hook: Optional[SpawnHook],
+        timeout: Optional[float],
+        signal: Optional[AbortSignal],
+        on_update,
+    ) -> AgentToolResult:
+        """引擎执行段（原 execute 的后半——校验之后的全部执行与后处理）。"""
         # 引擎写入本 accumulator；本层保留所有权用于中途快照（流式更新）
         # 与最终的截断标注渲染。
         output = OutputAccumulator(
@@ -474,6 +522,59 @@ class Tool:
             },
             # pi 对齐：非零退出 = 结果级错误（驱动 toolResult.is_error 与错误卡片）
             is_error=exit_code != 0,
+        )
+
+
+class _BashExecRuntime:
+    """bash 执行体（codex ToolRuntime 对位——orchestrator 的真执行挂点）。
+
+    exec_approval_requirement 经裁决装配件的政策引擎自报；run() 调
+    `_run_engine` 并把 AgentToolResult 映射为 ExecAttemptOutput（denial
+    判别的输入）。
+    """
+
+    def __init__(self, tool: "BashTool", command: str, cwd: str) -> None:
+        self._tool = tool
+        self._command = command
+        self._cwd = cwd
+        self.tool_result: AgentToolResult = None  # type: ignore[assignment]
+
+    def exec_approval_requirement(self, request):
+        engine = get_adjudication_engine()
+        if engine is None:
+            return None
+        return engine.adjudicate(
+            "bash", {"command": self._command, "cwd": self._cwd}, None
+        )
+
+    def should_bypass_approval(self, policy, already_approved: bool) -> bool:
+        return already_approved
+
+    def approval_action(self, request) -> ApprovalAction:
+        return ApprovalAction(
+            title="执行 bash 命令",
+            command=self._command,
+            reason=request.first_attempt and None,
+        )
+
+    async def run(self, request, attempt, ctx) -> ExecAttemptOutput:
+        result = await self._tool._run_engine(
+            self._command,
+            self._cwd,
+            request.params.get("env") or {},
+            request.params.get("spawn_hook"),
+            request.params.get("timeout"),
+            request.params.get("signal"),
+            request.params.get("on_update"),
+        )
+        self.tool_result = result
+        details = result.details or {}
+        exit_code = details.get("exit_code")
+        text = result.content[0].text if result.content else ""
+        return ExecAttemptOutput(
+            exit_code=exit_code if isinstance(exit_code, int) else 0,
+            aggregated=text,
+            result=result,
         )
 
 
