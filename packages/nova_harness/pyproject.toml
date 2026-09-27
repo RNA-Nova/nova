@@ -43,6 +43,8 @@ sniffio = "^1.3.0"
 [tool.uv.sources]
 nova-ai = { path = "../../nova_ai" }
 nova-agent = { path = "../../nova_agent" }
+nova-protocol = { path = "../../nova_protocol" }
+nova-exec-server-client = { path = "../../nova-exec-server-client" }
 
 [tool.poetry.scripts]
 nova-harness = "nova_harness.app.main:main"
