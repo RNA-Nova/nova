@@ -27,9 +27,7 @@ class _FakeTool:
     def __init__(self, outputs):
         self._outputs = outputs
         self.calls: list = []
-        self._context = SimpleNamespace(
-            settings=SimpleNamespace(get_executor_settings=lambda: None)
-        )
+        self._context = SimpleNamespace()
 
     async def _run_engine(self, *args, **kwargs):
         self.calls.append(kwargs.get("spawn_policy", _KEEP_POLICY))

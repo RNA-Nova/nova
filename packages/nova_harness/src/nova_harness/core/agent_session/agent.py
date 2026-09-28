@@ -1203,23 +1203,6 @@ class AgentSession:
             get_agents=self._get_agent_entries,
             change_agent=lambda name: self.change_agent(name),
             save_agent=self._save_agent,
-            # executor 执行后端设置（/executor 扩展的端点清单数据源）
-            get_executor_settings=lambda: (
-                self.settings_manager.get_executor_settings()
-                if self.settings_manager is not None
-                else None
-            ),
-            # executor 端点登记/注销（/executor 首次连接自动登记、forget 移除）
-            register_executor_endpoint=lambda name, url, cwd=None: (
-                self.settings_manager.register_executor_endpoint(name, url, cwd)
-                if self.settings_manager is not None
-                else None
-            ),
-            unregister_executor_endpoint=lambda name: (
-                self.settings_manager.unregister_executor_endpoint(name)
-                if self.settings_manager is not None
-                else False
-            ),
             # 系统提示词重建（环境段内容变化后——/executor 切换等）
             refresh_system_prompt=lambda: self._sync_system_prompt(),
         )

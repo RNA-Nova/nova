@@ -14,6 +14,23 @@ from nova_coding_agent.executor import get_backend_selection, reset_backend_sele
 from nova_harness.types.ui.primitives import UIResponse
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_default_config(monkeypatch):
+    """默认路径隔离：不读真实 ``~/.nova/exec-server/config.toml``（空配置 = 默认本地）。
+
+    显式切换（set_backend_selection）的用例不受 load_executor_config 影响；
+    只有未切换时的默认解析走磁盘——测试里固定为空配置，语义等价旧
+    settings 缺省（local）。
+    """
+    from nova_protocol import ExecutorConfig
+
+    import nova_coding_agent.executor.runtime as runtime_mod
+
+    monkeypatch.setattr(
+        runtime_mod, "load_executor_config", lambda **_: ExecutorConfig()
+    )
+
+
 def _load_extension():
     ext_path = os.path.join(
         os.path.dirname(__file__), "..", "..", "extensions", "executor_switch.py"
@@ -117,29 +134,16 @@ def fake_endpoints(monkeypatch):
 
 
 class _FakeCtx:
-    def __init__(self, ui, session_manager=None, executor_settings=None):
+    def __init__(self, ui, session_manager=None):
         self.ui = ui
         self.has_ui = True
         self.cwd = "/tmp"
         self.session_manager = session_manager
-        self._executor_settings = executor_settings
         self.entries = []
         self.refresh_calls = 0
-        self.registered = []
-        self.unregistered = []
 
     def append_entry(self, entry_type, data):
         self.entries.append((entry_type, data))
-
-    def get_executor_settings(self):
-        return self._executor_settings
-
-    def register_executor_endpoint(self, name, url, cwd=None):
-        self.registered.append((name, url, cwd))
-
-    def unregister_executor_endpoint(self, name):
-        self.unregistered.append(name)
-        return True
 
     def refresh_system_prompt(self):
         self.refresh_calls += 1
@@ -196,7 +200,7 @@ def test_switch_local_direct():
     try:
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("local", ctx))
-        assert get_backend_selection(None).backend == "local"
+        assert get_backend_selection().backend == "local"
         assert ctx.entries == [("executor_backend", {"backend": "local", "url": None})]
         assert ctx.refresh_calls == 1
         assert ctx.ui.notices, "切换应有 notice 回执"
@@ -209,7 +213,7 @@ def test_switch_remote_by_url():
     try:
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote wss://gpu-01:8080", ctx))
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor" and sel.url == "wss://gpu-01:8080"
     finally:
         _teardown()
@@ -224,7 +228,7 @@ def test_switch_remote_by_endpoint_name(fake_endpoints):
     try:
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote gpu-01", ctx))
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.url == "wss://gpu-01:8080"
     finally:
         _teardown()
@@ -234,9 +238,9 @@ def test_selector_cancel_keeps_current():
     api = _setup()
     try:
         ctx = _FakeCtx(_FakeUI(select_script=[None]))  # 用户取消
-        before = get_backend_selection(None).backend
+        before = get_backend_selection().backend
         asyncio.run(api.commands["executor"]("", ctx))
-        assert get_backend_selection(None).backend == before
+        assert get_backend_selection().backend == before
         assert ctx.entries == []
     finally:
         _teardown()
@@ -247,7 +251,7 @@ def test_selector_pick_executor_local():
     try:
         ctx = _FakeCtx(_FakeUI(select_script=["executor-local"]))
         asyncio.run(api.commands["executor"]("", ctx))
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor" and sel.url is None
     finally:
         _teardown()
@@ -262,7 +266,7 @@ def test_restore_from_branch_entry():
         ctx = _FakeCtx(_FakeUI(), session_manager=sm)
         handler = api.handlers["session_start"][0]
         handler(None, ctx)  # 同步 handler（恢复逻辑无 await）
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor" and sel.url == "wss://gpu-02:9000"
         assert ctx.refresh_calls == 1
     finally:
@@ -314,7 +318,7 @@ def test_ssh_bare_target_provisions_registers_switches(fake_endpoints):
         assert remote_calls == [("ssh://alice@gpu-01", f"mkdir -p {expected_cwd}")]
         # 自动登记（host 作缺省名；缺省工作区不记忆目录）+ 选择翻转 + 条目持久化
         assert fake_endpoints["registered"] == [("gpu-01", "ssh://alice@gpu-01", None)]
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor"
         assert sel.url == "ssh://alice@gpu-01"
         assert sel.remote_cwd == expected_cwd
@@ -351,7 +355,7 @@ def test_ssh_provision_failure_keeps_current(fake_endpoints):
         # 失败不切换、不登记、不写条目
         assert fake_endpoints["registered"] == []
         assert ctx.entries == []
-        assert get_backend_selection(None).backend == "local"
+        assert get_backend_selection().backend == "local"
         texts = _notice_texts(ctx.ui)
         assert any("远程供给失败（connect）" in text for text in texts)
     finally:
@@ -365,7 +369,7 @@ def test_ssh_explicit_cwd_validated_and_remembered(fake_endpoints):
         asyncio.run(api.commands["executor"]("remote alice@gpu-01 /data/proj", ctx))
         # 显式目录：test -d 校验（不建目录）
         assert remote_calls == [("ssh://alice@gpu-01", "test -d /data/proj")]
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.remote_cwd == "/data/proj"
         # 显式目录随端点记忆
         assert fake_endpoints["registered"] == [
@@ -383,7 +387,7 @@ def test_ssh_explicit_cwd_tilde_normalized(fake_endpoints):
         asyncio.run(api.commands["executor"]("remote alice@gpu-01 ~/work", ctx))
         # ~ 归一到远程家目录（executor 的 file:// cwd 不做 tilde 展开）
         assert remote_calls == [("ssh://alice@gpu-01", "test -d /home/alice/work")]
-        assert get_backend_selection(None).remote_cwd == "/home/alice/work"
+        assert get_backend_selection().remote_cwd == "/home/alice/work"
     finally:
         _teardown()
 
@@ -394,7 +398,7 @@ def test_ssh_explicit_cwd_missing_keeps_current(fake_endpoints):
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote alice@gpu-01 /nope", ctx))
         # 目录不存在：不切换、不登记、不写条目
-        assert get_backend_selection(None).backend == "local"
+        assert get_backend_selection().backend == "local"
         assert fake_endpoints["registered"] == []
         assert ctx.entries == []
         texts = _notice_texts(ctx.ui)
@@ -416,7 +420,7 @@ def test_ssh_registered_endpoint_by_name_skips_register(fake_endpoints):
         assert manager.calls[0]["target"].ssh_dest == "alice@gpu-01"
         assert fake_endpoints["registered"] == []  # 已登记端点不重复登记
         # 端点记住的目录被采用
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.url == "ssh://alice@gpu-01"
         assert sel.remote_cwd == "/data/remembered"
         assert remote_calls == [("ssh://alice@gpu-01", "test -d /data/remembered")]
@@ -469,7 +473,7 @@ def test_selector_add_remote_with_path(fake_endpoints):
         assert fake_endpoints["registered"] == [
             ("gpu-02", "ssh://carol@gpu-02", "/srv/ml")
         ]
-        assert get_backend_selection(None).remote_cwd == "/srv/ml"
+        assert get_backend_selection().remote_cwd == "/srv/ml"
     finally:
         _teardown()
 
@@ -507,7 +511,7 @@ def test_ws_url_still_direct_without_provision():
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote wss://gpu-01:8080", ctx))
         assert manager.calls == []  # 直连端点无供给
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor" and sel.url == "wss://gpu-01:8080"
     finally:
         _teardown()
@@ -532,7 +536,7 @@ def test_restore_ssh_entry_flips_selection_only():
         ctx = _FakeCtx(_FakeUI(), session_manager=sm)
         handler = api.handlers["session_start"][0]
         handler(None, ctx)
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor"
         assert sel.url == "ssh://alice@gpu-01"
         assert sel.remote_cwd == "/home/alice/.nova/agent/executor/workspaces/s1"

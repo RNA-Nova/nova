@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import pytest
 from nova_exec_server_client import load_executor_config
@@ -17,27 +17,11 @@ from nova_coding_agent.executor import (
 )
 
 
-class _Settings:
-    """ExecutorSettings 形态的极简替身（只带档位与默认后端）。"""
-
-    def __init__(
-        self,
-        sandbox: Optional[str] = None,
-        default_backend: Optional[str] = None,
-    ) -> None:
-        self.sandbox = sandbox
-        self.default_backend = default_backend
-
-
 class _Ctx:
-    """ExtensionContext 形态的极简替身（settings getter + cwd）。"""
+    """ExtensionContext 形态的极简替身（只带 cwd）。"""
 
-    def __init__(self, settings: Any = None, cwd: str = "/tmp/proj") -> None:
-        self._settings = settings
+    def __init__(self, cwd: str = "/tmp/proj") -> None:
         self.cwd = cwd
-
-    def get_executor_settings(self) -> Any:
-        return self._settings
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +61,6 @@ def test_start_kwargs_skips_none_items():
 # ---------------------------------------------------------------------------
 
 
-
 def _config_with_mode(tmp_path, mode: str | None):
     """临时 exec-server home 写 config.toml（物化输入注入）。"""
     home = tmp_path / "home"
@@ -92,7 +75,9 @@ def test_resolve_returns_none_without_mode_or_cwd(tmp_path):
 
     config = ExecutorConfig()
     assert config.resolve_execution("/tmp/proj").sandbox is None
-    config = ExecutorConfig(sandbox_mode=ExecutorConfig(sandbox_mode="read-only").sandbox_mode)
+    config = ExecutorConfig(
+        sandbox_mode=ExecutorConfig(sandbox_mode="read-only").sandbox_mode
+    )
     assert config.resolve_execution(None).sandbox is None
 
 
@@ -140,23 +125,36 @@ def teardown_function(_):
     reset_backend_selection()
 
 
-def test_default_path_attaches_policy_for_executor_backend(monkeypatch, tmp_path):
+def test_default_path_attaches_policy_when_sandbox_mode_configured(
+    monkeypatch, tmp_path
+):
+    """默认执行姿态归 config.toml：配了 sandbox_mode → 本地回环 executor 带沙箱。"""
     home = _config_with_mode(tmp_path, "read-only")
     import nova_coding_agent.executor.runtime as runtime_mod
 
     monkeypatch.setattr(
-        runtime_mod, "load_executor_config",
+        runtime_mod,
+        "load_executor_config",
         lambda **_: load_executor_config(executor_home=home),
     )
-    settings = _Settings(default_backend="executor")
-    selection = get_backend_selection(settings)  # type: ignore[arg-type]
+    selection = get_backend_selection()
     assert selection.backend == "executor"
+    assert selection.url is None
     assert selection.spawn_policy is not None
 
 
-def test_default_path_local_backend_has_no_policy():
-    settings = _Settings(default_backend="local", sandbox="read-only")
-    selection = get_backend_selection(settings)  # type: ignore[arg-type]
+def test_default_path_local_backend_without_sandbox_mode(monkeypatch, tmp_path):
+    """未配 sandbox_mode → 本地直接执行，无策略。"""
+    home = _config_with_mode(tmp_path, None)
+    import nova_coding_agent.executor.runtime as runtime_mod
+
+    monkeypatch.setattr(
+        runtime_mod,
+        "load_executor_config",
+        lambda **_: load_executor_config(executor_home=home),
+    )
+    selection = get_backend_selection()
+    assert selection.backend == "local"
     assert selection.spawn_policy is None
 
 
@@ -257,10 +255,11 @@ def test_attach_policy_ssh_uses_remote_cwd(monkeypatch, tmp_path):
     home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
     monkeypatch.setattr(
-        switch, "load_executor_config",
+        switch,
+        "load_executor_config",
         lambda **_: load_executor_config(executor_home=home),
     )
-    ctx = _Ctx(_Settings())
+    ctx = _Ctx()
     selection = BackendSelection(
         backend="executor", url="ssh://u@h", remote_cwd="/remote/w"
     )
@@ -274,10 +273,11 @@ def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
     home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
     monkeypatch.setattr(
-        switch, "load_executor_config",
+        switch,
+        "load_executor_config",
         lambda **_: load_executor_config(executor_home=home),
     )
-    ctx = _Ctx(_Settings(), cwd="/tmp/proj")
+    ctx = _Ctx(cwd="/tmp/proj")
     selection = BackendSelection(backend="executor", url=None)
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is not None
@@ -285,14 +285,17 @@ def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
     assert selection.spawn_policy.sandbox["cwd"] == "/tmp/proj"
 
 
-def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed(monkeypatch, tmp_path):
+def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed(
+    monkeypatch, tmp_path
+):
     home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
     monkeypatch.setattr(
-        switch, "load_executor_config",
+        switch,
+        "load_executor_config",
         lambda **_: load_executor_config(executor_home=home),
     )
-    ctx = _Ctx(_Settings(), cwd="/tmp/proj")
+    ctx = _Ctx(cwd="/tmp/proj")
     selection = BackendSelection(backend="executor", url="ws://host:28080")
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is None
@@ -300,7 +303,7 @@ def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed(monkeypatc
 
 def test_attach_policy_local_backend_never_sandboxes():
     switch = _switch_module()
-    ctx = _Ctx(_Settings(), cwd="/tmp/proj")
+    ctx = _Ctx(cwd="/tmp/proj")
     selection = BackendSelection(backend="local")
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is None
@@ -332,10 +335,6 @@ def test_invalid_mode_is_config_error(tmp_path):
     (home / "config.toml").write_text('sandbox_mode = "yolo"\n')
     with pytest.raises(Exception):
         load_executor_config(executor_home=home)
-    return
-    settings = _Settings(sandbox="yolo")
-    assert settings.sandbox not in SANDBOX_TIERS
-    assert resolve_spawn_policy(settings, "/tmp/proj") is None
 
 
 @pytest.mark.parametrize("tier", ["read-only", "workspace-write"])

@@ -10,8 +10,8 @@
   用户回执（用户可见、不进模型上下文）；
 - **SSH 远程供给**（/ssh 模式，类 VS Code Remote-SSH）：裸 ``user@host``
   直接可用——首次连接经终端让位输一次密码装入 Nova 管理密钥（之后
-  BatchMode 免密），供给成功后**自动登记**进 settings
-  ``executor.endpoints``（下次选择器直接可选，无需手改 JSON）；
+  BatchMode 免密），供给成功后**自动登记**进 exec-server 配置根的
+  ``[[environments]]``（下次选择器直接可选，无需手改 TOML）；
 - **远程执行 cwd**：远程文件系统与本地无关，本地 cwd 不能用——用户
   显式给目录则 ``test -d`` 校验后使用（并随端点记忆）；缺省按
   **会话隔离的远程工作区**（``<远程家目录>/.nova/agent/executor/
@@ -292,10 +292,7 @@ def extension(nova: NovaExtensionAPI) -> None:
         await _switch_to(BackendSelection(backend="executor", url=url), ctx, label)
 
     async def _executor_command(args: str, ctx: Any) -> None:
-        getter = getattr(ctx, "get_executor_settings", None)
-        executor_settings = getter() if getter is not None else None
-
-        current = get_backend_selection(executor_settings)
+        current = get_backend_selection()
         arg = args.strip()
 
         if arg == "local":

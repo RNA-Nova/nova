@@ -6,8 +6,10 @@
   本格管执行）；
 - 进程级状态即会话级（后端进程是一会话一进程）。
 
-默认解析：未显式切换过时读 settings ``executor.default_backend``
-（``None`` = local）。
+默认解析：未显式切换过时按 exec-server 配置根（
+``~/.nova/exec-server/config.toml``）物化——``sandbox_mode`` 配了套餐档
+→ 本地回环 executor 带物化沙箱执行；未配置 → 本地直接执行（codex 词汇：
+默认执行姿态唯一事实源在 config.toml，不经 settings）。
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ from typing import Any, Optional
 from nova_coding_agent.executor.policy import SpawnPolicy
 from nova_exec_server_client import load_executor_config
 from nova_coding_agent.tools_common.path_utils import normalize_input, resolve_path
-from nova_harness.types.config.settings import ExecutorSettings
 
 
 @dataclass
@@ -40,35 +41,26 @@ class BackendSelection:
 _current: Optional[BackendSelection] = None
 
 
-def get_backend_selection(
-    settings: Optional[ExecutorSettings] = None,
-) -> BackendSelection:
-    """读取当前生效后端（未显式切换过时按 settings 默认）。
+def get_backend_selection() -> BackendSelection:
+    """读取当前生效后端（未显式切换过时按 exec-server 配置根物化）。
 
-    默认 executor 时按本地 cwd 物化套餐策略（本地回环 executor 的执行
-    目录就是本机 cwd）——物化升级：套餐词汇在 config.toml（SDK
-    ExecutorConfig），不再是 settings 档位。
+    本地回环 executor 的执行目录就是本机 cwd——按它物化套餐策略（套餐
+    词汇在 config.toml（SDK ExecutorConfig），引擎产文本在
+    nova_protocol）。
     """
     global _current
     if _current is not None:
         return _current
-    default = (settings.default_backend if settings else None) or "local"
-    if default == "executor":
-        config = load_executor_config(project_trusted=False)
-        resolved = config.resolve_execution(os.getcwd())
-        return BackendSelection(
-            backend=default,
-            spawn_policy=(
-                SpawnPolicy(
-                    sandbox=resolved.sandbox.model_dump(
-                        by_alias=True, exclude_none=True
-                    )
-                )
-                if resolved.sandbox is not None
-                else None
-            ),
-        )
-    return BackendSelection(backend=default)
+    config = load_executor_config(project_trusted=False)
+    resolved = config.resolve_execution(os.getcwd())
+    if resolved.sandbox is None:
+        return BackendSelection(backend="local")
+    return BackendSelection(
+        backend="executor",
+        spawn_policy=SpawnPolicy(
+            sandbox=resolved.sandbox.model_dump(by_alias=True, exclude_none=True)
+        ),
+    )
 
 
 def set_backend_selection(selection: BackendSelection) -> None:
@@ -83,13 +75,6 @@ def reset_backend_selection() -> None:
     _current = None
 
 
-def executor_settings_of(context: Any) -> Optional[ExecutorSettings]:
-    """从 ToolContext 形态的 settings 视图读 ExecutorSettings（宽松回退）。"""
-    settings = getattr(context, "settings", None)
-    getter = getattr(settings, "get_executor_settings", None)
-    return getter() if callable(getter) else None
-
-
 def backend_file_layer(context: Any):
     """当前为远程 executor 后端时返回其 fs 层，否则 None。
 
@@ -97,7 +82,7 @@ def backend_file_layer(context: Any):
     （按 url 缓存复用）；本地/本地沙箱 → None（继续用本地 layer——本地
     沙箱跑的就是本机盘，fs 绕 WS 无意义）。
     """
-    selection = get_backend_selection(executor_settings_of(context))
+    selection = get_backend_selection()
     if selection.backend != "executor" or not selection.url:
         return None
     from nova_coding_agent.executor.fs_layer import get_executor_file_layer
@@ -113,7 +98,7 @@ def backend_process_runner(context: Any):
     rg 经 process/start，rg 路径随供给探测）；本地/本地沙箱 → None
     （工具缺省构造已带本机 runner）。
     """
-    selection = get_backend_selection(executor_settings_of(context))
+    selection = get_backend_selection()
     if selection.backend != "executor" or not selection.url:
         return None
     from nova_coding_agent.executor.manager import get_executor_manager
@@ -133,7 +118,7 @@ def resolve_backend_path(path: str, context: Any) -> str:
       ``~`` 以 ``remote_home`` 展开、绝对路径原样归一；不查存在性、
       不做 macOS 变体（那是本地文件系统语义，远程不适用）。
     """
-    selection = get_backend_selection(executor_settings_of(context))
+    selection = get_backend_selection()
     if selection.backend == "executor" and selection.url:
         return _resolve_remote_path(path, selection)
     return resolve_path(path, getattr(context, "cwd", None))

@@ -23,22 +23,43 @@ def _clean_selection():
 
 
 class TestBackendSelection:
-    """runtime 模式格：默认解析 / 显式翻转 / 重置。"""
+    """runtime 模式格：默认解析 / 显式翻转 / 重置。
 
-    def test_default_local_without_settings(self):
-        assert get_backend_selection(None).backend == "local"
+    默认执行姿态归 exec-server 配置根（sandbox_mode 物化）——测试经
+    monkeypatch 隔离，不读真实 ``~/.nova/exec-server/config.toml``。
+    """
 
-    def test_default_from_settings(self):
-        class _S:
-            default_backend = "executor"
+    @staticmethod
+    def _patch_config(monkeypatch, tmp_path, mode: str | None):
+        home = tmp_path / "home"
+        home.mkdir()
+        text = f'sandbox_mode = "{mode}"\n' if mode else ""
+        (home / "config.toml").write_text(text)
+        import nova_coding_agent.executor.runtime as runtime_mod
+        from nova_exec_server_client import load_executor_config
 
-        sel = get_backend_selection(_S())
+        monkeypatch.setattr(
+            runtime_mod,
+            "load_executor_config",
+            lambda **_: load_executor_config(executor_home=home),
+        )
+
+    def test_default_local_without_sandbox_mode(self, monkeypatch, tmp_path):
+        self._patch_config(monkeypatch, tmp_path, None)
+        assert get_backend_selection().backend == "local"
+
+    def test_default_executor_loopback_from_sandbox_mode(self, monkeypatch, tmp_path):
+        """config.toml 配了 sandbox_mode → 默认本地回环 executor + 物化策略。"""
+        self._patch_config(monkeypatch, tmp_path, "read-only")
+        sel = get_backend_selection()
         assert sel.backend == "executor"
         assert sel.url is None
+        assert sel.spawn_policy is not None
 
-    def test_explicit_switch_wins_over_default(self):
+    def test_explicit_switch_wins_over_default(self, monkeypatch, tmp_path):
+        self._patch_config(monkeypatch, tmp_path, None)
         set_backend_selection(BackendSelection(backend="executor", url="ws://x:1"))
-        sel = get_backend_selection(None)
+        sel = get_backend_selection()
         assert sel.backend == "executor"
         assert sel.url == "ws://x:1"
 

@@ -138,9 +138,9 @@ pi/Claude Code 的标记块训练分布实证安全）；`<environment>` 标记�
 
 | 改什么 | 在哪 |
 |---|---|
-| settings 加 `executor` 字段（`ExecutorSettings`：默认后端 + 已知端点清单；**token 归 auth.json 不进 settings**） | `core/types/config/settings.py` + `manager.py` 读取方法；线上 schema 再生成 + 漂移测试跟进 |
+| settings **无** executor 节（终态：默认执行姿态 + 端点清单唯一事实源在 exec-server 配置根 `~/.nova/exec-server/config.toml`；settings 不重复持有——批次 D 端点搬家 + 收尾删 `ExecutorSettings`/`register_executor_endpoint` 写门） | （已删除）`core/types/config/settings.py` 的 `ExecutorSettings`/`ExecutorEndpoint` + `manager.py` 三方法 |
 | 二进制注册表加 `nova-executor` 条目（或走 `binary_dependencies` PyPI wheel 车道——ripgrep 先例，pip 即发布渠道） | `package/binaries/registry.json` / bundle pyproject |
-| ExtensionContext 加 `get_executor_settings`（端点清单数据源）与 `refresh_system_prompt`（切换后重建触发）两个 action | `core/types/extensions/context.py` + `actions.py` + `runner.py` + `agent.py` 接线 |
+| ExtensionContext 加 `refresh_system_prompt`（切换后重建触发）一个 action（`get_executor_settings`/`register_executor_endpoint`/`unregister_executor_endpoint` 初版曾加、终态删除——端点与默认姿态归 exec-server 配置根，不经扩展上下文） | `core/types/extensions/context.py` + `actions.py` + `runner.py` + `agent.py` 接线 |
 
 ### nova_agent——本期不动
 
@@ -197,9 +197,10 @@ Remote-SSH）：远程 executor 只听 127.0.0.1，传输与身份全部走 SSH
   首用自动生成）幂等装入远端 `authorized_keys`——之后永远 BatchMode
   免密。密码不经过 Nova 进程、不落盘；headless/无让位能力时不引导，
   直接报 `ssh-copy-id` 指引；connect 类失败（主机不可达）不引导；
-- **供给成功后自动登记**进 settings `executor.endpoints`（缺省名 =
-  host，经 `ctx.register_executor_endpoint` 写门）——下次选择器直接
-  可选，无需手改 JSON；`/executor forget <name>` 移除；
+- **供给成功后自动登记**进 exec-server 配置根 `~/.nova/exec-server/config.toml`
+  的 `[[environments]]`（缺省名 = host，`endpoints_store.register_endpoint`
+  写门——批次 D 从 settings `executor.endpoints` 搬家）——下次选择器直接
+  可选，无需手改 TOML；`/executor forget <name>` 移除；
 - token 每次供给现生成（`secrets.token_hex`），经 ssh 命令行下发
   `--auth-token`，一次性、不落任何文件——SSH 是真身份层，token 只是
   隧道内防本机乱连的薄层；
@@ -320,15 +321,20 @@ async），六个 operations 实现参数化在它上面**——本地与远程�
 - **`executor/policy.py`**：`SpawnPolicy`（frozen dataclass）——`sandbox`
   / `network_proxy` / `enforce_managed_network` / `managed_network` 四旋钮，
   `start_kwargs()` 转 `process/start` 的 camel wire 额外参数（None 项不出场）；
-  `resolve_spawn_policy(settings, effective_cwd)` 从 settings 档位组装。
+  组装入口已终态化：物化归 SDK `ExecutorConfig.resolve_execution(cwd)`
+  （初版的 `resolve_spawn_policy(settings, effective_cwd)` 随 settings
+  档位一起删除）。
 - **`BackendSelection.spawn_policy`**：策略挂在模式格上随后端切换生效；
   bash 引擎（`ExecutorBashOperations.policy`）与 process_runner 同缝透传，
   执行层零理解纯转发。
-- **settings `executor.sandbox` 档位**：`read-only`（codex 套餐语义：全盘可读、
-  无处可写、网络受限）/ `workspace-write`（项目根可写 + /tmp 可写 +
-  网络默认受限，放行归 network_proxy 名单）——SDK `FileSystemSandboxContext`
-  工厂直出 wire 形态，executor 三平台沙箱（macOS Seatbelt / Linux
-  bwrap+landlock / Windows restricted token）执行。
+- **沙箱套餐档位**：唯一事实源在 exec-server 配置根的 `sandbox_mode`
+  （codex 词汇）——`read-only`（套餐语义：全盘可读、无处可写、网络受限）
+  / `workspace-write`（项目根可写 + /tmp 可写 + 网络默认受限，放行归
+  network_proxy 名单）——SDK `FileSystemSandboxContext` 工厂直出 wire
+  形态，executor 三平台沙箱（macOS Seatbelt / Linux bwrap+landlock /
+  Windows restricted token）执行。默认执行姿态同理：未显式切换过时
+  `get_backend_selection()` 按 `sandbox_mode` 物化（配了档 → 本地回环
+  executor 带沙箱；未配 → 本地直接执行）。
 
 ### 策略作用目录三态（`executor_switch._attach_policy` 统一解析）
 

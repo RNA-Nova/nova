@@ -56,14 +56,6 @@ MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000
 BASH_UPDATE_THROTTLE_MS = 100
 
 
-def _executor_settings(context: ToolContext) -> Optional[Any]:
-    """读取 settings 的 executor 节（老视图无该方法时安全回退 None）。"""
-    getter = getattr(context.settings, "get_executor_settings", None)
-    if getter is None:
-        return None
-    return getter()
-
-
 def _resolve_timeout_seconds(timeout: Any) -> Tuple[Optional[float], Optional[str]]:
     """解析并校验 timeout 入参（对齐 pi resolveTimeoutMs）。
 
@@ -180,12 +172,13 @@ class Tool:
         """执行期解析执行后端（设计定案 R3：工具直读真值，不经上下文）。
 
         当前生效后端来自 runtime 模式格（/executor 切换翻转），缺省按
-        settings ``executor.default_backend``。本地为缺省零开销路径；
+        exec-server 配置根的 ``sandbox_mode`` 物化（配了套餐档 → 本地
+        回环沙箱；未配置 → 本地）。本地为缺省零开销路径；
         executor 后端按 url 构造一次复用。``spawn_policy_override``：
         orchestrator 升级重试的脱沙箱姿态（None 之外的哨兵值 __KEEP__ 用
         selection 自带策略；显式 None 强制脱沙箱）。
         """
-        selection = get_backend_selection(_executor_settings(self._context))
+        selection = get_backend_selection()
         policy = (
             selection.spawn_policy
             if spawn_policy_override is _KEEP_POLICY
@@ -568,7 +561,7 @@ class _BashExecRuntime:
         self.tool_result: AgentToolResult = None  # type: ignore[assignment]
         # 沙箱尝试姿态：selection 带物化沙箱 → 首尝试 executor_managed；
         # 升级姿态 = 脱沙箱重试一次（denial 判别见 nova_protocol 启发式）
-        selection = get_backend_selection(_executor_settings(tool._context))
+        selection = get_backend_selection()
         self._sandboxes = selection.spawn_policy is not None and (
             selection.spawn_policy.sandbox is not None
         )
