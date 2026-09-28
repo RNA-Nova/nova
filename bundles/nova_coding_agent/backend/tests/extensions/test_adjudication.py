@@ -35,15 +35,18 @@ class _FakeResponse:
 
 
 class _FakeUI:
-    def __init__(self, script=()):
+    def __init__(self, script=(), capabilities=("select", "dialog:adjudication")):
         self._script = list(script)
+        self._capabilities = set(capabilities)
         self.notifications = []
+        self.requests = []
 
     def has_capability(self, method):
-        return True
+        return method in self._capabilities
 
     async def request(self, method, params):
-        if method == "select":
+        self.requests.append((method, params))
+        if method in ("select", "dialog:adjudication"):
             return _FakeResponse(value=self._script.pop(0))
         return _FakeResponse()
 
@@ -52,9 +55,11 @@ class _FakeUI:
 
 
 class _FakeCtx:
-    def __init__(self, has_ui=True, script=()):
+    def __init__(
+        self, has_ui=True, script=(), capabilities=("select", "dialog:adjudication")
+    ):
         self.has_ui = has_ui
-        self.ui = _FakeUI(script)
+        self.ui = _FakeUI(script, capabilities)
         self.entries = []
 
     def append_entry(self, custom_type, data):
@@ -148,14 +153,44 @@ def test_no_ui_fail_closed():
 
 def test_approve_once():
     flow = _flow()
-    ctx = _FakeCtx(script=[_CHOICE_ONCE])
+    ctx = _FakeCtx(script=[{"decision": "once"}])
     payload = _run(flow.request_approval(_action(), ctx))
     assert payload.decision is ReviewDecision.APPROVED
 
 
+def test_dialog_path_params_and_channel():
+    """dialog:adjudication 注册时走专用框——锁通道与载荷形状。"""
+    flow = _flow()
+    ctx = _FakeCtx(script=[{"decision": "once"}])
+    action = _action(amendment=("rm", "-rf"))
+    _run(flow.request_approval(action, ctx))
+    method, params = ctx.ui.requests[0]
+    assert method == "dialog:adjudication"
+    assert params["title"] == "执行 bash 命令"
+    assert params["command"] == "rm -rf /tmp/x"
+    assert params["proposeAmendment"] is True
+
+
+def test_dialog_cancel_counts_as_deny():
+    """对话框取消/畸形回执 → 拒绝（与 select 降级语义一致）。"""
+    flow = _flow()
+    ctx = _FakeCtx(script=[None])
+    payload = _run(flow.request_approval(_action(), ctx))
+    assert payload.decision is ReviewDecision.DENIED
+
+
+def test_select_fallback_when_dialog_unregistered():
+    """dialog:adjudication 未注册时 select 降级（通道 + 结局双锁）。"""
+    flow = _flow()
+    ctx = _FakeCtx(script=[_CHOICE_ONCE], capabilities=("select",))
+    payload = _run(flow.request_approval(_action(), ctx))
+    assert payload.decision is ReviewDecision.APPROVED
+    assert ctx.ui.requests[0][0] == "select"
+
+
 def test_approve_for_session_caches_and_hits():
     flow = _flow()
-    ctx = _FakeCtx(script=[_CHOICE_SESSION])
+    ctx = _FakeCtx(script=[{"decision": "session"}])
     action = _action()
     payload = _run(flow.request_approval(action, ctx))
     assert payload.decision is ReviewDecision.APPROVED_FOR_SESSION
@@ -167,7 +202,7 @@ def test_approve_for_session_caches_and_hits():
 
 def test_approve_forever_writes_rule():
     flow = _flow()
-    ctx = _FakeCtx(script=[_CHOICE_FOREVER])
+    ctx = _FakeCtx(script=[{"decision": "forever"}])
     action = _action(amendment=("rm", "-rf"))
     payload = _run(flow.request_approval(action, ctx))
     assert payload.decision is ReviewDecision.APPROVED_EXECPOLICY_AMENDMENT
@@ -176,7 +211,7 @@ def test_approve_forever_writes_rule():
 
 def test_deny():
     flow = _flow()
-    ctx = _FakeCtx(script=[_CHOICE_NO])
+    ctx = _FakeCtx(script=[{"decision": "deny"}])
     payload = _run(flow.request_approval(_action(), ctx))
     assert payload.decision is ReviewDecision.DENIED
     assert payload.rejection == "用户拒绝"

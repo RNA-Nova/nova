@@ -9,6 +9,7 @@
 
 import type { ExtensionUIAPI } from 'nova-client';
 
+import { adjudicationDialogFactory } from './dialogs/adjudication.js';
 import { interactiveShellDialogFactory } from './dialogs/interactive-shell.js';
 import { questionDialogFactory } from './dialogs/question.js';
 import { toolsDialogFactory } from './dialogs/tools.js';
@@ -66,6 +67,9 @@ export default function extension(api: ExtensionUIAPI): void {
   // interactive-shell 终端让位（dialog:interactive-shell——pi 对位：挂起 TUI
   // 执行交互命令后恢复，回执退出码）
   api.registerDialog?.('interactive-shell', interactiveShellDialogFactory);
+  // adjudication 审批框（dialog:adjudication——裁决/审批流专用框；后端按
+  // has_capability 判定走单框或 select 降级）
+  api.registerDialog?.('adjudication', adjudicationDialogFactory);
   // bashExecution 条目卡片（entry:<customType> 槽——user_tools/bash 的
   // 消息类型归包呈现：活组件带 update，流式 chunk/定稿逐次重绘；
   // 宿主不内置本卡）

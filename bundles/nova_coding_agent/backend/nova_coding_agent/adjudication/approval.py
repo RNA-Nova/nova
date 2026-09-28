@@ -36,6 +36,14 @@ _CHOICE_SESSION = "本会话都允许"
 _CHOICE_FOREVER = "永远允许（写入规则）"
 _CHOICE_NO = "拒绝"
 
+# dialog:adjudication 回执词汇 → 本地结局常量（与 select 降级共用判定链）
+_DIALOG_DECISIONS = {
+    "once": _CHOICE_ONCE,
+    "session": _CHOICE_SESSION,
+    "forever": _CHOICE_FOREVER,
+    "deny": _CHOICE_NO,
+}
+
 
 class ApprovalFlow:
     """审批流（扩展实例生命周期持有——会话缓存的闭包宿主）"""
@@ -61,6 +69,37 @@ class ApprovalFlow:
                 {"tool": tool, "target": target, "decision": decision, "reason": reason},
             )
 
+    async def _ask_choice(self, action: ApprovalAction, ctx: Any) -> str | None:
+        """询问四结局之一（取消/不支持 → None，调用方按拒绝处理）。
+
+        dialog:adjudication 专用框已注册（前端 dialog slot）时走单框
+        （标题 + 命令块 + 原因 + 选项热键）；否则 select 降级。
+        """
+        if ctx.ui.has_capability("dialog:adjudication"):
+            resp = await ctx.ui.request(
+                "dialog:adjudication",
+                {
+                    "title": action.title,
+                    "command": action.command,
+                    "reason": action.reason,
+                    "proposeAmendment": action.proposed_amendment_command is not None,
+                },
+            )
+            if resp.cancelled or not isinstance(resp.value, dict):
+                return None
+            return _DIALOG_DECISIONS.get(resp.value.get("decision"))
+
+        text = f"⚠️ {action.title}"
+        if action.command:
+            text += f"\n\n  {action.command}"
+        if action.reason:
+            text += f"\n\n原因: {action.reason}"
+        text += "\n\n允许执行？"
+        choices = [_CHOICE_ONCE, _CHOICE_SESSION, _CHOICE_NO]
+        if action.proposed_amendment_command is not None:
+            choices.insert(2, _CHOICE_FOREVER)
+        return await select(ctx.ui, text, choices)
+
     async def request_approval(
         self, action: ApprovalAction, ctx: Any
     ) -> ReviewDecisionPayload:
@@ -80,18 +119,8 @@ class ApprovalFlow:
         if key in self._session_allowed:
             return ReviewDecisionPayload(decision=ReviewDecision.APPROVED_FOR_SESSION)
 
-        # 3) 弹窗
-        text = f"⚠️ {action.title}"
-        if action.command:
-            text += f"\n\n  {action.command}"
-        if action.reason:
-            text += f"\n\n原因: {action.reason}"
-        text += "\n\n允许执行？"
-        choices = [_CHOICE_ONCE, _CHOICE_SESSION, _CHOICE_NO]
-        if action.proposed_amendment_command is not None:
-            choices.insert(2, _CHOICE_FOREVER)
-
-        choice = await select(ctx.ui, text, choices)
+        # 3) 弹窗（dialog:adjudication 专用框优先，select 降级；取消 → 拒绝）
+        choice = await self._ask_choice(action, ctx)
 
         if choice == _CHOICE_ONCE:
             self._record(ctx, tool_label, target, "allow")
