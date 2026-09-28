@@ -78,12 +78,10 @@ personas = [
 ]
 extensions = [
     "./backend/extensions/adjudication/extension.py",
-    "./backend/extensions/confirm_destructive.py",
     "./backend/extensions/executor_switch.py",
     "./backend/extensions/interactive_shell.py",
     "./backend/extensions/plan_mode.py",
     "./backend/extensions/session_commands.py",
-    "./backend/extensions/subagent_gate.py",
     "./backend/extensions/tools_panel.py"
 ]
 prompts = [

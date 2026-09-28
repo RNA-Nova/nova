@@ -1,14 +1,11 @@
-"""confirm-destructive 扩展（pi examples/extensions/confirm-destructive.ts 对位）。
+"""会话切换裁决点（confirm_destructive 收编）。
 
 订阅 ``session_before_switch``（reason: "new"|"resume"）与
-``session_before_fork``：离开当前会话前弹确认——当前会话有 N 条条目时
-经 ``ui_primitives.confirm`` 询问，用户选否/取消 → 返回 ``cancel=True``
-的**类型化结果**（runtime 读 ``result.cancel`` 取消本次切换；与
-permission_gate 返回 ToolCallEventResult 同一惯用法——纯 dict 会被
-runtime 的 ``getattr(result, "cancel")`` 读丢）。
+``session_before_fork``：离开当前会话前弹确认。语义与委派点同型——
+headless/空会话放行，有 UI 且非空会话经 confirm 询问，用户选否/取消
+返回类型化结果（``cancel=True``，runtime 读 ``result.cancel`` 取消切换）。
 
-- 条目数为 0（空会话）：不拦直接放行；
-- headless（无 UI）：放行（不返回）。
+这是自治权检查点（非安全边界）：与 bash 裁决的 fail-closed 刻意相反。
 """
 
 from __future__ import annotations
@@ -20,9 +17,7 @@ from nova_harness.events.results import (
     SessionBeforeForkResult,
     SessionBeforeSwitchResult,
 )
-from nova_harness.extensions.api import NovaExtensionAPI
 
-# before_switch reason → 动作文案（fork 走独立事件，文案固定）
 _ACTION_LABELS = {"new": "新建会话", "resume": "切换会话"}
 
 
@@ -39,7 +34,7 @@ async def _confirm_leave(ctx: Any, action: str) -> bool:
     )
 
 
-async def _on_before_switch(
+async def on_before_switch(
     event: Any, ctx: Any
 ) -> Optional[SessionBeforeSwitchResult]:
     action = _ACTION_LABELS.get(getattr(event, "reason", ""), "切换会话")
@@ -48,13 +43,7 @@ async def _on_before_switch(
     return SessionBeforeSwitchResult(cancel=True)
 
 
-async def _on_before_fork(event: Any, ctx: Any) -> Optional[SessionBeforeForkResult]:
+async def on_before_fork(event: Any, ctx: Any) -> Optional[SessionBeforeForkResult]:
     if await _confirm_leave(ctx, "分叉会话"):
         return None
     return SessionBeforeForkResult(cancel=True)
-
-
-def extension(nova: NovaExtensionAPI) -> None:
-    """注册 before_switch / before_fork 确认 handler。"""
-    nova.on("session_before_switch", _on_before_switch)
-    nova.on("session_before_fork", _on_before_fork)

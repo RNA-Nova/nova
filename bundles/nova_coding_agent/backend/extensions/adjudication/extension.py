@@ -27,7 +27,9 @@ from nova_protocol.exec_server_policy import Policy
 from nova_coding_agent.orchestration import AdjudicationAssembly, register_adjudication_assembly
 
 from nova_coding_agent.adjudication.approval import ApprovalFlow
+from nova_coding_agent.adjudication.delegation import DelegationGate
 from nova_coding_agent.adjudication.engine import AdjudicationEngine
+from nova_coding_agent.adjudication.session_gate import on_before_fork, on_before_switch
 
 _ENTRY_TYPE = "permission_decision"
 
@@ -92,3 +94,20 @@ def extension(nova: NovaExtensionAPI) -> None:
 
     nova.on("session_start", lambda _event, ctx: _restore(ctx))
     nova.on("session_tree", lambda _event, ctx: _restore(ctx))
+
+    # ── 委派裁决点（subagent_gate 收编——自治权检查点，headless 放行） ──
+    delegation = DelegationGate()
+
+    async def _on_delegation(event: Any, ctx: Any):
+        return await delegation.on_tool_call(event, ctx)
+
+    async def _restore_delegation(_event: Any, ctx: Any) -> None:
+        delegation.restore(ctx)
+
+    nova.on("tool_call", _on_delegation)
+    nova.on("session_start", _restore_delegation)
+    nova.on("session_tree", _restore_delegation)
+
+    # ── 会话切换裁决点（confirm_destructive 收编） ──
+    nova.on("session_before_switch", on_before_switch)
+    nova.on("session_before_fork", on_before_fork)
