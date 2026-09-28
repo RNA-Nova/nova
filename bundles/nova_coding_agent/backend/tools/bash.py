@@ -13,7 +13,6 @@ import os
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from nova_coding_agent.bash.engine import (
-
     BashOperations,
     create_local_bash_operations,
 )
@@ -36,6 +35,7 @@ from nova_harness.core.agent_session.controllers.orchestrator import (
     ApprovalAction,
     ExecAttemptOutput,
     OrchestratorRequest,
+    SandboxAttempt,
     ToolRejected,
 )
 from nova_harness.types.extensions.process import SpawnHook
@@ -105,6 +105,13 @@ def _result_details(
     }
 
 
+class _PolicySentinel:
+    """_resolve_operations 的策略覆盖哨兵：保持 selection 自带策略"""
+
+
+_KEEP_POLICY = _PolicySentinel()
+
+
 class _CombinedAbortSignal:
     """合并"调用方 signal"与"超时"的中止信号（对齐引擎的 signal 协议）。"""
 
@@ -169,14 +176,29 @@ class Tool:
         """注入外部 spawn hook（ToolsManager 聚合的扩展 hook）。"""
         self._spawn_hook = hook
 
-    def _resolve_operations(self) -> BashOperations:
+    def _resolve_operations(self, spawn_policy_override: Any = None) -> BashOperations:
         """执行期解析执行后端（设计定案 R3：工具直读真值，不经上下文）。
 
         当前生效后端来自 runtime 模式格（/executor 切换翻转），缺省按
         settings ``executor.default_backend``。本地为缺省零开销路径；
-        executor 后端按 url 构造一次复用。
+        executor 后端按 url 构造一次复用。``spawn_policy_override``：
+        orchestrator 升级重试的脱沙箱姿态（None 之外的哨兵值 __KEEP__ 用
+        selection 自带策略；显式 None 强制脱沙箱）。
         """
         selection = get_backend_selection(_executor_settings(self._context))
+        policy = (
+            selection.spawn_policy
+            if spawn_policy_override is _KEEP_POLICY
+            else spawn_policy_override
+        )
+        if policy is not selection.spawn_policy:
+            selection = BackendSelection(
+                backend=selection.backend,
+                url=selection.url,
+                remote_cwd=selection.remote_cwd,
+                remote_home=selection.remote_home,
+                spawn_policy=policy,
+            )
         if selection.backend != "executor":
             return self._local_operations
         if (
@@ -249,7 +271,6 @@ class Tool:
                 details={"error": "Working directory does not exist", "cwd": cwd},
             )
 
-
         # ── 裁决编排（pull 模型：对位 codex handler 内 ToolOrchestrator::new()）──
         orchestrator = new_orchestrator()
         if orchestrator is not None:
@@ -258,6 +279,12 @@ class Tool:
                 tool_name="bash",
                 call_id=tool_call_id,
                 params={"command": command, "cwd": cwd},
+                first_attempt=SandboxAttempt(
+                    sandbox_type="executor_managed" if runtime.sandboxes else None
+                ),
+                escalated_attempt=(
+                    SandboxAttempt(sandbox_type=None) if runtime.sandboxes else None
+                ),
             )
             try:
                 await orchestrator.run(runtime, request, ctx)
@@ -287,6 +314,7 @@ class Tool:
         timeout: Optional[float],
         signal: Optional[AbortSignal],
         on_update,
+        spawn_policy: Any = _KEEP_POLICY,
     ) -> AgentToolResult:
         """引擎执行段（原 execute 的后半——校验之后的全部执行与后处理）。"""
         # 引擎写入本 accumulator；本层保留所有权用于中途快照（流式更新）
@@ -397,7 +425,7 @@ class Tool:
 
         started_at = asyncio.get_event_loop().time()
         try:
-            result = await self._resolve_operations().execute(
+            result = await self._resolve_operations(spawn_policy).execute(
                 command,
                 cwd,
                 {
@@ -538,6 +566,16 @@ class _BashExecRuntime:
         self._command = command
         self._cwd = cwd
         self.tool_result: AgentToolResult = None  # type: ignore[assignment]
+        # 沙箱尝试姿态：selection 带物化沙箱 → 首尝试 executor_managed；
+        # 升级姿态 = 脱沙箱重试一次（denial 判别见 nova_protocol 启发式）
+        selection = get_backend_selection(_executor_settings(tool._context))
+        self._sandboxes = selection.spawn_policy is not None and (
+            selection.spawn_policy.sandbox is not None
+        )
+
+    @property
+    def sandboxes(self) -> bool:
+        return self._sandboxes
 
     def exec_approval_requirement(self, request):
         engine = get_adjudication_engine()
@@ -558,6 +596,11 @@ class _BashExecRuntime:
         )
 
     async def run(self, request, attempt, ctx) -> ExecAttemptOutput:
+        # 升级尝试（attempt.sandbox_type is None 且首尝试有沙箱）→ 脱沙箱
+        if self._sandboxes and attempt.sandbox_type is None:
+            spawn_policy = None
+        else:
+            spawn_policy = _KEEP_POLICY
         result = await self._tool._run_engine(
             self._command,
             self._cwd,
@@ -566,6 +609,7 @@ class _BashExecRuntime:
             request.params.get("timeout"),
             request.params.get("signal"),
             request.params.get("on_update"),
+            spawn_policy=spawn_policy,
         )
         self.tool_result = result
         details = result.details or {}
@@ -573,7 +617,8 @@ class _BashExecRuntime:
         text = result.content[0].text if result.content else ""
         return ExecAttemptOutput(
             exit_code=exit_code if isinstance(exit_code, int) else 0,
-            aggregated=text,
+            stderr=details.get("stderr") or "",
+            aggregated=text or details.get("stderr") or "",
             result=result,
         )
 
