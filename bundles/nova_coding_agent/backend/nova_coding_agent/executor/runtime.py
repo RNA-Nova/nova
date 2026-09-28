@@ -16,7 +16,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from nova_coding_agent.executor.policy import SpawnPolicy, resolve_spawn_policy
+from nova_coding_agent.executor.policy import SpawnPolicy
+from nova_exec_server_client import load_executor_config
 from nova_coding_agent.tools_common.path_utils import normalize_input, resolve_path
 from nova_harness.types.config.settings import ExecutorSettings
 
@@ -44,17 +45,28 @@ def get_backend_selection(
 ) -> BackendSelection:
     """读取当前生效后端（未显式切换过时按 settings 默认）。
 
-    settings 带沙箱档位且默认后端为 executor 时，按本地 cwd 组装策略
-    （本地回环 executor 的执行目录就是本机 cwd）。
+    默认 executor 时按本地 cwd 物化套餐策略（本地回环 executor 的执行
+    目录就是本机 cwd）——物化升级：套餐词汇在 config.toml（SDK
+    ExecutorConfig），不再是 settings 档位。
     """
     global _current
     if _current is not None:
         return _current
     default = (settings.default_backend if settings else None) or "local"
     if default == "executor":
+        config = load_executor_config(project_trusted=False)
+        resolved = config.resolve_execution(os.getcwd())
         return BackendSelection(
             backend=default,
-            spawn_policy=resolve_spawn_policy(settings, os.getcwd()),
+            spawn_policy=(
+                SpawnPolicy(
+                    sandbox=resolved.sandbox.model_dump(
+                        by_alias=True, exclude_none=True
+                    )
+                )
+                if resolved.sandbox is not None
+                else None
+            ),
         )
     return BackendSelection(backend=default)
 

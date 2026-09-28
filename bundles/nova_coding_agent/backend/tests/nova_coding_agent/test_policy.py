@@ -6,16 +6,15 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 import pytest
+from nova_exec_server_client import load_executor_config
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
     SpawnPolicy,
     get_backend_selection,
     reset_backend_selection,
-    resolve_spawn_policy,
     set_backend_selection,
 )
-from nova_coding_agent.executor.policy import SANDBOX_TIERS
 
 
 class _Settings:
@@ -76,36 +75,49 @@ def test_start_kwargs_skips_none_items():
 
 
 # ---------------------------------------------------------------------------
-# resolve_spawn_policy：档位 → wire 形态
-# ---------------------------------------------------------------------------
 
 
-def test_resolve_returns_none_without_tier_or_cwd():
-    assert resolve_spawn_policy(None, "/tmp/proj") is None
-    assert resolve_spawn_policy(_Settings(sandbox="read-only"), None) is None
-    assert resolve_spawn_policy(_Settings(sandbox=None), "/tmp/proj") is None
+
+def _config_with_mode(tmp_path, mode: str | None):
+    """临时 exec-server home 写 config.toml（物化输入注入）。"""
+    home = tmp_path / "home"
+    home.mkdir()
+    text = f'sandbox_mode = "{mode}"\n' if mode else ""
+    (home / "config.toml").write_text(text)
+    return home
 
 
-def test_resolve_read_only_wire_shape():
-    policy = resolve_spawn_policy(_Settings(sandbox="read-only"), "/tmp/proj")
-    assert policy is not None
-    sandbox = policy.sandbox
+def test_resolve_returns_none_without_mode_or_cwd(tmp_path):
+    from nova_protocol import ExecutorConfig
+
+    config = ExecutorConfig()
+    assert config.resolve_execution("/tmp/proj").sandbox is None
+    config = ExecutorConfig(sandbox_mode=ExecutorConfig(sandbox_mode="read-only").sandbox_mode)
+    assert config.resolve_execution(None).sandbox is None
+
+
+def test_resolve_read_only_wire_shape(tmp_path):
+    home = _config_with_mode(tmp_path, "read-only")
+    config = load_executor_config(executor_home=home)
+    sandbox = config.to_file_system_sandbox("/tmp/proj")
     assert sandbox is not None
-    assert sandbox["cwd"] == "/tmp/proj"
-    permissions = sandbox["permissions"]
+    payload = sandbox.model_dump(by_alias=True, exclude_none=True)
+    assert payload["cwd"] == "/tmp/proj"
+    permissions = payload["permissions"]
     assert permissions["type"] == "managed"
     assert permissions["network"] == "restricted"
     entries = permissions["fileSystem"]["entries"]
     assert entries[0]["access"] == "read"
 
 
-def test_resolve_workspace_write_wire_shape():
-    """workspace-write 档位 → codex :workspace 展开（网络默认受限，基座+项目根）"""
-    policy = resolve_spawn_policy(_Settings(sandbox="workspace-write"), "/tmp/proj")
-    assert policy is not None
-    sandbox = policy.sandbox
-    assert sandbox is not None
-    permissions = sandbox["permissions"]
+def test_resolve_workspace_write_wire_shape(tmp_path):
+    """workspace-write 套餐 → codex :workspace 展开（网络默认受限，基座+项目根）"""
+    home = _config_with_mode(tmp_path, "workspace-write")
+    config = load_executor_config(executor_home=home)
+    payload = config.to_file_system_sandbox("/tmp/proj").model_dump(
+        by_alias=True, exclude_none=True
+    )
+    permissions = payload["permissions"]
     assert permissions["network"] == "restricted"
     entries = permissions["fileSystem"]["entries"]
     # codex 形态：第 1 条是全盘只读基座（符号 :root），第 2 条项目根可写
@@ -113,10 +125,6 @@ def test_resolve_workspace_write_wire_shape():
     assert entries[0]["path"]["value"]["kind"] == "root"
     assert entries[1]["access"] == "write"
     assert entries[1]["path"]["value"]["kind"] == "project_roots"
-
-
-def test_sandbox_tiers_are_known():
-    assert SANDBOX_TIERS == ("read-only", "workspace-write")
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +140,15 @@ def teardown_function(_):
     reset_backend_selection()
 
 
-def test_default_path_attaches_policy_for_executor_backend():
-    settings = _Settings(default_backend="executor", sandbox="read-only")
+def test_default_path_attaches_policy_for_executor_backend(monkeypatch, tmp_path):
+    home = _config_with_mode(tmp_path, "read-only")
+    import nova_coding_agent.executor.runtime as runtime_mod
+
+    monkeypatch.setattr(
+        runtime_mod, "load_executor_config",
+        lambda **_: load_executor_config(executor_home=home),
+    )
+    settings = _Settings(default_backend="executor")
     selection = get_backend_selection(settings)  # type: ignore[arg-type]
     assert selection.backend == "executor"
     assert selection.spawn_policy is not None
@@ -190,9 +205,14 @@ def _run(ops: ExecutorBashOperations, cwd: str = "/tmp/proj"):
     return asyncio.run(ops.execute("echo hi", cwd, {}))
 
 
-def test_operations_pass_policy_into_start_params():
+def test_operations_pass_policy_into_start_params(tmp_path):
     handle = _FakeProcHandle()
-    policy = resolve_spawn_policy(_Settings(sandbox="workspace-write"), "/tmp/proj")
+    home = _config_with_mode(tmp_path, "workspace-write")
+    policy = SpawnPolicy(
+        sandbox=load_executor_config(executor_home=home)
+        .to_file_system_sandbox("/tmp/proj")
+        .model_dump(by_alias=True, exclude_none=True)
+    )
     assert policy is not None
     ops = ExecutorBashOperations(
         _FakeManagerForOps(_FakeClient(handle)),
@@ -233,9 +253,14 @@ def _switch_module():
     return module
 
 
-def test_attach_policy_ssh_uses_remote_cwd():
+def test_attach_policy_ssh_uses_remote_cwd(monkeypatch, tmp_path):
+    home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
-    ctx = _Ctx(_Settings(sandbox="read-only"))
+    monkeypatch.setattr(
+        switch, "load_executor_config",
+        lambda **_: load_executor_config(executor_home=home),
+    )
+    ctx = _Ctx(_Settings())
     selection = BackendSelection(
         backend="executor", url="ssh://u@h", remote_cwd="/remote/w"
     )
@@ -245,9 +270,14 @@ def test_attach_policy_ssh_uses_remote_cwd():
     assert selection.spawn_policy.sandbox["cwd"] == "/remote/w"
 
 
-def test_attach_policy_local_loopback_uses_local_cwd():
+def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
+    home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
-    ctx = _Ctx(_Settings(sandbox="read-only"), cwd="/tmp/proj")
+    monkeypatch.setattr(
+        switch, "load_executor_config",
+        lambda **_: load_executor_config(executor_home=home),
+    )
+    ctx = _Ctx(_Settings(), cwd="/tmp/proj")
     selection = BackendSelection(backend="executor", url=None)
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is not None
@@ -255,9 +285,14 @@ def test_attach_policy_local_loopback_uses_local_cwd():
     assert selection.spawn_policy.sandbox["cwd"] == "/tmp/proj"
 
 
-def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed():
+def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed(monkeypatch, tmp_path):
+    home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
-    ctx = _Ctx(_Settings(sandbox="read-only"), cwd="/tmp/proj")
+    monkeypatch.setattr(
+        switch, "load_executor_config",
+        lambda **_: load_executor_config(executor_home=home),
+    )
+    ctx = _Ctx(_Settings(), cwd="/tmp/proj")
     selection = BackendSelection(backend="executor", url="ws://host:28080")
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is None
@@ -265,7 +300,7 @@ def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed():
 
 def test_attach_policy_local_backend_never_sandboxes():
     switch = _switch_module()
-    ctx = _Ctx(_Settings(sandbox="read-only"), cwd="/tmp/proj")
+    ctx = _Ctx(_Settings(), cwd="/tmp/proj")
     selection = BackendSelection(backend="local")
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is None
@@ -289,14 +324,27 @@ def test_selection_roundtrip_keeps_policy():
     assert get_backend_selection().spawn_policy is policy
 
 
-def test_invalid_tier_resolves_to_no_policy():
+def test_invalid_mode_is_config_error(tmp_path):
+    import tomllib
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text('sandbox_mode = "yolo"\n')
+    with pytest.raises(Exception):
+        load_executor_config(executor_home=home)
+    return
     settings = _Settings(sandbox="yolo")
     assert settings.sandbox not in SANDBOX_TIERS
     assert resolve_spawn_policy(settings, "/tmp/proj") is None
 
 
 @pytest.mark.parametrize("tier", ["read-only", "workspace-write"])
-def test_both_tiers_produce_sandbox(tier: str):
-    policy = resolve_spawn_policy(_Settings(sandbox=tier), "/tmp/proj")
+def test_both_tiers_produce_sandbox(tier: str, tmp_path):
+    home = _config_with_mode(tmp_path, tier)
+    policy = SpawnPolicy(
+        sandbox=load_executor_config(executor_home=home)
+        .to_file_system_sandbox("/tmp/proj")
+        .model_dump(by_alias=True, exclude_none=True)
+    )
     assert policy is not None
     assert policy.sandbox is not None

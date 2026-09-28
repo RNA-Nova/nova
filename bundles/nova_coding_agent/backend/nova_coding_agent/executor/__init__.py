@@ -15,7 +15,7 @@ from nova_coding_agent.executor.manager import (
 )
 from nova_coding_agent.executor.policy import (
     SpawnPolicy,
-    resolve_spawn_policy,
+
 )
 from nova_coding_agent.executor.provision import (
     ProvisionError,
@@ -49,6 +49,6 @@ __all__ = [
     "reset_backend_selection",
     "resolve_backend_path",
     "resolve_executor_binary",
-    "resolve_spawn_policy",
+
     "set_backend_selection",
 ]

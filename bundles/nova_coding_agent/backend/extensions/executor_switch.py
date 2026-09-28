@@ -33,7 +33,7 @@ from nova_coding_agent.executor import (
     get_executor_manager,
     is_ssh_url,
     parse_ssh_target,
-    resolve_spawn_policy,
+    SpawnPolicy,
     set_backend_selection,
 )
 from nova_coding_agent.ui_primitives import input as input_dialog
@@ -43,6 +43,7 @@ from nova_coding_agent.ui_primitives import (
     set_status,
 )
 from nova_harness.extensions.api import NovaExtensionAPI
+from nova_exec_server_client import load_executor_config
 
 _ENTRY_TYPE = "executor_backend"
 # 供给进度的 footer 状态位（同 key 幂等覆盖，结束清除）
@@ -67,23 +68,31 @@ def _describe_url(url: str) -> str:
 
 
 def _attach_policy(ctx: Any, selection: BackendSelection) -> None:
-    """按 settings 沙箱档位为 executor 后端组装策略（挂到 selection 上）。
+    """物化套餐策略为 executor 后端挂到 selection 上（物化升级——对位
+    nova_protocol 的 resolve_execution：套餐词汇在 config.toml，引擎
+    产文本在 nova_protocol，这里只接线）。
 
     策略作用目录三态：SSH 远程取 remote_cwd（会话隔离工作区）；本地
     回环 executor（url 为空）取本地 cwd；ws 直连端点远程 cwd 未知，
-    v1 不沙箱（登记限制）。
+    不沙箱（与 resolve_execution 的无 cwd → None 语义一致）。
     """
     if selection.backend != "executor":
         return
-    getter = getattr(ctx, "get_executor_settings", None)
-    settings = getter() if callable(getter) else None
     if selection.remote_cwd:
         effective_cwd: Optional[str] = selection.remote_cwd
     elif not selection.url:
         effective_cwd = getattr(ctx, "cwd", None)
     else:
         effective_cwd = None
-    selection.spawn_policy = resolve_spawn_policy(settings, effective_cwd)
+
+    config = load_executor_config(project_trusted=False)
+    resolved = config.resolve_execution(effective_cwd)
+    if resolved.sandbox is None:
+        selection.spawn_policy = None
+        return
+    selection.spawn_policy = SpawnPolicy(
+        sandbox=resolved.sandbox.model_dump(by_alias=True, exclude_none=True)
+    )
 
 
 def _current_label(selection: BackendSelection) -> str:
