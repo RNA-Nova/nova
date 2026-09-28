@@ -53,7 +53,7 @@ class Tool:
 
     def _resolve_operations(self) -> WriteOperations:
         """执行期解析 operations（远程 executor 后端换远程 fs 层版）。"""
-        layer = backend_file_layer(self._context)
+        layer = backend_file_layer()
         if layer is None:
             return self.operations
         if self._remote_cache is None or self._remote_cache[0] is not layer:

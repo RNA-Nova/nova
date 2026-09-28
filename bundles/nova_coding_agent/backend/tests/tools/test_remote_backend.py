@@ -123,9 +123,9 @@ def _make_tool(name, layer):
     spec = importlib.util.spec_from_file_location(f"_test_remote_{name}", tool_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.backend_file_layer = lambda _ctx: layer
+    module.backend_file_layer = lambda: layer
     # 便携引擎路径：runner 恒 None（远程 rg 链另有专项测试）
-    module.backend_process_runner = lambda _ctx: None
+    module.backend_process_runner = lambda: None
     from nova_harness.types.resources.tools import (
         NULL_TOOL_SETTINGS,
         ToolContext,

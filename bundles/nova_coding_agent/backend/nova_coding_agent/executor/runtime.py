@@ -75,7 +75,7 @@ def reset_backend_selection() -> None:
     _current = None
 
 
-def backend_file_layer(context: Any):
+def backend_file_layer():
     """当前为远程 executor 后端时返回其 fs 层，否则 None。
 
     六个 fs 工具执行期解析用：远程（url 非空）→ ``ExecutorFileSystemLayer``
@@ -91,7 +91,7 @@ def backend_file_layer(context: Any):
     return get_executor_file_layer(get_executor_manager(), selection.url)
 
 
-def backend_process_runner(context: Any):
+def backend_process_runner():
     """当前为远程 executor 后端时返回其 ProcessRunner，否则 None。
 
     grep/find 工具执行期解析用：远程 → ``ExecutorProcessRunner``（远程

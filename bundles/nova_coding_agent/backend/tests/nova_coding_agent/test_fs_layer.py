@@ -245,26 +245,25 @@ class TestExecutorLayer:
 class _Ctx:
     def __init__(self, cwd):
         self.cwd = cwd
-        self.settings = None
 
 
 class TestBackendResolution:
     def test_backend_file_layer_none_when_local(self):
-        assert backend_file_layer(_Ctx("/tmp")) is None
+        assert backend_file_layer() is None
 
     def test_backend_file_layer_none_when_local_sandbox(self):
         # 本地沙箱（url=None）：本地盘，不切远程层
         set_backend_selection(BackendSelection(backend="executor", url=None))
-        assert backend_file_layer(_Ctx("/tmp")) is None
+        assert backend_file_layer() is None
 
     def test_backend_file_layer_remote(self):
         set_backend_selection(
             BackendSelection(backend="executor", url="ssh://u@h", remote_cwd="/w")
         )
-        layer = backend_file_layer(_Ctx("/tmp"))
+        layer = backend_file_layer()
         assert isinstance(layer, ExecutorFileSystemLayer)
         # 同 url 复用（缓存）
-        assert backend_file_layer(_Ctx("/tmp")) is layer
+        assert backend_file_layer() is layer
 
     def test_resolve_local_relative(self, tmp_path):
         resolved = resolve_backend_path("a/b.txt", _Ctx(str(tmp_path)))

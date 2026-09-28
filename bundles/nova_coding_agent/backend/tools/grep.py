@@ -87,11 +87,11 @@ class Tool:
     def _resolve_operations(self) -> GrepOperations:
         """执行期解析 operations（远程 executor 后端换远程 fs 层 +
         远程 ProcessRunner 版）。"""
-        layer = backend_file_layer(self._context)
+        layer = backend_file_layer()
         if layer is None:
             return self.operations
         if self._remote_cache is None or self._remote_cache[0] is not layer:
-            runner = backend_process_runner(self._context)
+            runner = backend_process_runner()
             self._remote_cache = (layer, type(self.operations)(layer, runner))
         return self._remote_cache[1]
 
