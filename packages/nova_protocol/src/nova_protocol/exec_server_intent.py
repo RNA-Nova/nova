@@ -1,20 +1,25 @@
 """exec 命令分析词汇与危险判定（exec-server 前置管线①站）。
 
-解析与判定全部对位 codex `shell_command_tools`（nova-agent-rs 存档金标）：
+解析与判定全部对位 codex `shell_command_tools`（原 nova-agent-rs 存档——已随
+金标对跑完成删除，金标语义固化在本包 tests）：
 
-- `parse_shell_script_into_commands` / `parse_shell_lc_literal_commands`：
-  codex `bash.rs` 两个解析入口的**手写等价实现**。codex 用 tree-sitter；本
-  实现按其接受/拒绝规则逐条对齐（引号剥壳、`$(...)`/反引号替换递归提取、
-  赋值前缀跳过、控制结构配平校验、动态词省略、解析失败整体 None），无
-  tree-sitter 依赖（枢纽纯度纪律）。obscure 语法（数组/进程替换/复杂
-  heredoc）在本实现下退化为 None——与 codex 的 fail-open 边界一致（不可
+- `parse_shell_script_into_commands` / `parse_shell_lc_literal_commands` /
+  `parse_shell_lc_plain_commands`：codex `bash.rs` 解析入口的**手写等价
+  实现**。codex 用 tree-sitter；本实现按其接受/拒绝规则逐条对齐（引号剥壳、
+  `$(...)`/反引号替换递归提取、赋值前缀 literal 跳过/plain 拒绝、控制结构
+  配平校验、动态词省略、plain 路径换行分隔与空命令位/悬挂运算符拒绝、解析
+  失败整体 None），无 tree-sitter 依赖（枢纽纯度纪律）。obscure 语法（数组/
+  进程替换/复杂 heredoc）在本实现下退化为 None；词拼接（concatenation，如
+  `-g"*.py"`）按词界切分为多词而非合并——已知分歧点（详见
+  exec_server_safe_command 模块说明）。fail-open 边界与 codex 一致（不可
   解析≠危险，由 Intent.opaque 上抛）。
 - `dangerous_command_match`：`is_dangerous_command.rs` 完整移植（fail-closed
   包装深度上限 + rm -f 族 + sudo/env/trap/bash -lc 穿透）。
 - `find_git_subcommand` 等 git 全局选项防绕过辅助（同文件金标）。
 
-安全白名单（`is_safe_command.rs` 逐命令选项表，802 行）与 windows 危险/安全
-表**本批未移植**——缺省更严而非更松（全过裁决），批次 C 随裁决子系统补。
+安全白名单（`is_safe_command.rs` 逐命令选项表）见 `exec_server_safe_command`
+（`is_safe_command` 为入口）；windows 危险/安全表**未移植**（Windows/PS
+专项批次另定）——缺省更严而非更松。
 
 `Intent` 是进程内值对象（不上线），frozen 锁死不可变。
 """
@@ -128,6 +133,21 @@ def parse_shell_script_into_commands(script: str) -> list[tuple[str, ...]] | Non
     return _extract_literal_commands(script, plain_only=True)
 
 
+def parse_shell_lc_plain_commands(
+    command: tuple[str, ...] | list[str],
+) -> list[tuple[str, ...]] | None:
+    """safe 路径：从 `bash -lc` 脚本提取 plain 命令序列（对位 codex 同名函数）。
+
+    与 `parse_shell_lc_literal_commands` 同形但走 plain 严格解析——脚本中
+    任一非白名单构造（重定向/替换/展开/赋值前缀/控制流/空命令位）整体 None。
+    """
+    extracted = extract_bash_command(command)
+    if extracted is None:
+        return None
+    _, script = extracted
+    return parse_shell_script_into_commands(script)
+
+
 def _extract_literal_commands(
     script: str, *, plain_only: bool = False
 ) -> list[tuple[str, ...]] | None:
@@ -135,6 +155,9 @@ def _extract_literal_commands(
     words: list[str] = []
     saw_command_word = False
     control_stack: list[str] = []
+    # plain 路径配平状态：最近一个 &&/||/| 之后尚未出现命令词（对位
+    # tree-sitter 的语法错误拒绝——bash.rs rejects_trailing_operator_parse_error）
+    trailing_needs_command = False
 
     def flush_command() -> bool:
         nonlocal words, saw_command_word
@@ -149,16 +172,41 @@ def _extract_literal_commands(
     while i < n:
         ch = script[i]
 
+        # ── 换行：plain 路径视为命令分隔（对位 tree-sitter 的换行终止命令；
+        # 空行/行首换行合法——仅在有进行中的命令时才落段） ──
+        if ch == "\n" and plain_only:
+            if saw_command_word:
+                flush_command()
+            i += 1
+            continue
         if ch.isspace():
             i += 1
             continue
 
         # ── 运算符/分隔符 ──
+        # plain 路径空命令位整体拒绝（对位 bash.rs
+        # rejects_empty_command_position_with_leading_operator /
+        # _with_double_separator / _with_empty_pipeline_segment——tree-sitter
+        # 视之为语法错误，本手写解析须显式配平）
         if script.startswith("&&", i) or script.startswith("||", i):
+            if plain_only:
+                if not saw_command_word:
+                    return None
+                trailing_needs_command = True
             flush_command()
             i += 2
             continue
-        if ch in ";|":
+        if ch == ";":
+            if plain_only and not saw_command_word:
+                return None
+            flush_command()
+            i += 1
+            continue
+        if ch == "|":
+            if plain_only:
+                if not saw_command_word:
+                    return None
+                trailing_needs_command = True
             flush_command()
             i += 1
             continue
@@ -185,6 +233,7 @@ def _extract_literal_commands(
             if saw_command_word or True:
                 words.append(script[i + 1 : end])
                 saw_command_word = True
+                trailing_needs_command = False
             i = end + 1
             continue
 
@@ -241,6 +290,7 @@ def _extract_literal_commands(
             if not has_substitution:
                 words.append("".join(literal_chars))
                 saw_command_word = True
+                trailing_needs_command = False
             i = end + 1
             continue
 
@@ -321,15 +371,25 @@ def _extract_literal_commands(
             flush_command()
             continue
 
-        # 赋值前缀（命令词位置的 NAME=value）：跳过不计词
+        # 赋值前缀（命令词位置的 NAME=value）：literal 路径跳过不计词（对位
+        # parse_literal_command_from_node 忽略 variable_assignment 子节点）；
+        # plain 路径整体拒绝（对位 bash.rs rejects_variable_assignment_prefix——
+        # tree-sitter 的 variable_assignment 不在 ALLOWED_KINDS；若放过，
+        # `LD_PRELOAD=/x ls` 一类环境注入会被安全白名单误判放行）
         if not saw_command_word and _is_assignment_word(word):
+            if plain_only:
+                return None
             continue
 
         words.append(word)
         saw_command_word = True
+        trailing_needs_command = False
 
     flush_command()
     if control_stack:
+        return None
+    if plain_only and trailing_needs_command:
+        # 脚本以 &&/||/| 结尾——语法错误（对位 tree-sitter has_error → None）
         return None
     return commands
 

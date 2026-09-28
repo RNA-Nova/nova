@@ -230,6 +230,7 @@ from .exec_server_intent import (
     intent_from_shell,
     extract_bash_command,
     parse_shell_lc_literal_commands,
+    parse_shell_lc_plain_commands,
     parse_shell_script_into_commands,
     DangerousCommandMatch,
     MAX_DANGEROUS_COMMAND_WRAPPER_DEPTH,
@@ -267,6 +268,11 @@ from .exec_server_policy import (
     format_network_rule,
     is_likely_executor_managed_sandbox_denied,
     is_likely_sandbox_denied,
+)
+
+from .exec_server_safe_command import (
+    is_safe_command,
+    is_safe_to_call_with_exec,
 )
 
 # ---------------------------------------------------------------------------

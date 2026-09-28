@@ -13,8 +13,7 @@ nova/
 │   ├── nova_server/        # JSON-RPC 协议服务层（protocol/transport/reduction/client 家族/exec）
 │   ├── nova_client/        # 前端运行时（TS 厚应用层 + 内置 TUI 宿主；npm 包）
 │   ├── nova_executor/      # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over stdio/WS）
-│   ├── nova-exec-server-client/   # executor 的 Python 薄客户端（连接 + 配置发现 + 物化）
-│   └── nova-agent-rs/      # Rust 侧实验性代码（非发布路径）
+│   └── nova-exec-server-client/   # executor 的 Python 薄客户端（连接 + 配置发现 + 物化）
 ├── bundles/
 │   └── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具（官方包住 bundles/，框架住 packages/）
 ├── docs/                   # 专题文档（本文件、data-modeling.md、development.md、security.md）

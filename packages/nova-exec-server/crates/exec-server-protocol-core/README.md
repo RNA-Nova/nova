@@ -6,4 +6,5 @@
 单点定义保证线上契约不漂移。
 
 派生自 OpenAI Codex 的 `codex-protocol`（Apache-2.0）；agent 会话面类型
-（thread/auth/mcp/items 等）已按 nova 纯度边界移出至 nova-agent-rs 存档。
+（thread/auth/mcp/items 等）按 nova 纯度边界移出（agent 层词汇归 py 侧
+`nova_protocol`——曾存的 Rust 存档已随金标对跑完成删除）。

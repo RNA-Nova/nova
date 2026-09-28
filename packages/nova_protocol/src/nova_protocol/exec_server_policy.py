@@ -1,4 +1,4 @@
-"""exec 裁决引擎（execpolicy py 移植——金标：nova-agent-rs/execpolicy）+ 沙箱拒绝启发式。
+"""exec 裁决引擎（execpolicy py 移植——金标已固化：`tests/test_execpolicy_golden.py`）+ 沙箱拒绝启发式。
 
 组成（逐件对位，不臆造）：
 
@@ -28,7 +28,6 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .exec_server_intent import executable_name_lookup_key
 from .exec_server_verdict import Decision
 
 
@@ -272,10 +271,15 @@ class Policy:
         cmd: tuple[str, ...] | list[str],
         heuristics_fallback=None,
     ) -> Evaluation:
-        """对一条命令求值：全部规则匹配 + 兜底 → Evaluation（decision 取 max）"""
+        """对一条命令求值：全部规则匹配 + 兜底 → Evaluation（decision 取 max）
+
+        查找键为**字面 ``cmd[0]``**（对位 Rust 默认 check 语义）：规则按
+        pattern 首 token 字面分组，路径/裸名互不认——可执行名归一归
+        ``host_executable`` 声明族（挂账，见 golden 测试 D3/D4 xfail）。
+        """
         cmd = tuple(cmd)
         matched: list[PrefixRuleMatch | HeuristicsRuleMatch] = []
-        program = executable_name_lookup_key(cmd[0]) if cmd else None
+        program = cmd[0] if cmd else None
         if program is not None:
             for rule in self._rules_by_program.get(program, []):
                 prefix = rule.pattern.matches_prefix(cmd)
