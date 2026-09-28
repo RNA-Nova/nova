@@ -57,8 +57,17 @@ def patched(monkeypatch):
         state["clients"].append(client)
         return client
 
+    class _FakeClientShim:
+        """SDK 经 ExecutorClient.from_environment 构造——假实现挂类方法。"""
+
+        @classmethod
+        def from_environment(cls, environment, **kwargs):
+            return _fake_client(environment.url, token=environment.token)
+
     monkeypatch.setattr(manager_module, "provision", _fake_provision)
-    monkeypatch.setattr(manager_module, "ExecutorClient", _fake_client)
+    monkeypatch.setattr(
+        "nova_exec_server_client.client.ExecutorClient", _FakeClientShim
+    )
     return state
 
 
@@ -135,7 +144,9 @@ class TestSshRouting:
             handle = mgr._ssh_handles["ssh://alice@gpu-01"]
             await mgr.close_all()
             assert handle.stopped
-            assert mgr._clients == {}
+            # 客户端缓存归 SDK EnvironmentManager（close_all 已清扫）
+            assert mgr._env_manager._clients == {}
+            assert all(c.disconnected for c in patched["clients"])
             assert mgr._ssh_handles == {}
 
         asyncio.run(run())

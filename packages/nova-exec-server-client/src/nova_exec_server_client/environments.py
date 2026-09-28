@@ -12,6 +12,7 @@ codex 对位关系：`~/.codex/environments.toml`（exec-server crate 自持解�
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal
@@ -132,6 +133,9 @@ class EnvironmentManager:
         self._config = config
         self._network_policy = network_policy
         self._clients: dict[str, ExecutorClient] = {}
+        #: 动态注册环境的鉴权 token 侧表（运行时产物——不进配置条目，
+        #: 解析后覆盖到 ResolvedEnvironment）
+        self._tokens: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -162,6 +166,9 @@ class EnvironmentManager:
         from .client import ExecutorClient  # 延迟导入破环（client 依赖本模块）
 
         environment = resolve_environment(self._config, name)
+        token = self._tokens.get(environment.id)
+        if token is not None:
+            environment = dataclasses.replace(environment, token=token)
         async with self._lock:
             cached = self._clients.get(environment.id)
             if cached is not None:
@@ -195,11 +202,21 @@ class EnvironmentManager:
     # 运行时增删（内存态；配置写回归调用方）
     # ------------------------------------------------------------------
 
-    async def upsert_environment(self, environment: ExecutorEnvironment) -> None:
-        """运行时注册/覆盖环境（已有活连接则断开缓存连接，下次用时重建）"""
+    async def upsert_environment(
+        self, environment: ExecutorEnvironment, *, token: str | None = None
+    ) -> None:
+        """运行时注册/覆盖环境（已有活连接则断开缓存连接，下次用时重建）。
+
+        `token`：WS 鉴权 token 的侧表登记（运行时产物，不落配置条目）；
+        None 时清除该环境的 token 登记。
+        """
         existing = self._clients.pop(environment.id, None)
         if existing is not None:
             await existing.disconnect()
+        if token is not None:
+            self._tokens[environment.id] = token
+        else:
+            self._tokens.pop(environment.id, None)
         environments = [e for e in self._config.environments if e.id != environment.id]
         environments.append(environment)
         self._config = self._config.model_copy(update={"environments": environments})

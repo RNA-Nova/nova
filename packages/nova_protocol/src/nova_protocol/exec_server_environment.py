@@ -29,3 +29,6 @@ class ResolvedEnvironment:
     cwd: str | None = None
     #: 连接总时限（秒；None = 不限制）
     connect_timeout_sec: float | None = None
+    #: WS 鉴权 token（运行时解析产物——本地 spawn 的随机 bearer / SSH 隧道
+    #: 的临时 token；不落盘、不进配置条目）
+    token: str | None = None

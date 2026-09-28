@@ -263,6 +263,7 @@ class ExecutorClient:
             assert environment.url is not None
             client = cls(
                 environment.url,
+                token=environment.token,
                 connections=connections,
                 reconnect=reconnect,
                 resume_session_id=resume_session_id,
