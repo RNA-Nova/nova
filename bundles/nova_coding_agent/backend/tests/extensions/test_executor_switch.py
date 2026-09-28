@@ -8,6 +8,8 @@ import asyncio
 import importlib.util
 import os
 
+import pytest
+
 from nova_coding_agent.executor import get_backend_selection, reset_backend_selection
 from nova_harness.types.ui.primitives import UIResponse
 
@@ -79,6 +81,39 @@ class _Entry:
         self.type = "custom"
         self.custom_type = "executor_backend"
         self.data = data
+
+
+@pytest.fixture
+def fake_endpoints(monkeypatch):
+    """假端点注册表：load 按脚本，register/unregister 记录（批次 D 后
+    executor_switch 的端点读写走 endpoints_store，不再走 ctx/settings）。"""
+    state = {"entries": [], "registered": [], "unregistered": []}
+
+    def _load():
+        return list(state["entries"])
+
+    def _register(name, url, cwd=None):
+        state["registered"].append((name, url, cwd))
+        state["entries"] = [e for e in state["entries"] if e["name"] != name] + [
+            {"name": name, "url": url, "cwd": cwd}
+        ]
+
+    def _unregister(name):
+        state["unregistered"].append(name)
+        before = len(state["entries"])
+        state["entries"] = [e for e in state["entries"] if e["name"] != name]
+        return len(state["entries"]) != before
+
+    monkeypatch.setattr(
+        "nova_coding_agent.executor.endpoints_store.load_endpoints", _load
+    )
+    monkeypatch.setattr(
+        "nova_coding_agent.executor.endpoints_store.register_endpoint", _register
+    )
+    monkeypatch.setattr(
+        "nova_coding_agent.executor.endpoints_store.unregister_endpoint", _unregister
+    )
+    return state
 
 
 class _FakeCtx:
@@ -180,19 +215,14 @@ def test_switch_remote_by_url():
         _teardown()
 
 
-def test_switch_remote_by_endpoint_name():
-    class _Endpoint:
-        def __init__(self, name, url):
-            self.name = name
-            self.url = url
-
-    class _Settings:
-        default_backend = None
-        endpoints = [_Endpoint("gpu-01", "wss://gpu-01:8080")]
+def test_switch_remote_by_endpoint_name(fake_endpoints):
+    fake_endpoints["entries"] = [
+        {"name": "gpu-01", "url": "wss://gpu-01:8080", "cwd": None}
+    ]
 
     api = _setup()
     try:
-        ctx = _FakeCtx(_FakeUI(), executor_settings=_Settings())
+        ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote gpu-01", ctx))
         sel = get_backend_selection(None)
         assert sel.url == "wss://gpu-01:8080"
@@ -267,7 +297,7 @@ def _setup_ssh(fail_with=None, remote_exec_result=None):
     return api, manager, remote_calls
 
 
-def test_ssh_bare_target_provisions_registers_switches():
+def test_ssh_bare_target_provisions_registers_switches(fake_endpoints):
     api, manager, remote_calls = _setup_ssh()
     try:
         ctx = _FakeCtx(_FakeUI())
@@ -283,7 +313,7 @@ def test_ssh_bare_target_provisions_registers_switches():
         expected_cwd = "/home/alice/.nova/agent/executor/workspaces/default"
         assert remote_calls == [("ssh://alice@gpu-01", f"mkdir -p {expected_cwd}")]
         # 自动登记（host 作缺省名；缺省工作区不记忆目录）+ 选择翻转 + 条目持久化
-        assert ctx.registered == [("gpu-01", "ssh://alice@gpu-01", None)]
+        assert fake_endpoints["registered"] == [("gpu-01", "ssh://alice@gpu-01", None)]
         sel = get_backend_selection(None)
         assert sel.backend == "executor"
         assert sel.url == "ssh://alice@gpu-01"
@@ -308,7 +338,7 @@ def test_ssh_bare_target_provisions_registers_switches():
         _teardown()
 
 
-def test_ssh_provision_failure_keeps_current():
+def test_ssh_provision_failure_keeps_current(fake_endpoints):
     from nova_coding_agent.executor import ProvisionError
 
     api, manager, _rc = _setup_ssh(
@@ -319,7 +349,7 @@ def test_ssh_provision_failure_keeps_current():
         asyncio.run(api.commands["executor"]("remote alice@gpu-01", ctx))
         assert len(manager.calls) == 1
         # 失败不切换、不登记、不写条目
-        assert ctx.registered == []
+        assert fake_endpoints["registered"] == []
         assert ctx.entries == []
         assert get_backend_selection(None).backend == "local"
         texts = _notice_texts(ctx.ui)
@@ -328,7 +358,7 @@ def test_ssh_provision_failure_keeps_current():
         _teardown()
 
 
-def test_ssh_explicit_cwd_validated_and_remembered():
+def test_ssh_explicit_cwd_validated_and_remembered(fake_endpoints):
     api, manager, remote_calls = _setup_ssh()
     try:
         ctx = _FakeCtx(_FakeUI())
@@ -338,13 +368,15 @@ def test_ssh_explicit_cwd_validated_and_remembered():
         sel = get_backend_selection(None)
         assert sel.remote_cwd == "/data/proj"
         # 显式目录随端点记忆
-        assert ctx.registered == [("gpu-01", "ssh://alice@gpu-01", "/data/proj")]
+        assert fake_endpoints["registered"] == [
+            ("gpu-01", "ssh://alice@gpu-01", "/data/proj")
+        ]
         assert ctx.entries[0][1]["remote_cwd"] == "/data/proj"
     finally:
         _teardown()
 
 
-def test_ssh_explicit_cwd_tilde_normalized():
+def test_ssh_explicit_cwd_tilde_normalized(fake_endpoints):
     api, manager, remote_calls = _setup_ssh()
     try:
         ctx = _FakeCtx(_FakeUI())
@@ -356,14 +388,14 @@ def test_ssh_explicit_cwd_tilde_normalized():
         _teardown()
 
 
-def test_ssh_explicit_cwd_missing_keeps_current():
+def test_ssh_explicit_cwd_missing_keeps_current(fake_endpoints):
     api, manager, _rc = _setup_ssh(remote_exec_result={"exit_code": 1})
     try:
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote alice@gpu-01 /nope", ctx))
         # 目录不存在：不切换、不登记、不写条目
         assert get_backend_selection(None).backend == "local"
-        assert ctx.registered == []
+        assert fake_endpoints["registered"] == []
         assert ctx.entries == []
         texts = _notice_texts(ctx.ui)
         assert any("远程目录不存在" in text for text in texts)
@@ -371,24 +403,18 @@ def test_ssh_explicit_cwd_missing_keeps_current():
         _teardown()
 
 
-def test_ssh_registered_endpoint_by_name_skips_register():
-    class _Endpoint:
-        def __init__(self, name, url, cwd=None):
-            self.name = name
-            self.url = url
-            self.cwd = cwd
-
-    class _Settings:
-        default_backend = None
-        endpoints = [_Endpoint("gpu", "ssh://alice@gpu-01", cwd="/data/remembered")]
+def test_ssh_registered_endpoint_by_name_skips_register(fake_endpoints):
+    fake_endpoints["entries"] = [
+        {"name": "gpu", "url": "ssh://alice@gpu-01", "cwd": "/data/remembered"}
+    ]
 
     api, manager, remote_calls = _setup_ssh()
     try:
-        ctx = _FakeCtx(_FakeUI(), executor_settings=_Settings())
+        ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("remote gpu", ctx))
         assert len(manager.calls) == 1
         assert manager.calls[0]["target"].ssh_dest == "alice@gpu-01"
-        assert ctx.registered == []  # 已登记端点不重复登记
+        assert fake_endpoints["registered"] == []  # 已登记端点不重复登记
         # 端点记住的目录被采用
         sel = get_backend_selection(None)
         assert sel.url == "ssh://alice@gpu-01"
@@ -398,7 +424,7 @@ def test_ssh_registered_endpoint_by_name_skips_register():
         _teardown()
 
 
-def test_ssh_scheme_url_registers():
+def test_ssh_scheme_url_registers(fake_endpoints):
     api, manager, _rc = _setup_ssh()
     try:
         ctx = _FakeCtx(_FakeUI())
@@ -409,12 +435,14 @@ def test_ssh_scheme_url_registers():
             "10.0.0.2",
             2222,
         )
-        assert ctx.registered == [("10.0.0.2", "ssh://bob@10.0.0.2:2222", None)]
+        assert fake_endpoints["registered"] == [
+            ("10.0.0.2", "ssh://bob@10.0.0.2:2222", None)
+        ]
     finally:
         _teardown()
 
 
-def test_selector_add_remote_flow():
+def test_selector_add_remote_flow(fake_endpoints):
     api, manager, _rc = _setup_ssh()
     try:
         ui = _FakeUI(
@@ -423,12 +451,12 @@ def test_selector_add_remote_flow():
         ctx = _FakeCtx(ui)
         asyncio.run(api.commands["executor"]("", ctx))
         assert manager.calls[0]["target"].ssh_dest == "carol@gpu-02"
-        assert ctx.registered == [("gpu-02", "ssh://carol@gpu-02", None)]
+        assert fake_endpoints["registered"] == [("gpu-02", "ssh://carol@gpu-02", None)]
     finally:
         _teardown()
 
 
-def test_selector_add_remote_with_path():
+def test_selector_add_remote_with_path(fake_endpoints):
     api, manager, remote_calls = _setup_ssh()
     try:
         ui = _FakeUI(
@@ -438,13 +466,15 @@ def test_selector_add_remote_with_path():
         ctx = _FakeCtx(ui)
         asyncio.run(api.commands["executor"]("", ctx))
         assert remote_calls == [("ssh://carol@gpu-02", "test -d /srv/ml")]
-        assert ctx.registered == [("gpu-02", "ssh://carol@gpu-02", "/srv/ml")]
+        assert fake_endpoints["registered"] == [
+            ("gpu-02", "ssh://carol@gpu-02", "/srv/ml")
+        ]
         assert get_backend_selection(None).remote_cwd == "/srv/ml"
     finally:
         _teardown()
 
 
-def test_selector_add_remote_cancel_input():
+def test_selector_add_remote_cancel_input(fake_endpoints):
     api, manager, _rc = _setup_ssh()
     try:
         ui = _FakeUI(select_script=["__add_remote__"], input_script=[None])
@@ -456,12 +486,15 @@ def test_selector_add_remote_cancel_input():
         _teardown()
 
 
-def test_forget_endpoint():
+def test_forget_endpoint(fake_endpoints):
+    fake_endpoints["entries"] = [
+        {"name": "gpu-01", "url": "ssh://alice@gpu-01", "cwd": None}
+    ]
     api, manager, _rc = _setup_ssh()
     try:
         ctx = _FakeCtx(_FakeUI())
         asyncio.run(api.commands["executor"]("forget gpu-01", ctx))
-        assert ctx.unregistered == ["gpu-01"]
+        assert fake_endpoints["unregistered"] == ["gpu-01"]
         texts = _notice_texts(ctx.ui)
         assert any("已移除端点：gpu-01" in text for text in texts)
     finally:

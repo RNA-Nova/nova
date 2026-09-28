@@ -17,7 +17,9 @@
   **会话隔离的远程工作区**（``<远程家目录>/.nova/agent/executor/
   workspaces/<session-id>``，切换时 mkdir -p 建好）。环境段 `<cwd>`
   渲染执行 cwd（codex 语义：命令在哪跑写哪）；
-- 端点清单来自 settings ``executor.endpoints``（core 侧 ``ExecutorSettings``）。
+- 端点清单来自 ``~/.nova/exec-server/config.toml`` 的 ``[[environments]]``
+  （批次 D 搬家——词汇归 exec-server 配置根，读写见
+  ``nova_coding_agent.executor.endpoints_store``）。
 """
 
 from __future__ import annotations
@@ -101,18 +103,11 @@ def _current_label(selection: BackendSelection) -> str:
     return "local（本地直接执行）"
 
 
-def _endpoints_from_settings(ctx: Any) -> List[Dict[str, Optional[str]]]:
-    """从 settings 读已知远程端点清单（经 ExtensionContext.get_executor_settings）。"""
-    getter = getattr(ctx, "get_executor_settings", None)
-    if getter is None:
-        return []
-    executor = getter()
-    if executor is None or not executor.endpoints:
-        return []
-    return [
-        {"name": e.name, "url": e.url, "cwd": getattr(e, "cwd", None)}
-        for e in executor.endpoints
-    ]
+def _endpoints_from_config() -> List[Dict[str, Optional[str]]]:
+    """从 exec-server 配置根读已登记端点（SDK loader；坏文件响亮抛错）。"""
+    from nova_coding_agent.executor.endpoints_store import load_endpoints
+
+    return load_endpoints()
 
 
 def _session_id(ctx: Any) -> str:
@@ -267,15 +262,15 @@ def extension(nova: NovaExtensionAPI) -> None:
 
         endpoint_name = name or target.default_name
         if register:
-            registrar = getattr(ctx, "register_executor_endpoint", None)
-            if registrar is not None:
-                # 只记忆用户显式给过的目录；缺省会话工作区按会话现算，不记忆
-                registrar(endpoint_name, target.canonical_url, explicit_cwd or None)
-                notify_message(
-                    ctx.ui,
-                    f"已登记端点 {endpoint_name}（ssh·{target.display}）"
-                    "——下次 /executor 直接选择",
-                )
+            from nova_coding_agent.executor.endpoints_store import register_endpoint
+
+            # 只记忆用户显式给过的目录；缺省会话工作区按会话现算，不记忆
+            register_endpoint(endpoint_name, target.canonical_url, explicit_cwd or None)
+            notify_message(
+                ctx.ui,
+                f"已登记端点 {endpoint_name}（ssh·{target.display}）"
+                "——下次 /executor 直接选择",
+            )
         await _switch_to(
             BackendSelection(
                 backend="executor",
@@ -337,7 +332,7 @@ def extension(nova: NovaExtensionAPI) -> None:
                 return
             # 裸名：先按名字查端点清单；未命中按 SSH 目标（user@host 直输，
             # ssh config 别名同享）——VS Code "Add SSH Host" 对位
-            for endpoint in _endpoints_from_settings(ctx):
+            for endpoint in _endpoints_from_config():
                 if endpoint["name"] == target:
                     url = endpoint["url"]
                     assert url is not None
@@ -361,8 +356,9 @@ def extension(nova: NovaExtensionAPI) -> None:
             if not name:
                 notify_message(ctx.ui, "用法：/executor forget <name>", "error")
                 return
-            unregister = getattr(ctx, "unregister_executor_endpoint", None)
-            removed = unregister(name) if unregister is not None else False
+            from nova_coding_agent.executor.endpoints_store import unregister_endpoint
+
+            removed = unregister_endpoint(name)
             if removed:
                 notify_message(ctx.ui, f"已移除端点：{name}")
             else:
@@ -382,7 +378,7 @@ def extension(nova: NovaExtensionAPI) -> None:
                 "description": "本地 nova-executor 回环实例",
             },
         ]
-        for endpoint in _endpoints_from_settings(ctx):
+        for endpoint in _endpoints_from_config():
             url = endpoint["url"] or ""
             desc = _describe_url(url)
             if endpoint.get("cwd"):
@@ -433,7 +429,7 @@ def extension(nova: NovaExtensionAPI) -> None:
             )
         elif choice.startswith("endpoint:"):
             name = choice[len("endpoint:") :]
-            for endpoint in _endpoints_from_settings(ctx):
+            for endpoint in _endpoints_from_config():
                 if endpoint["name"] == name:
                     url = endpoint["url"]
                     assert url is not None
