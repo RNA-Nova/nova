@@ -9,9 +9,11 @@
   的条目块），其余段（sandbox_mode/[otel]/[network_proxy]/
   default_environment）原样保留；咨询式文件锁对位规则写门。
 
-注册即环境：`/executor` 登记的远程端点就是 config.toml 的一条
-``[[environments]]`` 条目（url 环境；SSH 目标登记其 canonical_url，
-首次连接仍走供给流程换真实隧道端点）。
+注册即环境（codex 词表）：ws(s) 端点登记为 `url` 环境；SSH 目标登记为
+`program = "ssh"` 环境（对位 codex environments.toml 的 ssh 承载形态——
+磁盘上只有合法词汇，SDK 校验直通）。读侧把 ssh program 条目还原为
+bundle 的 canonical `ssh://` URL（现有 /executor 流程按 URL scheme 路由
+ssh 供给，零改动）。
 """
 
 from __future__ import annotations
@@ -31,13 +33,20 @@ def endpoints_config_path() -> Path:
 
 
 def load_endpoints() -> list[dict]:
-    """读全部已登记端点（SDK loader——坏文件响亮抛错）。"""
+    """读全部已登记端点（SDK loader——坏文件响亮抛错）。
+
+    ssh program 条目还原为 canonical `ssh://` URL（bundle 路由词汇）。
+    """
     from nova_exec_server_client import load_executor_config
 
     config = load_executor_config(project_trusted=False)
-    return [
-        {"name": e.id, "url": e.url, "cwd": e.cwd} for e in config.environments if e.url
-    ]
+    out = []
+    for e in config.environments:
+        if e.url:
+            out.append({"name": e.id, "url": e.url, "cwd": e.cwd})
+        elif e.program == "ssh" and e.args:
+            out.append({"name": e.id, "url": f"ssh://{e.args[0]}", "cwd": e.cwd})
+    return out
 
 
 def register_endpoint(name: str, url: str, cwd: str | None = None) -> None:
@@ -47,7 +56,13 @@ def register_endpoint(name: str, url: str, cwd: str | None = None) -> None:
     with lock:
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         _removed, text = _remove_environment_block(text, name)
-        entry_lines = [f"{_ENVIRONMENTS_HEADER}", f'id = "{name}"', f'url = "{url}"']
+        entry_lines = [f"{_ENVIRONMENTS_HEADER}", f'id = "{name}"']
+        if url.startswith("ssh://"):
+            # SSH 目标按 codex 词表登记为 ssh program 环境
+            entry_lines.append('program = "ssh"')
+            entry_lines.append(f'args = ["{url[len("ssh://") :]}"]')
+        else:
+            entry_lines.append(f'url = "{url}"')
         if cwd:
             entry_lines.append(f'cwd = "{cwd}"')
         addition = "\n".join(entry_lines) + "\n"
