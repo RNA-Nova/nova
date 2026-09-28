@@ -6,7 +6,7 @@ import pytest
 from nova_exec_server_client import ApprovalPolicy
 
 pytestmark = pytest.mark.asyncio
-from nova_exec_server_client.gate import (
+from nova_coding_agent.adjudication.network_gate import (
     AskOutcome,
     NetworkPolicyGate,
     resolve_ask_behavior,

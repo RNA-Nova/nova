@@ -81,7 +81,6 @@ from .errors import (
     TransportError,
 )
 from .fs import FileSystemManager
-from .gate import AskOutcome, NetworkPolicyGate, resolve_ask_behavior
 from .notifications import NotificationRouter, ReadStreamEvent
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, DATA_CHANNEL_METHODS, TransportPool
 from .process import ProcessHandle, ProcessManager, ProcessOutput
@@ -168,11 +167,7 @@ __all__ = [
     "NetworkProxySettings",
     "ApprovalPolicy",
     "NOVA_EXEC_SERVER_HOME_ENV",
-    "resolve_ask_behavior",
     "ResolvedExecutionPolicy",
-    # 网络裁决门（policyRequest 回调底座：会话记忆 + ask 注入 + fail-closed）
-    "NetworkPolicyGate",
-    "AskOutcome",
     # 环境注册表（多 executor——对位 codex environments 体系）
     "ExecutorEnvironment",
     "ResolvedEnvironment",
