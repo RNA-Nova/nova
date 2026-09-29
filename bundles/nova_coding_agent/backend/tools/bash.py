@@ -323,7 +323,7 @@ class Tool:
 
         update_dirty = False
         last_update_at = 0
-        update_timer: Optional[asyncio.TimerHandle] = None
+        update_timer: Optional[asyncio.Handle] = None
         finished = False
 
         async def emit_output_update() -> None:
@@ -555,7 +555,7 @@ class _BashExecRuntime:
     判别的输入）。
     """
 
-    def __init__(self, tool: "BashTool", command: str, cwd: str) -> None:
+    def __init__(self, tool: "Tool", command: str, cwd: str) -> None:
         self._tool = tool
         self._command = command
         self._cwd = cwd
@@ -608,7 +608,8 @@ class _BashExecRuntime:
         self.tool_result = result
         details = result.details or {}
         exit_code = details.get("exit_code")
-        text = result.content[0].text if result.content else ""
+        first_content = result.content[0] if result.content else None
+        text = first_content.text if isinstance(first_content, TextContent) else ""
         return ExecAttemptOutput(
             exit_code=exit_code if isinstance(exit_code, int) else 0,
             stderr=details.get("stderr") or "",
