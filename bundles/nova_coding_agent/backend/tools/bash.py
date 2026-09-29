@@ -18,6 +18,7 @@ from nova_coding_agent.bash.engine import (
 )
 from nova_coding_agent.orchestration import get_adjudication_engine, new_orchestrator
 from nova_coding_agent.executor import (
+    BackendSelection,
     ExecutorBashOperations,
     get_backend_selection,
     get_executor_manager,

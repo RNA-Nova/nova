@@ -9,6 +9,7 @@ import pytest
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
+    SpawnPolicy,
     get_backend_selection,
     reset_backend_selection,
     set_backend_selection,
@@ -120,6 +121,23 @@ class TestBashToolBackendResolution:
         ops2 = tool._resolve_operations()
         assert ops2 is not ops1  # remote_cwd 变化 → 重建
         assert ops2._remote_cwd == "/data/two"
+
+    def test_spawn_policy_override_forces_desandbox(self):
+        """升级重试姿态：显式 spawn_policy_override=None 强制脱沙箱——
+        该分支经 BackendSelection 重构 selection（回归：bash.py 曾漏导入
+        BackendSelection，此分支一触即 NameError——0f2f50e3 引入、
+        默认路径测试从未触达）。"""
+        tool = self._make_tool()
+        set_backend_selection(
+            BackendSelection(
+                backend="executor",
+                url="ws://a:1",
+                spawn_policy=SpawnPolicy(sandbox={"cwd": "/tmp", "permissions": {}}),
+            )
+        )
+        ops = tool._resolve_operations(spawn_policy_override=None)
+        assert isinstance(ops, ExecutorBashOperations)
+        assert ops._policy is None  # 脱沙箱姿态生效（策略被显式清空）
 
     def test_switch_back_to_local(self):
         tool = self._make_tool()
