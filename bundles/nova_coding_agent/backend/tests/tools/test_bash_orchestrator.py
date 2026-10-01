@@ -128,3 +128,79 @@ def test_full_orchestrator_denial_ring_with_sandbox():
     # 首尝试带沙箱策略，升级尝试脱沙箱
     assert tool.calls[0] is _KEEP_POLICY
     assert tool.calls[1] is None
+
+
+def test_orchestrated_path_passes_all_params_to_engine():
+    """编排路径 params 直通（回归：OrchestratorRequest 曾只装 command/cwd，
+    timeout/signal/on_update/spawn_hook/env 静默丢失——bash.py 的编排分支）。
+    回退修复即红（stub 收到的 timeout/signal/on_update 全为 None）。"""
+    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from tools.bash import Tool
+
+    import nova_coding_agent.orchestration as orch_mod
+
+    recorded: dict = {}
+
+    class _Result:
+        content = []
+        details = {"exit_code": 0}
+        is_error = False
+
+    tool = Tool(ToolContext(cwd="/tmp", settings=NULL_TOOL_SETTINGS))
+
+    async def _stub_engine(
+        command,
+        cwd,
+        env_extra,
+        spawn_hook,
+        timeout,
+        signal,
+        on_update,
+        spawn_policy=_KEEP_POLICY,
+    ):
+        recorded.update(
+            command=command,
+            cwd=cwd,
+            env=env_extra,
+            spawn_hook=spawn_hook,
+            timeout=timeout,
+            signal=signal,
+            on_update=on_update,
+            spawn_policy=spawn_policy,
+        )
+        return _Result()
+
+    tool._run_engine = _stub_engine  # type: ignore[method-assign]
+
+    prev = orch_mod._assembly
+    orch_mod.register_adjudication_assembly(
+        AdjudicationAssembly(new_orchestrator=_orchestrator, engine=None)  # type: ignore[arg-type]
+    )
+    try:
+        sentinel_signal = object()
+        sentinel_hook = object()
+        sentinel_update = lambda _text: None  # noqa: E731
+        with _patch_selection(False):
+            _run(
+                tool.execute(
+                    "c1",
+                    {
+                        "command": "echo hi",
+                        "timeout": 30,
+                        "env": {"FOO": "bar"},
+                        "spawn_hook": sentinel_hook,
+                    },
+                    # signal/on_update 是 execute 的顶层参（不进 params dict）
+                    signal=sentinel_signal,  # type: ignore[arg-type]
+                    on_update=sentinel_update,
+                )
+            )
+    finally:
+        orch_mod._assembly = prev
+
+    assert recorded["command"] == "echo hi"
+    assert recorded["timeout"] == 30.0
+    assert recorded["env"] == {"FOO": "bar"}
+    assert recorded["signal"] is sentinel_signal
+    assert recorded["spawn_hook"] is sentinel_hook
+    assert recorded["on_update"] is sentinel_update

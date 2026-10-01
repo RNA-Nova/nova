@@ -272,7 +272,17 @@ class Tool:
             request = OrchestratorRequest(
                 tool_name="bash",
                 call_id=tool_call_id,
-                params={"command": command, "cwd": cwd},
+                # params 全量直通——_BashExecRuntime.run 按键消费
+                # （env/spawn_hook/timeout/signal/on_update 缺一会静默丢功能）
+                params={
+                    "command": command,
+                    "cwd": cwd,
+                    "env": env_extra,
+                    "spawn_hook": spawn_hook,
+                    "timeout": timeout,
+                    "signal": signal,
+                    "on_update": on_update,
+                },
                 first_attempt=SandboxAttempt(
                     sandbox_type="executor_managed" if runtime.sandboxes else None
                 ),
