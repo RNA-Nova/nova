@@ -196,6 +196,12 @@ def _extract_literal_commands(
             flush_command()
             i += 2
             continue
+        # 裸 &（后台运算符）——不可静态判定（对位 bash.rs：& 不在白名单
+        # punct 内 → 解析失败整体 opaque，上移审批层）。必须在裸词扫描之前
+        # 显式拒绝：终止符集含 & 但分隔符段原本不消费它，词为空、i 不前进
+        # 会死循环（回归锚：'sleep 1 &'）
+        if ch == "&":
+            return None
         if ch == ";":
             if plain_only and not saw_command_word:
                 return None

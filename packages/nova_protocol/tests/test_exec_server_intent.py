@@ -145,3 +145,20 @@ def test_intent_from_shell_segments():
     intent = intent_from_shell("echo a && ls")
     assert intent.opaque is False
     assert intent.segments == (("echo", "a"), ("ls",))
+
+
+def test_bare_background_ampersand_is_opaque():
+    """裸 &（后台运算符）→ opaque（回归：裸词扫描遇 & 即停而分隔符段不
+    消费，曾无前进分支——'sleep 1 &' 死循环挂死裁决链，SIGALRM 实测复现；
+    对位 bash.rs：& 不在白名单 punct 内 → 解析失败）。回归时本用例靠
+    pytest-timeout 兜底变红。"""
+    assert parse_shell_script_into_commands("sleep 1 &") is None
+    assert parse_shell_script_into_commands("ls &") is None
+    assert parse_shell_script_into_commands("echo a && ls &") is None
+    assert parse_shell_script_into_commands("&") is None
+    assert intent_from_shell("sleep 1 &").opaque is True
+    # `&&` 不受影响（先匹配双字符运算符）
+    assert parse_shell_script_into_commands("ls && echo ok") == [
+        ("ls",),
+        ("echo", "ok"),
+    ]
