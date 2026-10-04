@@ -48,6 +48,7 @@ from nova_harness.types.resources.tools import (
 from nova_protocol import (
     AbortSignal,
     AgentToolResult,
+    ApprovalPolicy,
     TextContent,
 )
 
@@ -570,6 +571,7 @@ class _BashExecRuntime:
         self._command = command
         self._cwd = cwd
         self.tool_result: AgentToolResult = None  # type: ignore[assignment]
+        self._requirement = None
         # 沙箱尝试姿态：selection 带物化沙箱 → 首尝试 executor_managed；
         # 升级姿态 = 脱沙箱重试一次（denial 判别见 nova_protocol 启发式）
         selection = get_backend_selection()
@@ -585,18 +587,28 @@ class _BashExecRuntime:
         engine = get_adjudication_engine()
         if engine is None:
             return None
-        return engine.adjudicate(
+        requirement = engine.adjudicate(
             "bash", {"command": self._command, "cwd": self._cwd}, None
         )
+        # 缓存供 approval_action 取用（orchestrator 先调本方法后调 action——
+        # 提案的"永远允许"写回候选就驮在 requirement 上）
+        self._requirement = requirement
+        return requirement
 
     def should_bypass_approval(self, policy, already_approved: bool) -> bool:
-        return already_approved
+        """对位 sandboxing.rs:333 默认实现：已批过不重问；never 档无处可问。"""
+        return already_approved or policy is ApprovalPolicy.NEVER
 
     def approval_action(self, request) -> ApprovalAction:
+        requirement = getattr(self, "_requirement", None)
+        amendment = getattr(requirement, "proposed_amendment", None)
         return ApprovalAction(
             title="执行 bash 命令",
             command=self._command,
-            reason=request.first_attempt and None,
+            reason=getattr(requirement, "reason", None),
+            proposed_amendment_command=(
+                amendment.command if amendment is not None else None
+            ),
         )
 
     async def run(self, request, attempt, ctx) -> ExecAttemptOutput:

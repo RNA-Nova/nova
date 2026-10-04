@@ -10,6 +10,7 @@ import asyncio
 import pytest
 from nova_protocol import (
     ApprovalPolicy,
+    ExecPolicyAmendment,
     ReviewDecision,
 )
 from nova_protocol.exec_server_policy import Policy, PrefixPattern, PrefixRule, Decision
@@ -130,8 +131,12 @@ class _FakeRulesStore:
         return f'prefix_rule(pattern={list(amendment.command)}, decision="allow")'
 
 
-def _flow(policy=ApprovalPolicy.ON_REQUEST):
-    return ApprovalFlow(_FakeRulesStore(), policy)
+def _flow(policy=ApprovalPolicy.ON_REQUEST, live_policy=None):
+    return ApprovalFlow(
+        _FakeRulesStore(),
+        policy,
+        live_policy if live_policy is not None else Policy.empty(),
+    )
 
 
 def test_never_policy_fail_closed():
@@ -225,3 +230,92 @@ def _action(amendment=None):
         command="rm -rf /tmp/x",
         proposed_amendment_command=amendment,
     )
+
+
+# ── engine：amendment 产出端（对位 upstream try_derive_execpolicy_amendment_*） ──
+
+
+def test_engine_heuristics_prompt_carries_amendment():
+    """启发式 prompt（无规则命中）→ 提案写回候选 = 触发段的命令词。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate("bash", {"command": "rm -rf /tmp/x"}, None)
+    assert requirement.kind == "needs_approval"
+    assert requirement.proposed_amendment is not None
+    assert requirement.proposed_amendment.command == ("rm", "-rf", "/tmp/x")
+
+
+def test_engine_multi_segment_amendment_is_first_prompting_segment():
+    """复合命令：首个启发式 prompt 段作为写回候选（上游示例语义）。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate("bash", {"command": "ls /tmp && rm -rf /x"}, None)
+    assert requirement.kind == "needs_approval"
+    assert requirement.proposed_amendment is not None
+    assert requirement.proposed_amendment.command == ("rm", "-rf", "/x")
+
+
+def test_engine_rule_prompt_blocks_amendment():
+    """规则 prompt 存在 → 不带写回候选（写回也绕不过规则）。"""
+    policy = Policy()
+    policy.add_prefix_rule(
+        PrefixRule(pattern=PrefixPattern(first="rm"), decision=Decision.PROMPT)
+    )
+    engine = AdjudicationEngine(policy, ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate("bash", {"command": "rm -rf /tmp/x"}, None)
+    assert requirement.kind == "needs_approval"
+    assert requirement.proposed_amendment is None
+
+
+def test_engine_all_segments_rule_allowed_bypasses_sandbox():
+    """全部段被规则显式 allow → skip(bypass_sandbox=True)（对位 codex
+    Skip{bypass_sandbox}——启发式放行不算数）。"""
+    policy = Policy()
+    policy.add_prefix_rule(
+        PrefixRule(pattern=PrefixPattern(first="rm"), decision=Decision.ALLOW)
+    )
+    engine = AdjudicationEngine(policy, ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate("bash", {"command": "rm -rf /tmp/x"}, None)
+    assert requirement.kind == "skip"
+    assert requirement.bypass_sandbox is True
+    # 规则命中的 allow 结局不带豁免候选（本就在规则面放行）
+    assert requirement.proposed_amendment is None
+
+
+def test_engine_heuristics_allow_does_not_bypass():
+    """启发式 allow（无规则）→ skip 但不脱沙箱；带沙箱豁免候选。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate("bash", {"command": "ls /tmp"}, None)
+    assert requirement.kind == "skip"
+    assert requirement.bypass_sandbox is False
+    assert requirement.proposed_amendment is not None
+    assert requirement.proposed_amendment.command == ("ls", "/tmp")
+
+
+# ── approval flow：规则热更新（对位 append_amendment_and_update） ──
+
+
+def test_forever_hot_updates_live_policy():
+    """永远允许：写回 + 热更新活 Policy——后续同类命令引擎直接 skip。"""
+    live_policy = Policy.empty()
+    engine = AdjudicationEngine(live_policy, ApprovalPolicy.ON_REQUEST)
+    flow = _flow(live_policy=live_policy)
+    ctx = _FakeCtx(script=[{"decision": "forever"}])
+    action = _action(amendment=("rm", "-rf"))
+    payload = _run(flow.request_approval(action, ctx))
+    assert payload.decision is ReviewDecision.APPROVED_EXECPOLICY_AMENDMENT
+    # 热更新生效：同前缀命令现在规则放行（危险启发式被规则 allow 盖过）
+    assert engine.adjudicate("bash", {"command": "rm -rf /tmp/x"}, None).kind == "skip"
+
+
+def test_hot_update_dedupes_existing_allow():
+    """规则已允许的前缀 → 热更新跳过去重（对位 append_amendment_and_update
+    的 already_allowed 短路）。"""
+    live_policy = Policy.empty()
+    live_policy.add_prefix_rule(
+        PrefixRule(pattern=PrefixPattern(first="rm"), decision=Decision.ALLOW)
+    )
+    flow = _flow(live_policy=live_policy)
+    amendment = ExecPolicyAmendment(command=("rm", "-rf"))
+    flow._hot_update_policy(amendment)
+    evaluation = live_policy.check(("rm", "-rf", "/x"))
+    # 只有既有那条规则命中（没有重复追加）
+    assert len(evaluation.matched_rules) == 1

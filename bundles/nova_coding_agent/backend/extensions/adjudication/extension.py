@@ -47,7 +47,7 @@ def extension(nova: NovaExtensionAPI) -> None:
         policy = Policy.empty()
 
     engine = AdjudicationEngine(policy, config.approval_policy)
-    flow = ApprovalFlow(rules_store, config.approval_policy)
+    flow = ApprovalFlow(rules_store, config.approval_policy, policy)
 
     register_adjudication_assembly(
         AdjudicationAssembly(

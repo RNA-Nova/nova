@@ -8,7 +8,8 @@
 3. 弹窗四结局（对位 ReviewDecision）：
    - 允许一次 → APPROVED
    - 本会话允许 → 写缓存 + APPROVED_FOR_SESSION（条目持久化，分支恢复）
-   - 永远允许 → RulesStore.append_amendment 写规则 + APPROVED_EXECPOLICY_AMENDMENT
+   - 永远允许 → RulesStore.append_amendment 写规则 + 热更新活 Policy
+     （本会话后续同类命令不再弹窗）+ APPROVED_EXECPOLICY_AMENDMENT
    - 拒绝/取消 → DENIED（rejection 文案）
 
 全部结局经 `_record` 留审批痕（custom 条目——转录卡片+持久化+恢复同形，
@@ -21,9 +22,17 @@ from typing import Any
 
 from nova_protocol import (
     ApprovalPolicy,
+    Decision,
     ExecPolicyAmendment,
     ReviewDecision,
     ReviewDecisionPayload,
+)
+from nova_protocol.exec_server_policy import (
+    PatternToken,
+    Policy,
+    PrefixPattern,
+    PrefixRule,
+    PrefixRuleMatch,
 )
 
 from nova_harness.core.agent_session.controllers.orchestrator import ApprovalAction
@@ -48,9 +57,17 @@ _DIALOG_DECISIONS = {
 class ApprovalFlow:
     """审批流（扩展实例生命周期持有——会话缓存的闭包宿主）"""
 
-    def __init__(self, rules_store: RulesStore, approval_policy: ApprovalPolicy) -> None:
+    def __init__(
+        self,
+        rules_store: RulesStore,
+        approval_policy: ApprovalPolicy,
+        policy: Policy,
+    ) -> None:
         self._rules_store = rules_store
         self._approval_policy = approval_policy
+        # 与裁决引擎共享的活 Policy——"永远允许"写回后热更新
+        # （对位 append_amendment_and_update 的内存 ArcSwap 语义）
+        self._policy = policy
         # 会话级缓存：(title, command) 精确签名——闭包状态 + 条目持久化恢复
         self._session_allowed: set[tuple[str, str | None]] = set()
 
@@ -100,6 +117,28 @@ class ApprovalFlow:
             choices.insert(2, _CHOICE_FOREVER)
         return await select(ctx.ui, text, choices)
 
+    def _hot_update_policy(self, amendment: ExecPolicyAmendment) -> None:
+        """规则写回后热更新活 Policy（对位 append_amendment_and_update：
+        本会话后续同类命令不再弹窗——规则已允许则跳过去重）。"""
+        command = tuple(amendment.command)
+        if not command:
+            return
+        evaluation = self._policy.check(command)
+        if any(
+            isinstance(m, PrefixRuleMatch) and m.decision is Decision.ALLOW
+            for m in evaluation.matched_rules
+        ):
+            return
+        self._policy.add_prefix_rule(
+            PrefixRule(
+                pattern=PrefixPattern(
+                    first=command[0],
+                    rest=tuple(PatternToken.single(t) for t in command[1:]),
+                ),
+                decision=Decision.ALLOW,
+            )
+        )
+
     async def request_approval(
         self, action: ApprovalAction, ctx: Any
     ) -> ReviewDecisionPayload:
@@ -138,6 +177,7 @@ class ApprovalFlow:
                 command=tuple(action.proposed_amendment_command or ())
             )
             line = self._rules_store.append_amendment(amendment)
+            self._hot_update_policy(amendment)
             self._record(ctx, tool_label, target, "always", f"规则写回: {line}")
             notify_message(ctx.ui, f"已写入规则: {line}")
             return ReviewDecisionPayload(

@@ -204,3 +204,40 @@ def test_orchestrated_path_passes_all_params_to_engine():
     assert recorded["signal"] is sentinel_signal
     assert recorded["spawn_hook"] is sentinel_hook
     assert recorded["on_update"] is sentinel_update
+
+
+def test_approval_action_carries_proposed_amendment():
+    """approval_action 从缓存的 requirement 带出"永远允许"写回候选
+    （orchestrator 先调 exec_approval_requirement 后调 approval_action）。"""
+    from nova_protocol import ExecApprovalRequirement, ExecPolicyAmendment
+
+    import nova_coding_agent.orchestration as orch_mod
+
+    requirement = ExecApprovalRequirement.needs_approval(
+        proposed_amendment=ExecPolicyAmendment(command=("rm", "-rf"))
+    )
+    engine = SimpleNamespace(adjudicate=lambda *a, **k: requirement)
+    prev = orch_mod._assembly
+    orch_mod.register_adjudication_assembly(
+        AdjudicationAssembly(new_orchestrator=_orchestrator, engine=engine)  # type: ignore[arg-type]
+    )
+    try:
+        with _patch_selection(False):
+            runtime = _BashExecRuntime(_FakeTool([]), "rm -rf /tmp/x", "/tmp")
+            request = OrchestratorRequest(tool_name="bash", call_id="c1")
+            runtime.exec_approval_requirement(request)
+            action = runtime.approval_action(request)
+    finally:
+        orch_mod._assembly = prev
+
+    assert action.proposed_amendment_command == ("rm", "-rf")
+
+
+def test_should_bypass_approval_codex_default():
+    """should_bypass_approval 对位 sandboxing.rs:333：已批过/never 档 → 不重问。"""
+    from nova_protocol import ApprovalPolicy
+
+    runtime = _BashExecRuntime(_FakeTool([]), "ls", "/tmp")
+    assert runtime.should_bypass_approval(ApprovalPolicy.NEVER, False) is True
+    assert runtime.should_bypass_approval(ApprovalPolicy.ON_REQUEST, True) is True
+    assert runtime.should_bypass_approval(ApprovalPolicy.ON_REQUEST, False) is False
