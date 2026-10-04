@@ -95,8 +95,8 @@ def prm(prefix, decision) -> PrefixRuleMatch:
     return PrefixRuleMatch(matched_prefix=tuple(prefix), decision=decision)
 
 
-def hrm(decision) -> HeuristicsRuleMatch:
-    return HeuristicsRuleMatch(decision=decision)
+def hrm(decision, command=None) -> HeuristicsRuleMatch:
+    return HeuristicsRuleMatch(decision=decision, command=command)
 
 
 # =============================================================================
@@ -339,7 +339,12 @@ EVAL_CASES = [
         allow_all,
         Evaluation(
             decision=Decision.ALLOW,
-            matched_rules=(hrm(Decision.ALLOW),),
+            matched_rules=(
+                hrm(
+                    Decision.ALLOW,
+                    ("git", "--config", "color.status=always", "status"),
+                ),
+            ),
         ),
         id="match_and_not_match_examples_are_enforced-not_match",
     ),
@@ -379,7 +384,7 @@ EVAL_CASES = [
         prompt_all,
         Evaluation(
             decision=Decision.PROMPT,
-            matched_rules=(hrm(Decision.PROMPT),),
+            matched_rules=(hrm(Decision.PROMPT, ("python",)),),
         ),
         id="heuristics_match_is_returned_when_no_policy_matches",
     ),
@@ -601,7 +606,12 @@ def test_divergence_string_form_examples():
         ("git", "--config", "color.status=always", "status"), allow_all
     ) == Evaluation(
         decision=Decision.ALLOW,
-        matched_rules=(hrm(Decision.ALLOW),),
+        matched_rules=(
+            hrm(
+                Decision.ALLOW,
+                ("git", "--config", "color.status=always", "status"),
+            ),
+        ),
     )
 
 
@@ -704,7 +714,7 @@ def test_divergence_host_executable_resolution_respects_explicit_empty_allowlist
     evaluation = policy.check(("/usr/bin/git", "status"), allow_all)
     assert evaluation == Evaluation(
         decision=Decision.ALLOW,
-        matched_rules=(hrm(Decision.ALLOW),),
+        matched_rules=(hrm(Decision.ALLOW, ("/usr/bin/git", "status")),),
     )
 
 
@@ -717,7 +727,7 @@ def test_divergence_host_executable_resolution_ignores_path_not_in_allowlist():
     evaluation = policy.check(("/opt/homebrew/bin/git", "status"), allow_all)
     assert evaluation == Evaluation(
         decision=Decision.ALLOW,
-        matched_rules=(hrm(Decision.ALLOW),),
+        matched_rules=(hrm(Decision.ALLOW, ("/opt/homebrew/bin/git", "status")),),
     )
 
 
@@ -774,11 +784,9 @@ def test_divergence_justification_on_match_payload():
     assert ls_eval.matched_rules[0].justification == "safe and commonly used"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D6: py HeuristicsRuleMatch 不携带 command（Rust 随命中传递）",
-)
-def test_divergence_heuristics_match_command_payload():
+def test_heuristics_match_carries_command_payload():
+    """启发式命中携带命令词（D6 半边闭环——Rust HeuristicsRuleMatch 对位；
+    裁决装配件靠它产出"永远允许"写回候选）。"""
     evaluation = Policy.empty().check(("python",), prompt_all)
     assert evaluation.matched_rules[0].command == ("python",)
 
@@ -824,9 +832,10 @@ def test_pin_host_executable_unknown_call():
 
 
 def test_pin_match_payload_shape():
-    """D6 现状：命中负载形状（matched_prefix+decision / decision）"""
+    """D6 现状：命中负载形状——PrefixRuleMatch 无 justification（xfail 钉住
+    Rust 行为）；HeuristicsRuleMatch 已补 command（对位 Rust 同名字段）。"""
     assert [f.name for f in fields(PrefixRuleMatch)] == ["matched_prefix", "decision"]
-    assert [f.name for f in fields(HeuristicsRuleMatch)] == ["decision"]
+    assert [f.name for f in fields(HeuristicsRuleMatch)] == ["decision", "command"]
 
 
 def test_exact_path_rule_matches_literal_key():

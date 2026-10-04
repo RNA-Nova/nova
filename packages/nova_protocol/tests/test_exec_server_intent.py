@@ -3,9 +3,9 @@
 from nova_protocol.exec_server_intent import (
     DangerousCommandMatch,
     dangerous_command_match,
-    find_git_subcommand,
     intent_from_shell,
     parse_shell_lc_literal_commands,
+    parse_shell_lc_plain_commands,
     parse_shell_script_into_commands,
 )
 
@@ -78,26 +78,6 @@ def test_non_forced_or_non_literal_rm_is_not_dangerous():
         assert dangerous_command_match(command) is None, command
 
 
-# ── git 防绕过 ──
-
-
-def test_find_git_subcommand_skips_global_options():
-    assert find_git_subcommand(["git", "--git-dir=/x", "push"], ["push"]) == (2, "push")
-    assert find_git_subcommand(["git", "-C", "/repo", "status"], ["status"]) == (
-        3,
-        "status",
-    )
-    assert find_git_subcommand(["git", "-c", "user.name=x", "log"], ["log"]) == (
-        3,
-        "log",
-    )
-
-
-def test_find_git_subcommand_stops_at_first_non_option_token():
-    assert find_git_subcommand(["git", "checkout", "push"], ["push"]) is None
-    assert find_git_subcommand(["ls", "push"], ["push"]) is None
-
-
 # ── 解析器 ──
 
 
@@ -162,3 +142,105 @@ def test_bare_background_ampersand_is_opaque():
         ("ls",),
         ("echo", "ok"),
     ]
+
+
+# ── 动态词拒解析（codex bash.rs commit 4216123b3d 移植，上游测试逐条对位） ──
+
+
+def test_plain_parse_rejects_runtime_expansion_in_plain_words():
+    """对位 bash.rs rejects_runtime_expansion_in_plain_words（:424）——裸词含
+    glob/brace/转义/tilde/equals/`#` 任一动态字符 → 整体 None。"""
+    for script in [
+        "find . -{delete,print}",
+        "rg --pre{=,=sh} pattern payload.sh",
+        "find . -del*",
+        "find . -delet?",
+        "find . -delet[e]",
+        r"find . -de\lete",
+        "echo ~",
+        "echo ~HOME",
+        "echo HEAD~1",
+        "echo HEAD^",
+        "echo file~",
+        "echo =sh",
+        "echo foo^bar",
+        "echo foo#bar",
+        "l* -l",
+    ]:
+        assert parse_shell_script_into_commands(script) is None, script
+        # 上游另过 parse_shell_lc_plain_commands（bash/zsh × -c/-lc 四组合）；
+        # 包装层仅做 shell/flag 校验，抽 bash -lc 与 zsh -c 两例对位
+        assert parse_shell_lc_plain_commands(["bash", "-lc", script]) is None, script
+        assert parse_shell_lc_plain_commands(["zsh", "-c", script]) is None, script
+
+
+def test_plain_parse_preserves_quoted_literals():
+    r"""对位 bash.rs preserves_quoted_literals（:452）——引号抑制展开，`~ ^ # = *`
+    等在引号内保持字面。词拼接（`-g"*.py"`/`-"{a,b}"`）按 nova 已知分歧切分为
+    多词（上游 tree-sitter 合并为 concatenation 单词，见模块说明）。"""
+    assert parse_shell_script_into_commands(r'rg -g"*.py" pattern') == [
+        ("rg", "-g", "*.py", "pattern")
+    ]  # 上游合并 "-g*.py"
+    assert parse_shell_script_into_commands(r'echo "\n"') == [("echo", "\\n")]
+    assert parse_shell_script_into_commands(
+        r"""echo "~HOME" 'HEAD~1' "HEAD^" 'foo#bar' "=sh" 'file~'"""
+    ) == [("echo", "~HOME", "HEAD~1", "HEAD^", "foo#bar", "=sh", "file~")]
+    assert parse_shell_script_into_commands("""echo -"{a,b}" '*?[]~^#=\\\\'""") == [
+        ("echo", "-", "{a,b}", "*?[]~^#=\\\\")
+    ]  # 上游合并 "-{a,b}"
+
+
+def test_plain_parse_rejects_double_quoted_escapes():
+    r"""对位 bash.rs rejects_double_quoted_escapes（:477）——双引号内
+    `\$` ``\` `` `\"` `\\` `\<换行>` 源拼写≠运行时 argv → None。"""
+    for script in [
+        r'echo "\$HOME\`\"\\\n"',
+        'find . "-de\\\nlete"',
+        r'echo "\\"',
+    ]:
+        assert parse_shell_script_into_commands(script) is None, script
+        assert parse_shell_lc_plain_commands(["bash", "-lc", script]) is None, script
+        # literal 路径同样整体 None（nova 收紧点：上游 literal 半边仅省略该词，
+        # 见 test_literal_path_dynamic_word_also_rejected）
+        assert parse_shell_lc_literal_commands(["bash", "-lc", script]) is None, script
+
+
+def test_plain_parse_accepts_double_quoted_newline_without_backslash():
+    """对位 bash.rs accepts_double_quoted_strings_with_newlines——双引号内换行
+    本身合法，仅反斜杠续行（`\\<换行>`）拒解析。"""
+    assert parse_shell_script_into_commands('git commit -m "line1\nline2"') == [
+        ("git", "commit", "-m", "line1\nline2")
+    ]
+
+
+def test_dynamic_word_probes_rejected():
+    r"""实测探针（移植前逐条复现：`ls *.py` 放行成词、`ls ~/x` 放行、
+    `ls a\ b` 错切两词、`echo "a\$b"` 保留反斜杠）——修复后两路径整体 None，
+    Intent 置 opaque 上移审批层。"""
+    for script in ["ls *.py", "ls ~/x", r"ls a\ b", 'echo "a\\$b"']:
+        assert parse_shell_script_into_commands(script) is None, script
+        assert parse_shell_lc_literal_commands(["bash", "-lc", script]) is None, script
+        assert intent_from_shell(script).opaque is True, script
+
+
+def test_literal_path_dynamic_word_also_rejected():
+    """nova 收紧点（与上游不一致，理由在此）：上游 literal 半边对动态词仅"省略
+    该词/命令名非字面丢整条"（bash.rs:243 parse_literal_shell_word → None 由调
+    用方跳过），sibling 的 rm 类危险命令仍能提取；nova 手写解析器无节点粒度，
+    统一整体 None——fail-open 边界不变（不可解析≠危险）：该脚本同时过不掉
+    plain 解析（safe 白名单底座），审批层经 opaque 兜底，不会静默放行。"""
+    assert dangerous_command_match(["bash", "-lc", "rm -rf /x; ls *.py"]) is None
+    assert parse_shell_script_into_commands("rm -rf /x; ls *.py") is None
+
+
+def test_lone_closing_brace_rejected_no_hang():
+    """孤 `}`：裸词终止符集含 `}` 但无专属分支，词为空不前进曾死循环（同裸 `&`
+    教训）；对位上游 `}` 在拒绝字符集内 → None。回归靠 pytest-timeout 兜底变红。"""
+    assert parse_shell_script_into_commands("echo }") is None
+    assert parse_shell_script_into_commands("}") is None
+
+
+def test_plain_parse_rejects_variable_assignment_prefix():
+    """对位 bash.rs rejects_variable_assignment_prefix——既有对位分支回归锁：
+    赋值前缀 plain 拒绝不受动态词移植影响。"""
+    assert parse_shell_script_into_commands("FOO=bar ls") is None

@@ -7,19 +7,26 @@
   `parse_shell_lc_plain_commands`：codex `bash.rs` 解析入口的**手写等价
   实现**。codex 用 tree-sitter；本实现按其接受/拒绝规则逐条对齐（引号剥壳、
   `$(...)`/反引号替换递归提取、赋值前缀 literal 跳过/plain 拒绝、控制结构
-  配平校验、动态词省略、plain 路径换行分隔与空命令位/悬挂运算符拒绝、解析
-  失败整体 None），无 tree-sitter 依赖（枢纽纯度纪律）。obscure 语法（数组/
+  配平校验、动态词省略、动态词字符集拒解析、plain 路径换行分隔与空命令位/
+  悬挂运算符拒绝、解析失败整体 None），无 tree-sitter 依赖（枢纽纯度纪律）。
+  动态词字符集拒解析对位上游 commit 4216123b3d "Require approval for commands
+  with dynamic shell words"：tree-sitter 把 brace 展开/glob/转义/tilde/equals
+  展开表示为 plain word，源文本拼写不能当运行时 argv 证据——裸词含
+  `{ } * ? [ ] \\ ~ ^ # $ ` 任一字符或以 `=` 开头、双引号内含 `\\$` `\\`` `\\"`
+  `\\\\` `\\<换行>` 转义，两路径整体 None（nova 收紧点：上游 literal 半边
+  仅省略该词，本实现无节点粒度统一拒解析，fail-open 边界不变，由 Intent.opaque
+  兜底上移审批层）。obscure 语法（数组/
   进程替换/复杂 heredoc）在本实现下退化为 None；词拼接（concatenation，如
-  `-g"*.py"`）按词界切分为多词而非合并——已知分歧点（详见
-  exec_server_safe_command 模块说明）。fail-open 边界与 codex 一致（不可
-  解析≠危险，由 Intent.opaque 上抛）。
+  `-g"*.py"`）按词界切分为多词而非合并——已知分歧点。fail-open 边界与
+  codex 一致（不可解析≠危险，由 Intent.opaque 上抛）。
 - `dangerous_command_match`：`is_dangerous_command.rs` 完整移植（fail-closed
   包装深度上限 + rm -f 族 + sudo/env/trap/bash -lc 穿透）。
-- `find_git_subcommand` 等 git 全局选项防绕过辅助（同文件金标）。
 
-安全白名单（`is_safe_command.rs` 逐命令选项表）见 `exec_server_safe_command`
-（`is_safe_command` 为入口）；windows 危险/安全表**未移植**（Windows/PS
-专项批次另定）——缺省更严而非更松。
+**安全白名单未移植**：codex 上游已整体废弃"白名单证安全"（commit
+942af8447b "Retire the untrusted approval policy" 删除 `is_safe_command.rs`
+与 windows 安全表——替代语义为"危险否决 + 沙箱即信任"，连 git 只读子命令
+都不豁免），配套的 `find_git_subcommand` 辅助亦随上游移除；windows 危险表
+**未移植**（Windows/PS 专项批次另定）——缺省更严而非更松。
 
 `Intent` 是进程内值对象（不上线），frozen 锁死不可变。
 """
@@ -93,6 +100,13 @@ _CONTROL_KEYWORDS = (
     }
 )
 
+# 动态词拒解析字符集（对位 bash.rs:271-272 is_literal_word_or_number 的
+# contains 表，上游 commit 4216123b3d）。`$ `` ` ``{ } 在本手写解析中是裸词
+# 终止符、由各自分支处理（plain 拒绝 / literal 递归提取或跳过），不会进入裸
+# 词——裸词扫描的实际命中项为 * ? [ ] \ ~ ^ #，外加 `=` 前缀（zsh equals
+# 展开，上游 starts_with('=')，bash.rs:271）。
+_DYNAMIC_WORD_CHARS = frozenset("{}*?[]\\~^#$`")
+
 
 def extract_bash_command(
     command: tuple[str, ...] | list[str],
@@ -136,7 +150,8 @@ def parse_shell_script_into_commands(script: str) -> list[tuple[str, ...]] | Non
 def parse_shell_lc_plain_commands(
     command: tuple[str, ...] | list[str],
 ) -> list[tuple[str, ...]] | None:
-    """safe 路径：从 `bash -lc` 脚本提取 plain 命令序列（对位 codex 同名函数）。
+    """plain 路径：从 `bash -lc` 脚本提取 plain 命令序列（对位 codex 同名函数——
+    上游 exec_policy 的策略命令提取入口）。
 
     与 `parse_shell_lc_literal_commands` 同形但走 plain 严格解析——脚本中
     任一非白名单构造（重定向/替换/展开/赋值前缀/控制流/空命令位）整体 None。
@@ -255,6 +270,14 @@ def _extract_literal_commands(
                     closed = True
                     break
                 if c == "\\":
+                    # 双引号内转义拒解析（对位 bash.rs:290-297
+                    # parse_double_quoted_string 的 windows(2) 检查，上游
+                    # commit 4216123b3d）：双引号抑制 glob/brace 展开但不抑制
+                    # 转义消除，\$ \` \" \\ \<换行> 的源拼写≠运行时 argv →
+                    # literal/plain 两路径整体 None（上游该函数两路径共用）。
+                    # 其余 \x（如 \n 两字符序列）源拼写即字面，原样保留。
+                    if end + 1 < n and script[end + 1] in ("$", "`", '"', "\\", "\n"):
+                        return None
                     if end + 1 < n:
                         literal_chars.append(script[end : end + 2])
                     end += 2
@@ -366,6 +389,12 @@ def _extract_literal_commands(
         word = script[i:j]
         i = j
 
+        # 空词 = 扫描未前进（孤 `}` 等无专属分支的终止符）——整体 None（对位上
+        # 游：孤 `}` 是含 `}` 的 word，命中 is_literal_word_or_number 拒绝字符
+        # 集；同时防死循环，同裸 `&` 教训——回归锚：'echo }'）
+        if not word:
+            return None
+
         if word in _CONTROL_KEYWORDS:
             if plain_only:
                 return None
@@ -386,6 +415,17 @@ def _extract_literal_commands(
             if plain_only:
                 return None
             continue
+
+        # 动态词拒解析（对位 bash.rs:260-273 is_literal_word_or_number 及其
+        # :64/:243 两处调用点，上游 commit 4216123b3d）：tree-sitter 把 brace
+        # 展开/glob/转义表示为 plain word，源文本拼写不能当运行时 argv 证据。
+        # 裸词含 { } * ? [ ] \ ~ ^ # $ ` 任一字符或以 `=` 开头（zsh equals 展
+        # 开）→ literal/plain 两路径整体 None。nova 收紧点：上游 literal 半边
+        # 仅省略该词（bash.rs:243 parse_literal_shell_word → None 由调用方跳
+        # 过），本实现无节点粒度统一拒解析——fail-open 边界不变（不可解析≠危
+        # 险），审批层经 Intent.opaque / plain 解析失败兜底。
+        if word.startswith("=") or not _DYNAMIC_WORD_CHARS.isdisjoint(word):
+            return None
 
         words.append(word)
         saw_command_word = True
@@ -516,60 +556,6 @@ def executable_name_lookup_key(raw: str) -> str | None:
         return None
     name = raw.replace("\\", "/").rsplit("/", 1)[-1]
     return name or None
-
-
-def _is_git_global_option_with_value(arg: str) -> bool:
-    return arg in (
-        "-C",
-        "-c",
-        "--config-env",
-        "--exec-path",
-        "--git-dir",
-        "--namespace",
-        "--super-prefix",
-        "--work-tree",
-    )
-
-
-def _is_git_global_option_with_inline_value(arg: str) -> bool:
-    return (
-        arg.startswith("--config-env=")
-        or arg.startswith("--exec-path=")
-        or arg.startswith("--git-dir=")
-        or arg.startswith("--namespace=")
-        or arg.startswith("--super-prefix=")
-        or arg.startswith("--work-tree=")
-        or ((arg.startswith("-C") or arg.startswith("-c")) and len(arg) > 2)
-    )
-
-
-def find_git_subcommand(
-    command: list[str] | tuple[str, ...], subcommands: tuple[str, ...] | list[str]
-) -> tuple[int, str] | None:
-    """跳过 git 全局选项定位真子命令（防 `--git-dir` 类注入绕过）。
-
-    共享语义（codex is_dangerous/is_safe 同一辅助）：第一个非选项 token 即
-    子命令——不在目标集合内立即停扫，避免误伤后续位置参数（如分支名）。
-    """
-    if not command or executable_name_lookup_key(command[0]) != "git":
-        return None
-
-    skip_next = False
-    for idx, arg in enumerate(command[1:], start=1):
-        if skip_next:
-            skip_next = False
-            continue
-        if _is_git_global_option_with_inline_value(arg):
-            continue
-        if _is_git_global_option_with_value(arg):
-            skip_next = True
-            continue
-        if arg == "--" or arg.startswith("-"):
-            continue
-        if arg in subcommands:
-            return (idx, arg)
-        return None
-    return None
 
 
 def _dangerous_match_for_exec(

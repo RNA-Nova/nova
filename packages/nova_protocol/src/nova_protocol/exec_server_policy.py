@@ -211,9 +211,14 @@ class PrefixRuleMatch:
 
 @dataclass(frozen=True)
 class HeuristicsRuleMatch:
-    """启发式兜底命中（非规则——is_match() 判假，对位 RuleMatch::Heuristics）"""
+    """启发式兜底命中（非规则——is_match() 判假，对位 RuleMatch::Heuristics）。
+
+    `command` 携带触发兜底的命令词（对位 Rust 同名字段——裁决装配件靠它
+    产出"永远允许"的写回候选，见上游 try_derive_execpolicy_amendment_*）。
+    """
 
     decision: Decision
+    command: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -290,7 +295,7 @@ class Policy:
         if not matched and heuristics_fallback is not None:
             decision = heuristics_fallback(cmd)
             if decision is not None:
-                matched.append(HeuristicsRuleMatch(decision=decision))
+                matched.append(HeuristicsRuleMatch(decision=decision, command=cmd))
         if not matched:
             return Evaluation(decision=Decision.ALLOW, matched_rules=())
         decision = max((m.decision for m in matched), key=lambda d: _decision_rank(d))

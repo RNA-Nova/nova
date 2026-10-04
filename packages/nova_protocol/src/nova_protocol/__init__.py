@@ -236,7 +236,6 @@ from .exec_server_intent import (
     MAX_DANGEROUS_COMMAND_WRAPPER_DEPTH,
     dangerous_command_match,
     executable_name_lookup_key,
-    find_git_subcommand,
     is_dangerous_command,
 )
 
@@ -270,10 +269,6 @@ from .exec_server_policy import (
     is_likely_sandbox_denied,
 )
 
-from .exec_server_safe_command import (
-    is_safe_command,
-    is_safe_to_call_with_exec,
-)
 
 # ---------------------------------------------------------------------------
 # exec-server 词汇域（批次 A 迁入——线上/配置/环境注册表三类）
