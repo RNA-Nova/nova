@@ -135,15 +135,17 @@ class _JsonRpcTransport:
             await self._send_message(message)
             return await asyncio.wait_for(future, timeout=self.request_timeout)
         except asyncio.TimeoutError:
-            self._pending.pop(request_id, None)
             raise TimeoutError(f"request {method} timed out") from None
         except Exception as e:
-            self._pending.pop(request_id, None)
             # 业务错误（JSON-RPC error 响应的 ProtocolError、连接已断）原样透传，
             # 只把传输层发送失败包装为 ConnectionError
             if isinstance(e, ExecutorError):
                 raise
             raise ConnectionError(f"failed to send request {method}: {e}") from e
+        finally:
+            # 对位 Rust PendingRequestGuard：完成/失败/被取消（CancelledError）
+            # 一律即从 pending 表移除——取消残留会等到后续流量或断线才清
+            self._pending.pop(request_id, None)
 
     async def send_notification(
         self,

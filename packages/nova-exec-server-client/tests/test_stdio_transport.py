@@ -240,3 +240,30 @@ async def test_malformed_line_does_not_kill_connection():
         assert result == {"ok": True}
     finally:
         await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_removed_from_pending_without_further_traffic():
+    """对位上游 ed9e5a26a8（PendingRequestGuard）回归测试：在飞请求被取消
+    即从 pending 表移除——不等响应、后续流量或断线；迟到响应安全丢弃"""
+    transport = make_transport(request_timeout=30.0)
+    await transport.connect()
+    try:
+        call = asyncio.create_task(transport.send_request("sleep", {"ms": 500}))
+        for _ in range(100):
+            if transport._pending:
+                break
+            await asyncio.sleep(0.01)
+        assert len(transport._pending) == 1
+
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert len(transport._pending) == 0  # 无后续流量即清零
+
+        # 迟到响应（服务端 500ms 后回包）找不到 pending 条目，安全丢弃；
+        # 连接照常服务
+        await asyncio.sleep(0.7)
+        assert await transport.send_request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        await transport.disconnect()

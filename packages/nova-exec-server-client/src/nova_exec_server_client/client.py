@@ -36,7 +36,7 @@ from nova_protocol import (
     ResolvedEnvironment,
 )
 
-from .errors import ProtocolError
+from .errors import ProtocolError, TimeoutError
 from .fs import FileSystemManager
 from .notifications import NotificationRouter
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, TransportPool
@@ -47,6 +47,10 @@ from .transport import StdioTransport, Transport, WebSocketTransport
 
 #: 默认客户端名（initialize 握手携带）
 DEFAULT_CLIENT_NAME = "nova-exec-server-client"
+
+#: environment/info 探活时限（秒，对位 Rust ENVIRONMENT_INFO_TIMEOUT）：
+#: 覆盖发送与等待全程——卡死传输可能把请求堵在出站队列，时限必须覆盖发送
+ENVIRONMENT_INFO_TIMEOUT = 30.0
 
 
 class ExecutorClient:
@@ -409,13 +413,27 @@ class ExecutorClient:
     async def environment_info(self) -> EnvironmentInfo:
         """获取环境信息（initialize 捎带/首次拉取后缓存，连接生命周期内不重复请求）"""
         if self._environment_info is None:
-            result = await self._pool.send_request(ENVIRONMENT_INFO)
-            self._environment_info = EnvironmentInfo.model_validate(result)
+            # 对位 Rust get_or_try_init(force_environment_info)：缓存未命中走
+            # 同一探活路径，超时同样触发连接退役与会话恢复
+            self._environment_info = await self.force_environment_info()
         return self._environment_info
 
     async def force_environment_info(self) -> EnvironmentInfo:
-        """强制拉取环境信息——不读缓存、不写缓存（对位 rust force_environment_info）"""
-        result = await self._pool.send_request(ENVIRONMENT_INFO)
+        """强制拉取环境信息——不读缓存、不写缓存（对位 rust force_environment_info）
+
+        ENVIRONMENT_INFO_TIMEOUT（30s）覆盖发送与等待全程；超时即关闭所探
+        连接（控制面）并触发会话恢复，调用方拿到超时错误——不重试失败请求
+        （对位 Rust：close_transport + request_recovery 后返回 TimedOut）。
+        """
+        try:
+            result = await asyncio.wait_for(
+                self._pool.send_request(ENVIRONMENT_INFO), ENVIRONMENT_INFO_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            error = TimeoutError(f"request {ENVIRONMENT_INFO} timed out")
+            # 只退役所探连接；陈旧探针/已在恢复由 ManagedTransport 守卫忽略
+            await self._control.request_recovery(str(error))
+            raise error from None
         return EnvironmentInfo.model_validate(result)
 
     async def environment_status(self) -> EnvironmentStatus:

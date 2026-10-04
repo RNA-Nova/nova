@@ -150,6 +150,8 @@ class ManagedTransport:
         self._state: State = "disconnected"
         self._failure_message: str | None = None
         self._recover_task: asyncio.Task | None = None
+        #: request_recovery 退役传输的后台关闭任务（disconnect 时一并收尾）
+        self._retired_close_task: asyncio.Task | None = None
         self._closing = False
         #: 显式刷新串行化（普通连接/恢复工作可并发；对位 Rust refresh_lock）
         self._refresh_lock = asyncio.Lock()
@@ -222,8 +224,44 @@ class ManagedTransport:
             except asyncio.CancelledError:
                 pass
             self._recover_task = None
+        if self._retired_close_task is not None:
+            try:
+                await self._retired_close_task
+            except Exception:
+                pass
+            self._retired_close_task = None
         await self._transport.disconnect()
         self._set_state("disconnected")
+
+    async def request_recovery(self, reason: str) -> None:
+        """探针判死触发的主动恢复（对位 Rust close_transport + request_recovery 组合）。
+
+        调用场景：客户端请求（如 environment/info 探活）超时——底层传输可能已
+        卡死但断线回调尚未触发。仅 connected 且非主动关闭中受理（recovering /
+        failed / 断开期间到达的陈旧探针忽略，对位 Rust 的 ptr_eq 守卫）；传输
+        断线回调路径的恢复仍走 _on_transport_disconnect。
+
+        立即进入 recovering 按策略重建——不等待旧传输关闭收尾（卡死传输的关闭
+        握手可能耗时数秒，而服务端会话保留窗有限）；旧传输在后台关闭，其在途
+        请求以 ConnectionError 收尾。无恢复手段（无策略/无会话）时 _recover
+        即转 failed，后续调用拿到明确断线错误。
+        """
+        if self._state != "connected" or self._closing:
+            return
+        old = self._transport
+        self._set_state("recovering")
+        self._recover_task = asyncio.create_task(self._recover(reason))
+        self._retired_close_task = asyncio.create_task(self._close_retired(old))
+
+    async def _close_retired(self, transport: Transport) -> None:
+        """退役传输的后台关闭（request_recovery 专用）：主动关闭不触发断线
+        回调；失败仅留痕——恢复成败不依赖旧传输的关闭结果"""
+        try:
+            await transport.disconnect()
+        except Exception:
+            logger.warning(
+                "closing retired exec-server transport failed", exc_info=True
+            )
 
     async def refresh_connection(self) -> None:
         """计划内更换后的显式刷新（对位 Rust refresh_connection）。

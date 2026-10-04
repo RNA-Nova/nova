@@ -405,3 +405,74 @@ async def test_client_reconnect_none_disables_recovery():
     with pytest.raises(ConnectionError):
         await client.environment_status()
     await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_request_recovery_retires_transport_and_recovers():
+    """request_recovery（对位 Rust close_transport + request_recovery 组合）：
+    connected 下退役当前传输（后台关闭，不等关闭握手）并按策略 resume 同一会话"""
+    sink: list[FakeTransport] = []
+    managed = make_managed(sink)
+    await managed.connect()
+    first = sink[0]
+
+    await managed.request_recovery("request environment/info timed out")
+    # 同步进入恢复状态机（不等旧传输关闭收尾——卡死传输的关闭可能耗时数秒，
+    # 服务端会话保留窗有限）
+    assert managed.state == "recovering"
+
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 2 and not first.connected:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+    assert not first.connected  # 旧传输后台关闭收尾
+    # 重连握手携带原会话 id
+    assert sink[1].requests[0][1]["resumeSessionId"] == "fake-session"
+    sink[1].responses["echo"] = {"ok": True}
+    assert await managed.send_request("echo") == {"ok": True}
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_request_recovery_stale_probe_ignored():
+    """陈旧探针守卫（对位 Rust ptr_eq 检查）：failed / disconnected / 主动关闭
+    期间到达的 request_recovery 一律忽略"""
+    sink: list[FakeTransport] = []
+    managed = make_managed(sink, strategy=None)
+    await managed.connect()
+    sink[0].drop("test drop")  # 无策略 → failed
+    await asyncio.sleep(0.05)
+    assert managed.state == "failed"
+    await managed.request_recovery("stale probe")
+    assert managed.state == "failed"  # 忽略：不再起恢复
+    assert len(sink) == 1
+    await managed.disconnect()
+
+    sink2: list[FakeTransport] = []
+    managed2 = make_managed(sink2)
+    await managed2.connect()
+    await managed2.disconnect()
+    await managed2.request_recovery("stale probe")
+    assert managed2.state == "disconnected"  # 忽略
+    assert len(sink2) == 1
+
+
+@pytest.mark.asyncio
+async def test_request_recovery_without_strategy_fails():
+    """无恢复手段（strategy=None）时 request_recovery 转 failed——调用方拿到
+    明确断线错误而非干等（对位 Rust 无 reconnect strategy 的 recover 路径）"""
+    sink: list[FakeTransport] = []
+    managed = make_managed(sink, strategy=None)
+    await managed.connect()
+
+    await managed.request_recovery("probe timed out")
+    for _ in range(100):
+        if managed.state == "failed" and not sink[0].connected:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "failed"
+    assert not sink[0].connected
+    with pytest.raises(ConnectionError, match="probe timed out"):
+        await managed.send_request("echo")
+    await managed.disconnect()
