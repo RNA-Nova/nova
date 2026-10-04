@@ -153,9 +153,16 @@ class InitializeResponse(BaseModel):
 class EnvironmentInfo(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     shell: ShellInfo
+    #: executor 发布版本（版本化兼容决策用；旧 executor 缺席时默认 "0.0.0"）
+    executor_version: str = Field(default="0.0.0", alias="executorVersion")
+    #: 不透明 executor 构建标识（行为验证查询键；旧版/未打标构建缺席。
+    #: 非工件校验和、非安全证明，证据不得跨构建变体共享）
+    provider_id: str | None = Field(default=None, alias="providerId")
     cwd: str | None = None
     user_home_dir: str | None = Field(default=None, alias="userHomeDir")
     platform_os: str | None = Field(default=None, alias="platformOs")
+    #: 缺失时需前插到 PATH 的 executor 目录（按优先级序；缺席=空）
+    prepend_path_dirs: list[str] = Field(default_factory=list, alias="prependPathDirs")
     temporary_directories: list[str] | None = Field(
         default=None, alias="temporaryDirectories"
     )
@@ -245,9 +252,19 @@ class EnvironmentConfigReadResponse(BaseModel):
 # =============================================================================
 
 
+class ExecMetadata(BaseModel):
+    """可选工具归因（executor 遥测用，非授权依据——旧客户端省略、旧 executor 忽略）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    thread_id: str | None = Field(default=None, alias="threadId")
+    tool_call_id: str | None = Field(default=None, alias="toolCallId")
+
+
 class ProcessStartParams(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
+    #: 可选归因元数据（对位 ExecParams.metadata）
+    metadata: ExecMetadata | None = None
     argv: list[str]
     cwd: str
     env: dict[str, str]
@@ -382,10 +399,20 @@ class FsReadFileResponse(BaseModel):
         return base64.b64decode(self.data_base64)
 
 
+class FsOpenMode(str, Enum):
+    """fs/open 打开模式（缺省 read——旧调用方保持只读打开语义）"""
+
+    READ = "read"
+    #: 写打开：文件缺失则创建、存在则截断
+    REPLACE = "replace"
+
+
 class FsOpenParams(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     path: str
+    #: 打开模式：read 读既有文件（缺省）；replace 写打开（创建/截断）
+    mode: FsOpenMode = FsOpenMode.READ
     sandbox: dict[str, Any] | None = None
 
 
@@ -706,9 +733,13 @@ class NetworkSandboxPolicy(str, Enum):
 
 
 class WindowsSandboxLevel(str, Enum):
+    """windowsSandboxLevel 线上枚举（字段名保留 legacy 名兼容；
+    mxc 是独立沙箱实现而非 RestrictedToken 档位——对位上游注释）"""
+
     DISABLED = "disabled"
     RESTRICTED_TOKEN = "restricted-token"
     ELEVATED = "elevated"
+    MXC = "mxc"
 
 
 class FileSystemAccessMode(str, Enum):
@@ -832,9 +863,6 @@ class FileSystemSandboxContext(BaseModel):
     windows_sandbox_level: WindowsSandboxLevel = Field(
         default=WindowsSandboxLevel.DISABLED, alias="windowsSandboxLevel"
     )
-    windows_sandbox_private_desktop: bool = Field(
-        default=False, alias="windowsSandboxPrivateDesktop"
-    )
     windows_sandbox_proxy_settings_mode: WindowsSandboxProxySettingsMode | None = Field(
         default=None, alias="windowsSandboxProxySettingsMode"
     )
@@ -940,10 +968,18 @@ class ShellSnapshotRequest(BaseModel):
 
 class ManagedNetworkSandboxContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    """托管网络上下文（loopback 代理端口 + 本地绑定许可）"""
+    """托管网络上下文（loopback 代理端口 + 本地绑定许可 + Unix socket 许可）"""
 
     loopback_ports: list[int] = Field(default_factory=list, alias="loopbackPorts")
     allow_local_binding: bool = Field(default=False, alias="allowLocalBinding")
+    #: 有效托管网络策略放行的 Unix socket 路径
+    allow_unix_sockets: list[str] = Field(
+        default_factory=list, alias="allowUnixSockets"
+    )
+    #: 有效策略是否放行全部 Unix socket 连接（危险开关，默认关）
+    dangerously_allow_all_unix_sockets: bool = Field(
+        default=False, alias="dangerouslyAllowAllUnixSockets"
+    )
 
 
 def _file_url(path: str) -> str:
