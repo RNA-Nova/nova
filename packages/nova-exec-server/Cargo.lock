@@ -2185,6 +2185,7 @@ dependencies = [
  "bytes",
  "futures",
  "http",
+ "httpdate",
  "nova-exec-server-utils-cargo-bin",
  "nova-exec-server-utils-rustls-provider",
  "opentelemetry",

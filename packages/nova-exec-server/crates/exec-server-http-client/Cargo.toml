@@ -9,6 +9,7 @@ bytes = { workspace = true }
 nova-exec-server-utils-rustls-provider = { path = "../exec-server-utils-rustls-provider"  }
 futures = { workspace = true }
 http = { workspace = true }
+httpdate = { workspace = true }
 opentelemetry = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls-native-roots", "stream"] }
 rustls = { workspace = true }
@@ -40,6 +41,7 @@ opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 rcgen = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 
 [lib]

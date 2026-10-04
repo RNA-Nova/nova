@@ -24,3 +24,12 @@ pub use crate::trace_context::span_w3c_trace_context;
 pub use crate::trace_context::validate_tracestate_entries;
 pub use crate::trace_context::validate_tracestate_member;
 pub use nova_exec_server_utils_string::sanitize_metric_tag_value;
+
+/// Install externally managed process-global metrics.
+///
+/// Call this once during single-threaded startup, before any instruments are
+/// registered. Keep the returned handle to flush and shut down the exporter
+/// owned by this installation.
+pub fn install_global_metrics(metrics: MetricsClient) -> MetricsClient {
+    crate::metrics::install_global(metrics)
+}
