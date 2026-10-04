@@ -32,7 +32,8 @@ class FakeRuntime:
         return self._requirement
 
     def should_bypass_approval(self, policy, already_approved):
-        return already_approved
+        """codex 默认实现（sandboxing.rs:333）：已批过/never 档 → 不重问"""
+        return already_approved or policy is ApprovalPolicy.NEVER
 
     def approval_action(self, request):
         return ApprovalAction(title="run command", command="rm -rf /tmp/x")
@@ -199,3 +200,110 @@ def test_default_exec_approval_requirement_mapping():
         ).kind
         == "skip"
     )
+
+
+# ── 升级重试审批门（对位 orchestrator.rs:483 bypass_retry_approval） ──
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denial_skip_requires_retry_approval():
+    """skip（未批过）+ 非 never 档：沙箱被拒后的升级重试要走审批流，
+    带固定 retry_reason——不再静默脱沙箱。"""
+    from nova_harness.core.agent_session.controllers.orchestrator import (
+        _DENIAL_RETRY_REASON,
+    )
+
+    approval_actions = []
+
+    async def recording_approval(action, ctx):
+        approval_actions.append(action)
+        return ReviewDecisionPayload(decision=ReviewDecision.APPROVED)
+
+    outputs = [
+        ExecAttemptOutput(exit_code=1, stderr="Operation not permitted"),
+        ExecAttemptOutput(exit_code=0),
+    ]
+    runtime = FakeRuntime(requirement=ExecApprovalRequirement.skip(), outputs=outputs)
+    orchestrator = Orchestrator(
+        approval_policy=ApprovalPolicy.ON_REQUEST,
+        request_approval=recording_approval,
+    )
+    request = _request(
+        first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
+        escalated_attempt=SandboxAttempt(sandbox_type=None),
+    )
+    output = await orchestrator.run(runtime, request, ctx=None)
+
+    assert output.exit_code == 0
+    assert len(runtime.runs) == 2
+    assert len(approval_actions) == 1  # 只有升级这一问（首轮 skip 不问）
+    assert approval_actions[0].reason == _DENIAL_RETRY_REASON
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denial_never_bypasses_retry_approval():
+    """never 档：升级重试不问（无处可问——对位 should_bypass_approval
+    的 Never 分支），直接脱沙箱重跑。"""
+    approval_calls = []
+
+    async def counting_approval(action, ctx):
+        approval_calls.append(action)
+        return ReviewDecisionPayload(decision=ReviewDecision.APPROVED)
+
+    outputs = [
+        ExecAttemptOutput(exit_code=1, stderr="Operation not permitted"),
+        ExecAttemptOutput(exit_code=0),
+    ]
+    runtime = FakeRuntime(requirement=ExecApprovalRequirement.skip(), outputs=outputs)
+    orchestrator = Orchestrator(
+        approval_policy=ApprovalPolicy.NEVER, request_approval=counting_approval
+    )
+    request = _request(
+        first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
+        escalated_attempt=SandboxAttempt(sandbox_type=None),
+    )
+    output = await orchestrator.run(runtime, request, ctx=None)
+
+    assert output.exit_code == 0
+    assert len(runtime.runs) == 2
+    assert approval_calls == []
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denial_retry_approval_denied_rejects():
+    """升级审批被拒 → ToolRejected，重试不执行。"""
+    outputs = [ExecAttemptOutput(exit_code=1, stderr="Operation not permitted")]
+    runtime = FakeRuntime(requirement=ExecApprovalRequirement.skip(), outputs=outputs)
+    decision = ReviewDecisionPayload(
+        decision=ReviewDecision.DENIED, rejection="no escape"
+    )
+    orchestrator = Orchestrator(
+        approval_policy=ApprovalPolicy.ON_REQUEST,
+        request_approval=lambda action, ctx: _async_return(decision),
+    )
+    request = _request(
+        first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
+        escalated_attempt=SandboxAttempt(sandbox_type=None),
+    )
+    with pytest.raises(ToolRejected, match="no escape"):
+        await orchestrator.run(runtime, request, ctx=None)
+    assert len(runtime.runs) == 1
+
+
+async def _async_return(value):
+    return value
+
+
+@pytest.mark.asyncio
+async def test_bypass_sandbox_skip_runs_first_attempt_unsandboxed():
+    """Skip{bypass_sandbox:true}（规则全放行）→ 首尝试即脱沙箱
+    （对位 sandbox_override_for_first_attempt 的 BypassSandboxFirstAttempt）。"""
+    runtime = FakeRuntime(requirement=ExecApprovalRequirement.skip(bypass_sandbox=True))
+    request = _request(
+        first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
+        escalated_attempt=SandboxAttempt(sandbox_type=None),
+    )
+    output = await _orchestrator().run(runtime, request, ctx=None)
+    assert output.exit_code == 0
+    assert runtime.runs[0][1].sandbox_type is None
+    assert len(runtime.runs) == 1

@@ -9,8 +9,12 @@
   `default_exec_approval_requirement`（`sandboxing.rs:194` 移植）落默认。
 - **编排顺序**（`orchestrator.rs:run` 对位）：裁决 → Forbidden 拒绝 /
   NeedsApproval 走审批流（`approval_action` + `request_approval` 回调）→
-  attempt 执行（`runtime.run(request, attempt, ctx)`）→ 沙箱拒绝判别
-  （nova_protocol 启发式）→ 放宽一档重试一次（审批已缓存不重问）。
+  规则全放行时首尝试跳过沙箱（Skip.bypass_sandbox → sandbox_override_
+  for_first_attempt 对位）→ attempt 执行（`runtime.run(request, attempt,
+  ctx)`）→ 沙箱拒绝判别（nova_protocol 启发式）→ 放宽一档重试一次——
+  **重试带审批门**：已批过/never 档才不重问（`should_bypass_approval`
+  对位 sandboxing.rs:333 默认实现），其余带 retry_reason 走审批流，
+  拒绝即终局（沙箱被拒不是静默逃逸沙箱的理由）。
 - **遥测**：`otel.tool_decision` 对位——裁决/审批结局经 telemetry 回调
   上报（来源 tag：config/user/automated_reviewer）。
 
@@ -242,12 +246,7 @@ class Orchestrator:
                 ToolDecisionSource.USER,
                 decision.decision,
             )
-            if decision.decision not in (
-                ReviewDecision.APPROVED,
-                ReviewDecision.APPROVED_FOR_SESSION,
-                ReviewDecision.APPROVED_EXECPOLICY_AMENDMENT,
-                ReviewDecision.NETWORK_POLICY_AMENDMENT,
-            ):
+            if decision.decision not in _APPROVED_DECISIONS:
                 raise ToolRejected(decision.rejection or "execution rejected by user")
             already_approved = True
         else:
@@ -259,23 +258,67 @@ class Orchestrator:
             )
 
         # 3) 首尝试（对位 attempt → tool.run）
-        output = await runtime.run(request, request.first_attempt, ctx)
+        # 规则全放行 → 首尝试跳过沙箱（对位 sandbox_override_for_first_attempt：
+        # Skip{bypass_sandbox:true} → BypassSandboxFirstAttempt）
+        first_attempt = request.first_attempt
+        if requirement.kind == "skip" and requirement.bypass_sandbox:
+            first_attempt = replace(
+                first_attempt, sandbox_type=None, sandbox_context=None
+            )
+        output = await runtime.run(request, first_attempt, ctx)
 
-        # 4) 沙箱拒绝判别 → 放宽一档重试一次（审批已缓存，不重问——
-        #    对位 orchestrator.rs 的升级重试路径）
+        # 4) 沙箱拒绝判别 → 放宽一档重试一次（对位 orchestrator.rs 的升级重试
+        #    路径）。重试带审批门：已批过 / never 档才不重问（对位
+        #    sandboxing.rs:333 should_bypass_approval 默认实现）；其余带
+        #    retry_reason 走审批流——沙箱被拒不是静默逃逸沙箱的理由。
         if (
             request.escalated_attempt is not None
             and output.exit_code != 0
             and is_likely_sandbox_denied(
-                request.first_attempt.sandbox_type,
+                first_attempt.sandbox_type,
                 output.exit_code,
                 output.stdout,
                 output.stderr,
                 output.aggregated,
             )
         ):
+            if not runtime.should_bypass_approval(
+                self._approval_policy, already_approved
+            ):
+                decision = await self._request_approval(
+                    replace(
+                        runtime.approval_action(request),
+                        reason=_DENIAL_RETRY_REASON,
+                    ),
+                    ctx,
+                )
+                self._telemetry(
+                    request.tool_name,
+                    request.call_id,
+                    ToolDecisionSource.USER,
+                    decision.decision,
+                )
+                if decision.decision not in _APPROVED_DECISIONS:
+                    raise ToolRejected(
+                        decision.rejection or "execution rejected by user"
+                    )
             return await runtime.run(
                 request.escalated(), request.escalated_attempt, ctx
             )
 
         return output
+
+
+#: 升级重试的审批理由（对位 build_denial_reason_from_output——刻意短而稳定，
+#: 输出摘要演进不动调用点与测试）
+_DENIAL_RETRY_REASON = "命令在沙箱内执行失败；改在沙箱外重试？"
+
+#: 视为批准的弹窗结局（重试审批与首轮审批共用）
+_APPROVED_DECISIONS = frozenset(
+    {
+        ReviewDecision.APPROVED,
+        ReviewDecision.APPROVED_FOR_SESSION,
+        ReviewDecision.APPROVED_EXECPOLICY_AMENDMENT,
+        ReviewDecision.NETWORK_POLICY_AMENDMENT,
+    }
+)
