@@ -87,6 +87,13 @@ pub struct ManagedNetworkSandboxContext {
     /// Whether the command may bind local sockets and exchange loopback traffic.
     #[serde(default)]
     pub allow_local_binding: bool,
+    /// Unix-domain socket paths allowed by the effective managed-network policy.
+    /// 旧报文缺省为空（保持独立 unix socket 默认拒绝，对位 codex 99914f4950）。
+    #[serde(default)]
+    pub allow_unix_sockets: Vec<String>,
+    /// Whether the effective policy permits connections to all Unix-domain sockets.
+    #[serde(default)]
+    pub dangerously_allow_all_unix_sockets: bool,
 }
 
 /// 网络模式

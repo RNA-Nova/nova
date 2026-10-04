@@ -13,7 +13,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use anyhow::Result;
-use nova_exec_server_protocol_core::config_types::WindowsSandboxLevel;
+use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_protocol_core::protocol::SandboxPolicy;
 use nova_exec_server::CreateDirectoryOptions;
 use nova_exec_server::FileSystemSandboxContext;
@@ -350,7 +350,7 @@ async fn file_system_remote_fs_helper_respects_windows_sandbox_write_policy() ->
     std::fs::create_dir_all(&readonly_dir)?;
 
     let mut sandbox = read_only_sandbox_for_cwd(readonly_dir.clone())?;
-    sandbox.windows_sandbox_level = WindowsSandboxLevel::RestrictedToken;
+    sandbox.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
 
     let readable_file = readonly_dir.join("readable.txt");
     std::fs::write(&readable_file, b"readable")?;

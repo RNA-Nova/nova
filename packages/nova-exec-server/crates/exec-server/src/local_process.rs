@@ -368,6 +368,7 @@ impl LocalProcess {
             SandboxType::MacosSeatbelt => Some(ProcessSandboxType::MacosSeatbelt),
             SandboxType::LinuxSeccomp => Some(ProcessSandboxType::LinuxSeccomp),
             SandboxType::WindowsRestrictedToken => Some(ProcessSandboxType::WindowsRestrictedToken),
+            SandboxType::WindowsMxc => Some(ProcessSandboxType::WindowsMxc),
         };
 
         let start = Arc::new(ProcessStart);
@@ -1156,6 +1157,7 @@ mod tests {
 
     fn test_exec_params(env: HashMap<String, String>) -> ExecParams {
         ExecParams {
+            metadata: None,
             process_id: ProcessId::from("env-test"),
             argv: vec!["true".to_string()],
             cwd: PathUri::from_host_native_path(std::env::current_dir().expect("cwd"))

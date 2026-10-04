@@ -3,6 +3,7 @@ use nova_exec_server_sandboxing::SandboxExecRequest;
 use nova_exec_server_utils_path_uri::PathUri;
 use tokio::io;
 
+use crate::fs_helper::FsHelperOpenParams;
 use crate::fs_helper::FsHelperOpenResponse;
 use crate::fs_helper::FsHelperRequest;
 use crate::fs_helper::FsHelperResponse;
@@ -16,7 +17,6 @@ use crate::fs_sandbox::reap_helper_after_response;
 use crate::fs_sandbox::spawn_command;
 #[cfg(unix)]
 use crate::fs_sandbox::wait_for_helper_output;
-use crate::protocol::FsReadFileParams;
 use crate::rpc::internal_error;
 
 /// 沙箱化开门（fs/readStream 的读端执行体）：拉起一次性沙箱 helper 在平台沙箱
@@ -26,12 +26,8 @@ pub(crate) async fn open(
     command: SandboxExecRequest,
     path: PathUri,
 ) -> Result<tokio::fs::File, JSONRPCErrorError> {
-    let request = serde_json::to_vec(&FsHelperRequest::Open(FsReadFileParams {
-        path,
-        follow_symlinks: None,
-        sandbox: None,
-    }))
-    .map_err(|error| internal_error(format!("invalid fs sandbox helper request: {error}")))?;
+    let request = serde_json::to_vec(&FsHelperRequest::Open(FsHelperOpenParams { path }))
+        .map_err(|error| internal_error(format!("invalid fs sandbox helper request: {error}")))?;
     open_platform(command, request).await
 }
 

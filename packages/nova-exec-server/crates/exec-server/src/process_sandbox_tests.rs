@@ -49,6 +49,7 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
         cwd_uri.clone(),
     );
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-1"),
         argv: vec![
             "/bin/bash".to_string(),
@@ -128,6 +129,7 @@ async fn sandbox_request_routes_custom_arg0_to_inner_helper() {
         cwd_uri.clone(),
     );
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-custom-arg0"),
         argv: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
         cwd: cwd_uri,
@@ -193,6 +195,7 @@ async fn sandbox_request_allows_prepared_managed_proxy_port() {
         cwd_uri.clone(),
     );
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-managed-network"),
         argv: vec!["/usr/bin/true".to_string()],
         cwd: cwd_uri,
@@ -207,6 +210,7 @@ async fn sandbox_request_allows_prepared_managed_proxy_port() {
         managed_network: Some(ManagedNetworkSandboxContext {
             loopback_ports: vec![43123],
             allow_local_binding: false,
+            ..ManagedNetworkSandboxContext::default()
         }),
         network_proxy: None,
     };
@@ -238,6 +242,7 @@ async fn native_request_preserves_native_launch_fields() {
     let cwd_uri = PathUri::from_abs_path(&cwd);
     let env = HashMap::from([("TEST_ENV".to_string(), "value".to_string())]);
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-1"),
         argv: vec!["echo".to_string(), "hello".to_string()],
         cwd: cwd_uri,
@@ -283,6 +288,7 @@ async fn native_request_handles_remote_proxy_config_for_platform() {
     let proxy_config = RemoteNetworkProxyConfig::from_effective_config(&config)
         .expect("supported remote proxy config");
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-remote-proxy"),
         argv: vec!["echo".to_string(), "hello".to_string()],
         cwd: PathUri::from_abs_path(&cwd),
@@ -366,6 +372,7 @@ async fn disabled_remote_proxy_config_is_rejected_before_exporting_ports() {
         RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig::default())
             .expect("serializable disabled proxy config");
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-disabled-remote-proxy"),
         argv: vec!["echo".to_string(), "hello".to_string()],
         cwd: PathUri::from_abs_path(&cwd),
@@ -422,7 +429,7 @@ async fn managed_network_honors_windows_sandbox_level(windows_sandbox_level: Win
         permissions.clone(),
         cwd_uri.clone(),
     );
-    sandbox.windows_sandbox_level = windows_sandbox_level;
+    sandbox.windows_sandbox_selection = windows_sandbox_level.into();
     sandbox.windows_sandbox_proxy_settings_mode =
         Some(nova_exec_server_sandboxing::WindowsSandboxProxySettingsMode::Preserve);
     let proxy_config = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig {
@@ -432,6 +439,7 @@ async fn managed_network_honors_windows_sandbox_level(windows_sandbox_level: Win
     })
     .expect("supported remote proxy config");
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("process-managed-network"),
         argv: vec!["cmd.exe".to_string(), "/c".to_string(), "exit".to_string()],
         cwd: cwd_uri,

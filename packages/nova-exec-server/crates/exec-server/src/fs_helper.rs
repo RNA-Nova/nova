@@ -1,6 +1,7 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use nova_exec_server_protocol::JSONRPCErrorError;
+use nova_exec_server_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::io;
@@ -82,11 +83,19 @@ pub(crate) enum FsHelperRequest {
     /// 一次性开门：helper 在沙箱内 open 后把 fd/handle 传回 executor
     /// （见 [`crate::sandboxed_file_open`]），不走普通的一次性响应执行体。
     #[serde(rename = "fs/open")]
-    Open(FsReadFileParams),
+    Open(FsHelperOpenParams),
     /// 长命流式写：helper 进程活到流结束，stdin 逐行收 chunk/finish 事件帧
     /// （见 [`run_write_stream_request`]），最终确认走一次性响应信封。
     #[serde(rename = "fs/writeStream")]
     WriteStream(FsWriteStreamParams),
+}
+
+/// 开门请求的专用参数（对位 codex a73898c249 `FsHelperOpenParams`：
+/// 不复用 FsReadFileParams，去掉开门用不到的 read 选项）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FsHelperOpenParams {
+    pub(crate) path: PathUri,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -772,6 +772,11 @@ impl NetworkProxy {
             sandbox_context: crate::ManagedNetworkSandboxContext {
                 loopback_ports,
                 allow_local_binding: runtime_settings.allow_local_binding,
+                // runtime_settings 构造时已按平台门禁（Windows 清空/unix 放行），
+                // 与有效策略一致地带上下文的 unix socket 权限（对位 codex 99914f4950）
+                allow_unix_sockets: runtime_settings.allow_unix_sockets.to_vec(),
+                dangerously_allow_all_unix_sockets: runtime_settings
+                    .dangerously_allow_all_unix_sockets,
             },
         }
     }
@@ -1507,6 +1512,7 @@ mod tests {
                 crate::ManagedNetworkSandboxContext {
                     loopback_ports: expected_ports,
                     allow_local_binding: false,
+                    ..crate::ManagedNetworkSandboxContext::default()
                 }
             );
         }
@@ -1515,6 +1521,61 @@ mod tests {
         assert_eq!(legacy_env, local.env);
 
         handle.shutdown().await?;
+        Ok(())
+    }
+
+    // 有效策略的 unix socket 权限随 ManagedNetworkSandboxContext 投影带上，
+    // 供 Linux 沙箱 AF_UNIX 放行判定（改写自 codex 99914f4950 同名测试：
+    // nova 的 unix_sockets 为 Vec<entry> 形状，Windows 侧策略未移植故仅 unix）。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn prepare_for_optional_environment_preserves_effective_unix_socket_permissions()
+    -> Result<()> {
+        let unix_sockets = crate::NetworkUnixSocketPermissions {
+            entries: vec![
+                crate::NetworkUnixSocketPermissionEntry {
+                    path: "/tmp/allowed.sock".to_string(),
+                    permission: crate::NetworkUnixSocketPermission::Allow,
+                },
+                crate::NetworkUnixSocketPermissionEntry {
+                    path: "/tmp/denied.sock".to_string(),
+                    permission: crate::NetworkUnixSocketPermission::Deny,
+                },
+            ],
+        };
+        let mut config = NetworkProxyConfig {
+            enabled: true,
+            mode: NetworkMode::Proxy,
+            enable_socks5: true,
+            proxy_url: Some("http://127.0.0.1:44129".to_string()),
+            socks_url: Some("http://127.0.0.1:49082".to_string()),
+            allow_local_binding: true,
+            unix_sockets: Some(unix_sockets),
+            ..NetworkProxyConfig::default()
+        };
+        let proxy = NetworkProxy::builder()
+            .state(Arc::new(network_proxy_state_for_policy(config.clone())))
+            .managed_by_nova(/*managed_by_nova*/ false)
+            .build()
+            .await?;
+
+        for allow_all in [false, true] {
+            config.dangerously_allow_all_unix_sockets = allow_all;
+            let replacement = crate::state::build_config_state(config.clone(), Default::default())?;
+            proxy.replace_config_state(replacement).await?;
+            let prepared =
+                proxy.prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)?;
+            assert_eq!(
+                prepared.sandbox_context,
+                crate::ManagedNetworkSandboxContext {
+                    loopback_ports: vec![44129, 49082],
+                    allow_local_binding: true,
+                    allow_unix_sockets: vec!["/tmp/allowed.sock".to_string()],
+                    dangerously_allow_all_unix_sockets: allow_all,
+                }
+            );
+        }
+
         Ok(())
     }
 

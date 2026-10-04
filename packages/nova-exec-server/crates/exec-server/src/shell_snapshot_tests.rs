@@ -34,6 +34,7 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
     let profile = home.path().join(".bashrc");
     std::fs::write(&profile, "printf x >> \"$HOME/captures\"\nexit 7\n")?;
     let params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("snapshot-retry"),
         argv: vec![
             "/bin/bash".to_string(),

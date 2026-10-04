@@ -208,6 +208,8 @@ async fn exec_server_runs_ordinary_requests_serially_by_default() -> anyhow::Res
     };
     assert_eq!(id, queued_environment_info_id);
     let mut expected_environment_info = EnvironmentInfo::local();
+    // 服务端经 local_environment_info 盖印 crate 版本（对位 codex release_version）。
+    expected_environment_info.executor_version = env!("CARGO_PKG_VERSION").to_string();
     expected_environment_info.temporary_directories = Some(vec![PathUri::from_host_native_path(
         temporary_directory.path(),
     )?]);

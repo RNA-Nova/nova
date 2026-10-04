@@ -15,7 +15,7 @@ use nova_exec_server_network_proxy::RemoteNetworkProxyConfig;
 use nova_exec_server_network_proxy::RemoteNetworkProxyLaunchConfig;
 #[cfg(unix)]
 use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
-use nova_exec_server_protocol_core::config_types::WindowsSandboxLevel;
+use nova_exec_server_file_system::WindowsSandboxSelection;
 #[cfg(unix)]
 use nova_exec_server_protocol_core::models::PermissionProfile;
 #[cfg(unix)]
@@ -228,6 +228,7 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
         let started = context
             .backend
             .start(ExecParams {
+                metadata: None,
                 process_id: ProcessId::from(format!("snapshot-{attempt}")),
                 argv: vec![shell_path.to_string(), "-lc".to_string(), command.clone()],
                 cwd: cwd.clone(),
@@ -304,6 +305,7 @@ async fn shell_snapshot_v2_remote_managed_proxy_uses_prepared_execution_context(
         let started = context
             .backend
             .start(ExecParams {
+                metadata: None,
                 process_id: ProcessId::from(format!("managed-snapshot-{attempt}")),
                 argv: vec![
                     "/bin/bash".to_string(),
@@ -400,6 +402,7 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
         include_only: vec!["HOME".to_string(), "PATH".to_string()],
     };
     let mut params = ExecParams {
+        metadata: None,
         process_id: ProcessId::from("snapshot-first"),
         argv: vec![
             shell_path.to_string(),
@@ -510,6 +513,7 @@ async fn remote_sandboxed_process_preserves_custom_arg0() -> Result<()> {
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-custom-arg0"),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -550,6 +554,7 @@ async fn assert_exec_process_starts_and_exits(use_remote: bool) -> Result<()> {
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-1"),
             argv: vec!["true".to_string()],
             cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
@@ -614,6 +619,7 @@ async fn remote_process_keeps_sandbox_helper_visible_with_restricted_reads() -> 
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-restricted-helper"),
             argv: vec!["/bin/cat".to_string(), file.to_string_lossy().into_owned()],
             cwd,
@@ -686,6 +692,7 @@ async fn remote_tty_process_uses_configured_sandbox_helper_with_hostile_path() -
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-hostile-helper-path"),
             argv: vec!["/bin/cat".to_string(), file.to_string_lossy().into_owned()],
             cwd,
@@ -744,6 +751,7 @@ async fn remote_process_preserves_empty_workspace_roots() -> Result<()> {
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-empty-workspace-roots"),
             argv: vec!["/bin/cat".to_string(), file.to_string_lossy().into_owned()],
             cwd,
@@ -886,6 +894,7 @@ async fn assert_exec_process_streams_output(use_remote: bool) -> Result<()> {
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -922,6 +931,7 @@ async fn assert_exec_process_pushes_events(use_remote: bool) -> Result<()> {
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -974,6 +984,7 @@ async fn assert_exec_process_replays_events_after_close(use_remote: bool) -> Res
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -1027,6 +1038,7 @@ async fn assert_exec_process_retains_output_after_exit_until_streams_close(
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 helper_binary.to_string_lossy().into_owned(),
@@ -1102,6 +1114,7 @@ async fn assert_exec_process_write_then_read(use_remote: bool) -> Result<()> {
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 // Use `/bin/sh` instead of Python so this stdin round-trip test
@@ -1147,6 +1160,7 @@ async fn assert_exec_process_write_then_read_without_tty(use_remote: bool) -> Re
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -1188,11 +1202,12 @@ async fn assert_remote_windows_sandbox_process_write() -> Result<()> {
         SandboxPolicy::new_read_only_policy(),
         cwd.clone(),
     )?;
-    sandbox.windows_sandbox_level = WindowsSandboxLevel::RestrictedToken;
+    sandbox.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
 
     let session = match context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-windows-sandbox-stdin"),
             argv: vec![
                 r"C:\Windows\System32\cmd.exe".to_string(),
@@ -1245,6 +1260,7 @@ async fn assert_exec_process_rejects_write_without_pipe_stdin(use_remote: bool) 
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -1284,6 +1300,7 @@ async fn assert_exec_process_signal_interrupts_process(use_remote: bool) -> Resu
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: process_id.clone().into(),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -1342,6 +1359,7 @@ async fn assert_exec_process_signal_terminates_on_windows(use_remote: bool) -> R
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-windows-signal"),
             argv: vec![
                 "cmd".to_string(),
@@ -1379,6 +1397,7 @@ async fn assert_exec_process_preserves_queued_events_before_subscribe(
     let session = context
         .backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-queued"),
             argv: vec![
                 "/bin/sh".to_string(),
@@ -1425,6 +1444,7 @@ async fn remote_exec_process_recovers_after_transport_disconnect() -> Result<()>
     let emitted_path = temp_dir.path().join("output-emitted");
     let session = backend
         .start(ExecParams {
+            metadata: None,
             process_id: ProcessId::from("proc-recover"),
             argv: vec![
                 "/bin/sh".to_string(),

@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Result;
-use nova_exec_server_protocol_core::config_types::WindowsSandboxLevel;
+use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
 use nova_exec_server_protocol_core::permissions::FileSystemPath;
@@ -146,7 +146,7 @@ pub(crate) fn workspace_write_sandbox(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
         PathUri::from_abs_path(&writable_root),
     );
-    sandbox.windows_sandbox_level = WindowsSandboxLevel::RestrictedToken;
+    sandbox.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
     sandbox
 }
 
@@ -168,7 +168,7 @@ fn sandbox_context(mut entries: Vec<FileSystemSandboxEntry>) -> FileSystemSandbo
         ),
     );
     if cfg!(windows) {
-        sandbox.windows_sandbox_level = WindowsSandboxLevel::RestrictedToken;
+        sandbox.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
     }
     sandbox
 }

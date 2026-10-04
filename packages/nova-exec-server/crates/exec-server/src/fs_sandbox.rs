@@ -201,10 +201,18 @@ impl FileSystemSandboxRunner {
         // fail-closed：fs helper 必须使用更窄的 FileSystemHelper profile，
         // 平台沙箱不可用时显式报错而不是静默裸跑
         let sandbox_manager = SandboxManager::for_file_system_helpers();
+        // 选择项 → 受限令牌层级：Mxc 不是受限令牌层级且实现本体未移植，
+        // 与 process 侧同一拒绝文案（对位 codex windows_mxc_available() 拒绝）。
+        let windows_sandbox_level = sandbox_context
+            .windows_sandbox_selection
+            .restricted_token_level()
+            .ok_or_else(|| {
+                invalid_request("native MXC is unavailable on this executor".to_string())
+            })?;
         let sandbox = sandbox_manager.select_initial(
             permission_profile,
             SandboxablePreference::Require,
-            sandbox_context.windows_sandbox_level,
+            windows_sandbox_level,
             /*has_managed_network_requirements*/ false,
         );
         if sandbox == SandboxType::None {
@@ -238,9 +246,7 @@ impl FileSystemSandboxRunner {
                         .executor_linux_sandbox_exe
                         .as_deref(),
                     use_legacy_landlock: sandbox_context.use_legacy_landlock,
-                    windows_sandbox_level: sandbox_context.windows_sandbox_level,
-                    windows_sandbox_private_desktop: sandbox_context
-                        .windows_sandbox_private_desktop,
+                    windows_sandbox_level,
                 },
             })
             .map_err(|err| invalid_request(format!("failed to prepare fs sandbox: {err}")))
@@ -931,8 +937,8 @@ mod tests {
                 "filesystem sandbox cannot be enforced on this executor"
             );
             crate::FileSystemSandboxContext {
-                windows_sandbox_level:
-                    nova_exec_server_protocol_core::config_types::WindowsSandboxLevel::RestrictedToken,
+                windows_sandbox_selection:
+                    nova_exec_server_file_system::WindowsSandboxSelection::RestrictedToken,
                 ..sandbox_context
             }
         };

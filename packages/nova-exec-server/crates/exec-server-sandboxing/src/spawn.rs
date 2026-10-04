@@ -22,7 +22,6 @@ pub struct WindowsSandboxSpawnRequest<'a> {
     pub network_proxy_restricting_sid: Option<&'a str>,
     pub proxy_settings_mode: WindowsSandboxProxySettingsMode,
     pub filesystem_overrides: Option<&'a WindowsSandboxFilesystemOverrides>,
-    pub use_private_desktop: bool,
 }
 
 /// Executor-native process launch request shared by local and exec-server execution.
@@ -80,7 +79,9 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
                     }),
                     tty: request.tty,
                     stdin_open: request.stdin_open,
-                    use_private_desktop: windows.use_private_desktop,
+                    // 传统 Windows 沙箱总是使用私有桌面（对位 codex a633ebc124：
+                    // 私有桌面退出选项已删除）
+                    use_private_desktop: true,
                 },
             )
             .await;

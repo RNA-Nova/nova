@@ -3,7 +3,6 @@ use crate::bwrap::WSL1_BWRAP_WARNING;
 #[cfg(target_os = "linux")]
 use crate::bwrap::is_wsl1;
 use crate::landlock::NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0;
-use crate::landlock::allow_network_for_proxy;
 use crate::landlock::create_linux_sandbox_command_args_for_permission_profile;
 use crate::policy_transforms::effective_permission_profile;
 use crate::policy_transforms::should_require_platform_sandbox;
@@ -39,6 +38,9 @@ pub enum SandboxType {
     MacosSeatbelt,
     LinuxSeccomp,
     WindowsRestrictedToken,
+    /// MXC 是独立的 Windows 沙箱实现而非受限令牌层级（对位 codex 同名变体）。
+    /// nova 未移植实现本体：沙箱选择永不产出该值，transform 显式拒绝。
+    WindowsMxc,
 }
 
 impl SandboxType {
@@ -48,6 +50,7 @@ impl SandboxType {
             SandboxType::MacosSeatbelt => "seatbelt",
             SandboxType::LinuxSeccomp => "seccomp",
             SandboxType::WindowsRestrictedToken => "windows_sandbox",
+            SandboxType::WindowsMxc => "windows_mxc",
         }
     }
 }
@@ -120,7 +123,6 @@ pub struct SandboxExecRequest {
     pub network_environment_id: Option<String>,
     pub sandbox: SandboxType,
     pub windows_sandbox_level: WindowsSandboxLevel,
-    pub windows_sandbox_private_desktop: bool,
     pub permission_profile: PermissionProfile,
     pub arg0: Option<String>,
 }
@@ -141,7 +143,6 @@ pub struct SandboxTransformRequest<'a> {
     pub nova_linux_sandbox_exe: Option<&'a Path>,
     pub use_legacy_landlock: bool,
     pub windows_sandbox_level: WindowsSandboxLevel,
-    pub windows_sandbox_private_desktop: bool,
 }
 
 /// Bundled arguments for a sandbox transformation whose result will be spawned
@@ -206,6 +207,7 @@ pub enum SandboxTransformError {
         source: io::Error,
     },
     MissingLinuxSandboxExecutable,
+    WindowsMxcPreparation(String),
     EnvironmentNetworkProxy(String),
     #[cfg(target_os = "macos")]
     SeatbeltPreparation(String),
@@ -233,6 +235,9 @@ impl std::fmt::Display for SandboxTransformError {
             Self::MissingLinuxSandboxExecutable => {
                 write!(f, "missing nova-linux-sandbox executable path")
             }
+            Self::WindowsMxcPreparation(err) => {
+                write!(f, "failed to prepare MXC sandbox: {err}")
+            }
             Self::EnvironmentNetworkProxy(err) => {
                 write!(f, "failed to prepare environment network proxy: {err}")
             }
@@ -258,6 +263,7 @@ impl std::error::Error for SandboxTransformError {
             Self::InvalidCommandCwd { source, .. }
             | Self::InvalidSandboxPolicyCwd { source, .. } => Some(source),
             Self::MissingLinuxSandboxExecutable => None,
+            Self::WindowsMxcPreparation(_) => None,
             Self::EnvironmentNetworkProxy(_) => None,
             #[cfg(target_os = "macos")]
             Self::SeatbeltPreparation(_) => None,
@@ -343,7 +349,6 @@ impl SandboxManager {
             nova_linux_sandbox_exe,
             use_legacy_landlock,
             windows_sandbox_level,
-            windows_sandbox_private_desktop,
         } = request;
         #[cfg(target_os = "macos")]
         let managed_network = command.managed_network.as_ref();
@@ -408,14 +413,33 @@ impl SandboxManager {
                 let pending = pending_sandboxed_request?;
                 let exe = nova_linux_sandbox_exe
                     .ok_or(SandboxTransformError::MissingLinuxSandboxExecutable)?;
-                let allow_proxy_network = allow_network_for_proxy(enforce_managed_network);
+                // 托管网络要求下：调用方未带上下文而现场代理可用时，就地准备
+                // env 与沙箱上下文（对位 codex 99914f4950；exec-server 路径已在
+                // process_sandbox 提前备好，此分支兜底直连调用方）。
+                if enforce_managed_network
+                    && command.managed_network.is_none()
+                    && let Some(network) = network
+                {
+                    let prepared = network
+                        .prepare_for_optional_environment(
+                            std::mem::take(&mut command.env),
+                            environment_id,
+                        )
+                        .map_err(|err| {
+                            SandboxTransformError::EnvironmentNetworkProxy(err.to_string())
+                        })?;
+                    command.env = prepared.env;
+                    command.managed_network = Some(prepared.sandbox_context);
+                }
+                let managed_network =
+                    enforce_managed_network.then(|| command.managed_network.unwrap_or_default());
                 #[cfg(target_os = "linux")]
                 ensure_linux_bubblewrap_is_supported(
                     &pending
                         .effective_permission_profile
                         .file_system_sandbox_policy(),
                     use_legacy_landlock,
-                    allow_proxy_network,
+                    managed_network.is_some(),
                     is_wsl1(),
                 )?;
                 let mut args = create_linux_sandbox_command_args_for_permission_profile(
@@ -424,7 +448,7 @@ impl SandboxManager {
                     &pending.effective_permission_profile,
                     pending.native_sandbox_policy_cwd.as_path(),
                     use_legacy_landlock,
-                    allow_proxy_network,
+                    managed_network.as_ref(),
                 );
                 let mut full_command = Vec::with_capacity(1 + args.len());
                 full_command.push(os_string_to_command_component(exe.as_os_str().to_owned()));
@@ -456,6 +480,13 @@ impl SandboxManager {
                 None,
                 Some(pending_sandboxed_request?),
             ),
+            // MXC 实现本体未移植（选择层在 exec-server 侧已先行拒绝，
+            // 此臂为防御性兜底，对位 codex 的 WindowsMxcPreparation 拒绝语义）。
+            SandboxType::WindowsMxc => {
+                return Err(SandboxTransformError::WindowsMxcPreparation(
+                    "native MXC is unavailable on this executor".to_string(),
+                ));
+            }
         };
 
         // Unsandboxed exec-server requests may have foreign cwd values that cannot be prepared
@@ -475,7 +506,6 @@ impl SandboxManager {
             network_environment_id: environment_id.map(str::to_string),
             sandbox,
             windows_sandbox_level,
-            windows_sandbox_private_desktop,
             permission_profile,
             arg0: arg0_override,
         })
@@ -607,7 +637,9 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
             &request.env,
             &request.permission_profile,
             request.windows_sandbox_level,
-            request.windows_sandbox_private_desktop,
+            // 传统 Windows 沙箱总是使用私有桌面（对位 codex a633ebc124：
+            // 线上 windowsSandboxPrivateDesktop 字段与退出选项已删除）
+            /*windows_sandbox_private_desktop*/ true,
             proxy_enforced,
             network_proxy_restricting_sid.as_deref(),
             proxy_settings_mode,

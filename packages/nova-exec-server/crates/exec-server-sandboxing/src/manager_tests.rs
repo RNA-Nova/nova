@@ -108,7 +108,6 @@ fn unsandboxed_transform_preserves_foreign_cwd_and_unrestricted_file_system_poli
             nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
-            windows_sandbox_private_desktop: false,
         })
         .expect("transform");
 
@@ -165,7 +164,6 @@ fn symlinked_workspace_reports_seatbelt_preparation_error() {
             nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
-            windows_sandbox_private_desktop: false,
         })
         .expect_err("symlinked workspace should be rejected");
 
@@ -220,7 +218,6 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
             nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
-            windows_sandbox_private_desktop: false,
         })
         .expect("transform");
 
@@ -293,7 +290,6 @@ fn transform_additional_permissions_preserves_denied_entries() {
             nova_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
-            windows_sandbox_private_desktop: false,
         })
         .expect("transform");
 
@@ -397,7 +393,6 @@ fn transform_linux_seccomp_request(
             nova_linux_sandbox_exe: Some(nova_linux_sandbox_exe),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
-            windows_sandbox_private_desktop: false,
         })
         .expect("transform")
 }
@@ -492,6 +487,133 @@ fn transform_linux_seccomp_uses_helper_alias_when_launcher_is_not_helper_path() 
     let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe);
 
     assert_eq!(exec_request.arg0, Some("nova-linux-sandbox".to_string()));
+}
+
+// 托管网络上下文随 `--managed-network` 传输的矩阵：缺省保守、路径授予保持
+// 受限、预备好的 allow-all 生效、显式拒绝覆盖现场代理、无代理时回退现场
+// 代理准备（改写自 codex 99914f4950 同名测试，nova 字段名适配）。
+#[cfg(unix)]
+#[tokio::test]
+async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Result<()> {
+    use nova_exec_server_network_proxy::ConfigReloader;
+    use nova_exec_server_network_proxy::ConfigReloaderFuture;
+    use nova_exec_server_network_proxy::ConfigState;
+    use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
+    use nova_exec_server_network_proxy::NetworkProxy;
+    use nova_exec_server_network_proxy::NetworkProxyConfig;
+    use nova_exec_server_network_proxy::NetworkProxyConstraints;
+    use nova_exec_server_network_proxy::NetworkProxyState;
+    use nova_exec_server_network_proxy::build_config_state;
+    use std::sync::Arc;
+
+    struct TestConfigReloader;
+    impl ConfigReloader for TestConfigReloader {
+        fn source_label(&self) -> String {
+            "sandbox manager test config".to_string()
+        }
+
+        fn maybe_reload(&self) -> ConfigReloaderFuture<'_, Option<ConfigState>> {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn reload_now(&self) -> ConfigReloaderFuture<'_, ConfigState> {
+            Box::pin(async { Err(anyhow::anyhow!("test config cannot reload")) })
+        }
+    }
+
+    let state = build_config_state(
+        NetworkProxyConfig {
+            enabled: true,
+            dangerously_allow_all_unix_sockets: true,
+            ..Default::default()
+        },
+        NetworkProxyConstraints::default(),
+    )?;
+    let network = NetworkProxy::builder()
+        .state(Arc::new(NetworkProxyState::with_reloader(
+            state,
+            Arc::new(TestConfigReloader),
+        )))
+        .managed_by_nova(/*managed_by_nova*/ false)
+        .build()
+        .await?;
+    let prepared =
+        network.prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)?;
+    let allow_all = prepared.sandbox_context;
+    let path_only = ManagedNetworkSandboxContext {
+        allow_unix_sockets: vec!["/tmp/daemon.sock".to_string()],
+        ..Default::default()
+    };
+    let denied = ManagedNetworkSandboxContext::default();
+    let cwd = AbsolutePathBuf::current_dir()?;
+    let cwd_uri = PathUri::from_abs_path(&cwd);
+    let manager = SandboxManager::new();
+    for (label, context, live_proxy, enforce_managed_network, expected) in [
+        (
+            "missing policy stays managed with restrictive defaults",
+            None,
+            false,
+            true,
+            Some(denied.clone()),
+        ),
+        (
+            "path grant stays restricted",
+            Some(path_only.clone()),
+            false,
+            true,
+            Some(path_only),
+        ),
+        (
+            "prepared allow-all",
+            Some(allow_all.clone()),
+            false,
+            true,
+            Some(allow_all.clone()),
+        ),
+        (
+            "prepared denial overrides live allow-all",
+            Some(denied.clone()),
+            true,
+            true,
+            Some(denied),
+        ),
+        (
+            "live proxy fallback",
+            None,
+            true,
+            true,
+            Some(allow_all.clone()),
+        ),
+        ("no managed network", Some(allow_all), true, false, None),
+    ] {
+        let request = manager.transform(SandboxTransformRequest {
+            command: SandboxCommand {
+                program: "true".into(),
+                args: Vec::new(),
+                cwd: cwd_uri.clone(),
+                env: HashMap::new(),
+                managed_network: context,
+                additional_permissions: None,
+            },
+            permissions: &PermissionProfile::Disabled,
+            sandbox: SandboxType::LinuxSeccomp,
+            enforce_managed_network,
+            environment_id: None,
+            network: live_proxy.then_some(&network),
+            sandbox_policy_cwd: &cwd_uri,
+            nova_linux_sandbox_exe: Some(std::path::Path::new("/tmp/nova-linux-sandbox")),
+            use_legacy_landlock: false,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        })?;
+        let transported_context = request
+            .command
+            .windows(2)
+            .find(|args| args[0] == "--managed-network")
+            .map(|args| serde_json::from_str::<ManagedNetworkSandboxContext>(&args[1]))
+            .transpose()?;
+        assert_eq!(transported_context, expected, "{label}");
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -594,7 +716,6 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
                     nova_linux_sandbox_exe: None,
                     use_legacy_landlock: false,
                     windows_sandbox_level: WindowsSandboxLevel::Elevated,
-                    windows_sandbox_private_desktop: false,
                 },
             },
             executor_home.path(),

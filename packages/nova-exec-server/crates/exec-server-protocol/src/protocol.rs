@@ -93,6 +93,16 @@ pub struct InitializeResponse {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentInfo {
     pub shell: ShellInfo,
+    /// Executor release version for version-based compatibility decisions.
+    /// `0.0.0` when unknown, including responses from legacy executors.
+    #[serde(default = "unknown_executor_version")]
+    pub executor_version: String,
+    /// Opaque executor build identity for looking up behavioral verification.
+    /// Derived from the compiled commit and target for standard builds;
+    /// absent for legacy or unstamped builds. This is not an artifact checksum
+    /// or a security attestation, and evidence must not be shared across build variants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// Working directory inherited by the exec-server process.
     #[serde(default)]
     pub cwd: Option<PathUri>,
@@ -102,6 +112,9 @@ pub struct EnvironmentInfo {
     /// Operating system reported by the executor; absent for legacy exec-servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform_os: Option<String>,
+    /// Executor directories to prepend to `PATH` when missing, in priority order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prepend_path_dirs: Vec<PathUri>,
     /// Executor-local default directories for resolving `:tmpdir`, when reported.
     /// On Windows, a command's `TEMP` or `TMP` overrides take precedence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -112,6 +125,10 @@ pub struct EnvironmentInfo {
     /// Optional executor features that clients must gate before sending newer request fields.
     #[serde(default)]
     pub capabilities: EnvironmentCapabilities,
+}
+
+fn unknown_executor_version() -> String {
+    "0.0.0".to_string()
 }
 
 /// Features supported by the selected exec-server environment.
@@ -128,6 +145,10 @@ pub struct EnvironmentCapabilities {
     /// request（fs 流式通道可按请求装配沙箱执行——约束能力，对位 codex 同名位）。
     #[serde(default)]
     pub sandboxed_file_streaming: bool,
+    /// Whether `fs/open` supports replacement mode and `fs/writeBlock` is supported.
+    /// （写流未启用——如实宣告 false，对位 codex 同名位）
+    #[serde(default)]
+    pub file_write_streaming: bool,
     /// Whether `http/request` header values can resolve from the executor
     /// environment（valueEnvVar——凭证留执行机，敏感变量保护名单拒代发）。
     #[serde(default)]
@@ -192,11 +213,19 @@ impl EnvironmentInfo {
 
         Self {
             shell: nova_exec_server_shell_command::shell_detect::default_user_shell().into(),
+            // 线上缺省：版本由服务端启动时按自身 crate 版本覆盖（见 exec-server
+            // server::local_environment_info）；未经覆盖的值保持 0.0.0
+            executor_version: unknown_executor_version(),
+            // nova 尚无 build-stamp 基建（git commit + target 哈希），如实缺省
+            provider_id: None,
             cwd: cwd.and_then(|cwd| PathUri::from_host_native_path(cwd).ok()),
             // 家目录经 `~` 展开取绝对路径（底层即 absolute-path crate 的 home 解析，
             // 再往下是 dirs::home_dir）——与客户端展开的 `~` 同一语义
             user_home_dir: PathUri::from_host_native_path("~").ok(),
             platform_os: Some(std::env::consts::OS.to_string()),
+            // nova 无安装包布局（对位 codex InstallContext 的 codex-path 目录），
+            // 如实上报空列表（序列化时省略）
+            prepend_path_dirs: Vec::new(),
             temporary_directories: Some(temporary_directories),
             temp_dir,
             capabilities: EnvironmentCapabilities {
@@ -212,6 +241,9 @@ impl EnvironmentInfo {
                 // 如实宣告 true（v1.6 补回 codex 原约束位；端点存在不配位，
                 // readStream/writeStream 端点位随本版撤除）
                 sandboxed_file_streaming: true,
+                // fs/open 的 replace 模式与 fs/writeBlock 均未启用（服务端显式拒绝
+                // replace）——如实宣告 false，客户端按位门控
+                file_write_streaming: false,
                 // http/request 的 valueEnvVar（header 值从执行机环境变量解析）已实现
                 // 于 route_aware_http_client（敏感变量保护名单拒代发，有测试）——
                 // 如实宣告 true（此前机制在但宣告缺位，v1.5 补齐）
@@ -244,12 +276,29 @@ impl From<DetectedShell> for ShellInfo {
     }
 }
 
+/// Optional tool attribution for executor telemetry, not authorization.
+///
+/// 线上形状对位 codex `ExecMetadata`：nova 服务端存而不取（归遥测归因预留），
+/// 不参与任何鉴权/调度决策。codex 的 `threadId` 是其 `ThreadId` 新型别的
+/// 字符串序列化（UUID），nova 侧以透明字符串收取，线上形状一致。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecParams {
     /// Client-chosen logical process handle scoped to this connection/session.
     /// This is a protocol key, not an OS pid.
     pub process_id: ProcessId,
+    /// Optional attribution; older clients omit it and older executors ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ExecMetadata>,
     pub argv: Vec<String>,
     /// Working directory URI, interpreted using the exec-server host's path rules at launch time.
     pub cwd: PathUri,
@@ -321,6 +370,9 @@ pub enum ProcessSandboxType {
     MacosSeatbelt,
     LinuxSeccomp,
     WindowsRestrictedToken,
+    /// MXC 是独立的 Windows 沙箱实现而非受限令牌层级（对位 codex
+    /// `windowsMxc`）；nova 只收线上枚举值，实现本体未移植。
+    WindowsMxc,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -422,11 +474,24 @@ pub struct FsReadFileResponse {
     pub data_base64: String,
 }
 
+/// `fs/open` 的打开模式。缺省保持旧调用方的只读打开语义（对位 codex `FsOpenMode`）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FsOpenMode {
+    /// Open an existing file for reading.
+    #[default]
+    Read,
+    /// Open for writing, creating a missing file or truncating an existing file.
+    Replace,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsOpenParams {
     pub handle_id: String,
     pub path: PathUri,
+    #[serde(default)]
+    pub mode: FsOpenMode,
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
@@ -848,8 +913,11 @@ mod tests {
     use super::EnvironmentCapabilities;
     use super::EnvironmentInfo;
     use super::ExecExitedNotification;
+    use super::ExecMetadata;
     use super::ExecParams;
     use super::ExecResponse;
+    use super::FsOpenMode;
+    use super::FsOpenParams;
     use super::FsReadFileParams;
     use super::HttpRequestParams;
     use super::InitializeResponse;
@@ -882,6 +950,10 @@ mod tests {
                 .expect("cwd URI");
         let params = ExecParams {
             process_id: ProcessId::from("managed-network"),
+            metadata: Some(ExecMetadata {
+                thread_id: Some("thread-1".to_string()),
+                tool_call_id: Some("call-1".to_string()),
+            }),
             argv: vec!["true".to_string()],
             cwd,
             env_policy: None,
@@ -895,6 +967,8 @@ mod tests {
             managed_network: Some(ManagedNetworkSandboxContext {
                 loopback_ports: vec![43123, 48081],
                 allow_local_binding: false,
+                allow_unix_sockets: vec!["/tmp/allowed.sock".to_string()],
+                dangerously_allow_all_unix_sockets: true,
             }),
             network_proxy: Some(
                 RemoteNetworkProxyLaunchConfig::new(
@@ -911,10 +985,20 @@ mod tests {
 
         let mut serialized = serde_json::to_value(&params).expect("serialize exec params");
         assert_eq!(
+            (
+                serialized.get("threadId").cloned(),
+                serialized.get("toolCallId").cloned(),
+                serialized.get("metadata").cloned(),
+            ),
+            (None, None, Some(serde_json::json!(params.metadata)),)
+        );
+        assert_eq!(
             serialized["managedNetwork"],
             serde_json::json!({
                 "loopbackPorts": [43123, 48081],
                 "allowLocalBinding": false,
+                "allowUnixSockets": ["/tmp/allowed.sock"],
+                "dangerouslyAllowAllUnixSockets": true,
             })
         );
         assert_eq!(
@@ -933,14 +1017,68 @@ mod tests {
             .as_object_mut()
             .expect("exec params object")
             .remove("networkProxy");
+        serialized
+            .as_object_mut()
+            .expect("exec params object")
+            .remove("metadata");
         let legacy: ExecParams =
             serde_json::from_value(serialized).expect("deserialize legacy exec params");
         assert!(legacy.enforce_managed_network);
         assert_eq!(legacy.managed_network, None);
         assert_eq!(legacy.network_proxy, None);
+        assert_eq!(legacy.metadata, None);
         let legacy_serialized =
             serde_json::to_value(&legacy).expect("serialize exec params without proxy launch");
         assert!(legacy_serialized.get("networkProxy").is_none());
+        assert!(legacy_serialized.get("threadId").is_none());
+        assert!(legacy_serialized.get("toolCallId").is_none());
+        assert!(legacy_serialized.get("metadata").is_none());
+    }
+
+    #[test]
+    fn exec_params_defaults_legacy_managed_network_unix_socket_policy() {
+        let cwd =
+            PathUri::from_host_native_path(std::env::current_dir().expect("current directory"))
+                .expect("cwd URI");
+        let legacy: ExecParams = serde_json::from_value(serde_json::json!({
+            "processId": "legacy-managed-network",
+            "argv": ["true"],
+            "cwd": cwd,
+            "env": {},
+            "tty": false,
+            "arg0": null,
+            "enforceManagedNetwork": true,
+            "managedNetwork": {
+                "loopbackPorts": [43123],
+                "allowLocalBinding": true,
+            },
+        }))
+        .expect("deserialize legacy managed network context");
+
+        assert_eq!(
+            legacy,
+            ExecParams {
+                process_id: ProcessId::from("legacy-managed-network"),
+                metadata: None,
+                argv: vec!["true".to_string()],
+                cwd,
+                env_policy: None,
+                shell_snapshot: None,
+                env: HashMap::new(),
+                tty: false,
+                pipe_stdin: false,
+                arg0: None,
+                sandbox: None,
+                enforce_managed_network: true,
+                managed_network: Some(ManagedNetworkSandboxContext {
+                    loopback_ports: vec![43123],
+                    allow_local_binding: true,
+                    allow_unix_sockets: Vec::new(),
+                    dangerously_allow_all_unix_sockets: false,
+                }),
+                network_proxy: None,
+            }
+        );
     }
 
     #[test]
@@ -957,9 +1095,12 @@ mod tests {
                     name: "zsh".to_string(),
                     path: "/bin/zsh".to_string(),
                 },
+                executor_version: "0.0.0".to_string(),
+                provider_id: None,
                 cwd: None,
                 user_home_dir: None,
                 platform_os: None,
+                prepend_path_dirs: Vec::new(),
                 temporary_directories: None,
                 temp_dir: None,
                 capabilities: EnvironmentCapabilities::default(),
@@ -981,6 +1122,7 @@ mod tests {
                 network_proxy_launch: true,
                 environment_config_read: false,
                 sandboxed_file_streaming: false,
+                file_write_streaming: false,
                 http_header_env_vars: false,
                 shell_snapshot_v2: false,
             }
@@ -988,24 +1130,28 @@ mod tests {
     }
 
     #[test]
-    fn environment_info_preserves_executor_temporary_directories() {
+    fn environment_info_preserves_executor_metadata() {
         let expected = serde_json::json!({
             "shell": { "name": "powershell", "path": "powershell.exe" },
+            "executorVersion": "1.2.3-alpha.4",
+            "providerId": "sha256:e0a0cebe63ab8189ffe3eed378ccf6aa89ef15bc75e39dbbf1fc55951ec6888b",
             "cwd": null,
             "userHomeDir": "file:///C:/Users/remote",
             "platformOs": "windows",
+            "prependPathDirs": ["file:///C:/tools/bin", "file:///D:/tools/bin"],
             "temporaryDirectories": ["file:///C:/Temp", "file:///D:/Temp"],
             "tempDir": "file:///C:/Temp",
             "capabilities": {
                 "networkProxyLaunch": false,
                 "environmentConfigRead": false,
                 "sandboxedFileStreaming": false,
+                "fileWriteStreaming": false,
                 "httpHeaderEnvVars": false,
                 "shellSnapshotV2": false,
             },
         });
         let info: EnvironmentInfo = serde_json::from_value(expected.clone())
-            .expect("environment info with executor temporary directories should deserialize");
+            .expect("environment info with executor metadata should deserialize");
 
         assert_eq!(
             serde_json::to_value(info).expect("environment info should serialize"),
@@ -1016,11 +1162,14 @@ mod tests {
     #[test]
     fn initialize_response_piggybacks_environment_info() {
         // 捎带形态：environmentInfo 随 initialize 响应上线，字段逐一保留。
+        // 缺省的 executorVersion 反序列化补 0.0.0 并随回序列化再现（对位 codex
+        // 同名位，无 skip 语义）。
         let expected = serde_json::json!({
             "sessionId": "session-1",
             "protocolVersion": "1.0",
             "environmentInfo": {
                 "shell": { "name": "zsh", "path": "/bin/zsh" },
+                "executorVersion": "0.0.0",
                 "cwd": "file:///Users/test",
                 "userHomeDir": "file:///Users/test",
                 "platformOs": "macos",
@@ -1029,6 +1178,7 @@ mod tests {
                     "networkProxyLaunch": false,
                     "environmentConfigRead": false,
                     "sandboxedFileStreaming": true,
+                    "fileWriteStreaming": false,
                     "httpHeaderEnvVars": false,
                     "shellSnapshotV2": true,
                 },
@@ -1328,5 +1478,83 @@ mod tests {
             (unknown.sandbox_type, unsandboxed.sandbox_type),
             (None, Some(ProcessSandboxType::None))
         );
+    }
+
+    #[test]
+    fn exec_response_accepts_windows_mxc_sandbox_type() {
+        // 枚举值防拒：对端报告 windowsMxc 时反序列化不炸（对位 codex d4e11a9b97）。
+        let response: ExecResponse = serde_json::from_value(serde_json::json!({
+            "processId": "mxc",
+            "sandboxType": "windowsMxc",
+        }))
+        .expect("windowsMxc sandbox type should deserialize");
+
+        assert_eq!(response.sandbox_type, Some(ProcessSandboxType::WindowsMxc));
+        assert_eq!(
+            serde_json::to_value(response).expect("exec response should serialize"),
+            serde_json::json!({
+                "processId": "mxc",
+                "sandboxType": "windowsMxc",
+            })
+        );
+    }
+
+    /// Legacy `fs/open` callers continue to open existing files for reading only.
+    #[test]
+    fn filesystem_open_accepts_legacy_request_without_mode() {
+        let legacy: FsOpenParams = serde_json::from_value(serde_json::json!({
+            "handleId": "legacy-handle",
+            "path": "file:///tmp/existing.txt",
+        }))
+        .expect("legacy open should deserialize");
+
+        assert_eq!(legacy.mode, FsOpenMode::Read);
+
+        let replace: FsOpenParams = serde_json::from_value(serde_json::json!({
+            "handleId": "replace-handle",
+            "path": "file:///tmp/existing.txt",
+            "mode": "replace",
+        }))
+        .expect("replace open should deserialize");
+        assert_eq!(replace.mode, FsOpenMode::Replace);
+        let serialized = serde_json::to_value(replace).expect("replace open should serialize");
+        assert_eq!(serialized["mode"], serde_json::json!("replace"));
+    }
+
+    #[test]
+    fn windows_sandbox_selection_keeps_legacy_wire_field_and_accepts_mxc() {
+        // 线上字段保留 `windowsSandboxLevel` 名（对位 codex d4e11a9b97）；
+        // "mxc" 值反序列化为选择项而不是层级。
+        use nova_exec_server_file_system::WindowsSandboxSelection;
+
+        let cwd =
+            PathUri::from_host_native_path(std::env::current_dir().expect("current directory"))
+                .expect("cwd URI");
+        let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+            PermissionProfile::default(),
+            cwd,
+        );
+        assert_eq!(
+            sandbox.windows_sandbox_selection,
+            WindowsSandboxSelection::Disabled
+        );
+        sandbox.windows_sandbox_selection = WindowsSandboxSelection::Mxc;
+
+        let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
+        assert_eq!(serialized["windowsSandboxLevel"], "mxc");
+        assert_eq!(
+            serde_json::from_value::<FileSystemSandboxContext>(serialized)
+                .expect("deserialize mxc sandbox")
+                .windows_sandbox_selection,
+            WindowsSandboxSelection::Mxc
+        );
+
+        // 既有层级值保持 kebab-case 线上形状，反序列化兼容。
+        let serialized = serde_json::to_value(FileSystemSandboxContext {
+            windows_sandbox_selection: WindowsSandboxSelection::RestrictedToken,
+            ..sandbox
+        })
+        .expect("serialize restricted-token sandbox");
+        assert_eq!(serialized["windowsSandboxLevel"], "restricted-token");
     }
 }

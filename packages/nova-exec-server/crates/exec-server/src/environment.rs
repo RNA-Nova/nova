@@ -1308,6 +1308,7 @@ mod tests {
         let response = environment
             .get_exec_backend()
             .start(crate::ExecParams {
+                metadata: None,
                 process_id: ProcessId::from("default-env-proc"),
                 argv: vec!["true".to_string()],
                 cwd: PathUri::from_host_native_path(
@@ -1350,6 +1351,7 @@ mod tests {
         let result = environment
             .get_exec_backend()
             .start(crate::ExecParams {
+                metadata: None,
                 process_id: ProcessId::from("local-sandbox-proc"),
                 argv: vec!["true".to_string()],
                 cwd: PathUri::from_host_native_path(

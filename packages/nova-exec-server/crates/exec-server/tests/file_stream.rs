@@ -9,6 +9,7 @@ use nova_exec_server::ExecServerClient;
 use nova_exec_server::ExecServerError;
 use nova_exec_server::ExecutorFileSystem;
 use nova_exec_server::FsCloseParams;
+use nova_exec_server::FsOpenMode;
 use nova_exec_server::FsOpenParams;
 use nova_exec_server::FsReadBlockParams;
 use nova_exec_server::FsReadBlockResponse;
@@ -216,6 +217,7 @@ async fn read_block_supports_non_sequential_offsets_and_lengths() -> Result<()> 
     std::fs::write(&path, b"0123456789")?;
     let open = client
         .fs_open(FsOpenParams {
+            mode: FsOpenMode::Read,
             handle_id: Uuid::new_v4().simple().to_string(),
             path: PathUri::from_host_native_path(path)?,
             sandbox: None,
@@ -282,6 +284,7 @@ async fn open_enforces_the_per_connection_limit_and_close_releases_capacity() ->
     for _ in 0..OPEN_FILE_LIMIT {
         let open = client
             .fs_open(FsOpenParams {
+                mode: FsOpenMode::Read,
                 handle_id: Uuid::new_v4().simple().to_string(),
                 path: path.clone(),
                 sandbox: None,
@@ -292,6 +295,7 @@ async fn open_enforces_the_per_connection_limit_and_close_releases_capacity() ->
 
     let error = client
         .fs_open(FsOpenParams {
+            mode: FsOpenMode::Read,
             handle_id: Uuid::new_v4().simple().to_string(),
             path: path.clone(),
             sandbox: None,
@@ -316,6 +320,7 @@ async fn open_enforces_the_per_connection_limit_and_close_releases_capacity() ->
         .await?;
     client
         .fs_open(FsOpenParams {
+            mode: FsOpenMode::Read,
             handle_id: Uuid::new_v4().simple().to_string(),
             path,
             sandbox: None,
@@ -341,6 +346,7 @@ async fn open_rejects_handle_ids_longer_than_32_bytes() -> Result<()> {
 
     let error = client
         .fs_open(FsOpenParams {
+            mode: FsOpenMode::Read,
             handle_id: "x".repeat(33),
             path: PathUri::from_host_native_path(path)?,
             sandbox: None,

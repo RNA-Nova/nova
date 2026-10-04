@@ -142,7 +142,9 @@ fn classify_filesystem_sandbox_violation(
         SandboxType::None => return None,
         SandboxType::MacosSeatbelt => SandboxViolationBackend::Seatbelt,
         SandboxType::LinuxSeccomp => SandboxViolationBackend::LinuxSandbox,
-        SandboxType::WindowsRestrictedToken => SandboxViolationBackend::WindowsSandbox,
+        SandboxType::WindowsRestrictedToken | SandboxType::WindowsMxc => {
+            SandboxViolationBackend::WindowsSandbox
+        }
     };
 
     if let Some((reason, output)) = filesystem_reason_from_output(exec_output) {

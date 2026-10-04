@@ -1,4 +1,4 @@
-# nova-exec-server 线上协议（v1.6）
+# nova-exec-server 线上协议（v1.7）
 
 > 本文件是 nova-exec-server 服务端与客户端之间的**唯一契约**。任何语言照本文档
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
@@ -28,6 +28,14 @@ client → initialized（notification）
   `environment/info` 往返；旧服务端缺省该字段时，客户端在首次需要时回退
   单次 `environment/info` 调用并缓存（serde 向后兼容，两形态互通）。
 - 连接断开：该连接启动的进程被清理（会话级生命周期）。
+- 客户端入站限流（v1.7 起，对位 codex 54487a5b61）：**客户端侧**对执行端
+  发来的请求/未知通知/畸形消息限 8 KiB（超限即断开连接并带原因），数据面
+  通知（`process/output|exited|closed`、`http/request/bodyDelta`）放宽至
+  2 MiB，nova 扩展数据面 `fs/readStream/chunk` 按协议最大块放宽至
+  8 MiB（nova 特有豁免点），响应/错误不受此限（仍受传输层单消息上限约束）；
+  服务端→客户端反向请求（`network/policyRequest` 等）的 `tracestate` 超
+  512B 即丢弃（保留 `traceparent`）；stdio stderr 日志按 8 KiB 分块读取。
+  服务端侧入站不新增限制（沿用既有传输上限）。
 - 服务端行为约定（实现实况）：
   - `initialize` 每连接仅一次（重复调用报错）；
   - 未知方法报 method_not_found；**未知通知直接关闭连接**（严格姿态）；
@@ -43,7 +51,7 @@ client → initialized（notification）
 
 | 方法 | 参数 | 结果 | 说明 |
 |---|---|---|---|
-| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
+| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/`executorVersion`（v1.7，执行端发布版本，旧执行端缺省 `"0.0.0"`）/`providerId`（v1.7，可选，不透明构建身份；nova 无 build-stamp 基建，恒省略）/`prependPathDirs`（v1.7，执行端 PATH 前置目录，空即省略）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`fileWriteStreaming`（v1.7 起恒 false——fs/open 的 replace 模式与写流未启用）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
 | `environment/status` | — | `EnvironmentStatus` | 环境状态 |
 | `environmentConfig/read` | `EnvironmentConfigReadParams` | `EnvironmentConfigReadResponse` | 代读 executor 本机配置层栈（v1.4 起，能力位 `environmentConfigRead` 门控，见下节） |
 
@@ -87,7 +95,7 @@ mode = "full"               # off | full（缺省 full）；allow_domains 预留
 
 | 方法 | 说明 |
 |---|---|
-| `process/start` | 启动进程。参数：`processId`（客户端选定的连接内句柄）、`argv`、`cwd`（PathUri）、`env`、`envPolicy?`、`shellSnapshot?`（ShellSnapshotRequest，`{scopeId, shell}`）、`tty`、`pipeStdin?`、`arg0?`、`sandbox?`（FileSystemSandboxContext）、`enforceManagedNetwork?`、`managedNetwork?`、`networkProxy?`（RemoteNetworkProxyLaunchConfig，v1.3 起真实生效，见「托管网络」） |
+| `process/start` | 启动进程。参数：`processId`（客户端选定的连接内句柄）、`metadata?`（v1.7，`{threadId?, toolCallId?}`——遥测归因预留，服务端存而不取，不参与鉴权/调度）、`argv`、`cwd`（PathUri）、`env`、`envPolicy?`、`shellSnapshot?`（ShellSnapshotRequest，`{scopeId, shell}`）、`tty`、`pipeStdin?`、`arg0?`、`sandbox?`（FileSystemSandboxContext）、`enforceManagedNetwork?`、`managedNetwork?`（v1.7 补 `allowUnixSockets`/`dangerouslyAllowAllUnixSockets`——缺省受限：独立 unix socket 默认拒绝，仅 allow-all 时 Linux 沙箱放行 AF_UNIX）、`networkProxy?`（RemoteNetworkProxyLaunchConfig，v1.3 起真实生效，见「托管网络」） |
 | `process/read` | 读输出（`waitMs` 轮询等待） |
 | `process/write` | 写 stdin |
 | `process/signal` | 发信号 |
@@ -99,7 +107,12 @@ mode = "full"               # off | full（缺省 full）；allow_domains 预留
 **沙箱**：每次 `process/start` 由客户端下发沙箱意图（`sandbox` 字段 +
 managed network 参数），服务端解析为具体 wrapper（macOS Seatbelt /
 Linux bubblewrap+landlock / Windows restricted token）。**策略在客户端，
-执行在 executor。**
+执行在 executor。** `sandbox.windowsSandboxLevel` 字段自 v1.7 起承载实现选择
+（`disabled`/`restricted-token`/`elevated`/`mxc`——对位 codex
+WindowsSandboxSelection；`mxc` 实现未移植，下发即 `invalid_params`；
+`ExecResponse.sandboxType` 同步补 `windowsMxc` 枚举值）。v1.7 起删除
+`windowsSandboxPrivateDesktop` 字段（对位 codex a633ebc124：传统 Windows
+沙箱恒使用私有桌面）。
 
 **托管网络**（v1.3 起，能力位 `networkProxyLaunch` 门控）：`process/start`
 携带 `networkProxy`（RemoteNetworkProxyLaunchConfig）时，executor 在进程
@@ -141,7 +154,7 @@ shell 启动状态（`.zshrc`/`.bashrc` 求值结果：函数/别名/setopt/导�
 | 方法 | 说明 |
 |---|---|
 | `fs/readFile` | 小文件读取（base64） |
-| `fs/open` / `fs/readBlock` / `fs/close` | 随机访问句柄 |
+| `fs/open` / `fs/readBlock` / `fs/close` | 随机访问句柄。`fs/open` 自 v1.7 起带 `mode?`（`read`（缺省）|`replace`——`replace` 暂不支持，下发即 `invalid_request`「exec-server does not support writable file streams」，能力位 `fileWriteStreaming` 门控） |
 | `fs/readStream` (+ `fs/readStream/chunk` / `fs/readStream/done` 通知） | 大文件流式读取。沙箱语义：带平台沙箱上下文时经一次性沙箱化 `fs_helper` 开门并把 fd/handle 传回 executor 自读（受限范围生效）；不带时 executor 直读 |
 | `fs/writeStream`（请求开句柄）+ `fs/writeStream/chunk`（通知，客户端→服务端，seq 严格序 append）+ `fs/writeStream/done`（请求收尾确认） | 大文件流式写入。**中断不产生可见文件**（中止/断连/乱序删半截）。沙箱语义：带平台沙箱上下文时经长命沙箱化 `fs_helper` 子进程持续写（受限范围生效；executor 逐帧转发 chunk/done，半截文件经沙箱内删除）；不带时 executor 自写 |
 | `fs/writeFile` | 写文件（base64） |

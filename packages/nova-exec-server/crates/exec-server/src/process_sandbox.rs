@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_network_proxy::CUSTOM_CA_ENV_KEYS;
 use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
 use nova_exec_server_network_proxy::NetworkPolicyAuditObserver;
@@ -55,7 +56,6 @@ struct PreparedWindowsSandboxRequest {
     network_proxy_restricting_sid: Option<String>,
     proxy_settings_mode: WindowsSandboxProxySettingsMode,
     filesystem_overrides: Option<WindowsSandboxFilesystemOverrides>,
-    use_private_desktop: bool,
 }
 
 impl PreparedExecRequest {
@@ -70,7 +70,6 @@ impl PreparedExecRequest {
                 network_proxy_restricting_sid: request.network_proxy_restricting_sid.as_deref(),
                 proxy_settings_mode: request.proxy_settings_mode,
                 filesystem_overrides: request.filesystem_overrides.as_ref(),
-                use_private_desktop: request.use_private_desktop,
             })
     }
 }
@@ -82,6 +81,15 @@ pub(crate) async fn prepare_exec_request(
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
 ) -> Result<PreparedExecRequest, JSONRPCErrorError> {
+    if let Some(sandbox) = params.sandbox.as_ref()
+        && sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
+    {
+        // MXC 实现本体未移植（只收线上枚举值）——对位 codex 的
+        // windows_mxc_available() 不可用拒绝，文案与上游一致。
+        return Err(invalid_params(
+            "native MXC is unavailable on this executor".to_owned(),
+        ));
+    }
     #[cfg(target_os = "windows")]
     let mut env = env;
     #[cfg(target_os = "windows")]
@@ -182,10 +190,16 @@ pub(crate) async fn prepare_exec_request(
         network_policy,
     );
     let sandbox_manager = SandboxManager::new();
+    // 选择项 → 受限令牌层级：Mxc 已在函数入口拒绝，此处仅为防御性转换
+    // （对位 codex sandbox_selection::select_sandbox 的拆分语义）。
+    let windows_sandbox_level = sandbox_context
+        .windows_sandbox_selection
+        .restricted_token_level()
+        .ok_or_else(|| invalid_params("native MXC is unavailable on this executor".to_string()))?;
     let sandbox = sandbox_manager.select_initial(
         &permissions,
         SandboxablePreference::Require,
-        sandbox_context.windows_sandbox_level,
+        windows_sandbox_level,
         params.enforce_managed_network,
     );
     if sandbox == SandboxType::None {
@@ -237,8 +251,7 @@ pub(crate) async fn prepare_exec_request(
             sandbox_policy_cwd,
             nova_linux_sandbox_exe: runtime_paths.executor_linux_sandbox_exe.as_deref(),
             use_legacy_landlock: sandbox_context.use_legacy_landlock,
-            windows_sandbox_level: sandbox_context.windows_sandbox_level,
-            windows_sandbox_private_desktop: sandbox_context.windows_sandbox_private_desktop,
+            windows_sandbox_level,
         },
     };
     let mut request = if sandbox == SandboxType::WindowsRestrictedToken {
@@ -251,8 +264,7 @@ pub(crate) async fn prepare_exec_request(
     let windows_sandbox = if sandbox == SandboxType::WindowsRestrictedToken {
         request.arg0 = params.arg0.clone();
         let proxy_enforced = params.enforce_managed_network;
-        let use_elevated =
-            windows_sandbox_uses_elevated_backend(sandbox_context.windows_sandbox_level);
+        let use_elevated = windows_sandbox_uses_elevated_backend(windows_sandbox_level);
         let filesystem_overrides = if use_elevated {
             resolve_windows_elevated_filesystem_overrides(
                 sandbox,
@@ -265,19 +277,18 @@ pub(crate) async fn prepare_exec_request(
                 sandbox,
                 &permissions,
                 &native_sandbox_policy_cwd,
-                sandbox_context.windows_sandbox_level,
+                windows_sandbox_level,
             )
         }
         .map_err(|err| invalid_params(format!("failed to prepare process sandbox: {err}")))?;
         Some(PreparedWindowsSandboxRequest {
             permission_profile: permissions,
             workspace_roots: native_workspace_roots,
-            windows_sandbox_level: sandbox_context.windows_sandbox_level,
+            windows_sandbox_level,
             proxy_enforced,
             network_proxy_restricting_sid,
             proxy_settings_mode: windows_sandbox_proxy_settings_mode,
             filesystem_overrides,
-            use_private_desktop: sandbox_context.windows_sandbox_private_desktop,
         })
     } else {
         None

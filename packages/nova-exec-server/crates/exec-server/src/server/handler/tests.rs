@@ -27,6 +27,7 @@ fn exec_params(process_id: &str) -> ExecParams {
 
 fn exec_params_with_argv(process_id: &str, argv: Vec<String>) -> ExecParams {
     ExecParams {
+        metadata: None,
         process_id: ProcessId::from(process_id),
         argv,
         cwd: PathUri::from_host_native_path(std::env::current_dir().expect("cwd"))

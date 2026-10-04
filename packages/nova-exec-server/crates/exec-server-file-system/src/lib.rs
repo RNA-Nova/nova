@@ -325,6 +325,49 @@ impl TryFrom<ExecPermissionProfile> for PermissionProfile {
     }
 }
 
+/// Windows sandbox choice encoded in executor RPCs.
+///
+/// The serialized field retains its legacy `windowsSandboxLevel` name for compatibility, but MXC
+/// is a sandbox implementation rather than a RestrictedToken level（对位 codex
+/// `WindowsSandboxSelection`，d4e11a9b97）。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowsSandboxSelection {
+    #[default]
+    Disabled,
+    RestrictedToken,
+    Elevated,
+    Mxc,
+}
+
+impl From<WindowsSandboxLevel> for WindowsSandboxSelection {
+    fn from(level: WindowsSandboxLevel) -> Self {
+        match level {
+            WindowsSandboxLevel::Disabled => Self::Disabled,
+            WindowsSandboxLevel::RestrictedToken => Self::RestrictedToken,
+            WindowsSandboxLevel::Elevated => Self::Elevated,
+        }
+    }
+}
+
+impl WindowsSandboxSelection {
+    /// 受限令牌实现层级；Mxc 不是受限令牌层级，返回 None（由调用方按 executor
+    /// 能力拒绝，对位 codex sandbox_selection 的拆分语义）。
+    pub fn restricted_token_level(self) -> Option<WindowsSandboxLevel> {
+        match self {
+            Self::Disabled => Some(WindowsSandboxLevel::Disabled),
+            Self::RestrictedToken => Some(WindowsSandboxLevel::RestrictedToken),
+            Self::Elevated => Some(WindowsSandboxLevel::Elevated),
+            Self::Mxc => None,
+        }
+    }
+
+    /// Whether this context selects either supported Windows sandbox implementation.
+    pub fn windows_sandbox_is_requested(self) -> bool {
+        self != Self::Disabled
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileSystemSandboxContext {
@@ -339,9 +382,9 @@ pub struct FileSystemSandboxContext {
     /// Executor-local default directories used to resolve `:tmpdir` policy entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temporary_directories: Option<Vec<PathUri>>,
-    pub windows_sandbox_level: WindowsSandboxLevel,
-    #[serde(default)]
-    pub windows_sandbox_private_desktop: bool,
+    /// 线上字段保留旧名 `windowsSandboxLevel`；取值扩展为实现选择（含 "mxc"）。
+    #[serde(rename = "windowsSandboxLevel")]
+    pub windows_sandbox_selection: WindowsSandboxSelection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows_sandbox_proxy_settings_mode: Option<WindowsSandboxProxySettingsMode>,
     #[serde(default)]
@@ -385,8 +428,7 @@ impl FileSystemSandboxContext {
             workspace_roots,
             user_home_dir: None,
             temporary_directories: None,
-            windows_sandbox_level: WindowsSandboxLevel::Disabled,
-            windows_sandbox_private_desktop: false,
+            windows_sandbox_selection: WindowsSandboxSelection::Disabled,
             windows_sandbox_proxy_settings_mode: None,
             use_legacy_landlock: false,
         }

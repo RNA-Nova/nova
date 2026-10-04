@@ -20,6 +20,9 @@ use crate::rpc::RpcCallError;
 use crate::rpc::RpcServerOutboundMessage;
 
 pub(crate) const MAX_IN_FLIGHT_SERVER_CALLS: usize = 256;
+// 出站 server 请求的 tracestate 超此长度即丢弃（保留 traceparent），
+// 对位 codex 54487a5b61 同一阈值。
+const MAX_SERVER_REQUEST_TRACESTATE_LEN: usize = 512;
 
 type PendingRequest = oneshot::Sender<Result<Value, RpcCallError>>;
 
@@ -98,11 +101,21 @@ impl RpcServerRequestSender {
             inner: Arc::clone(&self.inner),
             request_id: request_id.clone(),
         };
+        let trace = nova_exec_server_otel::current_span_w3c_trace_context().map(|mut trace| {
+            if trace
+                .tracestate
+                .as_ref()
+                .is_some_and(|tracestate| tracestate.len() > MAX_SERVER_REQUEST_TRACESTATE_LEN)
+            {
+                trace.tracestate = None;
+            }
+            trace
+        });
         let request = RpcServerOutboundMessage::Request(JSONRPCRequest {
             id: request_id,
             method: method.to_string(),
             params: Some(params),
-            trace: nova_exec_server_otel::current_span_w3c_trace_context(),
+            trace,
         });
 
         let response = timeout(call_timeout, async {

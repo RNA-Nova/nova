@@ -1,6 +1,7 @@
 use std::process::Stdio;
 
 use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -23,6 +24,7 @@ use crate::client_api::StdioExecServerCommand;
 use crate::client_api::StdioExecServerConnectArgs;
 use crate::connection::JsonRpcConnection;
 
+const MAX_STDIO_STDERR_LOG_LINE_LEN: u64 = 8 * 1024;
 const ENVIRONMENT_CLIENT_NAME: &str = "nova-exec-server";
 
 /// Reopens the transport for one logical exec-server client session.
@@ -155,11 +157,22 @@ impl ExecServerClient {
         })?;
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
+                let mut reader = BufReader::new(stderr);
+                let mut line = Vec::new();
                 loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => debug!("exec-server stdio stderr: {line}"),
-                        Ok(None) => break,
+                    line.clear();
+                    match (&mut reader)
+                        .take(MAX_STDIO_STDERR_LOG_LINE_LEN)
+                        .read_until(b'\n', &mut line)
+                        .await
+                    {
+                        Ok(0) => break,
+                        Ok(_) => {
+                            let line = line.strip_suffix(b"\n").unwrap_or(&line);
+                            let line = line.strip_suffix(b"\r").unwrap_or(line);
+                            let line = String::from_utf8_lossy(line);
+                            debug!("exec-server stdio stderr: {line}");
+                        }
                         Err(err) => {
                             warn!("failed to read exec-server stdio stderr: {err}");
                             break;
@@ -170,8 +183,12 @@ impl ExecServerClient {
         }
 
         Self::connect(
-            JsonRpcConnection::from_stdio(stdout, stdin, "exec-server stdio command".to_string())
-                .with_child_process(child),
+            JsonRpcConnection::client_from_stdio(
+                stdout,
+                stdin,
+                "exec-server stdio command".to_string(),
+            )
+            .with_child_process(child),
             args.into(),
         )
         .await

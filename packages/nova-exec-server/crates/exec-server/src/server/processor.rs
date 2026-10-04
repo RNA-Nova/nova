@@ -559,6 +559,7 @@ mod tests {
             env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
         }
         ExecParams {
+            metadata: None,
             process_id,
             argv: sleep_then_print_argv(),
             cwd: PathUri::from_host_native_path(std::env::current_dir().expect("cwd"))

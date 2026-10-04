@@ -37,8 +37,12 @@ async fn remote_environment_fetches_info_from_exec_server() -> anyhow::Result<()
     let client = common::connect_remote_exec_client(server.websocket_url()).await?;
 
     // 远程 environment/info 应回放执行端本机元数据，与本地 EnvironmentInfo 等价
+    // （executorVersion 由服务端盖印 crate 版本，对位 codex release_version）
     let remote_info = client.environment_info().await?;
-    let local_info = EnvironmentInfo::local();
+    let local_info = EnvironmentInfo {
+        executor_version: env!("CARGO_PKG_VERSION").to_string(),
+        ..EnvironmentInfo::local()
+    };
     assert_eq!(remote_info, local_info);
 
     server.shutdown().await?;

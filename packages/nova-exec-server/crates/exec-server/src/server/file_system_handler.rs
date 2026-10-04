@@ -37,6 +37,7 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
+use crate::protocol::FsOpenMode;
 use crate::protocol::FsOpenParams;
 use crate::protocol::FsOpenResponse;
 use crate::protocol::FsReadBlockParams;
@@ -108,6 +109,13 @@ impl FileSystemHandler {
         params: FsOpenParams,
     ) -> Result<FsOpenResponse, JSONRPCErrorError> {
         validate_file_read_handle_id(&params.handle_id)?;
+        // TODO(nova): 写流落地后启用 replace 打开（对位 codex 875bf9209b：
+        // 服务端保持写流未启用并显式拒绝 replacement opens，文案一致）。
+        if params.mode == FsOpenMode::Replace {
+            return Err(invalid_request(
+                "exec-server does not support writable file streams".to_string(),
+            ));
+        }
         let file = self
             .file_system
             .open_file_for_read(&params.path, params.sandbox.as_ref())

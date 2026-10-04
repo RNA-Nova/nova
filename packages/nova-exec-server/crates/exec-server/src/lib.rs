@@ -32,6 +32,9 @@ mod server;
 mod shell_snapshot;
 mod telemetry;
 
+// Shared limits for inbound executor messages across all transports.
+mod client_inbound_request_limit;
+
 use nova_exec_server_protocol as protocol;
 
 /// Process-local opt-in for tying a remote executor to its parent's stdin pipe.
@@ -87,6 +90,7 @@ pub use nova_exec_server_file_system::WalkEntryKind;
 pub use nova_exec_server_file_system::WalkError;
 pub use nova_exec_server_file_system::WalkOptions;
 pub use nova_exec_server_file_system::WalkOutcome;
+pub use nova_exec_server_file_system::WindowsSandboxSelection;
 pub use nova_exec_server_file_system::WriteFileOptions;
 pub use nova_exec_server_protocol::ProcessId;
 pub use process::ExecBackend;
@@ -109,6 +113,7 @@ pub use protocol::EnvironmentStatusKind;
 pub use protocol::ExecClosedNotification;
 pub use protocol::ExecEnvPolicy;
 pub use protocol::ExecExitedNotification;
+pub use protocol::ExecMetadata;
 pub use protocol::ExecOutputDeltaNotification;
 pub use protocol::ExecOutputStream;
 pub use protocol::ExecParams;
@@ -126,6 +131,7 @@ pub use protocol::FsCreateDirectoryParams;
 pub use protocol::FsCreateDirectoryResponse;
 pub use protocol::FsGetMetadataParams;
 pub use protocol::FsGetMetadataResponse;
+pub use protocol::FsOpenMode;
 pub use protocol::FsOpenParams;
 pub use protocol::FsOpenResponse;
 pub use protocol::FsReadBlockParams;

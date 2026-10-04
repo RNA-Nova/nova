@@ -30,4 +30,15 @@ pub use rpc::*;
 ///       装配沙箱执行——readStream 沙箱开门取 fd、writeStream 长命沙箱 helper，
 ///       如实宣告 true）；撤除 readStream/writeStream 两个端点存在位
 ///       （端点存在不配位——约束才配位；端点本身不变，可选增量，向后兼容）。
-pub const PROTOCOL_VERSION: &str = "1.6";
+/// 1.7 = codex 上游 additive 跟进：EnvironmentInfo 补 executorVersion（缺省
+///       "0.0.0"，服务端盖印 crate 版本）/providerId（缺省省略，nova 无
+///       build-stamp 基建）/prependPathDirs（空即省略）；ExecParams 补 metadata
+///       归因（存而不取）；ManagedNetworkSandboxContext 补 allowUnixSockets/
+///       dangerouslyAllowAllUnixSockets（缺省受限）；ProcessSandboxType 补
+///       windowsMxc 枚举值、windowsSandboxLevel 字段承载 WindowsSandboxSelection
+///       （新增 "mxc" 值，实现未移植，下发即 invalid_params），删除
+///       windowsSandboxPrivateDesktop 字段；客户端入站请求限 8KiB（数据面通知
+///       2MiB、tracestate 512B 裁剪）；fs/open 补 mode（read|replace，replace
+///       暂拒）与 fileWriteStreaming 能力位（恒 false）（全部可选增量，
+///       windowsSandboxPrivateDesktop 删除一项对位 codex a633ebc124 同步执行）。
+pub const PROTOCOL_VERSION: &str = "1.7";

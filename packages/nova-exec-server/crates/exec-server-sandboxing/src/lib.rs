@@ -65,6 +65,9 @@ impl From<SandboxTransformError> for ExecErr {
             SandboxTransformError::MissingLinuxSandboxExecutable => {
                 ExecErr::LandlockSandboxExecutableNotProvided
             }
+            SandboxTransformError::WindowsMxcPreparation(message) => {
+                ExecErr::UnsupportedOperation(message)
+            }
             SandboxTransformError::EnvironmentNetworkProxy(message) => {
                 ExecErr::UnsupportedOperation(message)
             }
