@@ -2083,15 +2083,14 @@ mod tests {
         assert!(args.preserved_files.is_empty());
         assert_eq!(
             synthetic_mount_target_paths(&args),
-            // 对位 codex 1d804e91b7：补 .aws。注意上游该向量根组为 /.aws 居首，
-            // 那来自上游新一代 permissions lowering 的插入顺序；nova 现行 lowering
-            // 按 entries 顺序产出（.aws 居末），此处按 nova 生成器顺序书写，
-            // Linux 门控本机无法验证（见移植报告）。
+            // 对位 codex 1d804e91b7：补 .aws，顺序与上游一致（根组 .aws 居首、
+            // dev 组 .aws 居末——此前误按"nova 生成器居末"书写，Linux CI 实测
+            // 实际产出与上游同序，已修正）。
             vec![
+                PathBuf::from("/.aws"),
                 PathBuf::from("/.git"),
                 PathBuf::from("/.agents"),
                 PathBuf::from("/.nova"),
-                PathBuf::from("/.aws"),
                 PathBuf::from("/dev/.git"),
                 PathBuf::from("/dev/.agents"),
                 PathBuf::from("/dev/.nova"),
