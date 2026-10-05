@@ -408,7 +408,7 @@ fn transform_linux_seccomp_request(
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            sandbox_exe: Some(nova_linux_sandbox_exe),
+            sandbox_exe: Some(sandbox_exe),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
