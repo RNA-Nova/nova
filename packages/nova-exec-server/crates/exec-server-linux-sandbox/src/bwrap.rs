@@ -2113,7 +2113,14 @@ mod tests {
                 "/".to_string(),
                 // Mask the default metadata path names under the writable root.
                 // Because the root is `/` in this test, these carveout paths
-                // appear directly below `/`.
+                // appear directly below `/`（根组 .aws 居首——与上游及生成器
+                // 实际产出同序，Linux CI 实证）。
+                "--perms".to_string(),
+                "555".to_string(),
+                "--tmpfs".to_string(),
+                "/.aws".to_string(),
+                "--remount-ro".to_string(),
+                "/.aws".to_string(),
                 "--perms".to_string(),
                 "555".to_string(),
                 "--tmpfs".to_string(),
@@ -2132,12 +2139,6 @@ mod tests {
                 "/.nova".to_string(),
                 "--remount-ro".to_string(),
                 "/.nova".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/.aws".to_string(),
-                "--remount-ro".to_string(),
-                "/.aws".to_string(),
                 "--ro-bind".to_string(),
                 path_to_string(&synthetic_mount_registry_root()),
                 path_to_string(&synthetic_mount_registry_root()),
