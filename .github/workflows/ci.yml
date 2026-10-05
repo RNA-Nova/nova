@@ -47,6 +47,17 @@ jobs:
       - name: cargo build
         run: cargo build --workspace
 
+      # Windows 沙箱 helper 摆放（对齐 codex rust-ci-full-nextest-platform.yml）：
+      # unified_exec elevated 路径经 helper_materialization 按"当前可执行文件旁/
+      # nova-resources 下"查找 nova-command-runner.exe——测试二进制在 deps/ 下，
+      # 必须把 cargo build 产出的两个 helper 拷过去，否则退回裸文件名导致
+      # CreateProcessWithLogonW ERROR_FILE_NOT_FOUND(2)
+      - name: 摆放 Windows 沙箱测试 helper
+        if: matrix.os == 'windows-latest'
+        run: |
+          cp target/debug/nova-command-runner.exe target/debug/deps/
+          cp target/debug/nova-windows-sandbox-setup.exe target/debug/deps/
+
       # nextest 天然全量重跑（失败不中断后续用例），无需 --no-fail-fast；
       # doc-tests 不在 nextest 覆盖范围（与 codex 一致）
       - name: cargo nextest run

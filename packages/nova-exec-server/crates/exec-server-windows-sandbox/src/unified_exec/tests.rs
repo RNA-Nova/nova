@@ -484,7 +484,9 @@ fn legacy_non_tty_powershell_interrupt_terminates_process() {
             stderr_rx: _stderr_rx,
             exit_rx,
         } = spawned;
-        timeout(Duration::from_secs(5), async {
+        // GitHub-hosted windows-latest 上 pwsh 冷启动 + Add-Type 的 Roslyn 编译
+        // 在受限令牌下远超上游自托管 runner 的 5s（Defender 实时扫描），放宽到 30s
+        timeout(Duration::from_secs(30), async {
             let mut stdout = Vec::new();
             while let Some(chunk) = stdout_rx.recv().await {
                 stdout.extend(chunk);
