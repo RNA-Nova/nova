@@ -27,8 +27,8 @@ from pydantic import (
 # =============================================================================
 
 #: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
-#: 跟随服务端 crates/executor-protocol/src/lib.rs::PROTOCOL_VERSION）
-PROTOCOL_VERSION = "1.6"
+#: 跟随服务端 crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION）
+PROTOCOL_VERSION = "1.8"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
