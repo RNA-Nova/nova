@@ -576,55 +576,51 @@ async fn sandbox_blocks_nc() {
     assert_network_blocked(&["nc", "-z", "127.0.0.1", "80"]).await;
 }
 
+// 对位 codex 1d804e91b7：参数化覆盖 .git/.nova/.aws
+#[test_case::test_case(".git", "config")]
+#[test_case::test_case(".nova", "settings.json")]
+#[test_case::test_case(".aws", "config")]
 #[tokio::test]
-async fn sandbox_blocks_git_and_nova_writes_inside_writable_root() {
+async fn sandbox_blocks_metadata_writes_inside_writable_root(name: &str, config: &str) {
     if should_skip_bwrap_tests().await {
         eprintln!("skipping bwrap test: bwrap sandbox prerequisites are unavailable");
         return;
     }
 
-    let tmpdir = tempfile::tempdir().expect("tempdir");
-    let dot_git = tmpdir.path().join(".git");
-    let dot_nova = tmpdir.path().join(".nova");
-    std::fs::create_dir_all(&dot_git).expect("create .git");
-    std::fs::create_dir_all(&dot_nova).expect("create .nova");
-
-    let git_target = dot_git.join("config");
-    let nova_target = dot_nova.join("settings.json");
-
-    let git_output = expect_denied(
-        run_cmd_result_with_writable_roots(
-            &[
-                "bash",
-                "-lc",
-                &format!("echo denied > {}", git_target.to_string_lossy()),
-            ],
-            &[tmpdir.path().to_path_buf()],
-            LONG_TIMEOUT_MS,
-            /*use_legacy_landlock*/ false,
-            /*network_access*/ true,
-        )
-        .await,
-        ".git write should be denied under bubblewrap",
+    let home = tempfile::tempdir().expect("tempdir");
+    let metadata = home.path().join(name);
+    std::fs::create_dir(&metadata).expect("create protected directory");
+    let target = metadata.join(config);
+    std::fs::write(&target, "original").expect("write protected config");
+    let output = run_cmd_result_with_writable_roots(
+        &[
+            "/bin/sh",
+            "-c",
+            r#"set -eu
+writable_home="$1"
+printf permitted > "$writable_home/allowed"
+if (printf changed > "$2") 2>/dev/null; then exit 1; fi
+printf protected"#,
+            "metadata-test",
+            home.path().to_str().expect("UTF-8 home"),
+            target.to_str().expect("UTF-8 config"),
+        ],
+        &[home.path().to_path_buf()],
+        LONG_TIMEOUT_MS,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ true,
+    )
+    .await
+    .expect("sandbox should run with a separate writable home");
+    assert_eq!(
+        (output.exit_code, output.stdout.text, output.stderr.text),
+        (0, "protected".to_string(), String::new())
     );
-
-    let nova_output = expect_denied(
-        run_cmd_result_with_writable_roots(
-            &[
-                "bash",
-                "-lc",
-                &format!("echo denied > {}", nova_target.to_string_lossy()),
-            ],
-            &[tmpdir.path().to_path_buf()],
-            LONG_TIMEOUT_MS,
-            /*use_legacy_landlock*/ false,
-            /*network_access*/ true,
-        )
-        .await,
-        ".nova write should be denied under bubblewrap",
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "original");
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("allowed")).unwrap(),
+        "permitted"
     );
-    assert_ne!(git_output.exit_code, 0);
-    assert_ne!(nova_output.exit_code, 0);
 }
 
 #[tokio::test]

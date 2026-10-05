@@ -201,6 +201,11 @@ impl FileSystemSandboxRunner {
         // fail-closed：fs helper 必须使用更窄的 FileSystemHelper profile，
         // 平台沙箱不可用时显式报错而不是静默裸跑
         let sandbox_manager = SandboxManager::for_file_system_helpers();
+        // 对位 codex d13aeb77ea：fs helper 同样套用 NOVA_HOME symlink opt-out
+        #[cfg(target_os = "macos")]
+        let sandbox_manager = sandbox_manager.with_allowed_symlinked_nova_home(
+            self.runtime_paths.allowed_symlinked_nova_home.clone(),
+        );
         // 选择项 → 受限令牌层级：Mxc 不是受限令牌层级且实现本体未移植，
         // 与 process 侧同一拒绝文案（对位 codex windows_mxc_available() 拒绝）。
         let windows_sandbox_level = sandbox_context

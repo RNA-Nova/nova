@@ -24,15 +24,72 @@ use crate::protocol::NetworkAccess;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::WritableRoot;
 
+// 对位 codex `protocol/src/permissions/windows_glob.rs`（nova permissions 为
+// 单文件布局，内联为子模块）。
+pub use windows_glob::WindowsDenyReadGlobScan;
+pub use windows_glob::windows_deny_read_glob_scan;
+
+mod windows_glob {
+    //! Windows deny-glob scan bounds shared by policy validation and native ACL expansion.
+    use nova_exec_server_utils_path_uri::PathConvention;
+
+    /// Literal scan root and maximum traversal depth for a Windows deny glob.
+    pub struct WindowsDenyReadGlobScan<'a> {
+        pub root: &'a str,
+        pub pattern_suffix: &'a str,
+        pub max_depth: Option<usize>,
+    }
+
+    /// Plans lexical scan bounds without accessing the controller's filesystem.
+    pub fn windows_deny_read_glob_scan(
+        pattern: &str,
+        configured_max_depth: Option<usize>,
+    ) -> WindowsDenyReadGlobScan<'_> {
+        let first_glob = pattern.find(['*', '?', '[']).unwrap_or(pattern.len());
+        let literal_prefix = &pattern[..first_glob];
+        let (root, pattern_suffix) = match literal_prefix.rfind(['/', '\\']) {
+            Some(index) => {
+                let drive_root = index > 0 && literal_prefix.as_bytes()[index - 1] == b':';
+                let end = if index == 0 || drive_root {
+                    index + 1
+                } else {
+                    index
+                };
+                (&literal_prefix[..end], &pattern[index + 1..])
+            }
+            None => (".", pattern),
+        };
+        let components = PathConvention::Windows
+            .path_segments(pattern_suffix)
+            .filter(|component| !component.is_empty())
+            .collect::<Vec<_>>();
+        let max_depth = if components.contains(&"**") {
+            configured_max_depth
+        } else {
+            Some(
+                configured_max_depth.map_or(components.len(), |depth| depth.min(components.len())),
+            )
+        };
+        WindowsDenyReadGlobScan {
+            root,
+            pattern_suffix,
+            max_depth,
+        }
+    }
+}
+
 const PROTECTED_METADATA_GIT_PATH_NAME: &str = ".git";
 const PROTECTED_METADATA_AGENTS_PATH_NAME: &str = ".agents";
 const PROTECTED_METADATA_NOVA_EXEC_SERVER_PATH_NAME: &str = ".nova";
+// 对位 codex 1d804e91b7：.aws 与 .git/.agents/.nova 并列受保护
+const PROTECTED_METADATA_AWS_PATH_NAME: &str = ".aws";
 
 /// Top-level workspace metadata paths that stay protected under writable roots.
 pub const PROTECTED_METADATA_PATH_NAMES: &[&str] = &[
     PROTECTED_METADATA_GIT_PATH_NAME,
     PROTECTED_METADATA_AGENTS_PATH_NAME,
     PROTECTED_METADATA_NOVA_EXEC_SERVER_PATH_NAME,
+    PROTECTED_METADATA_AWS_PATH_NAME,
 ];
 
 /// Returns true when a path basename is one of the protected workspace metadata names.
@@ -792,6 +849,8 @@ impl FileSystemSandboxPolicy {
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".git");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".agents");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".nova");
+        // 对位 codex 1d804e91b7：workspace root 的 .aws 默认只读
+        append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".aws");
         for writable_root in writable_roots {
             for protected_path in default_read_only_subpaths_for_writable_root(
                 writable_root,
@@ -2169,6 +2228,13 @@ pub(crate) fn default_read_only_subpaths_for_writable_root(
         subpaths.push(top_level_nova);
     }
 
+    // AWS profiles can select credential helpers that the application executes.
+    // （对位 codex 1d804e91b7）
+    let top_level_aws = writable_root.join(PROTECTED_METADATA_AWS_PATH_NAME);
+    if top_level_aws.as_path().is_dir() {
+        subpaths.push(top_level_aws);
+    }
+
     dedup_absolute_paths(subpaths, /*normalize_effective_paths*/ false)
 }
 
@@ -3102,6 +3168,13 @@ mod tests {
                     },
                     FileSystemAccessMode::Read,
                 ),
+                // 对位 codex 1d804e91b7：.aws 进入默认期望
+                FileSystemSandboxEntry::skip_missing_path(
+                    FileSystemPath::Special {
+                        value: FileSystemSpecialPath::project_roots(Some(".aws".into())),
+                    },
+                    FileSystemAccessMode::Read,
+                ),
             ])
         );
     }
@@ -3129,54 +3202,58 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn writable_roots_skip_default_dot_nova_when_explicit_user_rule_exists() {
-        let cwd = TempDir::new().expect("tempdir");
-        let expected_root = AbsolutePathBuf::from_absolute_path(
-            cwd.path().canonicalize().expect("canonicalize cwd"),
-        )
-        .expect("absolute canonical root");
-        let explicit_dot_nova = expected_root.join(".nova");
-
-        let policy = FileSystemSandboxPolicy::restricted(vec![
-            FileSystemSandboxEntry {
-                path: FileSystemPath::Special {
-                    value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
-                },
-                access: FileSystemAccessMode::Write,
-                missing_path_behavior: None,
-            },
-            FileSystemSandboxEntry {
-                path: FileSystemPath::Path {
-                    path: explicit_dot_nova.clone().into(),
-                },
-                access: FileSystemAccessMode::Write,
-                missing_path_behavior: None,
-            },
-        ]);
-
-        let writable_roots = policy.get_writable_roots_with_cwd(cwd.path());
-        let workspace_root = writable_roots
-            .iter()
-            .find(|root| root.root == expected_root)
-            .expect("workspace writable root");
-        assert!(
-            !workspace_root
-                .protected_metadata_names
-                .contains(&".nova".to_string()),
-            "explicit .nova rule should remove the metadata-name protection"
-        );
-        assert!(
-            !workspace_root
-                .read_only_subpaths
-                .contains(&explicit_dot_nova),
-            "explicit .nova rule should win over the default protected carveout"
-        );
-        assert!(
-            policy.can_write_path_with_cwd(
-                explicit_dot_nova.join("config.toml").as_path(),
-                cwd.path()
+    fn writable_roots_skip_default_metadata_when_explicit_user_rule_exists() {
+        // 对位 codex 1d804e91b7：.nova 与 .aws 的显式规则都压过默认保护
+        for name in [".nova", ".aws"] {
+            let cwd = TempDir::new().expect("tempdir");
+            let expected_root = AbsolutePathBuf::from_absolute_path(
+                cwd.path().canonicalize().expect("canonicalize cwd"),
             )
-        );
+            .expect("absolute canonical root");
+            let explicit_metadata = expected_root.join(name);
+            fs::create_dir(&explicit_metadata).expect("create metadata directory");
+
+            let policy = FileSystemSandboxPolicy::restricted(vec![
+                FileSystemSandboxEntry {
+                    path: FileSystemPath::Special {
+                        value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
+                    },
+                    access: FileSystemAccessMode::Write,
+                    missing_path_behavior: None,
+                },
+                FileSystemSandboxEntry {
+                    path: FileSystemPath::Path {
+                        path: explicit_metadata.clone().into(),
+                    },
+                    access: FileSystemAccessMode::Write,
+                    missing_path_behavior: None,
+                },
+            ]);
+
+            let writable_roots = policy.get_writable_roots_with_cwd(cwd.path());
+            let workspace_root = writable_roots
+                .iter()
+                .find(|root| root.root == expected_root)
+                .expect("workspace writable root");
+            assert!(
+                !workspace_root
+                    .protected_metadata_names
+                    .contains(&name.to_string()),
+                "explicit {name} rule should remove the metadata-name protection"
+            );
+            assert!(
+                !workspace_root
+                    .read_only_subpaths
+                    .contains(&explicit_metadata),
+                "explicit {name} rule should win over the default protected carveout"
+            );
+            assert!(
+                policy.can_write_path_with_cwd(
+                    explicit_metadata.join("config.toml").as_path(),
+                    cwd.path()
+                )
+            );
+        }
     }
 
     #[test]
@@ -3185,6 +3262,8 @@ mod tests {
         let dot_git_config = cwd.path().join(".git").join("config");
         let dot_agents_config = cwd.path().join(".agents").join("config");
         let dot_nova_config = cwd.path().join(".nova").join("config.toml");
+        // 对位 codex 1d804e91b7：.aws 一并断言
+        let dot_aws_config = cwd.path().join(".aws").join("config");
         let root = AbsolutePathBuf::from_absolute_path(cwd.path()).expect("absolute cwd");
         let file_system_policy =
             FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
@@ -3196,6 +3275,7 @@ mod tests {
         assert!(!file_system_policy.can_write_path_with_cwd(&dot_git_config, cwd.path()));
         assert!(!file_system_policy.can_write_path_with_cwd(&dot_agents_config, cwd.path()));
         assert!(!file_system_policy.can_write_path_with_cwd(&dot_nova_config, cwd.path()));
+        assert!(!file_system_policy.can_write_path_with_cwd(&dot_aws_config, cwd.path()));
 
         let writable_roots = file_system_policy.get_writable_roots_with_cwd(cwd.path());
         assert_eq!(writable_roots.len(), 1);
@@ -3205,11 +3285,13 @@ mod tests {
                 ".git".to_string(),
                 ".agents".to_string(),
                 ".nova".to_string(),
+                ".aws".to_string(),
             ]
         );
         assert!(!writable_roots[0].is_path_writable(&dot_git_config));
         assert!(!writable_roots[0].is_path_writable(&dot_agents_config));
         assert!(!writable_roots[0].is_path_writable(&dot_nova_config));
+        assert!(!writable_roots[0].is_path_writable(&dot_aws_config));
     }
 
     #[test]

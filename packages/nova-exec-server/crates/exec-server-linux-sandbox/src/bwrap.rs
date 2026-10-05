@@ -1784,6 +1784,8 @@ mod tests {
                 workspace.join(".git"),
                 workspace.join(".agents"),
                 workspace.join(".nova"),
+                // 对位 codex 1d804e91b7
+                workspace.join(".aws"),
             ]
         );
         assert!(
@@ -1822,6 +1824,8 @@ mod tests {
                 dot_git.clone(),
                 workspace.join(".agents"),
                 workspace.join(".nova"),
+                // 对位 codex 1d804e91b7
+                workspace.join(".aws"),
             ]
         );
         assert!(
@@ -1863,7 +1867,13 @@ mod tests {
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
         assert_eq!(
             synthetic_mount_target_paths(&args),
-            vec![workspace.join(".nova"), dot_git, workspace.join(".agents")],
+            // 对位 codex 1d804e91b7：末尾补 .aws
+            vec![
+                workspace.join(".nova"),
+                dot_git,
+                workspace.join(".agents"),
+                workspace.join(".aws"),
+            ],
         );
         assert!(
             protected_create_target_paths(&args).is_empty(),
@@ -1901,7 +1911,13 @@ mod tests {
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
         assert_eq!(
             synthetic_mount_target_paths(&args),
-            vec![workspace.join(".nova"), dot_git, workspace.join(".agents")],
+            // 对位 codex 1d804e91b7：末尾补 .aws
+            vec![
+                workspace.join(".nova"),
+                dot_git,
+                workspace.join(".agents"),
+                workspace.join(".aws"),
+            ],
         );
         assert!(
             protected_create_target_paths(&args).is_empty(),
@@ -2067,13 +2083,19 @@ mod tests {
         assert!(args.preserved_files.is_empty());
         assert_eq!(
             synthetic_mount_target_paths(&args),
+            // 对位 codex 1d804e91b7：补 .aws。注意上游该向量根组为 /.aws 居首，
+            // 那来自上游新一代 permissions lowering 的插入顺序；nova 现行 lowering
+            // 按 entries 顺序产出（.aws 居末），此处按 nova 生成器顺序书写，
+            // Linux 门控本机无法验证（见移植报告）。
             vec![
                 PathBuf::from("/.git"),
                 PathBuf::from("/.agents"),
                 PathBuf::from("/.nova"),
+                PathBuf::from("/.aws"),
                 PathBuf::from("/dev/.git"),
                 PathBuf::from("/dev/.agents"),
                 PathBuf::from("/dev/.nova"),
+                PathBuf::from("/dev/.aws"),
             ]
         );
         assert_eq!(
@@ -2111,6 +2133,12 @@ mod tests {
                 "/.nova".to_string(),
                 "--remount-ro".to_string(),
                 "/.nova".to_string(),
+                "--perms".to_string(),
+                "555".to_string(),
+                "--tmpfs".to_string(),
+                "/.aws".to_string(),
+                "--remount-ro".to_string(),
+                "/.aws".to_string(),
                 "--ro-bind".to_string(),
                 path_to_string(&synthetic_mount_registry_root()),
                 path_to_string(&synthetic_mount_registry_root()),
@@ -2139,6 +2167,12 @@ mod tests {
                 "/dev/.nova".to_string(),
                 "--remount-ro".to_string(),
                 "/dev/.nova".to_string(),
+                "--perms".to_string(),
+                "555".to_string(),
+                "--tmpfs".to_string(),
+                "/dev/.aws".to_string(),
+                "--remount-ro".to_string(),
+                "/dev/.aws".to_string(),
             ]
         );
     }

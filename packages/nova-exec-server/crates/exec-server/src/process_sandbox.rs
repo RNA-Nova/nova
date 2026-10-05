@@ -190,6 +190,10 @@ pub(crate) async fn prepare_exec_request(
         network_policy,
     );
     let sandbox_manager = SandboxManager::new();
+    // 对位 codex d13aeb77ea：进程沙箱套用 NOVA_HOME symlink opt-out
+    #[cfg(target_os = "macos")]
+    let sandbox_manager = sandbox_manager
+        .with_allowed_symlinked_nova_home(runtime_paths.allowed_symlinked_nova_home.clone());
     // 选择项 → 受限令牌层级：Mxc 已在函数入口拒绝，此处仅为防御性转换
     // （对位 codex sandbox_selection::select_sandbox 的拆分语义）。
     let windows_sandbox_level = sandbox_context
