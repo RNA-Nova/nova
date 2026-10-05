@@ -206,18 +206,10 @@ impl FileSystemSandboxRunner {
         let sandbox_manager = sandbox_manager.with_allowed_symlinked_nova_home(
             self.runtime_paths.allowed_symlinked_nova_home.clone(),
         );
-        // 选择项 → 受限令牌层级：Mxc 不是受限令牌层级且实现本体未移植，
-        // 与 process 侧同一拒绝文案（对位 codex windows_mxc_available() 拒绝）。
-        let windows_sandbox_level = sandbox_context
-            .windows_sandbox_selection
-            .restricted_token_level()
-            .ok_or_else(|| {
-                invalid_request("native MXC is unavailable on this executor".to_string())
-            })?;
-        let sandbox = sandbox_manager.select_initial(
+        let (sandbox, windows_sandbox_level) = crate::sandbox_selection::select_sandbox(
+            &sandbox_manager,
             permission_profile,
-            SandboxablePreference::Require,
-            windows_sandbox_level,
+            sandbox_context,
             /*has_managed_network_requirements*/ false,
         );
         if sandbox == SandboxType::None {
@@ -246,12 +238,14 @@ impl FileSystemSandboxRunner {
                     environment_id: None,
                     network: None,
                     sandbox_policy_cwd: &cwd.uri,
-                    nova_linux_sandbox_exe: self
-                        .runtime_paths
-                        .executor_linux_sandbox_exe
-                        .as_deref(),
+                    sandbox_exe: if cfg!(windows) {
+                        Some(self.runtime_paths.executor_self_exe.as_path())
+                    } else {
+                        self.runtime_paths.executor_linux_sandbox_exe.as_deref()
+                    },
                     use_legacy_landlock: sandbox_context.use_legacy_landlock,
-                    windows_sandbox_level,
+                    windows_sandbox_level: windows_sandbox_level
+                        .unwrap_or(nova_exec_server_protocol_core::config_types::WindowsSandboxLevel::Disabled),
                 },
             })
             .map_err(|err| invalid_request(format!("failed to prepare fs sandbox: {err}")))

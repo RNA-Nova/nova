@@ -72,6 +72,17 @@ pub enum OtelExporter {
     },
 }
 
+/// Resolved Statsig metrics settings that another process can use to recreate
+/// the built-in metrics exporter configuration without receiving generic
+/// exporter credentials in-process.
+///
+/// 对位 codex `StatsigMetricsSettings`（config.rs）。nova 未移植 Statsig 出口
+/// 本体，本类型仅承载 Windows 沙箱 setup 链路的序列化传输。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StatsigMetricsSettings {
+    pub environment: String,
+}
+
 // ---------------------------------------------------------------------------
 // config.toml 的 [otel] 段（对位 codex `OtelConfigToml` 的 metrics 子集）
 // ---------------------------------------------------------------------------

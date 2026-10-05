@@ -364,6 +364,13 @@ pub enum LegacyAppPathStringError {
         path: String,
         convention: Option<PathConvention>,
     },
+    #[error("unsupported configuration path {path:?} using {convention} path syntax")]
+    UnsupportedConfigPath {
+        path: String,
+        convention: PathConvention,
+    },
+    #[error(transparent)]
+    PathUri(#[from] crate::PathUriParseError),
 }
 
 #[cfg(test)]

@@ -3,10 +3,10 @@ use nova_exec_server_protocol_core::permissions::FileSystemPath;
 use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
 use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
 use nova_exec_server_protocol_core::permissions::ReadDenyMatcher;
+use nova_exec_server_protocol_core::permissions::windows_deny_read_glob_scan;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::process::Command;
 
 #[path = "deny_read_walker.rs"]
 mod walker;
@@ -56,7 +56,8 @@ pub fn resolve_windows_deny_read_paths(
             })
             .collect(),
     );
-    let Some(matcher) = ReadDenyMatcher::try_new(&glob_policy, cwd.as_path())? else {
+    let Some(matcher) = ReadDenyMatcher::try_new(&glob_policy, cwd.as_path())?
+    else {
         return Ok(paths);
     };
 
@@ -98,7 +99,7 @@ pub fn resolve_windows_deny_read_paths(
 }
 
 fn ripgrep_files(scan_plan: &GlobScanPlan) -> Result<Option<Vec<PathBuf>>, String> {
-    let mut command = Command::new("rg");
+    let mut command = crate::background_command::background_command("rg");
     command
         .arg("--files")
         .arg("--hidden")
@@ -131,7 +132,8 @@ fn ripgrep_files(scan_plan: &GlobScanPlan) -> Result<Option<Vec<PathBuf>>, Strin
             // Ripgrep uses exit 2 for traversal errors, including protected
             // Windows directories. Its output may be incomplete. The caller
             // must enumerate again using the matcher-backed walker; policy
-            // syntax has already been validated by ReadDenyMatcher::try_new.
+            // syntax has already been validated by
+            // ReadDenyMatcher::try_new.
             return Ok(None);
         }
 
@@ -209,39 +211,11 @@ fn glob_scan_plans(
 }
 
 fn glob_scan_plan(pattern: &str, configured_max_depth: Option<usize>) -> GlobScanPlan {
-    // Start scanning at the deepest literal directory prefix before the first
-    // glob metacharacter. For example, `C:\repo\**\*.env` only scans `C:\repo`
-    // instead of the current directory or drive root.
-    let first_glob = pattern
-        .char_indices()
-        .find(|(_, ch)| matches!(ch, '*' | '?' | '['))
-        .map(|(index, _)| index)
-        .unwrap_or(pattern.len());
-    let literal_prefix = &pattern[..first_glob];
-    let Some(separator_index) = literal_prefix.rfind(['/', '\\']) else {
-        return GlobScanPlan {
-            root: PathBuf::from("."),
-            max_depth: effective_glob_scan_max_depth(pattern, configured_max_depth),
-            globs: vec![ripgrep_glob(pattern)],
-        };
-    };
-    let pattern_suffix = &pattern[separator_index + 1..];
-    let is_drive_root_separator = separator_index > 0
-        && literal_prefix
-            .as_bytes()
-            .get(separator_index - 1)
-            .is_some_and(|ch| *ch == b':');
-    if separator_index == 0 || is_drive_root_separator {
-        return GlobScanPlan {
-            root: PathBuf::from(&literal_prefix[..=separator_index]),
-            max_depth: effective_glob_scan_max_depth(pattern_suffix, configured_max_depth),
-            globs: vec![ripgrep_glob(pattern_suffix)],
-        };
-    }
+    let scan = windows_deny_read_glob_scan(pattern, configured_max_depth);
     GlobScanPlan {
-        root: PathBuf::from(literal_prefix[..separator_index].to_string()),
-        max_depth: effective_glob_scan_max_depth(pattern_suffix, configured_max_depth),
-        globs: vec![ripgrep_glob(pattern_suffix)],
+        root: PathBuf::from(scan.root),
+        max_depth: scan.max_depth,
+        globs: vec![ripgrep_glob(scan.pattern_suffix)],
     }
 }
 
@@ -281,22 +255,6 @@ fn ripgrep_glob(pattern: &str) -> String {
     } else {
         format!("**/{escaped}")
     }
-}
-
-fn effective_glob_scan_max_depth(
-    pattern_suffix: &str,
-    configured_max_depth: Option<usize>,
-) -> Option<usize> {
-    let components = pattern_suffix
-        .split(['/', '\\'])
-        .filter(|component| !component.is_empty())
-        .collect::<Vec<_>>();
-    if components.contains(&"**") {
-        return configured_max_depth;
-    }
-    Some(configured_max_depth.map_or(components.len(), |max_depth| {
-        max_depth.min(components.len())
-    }))
 }
 
 #[cfg(test)]

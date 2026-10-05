@@ -24,6 +24,7 @@ use url::Url;
 
 mod absolute_path_normalization;
 mod api_path_string;
+mod config_path;
 mod native_path_bytes;
 
 use absolute_path_normalization::path_uri_from_segments;
@@ -1004,6 +1005,18 @@ impl PathConvention {
             Self::Posix => character == '/',
             Self::Windows => matches!(character, '/' | '\\'),
         })
+    }
+
+    /// Returns the suffix of `~` paths using this grammar's separators.
+    /// Named-user paths such as `~someone/private` are not home-relative.
+    ///
+    /// 对位 codex `PathConvention::home_relative_suffix`（config_path 校验链使用）。
+    pub fn home_relative_suffix(self, path: &str) -> Option<&str> {
+        let suffix = path.strip_prefix('~')?;
+        (suffix.is_empty()
+            || suffix.starts_with('/')
+            || self == Self::Windows && suffix.starts_with('\\'))
+        .then_some(suffix)
     }
 }
 

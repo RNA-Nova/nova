@@ -29,6 +29,10 @@ use crate::protocol::WritableRoot;
 pub use windows_glob::WindowsDenyReadGlobScan;
 pub use windows_glob::windows_deny_read_glob_scan;
 
+#[cfg(test)]
+#[path = "permissions_target_approved_tests.rs"]
+mod target_approved_tests;
+
 mod windows_glob {
     //! Windows deny-glob scan bounds shared by policy validation and native ACL expansion.
     use nova_exec_server_utils_path_uri::PathConvention;
@@ -348,9 +352,16 @@ struct FileSystemSemanticSignature {
 
 /// Runtime matcher for read-deny entries in a filesystem sandbox policy.
 pub struct ReadDenyMatcher {
-    cwd: AbsolutePathBuf,
+    native_cwd: Option<AbsolutePathBuf>,
     user_home_dir: Option<PathUri>,
     temporary_directories: Vec<PathUri>,
+    prepared: PreparedReadDenyMatcher,
+}
+
+/// Prepared PathUri deny roots and globs for repeated executor-owned read checks.
+///
+/// 对位 codex `PreparedReadDenyMatcher`（permissions.rs）。
+struct PreparedReadDenyMatcher {
     denied_roots: Vec<PathUri>,
     deny_read_matchers: Vec<GlobMatcher>,
     invalid_pattern: bool,
@@ -389,6 +400,27 @@ impl ReadDenyMatcher {
         )
     }
 
+    /// Builds a strict matcher using only the supplied execution-host paths.
+    ///
+    /// 对位 codex `ReadDenyMatcher::try_new_with_context`（permissions/target.rs）。
+    pub fn try_new_with_context(
+        policy: &FileSystemSandboxPolicy,
+        context: &FileSystemSandboxPolicyContext<'_>,
+    ) -> Result<Option<Self>, String> {
+        if !has_context_read_denials(policy, context) {
+            return Ok(None);
+        }
+        validate_context_paths(policy, context)?;
+        let prepared =
+            policy.prepare_deny_read_matcher(context, InvalidDenyReadGlobBehavior::ReturnError)?;
+        Ok(Some(Self {
+            native_cwd: None,
+            user_home_dir: None,
+            temporary_directories: Vec::new(),
+            prepared,
+        }))
+    }
+
     fn build(
         file_system_sandbox_policy: &FileSystemSandboxPolicy,
         cwd: &Path,
@@ -408,38 +440,44 @@ impl ReadDenyMatcher {
             user_home_dir: user_home_dir.as_ref(),
             temporary_directories: Some(&temporary_directories),
         };
-        let (denied_roots, deny_read_matchers, invalid_pattern) = file_system_sandbox_policy
+        let prepared = file_system_sandbox_policy
             .prepare_deny_read_matcher(&context, invalid_glob_behavior)?;
         Ok(Some(Self {
-            cwd,
+            native_cwd: Some(cwd),
             user_home_dir,
             temporary_directories,
-            denied_roots,
-            deny_read_matchers,
-            invalid_pattern,
+            prepared,
         }))
     }
 
     /// Returns whether `path` is denied by the policy used to build this matcher.
     pub fn is_read_denied(&self, path: &Path) -> bool {
-        let Some(path) = resolve_candidate_path(path, self.cwd.as_path()) else {
+        let Some(cwd) = self.native_cwd.as_ref() else {
+            return true;
+        };
+        let Some(path) = resolve_candidate_path(path, cwd.as_path()) else {
             return true;
         };
         let path = PathUri::from(path);
-        let cwd = PathUri::from_abs_path(&self.cwd);
+        let cwd = PathUri::from_abs_path(cwd);
         let context = FileSystemSandboxPolicyContext {
             cwd: &cwd,
             workspace_roots: std::slice::from_ref(&cwd),
             user_home_dir: self.user_home_dir.as_ref(),
             temporary_directories: Some(&self.temporary_directories),
         };
-        FileSystemSandboxPolicy::matches_prepared_read_deny(
-            &path,
-            &context,
-            &self.denied_roots,
-            &self.deny_read_matchers,
-            self.invalid_pattern,
-        )
+        self.is_read_denied_uri(&path, &context)
+    }
+
+    /// Returns whether an executor-owned URI is denied under its matching path context.
+    ///
+    /// 对位 codex `ReadDenyMatcher::is_read_denied_uri`（permissions.rs）。
+    pub fn is_read_denied_uri(
+        &self,
+        path: &PathUri,
+        context: &FileSystemSandboxPolicyContext<'_>,
+    ) -> bool {
+        FileSystemSandboxPolicy::matches_prepared_read_deny(path, context, &self.prepared)
     }
 
     /// Checks an enumerated path using a canonical location already resolved by
@@ -771,7 +809,10 @@ impl FileSystemSandboxPolicy {
     /// entry for the same target wins under the normal precedence rules, so a
     /// shadowed `read` entry must not downgrade the policy out of full-disk
     /// write mode.
-    fn has_write_narrowing_entries(&self) -> bool {
+    ///
+    /// 对位 codex：convention 由调用方按目标 executor 显式选择（不再用宿主
+    /// `cfg!(unix)` 判定 `SlashTmp` 语义）。
+    fn has_write_narrowing_entries(&self, convention: PathConvention) -> bool {
         matches!(self.kind, FileSystemSandboxKind::Restricted)
             && self.entries.iter().any(|entry| {
                 if entry.access.can_write() {
@@ -779,15 +820,21 @@ impl FileSystemSandboxPolicy {
                 }
 
                 match &entry.path {
-                    FileSystemPath::Path { .. } => !self.has_same_target_write_override(entry),
+                    FileSystemPath::Path { .. } => {
+                        !self.has_same_target_write_override(entry, convention)
+                    }
                     FileSystemPath::GlobPattern { .. } => true,
                     FileSystemPath::Special { value } => match value {
                         FileSystemSpecialPath::Root => entry.access == FileSystemAccessMode::Deny,
-                        FileSystemSpecialPath::SlashTmp if !cfg!(unix) => false,
+                        FileSystemSpecialPath::SlashTmp
+                            if convention == PathConvention::Windows =>
+                        {
+                            false
+                        }
                         FileSystemSpecialPath::Minimal | FileSystemSpecialPath::Unknown { .. } => {
                             false
                         }
-                        _ => !self.has_same_target_write_override(entry),
+                        _ => !self.has_same_target_write_override(entry, convention),
                     },
                 }
             })
@@ -795,11 +842,15 @@ impl FileSystemSandboxPolicy {
 
     /// Returns true when a higher-priority `write` entry targets the same
     /// location as `entry`, so `entry` cannot narrow effective write access.
-    fn has_same_target_write_override(&self, entry: &FileSystemSandboxEntry) -> bool {
+    fn has_same_target_write_override(
+        &self,
+        entry: &FileSystemSandboxEntry,
+        convention: PathConvention,
+    ) -> bool {
         self.entries.iter().any(|candidate| {
             candidate.access.can_write()
                 && candidate.access > entry.access
-                && file_system_paths_share_target(&candidate.path, &entry.path)
+                && file_system_paths_share_target(&candidate.path, &entry.path, convention)
         })
     }
 
@@ -910,14 +961,35 @@ impl FileSystemSandboxPolicy {
         }
     }
 
-    /// Returns true when filesystem writes are unrestricted.
+    /// Returns true when filesystem writes are unrestricted on this host.
     pub fn has_full_disk_write_access(&self) -> bool {
+        // TODO(nova) 对位 codex：调用方迁移到显式选择 executor 的 path convention。
+        self.has_full_disk_write_access_for_convention(Some(PathConvention::native()))
+    }
+
+    /// Returns true when filesystem writes are unrestricted for the selected executor.
+    ///
+    /// 对位 codex `has_full_disk_write_access_with_context`。
+    pub fn has_full_disk_write_access_with_context(
+        &self,
+        context: &FileSystemSandboxPolicyContext<'_>,
+    ) -> bool {
+        self.has_full_disk_write_access_for_convention(context.cwd.infer_path_convention())
+    }
+
+    /// Returns true when filesystem writes are unrestricted for the selected path convention.
+    ///
+    /// 对位 codex `has_full_disk_write_access_for_convention`。
+    pub fn has_full_disk_write_access_for_convention(
+        &self,
+        convention: Option<PathConvention>,
+    ) -> bool {
         match self.kind {
             FileSystemSandboxKind::Unrestricted | FileSystemSandboxKind::ExternalSandbox => true,
-            FileSystemSandboxKind::Restricted => {
+            FileSystemSandboxKind::Restricted => convention.is_some_and(|convention| {
                 self.has_root_access(FileSystemAccessMode::can_write)
-                    && !self.has_write_narrowing_entries()
-            }
+                    && !self.has_write_narrowing_entries(convention)
+            }),
         }
     }
 
@@ -953,7 +1025,8 @@ impl FileSystemSandboxPolicy {
         .unwrap_or(false)
     }
 
-    fn resolve_access(
+    /// 对位 codex `resolve_access`（executor-context 版本，pub）。
+    pub fn resolve_access(
         &self,
         path: &PathUri,
         context: &FileSystemSandboxPolicyContext<'_>,
@@ -997,11 +1070,29 @@ impl FileSystemSandboxPolicy {
             .unwrap_or(FileSystemAccessMode::Deny)
     }
 
-    fn can_write_path(&self, path: &PathUri, context: &FileSystemSandboxPolicyContext<'_>) -> bool {
+    /// Checks exact-root read access using paths owned by the execution host.
+    /// Deny glob enforcement is checked separately with [`ReadDenyMatcher`].
+    ///
+    /// 对位 codex `can_read_path`（permissions/target.rs）。
+    pub fn can_read_path(
+        &self,
+        path: &PathUri,
+        context: &FileSystemSandboxPolicyContext<'_>,
+    ) -> bool {
+        self.resolve_access(path, context).can_read()
+    }
+
+    /// 对位 codex `can_write_path`（pub；full-disk 判定按 context 的 convention）。
+    pub fn can_write_path(
+        &self,
+        path: &PathUri,
+        context: &FileSystemSandboxPolicyContext<'_>,
+    ) -> bool {
         if !self.resolve_access(path, context).can_write() {
             return false;
         }
-        self.has_full_disk_write_access() || self.metadata_write_denial(path, context).is_none()
+        self.has_full_disk_write_access_with_context(context)
+            || self.metadata_write_denial(path, context).is_none()
     }
 
     fn metadata_write_denial(
@@ -1035,7 +1126,7 @@ impl FileSystemSandboxPolicy {
         &self,
         context: &FileSystemSandboxPolicyContext<'_>,
         invalid_glob_behavior: InvalidDenyReadGlobBehavior,
-    ) -> Result<(Vec<PathUri>, Vec<GlobMatcher>, bool), String> {
+    ) -> Result<PreparedReadDenyMatcher, String> {
         let file_system_root = file_system_root(context);
         let denied_roots = self
             .resolved_entries(context)
@@ -1049,7 +1140,11 @@ impl FileSystemSandboxPolicy {
             .map(|(root, _)| root)
             .collect();
         let Some(convention) = context.cwd.infer_path_convention() else {
-            return Ok((denied_roots, Vec::new(), true));
+            return Ok(PreparedReadDenyMatcher {
+                denied_roots,
+                deny_read_matchers: Vec::new(),
+                invalid_pattern: true,
+            });
         };
         let mut deny_read_matchers = Vec::new();
         let mut invalid_pattern = false;
@@ -1057,7 +1152,11 @@ impl FileSystemSandboxPolicy {
             Ok(patterns) => patterns,
             Err(err) => match invalid_glob_behavior {
                 InvalidDenyReadGlobBehavior::FailClosed => {
-                    return Ok((denied_roots, Vec::new(), true));
+                    return Ok(PreparedReadDenyMatcher {
+                        denied_roots,
+                        deny_read_matchers: Vec::new(),
+                        invalid_pattern: true,
+                    });
                 }
                 InvalidDenyReadGlobBehavior::ReturnError => return Err(err),
             },
@@ -1073,15 +1172,17 @@ impl FileSystemSandboxPolicy {
                 },
             }
         }
-        Ok((denied_roots, deny_read_matchers, invalid_pattern))
+        Ok(PreparedReadDenyMatcher {
+            denied_roots,
+            deny_read_matchers,
+            invalid_pattern,
+        })
     }
 
     fn matches_prepared_read_deny(
         path: &PathUri,
         context: &FileSystemSandboxPolicyContext<'_>,
-        denied_roots: &[PathUri],
-        deny_read_matchers: &[GlobMatcher],
-        invalid_pattern: bool,
+        prepared: &PreparedReadDenyMatcher,
     ) -> bool {
         let Some(convention) = context.cwd.infer_path_convention() else {
             return true;
@@ -1092,11 +1193,11 @@ impl FileSystemSandboxPolicy {
         {
             return true;
         }
-        if invalid_pattern {
+        if prepared.invalid_pattern {
             return true;
         }
-        denied_roots.iter().any(|root| path.starts_with(root))
-            || deny_read_matchers.iter().any(|matcher| {
+        prepared.denied_roots.iter().any(|root| path.starts_with(root))
+            || prepared.deny_read_matchers.iter().any(|matcher| {
                 let path = match convention {
                     PathConvention::Posix => path.decoded_path_bytes(),
                     PathConvention::Windows => Cow::Owned(
@@ -1302,6 +1403,151 @@ impl FileSystemSandboxPolicy {
         }
         self.entries = entries;
         self
+    }
+
+    /// 对位 codex `try_materialize_project_roots_with_path_uris`（fallible 版：
+    /// home-relative deny 缺 home fact、或 glob 目录无法安全拼写时返回 None）。
+    fn try_materialize_project_roots_with_path_uris(
+        mut self,
+        workspace_roots: &[PathUri],
+    ) -> Option<Self> {
+        let mut entries = Vec::with_capacity(self.entries.len());
+        for entry in self.entries {
+            let (subpath, is_glob) = match &entry.path {
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::ProjectRoots { subpath },
+                } => (subpath.as_deref(), false),
+                FileSystemPath::GlobPattern { pattern }
+                    if pattern.starts_with(PROJECT_ROOTS_GLOB_PATTERN_PREFIX) =>
+                {
+                    (
+                        Some(&pattern[PROJECT_ROOTS_GLOB_PATTERN_PREFIX.len()..]),
+                        true,
+                    )
+                }
+                _ => {
+                    entries.push(entry);
+                    continue;
+                }
+            };
+            if entry.access == FileSystemAccessMode::Deny
+                && subpath.is_some_and(|subpath| {
+                    workspace_roots.iter().any(|root| {
+                        root.infer_path_convention().is_some_and(|convention| {
+                            convention.home_relative_suffix(subpath).is_some()
+                        })
+                    })
+                })
+            {
+                // Older policies could expand these rules outside the workspace.
+                // Without a home fact, denying only the workspace would weaken them.
+                return None;
+            }
+            entries.extend(workspace_roots.iter().filter_map(|root| {
+                let path = if is_glob
+                    && root
+                        .infer_path_convention()
+                        .is_none_or(|convention| root.validate_glob_directory(convention).is_err())
+                {
+                    // An infallible materializer cannot return an unsafe glob.
+                    // Use the existing deny-root fallback for unresolvable rules.
+                    None
+                } else {
+                    subpath.map_or_else(
+                        || Some(root.clone()),
+                        |subpath| resolve_scoped_workspace_path(root, subpath),
+                    )
+                };
+                let (path, access) = match path {
+                    Some(path) if is_glob => (
+                        FileSystemPath::GlobPattern {
+                            pattern: path.inferred_native_path_string(),
+                        },
+                        entry.access,
+                    ),
+                    Some(path) => (FileSystemPath::Path { path }, entry.access),
+                    None if !entry.access.can_write() => (
+                        FileSystemPath::Path { path: root.clone() },
+                        FileSystemAccessMode::Deny,
+                    ),
+                    None => return None,
+                };
+                Some(FileSystemSandboxEntry {
+                    path,
+                    access,
+                    missing_path_behavior: entry.missing_path_behavior,
+                })
+            }));
+        }
+        self.entries = entries;
+        Some(self)
+    }
+
+    /// Grants root and root-metadata write for an approved command unless explicitly denied.
+    /// If a retained denial cannot be resolved or denies the root, keep the original policy.
+    ///
+    /// 对位 codex `FileSystemSandboxPolicy::for_approved_command`
+    /// （permissions/target.rs；645b683a9e 的 deny 保留语义）。
+    pub fn for_approved_command(&self, context: &FileSystemSandboxPolicyContext<'_>) -> Self {
+        if self.kind != FileSystemSandboxKind::Restricted {
+            return self.clone();
+        }
+        let mut approved = Self::restricted(vec![FileSystemSandboxEntry::new(
+            FileSystemPath::Special {
+                value: FileSystemSpecialPath::Root,
+            },
+            FileSystemAccessMode::Write,
+        )]);
+        approved.preserve_deny_read_restrictions_from(self);
+        if context.workspace_roots.is_empty()
+            && approved.entries.iter().any(|entry| {
+                matches!(
+                    &entry.path,
+                    FileSystemPath::Special {
+                        value: FileSystemSpecialPath::ProjectRoots { .. }
+                    }
+                ) || matches!(
+                    &entry.path,
+                    FileSystemPath::GlobPattern { pattern }
+                        if pattern.starts_with(PROJECT_ROOTS_GLOB_PATTERN_PREFIX)
+                )
+            })
+        {
+            return self.clone();
+        }
+        let Some(mut approved) =
+            approved.try_materialize_project_roots_with_path_uris(context.workspace_roots)
+        else {
+            return self.clone();
+        };
+        let Some(root) = file_system_root(context) else {
+            return self.clone();
+        };
+        let Ok(matcher) = ReadDenyMatcher::try_new_with_context(&approved, context) else {
+            return self.clone();
+        };
+        if !approved.resolve_access(&root, context).can_write()
+            || matcher
+                .as_ref()
+                .is_some_and(|matcher| matcher.is_read_denied_uri(&root, context))
+        {
+            return self.clone();
+        }
+        for name in PROTECTED_METADATA_PATH_NAMES {
+            let Ok(path) = root.join_descendant(name) else {
+                return self.clone();
+            };
+            if !matcher
+                .as_ref()
+                .is_some_and(|matcher| matcher.is_read_denied_uri(&path, context))
+            {
+                approved.entries.push(FileSystemSandboxEntry::new(
+                    path.into(),
+                    FileSystemAccessMode::Write,
+                ));
+            }
+        }
+        approved
     }
 
     /// Preserves symbolic `:workspace_roots` entries while also adding concrete
@@ -1964,6 +2210,75 @@ fn file_system_root(context: &FileSystemSandboxPolicyContext<'_>) -> Option<Path
     context.cwd.ancestors().last()
 }
 
+/// 对位 codex `has_context_read_denials`（permissions/deny_read_validator.rs）。
+fn has_context_read_denials(
+    policy: &FileSystemSandboxPolicy,
+    context: &FileSystemSandboxPolicyContext<'_>,
+) -> bool {
+    policy.kind == FileSystemSandboxKind::Restricted
+        && policy.entries.iter().any(|entry| {
+            entry.access == FileSystemAccessMode::Deny
+                && !matches!(&entry.path,
+                    FileSystemPath::Special { value: FileSystemSpecialPath::SlashTmp }
+                        if context.cwd.infer_path_convention() != Some(PathConvention::Posix)
+                )
+        })
+}
+
+/// 对位 codex `validate_context_paths`（permissions/target.rs）。
+fn validate_context_paths(
+    policy: &FileSystemSandboxPolicy,
+    context: &FileSystemSandboxPolicyContext<'_>,
+) -> Result<(), String> {
+    const INVALID_PATH: &str = "managed filesystem denial cannot be materialized safely";
+    let convention = context.cwd.infer_path_convention().ok_or(INVALID_PATH)?;
+    let valid = |path: &PathUri| {
+        path.infer_path_convention() == Some(convention) && path.lexical_depth().is_some()
+    };
+    if !valid(context.cwd) || context.workspace_roots.iter().any(|path| !valid(path)) {
+        return Err(INVALID_PATH.into());
+    }
+    for entry in &policy.entries {
+        match &entry.path {
+            FileSystemPath::Path { path } if !valid(path) => return Err(INVALID_PATH.into()),
+            FileSystemPath::Special {
+                value: FileSystemSpecialPath::Tmpdir,
+            } => {
+                let directories = context.temporary_directories.ok_or(
+                    "executor temporary-directory metadata is unavailable for managed filesystem denials",
+                )?;
+                if directories.iter().any(|path| !valid(path)) {
+                    return Err(
+                        "executor temporary-directory metadata cannot be materialized safely"
+                            .into(),
+                    );
+                }
+            }
+            FileSystemPath::Special {
+                value:
+                    FileSystemSpecialPath::ProjectRoots {
+                        subpath: Some(subpath),
+                    },
+            } if context
+                .workspace_roots
+                .iter()
+                .any(|root| root.join(subpath).is_err()) =>
+            {
+                return Err(INVALID_PATH.into());
+            }
+            FileSystemPath::GlobPattern { pattern }
+                if (pattern.starts_with("~/")
+                    || convention == PathConvention::Windows && pattern.starts_with("~\\"))
+                    && !context.user_home_dir.is_some_and(valid) =>
+            {
+                return Err(INVALID_PATH.into());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn local_temporary_directories() -> Vec<PathUri> {
     let Some(tmpdir) = std::env::var_os("TMPDIR").filter(|path| !path.is_empty()) else {
         return Vec::new();
@@ -1981,7 +2296,11 @@ fn local_temporary_directories() -> Vec<PathUri> {
 /// This is intentionally narrower than full path resolution: it only answers
 /// the "can one entry shadow another at the same specificity?" question used
 /// by `has_write_narrowing_entries`.
-fn file_system_paths_share_target(left: &FileSystemPath, right: &FileSystemPath) -> bool {
+fn file_system_paths_share_target(
+    left: &FileSystemPath,
+    right: &FileSystemPath,
+    convention: PathConvention,
+) -> bool {
     match (left, right) {
         (FileSystemPath::Path { path: left }, FileSystemPath::Path { path: right }) => {
             left == right
@@ -1990,9 +2309,10 @@ fn file_system_paths_share_target(left: &FileSystemPath, right: &FileSystemPath)
             special_paths_share_target(left, right)
         }
         (FileSystemPath::Path { path }, FileSystemPath::Special { value })
-        | (FileSystemPath::Special { value }, FileSystemPath::Path { path }) => path
-            .to_abs_path()
-            .is_ok_and(|path| special_path_matches_absolute_path(value, &path)),
+        | (FileSystemPath::Special { value }, FileSystemPath::Path { path }) => {
+            path.infer_path_convention() == Some(convention)
+                && special_path_matches_path_uri(value, path)
+        }
         (
             FileSystemPath::GlobPattern { pattern: left },
             FileSystemPath::GlobPattern { pattern: right },
@@ -2032,13 +2352,19 @@ fn special_paths_share_target(left: &FileSystemSpecialPath, right: &FileSystemSp
 ///
 /// We intentionally only fold the special paths whose concrete meaning is
 /// stable without a cwd, such as `/` and `/tmp`.
-fn special_path_matches_absolute_path(
-    value: &FileSystemSpecialPath,
-    path: &AbsolutePathBuf,
-) -> bool {
+/// We intentionally only fold the special paths whose concrete meaning is
+/// stable without a cwd, such as `/` and `/tmp`.
+///
+/// 对位 codex `special_path_matches_path_uri`（替代旧 native 版
+/// `special_path_matches_absolute_path`，判定改用 URI + convention）。
+fn special_path_matches_path_uri(value: &FileSystemSpecialPath, path: &PathUri) -> bool {
     match value {
-        FileSystemSpecialPath::Root => path.as_path().parent().is_none(),
-        FileSystemSpecialPath::SlashTmp => path.as_path() == Path::new("/tmp"),
+        FileSystemSpecialPath::Root => path.lexical_depth().is_some() && path.parent().is_none(),
+        FileSystemSpecialPath::SlashTmp => {
+            path.infer_path_convention() == Some(PathConvention::Posix)
+                && path.lexical_depth() == Some(1)
+                && path.basename().as_deref() == Some("tmp")
+        }
         _ => false,
     }
 }
@@ -2341,7 +2667,7 @@ fn append_default_read_only_entry_if_no_explicit_rule(
 ) {
     if entries
         .iter()
-        .any(|entry| file_system_paths_share_target(&entry.path, &path))
+        .any(|entry| file_system_paths_share_target(&entry.path, &path, PathConvention::native()))
     {
         return;
     }
@@ -2797,25 +3123,21 @@ mod tests {
             ),
             unreadable_glob_entry(r"C:\workspace\**\*.env".to_string()),
         ]);
-        let (roots, globs, invalid) = policy
+        let prepared = policy
             .prepare_deny_read_matcher(&context, InvalidDenyReadGlobBehavior::ReturnError)
             .expect("remote deny matcher");
 
-        assert!(roots.is_empty());
+        assert!(prepared.denied_roots.is_empty());
         assert!(FileSystemSandboxPolicy::matches_prepared_read_deny(
             &path("file:///c:/WORKSPACE/app/.ENV"),
             &context,
-            &roots,
-            &globs,
-            invalid,
+            &prepared,
         ));
         for candidate in ["file:///%00/bad/path/YQ", "file:///C:/workspace/%2Fsecret"] {
             assert!(FileSystemSandboxPolicy::matches_prepared_read_deny(
                 &path(candidate),
                 &context,
-                &roots,
-                &globs,
-                invalid,
+                &prepared,
             ));
         }
         assert!(!policy.can_write_path(&path("file:///C:/workspace/.nova/config"), &context));
@@ -2865,12 +3187,12 @@ mod tests {
             let policy = FileSystemSandboxPolicy::restricted(vec![unreadable_glob_entry(
                 pattern.to_string(),
             )]);
-            let (roots, globs, invalid) = policy
+            let prepared = policy
                 .prepare_deny_read_matcher(&context, InvalidDenyReadGlobBehavior::ReturnError)
                 .expect("home-relative deny glob");
 
             assert!(FileSystemSandboxPolicy::matches_prepared_read_deny(
-                &candidate, &context, &roots, &globs, invalid,
+                &candidate, &context, &prepared,
             ));
 
             let without_home = FileSystemSandboxPolicyContext {
@@ -2885,10 +3207,10 @@ mod tests {
                     )
                     .is_err()
             );
-            let (_, _, invalid) = policy
+            let prepared = policy
                 .prepare_deny_read_matcher(&without_home, InvalidDenyReadGlobBehavior::FailClosed)
                 .expect("missing executor home fails closed");
-            assert!(invalid);
+            assert!(prepared.invalid_pattern);
         }
     }
 

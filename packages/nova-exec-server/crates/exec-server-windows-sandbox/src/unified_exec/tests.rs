@@ -16,6 +16,7 @@ use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_pty::ProcessDriver;
 use nova_exec_server_utils_pty::ProcessSignal;
+use crate::test_support::WindowsSandboxAccountTestGuard;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::fs;
@@ -49,6 +50,8 @@ use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 static TEST_HOME_COUNTER: AtomicU64 = AtomicU64::new(0);
 static LEGACY_PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+const ASSERT_NO_CONSOLE: &str = r#"Add-Type -ErrorAction Stop 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'; if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { throw 'piped sandbox process unexpectedly has a console' };"#;
 
 fn legacy_process_test_guard() -> MutexGuard<'static, ()> {
     LEGACY_PROCESS_TEST_LOCK
@@ -249,7 +252,6 @@ fn restricted_token_rejects_managed_network_before_spawn() {
             deny_write_paths_override: &[],
             tty: false,
             stdin_open: false,
-            use_private_desktop: false,
         })
         .await
         .expect_err("managed networking must fail before spawning an unelevated sandbox");
@@ -286,7 +288,6 @@ fn legacy_non_tty_cmd_emits_output() {
             &[],
             /*tty*/ false,
             /*stdin_open*/ false,
-            /*use_private_desktop*/ true,
         )
         .await
         .expect("spawn legacy non-tty cmd session");
@@ -302,14 +303,8 @@ fn legacy_non_tty_cmd_emits_output() {
 
 #[test]
 fn elevated_non_tty_cmd_forwards_env_output_and_exit() {
-    // GH 托管 windows runner 的服务会话上下文不支持 LogonW 拉起沙箱会话
-    // （CreateProcessWithLogonW 错误 2，重试后仍确定性失败；codex CI 在
-    // 自管 runner 池运行本组测试）。真机/受控 runner 环境不受影响。
-    // TODO(nova): Windows 真机 relay 环境落地后移除本门控。
-    if std::env::var_os("CI").is_some() {
-        eprintln!("skipping: elevated LogonW sessions require a managed/real runner context");
-        return;
-    }
+    let _account_guard =
+        WindowsSandboxAccountTestGuard::acquire().expect("lock Windows sandbox test accounts");
     let _guard = legacy_process_test_guard();
     let runtime = current_thread_runtime();
     runtime.block_on(async move {
@@ -342,15 +337,73 @@ fn elevated_non_tty_cmd_forwards_env_output_and_exit() {
             &[],
             /*tty*/ false,
             /*stdin_open*/ false,
-            /*use_private_desktop*/ true,
         )
         .await
-        .expect("spawn elevated non-tty cmd session");
+        .unwrap_or_else(|err| {
+            panic!(
+                "spawn elevated non-tty cmd session: {err:#}\nsandbox log:\n{}",
+                sandbox_log(sandbox_home.path())
+            )
+        });
         let (stdout, exit_code) =
             collect_stdout_and_exit(spawned, sandbox_home.path(), Duration::from_secs(10)).await;
         let stdout = String::from_utf8_lossy(&stdout);
         assert_eq!(exit_code, 23, "stdout={stdout:?}");
         assert!(stdout.contains("ELEVATED-ENV-OK"), "stdout={stdout:?}");
+    });
+}
+
+#[test]
+#[ignore = "requires this test binary in an installed test MSIX, launched with package identity, NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE=1, and NOVA_EXEC_SERVER_HOME provisioned by that package's service in a disposable Windows VM"]
+fn registered_non_tty_cmd_forwards_env_output_and_exit() {
+    assert!(
+        crate::registered_core_requested(),
+        "registered Core opt-in is required"
+    );
+    let sandbox_home = PathBuf::from(std::env::var_os("NOVA_EXEC_SERVER_HOME").expect("fixture NOVA_EXEC_SERVER_HOME"));
+    assert!(
+        crate::app_package::registered_setup_is_ready(&sandbox_home)
+            .expect("validate the installed package and service receipt"),
+        "the test process must have package identity and completed service setup",
+    );
+    let cwd = tempfile::tempdir().expect("isolated command workspace");
+    current_thread_runtime().block_on(async {
+        let mut env_map: HashMap<String, String> = std::env::vars().collect();
+        env_map.insert("NOVA_EXEC_SERVER_REGISTERED_TEST".into(), "REGISTERED-ENV-OK".into());
+        let spawned = spawn_windows_sandbox_session_elevated_for_permission_profile(
+            &PermissionProfile::workspace_write(),
+            workspace_roots_for(cwd.path()).as_slice(),
+            &sandbox_home,
+            vec![
+                "C:\\Windows\\System32\\cmd.exe".into(),
+                "/d".into(),
+                "/c".into(),
+                "echo %CODEX_REGISTERED_TEST%& exit /b 23".into(),
+            ],
+            cwd.path(),
+            env_map,
+            /*proxy_enforced*/ false,
+            /*network_proxy_restricting_sid*/ None,
+            Some(5_000),
+            /*read_roots_override*/ None,
+            /*read_roots_include_platform_defaults*/ true,
+            /*write_roots_override*/ None,
+            &[],
+            &[],
+            /*tty*/ false,
+            /*stdin_open*/ false,
+        )
+        .await
+        .expect("launch through the service-recorded alias and authenticated pipes");
+        let (stdout, exit_code) =
+            collect_stdout_and_exit(spawned, &sandbox_home, Duration::from_secs(10)).await;
+        assert_eq!(
+            (
+                String::from_utf8(stdout).expect("command output"),
+                exit_code
+            ),
+            ("REGISTERED-ENV-OK\r\n".to_owned(), 23),
+        );
     });
 }
 
@@ -381,7 +434,6 @@ fn legacy_non_tty_cmd_rejects_deny_read_overrides() {
             &[],
             /*tty*/ false,
             /*stdin_open*/ false,
-            /*use_private_desktop*/ true,
         )
         .await
         .expect_err("legacy deny-read should require the elevated backend");
@@ -413,7 +465,7 @@ fn legacy_non_tty_powershell_interrupt_terminates_process() {
                 pwsh.display().to_string(),
                 "-NoProfile".to_string(),
                 "-Command".to_string(),
-                "Write-Output LEGACY-NONTTY-DIRECT; [System.Threading.ManualResetEvent]::new($false).WaitOne()".to_string(),
+                format!("{ASSERT_NO_CONSOLE} Write-Output LEGACY-NONTTY-DIRECT; [System.Threading.ManualResetEvent]::new($false).WaitOne()"),
             ],
             cwd.as_path(),
             HashMap::new(),
@@ -422,8 +474,7 @@ fn legacy_non_tty_powershell_interrupt_terminates_process() {
             &[],
             /*tty*/ false,
             /*stdin_open*/ false,
-            /*use_private_desktop*/ true,
-        )
+            )
         .await
         .expect("spawn legacy non-tty powershell session");
         println!("pwsh spawn returned");
@@ -644,7 +695,7 @@ fn legacy_capture_emits_output_and_preserves_descendant_after_normal_exit() {
         powershell_literal(&ready_marker),
     );
     let parent_command = format!(
-        "Write-Output LEGACY-CAPTURE-DIRECT; {}",
+        "{ASSERT_NO_CONSOLE} Write-Output LEGACY-CAPTURE-DIRECT; {}",
         start_powershell_child(&pwsh, sandbox_home.path(), &descendant_command, &parent_tail,),
     );
     let permission_profile = PermissionProfile::workspace_write();
@@ -662,7 +713,6 @@ fn legacy_capture_emits_output_and_preserves_descendant_after_normal_exit() {
         HashMap::new(),
         Some(10_000),
         /*cancellation*/ None,
-        /*use_private_desktop*/ true,
     )
     .expect("run legacy capture powershell");
     let descendant_pid = fs::read_to_string(&ready_marker)
@@ -785,7 +835,6 @@ fn legacy_workspace_write_delete_is_limited_to_writable_roots() {
             &[],
             /*tty*/ false,
             /*stdin_open*/ false,
-            /*use_private_desktop*/ true,
         )
         .await
         .expect("spawn legacy delete session");
@@ -867,7 +916,6 @@ fn legacy_capture_cancellation_terminates_descendants_without_timeout() {
         HashMap::new(),
         Some(30_000),
         /*cancellation*/ Some(cancellation),
-        /*use_private_desktop*/ true,
     )
     .expect("run legacy capture powershell with cancellation");
 
@@ -950,7 +998,6 @@ async fn assert_legacy_tty_descendant_lifecycle(
         &[],
         /*tty*/ true,
         /*stdin_open*/ false,
-        /*use_private_desktop*/ true,
     )
     .await
     .expect("spawn legacy sandbox ConPTY lifecycle test");
@@ -1041,7 +1088,6 @@ fn legacy_tty_powershell_emits_output_and_accepts_input() {
             &[],
             /*tty*/ true,
             /*stdin_open*/ true,
-            /*use_private_desktop*/ true,
         )
         .await
         .expect("spawn legacy tty powershell session");
@@ -1066,7 +1112,6 @@ fn legacy_tty_powershell_emits_output_and_accepts_input() {
         assert!(stdout.contains("second"), "stdout={stdout:?}");
     });
 }
-
 #[test]
 #[ignore = "TODO: legacy ConPTY cmd.exe exits with STATUS_DLL_INIT_FAILED in CI"]
 fn legacy_tty_cmd_emits_output_and_accepts_input() {
@@ -1092,65 +1137,10 @@ fn legacy_tty_cmd_emits_output_and_accepts_input() {
             &[],
             /*tty*/ true,
             /*stdin_open*/ true,
-            /*use_private_desktop*/ true,
         )
         .await
         .expect("spawn legacy tty cmd session");
         println!("tty cmd spawn returned");
-
-        let writer = spawned.session.writer_sender();
-        writer
-            .send(b"echo second\n".to_vec())
-            .await
-            .expect("send second command");
-        writer
-            .send(b"exit\n".to_vec())
-            .await
-            .expect("send exit command");
-        spawned.session.close_stdin();
-
-        let (stdout, exit_code) =
-            collect_stdout_and_exit(spawned, sandbox_home.path(), Duration::from_secs(15)).await;
-        let stdout = String::from_utf8_lossy(&stdout);
-        assert_eq!(exit_code, 0, "stdout={stdout:?}");
-        assert!(stdout.contains("ready"), "stdout={stdout:?}");
-        assert!(stdout.contains("second"), "stdout={stdout:?}");
-    });
-}
-
-#[test]
-#[ignore = "TODO: legacy ConPTY cmd.exe exits with STATUS_DLL_INIT_FAILED in CI"]
-fn legacy_tty_cmd_default_desktop_emits_output_and_accepts_input() {
-    let runtime = current_thread_runtime();
-    runtime.block_on(async move {
-        let cwd = sandbox_cwd();
-        let sandbox_home = sandbox_home("legacy-tty-cmd-default-desktop");
-        println!(
-            "tty cmd default desktop sandbox_home={}",
-            sandbox_home.path().display()
-        );
-        let permission_profile = PermissionProfile::workspace_write();
-        let spawned = spawn_windows_sandbox_session_legacy(
-            &permission_profile,
-            workspace_roots_for(cwd.as_path()).as_slice(),
-            sandbox_home.path(),
-            vec![
-                "C:\\Windows\\System32\\cmd.exe".to_string(),
-                "/K".to_string(),
-                "echo ready".to_string(),
-            ],
-            cwd.as_path(),
-            HashMap::new(),
-            Some(10_000),
-            &[],
-            &[],
-            /*tty*/ true,
-            /*stdin_open*/ true,
-            /*use_private_desktop*/ false,
-        )
-        .await
-        .expect("spawn legacy tty cmd session");
-        println!("tty cmd default desktop spawn returned");
 
         let writer = spawned.session.writer_sender();
         writer

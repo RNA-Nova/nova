@@ -39,7 +39,6 @@ pub enum SandboxType {
     LinuxSeccomp,
     WindowsRestrictedToken,
     /// MXC 是独立的 Windows 沙箱实现而非受限令牌层级（对位 codex 同名变体）。
-    /// nova 未移植实现本体：沙箱选择永不产出该值，transform 显式拒绝。
     WindowsMxc,
 }
 
@@ -140,7 +139,7 @@ pub struct SandboxTransformRequest<'a> {
     // to make shared ownership explicit across runtime/sandbox plumbing.
     pub network: Option<&'a NetworkProxy>,
     pub sandbox_policy_cwd: &'a PathUri,
-    pub nova_linux_sandbox_exe: Option<&'a Path>,
+    pub sandbox_exe: Option<&'a Path>,
     pub use_legacy_landlock: bool,
     pub windows_sandbox_level: WindowsSandboxLevel,
 }
@@ -317,15 +316,19 @@ impl SandboxManager {
         &self,
         permission_profile: &PermissionProfile,
         pref: SandboxablePreference,
-        windows_sandbox_level: WindowsSandboxLevel,
+        windows_sandbox_type: SandboxType,
         has_managed_network_requirements: bool,
     ) -> SandboxType {
-        if self.should_sandbox(permission_profile, pref, has_managed_network_requirements) {
-            get_platform_sandbox(windows_sandbox_level != WindowsSandboxLevel::Disabled)
-                .unwrap_or(SandboxType::None)
-        } else {
-            SandboxType::None
+        #[cfg(windows)]
+        crate::windows_mxc::record_availability_once();
+
+        if !self.should_sandbox(permission_profile, pref, has_managed_network_requirements) {
+            return SandboxType::None;
         }
+        if cfg!(windows) && windows_sandbox_type == SandboxType::WindowsMxc {
+            return SandboxType::WindowsMxc;
+        }
+        get_platform_sandbox(windows_sandbox_type != SandboxType::None).unwrap_or(SandboxType::None)
     }
 
     /// Returns whether the request needs a sandbox, independently of whether
@@ -363,7 +366,7 @@ impl SandboxManager {
             environment_id,
             network,
             sandbox_policy_cwd,
-            nova_linux_sandbox_exe,
+            sandbox_exe,
             use_legacy_landlock,
             windows_sandbox_level,
         } = request;
@@ -429,7 +432,7 @@ impl SandboxManager {
             SandboxType::MacosSeatbelt => return Err(SandboxTransformError::SeatbeltUnavailable),
             SandboxType::LinuxSeccomp => {
                 let pending = pending_sandboxed_request?;
-                let exe = nova_linux_sandbox_exe
+                let exe = sandbox_exe
                     .ok_or(SandboxTransformError::MissingLinuxSandboxExecutable)?;
                 // 托管网络要求下：调用方未带上下文而现场代理可用时，就地准备
                 // env 与沙箱上下文（对位 codex 99914f4950；exec-server 路径已在
@@ -498,12 +501,53 @@ impl SandboxManager {
                 None,
                 Some(pending_sandboxed_request?),
             ),
-            // MXC 实现本体未移植（选择层在 exec-server 侧已先行拒绝，
-            // 此臂为防御性兜底，对位 codex 的 WindowsMxcPreparation 拒绝语义）。
+            // 对位 codex c379459bba：经 executor 自身 exe + MXC launcher 参数
+            // 包装 argv（helper 侧即 windows_mxc::run_main 入口）。
             SandboxType::WindowsMxc => {
-                return Err(SandboxTransformError::WindowsMxcPreparation(
-                    "native MXC is unavailable on this executor".to_string(),
-                ));
+                if !nova_exec_server_mxc_sandbox::is_available() {
+                    return Err(SandboxTransformError::WindowsMxcPreparation(
+                        "native MXC is unavailable on this executor".to_string(),
+                    ));
+                }
+                if enforce_managed_network && command.managed_network.is_none() {
+                    let network = network.ok_or_else(|| {
+                        SandboxTransformError::WindowsMxcPreparation(
+                            "managed networking requires an executor-local proxy".to_string(),
+                        )
+                    })?;
+                    let prepared = network
+                        .prepare_for_optional_environment(
+                            std::mem::take(&mut command.env),
+                            environment_id,
+                        )
+                        .map_err(|err| {
+                            SandboxTransformError::EnvironmentNetworkProxy(err.to_string())
+                        })?;
+                    command.env = prepared.env;
+                    command.managed_network = Some(prepared.sandbox_context);
+                }
+                let managed_network = command.managed_network.filter(|_| enforce_managed_network);
+                let pending = pending_sandboxed_request?;
+                let exe = sandbox_exe.ok_or_else(|| {
+                    SandboxTransformError::WindowsMxcPreparation(
+                        "missing nova executable path".to_string(),
+                    )
+                })?;
+                let mut full_command =
+                    vec![os_string_to_command_component(exe.as_os_str().to_owned())];
+                full_command.extend(
+                    nova_exec_server_mxc_sandbox::create_command_args(
+                        nova_exec_server_mxc_sandbox::CreateMxcCommandArgsParams {
+                            command: os_argv_to_strings(argv),
+                            permission_profile: &pending.effective_permission_profile,
+                            sandbox_policy_cwd: pending.native_sandbox_policy_cwd.as_path(),
+                            managed_network: managed_network.as_ref(),
+                            env: &mut command.env,
+                        },
+                    )
+                    .map_err(|err| SandboxTransformError::WindowsMxcPreparation(err.to_string()))?,
+                );
+                (full_command, None, Some(pending))
             }
         };
 
@@ -652,12 +696,9 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
             inner_command,
             &native_cwd,
             workspace_roots,
-            &request.env,
+            &mut request.env,
             &request.permission_profile,
             request.windows_sandbox_level,
-            // 传统 Windows 沙箱总是使用私有桌面（对位 codex a633ebc124：
-            // 线上 windowsSandboxPrivateDesktop 字段与退出选项已删除）
-            /*windows_sandbox_private_desktop*/ true,
             proxy_enforced,
             network_proxy_restricting_sid.as_deref(),
             proxy_settings_mode,
@@ -667,7 +708,8 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
             deny_read_paths_override,
             deny_write_paths_override,
             executor_home,
-        );
+        )
+        .map_err(|err| SandboxTransformError::WindowsSandboxPreparation(err.to_string()))?;
 
     request.command = Vec::with_capacity(1 + wrapper_args.len());
     request.command.push(source.to_string_lossy().into_owned());

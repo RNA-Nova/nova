@@ -1,0 +1,40 @@
+[package]
+name = "nova-exec-server-mxc-sandbox"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_exec_server_mxc_sandbox"
+path = "src/lib.rs"
+doctest = false
+
+# wxc_common 传递依赖里的 ETW crate 在 GNU Windows 工具链下需要 1.2.3
+# （1.2.4 引入 OneCore_apiset，GNU 工具链不带该导入库）——对位 codex 的 pin。
+[dependencies]
+anyhow = { workspace = true }
+nova-exec-server-network-proxy = { path = "../exec-server-network-proxy" }
+nova-exec-server-protocol-core = { path = "../exec-server-protocol-core" }
+nova-exec-server-utils-absolute-path = { path = "../exec-server-utils-absolute-path" }
+nova-exec-server-utils-path-uri = { path = "../exec-server-utils-path-uri" }
+nova-exec-server-windows-sandbox = { path = "../exec-server-windows-sandbox" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+wxc_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
+
+[target.'cfg(windows)'.dependencies]
+appcontainer_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
+learning_mode_windows = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
+tracelogging = "=1.2.3"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_SystemInformation",
+    "Win32_UI_Shell",
+] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

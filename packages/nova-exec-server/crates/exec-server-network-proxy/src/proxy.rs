@@ -112,12 +112,27 @@ impl ReservedListenerSet {
     }
 }
 
+/// Selects how managed sandbox clients reach their logical proxy instance.
+///
+/// 对位 codex `ManagedProxyRouting`。裁点：nova 未移植 Windows 共享
+/// ingress（SID 归属路由），两种路由当前都使用既有的专用 loopback 监听；
+/// 该选择目前只影响 exec-server 侧的 restricting-SID 门控。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ManagedProxyRouting {
+    /// Use shared SID-attributed ingress when available and dedicated listeners otherwise.
+    #[default]
+    SharedIngress,
+    /// Reserve private loopback TCP ports for sandboxes that enforce endpoint access directly.
+    DedicatedListeners,
+}
+
 #[derive(Clone)]
 pub struct NetworkProxyBuilder {
     state: Option<Arc<NetworkProxyState>>,
     http_addr: Option<SocketAddr>,
     socks_addr: Option<SocketAddr>,
     managed_by_nova: bool,
+    managed_proxy_routing: ManagedProxyRouting,
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     blocked_request_observer: Option<Arc<dyn BlockedRequestObserver>>,
 }
@@ -126,6 +141,12 @@ impl NetworkProxyBuilder {
     /// 与 `Default` 相同的空构造器（stub 时代的既有入口，保留）。
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 对位 codex `NetworkProxyBuilder::managed_proxy_routing`。
+    pub fn managed_proxy_routing(mut self, managed_proxy_routing: ManagedProxyRouting) -> Self {
+        self.managed_proxy_routing = managed_proxy_routing;
+        self
     }
 
     pub fn state(mut self, state: Arc<NetworkProxyState>) -> Self {
@@ -224,6 +245,7 @@ impl NetworkProxyBuilder {
             socks5_udp_enabled: current_cfg.enable_socks5_udp,
             runtime_settings: Arc::new(RwLock::new(runtime_settings)),
             reserved_listeners,
+            managed_proxy_routing: self.managed_proxy_routing,
             policy_decider: self.policy_decider,
             environment_proxies: Arc::new(Mutex::new(HashMap::new())),
             execution_scope: None,
@@ -238,6 +260,7 @@ impl Default for NetworkProxyBuilder {
             http_addr: None,
             socks_addr: None,
             managed_by_nova: true,
+            managed_proxy_routing: ManagedProxyRouting::default(),
             policy_decider: None,
             blocked_request_observer: None,
         }
@@ -315,6 +338,7 @@ pub struct NetworkProxy {
     socks5_udp_enabled: bool,
     runtime_settings: Arc<RwLock<NetworkProxyRuntimeSettings>>,
     reserved_listeners: Option<Arc<ReservedListeners>>,
+    managed_proxy_routing: ManagedProxyRouting,
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     environment_proxies: Arc<Mutex<HashMap<String, EnvironmentProxy>>>,
     execution_scope: Option<Arc<ExecutionScope>>,
@@ -334,6 +358,7 @@ impl PartialEq for NetworkProxy {
     fn eq(&self, other: &Self) -> bool {
         self.http_addr == other.http_addr
             && self.socks_addr() == other.socks_addr()
+            && self.managed_proxy_routing == other.managed_proxy_routing
             && self.runtime_settings() == other.runtime_settings()
     }
 }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_network_proxy::CUSTOM_CA_ENV_KEYS;
 use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
+use nova_exec_server_network_proxy::ManagedProxyRouting;
 use nova_exec_server_network_proxy::NetworkPolicyAuditObserver;
 use nova_exec_server_network_proxy::NetworkPolicyDecider;
 use nova_exec_server_network_proxy::NetworkProxy;
@@ -14,13 +15,13 @@ use nova_exec_server_network_proxy::is_managed_mitm_ca_trust_bundle_path;
 #[cfg(target_os = "windows")]
 use nova_exec_server_network_proxy::strip_managed_proxy_env;
 use nova_exec_server_protocol::JSONRPCErrorError;
+use nova_exec_server_protocol_core::config_types::WindowsSandboxLevel;
 use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_sandboxing::SandboxCommand;
 use nova_exec_server_sandboxing::SandboxDirectSpawnTransformRequest;
 use nova_exec_server_sandboxing::SandboxManager;
 use nova_exec_server_sandboxing::SandboxTransformRequest;
 use nova_exec_server_sandboxing::SandboxType;
-use nova_exec_server_sandboxing::SandboxablePreference;
 use nova_exec_server_sandboxing::WindowsSandboxFilesystemOverrides;
 use nova_exec_server_sandboxing::WindowsSandboxProxySettingsMode;
 use nova_exec_server_sandboxing::WindowsSandboxSpawnRequest;
@@ -28,6 +29,8 @@ use nova_exec_server_sandboxing::resolve_windows_elevated_filesystem_overrides;
 use nova_exec_server_sandboxing::resolve_windows_restricted_token_filesystem_overrides;
 use nova_exec_server_sandboxing::windows_sandbox_uses_elevated_backend;
 use nova_exec_server_sandboxing::with_managed_mitm_ca_readable_root;
+#[cfg(windows)]
+use nova_exec_server_shell_command::shell_detect::fallback_powershell_shell_for_windows_sandbox;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_path_uri::PathUri;
 
@@ -37,6 +40,9 @@ use crate::NOVA_EXEC_SERVER_ARG0_EXEC_HELPER_ARG1;
 use crate::protocol::ExecParams;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
+use crate::sandbox_selection::select_sandbox;
+#[cfg(windows)]
+use std::path::Path;
 
 pub(crate) struct PreparedExecRequest {
     pub(crate) command: Vec<String>,
@@ -51,7 +57,7 @@ pub(crate) struct PreparedExecRequest {
 struct PreparedWindowsSandboxRequest {
     permission_profile: PermissionProfile,
     workspace_roots: Vec<AbsolutePathBuf>,
-    windows_sandbox_level: nova_exec_server_protocol_core::config_types::WindowsSandboxLevel,
+    windows_sandbox_level: WindowsSandboxLevel,
     proxy_enforced: bool,
     network_proxy_restricting_sid: Option<String>,
     proxy_settings_mode: WindowsSandboxProxySettingsMode,
@@ -84,11 +90,18 @@ pub(crate) async fn prepare_exec_request(
     if let Some(sandbox) = params.sandbox.as_ref()
         && sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
     {
-        // MXC 实现本体未移植（只收线上枚举值）——对位 codex 的
-        // windows_mxc_available() 不可用拒绝，文案与上游一致。
-        return Err(invalid_params(
-            "native MXC is unavailable on this executor".to_owned(),
-        ));
+        // 对位 codex c379459bba 的入口检查：自定义 argv0 不支持；
+        // 可用性以 MXC 的 PSEC create/close 探测为准。
+        if params.arg0.is_some() {
+            return Err(invalid_params(
+                "MXC custom argv0 is not supported".to_owned(),
+            ));
+        }
+        if !nova_exec_server_sandboxing::windows_mxc_available() {
+            return Err(invalid_params(
+                "native MXC is unavailable on this executor".to_owned(),
+            ));
+        }
     }
     #[cfg(target_os = "windows")]
     let mut env = env;
@@ -108,7 +121,7 @@ pub(crate) async fn prepare_exec_request(
 
     let (env, managed_network, network_proxy_handle, network_proxy_restricting_sid) =
         prepare_managed_network(
-            params.managed_network.as_ref(),
+            params,
             network_proxy,
             env,
             network_policy_decider,
@@ -194,16 +207,10 @@ pub(crate) async fn prepare_exec_request(
     #[cfg(target_os = "macos")]
     let sandbox_manager = sandbox_manager
         .with_allowed_symlinked_nova_home(runtime_paths.allowed_symlinked_nova_home.clone());
-    // 选择项 → 受限令牌层级：Mxc 已在函数入口拒绝，此处仅为防御性转换
-    // （对位 codex sandbox_selection::select_sandbox 的拆分语义）。
-    let windows_sandbox_level = sandbox_context
-        .windows_sandbox_selection
-        .restricted_token_level()
-        .ok_or_else(|| invalid_params("native MXC is unavailable on this executor".to_string()))?;
-    let sandbox = sandbox_manager.select_initial(
+    let (sandbox, windows_sandbox_level) = select_sandbox(
+        &sandbox_manager,
         &permissions,
-        SandboxablePreference::Require,
-        windows_sandbox_level,
+        sandbox_context,
         params.enforce_managed_network,
     );
     if sandbox == SandboxType::None {
@@ -235,6 +242,20 @@ pub(crate) async fn prepare_exec_request(
     );
     #[cfg(not(unix))]
     let (program, args) = (program.into(), args.to_vec());
+    #[cfg(windows)]
+    let program = if matches!(
+        sandbox_context.windows_sandbox_selection,
+        WindowsSandboxSelection::Elevated | WindowsSandboxSelection::Mxc
+    ) && Path::new(&program).file_stem().is_some_and(|name| {
+        name.eq_ignore_ascii_case("pwsh") || name.eq_ignore_ascii_case("powershell")
+    }) && let Some(fallback) =
+        fallback_powershell_shell_for_windows_sandbox(Path::new(&program))
+    {
+        // Remote controllers cannot resolve a sandbox-compatible shell on this host.
+        fallback.shell_path.into_os_string()
+    } else {
+        program
+    };
     let transform_request = SandboxDirectSpawnTransformRequest {
         workspace_roots,
         windows_sandbox_proxy_settings_mode,
@@ -253,9 +274,13 @@ pub(crate) async fn prepare_exec_request(
             environment_id: None,
             network: None,
             sandbox_policy_cwd,
-            nova_linux_sandbox_exe: runtime_paths.executor_linux_sandbox_exe.as_deref(),
+            sandbox_exe: if cfg!(windows) {
+                Some(runtime_paths.executor_self_exe.as_path())
+            } else {
+                runtime_paths.executor_linux_sandbox_exe.as_deref()
+            },
             use_legacy_landlock: sandbox_context.use_legacy_landlock,
-            windows_sandbox_level,
+            windows_sandbox_level: windows_sandbox_level.unwrap_or(WindowsSandboxLevel::Disabled),
         },
     };
     let mut request = if sandbox == SandboxType::WindowsRestrictedToken {
@@ -266,6 +291,9 @@ pub(crate) async fn prepare_exec_request(
     }
     .map_err(|err| invalid_params(format!("failed to prepare process sandbox: {err}")))?;
     let windows_sandbox = if sandbox == SandboxType::WindowsRestrictedToken {
+        let windows_sandbox_level = windows_sandbox_level.ok_or_else(|| {
+            invalid_params("restricted token sandbox requires a sandbox level".to_string())
+        })?;
         request.arg0 = params.arg0.clone();
         let proxy_enforced = params.enforce_managed_network;
         let use_elevated = windows_sandbox_uses_elevated_backend(windows_sandbox_level);
@@ -309,7 +337,7 @@ pub(crate) async fn prepare_exec_request(
 }
 
 async fn prepare_managed_network(
-    managed_network: Option<&ManagedNetworkSandboxContext>,
+    params: &ExecParams,
     network_proxy: Option<&RemoteNetworkProxyLaunchConfig>,
     env: HashMap<String, String>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
@@ -324,14 +352,26 @@ async fn prepare_managed_network(
     JSONRPCErrorError,
 > {
     let Some(network_proxy) = network_proxy.cloned() else {
-        return Ok((env, managed_network.cloned(), None, None));
+        return Ok((env, params.managed_network.clone(), None, None));
+    };
+    // 对位 codex a5c15ab5c0：MXC 选择专用 loopback 监听（其策略按端口放行
+    // loopback），其余选择共享 ingress。nova 尚无共享 ingress 实现——
+    // SharedIngress 的 restricting SID 取自未移植裁点，行为与既有桩一致。
+    let routing = if params.sandbox.as_ref().is_some_and(|sandbox| {
+        sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
+    }) {
+        ManagedProxyRouting::DedicatedListeners
+    } else {
+        ManagedProxyRouting::SharedIngress
     };
     let mut state = NetworkProxyState::from_remote_launch_config(network_proxy)
         .map_err(|err| invalid_params(format!("invalid network proxy config: {err}")))?;
     if let Some(observer) = network_policy_audit_observer {
         state.set_policy_audit_observer(observer);
     }
-    let mut builder = NetworkProxy::builder().state(Arc::new(state));
+    let mut builder = NetworkProxy::builder()
+        .state(Arc::new(state))
+        .managed_proxy_routing(routing);
     if let Some(network_policy_decider) = network_policy_decider {
         builder = builder.policy_decider_arc(network_policy_decider);
     }
@@ -344,15 +384,19 @@ async fn prepare_managed_network(
         .await
         .map_err(|err| internal_error(format!("failed to start executor network proxy: {err}")))?;
     #[cfg(target_os = "windows")]
-    let network_proxy_restricting_sid = Some(
-        proxy
-            .network_proxy_restricting_sid(/*environment_id*/ None)
-            .ok_or_else(|| {
-                internal_error(
-                    "managed Windows proxy route is missing its restricting SID".to_string(),
-                )
-            })?,
-    );
+    let network_proxy_restricting_sid = if routing == ManagedProxyRouting::SharedIngress {
+        Some(
+            proxy
+                .network_proxy_restricting_sid(/*environment_id*/ None)
+                .ok_or_else(|| {
+                    internal_error(
+                        "managed Windows proxy route is missing its restricting SID".to_string(),
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
     #[cfg(not(target_os = "windows"))]
     let network_proxy_restricting_sid = None;
     let prepared = proxy

@@ -79,9 +79,6 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
                     }),
                     tty: request.tty,
                     stdin_open: request.stdin_open,
-                    // 传统 Windows 沙箱总是使用私有桌面（对位 codex a633ebc124：
-                    // 私有桌面退出选项已删除）
-                    use_private_desktop: true,
                 },
             )
             .await;

@@ -9,6 +9,8 @@ pub mod seatbelt;
 mod spawn;
 mod violation;
 mod windows;
+#[cfg(windows)]
+mod windows_mxc;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::find_system_bwrap_in_path;
@@ -17,6 +19,9 @@ pub use bwrap::system_bwrap_warning;
 pub use denial::is_likely_executor_managed_sandbox_denied;
 pub use denial::is_likely_sandbox_denied;
 pub use manager::SandboxCommand;
+pub use nova_exec_server_mxc_sandbox::NOVA_EXEC_SERVER_WINDOWS_MXC_ARG1;
+pub use nova_exec_server_mxc_sandbox::is_available as windows_mxc_available;
+pub use nova_exec_server_mxc_sandbox::run_main as run_windows_mxc_main;
 pub use manager::SandboxDirectSpawnTransformRequest;
 pub use manager::SandboxExecRequest;
 pub use manager::SandboxManager;

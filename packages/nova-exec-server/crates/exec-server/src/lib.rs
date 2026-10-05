@@ -24,6 +24,7 @@ mod remote_file_system;
 mod remote_process;
 mod rpc;
 mod rpc_server_requests;
+mod sandbox_selection;
 mod runtime_paths;
 mod sandboxed_file_open;
 mod sandboxed_file_system;

@@ -20,6 +20,7 @@ url = { workspace = true }
 nova-exec-server = { workspace = true }
 nova-exec-server-http-client = { workspace = true }
 nova-exec-server-otel = { workspace = true }
+nova-exec-server-sandboxing = { workspace = true }
 nova-exec-server-utils-home-dir = { workspace = true }
 
 [dev-dependencies]

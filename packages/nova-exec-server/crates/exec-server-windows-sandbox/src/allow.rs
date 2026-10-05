@@ -317,13 +317,15 @@ mod tests {
     }
 
     #[test]
-    fn denies_nova_metadata_inside_writable_root() {
+    fn denies_nova_metadata_and_aws_inside_writable_root() {
         let tmp = TempDir::new().expect("tempdir");
         let command_cwd = tmp.path().join("workspace");
         let nova_dir = command_cwd.join(".nova");
         let agents_dir = command_cwd.join(".agents");
+        let aws_dir = command_cwd.join(".aws");
         let _ = fs::create_dir_all(&nova_dir);
         let _ = fs::create_dir_all(&agents_dir);
+        let _ = fs::create_dir_all(&aws_dir);
 
         let permission_profile = workspace_write_profile(
             &[],
@@ -344,6 +346,7 @@ mod tests {
         let expected_deny: HashSet<PathBuf> = [
             dunce::canonicalize(&nova_dir).unwrap(),
             dunce::canonicalize(&agents_dir).unwrap(),
+            dunce::canonicalize(&aws_dir).unwrap(),
         ]
         .into_iter()
         .collect();

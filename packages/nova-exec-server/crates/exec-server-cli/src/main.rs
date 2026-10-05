@@ -94,6 +94,16 @@ fn main() -> Result<()> {
     let mut args = std::env::args_os();
     let _program = args.next();
     match args.next().as_deref() {
+        // MXC helper 入口对位 codex 42cd1ec497：先取 argv1 再分派，helper
+        // 解包环境传输后直接以子进程退出码退出。
+        Some(arg)
+            if arg
+                == std::ffi::OsStr::new(
+                    nova_exec_server_sandboxing::NOVA_EXEC_SERVER_WINDOWS_MXC_ARG1,
+                ) =>
+        {
+            nova_exec_server_sandboxing::run_windows_mxc_main();
+        }
         Some(arg) if arg == std::ffi::OsStr::new(nova_exec_server::NOVA_EXEC_SERVER_FS_HELPER_ARG1) => {
             nova_exec_server::run_fs_helper_main();
         }

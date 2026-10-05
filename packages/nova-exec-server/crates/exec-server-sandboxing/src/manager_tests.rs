@@ -33,7 +33,7 @@ fn danger_full_access_defaults_to_no_sandbox_without_network_requirements() {
     let sandbox = manager.select_initial(
         &PermissionProfile::Disabled,
         SandboxablePreference::Auto,
-        WindowsSandboxLevel::Disabled,
+        SandboxType::None,
         /*has_managed_network_requirements*/ false,
     );
     assert_eq!(sandbox, SandboxType::None);
@@ -47,7 +47,7 @@ fn danger_full_access_uses_platform_sandbox_with_network_requirements() {
     let sandbox = manager.select_initial(
         &PermissionProfile::Disabled,
         SandboxablePreference::Auto,
-        WindowsSandboxLevel::Disabled,
+        SandboxType::None,
         /*has_managed_network_requirements*/ true,
     );
     assert_eq!(sandbox, expected);
@@ -71,9 +71,27 @@ fn restricted_file_system_uses_platform_sandbox_without_managed_network() {
     let sandbox = manager.select_initial(
         &permissions,
         SandboxablePreference::Auto,
-        WindowsSandboxLevel::Disabled,
+        SandboxType::None,
         /*has_managed_network_requirements*/ false,
     );
+    assert_eq!(sandbox, expected);
+}
+
+// 对位 codex c379459bba：显式 WindowsMxc 只在 Windows 上覆盖平台沙箱。
+#[test]
+fn explicit_mxc_only_overrides_the_windows_sandbox() {
+    let manager = SandboxManager::new();
+    let sandbox = manager.select_initial(
+        &PermissionProfile::read_only(),
+        SandboxablePreference::Auto,
+        SandboxType::WindowsMxc,
+        /*has_managed_network_requirements*/ false,
+    );
+    let expected = if cfg!(windows) {
+        SandboxType::WindowsMxc
+    } else {
+        get_platform_sandbox(/*windows_sandbox_enabled*/ false).unwrap_or(SandboxType::None)
+    };
     assert_eq!(sandbox, expected);
 }
 
@@ -105,7 +123,7 @@ fn unsandboxed_transform_preserves_foreign_cwd_and_unrestricted_file_system_poli
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            nova_linux_sandbox_exe: None,
+            sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -161,7 +179,7 @@ fn symlinked_workspace_reports_seatbelt_preparation_error() {
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &workspace_uri,
-            nova_linux_sandbox_exe: None,
+            sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -215,7 +233,7 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            nova_linux_sandbox_exe: None,
+            sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -287,7 +305,7 @@ fn transform_additional_permissions_preserves_denied_entries() {
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            nova_linux_sandbox_exe: None,
+            sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -368,7 +386,7 @@ fn managed_mitm_ca_bundle_becomes_readable_for_restricted_sandbox() {
 
 #[cfg(target_os = "linux")]
 fn transform_linux_seccomp_request(
-    nova_linux_sandbox_exe: &std::path::Path,
+    sandbox_exe: &std::path::Path,
 ) -> super::SandboxExecRequest {
     let manager = SandboxManager::new();
     let cwd = AbsolutePathBuf::current_dir().expect("current dir");
@@ -390,7 +408,7 @@ fn transform_linux_seccomp_request(
             environment_id: None,
             network: None,
             sandbox_policy_cwd: &cwd_uri,
-            nova_linux_sandbox_exe: Some(nova_linux_sandbox_exe),
+            sandbox_exe: Some(nova_linux_sandbox_exe),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -601,7 +619,7 @@ async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Resu
             environment_id: None,
             network: live_proxy.then_some(&network),
             sandbox_policy_cwd: &cwd_uri,
-            nova_linux_sandbox_exe: Some(std::path::Path::new("/tmp/nova-linux-sandbox")),
+            sandbox_exe: Some(std::path::Path::new("/tmp/nova-linux-sandbox")),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })?;
@@ -713,7 +731,7 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
                     environment_id: None,
                     network: None,
                     sandbox_policy_cwd: &cwd_uri,
-                    nova_linux_sandbox_exe: None,
+                    sandbox_exe: None,
                     use_legacy_landlock: false,
                     windows_sandbox_level: WindowsSandboxLevel::Elevated,
                 },

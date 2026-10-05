@@ -11,7 +11,9 @@ doctest = false
 
 [dependencies]
 anyhow = { workspace = true }
+nova-exec-server-mxc-sandbox = { path = "../exec-server-mxc-sandbox" }
 nova-exec-server-network-proxy = { path = "../exec-server-network-proxy" }
+nova-exec-server-otel = { path = "../exec-server-otel" }
 nova-exec-server-protocol-core = { path = "../exec-server-protocol-core" }
 nova-exec-server-utils-absolute-path = { path = "../exec-server-utils-absolute-path" }
 nova-exec-server-utils-path-uri = { path = "../exec-server-utils-path-uri" }

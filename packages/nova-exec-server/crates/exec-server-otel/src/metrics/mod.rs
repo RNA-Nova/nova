@@ -12,11 +12,13 @@ pub use crate::metrics::config::MetricsExporter;
 pub use crate::metrics::error::MetricsError;
 pub use crate::metrics::error::Result;
 pub use crate::metrics::timer::Timer;
+use crate::config::StatsigMetricsSettings;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::RwLock;
 
 static GLOBAL_METRICS: OnceLock<MetricsClient> = OnceLock::new();
+static GLOBAL_STATSIG_METRICS_SETTINGS: OnceLock<StatsigMetricsSettings> = OnceLock::new();
 
 pub(crate) fn install_global(mut metrics: MetricsClient) -> MetricsClient {
     let active = GLOBAL_METRICS
@@ -34,4 +36,16 @@ pub(crate) fn install_global(mut metrics: MetricsClient) -> MetricsClient {
 
 pub fn global() -> Option<MetricsClient> {
     GLOBAL_METRICS.get().cloned()
+}
+
+#[allow(dead_code)] // 对位 codex `install_global_statsig_settings`；nova 侧暂无安装方
+pub(crate) fn install_global_statsig_settings(settings: StatsigMetricsSettings) {
+    let _ = GLOBAL_STATSIG_METRICS_SETTINGS.set(settings);
+}
+
+/// 对位 codex `global_statsig_settings`。codex 另有一层
+/// `metrics.active_inner().network_policy.is_managed()` 门控（托管网络下扣留
+/// settings）——nova 的 MetricsClientInner 无 network_policy 字段，该门控未移植。
+pub(crate) fn global_statsig_settings() -> Option<StatsigMetricsSettings> {
+    GLOBAL_STATSIG_METRICS_SETTINGS.get().cloned()
 }

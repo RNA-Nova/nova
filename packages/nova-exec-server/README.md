@@ -1,6 +1,6 @@
-# nova-executor
+# nova-exec-server
 
-`nova-executor` 是 Nova 的通用执行后端，从 OpenAI Codex 的 `codex-exec-server`
+`nova-exec-server` 是 Nova 的通用执行后端，从 OpenAI Codex 的 `codex-exec-server`
 抽离并独立化。**编程无绑定**：不知道 agent/模型/工具/会话概念；线上协议
 （[PROTOCOL.md](./PROTOCOL.md)）即产品，任何语言照协议可实现客户端。
 
@@ -69,7 +69,7 @@ metrics_exporter = { OtlpGrpc = { endpoint = "http://127.0.0.1:4317" } }
 # 或 HTTP：metrics_exporter = { OtlpHttp = { endpoint = "...", protocol = "Json" } }
 ```
 
-daemon 启动时读取并装配 provider（`executor-otel::load_otel_settings` +
+daemon 启动时读取并装配 provider（`nova-exec-server-otel` 的 `load_otel_settings` +
 `OtelProvider::try_new`，对位 codex `build_provider`），退出时 flush。
 本批只接 metrics 出口（`exporter`/`trace_exporter` 字段暂忽略并告警——
 traces/logs 接线归后续批次）。
@@ -81,20 +81,20 @@ subprocess ↔ executor 同缝切换），工具契约不变。
 
 - Python SDK：`packages/nova-exec-server-client`（`ExecutorClient`，只做连接；
   传输双形态 + 恢复 + 控制/数据面分离 + 网络裁决回调）
-- 协议版本：`initialize` 响应携带 `protocolVersion`（major 不等即不兼容，当前 v1.4）
+- 协议版本：`initialize` 响应携带 `protocolVersion`（major 不等即不兼容，当前 v1.7）
 
 ## 开发
 
 ```sh
 cargo build --workspace          # 编译
-cargo test --workspace           # 测试（含 executor-server 端到端集成套件）
-cargo test -p nova-exec-server-server --test initialize   # 单套件
+cargo test --workspace           # 测试（含 exec-server 端到端集成套件）
+cargo test -p nova-exec-server --test initialize   # 单套件
 cargo run -p nova-exec-server-cli -- --listen ws://127.0.0.1:8080   # 运行 CLI
 ```
 
 ### 集成测试基建（fork 自 codex exec-server）
 
-`crates/executor-server/tests/` 是端到端集成测试：`tests/common/` 夹具把测试
+`crates/exec-server/tests/` 是端到端集成测试：`tests/common/` 夹具把测试
 二进制自身经 `#[ctor]` 隐藏入口分派兼任服务器与沙箱 helper（argv 哨兵），
 `ExecServerHarness` 负责起子进程、读 listen URL、WS 连接与 JSON-RPC 收发。
 与 codex 的差异：不引入 Bazel 专用 test-binary-support/arg0 alias 机械。
@@ -103,21 +103,22 @@ cargo run -p nova-exec-server-cli -- --listen ws://127.0.0.1:8080   # 运行 CLI
 
 ```
 crates/
-├── executor-protocol/          # 线上协议类型（initialize/process/fs/http/environment/网络策略）
-├── executor-protocol-core/     # 基础协议类型（权限/路径/环境子集——agent 语义已移除）
-├── executor-server/            # JSON-RPC server（ws/stdio）+ 进程/文件系统/网络沙箱接线
-├── executor-cli/               # 独立 CLI 入口（隐藏 helper 模式分派）
-├── executor-file-system/       # 文件系统抽象与沙箱上下文
-├── executor-sandboxing/        # 沙箱策略编译（seatbelt 策略生成/landlock/共享机械）
-├── executor-linux-sandbox/     # Linux 沙箱 helper（bwrap+landlock+seccomp）
-├── executor-windows-sandbox/   # Windows 沙箱后端（restricted token/elevated/WFP）
-├── executor-network-proxy/     # 托管网络代理（HTTP CONNECT/SOCKS5 + 域名策略 + 审计）
-├── executor-http-client/       # HTTP 客户端（http/request 代发底座）
-├── executor-websocket-client/  # WebSocket 客户端
-├── executor-otel/              # OpenTelemetry 基建（指标/链路导出）
-├── executor-shell-command/     # shell 命令处理（快照/检测）
-├── executor-utils-*/           # 工具库（absolute-path/cargo-bin/home-dir/path-uri/pty/string/rustls-provider/async-utils）
-└── Cargo.toml                  # workspace 配置
+├── exec-server-protocol/          # 线上协议类型（initialize/process/fs/http/environment/网络策略）
+├── exec-server-protocol-core/     # 基础协议类型（权限/路径/环境子集——agent 语义已移除）
+├── exec-server/                   # JSON-RPC server（ws/stdio）+ 进程/文件系统/网络沙箱接线
+├── exec-server-cli/               # 独立 CLI 入口（隐藏 helper 模式分派）
+├── exec-server-file-system/       # 文件系统抽象与沙箱上下文
+├── exec-server-sandboxing/        # 沙箱策略编译（seatbelt 策略生成/landlock/共享机械）
+├── exec-server-linux-sandbox/     # Linux 沙箱 helper（bwrap+landlock+seccomp）
+├── exec-server-windows-sandbox/   # Windows 沙箱后端（restricted token/elevated/WFP）
+├── exec-server-network-proxy/     # 托管网络代理（HTTP CONNECT/SOCKS5 + 域名策略 + 审计）
+├── exec-server-http-client/       # HTTP 客户端（http/request 代发底座）
+├── exec-server-websocket-client/  # WebSocket 客户端
+├── exec-server-otel/              # OpenTelemetry 基建（指标/链路导出）
+├── exec-server-shell-command/     # shell 命令处理（快照/检测）
+├── exec-server-utils-*/           # 工具库 7 件（absolute-path/cargo-bin/home-dir/
+│                                  #   path-uri/pty/rustls-provider/string）
+└── Cargo.toml                     # workspace 配置
 ```
 
 ## 通用执行后端化（v1.0 清洗）

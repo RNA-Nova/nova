@@ -9,7 +9,7 @@
   只做回环承载，TLS 归上层隧道/中继层）
 - 版本协商：`initialize` 响应携带 `protocolVersion`（`"major.minor"`）；
   **major 不等即不兼容**（客户端应拒绝连接），minor 只增不减（新能力新字段）
-- 服务端版本常量：`crates/executor-protocol/src/lib.rs::PROTOCOL_VERSION`
+- 服务端版本常量：`crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION`
 - 鉴权：executor 只做本地回环（WS 回环 / stdio 承载），**无入站鉴权**；
   对外暴露与鉴权归上层中继层，不归 executor
 

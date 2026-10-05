@@ -1,9 +1,11 @@
+pub use crate::runtime_ownership::SetupRuntime;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::c_void;
+use std::os::windows::io::BorrowedHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -16,6 +18,7 @@ use std::sync::OnceLock;
 
 use crate::allow::AllowDenyPaths;
 use crate::allow::compute_allow_paths_for_permissions;
+use crate::app_package::registered_core_requested;
 use crate::deny_read_resolver::resolve_windows_deny_read_paths;
 use crate::helper_materialization::bundled_executable_path_for_exe;
 use crate::helper_materialization::helper_bin_dir;
@@ -234,6 +237,7 @@ pub fn run_setup_refresh(
     else {
         return Ok(());
     };
+    permissions.validate_elevated_filesystem_policy(command_cwd)?;
     let deny_read_paths =
         setup_refresh_deny_read_paths(permission_profile, workspace_roots, command_cwd)?;
     run_setup_refresh_inner(
@@ -249,6 +253,7 @@ pub fn run_setup_refresh(
             ..SetupRootOverrides::default()
         },
         /*offline_proxy_settings_override*/ None,
+        current_setup_runtime(),
     )
 }
 
@@ -257,7 +262,12 @@ pub(crate) fn run_setup_refresh_with_overrides_and_proxy_settings(
     overrides: SetupRootOverrides,
     offline_proxy_settings: &OfflineProxySettings,
 ) -> Result<()> {
-    run_setup_refresh_inner(request, overrides, Some(offline_proxy_settings))
+    run_setup_refresh_inner(
+        request,
+        overrides,
+        Some(offline_proxy_settings),
+        current_setup_runtime(),
+    )
 }
 
 pub fn run_setup_refresh_with_extra_read_roots(
@@ -277,9 +287,11 @@ pub fn run_setup_refresh_with_extra_read_roots(
     else {
         return Ok(());
     };
+    permissions.validate_elevated_filesystem_policy(command_cwd)?;
     let deny_read_paths =
         setup_refresh_deny_read_paths(permission_profile, workspace_roots, command_cwd)?;
-    let mut read_roots = gather_read_roots(command_cwd, &permissions, env_map, sandbox_home);
+    let runtime = current_setup_runtime();
+    let mut read_roots = gather_read_roots(command_cwd, &permissions, env_map, sandbox_home, runtime);
     read_roots.extend(extra_read_roots);
     run_setup_refresh_inner(
         SandboxSetupRequest {
@@ -297,6 +309,7 @@ pub fn run_setup_refresh_with_extra_read_roots(
             deny_write_paths: None,
         },
         /*offline_proxy_settings_override*/ None,
+        runtime,
     )
 }
 
@@ -323,11 +336,12 @@ fn run_setup_refresh_inner(
     request: SandboxSetupRequest<'_>,
     overrides: SetupRootOverrides,
     offline_proxy_settings_override: Option<&OfflineProxySettings>,
+    runtime: SetupRuntime,
 ) -> Result<()> {
-    if !request.permissions.is_enforceable_by_windows_sandbox() {
-        anyhow::bail!("unsupported filesystem permissions for Windows sandbox setup");
-    }
-    let (read_roots, write_roots) = build_payload_roots(&request, &overrides);
+    request
+        .permissions
+        .validate_elevated_filesystem_policy(request.command_cwd)?;
+    let (read_roots, write_roots) = build_payload_roots(&request, &overrides, runtime);
     let deny_read_paths = build_payload_deny_read_paths(overrides.deny_read_paths);
     let deny_write_paths = build_payload_deny_write_paths(&request, overrides.deny_write_paths);
     let offline_proxy_settings =
@@ -344,8 +358,13 @@ fn run_setup_refresh_inner(
         deny_write_paths,
         proxy_ports: offline_proxy_settings.proxy_ports,
         allow_local_binding: offline_proxy_settings.allow_local_binding,
-        real_user: std::env::var("USERNAME").unwrap_or_else(|_| "Administrators".to_string()),
+        otel: None,
+        real_user: crate::runtime_ownership::current_setup_user()?,
+        user_profile: std::env::var_os("USERPROFILE")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
         mode: SetupMode::Full,
+        runtime,
         refresh_only: true,
     };
     let json = serde_json::to_vec(&payload)?;
@@ -370,9 +389,9 @@ fn run_setup_refresh_payload(b64: &str, sandbox_home: &Path) -> Result<()> {
         }
     };
     // Refresh should never request elevation; ensure verb isn't set and we don't trigger UAC.
-    let mut cmd = Command::new(&exe);
-    cmd.arg(b64)
-        .stdin(Stdio::null())
+    let mut cmd = crate::background_command::background_command(&exe);
+    crate::launch_environment::configure_command(&mut cmd, b64)?;
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let cwd = std::env::current_dir().unwrap_or_else(|_| sandbox_home.to_path_buf());
@@ -448,8 +467,10 @@ impl SetupMarker {
         if !network_identity.uses_offline_identity() {
             return None;
         }
-        if self.proxy_ports == offline_proxy_settings.proxy_ports
-            && self.allow_local_binding == offline_proxy_settings.allow_local_binding
+        // Local-binding mode has no port-specific loopback rules, so changing proxy
+        // listeners does not require a firewall update while that mode stays enabled.
+        if self.allow_local_binding == offline_proxy_settings.allow_local_binding
+            && (self.allow_local_binding || self.proxy_ports == offline_proxy_settings.proxy_ports)
         {
             return None;
         }
@@ -546,7 +567,18 @@ fn profile_read_roots(user_profile: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn gather_helper_read_roots(sandbox_home: &Path) -> Vec<PathBuf> {
+pub(crate) fn current_setup_runtime() -> SetupRuntime {
+    if registered_core_requested() {
+        SetupRuntime::Registered
+    } else {
+        SetupRuntime::Legacy
+    }
+}
+
+fn gather_helper_read_roots(sandbox_home: &Path, runtime: SetupRuntime) -> Vec<PathBuf> {
+    if runtime == SetupRuntime::Registered {
+        return Vec::new();
+    }
     let helper_dir = helper_bin_dir(sandbox_home);
     let _ = std::fs::create_dir_all(&helper_dir);
     vec![helper_dir]
@@ -557,8 +589,9 @@ fn gather_full_read_roots_for_permissions(
     permissions: &ResolvedWindowsSandboxPermissions,
     env_map: &HashMap<String, String>,
     sandbox_home: &Path,
+    runtime: SetupRuntime,
 ) -> Vec<PathBuf> {
-    let mut roots = gather_helper_read_roots(sandbox_home);
+    let mut roots = gather_helper_read_roots(sandbox_home, runtime);
     roots.extend(
         WINDOWS_PLATFORM_DEFAULT_READ_ROOTS
             .iter()
@@ -588,6 +621,7 @@ pub(crate) fn gather_read_roots(
     permissions: &ResolvedWindowsSandboxPermissions,
     env_map: &HashMap<String, String>,
     sandbox_home: &Path,
+    runtime: SetupRuntime,
 ) -> Vec<PathBuf> {
     if permissions.has_symbolic_root_read_access(command_cwd) {
         return gather_full_read_roots_for_permissions(
@@ -595,10 +629,11 @@ pub(crate) fn gather_read_roots(
             permissions,
             env_map,
             sandbox_home,
+            runtime,
         );
     }
 
-    let mut roots = gather_helper_read_roots(sandbox_home);
+    let mut roots = gather_helper_read_roots(sandbox_home, runtime);
     if permissions.include_platform_defaults() {
         roots.extend(
             WINDOWS_PLATFORM_DEFAULT_READ_ROOTS
@@ -681,8 +716,13 @@ struct ElevationPayload {
     proxy_ports: Vec<u16>,
     #[serde(default)]
     allow_local_binding: bool,
+    otel: Option<nova_exec_server_otel::StatsigMetricsSettings>,
     real_user: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_profile: Option<PathBuf>,
     mode: SetupMode,
+    #[serde(default, skip_serializing_if = "SetupRuntime::is_legacy")]
+    runtime: SetupRuntime,
     #[serde(default)]
     refresh_only: bool,
 }
@@ -691,6 +731,7 @@ struct ElevationPayload {
 #[serde(rename_all = "kebab-case")]
 enum SetupMode {
     Full,
+    InteractiveProvision,
     ProvisionOnly,
 }
 
@@ -723,7 +764,7 @@ impl SandboxNetworkIdentity {
     }
 }
 
-const PROXY_ENV_KEYS: &[&str] = &[
+pub(crate) const PROXY_ENV_KEYS: &[&str] = &[
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "ALL_PROXY",
@@ -790,7 +831,7 @@ pub(crate) fn proxy_ports_from_env(env_map: &HashMap<String, String>) -> Vec<u16
     ports.into_iter().collect()
 }
 
-fn loopback_proxy_port_from_url(url: &str) -> Option<u16> {
+pub(crate) fn loopback_proxy_port_from_url(url: &str) -> Option<u16> {
     let authority = url.trim().split_once("://")?.1.split('/').next()?;
     let host_port = authority.rsplit_once('@').map_or(authority, |(_, hp)| hp);
 
@@ -890,10 +931,15 @@ fn verify_setup_completed(sandbox_home: &Path) -> Result<()> {
     }
 }
 
+#[cfg(test)]
+#[path = "setup_refresh_tests.rs"]
+mod refresh_tests;
+
 fn run_setup_exe(
     payload: &ElevationPayload,
     needs_elevation: bool,
     sandbox_home: &Path,
+    retained_handles: &[BorrowedHandle<'_>],
 ) -> Result<()> {
     let payload_json = serde_json::to_string(payload).map_err(|err| {
         failure(
@@ -902,8 +948,13 @@ fn run_setup_exe(
         )
     })?;
     let payload_b64 = BASE64_STANDARD.encode(payload_json.as_bytes());
+    if !retained_handles.is_empty() {
+        // Service requests are serialized and must not join a bare setup flight
+        // whose helper was started without these directory protections.
+        return run_setup_exe_payload(&payload_b64, needs_elevation, sandbox_home, retained_handles);
+    }
     run_setup_singleflight(payload_b64.clone(), || {
-        run_setup_exe_payload(&payload_b64, needs_elevation, sandbox_home)
+        run_setup_exe_payload(&payload_b64, needs_elevation, sandbox_home, retained_handles)
     })
 }
 
@@ -911,6 +962,7 @@ fn run_setup_exe_payload(
     payload_b64: &str,
     needs_elevation: bool,
     sandbox_home: &Path,
+    retained_handles: &[BorrowedHandle<'_>],
 ) -> Result<()> {
     use windows_sys::Win32::System::Threading::GetExitCodeProcess;
     use windows_sys::Win32::System::Threading::INFINITE;
@@ -934,19 +986,25 @@ fn run_setup_exe_payload(
     };
 
     if !needs_elevation {
-        let status = Command::new(&exe)
-            .arg(payload_b64)
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|err| {
-                failure(
-                    SetupErrorCode::OrchestratorHelperLaunchFailed,
-                    format!("failed to launch setup helper (non-elevated): {err}"),
-                )
-            })?;
+        let mut command = Command::new(&exe);
+        crate::launch_environment::configure_command(&mut command, payload_b64)?;
+        let status = if retained_handles.is_empty() {
+            command
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        } else {
+            crate::setup_launch::spawn_with_retained_handles(&mut command, retained_handles)
+                .and_then(|mut child| child.wait())
+        }
+        .map_err(|err| {
+            failure(
+                SetupErrorCode::OrchestratorHelperLaunchFailed,
+                format!("failed to launch setup helper (non-elevated): {err}"),
+            )
+        })?;
         if !status.success() {
             return Err(report_helper_failure(
                 sandbox_home,
@@ -1016,31 +1074,57 @@ fn run_setup_exe_payload(
     Ok(())
 }
 
-pub fn run_elevated_setup(
-    request: SandboxSetupRequest<'_>,
-    overrides: SetupRootOverrides,
-) -> Result<()> {
-    run_elevated_setup_inner(
-        request, overrides, /*offline_proxy_settings_override*/ None,
-    )
+pub fn run_elevated_setup(request: SandboxSetupRequest<'_>) -> Result<()> {
+    run_elevated_setup_inner(request, /*offline_proxy_settings_override*/ None)
 }
 
 pub(crate) fn run_elevated_setup_with_proxy_settings(
     request: SandboxSetupRequest<'_>,
-    overrides: SetupRootOverrides,
     offline_proxy_settings: &OfflineProxySettings,
 ) -> Result<()> {
-    run_elevated_setup_inner(request, overrides, Some(offline_proxy_settings))
+    if registered_core_requested() {
+        request
+            .permissions
+            .validate_elevated_filesystem_policy(request.command_cwd)?;
+        // Reconcile the effective command settings through the same authenticated service as setup.
+        // A filtered shell environment may differ from the app's startup environment.
+        let settings = crate::WindowsSandboxProvisioningSettings {
+            proxy_ports: offline_proxy_settings.proxy_ports.clone(),
+            allow_local_binding: offline_proxy_settings.allow_local_binding,
+        };
+        let mut listeners =
+            crate::WindowsSandboxProxyListeners::from_proxy_environment(request.env_map);
+        listeners
+            .http_ports
+            .retain(|port| settings.proxy_ports.contains(port));
+        listeners
+            .socks_ports
+            .retain(|port| settings.proxy_ports.contains(port));
+        let outcome = crate::provisioning_client::provision_windows_sandbox_via_service(
+            request.sandbox_home,
+            settings,
+            listeners,
+        )?;
+        anyhow::ensure!(
+            outcome == crate::WindowsSandboxProvisioningOutcome::Provisioned,
+            "registered Core reconciliation requires the sandbox service"
+        );
+        return Ok(());
+    }
+    run_elevated_setup_inner(request, Some(offline_proxy_settings))
 }
 
 fn run_elevated_setup_inner(
     request: SandboxSetupRequest<'_>,
-    overrides: SetupRootOverrides,
     offline_proxy_settings_override: Option<&OfflineProxySettings>,
 ) -> Result<()> {
-    if !request.permissions.is_enforceable_by_windows_sandbox() {
-        anyhow::bail!("unsupported filesystem permissions for Windows sandbox setup");
-    }
+    anyhow::ensure!(
+        !registered_core_requested(),
+        "registered Core requires the sandbox service; retry service setup"
+    );
+    request
+        .permissions
+        .validate_elevated_filesystem_policy(request.command_cwd)?;
     // Ensure the shared sandbox directory exists before we send it to the elevated helper.
     let sbx_dir = sandbox_dir(request.sandbox_home);
     std::fs::create_dir_all(&sbx_dir).map_err(|err| {
@@ -1049,40 +1133,71 @@ fn run_elevated_setup_inner(
             format!("failed to create sandbox dir {}: {err}", sbx_dir.display()),
         )
     })?;
-    let (read_roots, write_roots) = build_payload_roots(&request, &overrides);
-    let deny_read_paths = build_payload_deny_read_paths(overrides.deny_read_paths);
-    let deny_write_paths = build_payload_deny_write_paths(&request, overrides.deny_write_paths);
-    let offline_proxy_settings =
-        offline_proxy_settings_for_request(&request, offline_proxy_settings_override);
-    let payload = ElevationPayload {
-        version: SETUP_VERSION,
-        offline_username: OFFLINE_USERNAME.to_string(),
-        online_username: ONLINE_USERNAME.to_string(),
-        sandbox_home: request.sandbox_home.to_path_buf(),
-        command_cwd: request.command_cwd.to_path_buf(),
-        read_roots,
-        write_roots,
-        deny_read_paths,
-        deny_write_paths,
-        proxy_ports: offline_proxy_settings.proxy_ports,
-        allow_local_binding: offline_proxy_settings.allow_local_binding,
-        real_user: std::env::var("USERNAME").unwrap_or_else(|_| "Administrators".to_string()),
-        mode: SetupMode::Full,
-        refresh_only: false,
-    };
+    let payload = elevated_provisioning_payload(
+        &request,
+        offline_proxy_settings_override,
+        crate::runtime_ownership::current_setup_user()?,
+    );
     let needs_elevation = !is_elevated().map_err(|err| {
         failure(
             SetupErrorCode::OrchestratorElevationCheckFailed,
             format!("failed to determine elevation state: {err}"),
         )
     })?;
-    run_setup_exe(&payload, needs_elevation, request.sandbox_home)
+    run_setup_exe(&payload, needs_elevation, request.sandbox_home, &[])
+}
+
+fn elevated_provisioning_payload(
+    request: &SandboxSetupRequest<'_>,
+    offline_proxy_settings_override: Option<&OfflineProxySettings>,
+    real_user: String,
+) -> ElevationPayload {
+    let offline_proxy_settings =
+        offline_proxy_settings_for_request(request, offline_proxy_settings_override);
+    ElevationPayload {
+        version: SETUP_VERSION,
+        offline_username: OFFLINE_USERNAME.to_string(),
+        online_username: ONLINE_USERNAME.to_string(),
+        sandbox_home: request.sandbox_home.to_path_buf(),
+        command_cwd: request.sandbox_home.to_path_buf(),
+        read_roots: Vec::new(),
+        write_roots: Vec::new(),
+        deny_read_paths: Vec::new(),
+        deny_write_paths: Vec::new(),
+        proxy_ports: offline_proxy_settings.proxy_ports,
+        allow_local_binding: offline_proxy_settings.allow_local_binding,
+        real_user,
+        otel: nova_exec_server_otel::global_statsig_metrics_settings(),
+        user_profile: None,
+        mode: SetupMode::InteractiveProvision,
+        runtime: SetupRuntime::Legacy,
+        refresh_only: false,
+    }
 }
 
 pub fn run_elevated_provisioning_setup(
     sandbox_home: &Path,
     real_user: &str,
     settings: crate::WindowsSandboxProvisioningSettings,
+) -> Result<()> {
+    run_elevated_provisioning_setup_with_retained_handles(
+        sandbox_home,
+        real_user,
+        settings,
+        current_setup_runtime(),
+        &[],
+    )
+}
+
+/// Runs service provisioning with directory protections retained by the helper
+/// itself, so they survive an unexpected exit of the provisioning service.
+/// The runtime must describe the authenticated client, not the shared service image.
+pub fn run_elevated_provisioning_setup_with_retained_handles(
+    sandbox_home: &Path,
+    real_user: &str,
+    settings: crate::WindowsSandboxProvisioningSettings,
+    runtime: SetupRuntime,
+    retained_handles: &[BorrowedHandle<'_>],
 ) -> Result<()> {
     if !sandbox_home.is_absolute()
         || !matches!(
@@ -1132,16 +1247,27 @@ pub fn run_elevated_provisioning_setup(
         deny_write_paths: Vec::new(),
         proxy_ports: settings.proxy_ports,
         allow_local_binding: settings.allow_local_binding,
+        otel: nova_exec_server_otel::global_statsig_metrics_settings(),
         real_user: real_user.to_string(),
+        user_profile: std::env::var_os("USERPROFILE")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
         mode: SetupMode::ProvisionOnly,
+        runtime,
         refresh_only: false,
     };
-    run_setup_exe(&payload, /*needs_elevation*/ false, sandbox_home)
+    run_setup_exe(
+        &payload,
+        /*needs_elevation*/ false,
+        sandbox_home,
+        retained_handles,
+    )
 }
 
 pub(crate) fn build_payload_roots(
     request: &SandboxSetupRequest<'_>,
     overrides: &SetupRootOverrides,
+    runtime: SetupRuntime,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let write_roots = effective_write_roots_for_setup(
         request.permissions,
@@ -1153,7 +1279,7 @@ pub(crate) fn build_payload_roots(
     let mut read_roots = if let Some(roots) = overrides.read_roots.as_deref() {
         // An explicit override is the split policy's complete readable set. Keep only the
         // helper/platform roots the elevated setup needs; do not re-add legacy cwd/full-read roots.
-        let mut read_roots = gather_helper_read_roots(request.sandbox_home);
+        let mut read_roots = gather_helper_read_roots(request.sandbox_home, runtime);
         if overrides.read_roots_include_platform_defaults {
             read_roots.extend(
                 WINDOWS_PLATFORM_DEFAULT_READ_ROOTS
@@ -1169,6 +1295,7 @@ pub(crate) fn build_payload_roots(
             request.permissions,
             request.env_map,
             request.sandbox_home,
+            runtime,
         )
     };
     read_roots = expand_user_profile_root(read_roots);
@@ -1358,6 +1485,8 @@ mod tests {
     use super::profile_read_roots;
     use super::proxy_ports_from_env;
     use super::verify_setup_completed;
+    use crate::WindowsSandboxProvisioningSettings;
+    use crate::WindowsSandboxProxyListeners;
     use crate::helper_materialization::BIN_DIRNAME;
     use crate::helper_materialization::RESOURCES_DIRNAME;
     use crate::helper_materialization::helper_bin_dir;
@@ -1371,6 +1500,7 @@ mod tests {
     use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
     use nova_exec_server_protocol_core::permissions::FileSystemPath;
     use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
+    use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
     use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
     use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
     use nova_exec_server_protocol_core::permissions::project_roots_glob_pattern;
@@ -1536,6 +1666,47 @@ mod tests {
     }
 
     #[test]
+    fn elevated_setup_payload_contains_no_caller_acl_roots() {
+        let tmp = TempDir::new().expect("tempdir");
+        let command_cwd = tmp.path().join("caller-workspace");
+        let sandbox_home = tmp.path().join("sandbox-home");
+        fs::create_dir_all(&command_cwd).expect("create workspace");
+        let permissions = permissions_for(
+            &workspace_write_profile(
+                workspace_roots_for(&command_cwd).as_slice(),
+                /*exclude_tmpdir_env_var*/ true,
+                /*exclude_slash_tmp*/ true,
+            ),
+            workspace_roots_for(&command_cwd).as_slice(),
+        );
+        let request = super::SandboxSetupRequest {
+            permissions: &permissions,
+            command_cwd: &command_cwd,
+            env_map: &HashMap::new(),
+            sandbox_home: &sandbox_home,
+            proxy_enforced: false,
+        };
+
+        let payload = super::elevated_provisioning_payload(
+            &request,
+            /*offline_proxy_settings_override*/ None,
+            r"DOMAIN\alice".to_string(),
+        );
+
+        assert!(matches!(payload.runtime, super::SetupRuntime::Legacy));
+        assert_eq!(payload.real_user, r"DOMAIN\alice");
+        assert_eq!(payload.command_cwd, sandbox_home);
+        assert_eq!(payload.read_roots, Vec::<PathBuf>::new());
+        assert_eq!(payload.write_roots, Vec::<PathBuf>::new());
+        assert_eq!(payload.deny_read_paths, Vec::<PathBuf>::new());
+        assert_eq!(payload.deny_write_paths, Vec::<PathBuf>::new());
+        assert!(matches!(
+            payload.mode,
+            super::SetupMode::InteractiveProvision
+        ));
+    }
+
+    #[test]
     fn report_helper_failure_uses_setup_error_report_when_clear_succeeded() {
         let tmp = TempDir::new().expect("tempdir");
         let sandbox_home = tmp.path().join("sandbox-home");
@@ -1690,6 +1861,56 @@ mod tests {
     }
 
     #[test]
+    fn setup_refresh_rejects_root_globs_before_expansion() {
+        let tmp = TempDir::new().expect("tempdir");
+        let command_cwd = tmp.path().join("workspace");
+        let sandbox_home = tmp.path().join("sandbox-home");
+        fs::create_dir_all(&command_cwd).expect("create workspace");
+        let root = command_cwd.ancestors().last().expect("filesystem root");
+        let mut file_system = FileSystemSandboxPolicy::read_only();
+        file_system.entries.push(FileSystemSandboxEntry::new(
+            FileSystemPath::GlobPattern {
+                pattern: root.join("**").display().to_string(),
+            },
+            FileSystemAccessMode::Deny,
+        ));
+        let permission_profile = PermissionProfile::from_runtime_permissions(
+            &file_system,
+            NetworkSandboxPolicy::Restricted,
+        );
+        let workspace_roots = workspace_roots_for(&command_cwd);
+        let env_map = HashMap::new();
+        let errors = [
+            super::run_setup_refresh(
+                &permission_profile,
+                &workspace_roots,
+                &command_cwd,
+                &env_map,
+                &sandbox_home,
+                /*proxy_enforced*/ false,
+            )
+            .expect_err("root glob must be rejected before expansion"),
+            super::run_setup_refresh_with_extra_read_roots(
+                &permission_profile,
+                &workspace_roots,
+                &command_cwd,
+                &env_map,
+                &sandbox_home,
+                Vec::new(),
+                /*proxy_enforced*/ false,
+            )
+            .expect_err("root glob must be rejected before expansion"),
+        ];
+
+        let expected =
+            "elevated Windows sandbox requires effective `:root` read access".to_string();
+        assert_eq!(
+            errors.map(|err| err.to_string()),
+            [expected.clone(), expected]
+        );
+    }
+
+    #[test]
     fn setup_refresh_rejects_invalid_deny_read_globs() {
         let tmp = TempDir::new().expect("tempdir");
         let workspace_root = tmp.path().join("workspace");
@@ -1783,6 +2004,26 @@ mod tests {
         );
 
         assert_eq!(proxy_ports_from_env(&env), vec![1081, 8080, 43128, 43129]);
+        assert_eq!(
+            WindowsSandboxProvisioningSettings::from_environment(
+                &PermissionProfile::workspace_write(),
+                &env,
+            ),
+            WindowsSandboxProvisioningSettings {
+                proxy_ports: vec![1081, 8080, 43128, 43129],
+                allow_local_binding: false,
+            }
+        );
+        assert_eq!(
+            WindowsSandboxProxyListeners::from_environment(
+                &PermissionProfile::workspace_write(),
+                &env,
+            ),
+            WindowsSandboxProxyListeners {
+                http_ports: vec![8080],
+                socks_ports: vec![1081],
+            }
+        );
     }
 
     #[test]
@@ -1804,6 +2045,20 @@ mod tests {
                 allow_local_binding: false,
             }
         );
+        let permission_profile = PermissionProfile::workspace_write_with(
+            &[],
+            NetworkSandboxPolicy::Enabled,
+            /*exclude_tmpdir_env_var*/ false,
+            /*exclude_slash_tmp*/ false,
+        );
+        assert_eq!(
+            WindowsSandboxProvisioningSettings::from_environment(&permission_profile, &env),
+            WindowsSandboxProvisioningSettings::default()
+        );
+        assert_eq!(
+            WindowsSandboxProxyListeners::from_environment(&permission_profile, &env),
+            WindowsSandboxProxyListeners::default()
+        );
     }
 
     #[test]
@@ -1823,12 +2078,104 @@ mod tests {
         );
 
         assert_eq!(
-            offline_proxy_settings_from_env(&env, super::SandboxNetworkIdentity::Offline),
-            super::OfflineProxySettings {
+            WindowsSandboxProvisioningSettings::from_environment(
+                &PermissionProfile::workspace_write(),
+                &env,
+            ),
+            WindowsSandboxProvisioningSettings {
                 proxy_ports: vec![1081, 8080],
                 allow_local_binding: true,
             }
         );
+        assert_eq!(
+            WindowsSandboxProxyListeners::from_environment(
+                &PermissionProfile::workspace_write(),
+                &env,
+            ),
+            WindowsSandboxProxyListeners {
+                http_ports: vec![8080],
+                socks_ports: vec![1081],
+            }
+        );
+
+        env.remove("ALL_PROXY");
+        for (all_proxy, socks_ports) in [
+            ("HTTP://localhost:8080", vec![]),
+            ("socks5h://[::1]:8080", vec![8080]),
+        ] {
+            env.insert("all_proxy".to_string(), all_proxy.to_string());
+            assert_eq!(
+                WindowsSandboxProxyListeners::from_environment(
+                    &PermissionProfile::workspace_write(),
+                    &env,
+                ),
+                WindowsSandboxProxyListeners {
+                    http_ports: vec![8080],
+                    socks_ports,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn provisioning_settings_preserve_all_inherited_proxy_ports() {
+        for (proxy_env, proxy_ports, http_ports, socks_ports) in [
+            (
+                vec![("ALL_PROXY", "socks5h://127.0.0.1:1081")],
+                vec![1081],
+                vec![],
+                vec![1081],
+            ),
+            (
+                vec![
+                    ("HTTP_PROXY", "http://127.0.0.1:8080"),
+                    ("HTTPS_PROXY", "http://127.0.0.1:3128"),
+                ],
+                vec![3128, 8080],
+                vec![3128, 8080],
+                vec![],
+            ),
+            (
+                vec![
+                    ("HTTP_PROXY", "http://127.0.0.1:8080"),
+                    (WINDOWS_SANDBOX_PROXY_PORTS_ENV_KEY, "8080,1081"),
+                ],
+                vec![1081, 8080],
+                vec![8080],
+                vec![],
+            ),
+            (
+                vec![("ALL_PROXY", "ftp://127.0.0.1:3128")],
+                vec![3128],
+                vec![],
+                vec![],
+            ),
+        ] {
+            let env = proxy_env
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect();
+            assert_eq!(
+                WindowsSandboxProvisioningSettings::from_environment(
+                    &PermissionProfile::workspace_write(),
+                    &env,
+                ),
+                WindowsSandboxProvisioningSettings {
+                    proxy_ports,
+                    allow_local_binding: false,
+                }
+            );
+            assert_eq!(
+                WindowsSandboxProxyListeners::from_environment(
+                    &PermissionProfile::workspace_write(),
+                    &env,
+                ),
+                WindowsSandboxProxyListeners {
+                    http_ports,
+                    socks_ports,
+                }
+            );
+        }
     }
 
     #[test]
@@ -2042,11 +2389,65 @@ mod tests {
         let workspace_roots = workspace_roots_for(command_cwd.as_path());
         let permissions = permissions_for(&permission_profile, workspace_roots.as_slice());
 
-        let roots = gather_read_roots(&command_cwd, &permissions, &HashMap::new(), &sandbox_home);
+        let roots = gather_read_roots(
+            &command_cwd,
+            &permissions,
+            &HashMap::new(),
+            &sandbox_home,
+            super::SetupRuntime::Legacy,
+        );
         let expected =
             dunce::canonicalize(helper_bin_dir(&sandbox_home)).expect("canonical helper dir");
 
         assert!(roots.contains(&expected));
+    }
+
+    #[test]
+    fn helper_read_roots_only_create_a_legacy_bin() {
+        let tmp = TempDir::new().expect("tempdir");
+        for runtime in [super::SetupRuntime::Registered, super::SetupRuntime::Legacy] {
+            let home = tmp.path().join(format!("{runtime:?}"));
+            let roots = super::gather_helper_read_roots(&home, runtime);
+            match runtime {
+                super::SetupRuntime::Registered => {
+                    assert_eq!(roots, Vec::<PathBuf>::new());
+                    assert!(!home.exists());
+                }
+                super::SetupRuntime::Legacy => {
+                    assert_eq!(roots, vec![helper_bin_dir(&home)]);
+                    assert!(helper_bin_dir(&home).is_dir());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn registered_payload_preserves_explicit_bin_read_root() {
+        let tmp = TempDir::new().expect("tempdir");
+        let home = tmp.path().join("home");
+        let bin = helper_bin_dir(&home);
+        fs::create_dir_all(&bin).expect("create explicit root");
+        let workspace_roots = workspace_roots_for(tmp.path());
+        let permissions = permissions_for(&PermissionProfile::read_only(), &workspace_roots);
+        let (read_roots, write_roots) = build_payload_roots(
+            &super::SandboxSetupRequest {
+                permissions: &permissions,
+                command_cwd: tmp.path(),
+                env_map: &HashMap::new(),
+                sandbox_home: &home,
+                proxy_enforced: false,
+            },
+            &super::SetupRootOverrides {
+                read_roots: Some(vec![bin.clone()]),
+                ..super::SetupRootOverrides::default()
+            },
+            super::SetupRuntime::Registered,
+        );
+        assert_eq!(
+            read_roots,
+            vec![dunce::canonicalize(bin).expect("canonical bin")]
+        );
+        assert_eq!(write_roots, Vec::<PathBuf>::new());
     }
 
     #[test]
@@ -2068,7 +2469,13 @@ mod tests {
         let workspace_roots = workspace_roots_for(command_cwd.as_path());
         let permissions = permissions_for(&permission_profile, workspace_roots.as_slice());
 
-        let roots = gather_read_roots(&command_cwd, &permissions, &HashMap::new(), &sandbox_home);
+        let roots = gather_read_roots(
+            &command_cwd,
+            &permissions,
+            &HashMap::new(),
+            &sandbox_home,
+            super::SetupRuntime::Legacy,
+        );
         let expected_writable =
             dunce::canonicalize(&writable_root).expect("canonical writable root");
 
@@ -2104,6 +2511,7 @@ mod tests {
                 deny_read_paths: None,
                 deny_write_paths: None,
             },
+            super::SetupRuntime::Legacy,
         );
         let expected_helper =
             dunce::canonicalize(helper_bin_dir(&sandbox_home)).expect("canonical helper dir");
@@ -2151,6 +2559,7 @@ mod tests {
                 deny_read_paths: None,
                 deny_write_paths: None,
             },
+            super::SetupRuntime::Legacy,
         );
         let expected_helper =
             dunce::canonicalize(helper_bin_dir(&sandbox_home)).expect("canonical helper dir");
@@ -2215,7 +2624,8 @@ mod tests {
             &sandbox_home,
             Some(&override_roots),
         );
-        let (_read_roots, payload_write_roots) = build_payload_roots(&request, &overrides);
+        let (_read_roots, payload_write_roots) =
+            build_payload_roots(&request, &overrides, super::SetupRuntime::Legacy);
 
         let expected_workspace = dunce::canonicalize(&command_cwd).expect("canonical workspace");
         let expected_extra = dunce::canonicalize(&extra_root).expect("canonical extra root");
@@ -2318,6 +2728,7 @@ mod tests {
             &permissions,
             &HashMap::new(),
             &sandbox_home,
+            super::SetupRuntime::Legacy,
         );
 
         assert!(

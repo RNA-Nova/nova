@@ -18,6 +18,8 @@ members = [
     "crates/exec-server-utils-pty",
     "crates/exec-server-sandboxing",
     "crates/exec-server-windows-sandbox",
+    "crates/exec-server-mxc-sandbox",
+    "crates/exec-server-windows-sandbox-service",
     "crates/exec-server-otel",
     "crates/exec-server-websocket-client",
     "crates/exec-server-linux-sandbox",
@@ -46,6 +48,8 @@ nova-exec-server-utils-cargo-bin = { path = "crates/exec-server-utils-cargo-bin"
 nova-exec-server-utils-pty = { path = "crates/exec-server-utils-pty" }
 nova-exec-server-sandboxing = { path = "crates/exec-server-sandboxing" }
 nova-exec-server-windows-sandbox = { path = "crates/exec-server-windows-sandbox" }
+nova-exec-server-mxc-sandbox = { path = "crates/exec-server-mxc-sandbox" }
+nova-exec-server-windows-sandbox-service = { path = "crates/exec-server-windows-sandbox-service" }
 nova-exec-server-otel = { path = "crates/exec-server-otel" }
 nova-exec-server-websocket-client = { path = "crates/exec-server-websocket-client" }
 nova-exec-server-linux-sandbox = { path = "crates/exec-server-linux-sandbox" }

@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
+use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
 #[cfg(target_os = "macos")]
 use nova_exec_server_network_proxy::NetworkUnixSocketPermission;
@@ -117,6 +118,22 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
         prepared.command.first().map(String::as_str),
         Some("/usr/bin/sandbox-exec")
     );
+
+    // 对位 codex c379459bba：非 Windows executor 上 MXC 选择必须 fail closed
+    //（windows_mxc_available() 在非 Windows 恒 false，文案与上游一致）。
+    let mut params = params;
+    params.sandbox.as_mut().unwrap().windows_sandbox_selection = WindowsSandboxSelection::Mxc;
+    let error = prepare_exec_request(
+        &params,
+        HashMap::new(),
+        Some(&runtime_paths),
+        /*network_policy_decider*/ None,
+        /*network_policy_audit_observer*/ None,
+    )
+    .await
+    .err()
+    .expect("unsupported MXC must fail closed");
+    assert_eq!(error.message, "native MXC is unavailable on this executor");
 }
 
 #[cfg(unix)]
