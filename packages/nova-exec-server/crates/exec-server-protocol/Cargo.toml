@@ -27,5 +27,10 @@ nova-exec-server-protocol-core = { workspace = true }
 nova-exec-server-shell-command = { workspace = true }
 nova-exec-server-utils-path-uri = { workspace = true }
 
+# windowsMxc 能力位按 mxc-sandbox 可用性如实上报（对位 codex exec-server-protocol
+# 的 cfg(windows) 依赖；非 windows 端恒 false，不引入依赖）
+[target.'cfg(windows)'.dependencies]
+nova-exec-server-mxc-sandbox = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }

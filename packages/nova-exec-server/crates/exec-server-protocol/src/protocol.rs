@@ -156,6 +156,10 @@ pub struct EnvironmentCapabilities {
     /// Whether shell state can be cached and restored entirely inside the executor.
     #[serde(default)]
     pub shell_snapshot_v2: bool,
+    /// Whether requests may explicitly select the MXC Windows sandbox backend.
+    /// （对位 codex 同名位：windows 端按 mxc-sandbox 可用性如实上报，非 windows 恒 false）
+    #[serde(default)]
+    pub windows_mxc: bool,
 }
 
 /// Status returned by an initialized exec-server connection.
@@ -180,6 +184,10 @@ pub enum EnvironmentStatusKind {
 impl EnvironmentInfo {
     /// Returns information about the current local exec-server process.
     pub fn local() -> Self {
+        #[cfg(windows)]
+        let windows_mxc = nova_exec_server_mxc_sandbox::is_available();
+        #[cfg(not(windows))]
+        let windows_mxc = false;
         let cwd = std::env::current_dir().ok();
         let temporary_directory_env_vars: &[&str] = if cfg!(windows) {
             &["TEMP", "TMP"]
@@ -251,6 +259,9 @@ impl EnvironmentInfo {
                 // shell snapshot（登录 shell 状态缓存/恢复）仅在 unix 落地——
                 // 非 unix 端如实宣告 false，客户端按位门控后再下发 shellSnapshot
                 shell_snapshot_v2: cfg!(unix),
+                // MXC Windows 沙箱实现可显式选择（windowsSandboxLevel="mxc"）——
+                // windows 端按 mxc-sandbox 可用性如实上报，非 windows 恒 false
+                windows_mxc,
             },
         }
     }
@@ -371,7 +382,8 @@ pub enum ProcessSandboxType {
     LinuxSeccomp,
     WindowsRestrictedToken,
     /// MXC 是独立的 Windows 沙箱实现而非受限令牌层级（对位 codex
-    /// `windowsMxc`）；nova 只收线上枚举值，实现本体未移植。
+    /// `windowsMxc`）；实现本体已移植（exec-server-mxc-sandbox crate +
+    /// exec-server 接入，经 `windowsSandboxLevel="mxc"` 显式选择）。
     WindowsMxc,
 }
 
@@ -1125,6 +1137,7 @@ mod tests {
                 file_write_streaming: false,
                 http_header_env_vars: false,
                 shell_snapshot_v2: false,
+                windows_mxc: false,
             }
         );
     }
@@ -1148,6 +1161,7 @@ mod tests {
                 "fileWriteStreaming": false,
                 "httpHeaderEnvVars": false,
                 "shellSnapshotV2": false,
+                "windowsMxc": false,
             },
         });
         let info: EnvironmentInfo = serde_json::from_value(expected.clone())
@@ -1181,6 +1195,7 @@ mod tests {
                     "fileWriteStreaming": false,
                     "httpHeaderEnvVars": false,
                     "shellSnapshotV2": true,
+                    "windowsMxc": false,
                 },
             },
         });

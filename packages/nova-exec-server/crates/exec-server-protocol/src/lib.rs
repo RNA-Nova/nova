@@ -41,4 +41,7 @@ pub use rpc::*;
 ///       2MiB、tracestate 512B 裁剪）；fs/open 补 mode（read|replace，replace
 ///       暂拒）与 fileWriteStreaming 能力位（恒 false）（全部可选增量，
 ///       windowsSandboxPrivateDesktop 删除一项对位 codex a633ebc124 同步执行）。
-pub const PROTOCOL_VERSION: &str = "1.7";
+/// 1.8 = EnvironmentCapabilities 补 windowsMxc 位（对位 codex 同名位：windows 端
+///       按 mxc-sandbox 可用性如实上报，非 windows 恒 false——MXC 实现本体已随
+///       Windows 批次落地，此前缺位导致客户端无法发现；可选增量，向后兼容）。
+pub const PROTOCOL_VERSION: &str = "1.8";

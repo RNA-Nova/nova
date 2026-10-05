@@ -185,6 +185,8 @@ class EnvironmentCapabilities(BaseModel):
     )
     http_header_env_vars: bool = Field(default=False, alias="httpHeaderEnvVars")
     shell_snapshot_v2: bool = Field(default=False, alias="shellSnapshotV2")
+    # v1.8：MXC Windows 沙箱可显式选择（对位 codex 同名位）
+    windows_mxc: bool = Field(default=False, alias="windowsMxc")
 
 
 class EnvironmentStatus(BaseModel):
