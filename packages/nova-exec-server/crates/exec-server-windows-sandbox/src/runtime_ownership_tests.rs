@@ -96,7 +96,7 @@ fn readiness_is_revoked_by_the_retirement_fence() {
 
 #[test]
 fn admission_accepts_package_family_casing() {
-    for stored in ["OpenAI.Codex_publisher", "openai.nova_PUBLISHER"] {
+    for stored in ["OpenAI.Codex_publisher", "openai.codex_PUBLISHER"] {
         let mut record = record();
         record.runtime_mut().unwrap().package_family = stored.into();
         let expected = record.clone();

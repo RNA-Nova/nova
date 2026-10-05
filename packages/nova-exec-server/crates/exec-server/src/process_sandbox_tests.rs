@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-#[cfg(target_os = "macos")]
 use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
 #[cfg(target_os = "macos")]
