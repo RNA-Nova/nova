@@ -233,3 +233,23 @@ async def test_local_bash_sigkill_escalation(tmp_path: Path):
     assert result.cancelled is True
     # 0.1s 触发 + 2s TERM 宽限 + ~1s KILL 宽限
     assert elapsed < 4.0
+
+
+@pytest.mark.asyncio
+async def test_local_bash_shell_override(tmp_path: Path):
+    """单次调用级解释器覆盖（options.shell）——用 /bin/sh 跑（真实 spawn）。"""
+    operations = create_local_bash_operations()
+    result = await operations.execute('echo "$0"', str(tmp_path), {"shell": "/bin/sh"})
+    assert result.exit_code == 0
+    assert "/bin/sh" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_bash_shell_override_missing_errors(tmp_path: Path):
+    """覆盖路径不存在 → 响亮报错（不静默回退默认 shell）。"""
+    operations = create_local_bash_operations()
+    result = await operations.execute(
+        "echo hi", str(tmp_path), {"shell": "/nonexistent/sh"}
+    )
+    assert result.exit_code == -1
+    assert "not found" in result.output

@@ -143,6 +143,13 @@ class Tool:
                 "description": "超时时间（秒，可选；不提供则不限时）",
             },
             "env": {"type": "object", "description": "额外的环境变量"},
+            "shell": {
+                "type": "string",
+                "description": (
+                    "本次调用使用的解释器二进制路径（可选；缺省为 settings "
+                    "配置的 shell 或系统默认）。指定未注册的解释器会触发审批。"
+                ),
+            },
         },
         "required": ["command"],
     }
@@ -225,6 +232,7 @@ class Tool:
         cwd = params.get("cwd") or self._context.cwd
         env_extra = params.get("env") or {}
         spawn_hook: Optional[SpawnHook] = params.get("spawn_hook", self._spawn_hook)
+        shell = params.get("shell")
 
         if not command:
             return AgentToolResult(
@@ -234,6 +242,16 @@ class Tool:
                     )
                 ],
                 details={"error": "Missing required parameter: command"},
+            )
+        if shell is not None and (not isinstance(shell, str) or not shell.strip()):
+            return AgentToolResult(
+                content=[
+                    TextContent(
+                        type="text", text="## ❌ 参数错误\n\nshell 必须是非空字符串"
+                    )
+                ],
+                details={"error": "Invalid parameter: shell"},
+                is_error=True,
             )
 
         # timeout 校验（对齐 pi resolveTimeoutMs）：非有限值 / ≤0 / 超上限
@@ -269,12 +287,12 @@ class Tool:
         # ── 裁决编排（pull 模型：对位 codex handler 内 ToolOrchestrator::new()）──
         orchestrator = new_orchestrator()
         if orchestrator is not None:
-            runtime = _BashExecRuntime(self, command, cwd)
+            runtime = _BashExecRuntime(self, command, cwd, shell=shell)
             request = OrchestratorRequest(
                 tool_name="bash",
                 call_id=tool_call_id,
                 # params 全量直通——_BashExecRuntime.run 按键消费
-                # （env/spawn_hook/timeout/signal/on_update 缺一会静默丢功能）
+                # （env/spawn_hook/timeout/signal/on_update/shell 缺一会静默丢功能）
                 params={
                     "command": command,
                     "cwd": cwd,
@@ -283,6 +301,7 @@ class Tool:
                     "timeout": timeout,
                     "signal": signal,
                     "on_update": on_update,
+                    "shell": shell,
                 },
                 first_attempt=SandboxAttempt(
                     sandbox_type="executor_managed" if runtime.sandboxes else None
@@ -307,7 +326,7 @@ class Tool:
             return runtime.tool_result
 
         return await self._run_engine(
-            command, cwd, env_extra, spawn_hook, timeout, signal, on_update
+            command, cwd, env_extra, spawn_hook, timeout, signal, on_update, shell=shell
         )
 
     async def _run_engine(
@@ -320,6 +339,7 @@ class Tool:
         signal: Optional[AbortSignal],
         on_update,
         spawn_policy: Any = _KEEP_POLICY,
+        shell: Optional[str] = None,
     ) -> AgentToolResult:
         """引擎执行段（原 execute 的后半——校验之后的全部执行与后处理）。"""
         # 引擎写入本 accumulator；本层保留所有权用于中途快照（流式更新）
@@ -439,6 +459,7 @@ class Tool:
                     "env_extra": env_extra,
                     "spawn_hook": spawn_hook,
                     "accumulator": output,
+                    "shell": shell,
                 },
             )
         except Exception as e:
@@ -566,10 +587,13 @@ class _BashExecRuntime:
     判别的输入）。
     """
 
-    def __init__(self, tool: "Tool", command: str, cwd: str) -> None:
+    def __init__(
+        self, tool: "Tool", command: str, cwd: str, shell: Optional[str] = None
+    ) -> None:
         self._tool = tool
         self._command = command
         self._cwd = cwd
+        self._shell = shell
         self.tool_result: AgentToolResult = None  # type: ignore[assignment]
         self._requirement = None
         # 沙箱尝试姿态：selection 带物化沙箱 → 首尝试 executor_managed；
@@ -588,7 +612,13 @@ class _BashExecRuntime:
         if engine is None:
             return None
         requirement = engine.adjudicate(
-            "bash", {"command": self._command, "cwd": self._cwd}, None
+            "bash",
+            {"command": self._command, "cwd": self._cwd},
+            None,
+            # 解释器身份门（executable_identity 对位）：模型指定的自定义
+            # 解释器单独进政策评估；已配置 shell 是比对基准
+            shell=self._shell,
+            configured_shell=self._tool._context.settings.get_shell_path(),
         )
         # 缓存供 approval_action 取用（orchestrator 先调本方法后调 action——
         # 提案的"永远允许"写回候选就驮在 requirement 上）
@@ -626,6 +656,7 @@ class _BashExecRuntime:
             request.params.get("signal"),
             request.params.get("on_update"),
             spawn_policy=spawn_policy,
+            shell=request.params.get("shell") or self._shell,
         )
         self.tool_result = result
         details = result.details or {}

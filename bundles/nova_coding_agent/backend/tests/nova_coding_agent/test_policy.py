@@ -347,3 +347,19 @@ def test_both_tiers_produce_sandbox(tier: str, tmp_path):
     )
     assert policy is not None
     assert policy.sandbox is not None
+
+
+def test_operations_shell_override_goes_to_argv():
+    """单次调用级解释器覆盖（options.shell）→ argv[0]；缺省回默认 bash。"""
+    handle = _FakeProcHandle()
+    ops = ExecutorBashOperations(_FakeManagerForOps(_FakeClient(handle)), url=None)
+    result = asyncio.run(
+        ops.execute("echo hi", "/tmp/proj", {"shell": "/opt/custom-sh"})
+    )
+    assert result.exit_code == 0
+    assert handle.start_params["argv"][0] == "/opt/custom-sh"
+
+    handle2 = _FakeProcHandle()
+    ops2 = ExecutorBashOperations(_FakeManagerForOps(_FakeClient(handle2)), url=None)
+    asyncio.run(ops2.execute("echo hi", "/tmp/proj", {}))
+    assert handle2.start_params["argv"][0] == "bash"

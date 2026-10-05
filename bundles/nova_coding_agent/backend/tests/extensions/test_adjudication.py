@@ -319,3 +319,76 @@ def test_hot_update_dedupes_existing_allow():
     evaluation = live_policy.check(("rm", "-rf", "/x"))
     # 只有既有那条规则命中（没有重复追加）
     assert len(evaluation.matched_rules) == 1
+
+
+# ── 解释器身份门（对位 upstream exec_policy/executable_identity.rs） ──
+
+
+def test_shell_gate_custom_interpreter_prompts():
+    """模型指定未注册解释器 → prompt，写回候选即解释器路径本身。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate(
+        "bash", {"command": "ls /tmp"}, None, shell="/tmp/custom-sh"
+    )
+    assert requirement.kind == "needs_approval"
+    assert requirement.reason == "使用未注册的解释器：/tmp/custom-sh"
+    assert requirement.proposed_amendment is not None
+    assert requirement.proposed_amendment.command == ("/tmp/custom-sh",)
+
+
+def test_shell_gate_system_and_configured_shell_exempt():
+    """/bin、/usr/bin 系统位与已配置 shell 豁免（对位 shell_approval_command）。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
+    assert (
+        engine.adjudicate("bash", {"command": "ls"}, None, shell="/bin/bash").kind
+        == "skip"
+    )
+    assert (
+        engine.adjudicate("bash", {"command": "ls"}, None, shell="/usr/bin/zsh").kind
+        == "skip"
+    )
+    assert (
+        engine.adjudicate(
+            "bash",
+            {"command": "ls"},
+            None,
+            shell="/opt/bin/bash",
+            configured_shell="/opt/bin/bash",
+        ).kind
+        == "skip"
+    )
+
+
+def test_shell_gate_rule_allows_interpreter():
+    """规则显式 allow 解释器路径 → 免问（政策授信是唯一通道）。"""
+    policy = Policy()
+    policy.add_prefix_rule(
+        PrefixRule(pattern=PrefixPattern(first="/opt/custom-sh"), decision=Decision.ALLOW)
+    )
+    engine = AdjudicationEngine(policy, ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate(
+        "bash", {"command": "ls"}, None, shell="/opt/custom-sh"
+    )
+    assert requirement.kind == "skip"
+
+
+def test_shell_gate_never_policy_allows():
+    """never 档：无处可问 + 信任沙箱——自定义解释器放行（对位上游
+    Never → Allow 的兜底语义）。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.NEVER)
+    requirement = engine.adjudicate(
+        "bash", {"command": "ls"}, None, shell="/tmp/custom-sh"
+    )
+    assert requirement.kind == "skip"
+
+
+def test_shell_gate_does_not_mask_command_prompt():
+    """解释器门不吞命令侧裁决：危险命令照常 prompt（最严档聚合）。"""
+    engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
+    requirement = engine.adjudicate(
+        "bash", {"command": "rm -rf /tmp/x"}, None, shell="/tmp/custom-sh"
+    )
+    assert requirement.kind == "needs_approval"
+    # 首个启发式 prompt 段是解释器（插在命令段之前）
+    assert requirement.proposed_amendment is not None
+    assert requirement.proposed_amendment.command == ("/tmp/custom-sh",)

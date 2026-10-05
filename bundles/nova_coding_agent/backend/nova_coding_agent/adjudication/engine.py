@@ -26,6 +26,7 @@ from nova_protocol import (
     is_dangerous_command,
 )
 from nova_protocol.exec_server_policy import (
+    Evaluation,
     HeuristicsRuleMatch,
     Policy,
     PrefixRuleMatch,
@@ -40,6 +41,37 @@ def _dangerous_fallback(cmd: tuple[str, ...]) -> Decision:
     return Decision.PROMPT if is_dangerous_command(cmd) else Decision.ALLOW
 
 
+def _strictest(matched: list[PrefixRuleMatch | HeuristicsRuleMatch]) -> Decision:
+    """命中集合的最严档（对位 Evaluation 的 max 聚合；空集 = allow）"""
+    if not matched:
+        return Decision.ALLOW
+    return max(
+        (m.decision for m in matched),
+        key=lambda d: (Decision.ALLOW, Decision.PROMPT, Decision.FORBIDDEN).index(d),
+    )
+
+
+def _shell_gate_segment(
+    shell: str | None, configured_shell: str | None
+) -> tuple[str, ...] | None:
+    """executable_identity 对位：自定义解释器进政策评估（上游
+    exec_policy/executable_identity.rs 的 shell_approval_command）。
+
+    豁免（不额外评估）：/bin、/usr/bin 系统位的解释器、与已配置 shell
+    同路径者；其余（用户不认识的解释器二进制）作为独立段参与求值——
+    内层命令只能加限制，不能给解释器授信。
+    """
+    if not shell:
+        return None
+    from pathlib import PurePath
+
+    if PurePath(shell).parent.as_posix() in ("/bin", "/usr/bin"):
+        return None
+    if configured_shell and shell == configured_shell:
+        return None
+    return (shell,)
+
+
 class AdjudicationEngine:
     """裁决引擎装配（每次规则 reload 现造；无跨调用状态）"""
 
@@ -47,14 +79,32 @@ class AdjudicationEngine:
         self._policy = policy
         self._approval_policy = approval_policy
 
-    def adjudicate(self, tool_name: str, params: dict, ctx: Any) -> ExecApprovalRequirement:
+    def adjudicate(
+        self,
+        tool_name: str,
+        params: dict,
+        ctx: Any,
+        *,
+        shell: str | None = None,
+        configured_shell: str | None = None,
+    ) -> ExecApprovalRequirement:
         if tool_name == "bash":
-            return self._adjudicate_bash(params.get("command") or "")
+            return self._adjudicate_bash(
+                params.get("command") or "",
+                shell=shell,
+                configured_shell=configured_shell,
+            )
         if tool_name in ("write", "edit"):
             return self._adjudicate_write_path(params.get("path") or "")
         return ExecApprovalRequirement.skip()
 
-    def _adjudicate_bash(self, command: str) -> ExecApprovalRequirement:
+    def _adjudicate_bash(
+        self,
+        command: str,
+        *,
+        shell: str | None = None,
+        configured_shell: str | None = None,
+    ) -> ExecApprovalRequirement:
         if not command:
             return ExecApprovalRequirement.skip()
 
@@ -68,12 +118,33 @@ class AdjudicationEngine:
         # ② execpolicy 求值（逐段 + 危险启发式兜底——对位 codex 的
         # check_multiple(commands, dangerous_fallback)）
         segments = list(intent.segments)
-        evaluation = self._policy.check_multiple(segments, _dangerous_fallback)
+        matched: list[PrefixRuleMatch | HeuristicsRuleMatch] = []
+
+        # 解释器身份门（上游 executable_identity）：自定义解释器单独求值——
+        # 未见过的解释器永不自动放行（never 档除外：无处可问、信任沙箱），
+        # 规则显式 allow 才免问；"永远允许"写回候选即解释器路径本身
+        gate_segment = _shell_gate_segment(shell, configured_shell)
+        if gate_segment is not None:
+            shell_eval = self._policy.check(gate_segment, self._shell_fallback)
+            matched.extend(shell_eval.matched_rules)
+        cmd_eval = self._policy.check_multiple(segments, _dangerous_fallback)
+        matched.extend(cmd_eval.matched_rules)
+
+        evaluation = Evaluation(
+            decision=_strictest(matched), matched_rules=tuple(matched)
+        )
 
         if evaluation.decision is Decision.FORBIDDEN:
             return ExecApprovalRequirement.forbidden("规则禁止该命令")
         if evaluation.decision is Decision.PROMPT:
+            gate_prompted = gate_segment is not None and any(
+                isinstance(m, HeuristicsRuleMatch)
+                and m.decision is Decision.PROMPT
+                and m.command == gate_segment
+                for m in matched
+            )
             return ExecApprovalRequirement.needs_approval(
+                reason=(f"使用未注册的解释器：{shell}" if gate_prompted else None),
                 proposed_amendment=_derive_amendment_for_prompt(
                     evaluation.matched_rules
                 ),
@@ -85,6 +156,13 @@ class AdjudicationEngine:
             bypass_sandbox=self._all_segments_rule_allowed(segments),
             proposed_amendment=_derive_amendment_for_allow(evaluation.matched_rules),
         )
+
+    def _shell_fallback(self, _cmd: tuple[str, ...]) -> Decision:
+        """解释器段兜底：never 档放行（无处可问、信任沙箱）；其余一律 prompt
+        ——未注册的解释器不能用启发式放行。"""
+        if self._approval_policy is ApprovalPolicy.NEVER:
+            return Decision.ALLOW
+        return Decision.PROMPT
 
     def _all_segments_rule_allowed(self, segments: list[tuple[str, ...]]) -> bool:
         """每段都被规则显式 allow（无兜底参与的纯规则求值——对位上游

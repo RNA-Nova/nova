@@ -168,7 +168,9 @@ class LocalBashOperations:
                 exit_code=-1,
             )
         try:
-            shell_config = get_shell_config(self.shell_path)
+            # 单次调用级解释器覆盖（工具 shell 参数——executable_identity
+            # 门的执行侧对位）；缺省回 settings/系统默认
+            shell_config = get_shell_config(options.get("shell") or self.shell_path)
         except FileNotFoundError as exc:
             return BashResult(output=str(exc), exit_code=-1)
 

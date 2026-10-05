@@ -86,13 +86,15 @@ class ExecutorBashOperations:
                 exit_code=-1,
             )
 
-        # 环境信息与 shell：远程按 executor 上报的 shell，本地默认 bash
-        shell = "bash"
-        try:
-            info = await client.environment_info()
-            shell = info.shell.name or "bash"
-        except Exception:
-            pass
+        # 环境信息与 shell：单次调用级覆盖（工具 shell 参数）优先，远程按
+        # executor 上报的 shell，本地默认 bash
+        shell = options.get("shell") or "bash"
+        if options.get("shell") is None:
+            try:
+                info = await client.environment_info()
+                shell = info.shell.name or "bash"
+            except Exception:
+                pass
 
         # 执行 cwd：SSH 远程用 remote_cwd（远程文件系统与本地无关）；
         # 本地/本地沙箱用调用方 cwd

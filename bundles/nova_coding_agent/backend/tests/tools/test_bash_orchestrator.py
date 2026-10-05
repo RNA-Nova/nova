@@ -27,7 +27,11 @@ class _FakeTool:
     def __init__(self, outputs):
         self._outputs = outputs
         self.calls: list = []
-        self._context = SimpleNamespace()
+        # 真实 ToolContext 有 settings（exec_approval_requirement 读
+        # get_shell_path 作为已配置解释器基准）
+        self._context = SimpleNamespace(
+            settings=SimpleNamespace(get_shell_path=lambda: None)
+        )
 
     async def _run_engine(self, *args, **kwargs):
         self.calls.append(kwargs.get("spawn_policy", _KEEP_POLICY))
@@ -157,6 +161,7 @@ def test_orchestrated_path_passes_all_params_to_engine():
         signal,
         on_update,
         spawn_policy=_KEEP_POLICY,
+        shell=None,
     ):
         recorded.update(
             command=command,
@@ -167,6 +172,7 @@ def test_orchestrated_path_passes_all_params_to_engine():
             signal=signal,
             on_update=on_update,
             spawn_policy=spawn_policy,
+            shell=shell,
         )
         return _Result()
 
@@ -189,6 +195,7 @@ def test_orchestrated_path_passes_all_params_to_engine():
                         "timeout": 30,
                         "env": {"FOO": "bar"},
                         "spawn_hook": sentinel_hook,
+                        "shell": "/bin/sh",
                     },
                     # signal/on_update 是 execute 的顶层参（不进 params dict）
                     signal=sentinel_signal,  # type: ignore[arg-type]
@@ -204,6 +211,7 @@ def test_orchestrated_path_passes_all_params_to_engine():
     assert recorded["signal"] is sentinel_signal
     assert recorded["spawn_hook"] is sentinel_hook
     assert recorded["on_update"] is sentinel_update
+    assert recorded["shell"] == "/bin/sh"
 
 
 def test_approval_action_carries_proposed_amendment():
