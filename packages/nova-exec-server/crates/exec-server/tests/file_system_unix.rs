@@ -1050,8 +1050,8 @@ async fn file_system_sandboxed_read_rejects_symlink_escape(
     };
     assert_sandbox_denied(&error);
 
-    // local 的进程内 FileSystemReadStream 不支持平台沙箱（Unsupported 也是
-    // 一种阻断：读不会发生）；remote 经 fs/readStream 服务端开门，应被沙箱拒绝。
+    // 与上游逐字对齐：local 经沙箱开门 fd 传递流读（能力差已补齐），
+    // 与 remote 同为真实沙箱拒绝。
     let error = file_system
         .read_file_stream(
             &PathUri::from_host_native_path(&requested_path)?,
@@ -1060,12 +1060,7 @@ async fn file_system_sandboxed_read_rejects_symlink_escape(
         .await
         .err()
         .context("streaming read should be blocked")?;
-    match implementation {
-        FileSystemImplementation::Local => {
-            assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
-        }
-        FileSystemImplementation::Remote => assert_sandbox_denied(&error),
-    }
+    assert_sandbox_denied(&error);
 
     Ok(())
 }

@@ -288,22 +288,6 @@ async fn file_system_read_file_stream_returns_bounded_chunks(
     let path = PathUri::from_host_native_path(file_path)?;
     let sandbox = read_only_sandbox(tmp.path().to_path_buf());
     for sandbox in [None, Some(&sandbox)] {
-        // nova 的进程内 FileSystemReadStream 抽象不支持平台沙箱（RPC 层
-        // fs/readStream 才支持，见 sandboxed_file_system.rs）。对位 codex
-        // a4ee536f01 读写路由：全盘整读的沙箱上下文（windows 侧
-        // sandbox_context helper 会补 Root Read）读不再进沙箱——local 直读
-        // 成功；读确实受限时 local 才以 Unsupported 快速失败；remote 两种
-        // 形态都覆盖。
-        if sandbox.is_some_and(|sandbox| {
-            implementation == FileSystemImplementation::Local
-                && sandbox.should_read_from_sandbox()
-        }) {
-            let Err(error) = file_system.read_file_stream(&path, sandbox).await else {
-                panic!("local sandboxed streaming read should be unsupported");
-            };
-            assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
-            continue;
-        }
         let chunks = file_system
             .read_file_stream(&path, sandbox)
             .await
@@ -311,7 +295,8 @@ async fn file_system_read_file_stream_returns_bounded_chunks(
             .try_collect::<Vec<_>>()
             .await?;
 
-        // nova 的 fs/readStream 以空块作结束哨兵，尺寸上界断言过滤空块。
+        // nova 的 fs/readStream 以空块作结束哨兵，尺寸上界断言过滤空块
+        // （上游拉模式无哨兵——对位上游断言的语义等价写法）。
         assert!(
             chunks
                 .iter()
@@ -915,26 +900,15 @@ async fn file_system_sandboxed_metadata_and_read_allow_readable_root(
         .with_context(|| format!("mode={implementation}"))?;
     assert_eq!(contents, b"sandboxed hello");
 
-    // local 的进程内流式读不支持平台沙箱（见上注），remote 经 fs/readStream
-    // 服务端开门支持，按实现分支断言。
-    let stream_result = file_system
+    // 与上游逐字对齐：local 经沙箱开门 fd 传递流读（能力差已补齐，
+    // 对位 codex `SandboxedFileSystem::read_file_stream`）。
+    let chunks = file_system
         .read_file_stream(&PathUri::from_host_native_path(&file_path)?, Some(&sandbox))
-        .await;
-    match implementation {
-        FileSystemImplementation::Local => {
-            let Err(error) = stream_result else {
-                panic!("local sandboxed streaming read should be unsupported");
-            };
-            assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
-        }
-        FileSystemImplementation::Remote => {
-            let chunks = stream_result
-                .with_context(|| format!("stream mode={implementation}"))?
-                .try_collect::<Vec<_>>()
-                .await?;
-            assert_eq!(chunks.concat(), b"sandboxed hello");
-        }
-    }
+        .await
+        .with_context(|| format!("stream mode={implementation}"))?
+        .try_collect::<Vec<_>>()
+        .await?;
+    assert_eq!(chunks.concat(), b"sandboxed hello");
 
     Ok(())
 }

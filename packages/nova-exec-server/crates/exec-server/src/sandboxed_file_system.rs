@@ -3,12 +3,14 @@ use base64::engine::general_purpose::STANDARD;
 use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_utils_path_uri::PathUri;
 use tokio::io;
+use tokio_util::io::ReaderStream;
 
 use crate::CopyOptions;
 use crate::CreateDirectoryOptions;
 use crate::ExecServerRuntimePaths;
 use crate::ExecutorFileSystem;
 use crate::ExecutorFileSystemFuture;
+use crate::FILE_READ_CHUNK_SIZE;
 use crate::FileMetadata;
 use crate::FileSystemReadStream;
 use crate::FileSystemResult;
@@ -349,17 +351,18 @@ impl ExecutorFileSystem for SandboxedFileSystem {
 
     fn read_file_stream<'a>(
         &'a self,
-        _path: &'a PathUri,
-        _sandbox: Option<&'a FileSystemSandboxContext>,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, FileSystemReadStream> {
-        // 注：RPC 层的 fs/readStream 已支持平台沙箱（开门 fd 传递，
-        // 见 open_file）；这里不支持的是 FileSystemReadStream 这一
-        // 进程内流抽象。
-        Box::pin(async {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "streaming file reads do not support platform sandboxing",
-            ))
+        // 对位 codex `SandboxedFileSystem::read_file_stream`（origin/main）：
+        // 沙箱开门把 fd/handle 传回本进程，executor 自持句柄流式读——进程内
+        // 流抽象与 RPC 层 fs/readStream 共用同一开门通道。
+        Box::pin(async move {
+            let file = self.open_file(path, FsOpenMode::Read, sandbox).await?;
+            Ok(FileSystemReadStream::new(ReaderStream::with_capacity(
+                file,
+                FILE_READ_CHUNK_SIZE,
+            )))
         })
     }
 
