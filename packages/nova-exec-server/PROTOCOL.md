@@ -1,4 +1,4 @@
-# nova-exec-server 线上协议（v1.9）
+# nova-exec-server 线上协议（v1.10）
 
 > 本文件是 nova-exec-server 服务端与客户端之间的**唯一契约**。任何语言照本文档
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
@@ -51,7 +51,7 @@ client → initialized（notification）
 
 | 方法 | 参数 | 结果 | 说明 |
 |---|---|---|---|
-| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/`executorVersion`（v1.7，执行端发布版本，旧执行端缺省 `"0.0.0"`）/`providerId`（v1.7，可选，不透明构建身份；nova 无 build-stamp 基建，恒省略）/`prependPathDirs`（v1.7，执行端 PATH 前置目录，空即省略）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`fileWriteStreaming`（v1.9 起恒 true——fs/open 的 replace 模式与 fs/writeBlock 已落地；v1.7-1.8 恒 false）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false）、`windowsMxc`（v1.8——windows 端按 MXC 沙箱可用性如实上报，非 windows 恒 false；客户端按位门控后再下发 `windowsSandboxLevel="mxc"`））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
+| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/`executorVersion`（v1.7，执行端发布版本，旧执行端缺省 `"0.0.0"`）/`providerId`（v1.7，可选，不透明构建身份；nova 无 build-stamp 基建，恒省略）/`prependPathDirs`（v1.7，执行端 PATH 前置目录，空即省略）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`fileWriteStreaming`（v1.9 起恒 true——fs/open 的 replace 模式与 fs/writeBlock 已落地；v1.7-1.8 恒 false）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false）、`windowsMxc`（v1.8——windows 端按 MXC 沙箱可用性如实上报，非 windows 恒 false；客户端按位门控后再下发 `windowsSandboxLevel="mxc"`）、`linuxRootWritePreservesDevices`（v1.10——Linux 沙箱在 `/` 可写时保留标准设备；Linux 恒 true，其余平台恒 false）、`linuxApprovedRootWritePreservesRestrictions`（v1.10——approved 根写保留设备与被拒根元数据符号链接目标；Linux 恒 true，其余平台恒 false；两位均 opt-in，false 时线上省略））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
 | `environment/status` | — | `EnvironmentStatus` | 环境状态 |
 | `environmentConfig/read` | `EnvironmentConfigReadParams` | `EnvironmentConfigReadResponse` | 代读 executor 本机配置层栈（v1.4 起，能力位 `environmentConfigRead` 门控，见下节） |
 
@@ -169,6 +169,32 @@ shell 启动状态（`.zshrc`/`.bashrc` 求值结果：函数/别名/setopt/导�
 所有路径用 **PathUri**（`file:///` URI），由服务端按本机路径规则解释；
 `sandbox` 字段（FileSystemSandboxContext）限定可访问根。
 
+**FileSystemSandboxContext**（v1.10 起）：沙箱策略与解释策略所需的执行端路径。
+线上字段：
+
+- `permissions`：权限档案（显式路径以 executor file URI 序列化）；
+- `cwd`：策略锚定目录（**必填**——绝对权限也需要；进程可用不同的工作目录）；
+- `workspaceRoots`：策略工作根数组；
+- `policyContext`：`{cwd, workspaceRoots}` 子对象（v1.10）——**新客户端**省略
+  平铺 `cwd`/`workspaceRoots`、由 `policyContext` 承载；**legacy 平铺字段保留**：
+  老客户端照旧平铺，executor 入口解析归一（`policyContext` 优先，回退平铺字段；
+  `process/start` 再回退进程 `cwd`，fs 方法再回退 executor 自身当前目录——
+  仅当策略不含 cwd 依赖项（相对 glob / `project_roots` 符号）时允许省略，否则
+  `invalid_params`）；策略需 cwd 时新老客户端都保留平铺字段（老 executor 只认
+  平铺）；
+- `userHomeDir?`/`temporaryDirectories?`：执行端家目录/临时目录（解析 `~`
+  相对与 `:tmpdir` 条目）；
+- `windowsSandboxLevel`/`windowsSandboxProxySettingsMode?`/`useLegacyLandlock`。
+
+**读写路由**（v1.10，对位 codex a4ee536f01）：全部 fs 操作按读/写**各自**权限档
+分流——读类操作（`fs/readFile`/`fs/readStream`/`fs/getMetadata`/`fs/readDirectory`/
+`fs/canonicalize`/`fs/walk`）仅在读受限时进沙箱，写类操作（`fs/writeFile`/
+`fs/writeStream`/`fs/createDirectory`/`fs/remove`/`fs/copy`）仅在写受限时进沙箱，
+`fs/open` 按 `mode` 分流（read 看读档、replace 看写档）；**全盘整读不再被写株连**
+（写受限、读全盘的上下文里读操作直读不进沙箱）；临时目录规则按执行端路径约定
+判定（`:slash_tmp` 拒绝仅在 POSIX 约定算读限制）。外来平台的显式权限路径
+（URI 约定与本机不兼容）一律 fail-closed 按需沙箱处理，不得选中非沙箱直读/直写。
+
 **followSymlinks**（`fs/readFile` / `fs/writeFile` / `fs/createDirectory` /
 `fs/getMetadata` / `fs/remove` 五端点，可选 bool，缺省 = true 即旧行为）：
 `false` 时启用 no-follow 语义——服务端经 rustix openat 族（Windows 为
@@ -224,6 +250,26 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
   （内部 wire 标记）
 - 构建期：`NOVA_EXEC_SERVER_BWRAP_SHA256`（bundled bwrap 的 pin 校验——当前无
   生产者，休眠链路）
+
+## 版本变迁
+
+完整版本注释以 `crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION`
+上方注释为准；本文件只记当前版本面的关键增量。
+
+- **v1.10**（fs 策略语义修正组，对位 codex 2926014075/34e74fda0e/c53f342fec/
+  841b5490b2/a4ee536f01/645b683a9e）：
+  - `FileSystemSandboxContext` 策略 `cwd` 改必填，新增 `policyContext`
+    `{cwd, workspaceRoots}` 子对象；legacy 平铺字段保留，executor 入口解析归一
+    （见「文件系统」节）；
+  - 全部 fs 操作按读/写各自权限档分流，全盘整读不再被写株连（见「文件系统」节
+    「读写路由」）；
+  - 策略匹配 URI-native：策略条目与特殊根按执行机路径约定解析为 PathUri，
+    包含/重叠/优先级用校验过的 URI 组件判定，组件边界歧义 fail-closed；
+  - deny-read 按执行机路径语义（Windows glob 大小写不敏感 + 分隔符规整，
+    POSIX 保字节导向；畸形路径/约定不兼容/非法 glob 全部 fail-closed）；
+  - `EnvironmentCapabilities` 补 `linuxRootWritePreservesDevices`/
+    `linuxApprovedRootWritePreservesRestrictions` 两位（opt-in，false 省略；
+    Linux 恒 true）。
 
 ## 客户端
 

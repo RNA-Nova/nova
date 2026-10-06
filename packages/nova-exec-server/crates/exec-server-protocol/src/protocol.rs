@@ -4,6 +4,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use nova_exec_server_file_system::FileSystemSandboxContext;
 pub use nova_exec_server_file_system::WalkOptions;
 pub use nova_exec_server_file_system::WalkOutcome;
+use nova_exec_server_file_system::WireFileSystemSandboxContext;
 use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
 use nova_exec_server_network_proxy::RemoteNetworkProxyLaunchConfig;
 use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
@@ -12,6 +13,7 @@ use nova_exec_server_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::JSONRPCErrorError;
 use crate::ProcessId;
 
 pub const INITIALIZE_METHOD: &str = "initialize";
@@ -162,6 +164,14 @@ pub struct EnvironmentCapabilities {
     /// （对位 codex 同名位：windows 端按 mxc-sandbox 可用性如实上报，非 windows 恒 false）
     #[serde(default)]
     pub windows_mxc: bool,
+    /// Whether a Linux filesystem sandbox preserves standard devices when `/` is writable.
+    /// （对位 codex 645b683a9e：opt-in 能力位，false 时线上省略）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linux_root_write_preserves_devices: bool,
+    /// Whether approved Linux root writes preserve devices and denied root-metadata symlink targets.
+    /// （对位 codex 645b683a9e：opt-in 能力位，false 时线上省略）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linux_approved_root_write_preserves_restrictions: bool,
 }
 
 /// Status returned by an initialized exec-server connection.
@@ -265,6 +275,11 @@ impl EnvironmentInfo {
                 // MXC Windows 沙箱实现可显式选择（windowsSandboxLevel="mxc"）——
                 // windows 端按 mxc-sandbox 可用性如实上报，非 windows 恒 false
                 windows_mxc,
+                // Linux 根写保留标准设备 / approved 根写保留拒绝限制（对位 codex
+                // 645b683a9e：bwrap 根绑定后重建 /dev 并承袭根元数据写）——
+                // linux 端如实宣告 true，其余平台恒 false
+                linux_root_write_preserves_devices: cfg!(target_os = "linux"),
+                linux_approved_root_write_preserves_restrictions: cfg!(target_os = "linux"),
             },
         }
     }
@@ -344,6 +359,73 @@ pub struct ExecParams {
     /// Optional instructions for starting an executor-local managed-network proxy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network_proxy: Option<RemoteNetworkProxyLaunchConfig>,
+}
+
+/// Executor ingress for process requests from clients that may omit the sandbox policy cwd.
+///
+/// 对位 codex 841b5490b2 `WireExecParams`：legacy 客户端省略沙箱策略 cwd 时，
+/// 入口解析回退为进程 cwd。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireExecParams {
+    process_id: ProcessId,
+    metadata: Option<ExecMetadata>,
+    argv: Vec<String>,
+    cwd: PathUri,
+    env_policy: Option<ExecEnvPolicy>,
+    shell_snapshot: Option<ShellSnapshotRequest>,
+    env: HashMap<String, String>,
+    tty: bool,
+    #[serde(default)]
+    pipe_stdin: bool,
+    arg0: Option<String>,
+    sandbox: Option<WireFileSystemSandboxContext>,
+    #[serde(default)]
+    enforce_managed_network: bool,
+    managed_network: Option<ManagedNetworkSandboxContext>,
+    network_proxy: Option<RemoteNetworkProxyLaunchConfig>,
+}
+
+impl From<WireExecParams> for ExecParams {
+    fn from(wire: WireExecParams) -> Self {
+        let WireExecParams {
+            process_id,
+            metadata,
+            argv,
+            cwd,
+            env_policy,
+            shell_snapshot,
+            env,
+            tty,
+            pipe_stdin,
+            arg0,
+            sandbox,
+            enforce_managed_network,
+            managed_network,
+            network_proxy,
+        } = wire;
+        let sandbox = sandbox.map(|sandbox| {
+            // Legacy processes used the required process cwd as their sandbox policy cwd.
+            let policy_cwd = sandbox.cwd().unwrap_or(&cwd).clone();
+            sandbox.into_context(policy_cwd)
+        });
+        Self {
+            process_id,
+            metadata,
+            argv,
+            cwd,
+            env_policy,
+            shell_snapshot,
+            env,
+            tty,
+            pipe_stdin,
+            arg0,
+            sandbox,
+            enforce_managed_network,
+            managed_network,
+            network_proxy,
+        }
+    }
 }
 
 /// Identifies shell state owned by one attachment within an executor session.
@@ -483,6 +565,17 @@ pub struct FsReadFileParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsReadFileParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsReadFileParams {
+    path: PathUri,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow_symlinks: Option<bool>,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsReadFileResponse {
@@ -508,6 +601,18 @@ pub struct FsOpenParams {
     #[serde(default)]
     pub mode: FsOpenMode,
     pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex `WireFsOpenParams`；`mode` 随 v1.9 写流批次进入线上形状）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsOpenParams {
+    handle_id: String,
+    path: PathUri,
+    #[serde(default)]
+    mode: FsOpenMode,
+    sandbox: Option<WireFileSystemSandboxContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -579,6 +684,23 @@ pub struct FsReadStreamParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// fs/readStream 的线上请求（nova 自有通道；按 841b5490b2 同一纪律携带
+/// legacy 可选沙箱策略 cwd，入口解析归一）。
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsReadStreamParams {
+    handle_id: String,
+    path: PathUri,
+    #[serde(default)]
+    offset: u64,
+    #[serde(default)]
+    len: Option<u64>,
+    #[serde(default)]
+    block_size: Option<usize>,
+    #[serde(default)]
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 /// 流式读取文件响应
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -620,6 +742,17 @@ pub struct FsWriteStreamParams {
     /// Sandbox 策略
     #[serde(default)]
     pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+/// fs/writeStream 的线上请求（nova 自有通道；按 841b5490b2 同一纪律携带
+/// legacy 可选沙箱策略 cwd，入口解析归一）。
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsWriteStreamParams {
+    handle_id: String,
+    path: PathUri,
+    #[serde(default)]
+    sandbox: Option<WireFileSystemSandboxContext>,
 }
 
 /// 流式写入文件响应
@@ -669,6 +802,18 @@ pub struct FsWriteFileParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsWriteFileParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsWriteFileParams {
+    path: PathUri,
+    data_base64: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow_symlinks: Option<bool>,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsWriteFileResponse {}
@@ -684,6 +829,18 @@ pub struct FsCreateDirectoryParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsCreateDirectoryParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsCreateDirectoryParams {
+    path: PathUri,
+    recursive: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow_symlinks: Option<bool>,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsCreateDirectoryResponse {}
@@ -696,6 +853,17 @@ pub struct FsGetMetadataParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_symlinks: Option<bool>,
     pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsGetMetadataParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsGetMetadataParams {
+    path: PathUri,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow_symlinks: Option<bool>,
+    sandbox: Option<WireFileSystemSandboxContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -716,6 +884,15 @@ pub struct FsCanonicalizeParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsCanonicalizeParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsCanonicalizeParams {
+    path: PathUri,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsCanonicalizeResponse {
@@ -727,6 +904,15 @@ pub struct FsCanonicalizeResponse {
 pub struct FsReadDirectoryParams {
     pub path: PathUri,
     pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsReadDirectoryParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsReadDirectoryParams {
+    path: PathUri,
+    sandbox: Option<WireFileSystemSandboxContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -751,6 +937,16 @@ pub struct FsWalkParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsWalkParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsWalkParams {
+    path: PathUri,
+    options: WalkOptions,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 pub type FsWalkResponse = WalkOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,6 +961,19 @@ pub struct FsRemoveParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsRemoveParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsRemoveParams {
+    path: PathUri,
+    recursive: Option<bool>,
+    force: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow_symlinks: Option<bool>,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsRemoveResponse {}
@@ -776,6 +985,58 @@ pub struct FsCopyParams {
     pub destination_path: PathUri,
     pub recursive: bool,
     pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// （对位 codex 841b5490b2 `WireFsCopyParams`）
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireFsCopyParams {
+    source_path: PathUri,
+    destination_path: PathUri,
+    recursive: bool,
+    sandbox: Option<WireFileSystemSandboxContext>,
+}
+
+// Destructuring both types makes adding a request field require updating the wire conversion.
+// （对位 codex 841b5490b2 `impl_wire_filesystem_request!`；capability discovery 的
+// Wire 变体属被移除的能力发现面，nova 不移植。）
+macro_rules! impl_wire_filesystem_request {
+    ($($wire:ident => $request:ident { $($field:ident),+ $(,)? }),+ $(,)?) => {$(
+        impl From<$request> for $wire {
+            fn from(request: $request) -> Self {
+                let $request { $($field,)+ sandbox } = request;
+                Self { $($field,)+ sandbox: sandbox.map(Into::into) }
+            }
+        }
+
+        impl $wire {
+            /// Resolves optional wire sandbox intent before it reaches an executor handler.
+            pub fn try_into_request(
+                self,
+                resolve: fn(WireFileSystemSandboxContext) -> Result<FileSystemSandboxContext, JSONRPCErrorError>,
+            ) -> Result<$request, JSONRPCErrorError> {
+                let Self { $($field,)+ sandbox } = self;
+                Ok($request { $($field,)+ sandbox: sandbox.map(resolve).transpose()? })
+            }
+        }
+    )+};
+}
+
+impl_wire_filesystem_request! {
+    WireFsReadFileParams => FsReadFileParams { path, follow_symlinks },
+    WireFsOpenParams => FsOpenParams { handle_id, path, mode },
+    WireFsWriteFileParams => FsWriteFileParams { path, data_base64, follow_symlinks },
+    WireFsCreateDirectoryParams => FsCreateDirectoryParams { path, recursive, follow_symlinks },
+    WireFsGetMetadataParams => FsGetMetadataParams { path, follow_symlinks },
+    WireFsCanonicalizeParams => FsCanonicalizeParams { path },
+    WireFsReadDirectoryParams => FsReadDirectoryParams { path },
+    WireFsWalkParams => FsWalkParams { path, options },
+    WireFsRemoveParams => FsRemoveParams { path, recursive, force, follow_symlinks },
+    WireFsCopyParams => FsCopyParams { source_path, destination_path, recursive },
+    // nova 自有流式通道按同一纪律接入入口解析。
+    WireFsReadStreamParams => FsReadStreamParams { handle_id, path, offset, len, block_size },
+    WireFsWriteStreamParams => FsWriteStreamParams { handle_id, path },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1159,7 +1420,44 @@ mod tests {
                 http_header_env_vars: false,
                 shell_snapshot_v2: false,
                 windows_mxc: false,
+                linux_root_write_preserves_devices: false,
+                linux_approved_root_write_preserves_restrictions: false,
             }
+        );
+    }
+
+    /// 对位 codex 645b683a9e：linux 两能力位 opt-in 上线（false 省略）+ 本机如实上报。
+    #[test]
+    fn linux_approved_root_write_support_is_opt_in_on_the_wire() {
+        let mut capabilities = EnvironmentCapabilities::default();
+        let legacy = serde_json::to_value(&capabilities).unwrap();
+        assert!(legacy.get("linuxRootWritePreservesDevices").is_none());
+        assert!(
+            legacy
+                .get("linuxApprovedRootWritePreservesRestrictions")
+                .is_none()
+        );
+        capabilities.linux_root_write_preserves_devices = true;
+        let device_only = serde_json::from_value::<EnvironmentCapabilities>(
+            serde_json::to_value(&capabilities).unwrap(),
+        )
+        .unwrap();
+        assert!(!device_only.linux_approved_root_write_preserves_restrictions);
+        capabilities.linux_approved_root_write_preserves_restrictions = true;
+        assert_eq!(
+            serde_json::from_value::<EnvironmentCapabilities>(
+                serde_json::to_value(&capabilities).unwrap()
+            )
+            .unwrap(),
+            capabilities
+        );
+        let local = EnvironmentInfo::local().capabilities;
+        assert_eq!(
+            (
+                local.linux_root_write_preserves_devices,
+                local.linux_approved_root_write_preserves_restrictions,
+            ),
+            (cfg!(target_os = "linux"), cfg!(target_os = "linux"))
         );
     }
 
@@ -1320,7 +1618,7 @@ mod tests {
         }))
         .expect_err("native absolute path should not deserialize as a URI");
 
-        let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+        let sandbox = FileSystemSandboxContext::from_permission_profile(
             PermissionProfile::default(),
             PathUri::from_host_native_path(&native_cwd).expect("cwd URI"),
         );
@@ -1371,7 +1669,7 @@ mod tests {
             network: NetworkSandboxPolicy::Restricted,
         };
         let sandbox =
-            FileSystemSandboxContext::from_permission_profile_with_cwd(permissions, cwd.clone());
+            FileSystemSandboxContext::from_permission_profile(permissions, cwd.clone());
 
         let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
 
@@ -1415,6 +1713,144 @@ mod tests {
         );
     }
 
+    /// The filesystem RPC preserves Windows drive and UNC permission URIs on any host.
+    /// （对位 codex 841b5490b2 同名测试）
+    #[test]
+    fn filesystem_protocol_preserves_foreign_permission_path_json() {
+        use super::WireFsReadFileParams;
+
+        let cwd = PathUri::parse("file:///C:/a%20b").expect("drive cwd URI");
+        let unc = PathUri::parse("file://host/s/a%20b").expect("UNC path URI");
+        let permissions = PermissionProfile::Managed {
+            file_system: ManagedFileSystemPermissions::Restricted {
+                entries: [cwd.clone(), unc.clone()]
+                    .into_iter()
+                    .map(|path| {
+                        FileSystemSandboxEntry::new(path.into(), FileSystemAccessMode::Read)
+                    })
+                    .collect(),
+                glob_scan_max_depth: None,
+            },
+            network: NetworkSandboxPolicy::Restricted,
+        };
+        let params = FsReadFileParams {
+            path: unc,
+            follow_symlinks: None,
+            sandbox: Some(FileSystemSandboxContext::from_permission_profile(
+                permissions,
+                cwd,
+            )),
+        };
+        let serialized = serde_json::to_value(WireFsReadFileParams::from(params.clone()))
+            .expect("serialize filesystem wire request");
+        assert_eq!(
+            serialized["sandbox"]["permissions"],
+            serde_json::json!({
+                "type": "managed",
+                "file_system": {
+                    "type": "restricted",
+                    "entries": [
+                        {"path": {"type": "path", "path": "file:///C:/a%20b"}, "access": "read"},
+                        {"path": {"type": "path", "path": "file://host/s/a%20b"}, "access": "read"}
+                    ]
+                },
+                "network": "restricted"
+            }),
+        );
+        assert_eq!(
+            serde_json::from_value::<WireFsReadFileParams>(serialized)
+                .expect("deserialize filesystem wire request")
+                .try_into_request(|wire| {
+                    let cwd = wire.cwd().expect("explicit client policy cwd").clone();
+                    Ok(wire.into_context(cwd))
+                })
+                .expect("resolve filesystem request"),
+            params,
+        );
+    }
+
+    /// Executor ingress must use the full policy context instead of interpreting legacy helper fields.
+    /// （对位 codex 841b5490b2 同名测试）
+    #[test]
+    fn filesystem_protocol_prefers_explicit_policy_paths_over_legacy_fields() {
+        use super::WireFsReadFileParams;
+
+        let cwd = PathUri::parse("file:///workspace/selected").expect("selected policy cwd");
+        let workspace = PathUri::parse("file:///workspace/other").expect("selected workspace");
+        let path = cwd.join("note.txt").expect("read path");
+        let sandbox = FileSystemSandboxContext {
+            workspace_roots: vec![workspace],
+            ..FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled, cwd)
+        };
+        let params = FsReadFileParams {
+            path,
+            follow_symlinks: None,
+            sandbox: Some(sandbox),
+        };
+        let mut json = serde_json::to_value(WireFsReadFileParams::from(params.clone()))
+            .expect("serialize wire read");
+        json["sandbox"]["cwd"] = serde_json::json!("file:///legacy");
+        json["sandbox"]["workspaceRoots"] = serde_json::json!(["file:///legacy"]);
+        let wire: WireFsReadFileParams = serde_json::from_value(json).expect("wire read");
+        let request = wire
+            .try_into_request(|wire| {
+                let cwd = wire.cwd().expect("explicit policy cwd").clone();
+                Ok(wire.into_context(cwd))
+            })
+            .expect("strict executor read");
+        assert_eq!(request, params);
+    }
+
+    /// Only filesystem RPCs need the additive policy field.
+    /// （对位 codex 841b5490b2
+    /// `filesystem_open_and_capability_discovery_keep_their_existing_cwd_contracts`
+    /// 的 fs/open 半侧；capability discovery 半侧属已移除的能力面，N/A 不移植。）
+    #[test]
+    fn filesystem_open_keeps_policy_context_wire_contract() {
+        use super::WireFsOpenParams;
+        use nova_exec_server_file_system::WindowsSandboxSelection;
+
+        let cwd = PathUri::parse("file:///D:/selected").expect("Windows policy cwd");
+        let path = cwd.join("note.txt").expect("read path");
+        let mut sandbox = FileSystemSandboxContext::from_permission_profile(
+            PermissionProfile::Disabled,
+            cwd.clone(),
+        );
+        sandbox.windows_sandbox_selection = WindowsSandboxSelection::Mxc;
+        let open = FsOpenParams {
+            handle_id: "handle".to_owned(),
+            path: path.clone(),
+            mode: FsOpenMode::Read,
+            sandbox: Some(sandbox.clone()),
+        };
+        let open_wire =
+            serde_json::to_value(WireFsOpenParams::from(open.clone())).expect("serialize open");
+        assert_eq!(
+            (
+                open_wire["sandbox"].get("cwd"),
+                open_wire["sandbox"].get("workspaceRoots"),
+                open_wire["sandbox"].get("policyContext"),
+                open_wire["sandbox"].get("windowsSandboxLevel"),
+            ),
+            (
+                None,
+                None,
+                Some(&serde_json::json!({"cwd": cwd, "workspaceRoots": [cwd]})),
+                Some(&serde_json::json!("mxc")),
+            )
+        );
+        assert_eq!(
+            serde_json::from_value::<WireFsOpenParams>(open_wire)
+                .expect("deserialize wire open")
+                .try_into_request(|wire| {
+                    let cwd = wire.cwd().expect("explicit client policy cwd").clone();
+                    Ok(wire.into_context(cwd))
+                })
+                .expect("resolve open"),
+            open
+        );
+    }
+
     #[test]
     fn filesystem_protocol_round_trips_legacy_policy_paths_as_uris() {
         let native_cwd = std::env::current_dir().expect("current directory");
@@ -1431,7 +1867,7 @@ mod tests {
             NetworkSandboxPolicy::Restricted,
         );
         let sandbox =
-            FileSystemSandboxContext::from_permission_profile_with_cwd(permissions, cwd.clone());
+            FileSystemSandboxContext::from_permission_profile(permissions, cwd.clone());
 
         let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
 
@@ -1603,9 +2039,9 @@ mod tests {
         let cwd =
             PathUri::from_host_native_path(std::env::current_dir().expect("current directory"))
                 .expect("cwd URI");
-        let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+        let mut sandbox = FileSystemSandboxContext::from_permission_profile(
             PermissionProfile::default(),
-            cwd,
+            cwd.clone(),
         );
         assert_eq!(
             sandbox.windows_sandbox_selection,
@@ -1615,6 +2051,8 @@ mod tests {
 
         let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
         assert_eq!(serialized["windowsSandboxLevel"], "mxc");
+        // 对位 codex 841b5490b2：cwd 必填后随线上形状直出
+        assert_eq!(serialized["cwd"], serde_json::json!(cwd.to_string()));
         assert_eq!(
             serde_json::from_value::<FileSystemSandboxContext>(serialized)
                 .expect("deserialize mxc sandbox")

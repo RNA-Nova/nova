@@ -84,17 +84,40 @@ impl LocalFileSystem {
         })
     }
 
-    fn file_system_for<'a>(
+    /// 对位 codex a4ee536f01 `file_system_for_reads`：读按读权限档分流；
+    /// 非沙箱路径不再携带沙箱上下文（返回 None）。
+    fn file_system_for_reads<'a>(
         &'a self,
         sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> io::Result<(
         &'a dyn ExecutorFileSystem,
         Option<&'a FileSystemSandboxContext>,
     )> {
-        if sandbox.is_some_and(FileSystemSandboxContext::should_run_in_sandbox) {
+        if let Some(sandbox) = sandbox {
+            sandbox.validate_file_system_paths_for_current_host()?;
+        }
+        if sandbox.is_some_and(FileSystemSandboxContext::should_read_from_sandbox) {
             Ok((self.sandboxed()?, sandbox))
         } else {
-            Ok((&self.unsandboxed, sandbox))
+            Ok((&self.unsandboxed, None))
+        }
+    }
+
+    /// 对位 codex a4ee536f01 `file_system_for_writes`：写按写权限档分流。
+    fn file_system_for_writes<'a>(
+        &'a self,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> io::Result<(
+        &'a dyn ExecutorFileSystem,
+        Option<&'a FileSystemSandboxContext>,
+    )> {
+        if let Some(sandbox) = sandbox {
+            sandbox.validate_file_system_paths_for_current_host()?;
+        }
+        if sandbox.is_some_and(FileSystemSandboxContext::should_write_into_sandbox) {
+            Ok((self.sandboxed()?, sandbox))
+        } else {
+            Ok((&self.unsandboxed, None))
         }
     }
 }
@@ -110,7 +133,10 @@ impl LocalFileSystem {
         mode: FsOpenMode,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
+        // 对位 codex 841b5490b2 + a4ee536f01：先本机兼容校验，再按打开模式的
+        // 读/写权限档分流
         if let Some(sandbox) = sandbox {
+            sandbox.validate_file_system_paths_for_current_host()?;
             let needs_sandbox = match mode {
                 FsOpenMode::Read => sandbox.should_read_from_sandbox(),
                 FsOpenMode::Replace => sandbox.should_write_into_sandbox(),
@@ -127,7 +153,8 @@ impl LocalFileSystem {
         path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
-        if sandbox.is_some_and(FileSystemSandboxContext::should_run_in_sandbox) {
+        // 对位 codex a4ee536f01：写按写权限档分流（全盘整读不豁免写执法）
+        if sandbox.is_some_and(FileSystemSandboxContext::should_write_into_sandbox) {
             // 进程内 file 句柄无法跨沙箱 helper 持有；fs/writeStream 不在此列——
             // 它走 spawn_sandboxed_write_stream 的长命 helper（调用方先分支）
             return Err(io::Error::new(
@@ -140,7 +167,7 @@ impl LocalFileSystem {
 
     /// fs/writeStream 的沙箱执行体：经长命沙箱 fs_helper 子进程持续写文件，
     /// chunk/finish 事件帧由调用方（FileSystemHandler）转发，helper 回传最终确认。
-    /// 非沙箱上下文不应走到这里（调用方先判别 `should_run_in_sandbox`）。
+    /// 非沙箱上下文不应走到这里（调用方先判别 `should_write_into_sandbox`）。
     pub(crate) async fn spawn_sandboxed_write_stream(
         &self,
         params: &FsWriteStreamParams,
@@ -153,7 +180,7 @@ impl LocalFileSystem {
         path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<PathUri> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_reads(sandbox)?;
         file_system.canonicalize(path, sandbox).await
     }
 
@@ -163,16 +190,17 @@ impl LocalFileSystem {
         options: ReadFileOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<u8>> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_reads(sandbox)?;
         file_system.read_file(path, options, sandbox).await
     }
 
+    /// fs/readStream（nova 自有通道）按同一纪律走读权限档分流。
     async fn read_file_stream(
         &self,
         path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileSystemReadStream> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_reads(sandbox)?;
         file_system.read_file_stream(path, sandbox).await
     }
 
@@ -183,7 +211,7 @@ impl LocalFileSystem {
         options: WriteFileOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_writes(sandbox)?;
         file_system
             .write_file(path, contents, options, sandbox)
             .await
@@ -195,7 +223,7 @@ impl LocalFileSystem {
         options: CreateDirectoryOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_writes(sandbox)?;
         file_system.create_directory(path, options, sandbox).await
     }
 
@@ -205,7 +233,7 @@ impl LocalFileSystem {
         options: GetMetadataOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileMetadata> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_reads(sandbox)?;
         file_system.get_metadata(path, options, sandbox).await
     }
 
@@ -214,7 +242,7 @@ impl LocalFileSystem {
         path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<ReadDirectoryEntry>> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_reads(sandbox)?;
         file_system.read_directory(path, sandbox).await
     }
 
@@ -224,7 +252,7 @@ impl LocalFileSystem {
         options: WalkOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<WalkOutcome> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_reads(sandbox)?;
         file_system.walk(path, options, sandbox).await
     }
 
@@ -234,7 +262,7 @@ impl LocalFileSystem {
         options: RemoveOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_writes(sandbox)?;
         file_system.remove(path, options, sandbox).await
     }
 
@@ -245,7 +273,7 @@ impl LocalFileSystem {
         options: CopyOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
-        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        let (file_system, sandbox) = self.file_system_for_writes(sandbox)?;
         file_system
             .copy(source_path, destination_path, options, sandbox)
             .await
@@ -925,7 +953,10 @@ fn reject_sandbox_context(sandbox: Option<&FileSystemSandboxContext>) -> io::Res
 }
 
 fn reject_platform_sandbox_context(sandbox: Option<&FileSystemSandboxContext>) -> io::Result<()> {
-    if sandbox.is_some_and(FileSystemSandboxContext::should_run_in_sandbox) {
+    // 对位 codex a4ee536f01：读或写任一侧需要平台沙箱即拒绝（无 runtime paths 时）
+    if sandbox.is_some_and(|context| {
+        context.should_read_from_sandbox() || context.should_write_into_sandbox()
+    }) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "sandboxed filesystem operations require configured runtime paths",
@@ -981,12 +1012,6 @@ pub(crate) fn resolve_existing_path(path: &Path) -> io::Result<PathBuf> {
         resolved.push(file_name);
     }
     Ok(resolved)
-}
-
-pub(crate) fn current_sandbox_cwd() -> io::Result<PathBuf> {
-    let cwd = std::env::current_dir()
-        .map_err(|err| io::Error::other(format!("failed to read current dir: {err}")))?;
-    resolve_existing_path(cwd.as_path())
 }
 
 fn copy_symlink(source: &Path, target: &Path) -> io::Result<()> {

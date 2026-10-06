@@ -1343,7 +1343,7 @@ mod tests {
         let source = sandbox_cwd
             .to_abs_path()
             .expect_err("sandbox cwd should not be native to this host");
-        let sandbox = crate::FileSystemSandboxContext::from_permission_profile_with_cwd(
+        let sandbox = crate::FileSystemSandboxContext::from_permission_profile(
             nova_exec_server_protocol_core::models::PermissionProfile::workspace_write(),
             sandbox_cwd.clone(),
         );
@@ -1397,6 +1397,8 @@ mod tests {
                 ),
                 nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy::Restricted,
             ),
+            PathUri::from_host_native_path(std::env::current_dir().expect("read current dir"))
+                .expect("cwd URI"),
         );
 
         let err = environment

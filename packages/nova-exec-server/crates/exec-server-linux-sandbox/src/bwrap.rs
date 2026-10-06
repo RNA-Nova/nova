@@ -373,7 +373,8 @@ fn create_bwrap_flags(
 /// 3. Unreadable ancestors of writable roots are masked before their child
 ///    mounts are rebound so nested writable carveouts can be reopened safely.
 /// 4. `--bind <root> <root>` re-enables writes for allowed roots, including
-///    writable subpaths under `/dev` (for example, `/dev/shm`).
+///    writable subpaths under `/dev` (for example, `/dev/shm`). Binding `/`
+///    recreates the minimal `/dev` before applying any carveouts below it.
 /// 5. `--ro-bind <subpath> <subpath>` re-applies read-only protections under
 ///    those writable roots so protected subpaths win.
 /// 6. Nested unreadable carveouts under a writable root are masked after that
@@ -387,8 +388,10 @@ fn create_filesystem_args(
     // Bubblewrap requires bind mount targets to exist. Skip missing writable
     // roots so mixed-platform configs can keep harmless paths for other
     // environments without breaking Linux command startup.
+    // 对位 codex 645b683a9e：根元数据挂载从根绑定承袭（避免元数据符号链接
+    // 经二次绑定重开被拒目录）。
     let mut writable_roots = file_system_sandbox_policy
-        .get_writable_roots_with_cwd(cwd)
+        .get_writable_roots_with_cwd_inheriting_root_metadata(cwd)
         .into_iter()
         .filter(|writable_root| writable_root.root.as_path().exists())
         .collect::<Vec<_>>();
@@ -435,8 +438,10 @@ fn create_filesystem_args(
                 (!resolved.as_path().exists()).then(|| resolved.into_path_buf())
             })
             .collect();
+    // 对位 codex 645b683a9e：字面拒绝路径与解析目标一并保留——经可写符号链接
+    // 的拒绝要在挂载构建期直接失败，而不是只掩住符号链接的当前目标。
     let mut unreadable_roots = file_system_sandbox_policy
-        .get_unreadable_roots_with_cwd(cwd)
+        .get_unreadable_roots_with_cwd_preserving_symlinks(cwd)
         .into_iter()
         .map(AbsolutePathBuf::into_path_buf)
         .collect::<Vec<_>>();
@@ -541,6 +546,10 @@ fn create_filesystem_args(
     let unreadable_paths: HashSet<PathBuf> = unreadable_roots.iter().cloned().collect();
     let mut sorted_writable_roots = writable_roots;
     sorted_writable_roots.sort_by_key(|writable_root| path_depth(writable_root.root.as_path()));
+    // 对位 codex 645b683a9e：记录是否将绑定文件系统根（用于根别名去重与设备树重建）。
+    let binds_file_system_root = sorted_writable_roots
+        .iter()
+        .any(|writable_root| writable_root.root.as_path() == Path::new("/"));
     // Mask only the unreadable ancestors that sit outside every writable root.
     // Unreadable paths nested under a broader writable root are applied after
     // that broader root is bound, then reopened by any deeper writable child.
@@ -578,9 +587,27 @@ fn create_filesystem_args(
         }
 
         let mount_root = symlink_target.as_deref().unwrap_or(root);
-        bwrap_args.args.push("--bind".to_string());
-        bwrap_args.args.push(path_to_string(mount_root));
-        bwrap_args.args.push(path_to_string(mount_root));
+        // 对位 codex 645b683a9e：根别名重绑会同时撤销已施加到 `/` 的掩码——
+        // 物理根已可写，别名只需保留其 carveouts；根绑定会遮蔽先前挂载的最小
+        // 设备树并带上 nodev，故在施加显式拒绝掩码前重建标准设备。
+        let redundant_root_alias =
+            binds_file_system_root && root != Path::new("/") && mount_root == Path::new("/");
+        if !redundant_root_alias {
+            bwrap_args.args.push("--bind".to_string());
+            bwrap_args.args.push(path_to_string(mount_root));
+            bwrap_args.args.push(path_to_string(mount_root));
+            if mount_root == Path::new("/") {
+                // The root bind shadows the earlier device tree and applies nodev.
+                // Recreate only standard devices before applying explicit deny masks.
+                bwrap_args.args.extend([
+                    "--dev".to_string(),
+                    "/dev".to_string(),
+                    "--bind-try".to_string(),
+                    "/dev/shm".to_string(),
+                    "/dev/shm".to_string(),
+                ]);
+            }
+        }
 
         let mut read_only_subpaths: Vec<PathBuf> = writable_root
             .read_only_subpaths
@@ -1430,6 +1457,9 @@ mod tests {
         let temp_dir = TempDir::new().expect("temp dir");
         let root_env = temp_dir.path().join(".env");
         std::fs::write(&root_env, "secret").expect("write env");
+        // 对位 codex 645b683a9e：根别名（symlink → /）与显式设备拒绝
+        let root_alias = temp_dir.path().join("root-alias");
+        std::os::unix::fs::symlink("/", &root_alias).expect("create root symlink");
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
                 path: FileSystemPath::Special {
@@ -1439,6 +1469,18 @@ mod tests {
                 missing_path_behavior: None,
             },
             unreadable_glob_entry(format!("{}/**/*.env", temp_dir.path().display())),
+            FileSystemSandboxEntry::new(
+                AbsolutePathBuf::from_absolute_path(root_alias)
+                    .expect("absolute root alias")
+                    .into(),
+                FileSystemAccessMode::Write,
+            ),
+            FileSystemSandboxEntry::new(
+                AbsolutePathBuf::try_from("/dev/zero")
+                    .expect("device path")
+                    .into(),
+                FileSystemAccessMode::Deny,
+            ),
         ]);
         let command = vec!["/bin/true".to_string()];
 
@@ -1456,6 +1498,32 @@ mod tests {
             "full-write policy with unreadable globs must still use bwrap"
         );
         assert_file_masked(&args.args, &root_env);
+        // 对位 codex 645b683a9e：显式设备掩码在根绑定与设备树重建之后；
+        // 根别名不重复绑定（全测试只出现一次 `--bind / /`）。
+        assert_file_masked(&args.args, Path::new("/dev/zero"));
+        assert_eq!(
+            args.args
+                .windows(3)
+                .filter(|window| *window == ["--bind", "/", "/"])
+                .count(),
+            1,
+        );
+        let writable_root = args
+            .args
+            .windows(3)
+            .position(|window| window == ["--bind", "/", "/"])
+            .expect("writable root");
+        let devices = args
+            .args
+            .windows(5)
+            .rposition(|window| window == ["--dev", "/dev", "--bind-try", "/dev/shm", "/dev/shm"])
+            .expect("minimal device tree with shared memory");
+        let device_mask = args
+            .args
+            .windows(3)
+            .position(|window| window[0] == "--ro-bind-data" && window[2] == "/dev/zero")
+            .expect("explicit device deny mask");
+        assert!(writable_root < devices && devices < device_mask);
     }
 
     #[cfg(unix)]

@@ -50,4 +50,15 @@ pub use rpc::*;
 ///       true；fs/open|readBlock|writeBlock|close 句柄表容量有界（128/连接，
 ///       在飞行打开也占槽），句柄文案由 "file read handle" 泛化为 "file handle"
 ///       （可选增量，向后兼容——读打开语义不变）。
-pub const PROTOCOL_VERSION: &str = "1.9";
+/// 1.10 = fs 策略语义修正组（对位 codex 2926014075/34e74fda0e/c53f342fec/
+///        841b5490b2/a4ee536f01/645b683a9e）：FileSystemSandboxContext 策略 cwd
+///        改必填并新增 policyContext 子对象承载策略目录（新客户端省略平铺
+///        cwd/workspaceRoots、policyContext 承载；legacy 平铺字段保留，executor
+///        入口解析归一——process/start 回退进程 cwd，fs 方法回退 executor 自身
+///        cwd）；全部 fs 操作按读/写各自权限档分流（全盘整读不再被写株连进
+///        沙箱）；策略匹配 URI-native（执行机路径约定解析、组件边界歧义
+///        fail-closed）；deny-read 按执行机路径语义（Windows glob 大小写不敏感）；
+///        EnvironmentCapabilities 补 linuxRootWritePreservesDevices/
+///        linuxApprovedRootWritePreservesRestrictions 两位（opt-in，false 省略）
+///        （可选增量，向后兼容——legacy 平铺字段入口解析照旧）。
+pub const PROTOCOL_VERSION: &str = "1.10";

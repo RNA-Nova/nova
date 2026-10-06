@@ -135,6 +135,21 @@ use crate::protocol::SignalParams;
 use crate::protocol::SignalResponse;
 use crate::protocol::TerminateParams;
 use crate::protocol::TerminateResponse;
+// 对位 codex 841b5490b2：fs 发送侧统一经 Wire* 形状上线（policyContext 承载
+// 策略目录，legacy 平铺字段按需保留）；readStream/writeStream 为 nova 自有
+// 通道，按同一纪律发送。
+use crate::protocol::WireFsCanonicalizeParams;
+use crate::protocol::WireFsCopyParams;
+use crate::protocol::WireFsCreateDirectoryParams;
+use crate::protocol::WireFsGetMetadataParams;
+use crate::protocol::WireFsOpenParams;
+use crate::protocol::WireFsReadDirectoryParams;
+use crate::protocol::WireFsReadFileParams;
+use crate::protocol::WireFsReadStreamParams;
+use crate::protocol::WireFsRemoveParams;
+use crate::protocol::WireFsWalkParams;
+use crate::protocol::WireFsWriteFileParams;
+use crate::protocol::WireFsWriteStreamParams;
 use crate::protocol::WriteParams;
 use crate::protocol::WriteResponse;
 use crate::rpc::RpcCallError;
@@ -836,11 +851,13 @@ impl ExecServerClient {
         &self,
         params: FsReadFileParams,
     ) -> Result<FsReadFileResponse, ExecServerError> {
-        self.call(FS_READ_FILE_METHOD, &params).await
+        self.call(FS_READ_FILE_METHOD, &WireFsReadFileParams::from(params))
+            .await
     }
 
     pub async fn fs_open(&self, params: FsOpenParams) -> Result<FsOpenResponse, ExecServerError> {
-        self.call(FS_OPEN_METHOD, &params).await
+        self.call(FS_OPEN_METHOD, &WireFsOpenParams::from(params))
+            .await
     }
 
     pub async fn fs_read_block(
@@ -874,50 +891,70 @@ impl ExecServerClient {
         &self,
         params: FsWriteFileParams,
     ) -> Result<FsWriteFileResponse, ExecServerError> {
-        self.call(FS_WRITE_FILE_METHOD, &params).await
+        self.call(FS_WRITE_FILE_METHOD, &WireFsWriteFileParams::from(params))
+            .await
     }
 
     pub async fn fs_create_directory(
         &self,
         params: FsCreateDirectoryParams,
     ) -> Result<FsCreateDirectoryResponse, ExecServerError> {
-        self.call(FS_CREATE_DIRECTORY_METHOD, &params).await
+        self.call(
+            FS_CREATE_DIRECTORY_METHOD,
+            &WireFsCreateDirectoryParams::from(params),
+        )
+        .await
     }
 
     pub async fn fs_get_metadata(
         &self,
         params: FsGetMetadataParams,
     ) -> Result<FsGetMetadataResponse, ExecServerError> {
-        self.call(FS_GET_METADATA_METHOD, &params).await
+        self.call(
+            FS_GET_METADATA_METHOD,
+            &WireFsGetMetadataParams::from(params),
+        )
+        .await
     }
 
     pub async fn fs_canonicalize(
         &self,
         params: FsCanonicalizeParams,
     ) -> Result<FsCanonicalizeResponse, ExecServerError> {
-        self.call(FS_CANONICALIZE_METHOD, &params).await
+        self.call(
+            FS_CANONICALIZE_METHOD,
+            &WireFsCanonicalizeParams::from(params),
+        )
+        .await
     }
 
     pub async fn fs_read_directory(
         &self,
         params: FsReadDirectoryParams,
     ) -> Result<FsReadDirectoryResponse, ExecServerError> {
-        self.call(FS_READ_DIRECTORY_METHOD, &params).await
+        self.call(
+            FS_READ_DIRECTORY_METHOD,
+            &WireFsReadDirectoryParams::from(params),
+        )
+        .await
     }
 
     pub async fn fs_walk(&self, params: FsWalkParams) -> Result<FsWalkResponse, ExecServerError> {
-        self.call(FS_WALK_METHOD, &params).await
+        self.call(FS_WALK_METHOD, &WireFsWalkParams::from(params))
+            .await
     }
 
     pub async fn fs_remove(
         &self,
         params: FsRemoveParams,
     ) -> Result<FsRemoveResponse, ExecServerError> {
-        self.call(FS_REMOVE_METHOD, &params).await
+        self.call(FS_REMOVE_METHOD, &WireFsRemoveParams::from(params))
+            .await
     }
 
     pub async fn fs_copy(&self, params: FsCopyParams) -> Result<FsCopyResponse, ExecServerError> {
-        self.call(FS_COPY_METHOD, &params).await
+        self.call(FS_COPY_METHOD, &WireFsCopyParams::from(params))
+            .await
     }
 
     /// 开启 fs/readStream 流式读：服务端随后经 `fs/readStream/chunk|done` 通知推送，
@@ -926,7 +963,8 @@ impl ExecServerClient {
         &self,
         params: FsReadStreamParams,
     ) -> Result<FsReadStreamResponse, ExecServerError> {
-        self.call(FS_READ_STREAM_METHOD, &params).await
+        self.call(FS_READ_STREAM_METHOD, &WireFsReadStreamParams::from(params))
+            .await
     }
 
     /// 开启 fs/writeStream 流式写（readStream 的方向反转）。
@@ -934,7 +972,8 @@ impl ExecServerClient {
         &self,
         params: FsWriteStreamParams,
     ) -> Result<FsWriteStreamResponse, ExecServerError> {
-        self.call(FS_WRITE_STREAM_METHOD, &params).await
+        self.call(FS_WRITE_STREAM_METHOD, &WireFsWriteStreamParams::from(params))
+            .await
     }
 
     /// 推送一个 fs/writeStream 数据块（通知，无响应；seq 须严格连续）。

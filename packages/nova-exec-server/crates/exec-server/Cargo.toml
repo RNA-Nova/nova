@@ -94,3 +94,5 @@ nova-exec-server-linux-sandbox = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 nova-exec-server-windows-sandbox = { workspace = true }
+# windows 测试装配沙箱 helper（对位 codex exec-server 对 codex-utils-cargo-bin 的依赖）
+nova-exec-server-utils-cargo-bin = { workspace = true }

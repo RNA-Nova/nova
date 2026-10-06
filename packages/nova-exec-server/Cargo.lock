@@ -2198,6 +2198,7 @@ dependencies = [
  "nova-exec-server-sandboxing",
  "nova-exec-server-shell-command",
  "nova-exec-server-utils-absolute-path",
+ "nova-exec-server-utils-cargo-bin",
  "nova-exec-server-utils-home-dir",
  "nova-exec-server-utils-path-uri",
  "nova-exec-server-utils-pty",

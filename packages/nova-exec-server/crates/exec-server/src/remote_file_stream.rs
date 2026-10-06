@@ -27,10 +27,12 @@ impl Drop for PushReadRegistration {
 /// 经 fs/readStream 端点打开推送式流式读：客户端先注册推送路由再发请求，
 /// 服务端随后逐块推送（`fs/readStream/chunk`），以 `fs/readStream/done` 收尾。
 /// 平台沙箱由服务端经沙箱开门（fd 传递）承载，客户端无感。
+///
+/// 对位 codex 841b5490b2 `file_stream::open`：sandbox 借引用传入、发送时克隆。
 pub(super) async fn open_push(
     client: ExecServerClient,
     path: PathUri,
-    sandbox: Option<FileSystemSandboxContext>,
+    sandbox: Option<&FileSystemSandboxContext>,
 ) -> FileSystemResult<FileSystemReadStream> {
     let registration = PushReadRegistration {
         client,
@@ -49,7 +51,7 @@ pub(super) async fn open_push(
             offset: 0,
             len: None,
             block_size: None,
-            sandbox,
+            sandbox: sandbox.cloned(),
         })
         .await
     {

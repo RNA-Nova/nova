@@ -316,11 +316,12 @@ impl FileSystemHandler {
         validate_file_write_handle_id(&params.handle_id)?;
 
         // 平台沙箱上下文：文件写入委托给长命沙箱 helper 子进程，
-        // 线上 writeStream/chunk/done 三件套形状不变
+        // 线上 writeStream/chunk/done 三件套形状不变。
+        // 对位 codex a4ee536f01：nova 自有写流通道按写权限档分流（同一纪律）
         if params
             .sandbox
             .as_ref()
-            .is_some_and(FileSystemSandboxContext::should_run_in_sandbox)
+            .is_some_and(FileSystemSandboxContext::should_write_into_sandbox)
         {
             return self.write_stream_sandboxed(params).await;
         }
@@ -349,7 +350,7 @@ impl FileSystemHandler {
         &self,
         params: FsWriteStreamParams,
     ) -> Result<FsWriteStreamResponse, JSONRPCErrorError> {
-        // 调用方已判别 should_run_in_sandbox，这里必然带平台沙箱上下文
+        // 调用方已判别 should_write_into_sandbox，这里必然带平台沙箱上下文
         let sandbox = params.sandbox.clone().ok_or_else(|| {
             internal_error("sandboxed write stream requires a sandbox context".to_string())
         })?;
@@ -985,11 +986,11 @@ mod tests {
             access: FileSystemAccessMode::Write,
             missing_path_behavior: None,
         }]);
-        let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+        let sandbox = FileSystemSandboxContext::from_permission_profile(
             PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
             PathUri::from_host_native_path(temp_dir.path()).expect("cwd URI"),
         );
-        assert!(sandbox.should_run_in_sandbox());
+        assert!(sandbox.should_write_into_sandbox());
 
         let err = file_system
             .open_file_for_write(&path, Some(&sandbox))
@@ -1119,14 +1120,14 @@ mod tests {
                 access: FileSystemAccessMode::Read,
                 missing_path_behavior: None,
             }]);
-            let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+            let sandbox = FileSystemSandboxContext::from_permission_profile(
                 PermissionProfile::from_runtime_permissions(
                     &policy,
                     NetworkSandboxPolicy::Restricted,
                 ),
                 PathUri::from_host_native_path(root).expect("cwd URI"),
             );
-            assert!(sandbox.should_run_in_sandbox());
+            assert!(sandbox.should_read_from_sandbox());
             sandbox
         }
 
@@ -1368,14 +1369,14 @@ mod tests {
                 access: FileSystemAccessMode::Write,
                 missing_path_behavior: None,
             }]);
-            let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+            let sandbox = FileSystemSandboxContext::from_permission_profile(
                 PermissionProfile::from_runtime_permissions(
                     &policy,
                     NetworkSandboxPolicy::Restricted,
                 ),
                 PathUri::from_host_native_path(root).expect("cwd URI"),
             );
-            assert!(sandbox.should_run_in_sandbox());
+            assert!(sandbox.should_write_into_sandbox());
             sandbox
         }
 

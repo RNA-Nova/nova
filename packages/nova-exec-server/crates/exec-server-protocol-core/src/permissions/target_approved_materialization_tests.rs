@@ -146,6 +146,52 @@ fn approved_command_grants_root_metadata_unless_explicitly_denied() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn linux_root_metadata_writes_inherit_the_root_without_reopening_other_paths() {
+    // 对位 codex 645b683a9e 同名测试（随 get_writable_roots_with_cwd_inheriting_root_metadata
+    // 落地补入）。
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path().canonicalize().unwrap();
+    let root = uri("file:///");
+    let mut policy = FileSystemSandboxPolicy::restricted(vec![
+        entry(root.clone(), Write),
+        entry(
+            PathUri::from_host_native_path(cwd.join("private")).unwrap(),
+            Deny,
+        ),
+    ]);
+    let roots = policy.get_writable_roots_with_cwd_inheriting_root_metadata(&cwd);
+    assert_eq!(
+        roots[0].protected_metadata_names,
+        PROTECTED_METADATA_PATH_NAMES
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>(),
+    );
+
+    let metadata = PROTECTED_METADATA_PATH_NAMES
+        .iter()
+        .map(|name| entry(root.join_descendant(name).unwrap(), Write))
+        .collect::<Vec<_>>();
+    policy.entries.extend(metadata.clone());
+    let roots = policy.get_writable_roots_with_cwd_inheriting_root_metadata(&cwd);
+    assert_eq!(
+        roots
+            .iter()
+            .map(|root| root.root.as_path())
+            .collect::<Vec<_>>(),
+        [Path::new("/")],
+    );
+    assert!(roots[0].protected_metadata_names.is_empty());
+
+    let standalone = FileSystemSandboxPolicy::restricted(metadata);
+    assert_eq!(
+        standalone.get_writable_roots_with_cwd_inheriting_root_metadata(&cwd),
+        standalone.get_writable_roots_with_cwd(&cwd),
+    );
+}
+
 #[test]
 fn approved_command_discards_other_volume_grants_before_materialization() {
     let cwd = uri("file:///C:/run");

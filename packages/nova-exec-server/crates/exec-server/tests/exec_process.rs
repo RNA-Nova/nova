@@ -245,7 +245,7 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
                 pipe_stdin: false,
                 arg0: None,
                 sandbox: (use_sandbox && attempt == 0).then(|| {
-                    FileSystemSandboxContext::from_permission_profile_with_cwd(
+                    FileSystemSandboxContext::from_permission_profile(
                         PermissionProfile::read_only(),
                         cwd.clone(),
                     )
@@ -423,7 +423,7 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
         pipe_stdin: false,
         arg0: None,
         sandbox: use_remote.then(|| {
-            FileSystemSandboxContext::from_permission_profile_with_cwd(
+            FileSystemSandboxContext::from_permission_profile(
                 PermissionProfile::workspace_write(),
                 cwd,
             )
@@ -506,7 +506,7 @@ async fn remote_sandboxed_process_preserves_custom_arg0() -> Result<()> {
             missing_path_behavior: None,
         },
     ]);
-    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
         cwd.clone(),
     );
@@ -611,7 +611,7 @@ async fn remote_process_keeps_sandbox_helper_visible_with_restricted_reads() -> 
             missing_path_behavior: None,
         },
     ]);
-    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
         cwd.clone(),
     );
@@ -684,7 +684,7 @@ async fn remote_tty_process_uses_configured_sandbox_helper_with_hostile_path() -
             missing_path_behavior: None,
         },
     ]);
-    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
         cwd.clone(),
     );
@@ -742,7 +742,7 @@ async fn remote_process_preserves_empty_workspace_roots() -> Result<()> {
         access: FileSystemAccessMode::Read,
         missing_path_behavior: None,
     }]);
-    let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let mut sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
         cwd.clone(),
     );

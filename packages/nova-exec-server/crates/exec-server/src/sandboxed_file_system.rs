@@ -452,8 +452,9 @@ fn validate_native_path(path: &PathUri) -> FileSystemResult<()> {
 fn require_platform_sandbox(
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> FileSystemResult<&FileSystemSandboxContext> {
+    // 对位 codex a4ee536f01：读或写任一侧需要平台沙箱即视为沙箱上下文
     sandbox
-        .filter(|sandbox| sandbox.should_run_in_sandbox())
+        .filter(|sandbox| sandbox.should_read_from_sandbox() || sandbox.should_write_into_sandbox())
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,

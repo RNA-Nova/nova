@@ -24,63 +24,16 @@ use crate::protocol::NetworkAccess;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::WritableRoot;
 
-// 对位 codex `protocol/src/permissions/windows_glob.rs`（nova permissions 为
-// 单文件布局，内联为子模块）。
+// 对位 codex c53f342fec：permissions 子目录形态（deny_read_validator / target /
+// windows_glob 三个子模块与上游同名同职责）。
+mod deny_read_validator;
+mod target;
+mod windows_glob;
+
+pub use deny_read_validator::DenyReadValidator;
+pub use deny_read_validator::DenyReadViolation;
 pub use windows_glob::WindowsDenyReadGlobScan;
 pub use windows_glob::windows_deny_read_glob_scan;
-
-#[cfg(test)]
-#[path = "permissions_target_approved_tests.rs"]
-mod target_approved_tests;
-
-mod windows_glob {
-    //! Windows deny-glob scan bounds shared by policy validation and native ACL expansion.
-    use nova_exec_server_utils_path_uri::PathConvention;
-
-    /// Literal scan root and maximum traversal depth for a Windows deny glob.
-    pub struct WindowsDenyReadGlobScan<'a> {
-        pub root: &'a str,
-        pub pattern_suffix: &'a str,
-        pub max_depth: Option<usize>,
-    }
-
-    /// Plans lexical scan bounds without accessing the controller's filesystem.
-    pub fn windows_deny_read_glob_scan(
-        pattern: &str,
-        configured_max_depth: Option<usize>,
-    ) -> WindowsDenyReadGlobScan<'_> {
-        let first_glob = pattern.find(['*', '?', '[']).unwrap_or(pattern.len());
-        let literal_prefix = &pattern[..first_glob];
-        let (root, pattern_suffix) = match literal_prefix.rfind(['/', '\\']) {
-            Some(index) => {
-                let drive_root = index > 0 && literal_prefix.as_bytes()[index - 1] == b':';
-                let end = if index == 0 || drive_root {
-                    index + 1
-                } else {
-                    index
-                };
-                (&literal_prefix[..end], &pattern[index + 1..])
-            }
-            None => (".", pattern),
-        };
-        let components = PathConvention::Windows
-            .path_segments(pattern_suffix)
-            .filter(|component| !component.is_empty())
-            .collect::<Vec<_>>();
-        let max_depth = if components.contains(&"**") {
-            configured_max_depth
-        } else {
-            Some(
-                configured_max_depth.map_or(components.len(), |depth| depth.min(components.len())),
-            )
-        };
-        WindowsDenyReadGlobScan {
-            root,
-            pattern_suffix,
-            max_depth,
-        }
-    }
-}
 
 const PROTECTED_METADATA_GIT_PATH_NAME: &str = ".git";
 const PROTECTED_METADATA_AGENTS_PATH_NAME: &str = ".agents";
@@ -299,6 +252,13 @@ enum WritableRootPathResolution {
     PreserveMutableComponents,
 }
 
+/// 对位 codex 645b683a9e `RootMetadataWriteMounts`。
+#[derive(Clone, Copy)]
+enum RootMetadataWriteMounts {
+    Separate,
+    InheritWritableRoot,
+}
+
 impl WritableRootPathResolution {
     fn resolve(self, path: AbsolutePathBuf) -> AbsolutePathBuf {
         match self {
@@ -398,27 +358,6 @@ impl ReadDenyMatcher {
             cwd,
             InvalidDenyReadGlobBehavior::ReturnError,
         )
-    }
-
-    /// Builds a strict matcher using only the supplied execution-host paths.
-    ///
-    /// 对位 codex `ReadDenyMatcher::try_new_with_context`（permissions/target.rs）。
-    pub fn try_new_with_context(
-        policy: &FileSystemSandboxPolicy,
-        context: &FileSystemSandboxPolicyContext<'_>,
-    ) -> Result<Option<Self>, String> {
-        if !has_context_read_denials(policy, context) {
-            return Ok(None);
-        }
-        validate_context_paths(policy, context)?;
-        let prepared =
-            policy.prepare_deny_read_matcher(context, InvalidDenyReadGlobBehavior::ReturnError)?;
-        Ok(Some(Self {
-            native_cwd: None,
-            user_home_dir: None,
-            temporary_directories: Vec::new(),
-            prepared,
-        }))
     }
 
     fn build(
@@ -1092,18 +1031,6 @@ impl FileSystemSandboxPolicy {
             .unwrap_or(FileSystemAccessMode::Deny)
     }
 
-    /// Checks exact-root read access using paths owned by the execution host.
-    /// Deny glob enforcement is checked separately with [`ReadDenyMatcher`].
-    ///
-    /// 对位 codex `can_read_path`（permissions/target.rs）。
-    pub fn can_read_path(
-        &self,
-        path: &PathUri,
-        context: &FileSystemSandboxPolicyContext<'_>,
-    ) -> bool {
-        self.resolve_access(path, context).can_read()
-    }
-
     /// 对位 codex `can_write_path`（pub；full-disk 判定按 context 的 convention）。
     pub fn can_write_path(
         &self,
@@ -1505,73 +1432,6 @@ impl FileSystemSandboxPolicy {
         Some(self)
     }
 
-    /// Grants root and root-metadata write for an approved command unless explicitly denied.
-    /// If a retained denial cannot be resolved or denies the root, keep the original policy.
-    ///
-    /// 对位 codex `FileSystemSandboxPolicy::for_approved_command`
-    /// （permissions/target.rs；645b683a9e 的 deny 保留语义）。
-    pub fn for_approved_command(&self, context: &FileSystemSandboxPolicyContext<'_>) -> Self {
-        if self.kind != FileSystemSandboxKind::Restricted {
-            return self.clone();
-        }
-        let mut approved = Self::restricted(vec![FileSystemSandboxEntry::new(
-            FileSystemPath::Special {
-                value: FileSystemSpecialPath::Root,
-            },
-            FileSystemAccessMode::Write,
-        )]);
-        approved.preserve_deny_read_restrictions_from(self);
-        if context.workspace_roots.is_empty()
-            && approved.entries.iter().any(|entry| {
-                matches!(
-                    &entry.path,
-                    FileSystemPath::Special {
-                        value: FileSystemSpecialPath::ProjectRoots { .. }
-                    }
-                ) || matches!(
-                    &entry.path,
-                    FileSystemPath::GlobPattern { pattern }
-                        if pattern.starts_with(PROJECT_ROOTS_GLOB_PATTERN_PREFIX)
-                )
-            })
-        {
-            return self.clone();
-        }
-        let Some(mut approved) =
-            approved.try_materialize_project_roots_with_path_uris(context.workspace_roots)
-        else {
-            return self.clone();
-        };
-        let Some(root) = file_system_root(context) else {
-            return self.clone();
-        };
-        let Ok(matcher) = ReadDenyMatcher::try_new_with_context(&approved, context) else {
-            return self.clone();
-        };
-        if !approved.resolve_access(&root, context).can_write()
-            || matcher
-                .as_ref()
-                .is_some_and(|matcher| matcher.is_read_denied_uri(&root, context))
-        {
-            return self.clone();
-        }
-        for name in PROTECTED_METADATA_PATH_NAMES {
-            let Ok(path) = root.join_descendant(name) else {
-                return self.clone();
-            };
-            if !matcher
-                .as_ref()
-                .is_some_and(|matcher| matcher.is_read_denied_uri(&path, context))
-            {
-                approved.entries.push(FileSystemSandboxEntry::new(
-                    path.into(),
-                    FileSystemAccessMode::Write,
-                ));
-            }
-        }
-        approved
-    }
-
     /// Preserves symbolic `:workspace_roots` entries while also adding concrete
     /// entries for each provided workspace root.
     pub fn with_materialized_project_roots_for_workspace_roots(
@@ -1717,7 +1577,29 @@ impl FileSystemSandboxPolicy {
     /// Returns the writable roots together with read-only carveouts resolved
     /// against the provided cwd.
     pub fn get_writable_roots_with_cwd(&self, cwd: &Path) -> Vec<WritableRoot> {
-        self.get_writable_roots_with_cwd_impl(cwd, WritableRootPathResolution::Effective)
+        self.get_writable_roots_with_cwd_impl(
+            cwd,
+            WritableRootPathResolution::Effective,
+            RootMetadataWriteMounts::Separate,
+        )
+    }
+
+    /// Omits redundant root-metadata mounts when the filesystem root is writable.
+    ///
+    /// Explicit root metadata writes still disable their default protection. Linux
+    /// inherits those writes from its root bind so a metadata symlink cannot cause
+    /// a second bind to reopen its target under an explicitly denied directory.
+    ///
+    /// 对位 codex 645b683a9e `get_writable_roots_with_cwd_inheriting_root_metadata`。
+    pub fn get_writable_roots_with_cwd_inheriting_root_metadata(
+        &self,
+        cwd: &Path,
+    ) -> Vec<WritableRoot> {
+        self.get_writable_roots_with_cwd_impl(
+            cwd,
+            WritableRootPathResolution::Effective,
+            RootMetadataWriteMounts::InheritWritableRoot,
+        )
     }
 
     /// Returns whether any effective writable root exists without materializing its carveouts.
@@ -1745,6 +1627,7 @@ impl FileSystemSandboxPolicy {
         self.get_writable_roots_with_cwd_impl(
             cwd,
             WritableRootPathResolution::PreserveMutableComponents,
+            RootMetadataWriteMounts::Separate,
         )
     }
 
@@ -1752,15 +1635,31 @@ impl FileSystemSandboxPolicy {
         &self,
         cwd: &Path,
         path_resolution: WritableRootPathResolution,
+        root_metadata_mounts: RootMetadataWriteMounts,
     ) -> Vec<WritableRoot> {
         if self.has_full_disk_write_access() {
             return Vec::new();
         }
 
         let resolved_entries = self.resolved_entries_with_cwd(cwd);
+        // 对位 codex 645b683a9e：文件系统根可写时，根直属的元数据挂载（`/.git` 等）
+        // 不再单独成根——Linux 从根绑定承袭这些写权限，避免二次绑定经元数据
+        // 符号链接重开已被拒绝的目录。
+        let inherits_root_metadata = matches!(
+            root_metadata_mounts,
+            RootMetadataWriteMounts::InheritWritableRoot
+        ) && resolved_entries.iter().any(|entry| {
+            entry.access.can_write() && entry.path.as_path().parent().is_none()
+        });
         let writable_entries: Vec<AbsolutePathBuf> = resolved_entries
             .iter()
             .filter(|entry| entry.access.can_write())
+            .filter(|entry| {
+                let path = entry.path.as_path();
+                !inherits_root_metadata
+                    || path.parent().is_none_or(|parent| parent.parent().is_some())
+                    || !path.file_name().is_some_and(is_protected_metadata_name)
+            })
             .filter(|entry| self.can_write_path_with_cwd(entry.path.as_path(), cwd))
             .map(|entry| entry.path.clone())
             .collect();
@@ -1893,6 +1792,31 @@ impl FileSystemSandboxPolicy {
                 .collect(),
             /*normalize_effective_paths*/ true,
         )
+    }
+
+    /// Includes literal denies alongside their resolved targets so Linux can reject a denial
+    /// through a writable symlink instead of only masking the symlink's current target.
+    ///
+    /// 对位 codex 645b683a9e `get_unreadable_roots_with_cwd_preserving_symlinks`
+    /// （上游内部经 `can_read_local_path_with_cwd` 判定——nova 沿用改名前的
+    /// `can_read_path_with_cwd`，同一方法）。
+    pub fn get_unreadable_roots_with_cwd_preserving_symlinks(
+        &self,
+        cwd: &Path,
+    ) -> Vec<AbsolutePathBuf> {
+        let mut roots = self.get_unreadable_roots_with_cwd(cwd);
+        if matches!(self.kind, FileSystemSandboxKind::Restricted) {
+            for entry in self.resolved_entries_with_cwd(cwd) {
+                if entry.access == FileSystemAccessMode::Deny
+                    && entry.path.as_path().parent().is_some()
+                    && !self.can_read_path_with_cwd(entry.path.as_path(), cwd)
+                    && !roots.contains(&entry.path)
+                {
+                    roots.push(entry.path);
+                }
+            }
+        }
+        roots
     }
 
     /// Returns unreadable glob patterns resolved against the provided cwd.
@@ -2230,75 +2154,6 @@ fn with_local_policy_context<T>(
 fn file_system_root(context: &FileSystemSandboxPolicyContext<'_>) -> Option<PathUri> {
     context.cwd.lexical_depth()?;
     context.cwd.ancestors().last()
-}
-
-/// 对位 codex `has_context_read_denials`（permissions/deny_read_validator.rs）。
-fn has_context_read_denials(
-    policy: &FileSystemSandboxPolicy,
-    context: &FileSystemSandboxPolicyContext<'_>,
-) -> bool {
-    policy.kind == FileSystemSandboxKind::Restricted
-        && policy.entries.iter().any(|entry| {
-            entry.access == FileSystemAccessMode::Deny
-                && !matches!(&entry.path,
-                    FileSystemPath::Special { value: FileSystemSpecialPath::SlashTmp }
-                        if context.cwd.infer_path_convention() != Some(PathConvention::Posix)
-                )
-        })
-}
-
-/// 对位 codex `validate_context_paths`（permissions/target.rs）。
-fn validate_context_paths(
-    policy: &FileSystemSandboxPolicy,
-    context: &FileSystemSandboxPolicyContext<'_>,
-) -> Result<(), String> {
-    const INVALID_PATH: &str = "managed filesystem denial cannot be materialized safely";
-    let convention = context.cwd.infer_path_convention().ok_or(INVALID_PATH)?;
-    let valid = |path: &PathUri| {
-        path.infer_path_convention() == Some(convention) && path.lexical_depth().is_some()
-    };
-    if !valid(context.cwd) || context.workspace_roots.iter().any(|path| !valid(path)) {
-        return Err(INVALID_PATH.into());
-    }
-    for entry in &policy.entries {
-        match &entry.path {
-            FileSystemPath::Path { path } if !valid(path) => return Err(INVALID_PATH.into()),
-            FileSystemPath::Special {
-                value: FileSystemSpecialPath::Tmpdir,
-            } => {
-                let directories = context.temporary_directories.ok_or(
-                    "executor temporary-directory metadata is unavailable for managed filesystem denials",
-                )?;
-                if directories.iter().any(|path| !valid(path)) {
-                    return Err(
-                        "executor temporary-directory metadata cannot be materialized safely"
-                            .into(),
-                    );
-                }
-            }
-            FileSystemPath::Special {
-                value:
-                    FileSystemSpecialPath::ProjectRoots {
-                        subpath: Some(subpath),
-                    },
-            } if context
-                .workspace_roots
-                .iter()
-                .any(|root| root.join(subpath).is_err()) =>
-            {
-                return Err(INVALID_PATH.into());
-            }
-            FileSystemPath::GlobPattern { pattern }
-                if (pattern.starts_with("~/")
-                    || convention == PathConvention::Windows && pattern.starts_with("~\\"))
-                    && !context.user_home_dir.is_some_and(valid) =>
-            {
-                return Err(INVALID_PATH.into());
-            }
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 fn local_temporary_directories() -> Vec<PathUri> {

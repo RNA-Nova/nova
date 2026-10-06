@@ -642,7 +642,7 @@ async fn writable_open_obeys_sandbox_write_permissions() -> Result<()> {
                 FileSystemAccessMode::Read,
             ));
         }
-        let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+        let sandbox = FileSystemSandboxContext::from_permission_profile(
             PermissionProfile::from_runtime_permissions(
                 &FileSystemSandboxPolicy::restricted(entries),
                 NetworkSandboxPolicy::Restricted,
@@ -703,12 +703,15 @@ fn read_only_sandbox(path: std::path::PathBuf) -> nova_exec_server::FileSystemSa
 
     let path = AbsolutePathBuf::from_absolute_path(&path)
         .unwrap_or_else(|err| panic!("sandbox path should be absolute: {err}"));
-    FileSystemSandboxContext::from_permission_profile(PermissionProfile::from_runtime_permissions(
+    // 对位 codex 841b5490b2：cwd 必填（策略 cwd 取所给只读根）
+    let cwd = PathUri::from_abs_path(&path);
+    let permissions = PermissionProfile::from_runtime_permissions(
         &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: path.into(),
             access: FileSystemAccessMode::Read,
             missing_path_behavior: None,
         }]),
         NetworkSandboxPolicy::Restricted,
-    ))
+    );
+    FileSystemSandboxContext::from_permission_profile(permissions, cwd)
 }

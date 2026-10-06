@@ -421,4 +421,5 @@ from .exec_server_wire import (
     WalkOutcome,
     WindowsSandboxLevel,
     WindowsSandboxProxySettingsMode,
+    WireFileSystemPolicyContext,
 )

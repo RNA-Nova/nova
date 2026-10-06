@@ -13,6 +13,7 @@ use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
 use nova_exec_server_protocol_core::permissions::FileSystemPath;
 use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
 use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
+use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicyContext;
 use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
@@ -1248,4 +1249,162 @@ async fn sandbox_blocks_dev_tcp_redirection() {
     // Fallback generic socket attempt using /bin/sh with bash‑style /dev/tcp.  Not
     // all images ship bash, so we guard against 127 as well.
     assert_network_blocked(&["bash", "-c", "echo hi > /dev/tcp/127.0.0.1/80"]).await;
+}
+
+/// Approved root metadata writes must not remount targets hidden by executor-side denials.
+/// （对位 codex 645b683a9e `root_metadata_tests.rs`；`.codex` 按 nova 命名换成 `.nova`，
+/// 驱动与上游一致：bwrap 直包沙箱二进制）
+#[tokio::test]
+async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
+    if should_skip_bwrap_tests().await {
+        return;
+    }
+    let Some(bwrap) = nova_exec_server_sandboxing::find_system_bwrap_in_path() else {
+        eprintln!("skipping root metadata test: system bubblewrap is unavailable");
+        return;
+    };
+    let fixture = tempfile::tempdir_in("/tmp").unwrap();
+    let work = fixture.path().join("work");
+    let private = fixture.path().join("private");
+    std::fs::create_dir_all(work.join("public")).unwrap();
+    std::fs::create_dir_all(private.join("reopened")).unwrap();
+    std::fs::write(work.join("public/secret"), "outside").unwrap();
+    std::fs::write(private.join("reopened/secret"), "private").unwrap();
+    std::fs::write(private.join("sibling"), "sibling").unwrap();
+    std::fs::copy(nova_linux_sandbox_exe(), work.join("sandbox")).unwrap();
+
+    let path_entry = |path: &str, access| {
+        FileSystemSandboxEntry::new(
+            AbsolutePathBuf::from_absolute_path(path).unwrap().into(),
+            access,
+        )
+    };
+    let cwd = AbsolutePathBuf::from_absolute_path("/tmp").unwrap().into();
+    let context = FileSystemSandboxPolicyContext {
+        cwd: &cwd,
+        workspace_roots: std::slice::from_ref(&cwd),
+        user_home_dir: None,
+        temporary_directories: Some(&[]),
+    };
+    let approved = |denied| {
+        let mut policy = FileSystemSandboxPolicy::read_only();
+        policy
+            .entries
+            .push(path_entry(denied, FileSystemAccessMode::Deny));
+        policy.for_approved_command(&context)
+    };
+    let run = |policy: &FileSystemSandboxPolicy,
+               private_mount: &str,
+               nova_target: &str,
+               script: &str| {
+        let profile =
+            PermissionProfile::from_runtime_permissions(policy, NetworkSandboxPolicy::Enabled);
+        let mut command = std::process::Command::new(&bwrap);
+        command.args("--unshare-user --uid 0 --gid 0 --die-with-parent --tmpfs /".split_whitespace());
+        command.args(
+            "--ro-bind /usr /usr --ro-bind /etc /etc --proc /proc --dev /dev".split_whitespace(),
+        );
+        command.args("--dir /run --dir /.agents --symlink /private-link /.git".split_whitespace());
+        command.args(["--symlink", nova_target, "/.nova"]);
+        command.args(["--symlink", "/private/reopened", "/private-link"]);
+        for path in ["/bin", "/sbin", "/lib", "/lib64"] {
+            if let Ok(metadata) = std::fs::symlink_metadata(path) {
+                if metadata.file_type().is_symlink() {
+                    command
+                        .arg("--symlink")
+                        .arg(std::fs::read_link(path).unwrap())
+                        .arg(path);
+                } else {
+                    command.args(["--ro-bind", path, path]);
+                }
+            }
+        }
+        command.arg("--bind").arg(&work).arg("/tmp");
+        command.arg("--bind").arg(&private).arg(private_mount);
+        if private_mount != "/private" {
+            command.args(["--symlink", private_mount, "/private"]);
+        }
+        command.args(
+            "--chdir /tmp --setenv TMPDIR /tmp --setenv PATH /usr/bin:/bin".split_whitespace(),
+        );
+        command.args(
+            "-- /tmp/sandbox --sandbox-policy-cwd /tmp --permission-profile".split_whitespace(),
+        );
+        command.arg(serde_json::to_string(&profile).unwrap());
+        command.args(["--", "/bin/sh", "-c", script]);
+        command.output().unwrap()
+    };
+
+    let private_denied = approved("/private");
+    let script = r#"
+        set -eu
+        if cat /private/reopened/secret >/dev/null 2>&1 ||
+           cat /.nova/secret >/dev/null 2>&1 || cat /.git/secret >/dev/null 2>&1; then exit 21; fi
+        if (printf bad > /.nova/changed) 2>/dev/null; then exit 22; fi
+        printf good > /.agents/allowed
+        printf good > /tmp/marker
+        printf 'root-metadata-denials-held\n'
+    "#;
+    let output = run(&private_denied, "/private", "/private/reopened", script);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.starts_with("bwrap: Creating new namespace failed")
+        || stderr.contains("No permissions to create a new namespace")
+        || stderr.contains("setting up uid map")
+    {
+        eprintln!("skipping root metadata test: {stderr}");
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"root-metadata-denials-held\n");
+    assert_eq!(std::fs::read_to_string(work.join("marker")).unwrap(), "good");
+    assert!(!private.join("reopened/changed").exists());
+
+    let script = r#"
+        set -eu
+        printf safe > /.nova/allowed
+        if cat /.git/secret >/dev/null 2>&1; then exit 23; fi
+    "#;
+    let output = run(&private_denied, "/private", "/tmp/public", script);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(work.join("public/allowed")).unwrap(),
+        "safe"
+    );
+
+    let script = r#"
+        set -eu
+        rm /private
+        ln -s /tmp/public /private
+        cat /.nova/secret
+    "#;
+    let output = run(&private_denied, "/real-private", "/private", script);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains(
+        "cannot enforce sandbox deny-read path /private because it crosses writable symlink /private"
+    ), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+
+    let mut reopened = private_denied;
+    reopened
+        .entries
+        .push(path_entry("/private/reopened", FileSystemAccessMode::Write));
+    let script = r#"
+        set -eu
+        test "$(cat /.nova/secret)" = private
+        if cat /private/sibling >/dev/null 2>&1; then exit 24; fi
+    "#;
+    let output = run(&reopened, "/private", "/private/reopened", script);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    let output = run(
+        &approved("/.nova/secret"),
+        "/private",
+        "/private/reopened",
+        "true",
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains(
+        "cannot enforce sandbox deny-read path /.nova/secret because it crosses writable symlink /.nova"
+    ), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
 }

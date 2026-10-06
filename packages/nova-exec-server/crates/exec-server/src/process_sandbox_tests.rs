@@ -23,6 +23,8 @@ use nova_exec_server_sandboxing::landlock::NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
+#[cfg(unix)]
+use tempfile::tempdir;
 #[cfg(windows)]
 use test_case::test_case;
 use tokio::io::AsyncReadExt;
@@ -42,15 +44,15 @@ use crate::ProcessId;
 #[cfg(unix)]
 #[tokio::test]
 async fn sandbox_request_wraps_native_argv_on_executor() {
-    let cwd: AbsolutePathBuf = std::env::current_dir()
-        .expect("current directory")
-        .try_into()
-        .expect("absolute cwd");
+    // 对位 codex 841b5490b2：命令目录用临时目录（与策略目录解耦，便于下面
+    // 验证策略 cwd 独立于命令 cwd 传递）。
+    let command_directory = tempdir().expect("command directory");
+    let cwd = AbsolutePathBuf::from_absolute_path(command_directory.path()).expect("absolute cwd");
     let cwd_uri = PathUri::from_abs_path(&cwd);
     let self_exe = std::env::current_exe().expect("current executable");
     let runtime_paths =
         ExecServerRuntimePaths::new(self_exe.clone(), Some(self_exe)).expect("runtime paths");
-    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::workspace_write(),
         cwd_uri.clone(),
     );
@@ -111,6 +113,39 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
             PermissionProfile::workspace_write()
                 .materialize_project_roots_with_workspace_roots(std::slice::from_ref(&cwd))
         );
+
+        // 对位 codex 841b5490b2：策略 cwd 独立于命令 cwd 传递（--sandbox-policy-cwd
+        // 与 --command-cwd 分列）。
+        let policy_directory = tempdir().expect("policy directory");
+        let explicit_cwd =
+            AbsolutePathBuf::from_absolute_path(policy_directory.path()).expect("policy cwd");
+        let mut params = params.clone();
+        for policy_cwd in [&cwd, &explicit_cwd] {
+            params.sandbox.as_mut().expect("sandbox").cwd = PathUri::from_abs_path(policy_cwd);
+            let prepared = prepare_exec_request(
+                &params,
+                HashMap::new(),
+                Some(&runtime_paths),
+                /*network_policy_decider*/ None,
+                /*network_policy_audit_observer*/ None,
+            )
+            .await
+            .expect("prepare sandboxed request");
+            let actual_cwds = prepared
+                .command
+                .windows(4)
+                .find(|args| args[0] == "--sandbox-policy-cwd")
+                .expect("sandbox wrapper cwd arguments");
+            assert_eq!(
+                actual_cwds,
+                [
+                    "--sandbox-policy-cwd",
+                    policy_cwd.to_string_lossy().as_ref(),
+                    "--command-cwd",
+                    cwd.to_string_lossy().as_ref(),
+                ]
+            );
+        }
     }
     #[cfg(target_os = "macos")]
     assert_eq!(
@@ -146,7 +181,7 @@ async fn sandbox_request_routes_custom_arg0_to_inner_helper() {
     let self_exe = std::env::current_exe().expect("current executable");
     let runtime_paths =
         ExecServerRuntimePaths::new(self_exe.clone(), Some(self_exe)).expect("runtime paths");
-    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::workspace_write(),
         cwd_uri.clone(),
     );
@@ -212,7 +247,7 @@ fn managed_network_sandbox_request() -> (ExecParams, ExecServerRuntimePaths) {
     let self_exe = std::env::current_exe().expect("current executable");
     let runtime_paths =
         ExecServerRuntimePaths::new(self_exe.clone(), Some(self_exe)).expect("runtime paths");
-    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let sandbox = FileSystemSandboxContext::from_permission_profile(
         PermissionProfile::workspace_write(),
         cwd_uri.clone(),
     );
@@ -612,7 +647,7 @@ async fn managed_network_honors_windows_sandbox_level(windows_sandbox_level: Win
     let self_exe = std::env::current_exe().expect("current executable");
     let runtime_paths = ExecServerRuntimePaths::new(self_exe, None).expect("runtime paths");
     let permissions = PermissionProfile::read_only();
-    let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+    let mut sandbox = FileSystemSandboxContext::from_permission_profile(
         permissions.clone(),
         cwd_uri.clone(),
     );

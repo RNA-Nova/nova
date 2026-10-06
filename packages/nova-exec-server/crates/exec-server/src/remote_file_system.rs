@@ -71,7 +71,7 @@ impl RemoteFileSystem {
         let response = client
             .fs_canonicalize(FsCanonicalizeParams {
                 path: path.clone(),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await
             .map_err(map_remote_error)?;
@@ -90,7 +90,7 @@ impl RemoteFileSystem {
             .fs_read_file(FsReadFileParams {
                 path: path.clone(),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await
             .map_err(map_remote_error)?;
@@ -112,12 +112,9 @@ impl RemoteFileSystem {
         // 往返，且不支持沙箱）。
         trace!("remote fs read_file_stream");
         let client = self.client.get().await.map_err(map_remote_error)?;
-        file_stream::open_push(
-            client.clone(),
-            path.clone(),
-            remote_sandbox_context(sandbox),
-        )
-        .await
+        // 对位 codex 841b5490b2：cwd 语义由线上 policyContext 承载，客户端不再
+        // 省略——直接借引用，发送端克隆。
+        file_stream::open_push(client.clone(), path.clone(), sandbox).await
     }
 
     async fn write_file(
@@ -134,7 +131,7 @@ impl RemoteFileSystem {
                 path: path.clone(),
                 data_base64: STANDARD.encode(contents),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await;
         self.metadata_requests.lock().await.clear();
@@ -155,7 +152,7 @@ impl RemoteFileSystem {
                 path: path.clone(),
                 recursive: Some(options.recursive),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await;
         self.metadata_requests.lock().await.clear();
@@ -216,7 +213,7 @@ impl RemoteFileSystem {
             .fs_get_metadata(FsGetMetadataParams {
                 path: path.clone(),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await
             .map_err(map_remote_error)?;
@@ -240,7 +237,7 @@ impl RemoteFileSystem {
         let response = client
             .fs_read_directory(FsReadDirectoryParams {
                 path: path.clone(),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await
             .map_err(map_remote_error)?;
@@ -267,7 +264,7 @@ impl RemoteFileSystem {
             .fs_walk(FsWalkParams {
                 path: path.clone(),
                 options,
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await
         {
@@ -300,7 +297,7 @@ impl RemoteFileSystem {
                 recursive: Some(options.recursive),
                 force: Some(options.force),
                 follow_symlinks: (!options.follow_symlinks).then_some(false),
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await;
         self.metadata_requests.lock().await.clear();
@@ -322,7 +319,7 @@ impl RemoteFileSystem {
                 source_path: source_path.clone(),
                 destination_path: destination_path.clone(),
                 recursive: options.recursive,
-                sandbox: remote_sandbox_context(sandbox),
+                sandbox: sandbox.cloned(),
             })
             .await;
         self.metadata_requests.lock().await.clear();
@@ -432,13 +429,8 @@ impl ExecutorFileSystem for RemoteFileSystem {
     }
 }
 
-fn remote_sandbox_context(
-    sandbox: Option<&FileSystemSandboxContext>,
-) -> Option<FileSystemSandboxContext> {
-    sandbox
-        .cloned()
-        .map(FileSystemSandboxContext::drop_cwd_if_unused)
-}
+// 对位 codex a4ee536f01：`remote_sandbox_context` 帮手删除——所有调用点直接
+// `sandbox.cloned()`（policyContext 由 Wire 层在发送侧承载）。
 
 fn map_remote_error(error: ExecServerError) -> io::Error {
     match error {
@@ -462,61 +454,9 @@ mod path_uri_tests;
 
 #[cfg(test)]
 mod tests {
-    use nova_exec_server_protocol_core::models::PermissionProfile;
-    use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
-    use nova_exec_server_protocol_core::permissions::FileSystemPath;
-    use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
-    use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
-    use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
-    use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
-    use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
-    use nova_exec_server_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
 
     use super::*;
-
-    #[test]
-    fn remote_sandbox_context_drops_unused_cwd() {
-        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-            path: FileSystemPath::Path {
-                path: absolute_test_path("remote-root").into(),
-            },
-            access: FileSystemAccessMode::Read,
-            missing_path_behavior: None,
-        }]);
-        let permissions =
-            PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted);
-        let sandbox_context = FileSystemSandboxContext::from_permission_profile_with_cwd(
-            permissions,
-            path_uri("host-checkout"),
-        );
-
-        let remote_context =
-            remote_sandbox_context(Some(&sandbox_context)).expect("remote sandbox context");
-
-        assert_eq!(remote_context.cwd, None);
-    }
-
-    #[test]
-    fn remote_sandbox_context_preserves_required_cwd() {
-        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-            path: FileSystemPath::Special {
-                value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
-            },
-            access: FileSystemAccessMode::Write,
-            missing_path_behavior: None,
-        }]);
-        let permissions =
-            PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted);
-        let cwd = path_uri("host-checkout");
-        let sandbox_context =
-            FileSystemSandboxContext::from_permission_profile_with_cwd(permissions, cwd.clone());
-
-        let remote_context =
-            remote_sandbox_context(Some(&sandbox_context)).expect("remote sandbox context");
-
-        assert_eq!(remote_context.cwd, Some(cwd));
-    }
 
     #[test]
     fn transport_errors_map_to_broken_pipe() {
@@ -546,14 +486,5 @@ mod tests {
                 ),
             ]
         );
-    }
-
-    fn absolute_test_path(name: &str) -> AbsolutePathBuf {
-        let path = std::env::temp_dir().join(name);
-        AbsolutePathBuf::from_absolute_path(&path).expect("absolute path")
-    }
-
-    fn path_uri(name: &str) -> PathUri {
-        PathUri::from_abs_path(&absolute_test_path(name))
     }
 }

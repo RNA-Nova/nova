@@ -139,19 +139,20 @@ pub(crate) async fn prepare_exec_request(
             windows_sandbox: None,
         });
     };
+    let runtime_paths = runtime_paths
+        .ok_or_else(|| invalid_params("sandbox runtime paths are not configured".to_string()))?;
+    // 对位 codex 841b5490b2：本机兼容校验在执法侧显式进行；permissions 已是
+    // PermissionProfile，策略 cwd 必填（入口解析已归一）。
+    sandbox_context
+        .validate_file_system_paths_for_current_host()
+        .map_err(|err| invalid_params(err.to_string()))?;
     let windows_sandbox_proxy_settings_mode = sandbox_context
         .windows_sandbox_proxy_settings_mode
         .unwrap_or_default();
-    let runtime_paths = runtime_paths
-        .ok_or_else(|| invalid_params("sandbox runtime paths are not configured".to_string()))?;
     // TODO(nova): Transport permissions before orchestrator-local paths are materialized,
     // then resolve executor-local helper and workspace paths here.
-    let permissions: PermissionProfile = sandbox_context
-        .permissions
-        .clone()
-        .try_into()
-        .map_err(|err| invalid_params(format!("invalid sandbox permission path URI: {err}")))?;
-    let sandbox_policy_cwd = sandbox_context.cwd.as_ref().unwrap_or(&params.cwd);
+    let permissions = sandbox_context.permissions.clone();
+    let sandbox_policy_cwd = &sandbox_context.cwd;
     let native_sandbox_policy_cwd = native_path(sandbox_policy_cwd, "sandbox cwd")?;
     let native_workspace_roots = sandbox_context
         .workspace_roots
