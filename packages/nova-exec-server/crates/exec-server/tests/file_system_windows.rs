@@ -428,6 +428,10 @@ fn read_only_sandbox_for_cwd(cwd: std::path::PathBuf) -> Result<FileSystemSandbo
 async fn file_system_elevated_relative_read_denial_uses_policy_cwd(
     implementation: FileSystemImplementation,
 ) -> Result<()> {
+    // 对位 codex 9212b3eca8：提升沙箱用例共享机器级 Windows 账户，先取
+    // 跨进程账户文件锁（与 windows-sandbox crate 的提升用例同一把锁）。
+    let _account_guard =
+        nova_exec_server_windows_sandbox::test_support::WindowsSandboxAccountTestGuard::acquire()?;
     // Both implementations re-enter this test binary; the elevated backend finds its helpers
     // next to that binary, while Cargo and Bazel provide them separately.
     let test_exe = std::env::current_exe()?;

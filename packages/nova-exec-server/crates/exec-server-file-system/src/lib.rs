@@ -20,7 +20,6 @@ use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicyContext;
 use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::SandboxPolicy;
-use nova_exec_server_utils_path_uri::LegacyAppPathString;
 use nova_exec_server_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde::Serialize;
@@ -486,21 +485,20 @@ impl FileSystemSandboxContext {
     }
 }
 
-/// Filesystem RPC wire context; older clients can omit the policy cwd before executor resolution.
+/// Filesystem RPC wire context; clients can omit the policy cwd before executor resolution.
 ///
-/// 对位 codex 841b5490b2 `WireFileSystemSandboxContext`：legacy 平铺字段
-/// （`cwd`/`workspaceRoots`）刻意保留做线上兼容——新客户端省略平铺字段、
-/// 由 `policyContext` 承载；老客户端照旧平铺，executor 入口解析归一。
+/// 对位 codex 841b5490b2 `WireFileSystemSandboxContext` 的终态化（v1.11）：
+/// 策略目录只经 `policyContext` 承载——codex 为老客户端保留的平铺
+/// `cwd`/`workspaceRoots` 双形状字段在 nova 侧整个删除（从未对外发布，没有
+/// 老客户端存在）；保留的是"客户端整个省略 policyContext 时 executor 入口
+/// 回退为自身 cwd"的人机工学（见 `cwd()` 与 server/registry.rs 的
+/// `resolve_filesystem_sandbox`）。
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireFileSystemSandboxContext {
     permissions: ExecPermissionProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    cwd: Option<PathUri>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     policy_context: Option<WireFileSystemPolicyContext>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    workspace_roots: Vec<PathUri>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     user_home_dir: Option<PathUri>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -513,7 +511,7 @@ pub struct WireFileSystemSandboxContext {
     use_legacy_landlock: bool,
 }
 
-/// New filesystem clients provide these paths independently of the legacy helper launch cwd.
+/// Filesystem clients provide these paths independently of the helper launch cwd.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireFileSystemPolicyContext {
@@ -536,39 +534,8 @@ impl From<FileSystemSandboxContext> for WireFileSystemSandboxContext {
             use_legacy_landlock,
         } = sandbox;
         let permissions = ExecPermissionProfile::from(permissions);
-        // Older filesystem clients sent cwd and roots only when permissions needed them; old
-        // executors also use that cwd to launch their helper. The explicit context is independent.
-        let legacy_needs_cwd = match &permissions {
-            ExecPermissionProfile::Managed {
-                file_system: ExecManagedFileSystemPermissions::Restricted { entries, .. },
-                ..
-            } => entries.iter().any(|entry| match &entry.path {
-                ExecFileSystemPath::GlobPattern { pattern } => match cwd.infer_path_convention() {
-                    Some(convention) => LegacyAppPathString::from_string(pattern)
-                        .to_path_uri(convention)
-                        .is_err(),
-                    None => true,
-                },
-                ExecFileSystemPath::Special {
-                    value: FileSystemSpecialPath::ProjectRoots { .. },
-                } => true,
-                ExecFileSystemPath::Path { .. } | ExecFileSystemPath::Special { .. } => false,
-            }),
-            ExecPermissionProfile::Managed {
-                file_system: ExecManagedFileSystemPermissions::Unrestricted,
-                ..
-            }
-            | ExecPermissionProfile::Disabled
-            | ExecPermissionProfile::External { .. } => false,
-        };
         Self {
             permissions,
-            cwd: legacy_needs_cwd.then(|| cwd.clone()),
-            workspace_roots: if legacy_needs_cwd {
-                workspace_roots.clone()
-            } else {
-                Vec::new()
-            },
             policy_context: Some(WireFileSystemPolicyContext {
                 cwd: Some(cwd),
                 workspace_roots,
@@ -583,15 +550,14 @@ impl From<FileSystemSandboxContext> for WireFileSystemSandboxContext {
 }
 
 impl WireFileSystemSandboxContext {
-    /// Returns the policy cwd supplied by the client, falling back to the legacy cwd field.
+    /// Returns the policy cwd supplied by the client via `policyContext`.
     pub fn cwd(&self) -> Option<&PathUri> {
-        match &self.policy_context {
-            Some(policy_context) => policy_context.cwd.as_ref().or(self.cwd.as_ref()),
-            None => self.cwd.as_ref(),
-        }
+        self.policy_context
+            .as_ref()
+            .and_then(|policy_context| policy_context.cwd.as_ref())
     }
 
-    /// Returns whether a legacy filesystem policy needs the client's cwd to be interpreted.
+    /// Returns whether a filesystem policy needs the client's cwd to be interpreted.
     pub fn requires_cwd(&self) -> bool {
         let ExecPermissionProfile::Managed {
             file_system: ExecManagedFileSystemPermissions::Restricted { entries, .. },
@@ -615,10 +581,10 @@ impl WireFileSystemSandboxContext {
         FileSystemSandboxContext {
             permissions: self.permissions.into(),
             cwd,
-            workspace_roots: match self.policy_context {
-                Some(policy_context) => policy_context.workspace_roots,
-                None => self.workspace_roots,
-            },
+            workspace_roots: self
+                .policy_context
+                .map(|policy_context| policy_context.workspace_roots)
+                .unwrap_or_default(),
             user_home_dir: self.user_home_dir,
             temporary_directories: self.temporary_directories,
             windows_sandbox_selection: self.windows_sandbox_selection,

@@ -363,9 +363,10 @@ pub struct ExecParams {
 
 /// Executor ingress for process requests from clients that may omit the sandbox policy cwd.
 ///
-/// 对位 codex 841b5490b2 `WireExecParams`：legacy 客户端省略沙箱策略 cwd 时，
-/// 入口解析回退为进程 cwd。
-#[derive(Deserialize)]
+/// 对位 codex 841b5490b2 `WireExecParams`：客户端省略沙箱策略 cwd 时，
+/// 入口解析回退为进程 cwd。v1.11 终态：线上只经 policyContext 承载策略目录
+/// （发送侧经 `From<ExecParams>` 转换，与 fs 方法同一纪律）。
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireExecParams {
     process_id: ProcessId,
@@ -384,6 +385,43 @@ pub struct WireExecParams {
     enforce_managed_network: bool,
     managed_network: Option<ManagedNetworkSandboxContext>,
     network_proxy: Option<RemoteNetworkProxyLaunchConfig>,
+}
+
+impl From<ExecParams> for WireExecParams {
+    fn from(request: ExecParams) -> Self {
+        let ExecParams {
+            process_id,
+            metadata,
+            argv,
+            cwd,
+            env_policy,
+            shell_snapshot,
+            env,
+            tty,
+            pipe_stdin,
+            arg0,
+            sandbox,
+            enforce_managed_network,
+            managed_network,
+            network_proxy,
+        } = request;
+        Self {
+            process_id,
+            metadata,
+            argv,
+            cwd,
+            env_policy,
+            shell_snapshot,
+            env,
+            tty,
+            pipe_stdin,
+            arg0,
+            sandbox: sandbox.map(Into::into),
+            enforce_managed_network,
+            managed_network,
+            network_proxy,
+        }
+    }
 }
 
 impl From<WireExecParams> for ExecParams {
@@ -565,7 +603,7 @@ pub struct FsReadFileParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsReadFileParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -603,7 +641,7 @@ pub struct FsOpenParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex `WireFsOpenParams`；`mode` 随 v1.9 写流批次进入线上形状）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -685,7 +723,7 @@ pub struct FsReadStreamParams {
 }
 
 /// fs/readStream 的线上请求（nova 自有通道；按 841b5490b2 同一纪律携带
-/// legacy 可选沙箱策略 cwd，入口解析归一）。
+/// 沙箱策略 cwd 可省略，executor 入口解析回退自身 cwd）。
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireFsReadStreamParams {
@@ -745,7 +783,7 @@ pub struct FsWriteStreamParams {
 }
 
 /// fs/writeStream 的线上请求（nova 自有通道；按 841b5490b2 同一纪律携带
-/// legacy 可选沙箱策略 cwd，入口解析归一）。
+/// 沙箱策略 cwd 可省略，executor 入口解析回退自身 cwd）。
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireFsWriteStreamParams {
@@ -802,7 +840,7 @@ pub struct FsWriteFileParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsWriteFileParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -829,7 +867,7 @@ pub struct FsCreateDirectoryParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsCreateDirectoryParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -855,7 +893,7 @@ pub struct FsGetMetadataParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsGetMetadataParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -884,7 +922,7 @@ pub struct FsCanonicalizeParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsCanonicalizeParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -906,7 +944,7 @@ pub struct FsReadDirectoryParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsReadDirectoryParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -937,7 +975,7 @@ pub struct FsWalkParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsWalkParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -961,7 +999,7 @@ pub struct FsRemoveParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsRemoveParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -987,7 +1025,7 @@ pub struct FsCopyParams {
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// Filesystem RPC wire request with legacy optional sandbox policy cwd.
+/// Filesystem RPC wire request; the sandbox policy cwd may be omitted (ingress-resolved).
 /// （对位 codex 841b5490b2 `WireFsCopyParams`）
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1769,8 +1807,9 @@ mod tests {
         );
     }
 
-    /// Executor ingress must use the full policy context instead of interpreting legacy helper fields.
-    /// （对位 codex 841b5490b2 同名测试）
+    /// Executor ingress must use the full policy context; stray flat fields are ignored.
+    /// （对位 codex 841b5490b2 同名测试的终态化：v1.11 起平铺字段已从线上结构
+    /// 删除——注入的平铺键按未知字段忽略，policyContext 唯一承载策略目录。）
     #[test]
     fn filesystem_protocol_prefers_explicit_policy_paths_over_legacy_fields() {
         use super::WireFsReadFileParams;

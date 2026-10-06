@@ -124,53 +124,39 @@ async fn remote_file_system_sends_path_and_sandbox_cwd_uris_without_native_conve
     server.await.expect("recording server should succeed");
 }
 
-/// Only dynamic policies retain legacy selection fields; all policies preserve the new context.
-/// （对位 codex 841b5490b2 同名测试）
+/// The wire policy context always carries the full directories, whatever the policy shape.
+/// （对位 codex 841b5490b2 `remote_file_system_preserves_only_cwd_dependent_policy_directories`
+/// 的终态化：v1.11 起平铺字段删除，policyContext 对所有策略形态统一承载。）
 #[tokio::test]
-async fn remote_file_system_preserves_only_cwd_dependent_policy_directories() {
+async fn remote_file_system_policy_context_always_carries_full_directories() {
     let cases = [
         (
             "file:///workspace/checkout",
             Some("/elsewhere/*.secret"),
-            None,
             Some("selected-root"),
         ),
         (
             "file:///D:/checkout",
             Some(r"D:\elsewhere\*.secret"),
-            None,
             Some("selected-root"),
         ),
         (
             "file://server/share/checkout",
             Some(r"\\server\share\elsewhere\*.secret"),
-            None,
             Some("selected-root"),
         ),
         (
             "file:///workspace/checkout",
             Some("*.secret"),
-            Some("file:///workspace/checkout"),
             Some("selected-root"),
         ),
         (
             "file:///D:/checkout",
             Some(r"private\*.secret"),
-            Some("file:///D:/checkout"),
             Some("selected-root"),
         ),
-        (
-            "file:///workspace/checkout",
-            None,
-            Some("file:///workspace/checkout"),
-            Some("selected-root"),
-        ),
-        (
-            "file:///D:/checkout",
-            None,
-            Some("file:///D:/checkout"),
-            None,
-        ),
+        ("file:///workspace/checkout", None, Some("selected-root")),
+        ("file:///D:/checkout", None, None),
     ];
     let (websocket_url, captured_params, server) = record_read_file_params(cases.len()).await;
     let file_system = RemoteFileSystem::new(LazyRemoteExecServerClient::new(
@@ -182,7 +168,7 @@ async fn remote_file_system_preserves_only_cwd_dependent_policy_directories() {
     ));
     let mut expected_params = Vec::new();
     let mut expected_contexts = Vec::new();
-    for (cwd, pattern, legacy_cwd, selected_root) in cases {
+    for (cwd, pattern, selected_root) in cases {
         let cwd = PathUri::parse(cwd).expect("policy cwd");
         let path = cwd.join("public.txt").expect("operation path");
         let permission_path = match pattern {
@@ -209,16 +195,9 @@ async fn remote_file_system_preserves_only_cwd_dependent_policy_directories() {
             .read_file(&path, Default::default(), Some(&sandbox))
             .await
             .expect("remote read");
-        let legacy_cwd = legacy_cwd
-            .map(|cwd| serde_json::json!(PathUri::parse(cwd).expect("legacy policy cwd")));
-        let legacy_roots = if legacy_cwd.is_some() && !sandbox.workspace_roots.is_empty() {
-            Some(serde_json::json!(sandbox.workspace_roots))
-        } else {
-            None
-        };
         expected_contexts.push((
-            legacy_cwd,
-            legacy_roots,
+            None,
+            None,
             Some(serde_json::json!({
                 "cwd": cwd,
                 "workspaceRoots": sandbox.workspace_roots,
@@ -254,10 +233,12 @@ async fn remote_file_system_preserves_only_cwd_dependent_policy_directories() {
     server.await.expect("recording server should succeed");
 }
 
-/// Older executors can launch with their own cwd while newer executors retain the removed cwd.
-/// （对位 codex 841b5490b2 同名测试）
+/// Clients that omit the policy cwd fall back to the executor's own cwd; removed dirs still read.
+/// （对位 codex 841b5490b2 `remote_file_system_can_read_after_checkout_removal_with_legacy_helper_launch`
+/// 的终态化：v1.11 起线上只有 policyContext 一种承载——省略策略 cwd 时 executor
+/// 回退自身 cwd 启动 helper，因全部路径绝对仍可工作。）
 #[tokio::test]
-async fn remote_file_system_can_read_after_checkout_removal_with_legacy_helper_launch() {
+async fn remote_file_system_can_read_after_checkout_removal_with_cwd_fallback() {
     let temp = tempfile::TempDir::new().expect("test directory");
     let checkout = temp.path().join("checkout");
     std::fs::create_dir(&checkout).expect("checkout should exist");
@@ -297,6 +278,7 @@ async fn remote_file_system_can_read_after_checkout_removal_with_legacy_helper_l
             "cwd": cwd,
             "workspaceRoots": [cwd],
         });
+        // 终态线上形状：平铺 cwd/workspaceRoots 不存在，policyContext 唯一承载。
         assert_eq!(
             (
                 raw_sandbox.get("cwd"),
@@ -305,12 +287,6 @@ async fn remote_file_system_can_read_after_checkout_removal_with_legacy_helper_l
             ),
             (None, None, Some(&policy_context)),
         );
-        let legacy_cwd = raw_sandbox
-            .get("cwd")
-            .cloned()
-            .map(serde_json::from_value::<PathUri>)
-            .transpose()
-            .expect("legacy sandbox cwd");
         let params = serde_json::from_value::<WireFsReadFileParams>(raw_params)
             .expect("wire read params")
             .try_into_request(|wire| {
@@ -323,11 +299,9 @@ async fn remote_file_system_can_read_after_checkout_removal_with_legacy_helper_l
             (selected_sandbox.cwd, selected_sandbox.workspace_roots),
             (cwd.clone(), vec![cwd]),
         );
-        // An old executor falls back to its own cwd when it spawns the helper for this policy.
-        let helper_cwd = match legacy_cwd {
-            Some(cwd) => cwd.to_abs_path().expect("native legacy cwd").to_path_buf(),
-            None => std::env::current_dir().expect("legacy executor cwd"),
-        };
+        // An executor without a policy cwd falls back to its own cwd when spawning the helper;
+        // absolute request paths keep working.
+        let helper_cwd = std::env::current_dir().expect("executor fallback cwd");
         #[cfg(unix)]
         let mut command = tokio::process::Command::new("cat");
         #[cfg(windows)]
@@ -341,7 +315,7 @@ async fn remote_file_system_can_read_after_checkout_removal_with_legacy_helper_l
             .arg(params.path.to_abs_path().expect("native file").as_path())
             .output()
             .await
-            .expect("legacy helper should launch");
+            .expect("fallback helper should launch");
         assert!(
             output.status.success(),
             "{}",
@@ -373,7 +347,7 @@ async fn remote_file_system_can_read_after_checkout_removal_with_legacy_helper_l
             .expect("remote read"),
         b"allowed"
     );
-    server.await.expect("legacy server should succeed");
+    server.await.expect("fallback server should succeed");
 }
 
 #[tokio::test]

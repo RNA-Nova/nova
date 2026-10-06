@@ -17,8 +17,23 @@ inherits = "default"
 [test-groups.windows_sandbox_legacy_sessions]
 max-threads = 1
 
+# 对位 codex 9212b3eca8：共享 runner 提升沙箱账户的用例单线程排队
+[test-groups.windows_sandbox_accounts]
+max-threads = 1
+
 [test-groups.windows_process_heavy]
 max-threads = 2
+
+[[profile.default.overrides]]
+# 这些用例共享 runner 的提升沙箱账户（并发 setup 会在他方 setup 与 logon 之间
+# 轮换账户密码）。入组单线程排队（超时计时也因此推迟）；跨进程仍由
+# WindowsSandboxAccountTestGuard 文件锁协调（对位 codex 9212b3eca8）。
+platform = 'cfg(windows)'
+filter = '''
+    (package(nova-exec-server) & test(file_system_elevated_relative_read_denial_uses_policy_cwd)) |
+    (package(nova-exec-server-windows-sandbox) & test(elevated_non_tty_cmd_forwards_env_output_and_exit))
+'''
+test-group = 'windows_sandbox_accounts'
 
 [[profile.default.overrides]]
 # These tests create restricted-token Windows child processes and private desktops.

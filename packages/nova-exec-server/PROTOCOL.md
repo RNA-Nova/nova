@@ -1,4 +1,4 @@
-# nova-exec-server 线上协议（v1.10）
+# nova-exec-server 线上协议（v1.11）
 
 > 本文件是 nova-exec-server 服务端与客户端之间的**唯一契约**。任何语言照本文档
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
@@ -169,19 +169,16 @@ shell 启动状态（`.zshrc`/`.bashrc` 求值结果：函数/别名/setopt/导�
 所有路径用 **PathUri**（`file:///` URI），由服务端按本机路径规则解释；
 `sandbox` 字段（FileSystemSandboxContext）限定可访问根。
 
-**FileSystemSandboxContext**（v1.10 起）：沙箱策略与解释策略所需的执行端路径。
-线上字段：
+**FileSystemSandboxContext**（v1.11 终态形状）：沙箱策略与解释策略所需的执行端
+路径。线上字段：
 
 - `permissions`：权限档案（显式路径以 executor file URI 序列化）；
-- `cwd`：策略锚定目录（**必填**——绝对权限也需要；进程可用不同的工作目录）；
-- `workspaceRoots`：策略工作根数组；
-- `policyContext`：`{cwd, workspaceRoots}` 子对象（v1.10）——**新客户端**省略
-  平铺 `cwd`/`workspaceRoots`、由 `policyContext` 承载；**legacy 平铺字段保留**：
-  老客户端照旧平铺，executor 入口解析归一（`policyContext` 优先，回退平铺字段；
-  `process/start` 再回退进程 `cwd`，fs 方法再回退 executor 自身当前目录——
-  仅当策略不含 cwd 依赖项（相对 glob / `project_roots` 符号）时允许省略，否则
-  `invalid_params`）；策略需 cwd 时新老客户端都保留平铺字段（老 executor 只认
-  平铺）；
+- `policyContext`：`{cwd, workspaceRoots}`——**策略目录的唯一承载**（v1.11 起；
+  v1.10 沿 codex 保留的平铺 `cwd`/`workspaceRoots` 双形状字段已删除）。`cwd`
+  为策略锚定目录（绝对权限也需要；进程可用不同的工作目录）。客户端整个省略
+  `policyContext` 时 executor 入口回退为自身 cwd（人机工学：`process/start`
+  回退进程 `cwd`，fs 方法回退 executor 自身当前目录）；但策略含 cwd 依赖项
+  （相对 glob / `project_roots` 符号）而省略时 `invalid_params`；
 - `userHomeDir?`/`temporaryDirectories?`：执行端家目录/临时目录（解析 `~`
   相对与 `:tmpdir` 条目）；
 - `windowsSandboxLevel`/`windowsSandboxProxySettingsMode?`/`useLegacyLandlock`。
@@ -256,11 +253,15 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 完整版本注释以 `crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION`
 上方注释为准；本文件只记当前版本面的关键增量。
 
+- **v1.11**（policyContext 终态化）：删除 v1.10 沿 codex 841b5490b2 保留的
+  legacy 平铺 `cwd`/`workspaceRoots` 双形状字段（nova 从未对外发布，没有老
+  客户端存在，不背 legacy 包袱）——策略目录只经 `policyContext` 承载；保留
+  "客户端整个省略时 executor 入口回退自身 cwd"的人机工学（**形状不兼容
+  演化**，客户端须同步升级）。
 - **v1.10**（fs 策略语义修正组，对位 codex 2926014075/34e74fda0e/c53f342fec/
   841b5490b2/a4ee536f01/645b683a9e）：
   - `FileSystemSandboxContext` 策略 `cwd` 改必填，新增 `policyContext`
-    `{cwd, workspaceRoots}` 子对象；legacy 平铺字段保留，executor 入口解析归一
-    （见「文件系统」节）；
+    `{cwd, workspaceRoots}` 子对象（v1.11 已终态化为唯一承载）；
   - 全部 fs 操作按读/写各自权限档分流，全盘整读不再被写株连（见「文件系统」节
     「读写路由」）；
   - 策略匹配 URI-native：策略条目与特殊根按执行机路径约定解析为 PathUri，

@@ -135,9 +135,9 @@ use crate::protocol::SignalParams;
 use crate::protocol::SignalResponse;
 use crate::protocol::TerminateParams;
 use crate::protocol::TerminateResponse;
-// 对位 codex 841b5490b2：fs 发送侧统一经 Wire* 形状上线（policyContext 承载
-// 策略目录，legacy 平铺字段按需保留）；readStream/writeStream 为 nova 自有
-// 通道，按同一纪律发送。
+// 对位 codex 841b5490b2：fs 发送侧统一经 Wire* 形状上线（policyContext 唯一
+// 承载策略目录）；readStream/writeStream 为 nova 自有通道，按同一纪律发送。
+use crate::protocol::WireExecParams;
 use crate::protocol::WireFsCanonicalizeParams;
 use crate::protocol::WireFsCopyParams;
 use crate::protocol::WireFsCreateDirectoryParams;
@@ -749,7 +749,9 @@ impl ExecServerClient {
     }
 
     pub async fn exec(&self, params: ExecParams) -> Result<ExecResponse, ExecServerError> {
-        self.call(EXEC_METHOD, &params).await
+        // v1.11 终态：process/start 与 fs 方法同一纪律——policyContext 承载策略目录
+        self.call(EXEC_METHOD, &WireExecParams::from(params))
+            .await
     }
 
     /// 返回缓存的执行端环境元数据；initialize 未捎带时惰性经 environment/info
@@ -1080,7 +1082,11 @@ impl ExecServerClient {
             let process_start_task = async move {
                 let _active_start = active_start;
                 match client
-                    .call_rpc::<_, ExecResponse>(&rpc_client, EXEC_METHOD, &params)
+                    .call_rpc::<_, ExecResponse>(
+                        &rpc_client,
+                        EXEC_METHOD,
+                        &WireExecParams::from(params),
+                    )
                     .await
                 {
                     Ok(response) => {

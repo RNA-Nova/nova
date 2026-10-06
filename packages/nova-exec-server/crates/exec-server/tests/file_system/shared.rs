@@ -289,9 +289,15 @@ async fn file_system_read_file_stream_returns_bounded_chunks(
     let sandbox = read_only_sandbox(tmp.path().to_path_buf());
     for sandbox in [None, Some(&sandbox)] {
         // nova 的进程内 FileSystemReadStream 抽象不支持平台沙箱（RPC 层
-        // fs/readStream 才支持，见 sandboxed_file_system.rs），local 实现
-        // 带沙箱时以 Unsupported 快速失败；remote 两种形态都覆盖。
-        if sandbox.is_some() && implementation == FileSystemImplementation::Local {
+        // fs/readStream 才支持，见 sandboxed_file_system.rs）。对位 codex
+        // a4ee536f01 读写路由：全盘整读的沙箱上下文（windows 侧
+        // sandbox_context helper 会补 Root Read）读不再进沙箱——local 直读
+        // 成功；读确实受限时 local 才以 Unsupported 快速失败；remote 两种
+        // 形态都覆盖。
+        if sandbox.is_some_and(|sandbox| {
+            implementation == FileSystemImplementation::Local
+                && sandbox.should_read_from_sandbox()
+        }) {
             let Err(error) = file_system.read_file_stream(&path, sandbox).await else {
                 panic!("local sandboxed streaming read should be unsupported");
             };

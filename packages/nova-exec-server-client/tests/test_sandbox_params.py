@@ -15,8 +15,8 @@ from pydantic import ValidationError
 
 def test_read_only_sandbox_serializes_wire_shape():
     """codex `:read-only` 套餐 wire 形态：全盘可读（符号 :root）、无处可写、
-    网络受限；v1.10 起策略目录由 policyContext 承载（只读基座无需
-    cwd 的策略不再平铺 legacy cwd——对位 codex 841b5490b2）"""
+    网络受限；v1.11 起策略目录只经 policyContext 承载（终态形状——平铺
+    cwd/workspaceRoots 字段已删，对位 codex 841b5490b2 的终态化）"""
     ctx = FileSystemSandboxContext.read_only("/tmp/proj")
     # exclude_none 对齐 process/start 的真实出货路径（None 项不上线）
     data = ctx.model_dump(by_alias=True, exclude_none=True)
@@ -27,70 +27,60 @@ def test_read_only_sandbox_serializes_wire_shape():
         {"path": {"type": "special", "value": {"kind": "root"}}, "access": "read"}
     ]
     assert data["permissions"]["network"] == "restricted"
-    assert "cwd" not in data  # 策略不依赖 cwd 时 legacy 平铺字段省略
-    assert data["policyContext"] == {"cwd": "/tmp/proj", "workspaceRoots": []}
-    assert data["windowsSandboxLevel"] == "disabled"
-    assert data["useLegacyLandlock"] is False
-
-
-def test_cwd_dependent_sandbox_keeps_legacy_flat_fields():
-    """策略含 project_roots 符号（或相对 glob）时，legacy 平铺 cwd/workspaceRoots
-    照旧上线（老 executor 兼容），policyContext 同时承载（对位 codex 841b5490b2）"""
-    ctx = FileSystemSandboxContext.workspace_write("/tmp/proj")
-    ctx.workspace_roots = ["/tmp/proj"]
-    data = ctx.model_dump(by_alias=True, exclude_none=True)
-    assert data["cwd"] == "/tmp/proj"
-    assert data["workspaceRoots"] == ["/tmp/proj"]
+    assert "cwd" not in data
+    assert "workspaceRoots" not in data
     assert data["policyContext"] == {
         "cwd": "/tmp/proj",
         "workspaceRoots": ["/tmp/proj"],
     }
-
-    # 老客户端发来的平铺形态（无 policyContext）照旧可解析
-    legacy = FileSystemSandboxContext.model_validate(
-        {"cwd": "/tmp/proj", "workspaceRoots": ["/tmp/proj"]}
-    )
-    assert legacy.policy_context is None
-    assert legacy.cwd == "/tmp/proj"
-    assert legacy.workspace_roots == ["/tmp/proj"]
+    assert data["windowsSandboxLevel"] == "disabled"
+    assert data["useLegacyLandlock"] is False
 
 
-def test_legacy_flat_fields_follow_glob_convention():
-    """绝对 glob（按 cwd 约定）省略 legacy 平铺；相对 glob 保留——对位 codex
-    841b5490b2 的 remote_file_system_preserves_only_cwd_dependent_policy_directories"""
+def test_policy_context_is_the_only_directory_carrier():
+    """任意策略形态（含 project_roots 符号/相对 glob）线上都只有
+    policyContext 一种承载；平铺键永不出现（v1.11 终态，对位 codex
+    841b5490b2 的终态化）"""
     from nova_protocol.exec_server_wire import (
         ExecFileSystemPath,
         ExecFileSystemSandboxEntry,
         ExecManagedFileSystemPermissions,
         ExecPermissionProfile,
         FileSystemAccessMode,
+        WireFileSystemPolicyContext,
     )
 
-    def ctx_with_glob(cwd: str, pattern: str) -> FileSystemSandboxContext:
-        return FileSystemSandboxContext(
-            cwd=cwd,
+    for cwd in [
+        "/tmp/proj",
+        "file:///workspace/checkout",
+        "file:///D:/checkout",
+        "file://server/share/checkout",
+    ]:
+        ctx = FileSystemSandboxContext(
+            policy_context=WireFileSystemPolicyContext(cwd=cwd, workspaceRoots=[cwd]),
             permissions=ExecPermissionProfile(
                 file_system=ExecManagedFileSystemPermissions(
                     entries=[
                         ExecFileSystemSandboxEntry(
-                            path=ExecFileSystemPath.glob(pattern),
+                            path=ExecFileSystemPath.glob("*.secret"),
                             access=FileSystemAccessMode.DENY,
-                        )
+                        ),
+                        ExecFileSystemSandboxEntry(
+                            path=ExecFileSystemPath.project_roots(),
+                            access=FileSystemAccessMode.WRITE,
+                        ),
                     ]
                 )
             ),
         )
+        data = ctx.model_dump(by_alias=True, exclude_none=True)
+        assert "cwd" not in data and "workspaceRoots" not in data
+        assert data["policyContext"] == {"cwd": cwd, "workspaceRoots": [cwd]}
 
-    for cwd, pattern, expect_flat in [
-        ("file:///workspace/checkout", "/elsewhere/*.secret", False),
-        ("file:///D:/checkout", r"D:\elsewhere\*.secret", False),
-        ("file://server/share/checkout", r"\\server\share\elsewhere\*.secret", False),
-        ("file:///workspace/checkout", "*.secret", True),
-        ("file:///D:/checkout", r"private\*.secret", True),
-    ]:
-        data = ctx_with_glob(cwd, pattern).model_dump(by_alias=True, exclude_none=True)
-        assert ("cwd" in data) is expect_flat, (cwd, pattern)
-        assert data["policyContext"]["cwd"] == cwd
+    # 省略 policyContext = 客户端让 executor 入口回退自身 cwd（人机工学，保留）
+    ctx = FileSystemSandboxContext.read_only()
+    data = ctx.model_dump(by_alias=True, exclude_none=True)
+    assert "policyContext" not in data
 
 
 def test_workspace_write_sandbox_serializes_roots_and_network():

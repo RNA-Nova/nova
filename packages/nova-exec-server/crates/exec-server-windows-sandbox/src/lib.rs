@@ -14,9 +14,12 @@ mod launch_environment;
 // pub 是因为 bin target（command_runner 的 cwd_junction）也引用它。
 #[doc(hidden)]
 pub mod background_command;
-// 对位 codex `codex-windows-sandbox-test-support`（nova 内联实现，仅测试使用）。
+// 对位 codex `codex-windows-sandbox-test-support`（nova 内联实现，仅测试使用；
+// pub 供 exec-server 等 crate 的 windows 测试共享同一账户文件锁，对位
+// 上游 9212b3eca8 把该支撑件提供给 codex-exec-server 测试的做法）。
 #[cfg(target_os = "windows")]
-pub(crate) mod test_support;
+#[doc(hidden)]
+pub mod test_support;
 
 use std::fmt;
 use std::sync::Arc;

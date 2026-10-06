@@ -2165,84 +2165,30 @@ mod tests {
                 PathBuf::from("/dev/.aws"),
             ]
         );
-        assert_eq!(
-            args.args,
-            vec![
-                // Start from a read-only view of the full filesystem.
-                "--ro-bind".to_string(),
-                "/".to_string(),
-                "/".to_string(),
-                // Recreate a writable /dev inside the sandbox.
-                "--dev".to_string(),
-                "/dev".to_string(),
-                // Make the writable root itself writable again.
-                "--bind".to_string(),
-                "/".to_string(),
-                "/".to_string(),
-                // Mask the default metadata path names under the writable root.
-                // Because the root is `/` in this test, these carveout paths
-                // appear directly below `/`（根组 .aws 居首——与上游及生成器
-                // 实际产出同序，Linux CI 实证）。
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/.aws".to_string(),
-                "--remount-ro".to_string(),
-                "/.aws".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/.git".to_string(),
-                "--remount-ro".to_string(),
-                "/.git".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/.agents".to_string(),
-                "--remount-ro".to_string(),
-                "/.agents".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/.nova".to_string(),
-                "--remount-ro".to_string(),
-                "/.nova".to_string(),
-                "--ro-bind".to_string(),
-                path_to_string(&synthetic_mount_registry_root()),
-                path_to_string(&synthetic_mount_registry_root()),
-                // Rebind /dev after the root bind so device nodes remain
-                // writable/usable inside the writable root.
-                "--bind".to_string(),
-                "/dev".to_string(),
-                "/dev".to_string(),
-                // Then mask the metadata names that would otherwise be
-                // creatable below the writable /dev bind.
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/dev/.git".to_string(),
-                "--remount-ro".to_string(),
-                "/dev/.git".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/dev/.agents".to_string(),
-                "--remount-ro".to_string(),
-                "/dev/.agents".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/dev/.nova".to_string(),
-                "--remount-ro".to_string(),
-                "/dev/.nova".to_string(),
-                "--perms".to_string(),
-                "555".to_string(),
-                "--tmpfs".to_string(),
-                "/dev/.aws".to_string(),
-                "--remount-ro".to_string(),
-                "/dev/.aws".to_string(),
-            ]
-        );
+        // 对位 codex 645b683a9e（origin/main 现行版）：根绑定会遮蔽先前挂载的
+        // 最小设备树并带上 nodev，故根绑定后须重建 /dev——恰好两次 /dev 挂载，
+        // 顺序为 初始 /dev < 根绑定 < 重建 /dev < 可写 /dev 绑定。
+        let dev_mounts = args
+            .args
+            .windows(2)
+            .enumerate()
+            .filter_map(|(index, args)| (args == ["--dev", "/dev"]).then_some(index))
+            .collect::<Vec<_>>();
+        let [initial_dev_mount, restored_dev_mount] = dev_mounts.as_slice() else {
+            panic!("expected exactly two /dev mounts, got {dev_mounts:?}");
+        };
+        let root_bind = args
+            .args
+            .windows(3)
+            .position(|args| args == ["--bind", "/", "/"])
+            .expect("root bind");
+        let dev_bind = args
+            .args
+            .windows(3)
+            .position(|args| args == ["--bind", "/dev", "/dev"])
+            .expect("/dev bind");
+        assert!(*initial_dev_mount < root_bind && root_bind < *restored_dev_mount);
+        assert!(*restored_dev_mount < dev_bind);
     }
 
     #[test]

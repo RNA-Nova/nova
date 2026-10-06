@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 from nova_exec_server_client import load_executor_config
+
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
@@ -87,7 +88,9 @@ def test_resolve_read_only_wire_shape(tmp_path):
     sandbox = config.to_file_system_sandbox("/tmp/proj")
     assert sandbox is not None
     payload = sandbox.model_dump(by_alias=True, exclude_none=True)
-    assert payload["cwd"] == "/tmp/proj"
+    # v1.11 终态：策略目录只经 policyContext 承载（平铺字段已删）
+    assert "cwd" not in payload
+    assert payload["policyContext"]["cwd"] == "/tmp/proj"
     permissions = payload["permissions"]
     assert permissions["type"] == "managed"
     assert permissions["network"] == "restricted"
@@ -266,7 +269,8 @@ def test_attach_policy_ssh_uses_remote_cwd(monkeypatch, tmp_path):
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is not None
     assert selection.spawn_policy.sandbox is not None
-    assert selection.spawn_policy.sandbox["cwd"] == "/remote/w"
+    # v1.11 终态：策略目录只经 policyContext 承载
+    assert selection.spawn_policy.sandbox["policyContext"]["cwd"] == "/remote/w"
 
 
 def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
@@ -282,7 +286,8 @@ def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is not None
     assert selection.spawn_policy.sandbox is not None
-    assert selection.spawn_policy.sandbox["cwd"] == "/tmp/proj"
+    # v1.11 终态：策略目录只经 policyContext 承载
+    assert selection.spawn_policy.sandbox["policyContext"]["cwd"] == "/tmp/proj"
 
 
 def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed(

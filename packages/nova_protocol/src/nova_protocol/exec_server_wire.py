@@ -28,7 +28,7 @@ from pydantic import (
 
 #: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
 #: 跟随服务端 crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION）
-PROTOCOL_VERSION = "1.10"
+PROTOCOL_VERSION = "1.11"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
@@ -884,69 +884,25 @@ class ExecPermissionProfile(BaseModel):
 
 
 class WireFileSystemPolicyContext(BaseModel):
-    """policyContext 子对象（v1.10 起新客户端经它承载策略目录，对位 codex
-    841b5490b2 的 WireFileSystemPolicyContext）"""
+    """policyContext 子对象（v1.11 起策略目录的唯一线上承载，对位 codex
+    841b5490b2 的 WireFileSystemPolicyContext 终态化）"""
 
     model_config = ConfigDict(populate_by_name=True)
     cwd: str | None = None
     workspace_roots: list[str] = Field(default_factory=list, alias="workspaceRoots")
-
-
-def _infer_path_convention(cwd: str | None) -> str | None:
-    """按 RS `PathUri::infer_path_convention` 的口径从 cwd 串推断路径约定
-    （"windows" / "posix" / None）；py 侧 cwd 可能是 file:// URI 或原生路径。"""
-    if not cwd:
-        return None
-    rest = cwd
-    if rest.startswith("file:///%00"):
-        # opaque 回退 URI（BAD_PATH_URI_PREFIX）——约定不可知
-        return None
-    if rest.startswith("file://"):
-        rest = rest[len("file://") :]
-        if not rest.startswith("/"):
-            # file://host/share（UNC）——Windows
-            return "windows"
-    # 余下形态："/..."（file:///x 或原生 posix）——检查 Windows 盘符
-    drive = rest.lstrip("/")
-    if (
-        len(drive) >= 2
-        and drive[0].isascii()
-        and drive[0].isalpha()
-        and drive[1] == ":"
-    ):
-        return "windows"
-    if rest.startswith("\\\\"):
-        return "windows"
-    if rest.startswith("/"):
-        return "posix"
-    return None
-
-
-def _is_absolute_glob(pattern: str, convention: str) -> bool:
-    """glob 模式按给定约定是否已绝对（RS 侧判定即
-    `LegacyAppPathString::to_path_uri(convention)` 非错）。"""
-    if convention == "posix":
-        return pattern.startswith("/")
-    # windows：盘符绝对（X:/ 或 X:\\）或 UNC/根起（\\ 或 / 开头）
-    if (
-        len(pattern) >= 3
-        and pattern[0].isascii()
-        and pattern[0].isalpha()
-        and pattern[1] == ":"
-    ):
-        return pattern[2] in ("/", "\\")
-    return pattern.startswith(("/", "\\"))
 
 
 class FileSystemSandboxContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    """文件系统沙箱上下文（process/start 的 sandbox 参数的 wire 形态）"""
+    """文件系统沙箱上下文（process/start 的 sandbox 参数的 wire 形态）。
+
+    v1.11 终态形状：策略目录只经 `policyContext` 承载——codex 为老客户端
+    保留的平铺 `cwd`/`workspaceRoots` 双形状字段已删（nova 从未对外发布，
+    没有老客户端存在）。客户端整个省略 policyContext 时 executor 入口
+    回退为自身 cwd（人机工学，保留）。"""
 
     permissions: ExecPermissionProfile = Field(default_factory=ExecPermissionProfile)
-    cwd: str | None = None
-    workspace_roots: list[str] = Field(default_factory=list, alias="workspaceRoots")
-    #: v1.10：新客户端经 policyContext 承载策略目录（对位 codex 841b5490b2）；
-    #: 缺省时由序列化器从平铺 cwd/workspaceRoots 推导
+    #: 策略目录（cwd + workspaceRoots）。省略 = executor 入口回退自身 cwd
     policy_context: WireFileSystemPolicyContext | None = Field(
         default=None, alias="policyContext"
     )
@@ -962,66 +918,13 @@ class FileSystemSandboxContext(BaseModel):
     )
     use_legacy_landlock: bool = Field(default=False, alias="useLegacyLandlock")
 
-    def _legacy_needs_cwd(self) -> bool:
-        """对位 RS `WireFileSystemSandboxContext::from` 的 legacy_needs_cwd：
-        restricted 策略含相对 glob（按 cwd 约定转不成 URI）或 project_roots
-        符号时，legacy 平铺 cwd/workspaceRoots 才保留上线。"""
-        perms = self.permissions
-        if perms.type != "managed" or perms.file_system.type != "restricted":
-            return False
-        convention = _infer_path_convention(self.cwd)
-        for entry in perms.file_system.entries:
-            path = entry.path
-            if path.type == "glob_pattern":
-                if convention is None or not _is_absolute_glob(
-                    path.pattern or "", convention
-                ):
-                    return True
-            elif (
-                path.type == "special"
-                and path.value is not None
-                and path.value.kind == "project_roots"
-            ):
-                return True
-        return False
-
-    @model_serializer(mode="wrap")
-    def _wire_shape(self, handler) -> dict:
-        """对位 codex 841b5490b2 的 `From<FileSystemSandboxContext> for
-        WireFileSystemSandboxContext`：policyContext 承载策略目录；legacy 平铺
-        cwd/workspaceRoots 仅在策略需要时保留（老 executor 兼容）。"""
-        data = handler(self)
-        cwd = self.cwd
-        policy_context = self.policy_context
-        if policy_context is None and cwd is not None:
-            policy_context = WireFileSystemPolicyContext(
-                cwd=cwd, workspaceRoots=list(self.workspace_roots)
-            )
-        if self._legacy_needs_cwd():
-            if cwd is not None:
-                data["cwd"] = cwd
-            if self.workspace_roots:
-                data["workspaceRoots"] = list(self.workspace_roots)
-        else:
-            data.pop("cwd", None)
-            data.pop("workspaceRoots", None)
-        if policy_context is not None:
-            data["policyContext"] = policy_context.model_dump(
-                by_alias=True, exclude_none=True
-            )
-        else:
-            data.pop("policyContext", None)
-        # RS serde 线上纪律：None 与空 workspaceRoots 从不上线
-        for key in (
-            "userHomeDir",
-            "temporaryDirectories",
-            "windowsSandboxProxySettingsMode",
-        ):
-            if data.get(key) is None:
-                data.pop(key, None)
-        if not self.workspace_roots:
-            data.pop("workspaceRoots", None)
-        return data
+    @classmethod
+    def _policy_context(cls, cwd: str | None) -> WireFileSystemPolicyContext | None:
+        """RS `from_permission_profile` 对位：cwd 给定时 policyContext 承载
+        cwd 与 workspace_roots=[cwd]；cwd 缺省 = 省略（入口回退）。"""
+        if cwd is None:
+            return None
+        return WireFileSystemPolicyContext(cwd=cwd, workspaceRoots=[cwd])
 
     @classmethod
     def read_only(cls, cwd: str | None = None) -> "FileSystemSandboxContext":
@@ -1031,7 +934,7 @@ class FileSystemSandboxContext(BaseModel):
         `:root`，不把路径烤进条目。
         """
         return cls(
-            cwd=cwd,
+            policy_context=cls._policy_context(cwd),
             permissions=ExecPermissionProfile(
                 type="managed",
                 file_system=ExecManagedFileSystemPermissions(
@@ -1093,7 +996,7 @@ class FileSystemSandboxContext(BaseModel):
             for name in (".git", ".nova")
         )
         return cls(
-            cwd=cwd,
+            policy_context=cls._policy_context(cwd),
             permissions=ExecPermissionProfile(
                 type="managed",
                 file_system=ExecManagedFileSystemPermissions(

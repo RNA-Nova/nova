@@ -250,9 +250,10 @@ pub(crate) fn build_router() -> RpcRouter<ExecServerHandler> {
     router
 }
 
-/// 对位 codex 841b5490b2 `resolve_filesystem_sandbox`：executor 入口把线上可选的
-/// 沙箱策略 cwd 归一——policyContext/legacy cwd 优先；legacy 客户端省略且策略
-/// 不需要 cwd 时，回退为 executor 自身当前目录（保住 Windows 盘符/共享）。
+/// 对位 codex 841b5490b2 `resolve_filesystem_sandbox` 的终态化（v1.11）：
+/// 策略目录只经 policyContext 承载；客户端整个省略时回退 executor 自身
+/// 当前目录（保住 Windows 盘符/共享）；策略含 cwd 依赖项（相对 glob /
+/// project_roots 符号）却省略 cwd 时报 invalid_params。
 fn resolve_filesystem_sandbox(
     sandbox: WireFileSystemSandboxContext,
 ) -> Result<FileSystemSandboxContext, JSONRPCErrorError> {
@@ -264,7 +265,7 @@ fn resolve_filesystem_sandbox(
                 "file system sandbox context with dynamic permissions requires cwd".to_string(),
             ));
         }
-        // Legacy filesystem clients omitted cwd only for these policies. Preserve the executor's
+        // Clients may omit the policy cwd only for these policies. Preserve the executor's
         // own default (and Windows drive/share), rather than using the requested path.
         std::env::current_dir()
             .and_then(|cwd| resolve_existing_path(&cwd))
