@@ -1,4 +1,4 @@
-# nova-exec-server 线上协议（v1.7）
+# nova-exec-server 线上协议（v1.9）
 
 > 本文件是 nova-exec-server 服务端与客户端之间的**唯一契约**。任何语言照本文档
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
@@ -51,7 +51,7 @@ client → initialized（notification）
 
 | 方法 | 参数 | 结果 | 说明 |
 |---|---|---|---|
-| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/`executorVersion`（v1.7，执行端发布版本，旧执行端缺省 `"0.0.0"`）/`providerId`（v1.7，可选，不透明构建身份；nova 无 build-stamp 基建，恒省略）/`prependPathDirs`（v1.7，执行端 PATH 前置目录，空即省略）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`fileWriteStreaming`（v1.7 起恒 false——fs/open 的 replace 模式与写流未启用）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false）、`windowsMxc`（v1.8——windows 端按 MXC 沙箱可用性如实上报，非 windows 恒 false；客户端按位门控后再下发 `windowsSandboxLevel="mxc"`））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
+| `environment/info` | — | `EnvironmentInfo` | shell/cwd/`userHomeDir`（`~` 展开目标，v1.2）/`platformOs`（`std::env::consts::OS` 值，v1.2）/临时目录（`temporaryDirectories` + `tempDir`，v1.2）/`executorVersion`（v1.7，执行端发布版本，旧执行端缺省 `"0.0.0"`）/`providerId`（v1.7，可选，不透明构建身份；nova 无 build-stamp 基建，恒省略）/`prependPathDirs`（v1.7，执行端 PATH 前置目录，空即省略）/能力位（`networkProxyLaunch`（v1.3 起恒 true——托管网络代理已落地）、`environmentConfigRead`（v1.4 起恒 true——端点已恢复为 nova 语义）、`sandboxedFileStreaming`（v1.6 起恒 true——fs 流式通道可按请求装配沙箱执行，约束位补回）、`fileWriteStreaming`（v1.9 起恒 true——fs/open 的 replace 模式与 fs/writeBlock 已落地；v1.7-1.8 恒 false）、`httpHeaderEnvVars`（v1.5 起恒 true——valueEnvVar 机制已实现的补宣告）、`shellSnapshotV2`（unix 为 true，非 unix 恒 false）、`windowsMxc`（v1.8——windows 端按 MXC 沙箱可用性如实上报，非 windows 恒 false；客户端按位门控后再下发 `windowsSandboxLevel="mxc"`））。v1.2 起 initialize 响应捎带同形状数据，客户端通常无需再调本方法（仅旧服务端回退用） |
 | `environment/status` | — | `EnvironmentStatus` | 环境状态 |
 | `environmentConfig/read` | `EnvironmentConfigReadParams` | `EnvironmentConfigReadResponse` | 代读 executor 本机配置层栈（v1.4 起，能力位 `environmentConfigRead` 门控，见下节） |
 
@@ -154,7 +154,7 @@ shell 启动状态（`.zshrc`/`.bashrc` 求值结果：函数/别名/setopt/导�
 | 方法 | 说明 |
 |---|---|
 | `fs/readFile` | 小文件读取（base64） |
-| `fs/open` / `fs/readBlock` / `fs/close` | 随机访问句柄。`fs/open` 自 v1.7 起带 `mode?`（`read`（缺省）|`replace`——`replace` 暂不支持，下发即 `invalid_request`「exec-server does not support writable file streams」，能力位 `fileWriteStreaming` 门控） |
+| `fs/open` / `fs/readBlock` / `fs/writeBlock` / `fs/close` | 随机访问句柄（每连接上限 128 个，在飞行打开也占槽；重复 ID/超限在触碰文件前拒绝）。`fs/open` 带 `mode?`（`read`（缺省）|`replace`——v1.9 起 `replace` 生效：创建/截断写打开，带沙箱上下文时按**写权限档**进沙箱 helper 开门执法，全盘整读不豁免）；`fs/writeBlock`（v1.9）显式 `offset` 定位写——`chunk` 为非空 base64 块（解码后 ≤1MiB），写区间不得超 i64 上限（越限 `invalid_request`），成功响应即确认全部字节落盘；写侧由能力位 `fileWriteStreaming` 门控 |
 | `fs/readStream` (+ `fs/readStream/chunk` / `fs/readStream/done` 通知） | 大文件流式读取。沙箱语义：带平台沙箱上下文时经一次性沙箱化 `fs_helper` 开门并把 fd/handle 传回 executor 自读（受限范围生效）；不带时 executor 直读 |
 | `fs/writeStream`（请求开句柄）+ `fs/writeStream/chunk`（通知，客户端→服务端，seq 严格序 append）+ `fs/writeStream/done`（请求收尾确认） | 大文件流式写入。**中断不产生可见文件**（中止/断连/乱序删半截）。沙箱语义：带平台沙箱上下文时经长命沙箱化 `fs_helper` 子进程持续写（受限范围生效；executor 逐帧转发 chunk/done，半截文件经沙箱内删除）；不带时 executor 自写 |
 | `fs/writeFile` | 写文件（base64） |
@@ -228,4 +228,8 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 ## 客户端
 
 - Python SDK：`packages/nova-exec-server-client`（`ExecutorClient`——initialize 时
-  做 protocolVersion major 匹配，不等即 `ProtocolError`）
+  做 protocolVersion major 匹配，不等即 `ProtocolError`）。写流客户端门
+  （v1.9，对位 codex e7798c9944）：`fs.open(mode=replace)` 与 `fs.write_block`
+  先查缓存的 `environmentInfo.capabilities.fileWriteStreaming`，false 即本地
+  `ProtocolError`（「exec-server does not support writable file streams」），
+  不发线上请求——旧执行端会把 replace 静默降级为只读句柄

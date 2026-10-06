@@ -175,7 +175,11 @@ class ExecutorClient:
         self._pool.on_notification(self._router.dispatch)
         self._control: ManagedTransport = channels[CHANNEL_CONTROL]  # type: ignore[assignment]
         self.process = ProcessManager(self._pool)
-        self.fs = FileSystemManager(self._pool, router=self._router)
+        # 写流能力门（fileWriteStreaming）与环境元数据缓存同源：initialize 捎带
+        # 即填充、旧服务端惰性拉取（对位 codex e7798c9944 的 environment_info()）
+        self.fs = FileSystemManager(
+            self._pool, router=self._router, environment_info=self.environment_info
+        )
         self.pty = PtyManager(self.process)
 
         self._network_policy = network_policy

@@ -37,6 +37,7 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
+use crate::protocol::FsOpenMode;
 use crate::protocol::FsReadDirectoryEntry;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadDirectoryResponse;
@@ -91,11 +92,14 @@ pub(crate) enum FsHelperRequest {
 }
 
 /// 开门请求的专用参数（对位 codex a73898c249 `FsHelperOpenParams`：
-/// 不复用 FsReadFileParams，去掉开门用不到的 read 选项）。
+/// 不复用 FsReadFileParams，去掉开门用不到的 read 选项；
+/// c39bfa4c8f 补 `mode`——缺省 read 保持既有 helper 请求的线上形状）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FsHelperOpenParams {
     pub(crate) path: PathUri,
+    #[serde(default)]
+    pub(crate) mode: FsOpenMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

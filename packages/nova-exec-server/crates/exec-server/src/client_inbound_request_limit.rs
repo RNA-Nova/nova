@@ -9,7 +9,7 @@ use nova_exec_server_protocol::HTTP_REQUEST_BODY_DELTA_METHOD;
 use nova_exec_server_protocol::JSONRPCMessage;
 use nova_exec_server_protocol::MAX_HTTP_BODY_DELTA_BYTES;
 
-use crate::file_read::MAX_READ_STREAM_BLOCK_SIZE;
+use crate::file_handle::MAX_READ_STREAM_BLOCK_SIZE;
 
 // A transport may materialize one larger frame before its JSON-RPC kind is known.
 pub(crate) const MAX_CLIENT_INBOUND_REQUEST_LEN: usize = 8 * 1024;

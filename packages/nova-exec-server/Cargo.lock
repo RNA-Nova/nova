@@ -2412,6 +2412,7 @@ dependencies = [
  "base64",
  "bytes",
  "nova-exec-server-file-system",
+ "nova-exec-server-mxc-sandbox",
  "nova-exec-server-network-proxy",
  "nova-exec-server-protocol-core",
  "nova-exec-server-shell-command",

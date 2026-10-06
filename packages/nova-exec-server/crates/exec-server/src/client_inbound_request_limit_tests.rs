@@ -11,7 +11,7 @@ use super::MAX_CLIENT_INBOUND_NOTIFICATION_LEN;
 use super::MAX_CLIENT_INBOUND_REQUEST_LEN;
 use super::MAX_FS_READ_STREAM_CHUNK_NOTIFICATION_LEN;
 use super::client_inbound_message_exceeded_limit;
-use crate::file_read::MAX_READ_STREAM_BLOCK_SIZE;
+use crate::file_handle::MAX_READ_STREAM_BLOCK_SIZE;
 
 #[test]
 fn rejects_oversized_request_hidden_in_raw_value_wrapper() {

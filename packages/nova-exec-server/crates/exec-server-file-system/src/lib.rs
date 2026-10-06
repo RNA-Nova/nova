@@ -35,6 +35,9 @@ use std::task::Poll;
 
 /// Maximum chunk size returned by [`ExecutorFileSystem::read_file_stream`].
 pub const FILE_READ_CHUNK_SIZE: usize = 1024 * 1024;
+/// Maximum decoded chunk size accepted by a streamed filesystem write.
+/// （对位 codex `FILE_WRITE_CHUNK_SIZE`：fs/writeBlock 单块解码后上限）
+pub const FILE_WRITE_CHUNK_SIZE: usize = 1024 * 1024;
 /// fs/walk 的服务端上限（集成测试需要引用以构造超限用例）。
 pub const MAX_WALK_DEPTH: usize = 64;
 pub const MAX_WALK_DIRECTORIES: usize = 10_000;
@@ -442,6 +445,41 @@ impl FileSystemSandboxContext {
         let file_system_policy = permissions.file_system_sandbox_policy();
         matches!(file_system_policy.kind, FileSystemSandboxKind::Restricted)
             && !file_system_policy.has_full_disk_write_access()
+    }
+
+    /// Whether filesystem reads need a platform sandbox on the selected executor.
+    ///
+    /// 对位 codex `should_read_from_sandbox`（cwd 在 nova 为 Option——线上旧客户端
+    /// 可省略，无法推断 convention 时按未知约定处理：`:slash_tmp` 拒绝仍算读限制）。
+    pub fn should_read_from_sandbox(&self) -> bool {
+        let Ok(permissions) = PermissionProfile::try_from(self.permissions.clone()) else {
+            // A sandbox context for another host must not select the unsandboxed filesystem.
+            return true;
+        };
+        !permissions
+            .file_system_sandbox_policy()
+            .has_full_disk_read_access_for_convention(
+                self.cwd
+                    .as_ref()
+                    .and_then(|cwd| cwd.infer_path_convention()),
+            )
+    }
+
+    /// Whether filesystem writes need a platform sandbox on the selected executor.
+    ///
+    /// 对位 codex `should_write_into_sandbox`（Option cwd 语义同读侧）。
+    pub fn should_write_into_sandbox(&self) -> bool {
+        let Ok(permissions) = PermissionProfile::try_from(self.permissions.clone()) else {
+            // A sandbox context for another host must not select the unsandboxed filesystem.
+            return true;
+        };
+        !permissions
+            .file_system_sandbox_policy()
+            .has_full_disk_write_access_for_convention(
+                self.cwd
+                    .as_ref()
+                    .and_then(|cwd| cwd.infer_path_convention()),
+            )
     }
 
     /// Borrows the executor-owned paths needed to interpret filesystem policy entries.

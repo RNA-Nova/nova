@@ -79,6 +79,7 @@ use crate::protocol::FS_READ_STREAM_DONE_METHOD;
 use crate::protocol::FS_READ_STREAM_METHOD;
 use crate::protocol::FS_REMOVE_METHOD;
 use crate::protocol::FS_WALK_METHOD;
+use crate::protocol::FS_WRITE_BLOCK_METHOD;
 use crate::protocol::FS_WRITE_FILE_METHOD;
 use crate::protocol::FS_WRITE_STREAM_CHUNK_METHOD;
 use crate::protocol::FS_WRITE_STREAM_DONE_METHOD;
@@ -109,6 +110,8 @@ use crate::protocol::FsRemoveParams;
 use crate::protocol::FsRemoveResponse;
 use crate::protocol::FsWalkParams;
 use crate::protocol::FsWalkResponse;
+use crate::protocol::FsWriteBlockParams;
+use crate::protocol::FsWriteBlockResponse;
 use crate::protocol::FsWriteFileParams;
 use crate::protocol::FsWriteFileResponse;
 use crate::protocol::FsWriteStreamChunkNotification;
@@ -845,6 +848,19 @@ impl ExecServerClient {
         params: FsReadBlockParams,
     ) -> Result<FsReadBlockResponse, ExecServerError> {
         self.call(FS_READ_BLOCK_METHOD, &params).await
+    }
+
+    /// fs/writeBlock：显式 offset 定位写（对位 codex `ExecServerClient::fs_write_block`）。
+    ///
+    /// 注：上游在此按 `fileWriteStreaming` 能力位本地门控（旧 executor 会把 replace
+    /// 打开静默降级为只读句柄）；nova 两侧同仓发布（协议 major 不匹配即拒连），
+    /// 能力门落地在 py 客户端（packages/nova-exec-server-client，对位
+    /// codex e7798c9944），Rust 客户端保持薄转发供集成测试直验服务端行为。
+    pub async fn fs_write_block(
+        &self,
+        params: FsWriteBlockParams,
+    ) -> Result<FsWriteBlockResponse, ExecServerError> {
+        self.call(FS_WRITE_BLOCK_METHOD, &params).await
     }
 
     pub async fn fs_close(

@@ -28,7 +28,7 @@ from pydantic import (
 
 #: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
 #: 跟随服务端 crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION）
-PROTOCOL_VERSION = "1.8"
+PROTOCOL_VERSION = "1.9"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
@@ -48,6 +48,7 @@ NETWORK_POLICY_DECISION = "network/policyDecision"
 FS_READ_FILE = "fs/readFile"
 FS_OPEN = "fs/open"
 FS_READ_BLOCK = "fs/readBlock"
+FS_WRITE_BLOCK = "fs/writeBlock"
 FS_CLOSE = "fs/close"
 FS_READ_STREAM = "fs/readStream"
 FS_READ_STREAM_CHUNK = "fs/readStream/chunk"
@@ -183,6 +184,8 @@ class EnvironmentCapabilities(BaseModel):
     sandboxed_file_streaming: bool = Field(
         default=False, alias="sandboxedFileStreaming"
     )
+    #: v1.9：fs/open 支持 replace 模式且 fs/writeBlock 可用（对位 codex 同名位）
+    file_write_streaming: bool = Field(default=False, alias="fileWriteStreaming")
     http_header_env_vars: bool = Field(default=False, alias="httpHeaderEnvVars")
     shell_snapshot_v2: bool = Field(default=False, alias="shellSnapshotV2")
     # v1.8：MXC Windows 沙箱可显式选择（对位 codex 同名位）
@@ -446,6 +449,27 @@ class FsReadBlockResponse(BaseModel):
 class FsCloseParams(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
+
+
+class FsWriteBlockParams(BaseModel):
+    """fs/writeBlock 请求（对位 RS `FsWriteBlockParams`）：显式 offset 定位写，
+    chunk 为非空块、解码后 ≤1MiB（服务端 FILE_WRITE_CHUNK_SIZE 校验）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    handle_id: str = Field(..., alias="handleId")
+    offset: int
+    #: 透明字节块——线上即裸 base64 字符串（同 ByteChunk）
+    chunk: bytes
+
+    @field_serializer("chunk")
+    def encode_chunk(self, v: bytes) -> str:
+        return base64.b64encode(v).decode()
+
+
+class FsWriteBlockResponse(BaseModel):
+    """成功响应即确认请求块的全部字节已落盘（对位 RS `FsWriteBlockResponse`）"""
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class FsReadStreamParams(BaseModel):

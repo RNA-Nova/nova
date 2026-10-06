@@ -29,6 +29,7 @@ use crate::WalkOutcome;
 use crate::WriteFileOptions;
 use crate::fs_sandbox::SandboxFsHelperWriteStream;
 use crate::no_follow;
+use crate::protocol::FsOpenMode;
 use crate::protocol::FsWriteStreamParams;
 use crate::regular_file;
 use crate::sandboxed_file_system::SandboxedFileSystem;
@@ -99,17 +100,26 @@ impl LocalFileSystem {
 }
 
 impl LocalFileSystem {
-    pub(crate) async fn open_file_for_read(
+    /// fs/open 的开门入口（对位 codex c39bfa4c8f `open_file(path, mode, sandbox)`）：
+    /// 沙箱判别按打开模式分流——Read 看读权限档（should_read_from_sandbox），
+    /// Replace 看写权限档（should_write_into_sandbox，全盘整读不豁免写执法）；
+    /// 需要沙箱时经一次性 helper 在沙箱内开门并把 fd/handle 传回本进程。
+    pub(crate) async fn open_file(
         &self,
         path: &PathUri,
+        mode: FsOpenMode,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
-        if sandbox.is_some_and(FileSystemSandboxContext::should_run_in_sandbox) {
-            // 沙箱开门：一次性 helper 在沙箱内 open 并把 fd/handle 传回本进程
-            // （见 sandboxed_file_open），进程内句柄由此可持有沙箱内文件
-            return self.sandboxed()?.open_file_for_read(path, sandbox).await;
+        if let Some(sandbox) = sandbox {
+            let needs_sandbox = match mode {
+                FsOpenMode::Read => sandbox.should_read_from_sandbox(),
+                FsOpenMode::Replace => sandbox.should_write_into_sandbox(),
+            };
+            if needs_sandbox {
+                return self.sandboxed()?.open_file(path, mode, Some(sandbox)).await;
+            }
         }
-        self.unsandboxed.open_file_for_read(path, sandbox).await
+        regular_file::open(path.to_abs_path()?.as_path(), mode).await
     }
 
     pub(crate) async fn open_file_for_write(
@@ -344,17 +354,6 @@ impl ExecutorFileSystem for LocalFileSystem {
 }
 
 impl UnsandboxedFileSystem {
-    async fn open_file_for_read(
-        &self,
-        path: &PathUri,
-        sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<tokio::fs::File> {
-        reject_platform_sandbox_context(sandbox)?;
-        self.file_system
-            .open_file_for_read(path, /*sandbox*/ None)
-            .await
-    }
-
     async fn open_file_for_write(
         &self,
         path: &PathUri,
@@ -574,14 +573,17 @@ impl ExecutorFileSystem for UnsandboxedFileSystem {
 }
 
 impl DirectFileSystem {
-    pub(crate) async fn open_file_for_read(
+    /// 直开读句柄（对位 codex `DirectFileSystem::open_file`——恒 Read 模式；
+    /// 写方向句柄由 fs/open replace 经 `LocalFileSystem::open_file` 直落
+    /// `regular_file::open`，fs/writeStream 走下方 open_file_for_write）。
+    pub(crate) async fn open_file(
         &self,
         path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
         reject_sandbox_context(sandbox)?;
         let path = path.to_abs_path()?;
-        regular_file::open(path.as_path()).await
+        regular_file::open(path.as_path(), FsOpenMode::Read).await
     }
 
     pub(crate) async fn open_file_for_write(
@@ -615,7 +617,7 @@ impl DirectFileSystem {
         reject_sandbox_context(sandbox)?;
         // no-follow：逐组件不跟符号链接直开（rustix openat 族），符号链接即报错
         let file = if options.follow_symlinks {
-            self.open_file_for_read(path, /*sandbox*/ None).await?
+            self.open_file(path, /*sandbox*/ None).await?
         } else {
             no_follow::open_file(path.to_abs_path()?.as_path()).await?
         };
@@ -638,7 +640,7 @@ impl DirectFileSystem {
         path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileSystemReadStream> {
-        let file = self.open_file_for_read(path, sandbox).await?;
+        let file = self.open_file(path, sandbox).await?;
         Ok(FileSystemReadStream::new(ReaderStream::with_capacity(
             file,
             FILE_READ_CHUNK_SIZE,

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import base64
 import uuid
-from collections.abc import AsyncIterable, AsyncIterator, Iterable
-from dataclasses import dataclass
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable
 
 from nova_protocol import (
+    ENVIRONMENT_INFO,
     FS_CANONICALIZE,
     FS_CLOSE,
     FS_COPY,
@@ -20,12 +20,14 @@ from nova_protocol import (
     FS_READ_STREAM,
     FS_REMOVE,
     FS_WALK,
+    FS_WRITE_BLOCK,
     FS_WRITE_FILE,
     FS_WRITE_STREAM,
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
     MAX_WRITE_STREAM_CHUNK_BYTES,
     DirEntry,
+    EnvironmentInfo,
     FileMetadata,
     FsCanonicalizeParams,
     FsCanonicalizeResponse,
@@ -33,6 +35,7 @@ from nova_protocol import (
     FsCopyParams,
     FsCreateDirectoryParams,
     FsGetMetadataParams,
+    FsOpenMode,
     FsOpenParams,
     FsOpenResponse,
     FsReadBlockParams,
@@ -45,6 +48,8 @@ from nova_protocol import (
     FsReadStreamResponse,
     FsRemoveParams,
     FsWalkParams,
+    FsWriteBlockParams,
+    FsWriteBlockResponse,
     FsWriteFileParams,
     FsWriteStreamChunkNotification,
     FsWriteStreamDoneParams,
@@ -74,14 +79,26 @@ class FileSystemManager:
     `router`：统一通知分发器（notifications.NotificationRouter）——
     client 装配时注入（全局单例，传输层通知统一经它按 handle_id 路由）；
     独立使用时缺省自建并自挂到 transport.on_notification（旧行为兼容）。
+
+    `environment_info`：环境元数据提供方（client 装配时注入
+    ExecutorClient.environment_info，共享 initialize 捎带/惰性拉取的缓存）——
+    fileWriteStreaming 能力门（对位 codex e7798c9944）经它查询；
+    独立使用时缺省为 None，按需经 transport 惰性拉取一次并本地缓存。
     """
 
-    def __init__(self, transport: Transport, router: NotificationRouter | None = None):
+    def __init__(
+        self,
+        transport: Transport,
+        router: NotificationRouter | None = None,
+        environment_info: Callable[[], Awaitable[EnvironmentInfo]] | None = None,
+    ):
         self._transport = transport
         if router is None:
             router = NotificationRouter()
             transport.on_notification(router.dispatch)
         self._router = router
+        self._environment_info_provider = environment_info
+        self._environment_info_cached: EnvironmentInfo | None = None
 
     def _stream_channel(self, method: str) -> str | None:
         """解析流式方法的落点通道名（池化传输打标签用；裸传输无此概念归 None）"""
@@ -335,11 +352,29 @@ class FileSystemManager:
         response = FsCanonicalizeResponse.model_validate(result)
         return response.path
 
-    # 分块读取 API（兼容旧版）
-    async def open(self, path: str, handle_id: str | None = None) -> str:
-        """打开文件用于分块读取"""
+    # 随机访问句柄 API（fs/open|readBlock|writeBlock|close）
+    async def open(
+        self,
+        path: str,
+        handle_id: str | None = None,
+        *,
+        mode: FsOpenMode = FsOpenMode.READ,
+        sandbox: dict | None = None,
+    ) -> str:
+        """打开文件句柄用于分块读/写
+
+        `mode=FsOpenMode.REPLACE`：写打开（文件缺失则创建、存在则截断），
+        随后用 `write_block` 按显式 offset 定位写。旧 executor 会把 replace
+        静默降级为只读句柄——能力门（对位 codex e7798c9944）在
+        fileWriteStreaming=false 时本地报错，不发线上请求。
+        """
+        if (
+            mode is FsOpenMode.REPLACE
+            and not await self._file_write_streaming_supported()
+        ):
+            raise ProtocolError("exec-server does not support writable file streams")
         handle_id = handle_id or _new_handle_id("b")
-        params = FsOpenParams(handleId=handle_id, path=path)
+        params = FsOpenParams(handleId=handle_id, path=path, mode=mode, sandbox=sandbox)
         result = await self._transport.send_request(
             FS_OPEN, params.model_dump(by_alias=True)
         )
@@ -357,10 +392,38 @@ class FileSystemManager:
         response = FsReadBlockResponse.model_validate(result)
         return response.chunk, response.eof
 
+    async def write_block(self, handle_id: str, offset: int, chunk: bytes) -> None:
+        """定位写块（对位 RS `fs_write_block`）：非空块、解码后 ≤1MiB，显式 offset。
+
+        成功返回即确认全部字节落盘；能力门同上（fileWriteStreaming=false 时
+        本地报错，不发线上请求）。
+        """
+        if not await self._file_write_streaming_supported():
+            raise ProtocolError("exec-server does not support writable file streams")
+        params = FsWriteBlockParams(handleId=handle_id, offset=offset, chunk=chunk)
+        result = await self._transport.send_request(
+            FS_WRITE_BLOCK, params.model_dump(by_alias=True)
+        )
+        FsWriteBlockResponse.model_validate(result)
+
     async def close(self, handle_id: str) -> None:
-        """关闭分块读取句柄"""
+        """关闭随机访问句柄（读/写通用）"""
         params = FsCloseParams(handleId=handle_id)
         await self._transport.send_request(FS_CLOSE, params.model_dump(by_alias=True))
+
+    async def _file_write_streaming_supported(self) -> bool:
+        """fileWriteStreaming 能力位（对位 codex e7798c9944 的客户端门）：
+        优先走注入的环境元数据缓存；独立使用时惰性拉取一次并本地缓存。
+        capabilities 缺失（旧服务端）按 false 处理。"""
+        if self._environment_info_provider is not None:
+            info = await self._environment_info_provider()
+        else:
+            if self._environment_info_cached is None:
+                result = await self._transport.send_request(ENVIRONMENT_INFO)
+                self._environment_info_cached = EnvironmentInfo.model_validate(result)
+            info = self._environment_info_cached
+        capabilities = info.capabilities
+        return capabilities is not None and capabilities.file_write_streaming
 
 
 async def _iterate_bytes(

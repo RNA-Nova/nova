@@ -28,6 +28,7 @@ use crate::protocol::FsCanonicalizeParams;
 use crate::protocol::FsCopyParams;
 use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsGetMetadataParams;
+use crate::protocol::FsOpenMode;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadFileParams;
 use crate::protocol::FsRemoveParams;
@@ -58,12 +59,14 @@ impl SandboxedFileSystem {
             .map_err(map_sandbox_error)
     }
 
-    /// 沙箱化开门（fs/readStream 的读端）：一次性 helper 在平台沙箱内 open
-    /// 目标文件后把 fd/handle 传回 executor（Unix 经 SCM_RIGHTS、Windows 经
-    /// 句柄复制，见 [`crate::sandboxed_file_open`]），executor 自持句柄读文件。
-    pub(crate) async fn open_file_for_read(
+    /// 沙箱化开门（fs/open 与 fs/readStream 共用）：一次性 helper 在平台沙箱内
+    /// 按 `mode` open 目标文件后把 fd/handle 传回 executor（Unix 经 SCM_RIGHTS、
+    /// Windows 经句柄复制，见 [`crate::sandboxed_file_open`]），executor 自持句柄
+    /// 读/写文件——开门在沙箱内发生即执法（helper 的沙箱命令按上下文权限档构建）。
+    pub(crate) async fn open_file(
         &self,
         path: &PathUri,
+        mode: FsOpenMode,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
         let sandbox = require_platform_sandbox(sandbox)?;
@@ -73,7 +76,7 @@ impl SandboxedFileSystem {
             .sandbox_runner
             .prepare_command(sandbox)
             .map_err(map_sandbox_error)?;
-        crate::sandboxed_file_open::open(command, path.clone())
+        crate::sandboxed_file_open::open(command, path.clone(), mode)
             .await
             .map_err(map_sandbox_error)
     }
@@ -350,7 +353,7 @@ impl ExecutorFileSystem for SandboxedFileSystem {
         _sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, FileSystemReadStream> {
         // 注：RPC 层的 fs/readStream 已支持平台沙箱（开门 fd 传递，
-        // 见 open_file_for_read）；这里不支持的是 FileSystemReadStream 这一
+        // 见 open_file）；这里不支持的是 FileSystemReadStream 这一
         // 进程内流抽象。
         Box::pin(async {
             Err(io::Error::new(

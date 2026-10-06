@@ -48,11 +48,11 @@ async fn run_main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // SCM_RIGHTS 递给父进程；Windows 则须等父进程复制完句柄（见文末 ack 等待）。
     let mut opened_file = None;
     match request {
-        // 一次性开门：在沙箱内 open 后把 fd/handle 传回父进程，随即退出
+        // 一次性开门：在沙箱内按 mode open 后把 fd/handle 传回父进程，随即退出
         FsHelperRequest::Open(params) => {
             let result: io::Result<_> = async {
                 let path = params.path.to_abs_path()?;
-                let file = regular_file::open(path.as_path()).await?;
+                let file = regular_file::open(path.as_path(), params.mode).await?;
                 // Unix 直接把已打开的 fd 经 stdin socket 递给父进程。
                 #[cfg(unix)]
                 crate::sandboxed_file_open::transfer_file(&file)?;

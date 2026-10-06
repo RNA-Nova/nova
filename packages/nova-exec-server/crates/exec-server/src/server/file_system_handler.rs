@@ -16,10 +16,10 @@ use crate::GetMetadataOptions;
 use crate::ReadFileOptions;
 use crate::RemoveOptions;
 use crate::WriteFileOptions;
-use crate::file_read::DEFAULT_READ_STREAM_BLOCK_SIZE;
-use crate::file_read::FileReadHandleManager;
-use crate::file_read::MAX_READ_STREAM_BLOCK_SIZE;
-use crate::file_read::stream_file_blocks;
+use crate::file_handle::DEFAULT_READ_STREAM_BLOCK_SIZE;
+use crate::file_handle::FileHandleManager;
+use crate::file_handle::MAX_READ_STREAM_BLOCK_SIZE;
+use crate::file_handle::stream_file_blocks;
 use crate::file_write::FileWriteHandleManager;
 use crate::file_write::FileWriteSandboxed;
 use crate::file_write::SandboxedWriteCommand;
@@ -55,6 +55,8 @@ use crate::protocol::FsRemoveParams;
 use crate::protocol::FsRemoveResponse;
 use crate::protocol::FsWalkParams;
 use crate::protocol::FsWalkResponse;
+use crate::protocol::FsWriteBlockParams;
+use crate::protocol::FsWriteBlockResponse;
 use crate::protocol::FsWriteFileParams;
 use crate::protocol::FsWriteFileResponse;
 use crate::protocol::FsWriteStreamChunkNotification;
@@ -68,7 +70,7 @@ use crate::rpc::invalid_request;
 use crate::rpc::not_found;
 use crate::sandboxed_file_system::map_sandbox_error;
 
-const MAX_FILE_READ_HANDLE_ID_BYTES: usize = 32;
+const MAX_FILE_HANDLE_ID_BYTES: usize = 32;
 const MAX_FILE_WRITE_HANDLE_ID_BYTES: usize = 32;
 // Each read-directory entry needs four JSON values. Keep same-version
 // producers comfortably below the shared 256K-value decoder budget.
@@ -79,7 +81,7 @@ const SANDBOXED_WRITE_COMMAND_QUEUE: usize = 8;
 #[derive(Clone)]
 pub(crate) struct FileSystemHandler {
     file_system: LocalFileSystem,
-    file_reads: FileReadHandleManager,
+    file_handles: FileHandleManager,
     file_writes: FileWriteHandleManager,
     notifications: Option<RpcNotificationSender>,
 }
@@ -88,7 +90,7 @@ impl FileSystemHandler {
     pub(crate) fn new(runtime_paths: ExecServerRuntimePaths) -> Self {
         Self {
             file_system: LocalFileSystem::with_runtime_paths(runtime_paths),
-            file_reads: FileReadHandleManager::default(),
+            file_handles: FileHandleManager::default(),
             file_writes: FileWriteHandleManager::default(),
             notifications: None,
         }
@@ -100,7 +102,7 @@ impl FileSystemHandler {
     }
 
     pub(crate) async fn shutdown(&self) {
-        self.file_reads.close_all().await;
+        self.file_handles.close_all();
         self.file_writes.close_all().await;
     }
 
@@ -108,22 +110,16 @@ impl FileSystemHandler {
         &self,
         params: FsOpenParams,
     ) -> Result<FsOpenResponse, JSONRPCErrorError> {
-        validate_file_read_handle_id(&params.handle_id)?;
-        // TODO(nova): 写流落地后启用 replace 打开（对位 codex 875bf9209b：
-        // 服务端保持写流未启用并显式拒绝 replacement opens，文案一致）。
-        if params.mode == FsOpenMode::Replace {
-            return Err(invalid_request(
-                "exec-server does not support writable file streams".to_string(),
-            ));
-        }
-        let file = self
-            .file_system
-            .open_file_for_read(&params.path, params.sandbox.as_ref())
-            .await
-            .map_err(map_fs_error)?;
+        validate_file_handle_id(&params.handle_id)?;
+        // 对位 codex d25c114d49+c39bfa4c8f：mode 透传到开门执行体，句柄表先占槽
+        // 再 await 打开（在飞行打开计入 128 槽上限，重复 ID/容量超限在碰文件前拒绝）
         let handle_id = self
-            .file_reads
-            .open(params.handle_id, file)
+            .file_handles
+            .open(
+                params.handle_id,
+                self.file_system
+                    .open_file(&params.path, params.mode, params.sandbox.as_ref()),
+            )
             .await
             .map_err(map_fs_error)?;
         Ok(FsOpenResponse { handle_id })
@@ -133,9 +129,9 @@ impl FileSystemHandler {
         &self,
         params: FsReadBlockParams,
     ) -> Result<FsReadBlockResponse, JSONRPCErrorError> {
-        validate_file_read_handle_id(&params.handle_id)?;
+        validate_file_handle_id(&params.handle_id)?;
         let block = self
-            .file_reads
+            .file_handles
             .read_block(&params.handle_id, params.offset, params.len)
             .await
             .map_err(map_fs_error)?;
@@ -145,12 +141,26 @@ impl FileSystemHandler {
         })
     }
 
+    /// fs/writeBlock（对位 codex c39bfa4c8f）：显式 offset 定位写，委托句柄表
+    /// 做块长/区间校验与 spawn_blocking 写循环。
+    pub(crate) async fn write_block(
+        &self,
+        params: FsWriteBlockParams,
+    ) -> Result<FsWriteBlockResponse, JSONRPCErrorError> {
+        validate_file_handle_id(&params.handle_id)?;
+        self.file_handles
+            .write_block(&params.handle_id, params.offset, params.chunk.into_inner())
+            .await
+            .map_err(map_fs_error)?;
+        Ok(FsWriteBlockResponse {})
+    }
+
     pub(crate) async fn close(
         &self,
         params: FsCloseParams,
     ) -> Result<FsCloseResponse, JSONRPCErrorError> {
-        validate_file_read_handle_id(&params.handle_id)?;
-        self.file_reads.close(&params.handle_id).await;
+        validate_file_handle_id(&params.handle_id)?;
+        self.file_handles.close(&params.handle_id);
         // 对写流句柄的 close 即中止：删除未完成流的半截文件
         self.file_writes.abort(&params.handle_id).await;
         Ok(FsCloseResponse {})
@@ -160,14 +170,14 @@ impl FileSystemHandler {
         &self,
         params: FsReadStreamParams,
     ) -> Result<FsReadStreamResponse, JSONRPCErrorError> {
-        validate_file_read_handle_id(&params.handle_id)?;
+        validate_file_handle_id(&params.handle_id)?;
         let block_size = params
             .block_size
             .unwrap_or(DEFAULT_READ_STREAM_BLOCK_SIZE)
             .clamp(1, MAX_READ_STREAM_BLOCK_SIZE);
 
         // 平台沙箱上下文对调用方透明：get_metadata 走一次性沙箱 helper，
-        // open_file_for_read 经沙箱开门把 fd/handle 传回本进程（见
+        // open_file 经沙箱开门把 fd/handle 传回本进程（见
         // sandboxed_file_open）——两条路径随后共用同一句柄与流式读循环，
         // 线上 readStream/chunk/done 通知形状不变
         let metadata = self
@@ -185,20 +195,20 @@ impl FileSystemHandler {
             None
         };
 
-        let file = self
-            .file_system
-            .open_file_for_read(&params.path, params.sandbox.as_ref())
-            .await
-            .map_err(map_fs_error)?;
+        // 读流恒以 Read 模式开门（句柄表先占槽再 await 打开，与 fs/open 同）
         let handle_id = self
-            .file_reads
-            .open(params.handle_id.clone(), file)
+            .file_handles
+            .open(
+                params.handle_id.clone(),
+                self.file_system
+                    .open_file(&params.path, FsOpenMode::Read, params.sandbox.as_ref()),
+            )
             .await
             .map_err(map_fs_error)?;
 
         // 启动后台流式读取任务
         let notifications = self.notifications.clone();
-        let file_reads = self.file_reads.clone();
+        let file_handles = self.file_handles.clone();
         let handle_id_clone = handle_id.clone();
         let offset = params.offset;
         let len = params.len;
@@ -206,7 +216,7 @@ impl FileSystemHandler {
             let emit_notifications = notifications.clone();
             let emit_handle_id = handle_id_clone.clone();
             let (total_bytes, error) = stream_file_blocks(
-                &file_reads,
+                &file_handles,
                 &handle_id_clone,
                 offset,
                 len,
@@ -245,7 +255,7 @@ impl FileSystemHandler {
                     .await;
             }
 
-            file_reads.close(&handle_id_clone).await;
+            file_handles.close(&handle_id_clone);
         });
 
         Ok(FsReadStreamResponse {
@@ -705,10 +715,10 @@ async fn cleanup_sandboxed_write_stream(
     }
 }
 
-fn validate_file_read_handle_id(handle_id: &str) -> Result<(), JSONRPCErrorError> {
-    if handle_id.len() > MAX_FILE_READ_HANDLE_ID_BYTES {
+fn validate_file_handle_id(handle_id: &str) -> Result<(), JSONRPCErrorError> {
+    if handle_id.len() > MAX_FILE_HANDLE_ID_BYTES {
         return Err(invalid_request(format!(
-            "file read handle ID must not exceed {MAX_FILE_READ_HANDLE_ID_BYTES} bytes"
+            "file handle ID must not exceed {MAX_FILE_HANDLE_ID_BYTES} bytes"
         )));
     }
     Ok(())
@@ -1171,7 +1181,7 @@ mod tests {
         /// 等待流式读后台任务收尾：done 送达后任务注销句柄退出
         async fn wait_for_handle_close(handler: &FileSystemHandler) {
             timeout(Duration::from_secs(10), async {
-                while handler.file_reads.open_handle_count().await > 0 {
+                while handler.file_handles.open_handle_count() > 0 {
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
             })
@@ -1255,7 +1265,7 @@ mod tests {
             // Seatbelt 拒绝 → EPERM → invalid_request（元数据/开门失败同步以
             // RPC 错误返回，与非沙箱路径语义一致）
             assert_eq!(err.code, -32600);
-            assert_eq!(handler.file_reads.open_handle_count().await, 0);
+            assert_eq!(handler.file_handles.open_handle_count(), 0);
         }
 
         #[tokio::test]
@@ -1291,7 +1301,7 @@ mod tests {
                 .await
                 .expect("close");
             // close 同步摘除句柄（fd 传递后无长命 helper，无需另行收尸）
-            assert_eq!(handler.file_reads.open_handle_count().await, 0);
+            assert_eq!(handler.file_handles.open_handle_count(), 0);
 
             // 中断后必到终态 done（带 error），且提前结束（16MB/256KB 共 64 块）
             let mut chunk_count = 1usize;

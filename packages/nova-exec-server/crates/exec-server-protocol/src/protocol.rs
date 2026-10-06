@@ -29,6 +29,8 @@ pub const ENVIRONMENT_STATUS_METHOD: &str = "environment/status";
 pub const FS_READ_FILE_METHOD: &str = "fs/readFile";
 pub const FS_OPEN_METHOD: &str = "fs/open";
 pub const FS_READ_BLOCK_METHOD: &str = "fs/readBlock";
+/// 对位 codex `FS_WRITE_BLOCK_METHOD`（v1.9 起服务端落地）。
+pub const FS_WRITE_BLOCK_METHOD: &str = "fs/writeBlock";
 pub const FS_CLOSE_METHOD: &str = "fs/close";
 pub const FS_READ_STREAM_METHOD: &str = "fs/readStream";
 pub const FS_READ_STREAM_CHUNK_METHOD: &str = "fs/readStream/chunk";
@@ -146,7 +148,7 @@ pub struct EnvironmentCapabilities {
     #[serde(default)]
     pub sandboxed_file_streaming: bool,
     /// Whether `fs/open` supports replacement mode and `fs/writeBlock` is supported.
-    /// （写流未启用——如实宣告 false，对位 codex 同名位）
+    /// （v1.9 起已启用——如实宣告 true，对位 codex 同名位）
     #[serde(default)]
     pub file_write_streaming: bool,
     /// Whether `http/request` header values can resolve from the executor
@@ -249,9 +251,10 @@ impl EnvironmentInfo {
                 // 如实宣告 true（v1.6 补回 codex 原约束位；端点存在不配位，
                 // readStream/writeStream 端点位随本版撤除）
                 sandboxed_file_streaming: true,
-                // fs/open 的 replace 模式与 fs/writeBlock 均未启用（服务端显式拒绝
-                // replace）——如实宣告 false，客户端按位门控
-                file_write_streaming: false,
+                // fs/open 的 replace 模式与 fs/writeBlock 已落地（v1.9，对位 codex
+                // c39bfa4c8f：显式 offset 定位写，单块 ≤1MiB，沙箱写权限档执法）——
+                // 如实宣告 true
+                file_write_streaming: true,
                 // http/request 的 valueEnvVar（header 值从执行机环境变量解析）已实现
                 // 于 route_aware_http_client（敏感变量保护名单拒代发，有测试）——
                 // 如实宣告 true（此前机制在但宣告缺位，v1.5 补齐）
@@ -527,6 +530,22 @@ pub struct FsReadBlockResponse {
     pub chunk: ByteChunk,
     pub eof: bool,
 }
+
+/// Writes a nonempty block of at most [`nova_exec_server_file_system::FILE_WRITE_CHUNK_SIZE`] decoded bytes at `offset`.
+/// （对位 codex `FsWriteBlockParams`）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsWriteBlockParams {
+    pub handle_id: String,
+    pub offset: u64,
+    pub chunk: ByteChunk,
+}
+
+/// A successful response confirms that every byte in the requested block was written.
+/// （对位 codex `FsWriteBlockResponse`）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsWriteBlockResponse {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -931,6 +950,8 @@ mod tests {
     use super::FsOpenMode;
     use super::FsOpenParams;
     use super::FsReadFileParams;
+    use super::FsWriteBlockParams;
+    use super::FsWriteBlockResponse;
     use super::HttpRequestParams;
     use super::InitializeResponse;
     use super::ProcessId;
@@ -1534,6 +1555,43 @@ mod tests {
         assert_eq!(replace.mode, FsOpenMode::Replace);
         let serialized = serde_json::to_value(replace).expect("replace open should serialize");
         assert_eq!(serialized["mode"], serde_json::json!("replace"));
+    }
+
+    /// `fs/writeBlock` 线上形状金标：camelCase 键 + chunk 透明 base64 字符串，
+    /// 全对象 roundtrip 相等（对位 codex `FsWriteBlockParams`/`FsWriteBlockResponse`）。
+    #[test]
+    fn filesystem_write_block_round_trips_golden_wire_shape() {
+        let params = FsWriteBlockParams {
+            handle_id: "writer".to_string(),
+            offset: 42,
+            chunk: b"abc".to_vec().into(),
+        };
+        let expected = serde_json::json!({
+            "handleId": "writer",
+            "offset": 42,
+            "chunk": "YWJj",
+        });
+        assert_eq!(
+            serde_json::to_value(&params).expect("serialize write block params"),
+            expected,
+        );
+        assert_eq!(
+            serde_json::from_value::<FsWriteBlockParams>(expected)
+                .expect("deserialize write block params"),
+            params,
+        );
+
+        let response = FsWriteBlockResponse {};
+        let expected = serde_json::json!({});
+        assert_eq!(
+            serde_json::to_value(&response).expect("serialize write block response"),
+            expected,
+        );
+        assert_eq!(
+            serde_json::from_value::<FsWriteBlockResponse>(expected)
+                .expect("deserialize write block response"),
+            response,
+        );
     }
 
     #[test]

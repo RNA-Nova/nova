@@ -731,6 +731,16 @@ impl FileSystemSandboxPolicy {
     }
 
     pub fn has_denied_read_restrictions(&self) -> bool {
+        // TODO(nova) 对位 codex：调用方迁移到显式选择 executor 的 path convention。
+        self.has_denied_read_restrictions_for_convention(Some(PathConvention::native()))
+    }
+
+    /// 对位 codex `has_denied_read_restrictions_for_convention`（Windows 约定下
+    /// `:slash_tmp` 拒绝条目不算读限制）。
+    fn has_denied_read_restrictions_for_convention(
+        &self,
+        convention: Option<PathConvention>,
+    ) -> bool {
         matches!(self.kind, FileSystemSandboxKind::Restricted)
             && self.entries.iter().any(|entry| {
                 entry.access == FileSystemAccessMode::Deny
@@ -738,7 +748,7 @@ impl FileSystemSandboxPolicy {
                         &entry.path,
                         FileSystemPath::Special {
                             value: FileSystemSpecialPath::SlashTmp,
-                        } if !cfg!(unix)
+                        } if convention == Some(PathConvention::Windows)
                     )
             })
     }
@@ -952,11 +962,23 @@ impl FileSystemSandboxPolicy {
 
     /// Returns true when filesystem reads are unrestricted.
     pub fn has_full_disk_read_access(&self) -> bool {
+        // TODO(nova) 对位 codex：调用方迁移到显式选择 executor 的 path convention。
+        self.has_full_disk_read_access_for_convention(Some(PathConvention::native()))
+    }
+
+    /// Returns true when filesystem reads are unrestricted on the selected executor.
+    /// If the convention is unknown, a `:slash_tmp` denial is still treated as a restriction.
+    ///
+    /// 对位 codex `has_full_disk_read_access_for_convention`。
+    pub fn has_full_disk_read_access_for_convention(
+        &self,
+        convention: Option<PathConvention>,
+    ) -> bool {
         match self.kind {
             FileSystemSandboxKind::Unrestricted | FileSystemSandboxKind::ExternalSandbox => true,
             FileSystemSandboxKind::Restricted => {
                 self.has_root_access(FileSystemAccessMode::can_read)
-                    && !self.has_denied_read_restrictions()
+                    && !self.has_denied_read_restrictions_for_convention(convention)
             }
         }
     }

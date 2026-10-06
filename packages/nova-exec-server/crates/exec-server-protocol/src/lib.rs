@@ -44,4 +44,10 @@ pub use rpc::*;
 /// 1.8 = EnvironmentCapabilities 补 windowsMxc 位（对位 codex 同名位：windows 端
 ///       按 mxc-sandbox 可用性如实上报，非 windows 恒 false——MXC 实现本体已随
 ///       Windows 批次落地，此前缺位导致客户端无法发现；可选增量，向后兼容）。
-pub const PROTOCOL_VERSION: &str = "1.8";
+/// 1.9 = 可写文件流落地（对位 codex c39bfa4c8f/d25c114d49）：fs/open 的 replace
+///       模式生效（创建/截断写打开），新增 fs/writeBlock（显式 offset 定位写，
+///       非空块 ≤1MiB，写区间不得超 i64 上限），fileWriteStreaming 能力位翻
+///       true；fs/open|readBlock|writeBlock|close 句柄表容量有界（128/连接，
+///       在飞行打开也占槽），句柄文案由 "file read handle" 泛化为 "file handle"
+///       （可选增量，向后兼容——读打开语义不变）。
+pub const PROTOCOL_VERSION: &str = "1.9";
