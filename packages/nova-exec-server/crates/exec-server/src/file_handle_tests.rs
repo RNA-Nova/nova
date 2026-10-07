@@ -138,3 +138,42 @@ async fn concurrent_opens_reject_duplicate_ids_without_replacing_the_file() -> R
     );
     Ok(())
 }
+
+/// 断连/close 摘条目后写任务自然结束（channel 对端全掉 → recv=None → 任务退出），
+/// 已落盘内容留在盘上（与读流的断连停止镜像；nova 自有通道）。
+#[tokio::test]
+async fn write_stream_task_exits_when_the_channel_drops() -> Result<()> {
+    use std::sync::Arc;
+
+    use super::WriteStreamInput;
+
+    let manager = FileHandleManager::default();
+    let native = tempfile::NamedTempFile::new()?;
+    let path = native.path().to_path_buf();
+    let file = Arc::new(native.reopen()?);
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(super::run_write_stream_task(
+        manager.clone(),
+        "w-drop".to_string(),
+        file,
+        rx,
+        /*offset*/ 0,
+    ));
+
+    tx.send(WriteStreamInput::Chunk {
+        seq: 0,
+        bytes: b"ab".to_vec(),
+        eof: false,
+    })
+    .expect("chunk should send");
+    // 断连/close 摘条目 → tx 全掉：chunk 先于关闭到达 channel，任务先落盘再退出
+    drop(tx);
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("write stream task should end when its channel drops")
+        .expect("write stream task should not panic");
+
+    // 任务退出时写入已落定（同 channel 顺序：chunk 先于断开被处理）
+    assert_eq!(std::fs::read(&path)?, b"ab");
+    Ok(())
+}

@@ -561,6 +561,27 @@ mod tests {
         .expect("runtime paths")
     }
 
+    /// 等写任务把已入 channel 的块落定（镜像结构下 close/断开只摘条目——
+    /// 写任务先排空队列再退出，内容为最终一致；此处按超时轮询等待）。
+    async fn await_file_content(path: &std::path::Path, expected: &[u8]) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if std::fs::read(path).is_ok_and(|content| content == expected) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "timed out waiting for file content {:?} (actual: {:?})",
+                expected,
+                std::fs::read(path).ok()
+            )
+        });
+    }
+
     #[tokio::test]
     async fn write_stream_aggregates_chunks_and_done_confirms_total_bytes() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
@@ -648,10 +669,7 @@ mod tests {
             })
             .await
             .expect("close");
-        assert_eq!(
-            std::fs::read(&native_path).expect("partial file stays"),
-            b"half"
-        );
+        await_file_content(&native_path, b"half").await;
 
         let err = handler
             .write_stream_done(FsWriteStreamDoneParams {
@@ -771,11 +789,8 @@ mod tests {
             .expect("chunk");
 
         handler.shutdown().await;
-        // 语义翻转：连接关闭也不再删半成品
-        assert_eq!(
-            std::fs::read(&native_path).expect("partial file stays"),
-            b"half"
-        );
+        // 语义翻转：连接关闭也不再删半成品（写任务排空队列后退出）
+        await_file_content(&native_path, b"half").await;
     }
 
     /// offset 续传（v1.12，nova 自有通道）：中止后文件留在盘上，
@@ -806,13 +821,15 @@ mod tests {
             })
             .await
             .expect("chunk");
-        // 中止（断连/close）：文件留在盘上
+        // 中止（断连/close）：文件留在盘上（镜像结构下 close 只摘条目——
+        // 写任务先排空队列再退出，等有界轮询落定再续传，不赌调度窗口）
         handler
             .close(FsCloseParams {
                 handle_id: "w1".to_string(),
             })
             .await
             .expect("close");
+        await_file_content(&native_path, b"hello ").await;
 
         // 续传：从 6 续写，不截断
         handler
@@ -1371,7 +1388,15 @@ mod tests {
             assert_eq!(done.handle_id, "ws-ok");
             assert_eq!(done.total_bytes, data.len() as u64);
             assert_eq!(std::fs::read(&file_path).expect("read file"), data);
-            assert_eq!(handler.file_handles.open_handle_count(), 0);
+            // 交账后写任务随即摘句柄退出（respond 先达、摘除在其后一拍）——
+            // 有界轮询，不赌调度窗口
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while handler.file_handles.open_handle_count() > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("write stream handle should be removed after done");
         }
 
         #[tokio::test]
@@ -1416,7 +1441,7 @@ mod tests {
                 })
                 .await
                 .expect("close");
-            assert_eq!(std::fs::read(&file_path).expect("partial file stays"), b"half");
+            await_file_content(&file_path, b"half").await;
 
             let err = handler
                 .write_stream_done(FsWriteStreamDoneParams {

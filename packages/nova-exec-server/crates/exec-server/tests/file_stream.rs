@@ -755,7 +755,18 @@ async fn write_stream_resumes_from_offset_after_abort() -> Result<()> {
             handle_id: "w-first".to_string(),
         })
         .await?;
-    assert_eq!(std::fs::read(&path)?, b"hello ", "partial file should stay");
+    // 镜像结构下 close 只摘条目——写任务先排空队列再退出（最终一致）；
+    // 等有界轮询落定再断言/续传，不赌调度窗口
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if std::fs::read(&path).is_ok_and(|content| content == b"hello ") {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("partial content should settle after abort");
 
     // 续传：不截断，从断点续写；done 的 totalBytes 为全量语义
     client

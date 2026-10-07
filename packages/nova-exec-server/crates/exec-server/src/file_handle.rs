@@ -5,9 +5,10 @@
 //! 沙箱化 fs/open|readStream 也由 executor 进程自持句柄（一次性 helper 开门后
 //! 把 fd/handle 传回，见 sandboxed_file_open），因此句柄统一为普通 file 对象。
 //!
-//! v1.12 起 fs/writeStream 收编进本表（nova 自有通道）：与 readBlock/writeBlock
-//! 共享句柄容量/ID 校验，chunk 经与 write_block 共享的定位写核心落到每流独立
-//! 的追加游标（`WriteStreamEntryState` 随句柄条目持有）。
+//! fs/writeStream 与读流完全镜像（nova 自有通道，v1.12 起收编句柄族）：
+//! open 注册即 spawn 写任务（对读任务 `stream_file_blocks`）——chunk 通知只投进
+//! 写任务 channel，seq/eof 校验与定位写（经与 writeBlock 共享的核心）全部在
+//! 任务栈内完成；done 请求经一次性应答通道向任务交账。句柄条目零游标状态。
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -38,14 +39,24 @@ pub(crate) struct FileReadBlock {
     pub(crate) eof: bool,
 }
 
-/// fs/writeStream 句柄的每流追加状态（nova 自有通道，随句柄条目持有）：
-/// 定位写游标（开门起点 + 已写累计）+ seq 严格序 + eof 序 + 首个失败
-/// （通知无回执——协议违约/写盘失败记为终态，由随后的 done 回报）。
-struct WriteStreamEntryState {
-    expected_seq: u64,
-    cursor: u64,
-    eof_seen: bool,
-    failed: Option<(io::ErrorKind, String)>,
+/// fs/writeStream 写任务的输入消息（nova 自有通道）：chunk 与线上通知同构
+/// （fire-and-forget）；Done 携带一次性应答通道（done 请求的交账出口）。
+enum WriteStreamInput {
+    Chunk {
+        seq: u64,
+        bytes: Vec<u8>,
+        eof: bool,
+    },
+    Done {
+        respond: tokio::sync::oneshot::Sender<Result<u64, (io::ErrorKind, String)>>,
+    },
+}
+
+/// fs/writeStream 的句柄载荷（nova 自有通道，v1.12 起与读流完全镜像）：
+/// 条目只承载写任务的 channel 发送端——全部流状态（expected_seq/cursor/
+/// eof_seen/failed）住进写任务栈，不在句柄表里挂账。
+struct WriteStreamHandle {
+    tx: tokio::sync::mpsc::UnboundedSender<WriteStreamInput>,
 }
 
 #[derive(Clone)]
@@ -74,8 +85,10 @@ impl FileHandleManager {
         self.open_entry(handle_id, open_file, None).await
     }
 
-    /// fs/writeStream 开门注册（nova 自有通道）：与 `open` 同一套容量/ID 校验，
-    /// 条目携带每流追加游标（`offset` = 续传起点；None = 创建/截断语义）。
+    /// fs/writeStream 开门注册（nova 自有通道）：与 `open` 同一套容量/ID 校验；
+    /// 注册即 spawn 写任务（与读任务 `stream_file_blocks` 完全镜像——状态全部
+    /// 住进任务栈），条目只承载 channel 发送端。`offset` = 续传起点（写任务
+    /// 游标初值；None = 创建/截断语义）。
     pub(crate) async fn open_write_stream(
         &self,
         handle_id: String,
@@ -105,6 +118,11 @@ impl FileHandleManager {
             )
         })?;
         let file = Arc::new(open_file.await?.into_std().await);
+        let write_stream_channel = write_stream_offset
+            .map(|_| tokio::sync::mpsc::unbounded_channel());
+        let write_stream = write_stream_channel
+            .as_ref()
+            .map(|(tx, _rx)| WriteStreamHandle { tx: tx.clone() });
         let mut handles = self.lock_handles();
         let Entry::Vacant(entry) = handles.entry(handle_id.clone()) else {
             return Err(io::Error::new(
@@ -113,15 +131,22 @@ impl FileHandleManager {
             ));
         };
         entry.insert(FileHandleEntry {
-            file,
-            write_stream: write_stream_offset.map(|offset| WriteStreamEntryState {
-                expected_seq: 0,
-                cursor: offset,
-                eof_seen: false,
-                failed: None,
-            }),
+            file: Arc::clone(&file),
+            write_stream,
             _permit: permit,
         });
+        drop(handles);
+        // 写任务在条目落表后才启动（与读任务的 spawn 时机一致）——重复 ID 被
+        // 拒绝时 channel 随局部变量 drop，不会误摘既有句柄。
+        if let Some((_tx, rx)) = write_stream_channel {
+            tokio::spawn(run_write_stream_task(
+                self.clone(),
+                handle_id.clone(),
+                file,
+                rx,
+                write_stream_offset.expect("write stream offset is set"),
+            ));
+        }
         Ok(handle_id)
     }
 
@@ -162,11 +187,10 @@ impl FileHandleManager {
         write_block_at(file, offset, bytes).await
     }
 
-    /// fs/writeStream/chunk 执行体（nova 自有通道，v1.12 起收编句柄族）：
-    /// seq 严格序 + eof 序 + 块长（≤MAX_WRITE_STREAM_CHUNK_BYTES）校验，定位写经
-    /// 共享核心落到每流独立的追加游标。chunk 是通知（无回执）：协议违约/写盘
-    /// 失败只把流转入失败终态，由随后的 done 回报首个错误。**中断语义翻转
-    /// （v1.12）：失败/中止不再删半成品——文件留在盘上，为断点续传让路**。
+    /// fs/writeStream/chunk 执行体（nova 自有通道，与读流的通知推送完全镜像——
+    /// fire-and-forget）：只把块投进写任务的 channel，不碰任何流状态；
+    /// seq/eof/块长校验与定位写全部在写任务栈内完成（状态翻转语义同前：
+    /// 失败/中止不再删半成品——文件留在盘上，为断点续传让路）。
     pub(crate) async fn write_stream_chunk(
         &self,
         handle_id: &str,
@@ -174,93 +198,66 @@ impl FileHandleManager {
         bytes: Vec<u8>,
         eof: bool,
     ) {
-        let assignment = {
-            let mut handles = self.lock_handles();
-            let Some(entry) = handles.get_mut(handle_id) else {
-                // 未知句柄：流可能已完成或从未建立；通知无回执，忽略即可
-                tracing::warn!("ignoring write stream chunk for unknown handle `{handle_id}`");
-                return;
-            };
-            let Some(state) = entry.write_stream.as_mut() else {
+        let sender = {
+            let handles = self.lock_handles();
+            match handles.get(handle_id) {
+                Some(entry) => entry.write_stream.as_ref().map(|stream| stream.tx.clone()),
+                None => {
+                    // 未知句柄：流可能已完成或从未建立；通知无回执，忽略即可
+                    tracing::warn!("ignoring write stream chunk for unknown handle `{handle_id}`");
+                    return;
+                }
+            }
+        };
+        match sender {
+            Some(tx) => {
+                // 任务已结束（理论上仅 done 之后——那时条目已摘除走不到这里；
+                // 防御性路径）静默即可，与通知无回执的姿态一致
+                let _ = tx.send(WriteStreamInput::Chunk { seq, bytes, eof });
+            }
+            None => {
                 tracing::warn!(
                     "ignoring write stream chunk for non-stream handle `{handle_id}`"
                 );
-                return;
-            };
-            if state.failed.is_some() {
-                // 失败终态：静默忽略后续块，等 done 回报首个错误
-                return;
-            }
-            let violation = if state.eof_seen {
-                Some(format!(
-                    "file write stream `{handle_id}` received chunk after eof"
-                ))
-            } else if seq != state.expected_seq {
-                Some(format!(
-                    "file write stream `{handle_id}` expected seq {}, got {seq}",
-                    state.expected_seq
-                ))
-            } else if bytes.len() > MAX_WRITE_STREAM_CHUNK_BYTES {
-                Some(format!(
-                    "file write stream chunk must not exceed {MAX_WRITE_STREAM_CHUNK_BYTES} bytes"
-                ))
-            } else {
-                None
-            };
-            if let Some(error) = violation {
-                state.failed = Some((io::ErrorKind::InvalidInput, error));
-                return;
-            }
-            let offset = state.cursor;
-            state.cursor = state.cursor.saturating_add(bytes.len() as u64);
-            state.expected_seq += 1;
-            state.eof_seen = eof;
-            (Arc::clone(&entry.file), offset)
-        };
-        // 空块（eof 哨兵）只携带标志位，不落盘
-        if bytes.is_empty() {
-            return;
-        }
-        if let Err(err) = write_block_at(assignment.0, assignment.1, bytes).await {
-            if let Some(state) = self
-                .lock_handles()
-                .get_mut(handle_id)
-                .and_then(|entry| entry.write_stream.as_mut())
-            {
-                state.failed = Some((
-                    err.kind(),
-                    format!("file write stream `{handle_id}` write failed: {err}"),
-                ));
             }
         }
     }
 
-    /// fs/writeStream/done 执行体：流须已见 eof 块；失败终态回报首个错误。
-    /// 成功返回全量字节数（offset 起点 + 本次流式字节数——追加游标的终点，
-    /// 客户端对账用），句柄摘除；无论成败文件均留在盘上（v1.12 语义翻转）。
+    /// fs/writeStream/done 执行体：把 Done 投进写任务的 channel 并等交账
+    /// （与读流的 done 收尾镜像）。流须已见 eof 块；失败终态回报首个错误。
+    /// 成功返回全量字节数（offset 起点 + 本次流式字节数——游标终点，客户端
+    /// 对账用），写任务随后摘句柄退出；无论成败文件均留在盘上。
     pub(crate) async fn finish_write_stream(&self, handle_id: &str) -> io::Result<u64> {
-        let entry = self.lock_handles().remove(handle_id);
-        let Some(entry) = entry else {
-            return Err(unknown_handle_error(handle_id));
+        let sender = {
+            let handles = self.lock_handles();
+            match handles.get(handle_id) {
+                Some(entry) => match entry.write_stream.as_ref() {
+                    Some(stream) => stream.tx.clone(),
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("file handle `{handle_id}` is not a write stream"),
+                        ));
+                    }
+                },
+                None => return Err(unknown_handle_error(handle_id)),
+            }
         };
-        let Some(state) = entry.write_stream else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("file handle `{handle_id}` is not a write stream"),
-            ));
-        };
-        if let Some((kind, error)) = state.failed {
-            return Err(io::Error::new(kind, error));
+        let (respond_tx, respond_rx) = tokio::sync::oneshot::channel();
+        if sender
+            .send(WriteStreamInput::Done { respond: respond_tx })
+            .is_err()
+        {
+            return Err(io::Error::other(format!(
+                "file write stream `{handle_id}` task stopped unexpectedly"
+            )));
         }
-        if !state.eof_seen {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("file write stream `{handle_id}` finished without an eof chunk"),
-            ));
-        }
-        // 定位写经 spawn_blocking 内同步 write 落定，返回即全部落盘——
-        // 无 tokio 写管线缓冲，无需 flush 等待
-        Ok(state.cursor)
+        let result = respond_rx.await.map_err(|_| {
+            io::Error::other(format!(
+                "file write stream `{handle_id}` task stopped unexpectedly"
+            ))
+        })?;
+        result.map_err(|(kind, error)| io::Error::new(kind, error))
     }
 
     fn get(&self, handle_id: &str) -> io::Result<Arc<File>> {
@@ -293,8 +290,8 @@ impl FileHandleManager {
 
 struct FileHandleEntry {
     file: Arc<File>,
-    /// fs/writeStream 的每流追加状态（v1.12 起写流收编句柄族；None = 非流句柄）
-    write_stream: Option<WriteStreamEntryState>,
+    /// fs/writeStream 的写任务 channel 发送端（nova 自有通道；None = 非流句柄）
+    write_stream: Option<WriteStreamHandle>,
     // Closing an entry releases capacity even if a read or write still holds the file.
     _permit: OwnedSemaphorePermit,
 }
@@ -356,6 +353,86 @@ where
     }
 
     (total_bytes, error)
+}
+
+/// fs/writeStream 的写任务（nova 自有通道，与读任务 `stream_file_blocks`
+/// 完全镜像）：全部流状态住进任务栈——expected_seq/cursor/eof_seen/failed
+/// （游标初值即续传 offset；done 的 totalBytes 全量语义 = 游标终点）。
+///
+/// 循环：从 channel 收块 → 协议校验（seq 严格序/eof 序/块长）→ 经
+/// `write_block_at` 定位落盘；失败记为终态（latch，由随后的 Done 回报首个
+/// 错误，与收编前语义逐字节一致）。Done 到来即交账并退出（句柄摘除）；
+/// channel 对端全掉（close/断连摘条目 → tx drop → recv=None）则自然结束——
+/// 无论成败文件留在盘上（v1.12 语义翻转）。
+async fn run_write_stream_task(
+    manager: FileHandleManager,
+    handle_id: String,
+    file: Arc<File>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<WriteStreamInput>,
+    offset: u64,
+) {
+    let mut expected_seq = 0_u64;
+    let mut cursor = offset;
+    let mut eof_seen = false;
+    let mut failed: Option<(io::ErrorKind, String)> = None;
+
+    while let Some(input) = rx.recv().await {
+        match input {
+            WriteStreamInput::Chunk { seq, bytes, eof } => {
+                if failed.is_some() {
+                    // 失败终态：静默忽略后续块，等 Done 回报首个错误
+                    continue;
+                }
+                let violation = if eof_seen {
+                    Some(format!(
+                        "file write stream `{handle_id}` received chunk after eof"
+                    ))
+                } else if seq != expected_seq {
+                    Some(format!(
+                        "file write stream `{handle_id}` expected seq {expected_seq}, got {seq}"
+                    ))
+                } else if bytes.len() > MAX_WRITE_STREAM_CHUNK_BYTES {
+                    Some(format!(
+                        "file write stream chunk must not exceed {MAX_WRITE_STREAM_CHUNK_BYTES} bytes"
+                    ))
+                } else {
+                    None
+                };
+                if let Some(error) = violation {
+                    failed = Some((io::ErrorKind::InvalidInput, error));
+                    continue;
+                }
+                if !bytes.is_empty() {
+                    let bytes_len = bytes.len() as u64;
+                    if let Err(err) = write_block_at(Arc::clone(&file), cursor, bytes).await {
+                        failed = Some((
+                            err.kind(),
+                            format!("file write stream `{handle_id}` write failed: {err}"),
+                        ));
+                        continue;
+                    }
+                    cursor += bytes_len;
+                }
+                // 空块（eof 哨兵）只携带标志位，不落盘
+                expected_seq += 1;
+                eof_seen = eof;
+            }
+            WriteStreamInput::Done { respond } => {
+                let result = match (failed.take(), eof_seen) {
+                    (Some(failure), _) => Err(failure),
+                    (None, false) => Err((
+                        io::ErrorKind::InvalidInput,
+                        format!("file write stream `{handle_id}` finished without an eof chunk"),
+                    )),
+                    // 定位写经 spawn_blocking 内同步 write 落定，交账即全部落盘
+                    (None, true) => Ok(cursor),
+                };
+                let _ = respond.send(result);
+                break;
+            }
+        }
+    }
+    manager.close(&handle_id);
 }
 
 fn read_block_at(file: &File, offset: u64, len: usize) -> io::Result<FileReadBlock> {
