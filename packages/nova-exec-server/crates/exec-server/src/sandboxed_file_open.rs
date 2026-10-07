@@ -17,18 +17,19 @@ use crate::fs_sandbox::reap_helper_after_response;
 use crate::fs_sandbox::spawn_command;
 #[cfg(unix)]
 use crate::fs_sandbox::wait_for_helper_output;
-use crate::protocol::FsOpenMode;
+use crate::regular_file::OpenMode;
 use crate::rpc::internal_error;
 
-/// 沙箱化开门（fs/open 与 fs/readStream 的共用执行体）：拉起一次性沙箱 helper
-/// 在平台沙箱内按 `mode` open 目标文件，把文件描述符传回主进程（Unix 经
-/// SCM_RIGHTS / Windows 经句柄复制），主进程自持句柄自行读/写——helper 随即退出，
-/// 不再长命推流。写模式（replace）的执法点在开门：helper 的沙箱命令按沙箱
-/// 上下文的写权限档构建（见 fs_sandbox::prepare_command），门在沙箱内打开即生效。
+/// 沙箱化开门（fs/open、fs/readStream 与 fs/writeStream 的共用执行体）：拉起
+/// 一次性沙箱 helper 在平台沙箱内按 `mode` open 目标文件，把文件描述符传回
+/// 主进程（Unix 经 SCM_RIGHTS / Windows 经句柄复制），主进程自持句柄自行
+/// 读/写——helper 随即退出，不再长命推流。写模式（replace/resume）的执法点
+/// 在开门：helper 的沙箱命令按沙箱上下文的写权限档构建（见
+/// fs_sandbox::prepare_command），门在沙箱内打开即生效。
 pub(crate) async fn open(
     command: SandboxExecRequest,
     path: PathUri,
-    mode: FsOpenMode,
+    mode: OpenMode,
 ) -> Result<tokio::fs::File, JSONRPCErrorError> {
     let request = serde_json::to_vec(&FsHelperRequest::Open(FsHelperOpenParams { path, mode }))
         .map_err(|error| internal_error(format!("invalid fs sandbox helper request: {error}")))?;

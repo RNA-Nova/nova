@@ -23,13 +23,9 @@ use nova_exec_server_utils_path_uri::LegacyAppPathString;
 #[cfg(any(windows, test))]
 use nova_exec_server_utils_path_uri::PathConvention;
 use nova_exec_server_utils_path_uri::PathUri;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncBufReadExt as _;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::io::BufReader;
-use tokio::io::Lines;
-use tokio::process::ChildStdin;
-use tokio::process::ChildStdout;
 use tokio::process::Command;
 
 use crate::ExecServerRuntimePaths;
@@ -37,12 +33,7 @@ use crate::FileSystemSandboxContext;
 use crate::fs_helper::FsHelperPayload;
 use crate::fs_helper::FsHelperRequest;
 use crate::fs_helper::FsHelperResponse;
-use crate::fs_helper::FsHelperWriteStreamEvent;
 use crate::fs_helper::NOVA_EXEC_SERVER_FS_HELPER_ARG1;
-use crate::protocol::FsWriteStreamChunkNotification;
-use crate::protocol::FsWriteStreamDoneParams;
-use crate::protocol::FsWriteStreamDoneResponse;
-use crate::protocol::FsWriteStreamResponse;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_request;
 
@@ -89,70 +80,6 @@ impl FileSystemSandboxRunner {
         let command = self.prepare_command(sandbox)?;
         let request_json = serde_json::to_vec(&request).map_err(json_error)?;
         run_command(command, request_json).await
-    }
-
-    /// 启动长命沙箱 helper（fs/writeStream）：与一次性 `run` 相同的沙箱变换
-    /// 与进程配置，但进程活到流结束——stdin 保持打开，executor 随后逐行转发
-    /// chunk/finish 事件帧，helper 回传启动握手（首行）与最终确认（末行）。
-    /// 返回的流对象经 `kill_on_drop` 兜底：任何提前丢弃都会击杀 helper。
-    pub(crate) async fn spawn_streaming_write(
-        &self,
-        sandbox: &FileSystemSandboxContext,
-        request: FsHelperRequest,
-    ) -> Result<SandboxFsHelperWriteStream, JSONRPCErrorError> {
-        let spawned = self.spawn_streaming_helper(sandbox, request).await?;
-        Ok(SandboxFsHelperWriteStream {
-            child: spawned.child,
-            stdin: spawned.stdin,
-            stdout: spawned.stdout,
-            stderr_drain: spawned.stderr_drain,
-        })
-    }
-
-    /// 拉起长命 helper 并写入请求帧（NDJSON 首行，以换行收尾）；写方向流式
-    /// helper 专用（stdin 保持打开，随后逐行转发 chunk/finish 事件帧）。
-    async fn spawn_streaming_helper(
-        &self,
-        sandbox: &FileSystemSandboxContext,
-        request: FsHelperRequest,
-    ) -> Result<SpawnedFsHelper, JSONRPCErrorError> {
-        let command = self.prepare_command(sandbox)?;
-        let request_json = serde_json::to_vec(&request).map_err(json_error)?;
-        let mut child = spawn_command(command, std::process::Stdio::piped())?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| internal_error("failed to open fs sandbox helper stdin".to_string()))?;
-        stdin.write_all(&request_json).await.map_err(io_error)?;
-        stdin.write_all(b"\n").await.map_err(io_error)?;
-        stdin.flush().await.map_err(io_error)?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| internal_error("failed to open fs sandbox helper stdout".to_string()))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| internal_error("failed to open fs sandbox helper stderr".to_string()))?;
-        // stderr 后台限量排空：超过上限后丢弃余量但继续排到 EOF，
-        // 避免管道写满阻塞 helper，退出时附作诊断
-        let stderr_drain = tokio::spawn(async move {
-            let mut buffer = Vec::new();
-            let mut stderr = stderr;
-            let _ = (&mut stderr)
-                .take(MAX_FS_HELPER_STDERR_BYTES)
-                .read_to_end(&mut buffer)
-                .await;
-            let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
-            buffer
-        });
-        Ok(SpawnedFsHelper {
-            child,
-            stdin,
-            stdout: BufReader::new(stdout).lines(),
-            stderr_drain,
-        })
     }
 
     pub(crate) fn prepare_command(
@@ -266,173 +193,6 @@ impl FileSystemSandboxRunner {
                 },
             })
             .map_err(|err| invalid_request(format!("failed to prepare fs sandbox: {err}")))
-    }
-}
-
-/// 长命 helper 的 spawn 产物（fs/writeStream 流式写方向）。
-struct SpawnedFsHelper {
-    child: tokio::process::Child,
-    stdin: ChildStdin,
-    stdout: Lines<BufReader<ChildStdout>>,
-    stderr_drain: tokio::task::JoinHandle<Vec<u8>>,
-}
-
-/// 回收长命 helper：先在 FS_HELPER_EXIT_TIMEOUT 窗口内等其自行退出（正常
-/// 路径下 helper 在确认帧后已自行退出，wait 立即返回）；超时不应答则
-/// start_kill + wait 强杀收尸（不留僵尸/孤儿），最后收编 stderr 排空任务
-/// （同样限时，兜底 kill 失败等极端情况）。
-async fn reap_fs_helper(
-    child: &mut tokio::process::Child,
-    stderr_drain: &mut tokio::task::JoinHandle<Vec<u8>>,
-) -> (Result<std::process::ExitStatus, std::io::Error>, Vec<u8>) {
-    let status = match tokio::time::timeout(FS_HELPER_EXIT_TIMEOUT, child.wait()).await {
-        Ok(status) => status,
-        Err(_) => {
-            // helper 不应答：强杀并再给一个退出窗口
-            let _ = child.start_kill();
-            match tokio::time::timeout(FS_HELPER_EXIT_TIMEOUT, child.wait()).await {
-                Ok(status) => status,
-                Err(_) => Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "fs sandbox helper did not stop after kill",
-                )),
-            }
-        }
-    };
-    let stderr = match tokio::time::timeout(FS_HELPER_EXIT_TIMEOUT, &mut *stderr_drain).await {
-        Ok(result) => result.unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-    (status, stderr)
-}
-
-/// 回收 helper 并按退出状态告警（正常退出静默）。
-async fn finish_fs_helper(
-    mut child: tokio::process::Child,
-    mut stderr_drain: tokio::task::JoinHandle<Vec<u8>>,
-    stream_kind: &str,
-) {
-    let (status, stderr) = reap_fs_helper(&mut child, &mut stderr_drain).await;
-    match status {
-        Ok(status) if status.success() => {}
-        Ok(status) => tracing::warn!(
-            %status,
-            stderr = %String::from_utf8_lossy(&stderr).trim(),
-            "fs sandbox {stream_kind} stream helper exited with failure"
-        ),
-        Err(err) => {
-            tracing::warn!(
-                ?err,
-                "failed to reap fs sandbox {stream_kind} stream helper"
-            )
-        }
-    }
-}
-
-/// 构造 helper 早退的内部错误：击杀并回收子进程，错误信息附带退出状态
-/// 与 stderr 摘要（helper 失败时会把原因写到 stderr）。
-async fn fs_helper_exit_error(
-    child: &mut tokio::process::Child,
-    stderr_drain: &mut tokio::task::JoinHandle<Vec<u8>>,
-    context: &str,
-) -> JSONRPCErrorError {
-    let (status, stderr) = reap_fs_helper(child, stderr_drain).await;
-    let status = status
-        .map(|status| status.to_string())
-        .unwrap_or_else(|err| format!("unknown (reap failed: {err})"));
-    internal_error(format!(
-        "fs sandbox helper exited {context} (status: {status}, stderr: {})",
-        String::from_utf8_lossy(&stderr).trim()
-    ))
-}
-
-/// 长命沙箱 fs/writeStream helper 句柄：包装子进程与其 stdin 事件帧通道 /
-/// stdout 响应帧流。stdin 保持打开：executor 逐行转发 chunk/finish 事件帧。
-///
-/// 回收语义：正常结束（最终确认读回后）或中断/异常都经
-/// `finish`/`kill_on_drop` 完成收尸，不留孤儿进程。
-pub(crate) struct SandboxFsHelperWriteStream {
-    child: tokio::process::Child,
-    stdin: ChildStdin,
-    stdout: Lines<BufReader<ChildStdout>>,
-    stderr_drain: tokio::task::JoinHandle<Vec<u8>>,
-}
-
-impl SandboxFsHelperWriteStream {
-    /// 读取启动握手（首行）：Ok 为 writeStream 响应；helper 报告的请求级错误
-    /// （如打开被沙箱拒绝）原样透传为 RPC 错误，与非沙箱路径语义一致；
-    /// EOF/帧损坏归为内部错误并附带 helper 退出状态与 stderr 摘要。
-    pub(crate) async fn write_start(&mut self) -> Result<FsWriteStreamResponse, JSONRPCErrorError> {
-        match self.stdout.next_line().await.map_err(io_error)? {
-            Some(line) => {
-                let response: FsHelperResponse = serde_json::from_str(&line).map_err(json_error)?;
-                match response {
-                    FsHelperResponse::Ok(payload) => payload.expect_write_stream(),
-                    FsHelperResponse::Error(error) => Err(error),
-                }
-            }
-            None => Err(self
-                .helper_exit_error("before the write stream started")
-                .await),
-        }
-    }
-
-    /// 转发一个数据块（与线上 fs/writeStream/chunk 通知同构的 NDJSON 帧）。
-    pub(crate) async fn send_chunk(
-        &mut self,
-        notification: &FsWriteStreamChunkNotification,
-    ) -> Result<(), JSONRPCErrorError> {
-        self.write_event(&FsHelperWriteStreamEvent::Chunk(notification.clone()))
-            .await
-    }
-
-    /// 转发收尾请求（对应 fs/writeStream/done）：helper 校验 eof 并回传最终确认。
-    pub(crate) async fn send_finish(
-        &mut self,
-        done: &FsWriteStreamDoneParams,
-    ) -> Result<(), JSONRPCErrorError> {
-        self.write_event(&FsHelperWriteStreamEvent::Finish(done.clone()))
-            .await
-    }
-
-    /// 读取最终确认（helper stdout 末行）：Ok 为 writeStream/done 响应；
-    /// helper 报告的业务错误（乱序/缺 eof/落盘失败等）原样透传；
-    /// EOF/帧损坏归为内部错误并附带 helper 退出状态与 stderr 摘要。
-    pub(crate) async fn read_done(
-        &mut self,
-    ) -> Result<FsWriteStreamDoneResponse, JSONRPCErrorError> {
-        match self.stdout.next_line().await.map_err(io_error)? {
-            Some(line) => {
-                let response: FsHelperResponse = serde_json::from_str(&line).map_err(json_error)?;
-                match response {
-                    FsHelperResponse::Ok(payload) => payload.expect_write_stream_done(),
-                    FsHelperResponse::Error(error) => Err(error),
-                }
-            }
-            None => Err(self
-                .helper_exit_error("before confirming the write stream")
-                .await),
-        }
-    }
-
-    /// 回收 helper（同读流：限时等待自行退出，超时强杀收尸 + stderr 收编）。
-    pub(crate) async fn finish(self) {
-        finish_fs_helper(self.child, self.stderr_drain, "write").await;
-    }
-
-    /// 写一行 NDJSON 事件帧并 flush（每帧即时送达，不攒在缓冲里拖住写流）。
-    async fn write_event(
-        &mut self,
-        event: &FsHelperWriteStreamEvent,
-    ) -> Result<(), JSONRPCErrorError> {
-        let encoded = serde_json::to_vec(event).map_err(json_error)?;
-        self.stdin.write_all(&encoded).await.map_err(io_error)?;
-        self.stdin.write_all(b"\n").await.map_err(io_error)?;
-        self.stdin.flush().await.map_err(io_error)
-    }
-
-    async fn helper_exit_error(&mut self, context: &str) -> JSONRPCErrorError {
-        fs_helper_exit_error(&mut self.child, &mut self.stderr_drain, context).await
     }
 }
 

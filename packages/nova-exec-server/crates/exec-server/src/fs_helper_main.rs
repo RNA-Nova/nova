@@ -11,7 +11,6 @@ use crate::fs_helper::FsHelperRequest;
 use crate::fs_helper::FsHelperResponse;
 use crate::fs_helper::map_fs_error;
 use crate::fs_helper::run_direct_request;
-use crate::fs_helper::run_write_stream_request;
 use crate::regular_file;
 
 pub fn main() -> ! {
@@ -35,8 +34,8 @@ pub fn main() -> ! {
 }
 
 async fn run_main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // stdin 行帧协议（NDJSON）：首行为请求帧；长命流式写随后逐行收事件帧，
-    // 一次性与 Open 请求只含首行（executor 写完即关闭 stdin，EOF 收尾首行）。
+    // stdin 行帧协议（NDJSON）：首行即请求帧，一次性与 Open 请求只含首行
+    // （executor 写完即关闭 stdin，EOF 收尾首行）。
     let mut stdin_lines = BufReader::new(io::stdin()).lines();
     let request_line = stdin_lines
         .next_line()
@@ -80,11 +79,6 @@ async fn run_main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .write_all(serde_json::to_string(&response)?.as_bytes())
                 .await?;
             stdout.write_all(b"\n").await?;
-        }
-        // 长命流式写：首行启动握手，stdin 逐行收 chunk/finish 事件帧，
-        // 末行回传最终确认，进程活到流结束
-        FsHelperRequest::WriteStream(params) => {
-            run_write_stream_request(params, &mut stdin_lines, &mut stdout).await?;
         }
         request => {
             let response = match run_direct_request(request).await {

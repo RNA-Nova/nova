@@ -257,7 +257,7 @@ impl EnvironmentInfo {
                 // 本机 user/project 配置层回传，不合并不裁决）——能力位如实宣告 true
                 environment_config_read: true,
                 // fs 流式通道可随单装配沙箱执行（readStream 经沙箱开门取 fd、
-                // writeStream 走长命沙箱 helper——按下发权限档执法）——
+                // writeStream 同姿态开门写——按下发权限档执法）——
                 // 如实宣告 true（v1.6 补回 codex 原约束位；端点存在不配位，
                 // readStream/writeStream 端点位随本版撤除）
                 sandboxed_file_streaming: true,
@@ -775,20 +775,27 @@ pub struct FsReadStreamDoneNotification {
 pub struct FsWriteStreamParams {
     /// 流式写入句柄 ID，由客户端分配
     pub handle_id: String,
-    /// 文件路径（打开即创建/截断，与 fs/writeFile 语义一致）
+    /// 文件路径（缺省打开即创建/截断，与 fs/writeFile 语义一致）
     pub path: PathUri,
+    /// 断点续传起点（v1.12，nova 自有通道）：Some(n) = 不截断、从 n 续写
+    /// （边界：n 不得超当前文件长度——不许隔洞写；文件不存在时 n>0 拒绝）；
+    /// None = 创建/截断（现状语义）
+    #[serde(default)]
+    pub offset: Option<u64>,
     /// Sandbox 策略
     #[serde(default)]
     pub sandbox: Option<FileSystemSandboxContext>,
 }
 
-/// fs/writeStream 的线上请求（nova 自有通道；按 841b5490b2 同一纪律携带
-/// 沙箱策略 cwd 可省略，executor 入口解析回退自身 cwd）。
+/// fs/writeStream 的线上请求（nova 自有通道；沙箱策略 cwd 可省略，executor
+/// 入口解析回退自身 cwd）。
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireFsWriteStreamParams {
     handle_id: String,
     path: PathUri,
+    #[serde(default)]
+    offset: Option<u64>,
     #[serde(default)]
     sandbox: Option<WireFileSystemSandboxContext>,
 }
@@ -1074,7 +1081,7 @@ impl_wire_filesystem_request! {
     WireFsCopyParams => FsCopyParams { source_path, destination_path, recursive },
     // nova 自有流式通道按同一纪律接入入口解析。
     WireFsReadStreamParams => FsReadStreamParams { handle_id, path, offset, len, block_size },
-    WireFsWriteStreamParams => FsWriteStreamParams { handle_id, path },
+    WireFsWriteStreamParams => FsWriteStreamParams { handle_id, path, offset },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2067,6 +2074,65 @@ mod tests {
                 .expect("deserialize write block response"),
             response,
         );
+    }
+
+    /// `fs/writeStream` 续传字段（v1.12，nova 自有通道）：offset 缺省省略/缺省即
+    /// None（创建/截断），Some(n) 线上直出；Wire 入口解析归一。
+    #[test]
+    fn write_stream_offset_is_an_optional_wire_addition() {
+        use super::FsWriteStreamParams;
+        use super::WireFsWriteStreamParams;
+
+        let resume = FsWriteStreamParams {
+            handle_id: "w1".to_string(),
+            path: PathUri::parse("file:///tmp/out.bin").expect("path URI"),
+            offset: Some(6),
+            sandbox: None,
+        };
+        let wire = serde_json::to_value(WireFsWriteStreamParams::from(resume.clone()))
+            .expect("serialize wire write stream params");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "handleId": "w1",
+                "path": "file:///tmp/out.bin",
+                "offset": 6,
+                "sandbox": null,
+            }),
+        );
+        assert_eq!(
+            serde_json::from_value::<WireFsWriteStreamParams>(wire)
+                .expect("deserialize wire write stream params")
+                .try_into_request(|sandbox| {
+                    let cwd = sandbox.cwd().expect("client policy cwd").clone();
+                    Ok(sandbox.into_context(cwd))
+                })
+                .expect("resolve write stream request"),
+            resume,
+        );
+
+        // 缺省/显式 null 均解析为 None（旧产线形状照旧可收）
+        for json in [
+            serde_json::json!({"handleId": "w2", "path": "file:///tmp/out.bin"}),
+            serde_json::json!({"handleId": "w2", "path": "file:///tmp/out.bin", "offset": null}),
+        ] {
+            let parsed = serde_json::from_value::<WireFsWriteStreamParams>(json)
+                .expect("legacy write stream shape should deserialize")
+                .try_into_request(|sandbox| {
+                    let cwd = sandbox.cwd().expect("client policy cwd").clone();
+                    Ok(sandbox.into_context(cwd))
+                })
+                .expect("resolve write stream request");
+            assert_eq!(
+                parsed,
+                FsWriteStreamParams {
+                    handle_id: "w2".to_string(),
+                    path: PathUri::parse("file:///tmp/out.bin").expect("path URI"),
+                    offset: None,
+                    sandbox: None,
+                }
+            );
+        }
     }
 
     #[test]

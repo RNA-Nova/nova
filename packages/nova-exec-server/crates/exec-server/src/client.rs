@@ -3909,6 +3909,7 @@ mod tests {
                 handle_id: "whandle".to_string(),
                 path: PathUri::from_host_native_path(stream_fixture_path("out.bin"))
                     .expect("path uri"),
+                offset: None,
                 sandbox: None,
             })
             .await

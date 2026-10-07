@@ -715,3 +715,89 @@ fn read_only_sandbox(path: std::path::PathBuf) -> nova_exec_server::FileSystemSa
     );
     FileSystemSandboxContext::from_permission_profile(permissions, cwd)
 }
+
+/// fs/writeStream 断点续传（v1.12，nova 自有通道）：截断打开 → 中止（close）
+/// 文件保留 → 带 offset 重开续写 → done 全量对账；越界 offset 拒绝。
+#[tokio::test]
+async fn write_stream_resumes_from_offset_after_abort() -> Result<()> {
+    let server = exec_server().await?;
+    let client = ExecServerClient::connect_websocket(RemoteExecServerConnectArgs::new(
+        server.websocket_url().to_string(),
+        "file-write-resume-test".to_string(),
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    ))
+    .await?;
+    let tmp = TempDir::new()?;
+    let path = tmp.path().join("resumed.bin");
+    let uri = PathUri::from_host_native_path(&path)?;
+
+    // 首轮：截断打开，写一半后 close 中止——文件留在盘上（语义翻转）
+    client
+        .fs_write_stream(nova_exec_server_protocol::FsWriteStreamParams {
+            handle_id: "w-first".to_string(),
+            path: uri.clone(),
+            offset: None,
+            sandbox: None,
+        })
+        .await?;
+    client
+        .fs_write_stream_chunk(
+            nova_exec_server_protocol::FsWriteStreamChunkNotification {
+                handle_id: "w-first".to_string(),
+                seq: 0,
+                chunk: b"hello ".to_vec().into(),
+                eof: false,
+            },
+        )
+        .await?;
+    client
+        .fs_close(FsCloseParams {
+            handle_id: "w-first".to_string(),
+        })
+        .await?;
+    assert_eq!(std::fs::read(&path)?, b"hello ", "partial file should stay");
+
+    // 续传：不截断，从断点续写；done 的 totalBytes 为全量语义
+    client
+        .fs_write_stream(nova_exec_server_protocol::FsWriteStreamParams {
+            handle_id: "w-second".to_string(),
+            path: uri.clone(),
+            offset: Some(6),
+            sandbox: None,
+        })
+        .await?;
+    client
+        .fs_write_stream_chunk(
+            nova_exec_server_protocol::FsWriteStreamChunkNotification {
+                handle_id: "w-second".to_string(),
+                seq: 0,
+                chunk: b"world".to_vec().into(),
+                eof: true,
+            },
+        )
+        .await?;
+    let done = client
+        .fs_write_stream_done(nova_exec_server_protocol::FsWriteStreamDoneParams {
+            handle_id: "w-second".to_string(),
+        })
+        .await?;
+    assert_eq!(done.total_bytes, 11);
+    assert_eq!(std::fs::read(&path)?, b"hello world");
+
+    // 越界 offset（隔洞写）拒绝：invalid_request（-32600），文件不变
+    let error = client
+        .fs_write_stream(nova_exec_server_protocol::FsWriteStreamParams {
+            handle_id: "w-beyond".to_string(),
+            path: uri.clone(),
+            offset: Some(100),
+            sandbox: None,
+        })
+        .await
+        .expect_err("offset beyond file length should be rejected");
+    let ExecServerError::Server { code, .. } = error else {
+        anyhow::bail!("expected server error, got {error:?}");
+    };
+    assert_eq!(code, -32600);
+    assert_eq!(std::fs::read(&path)?, b"hello world");
+    Ok(())
+}

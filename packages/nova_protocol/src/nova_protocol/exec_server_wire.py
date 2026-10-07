@@ -28,7 +28,7 @@ from pydantic import (
 
 #: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
 #: 跟随服务端 crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION）
-PROTOCOL_VERSION = "1.11"
+PROTOCOL_VERSION = "1.12"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
@@ -65,8 +65,9 @@ FS_WALK = "fs/walk"
 FS_REMOVE = "fs/remove"
 FS_COPY = "fs/copy"
 
-#: 流式写入单块解码后字节上限（对齐服务端 file_write.rs 的
-#: MAX_WRITE_STREAM_CHUNK_BYTES，超限时服务端转入 Failed 并在 done 报错）
+#: 流式写入单块解码后字节上限（对齐服务端 file_handle.rs 的
+#: MAX_WRITE_STREAM_CHUNK_BYTES——v1.12 起随写流收编句柄族迁入；
+#: 超限时服务端把流转入失败终态并在 done 报错）
 MAX_WRITE_STREAM_CHUNK_BYTES = 4 * 1024 * 1024
 
 
@@ -525,10 +526,13 @@ class FsReadStreamDoneNotification(BaseModel):
 
 class FsWriteStreamParams(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    """流式写入开句柄请求（打开即创建/截断，与 fs/writeFile 语义一致）"""
+    """流式写入开句柄请求（缺省打开即创建/截断，与 fs/writeFile 语义一致）"""
 
     handle_id: str = Field(..., alias="handleId")
     path: str
+    #: 断点续传起点（v1.12）：Some(n) = 不截断、从 n 续写（n 不得超当前文件
+    #: 长度——不许隔洞写；文件不存在时 n>0 拒绝）；None = 创建/截断
+    offset: int | None = None
     sandbox: dict[str, Any] | None = None
 
 
@@ -542,7 +546,8 @@ class FsWriteStreamChunkNotification(BaseModel):
     """流式写入数据块（客户端 → 服务端通知，无回执）"""
 
     handle_id: str = Field(..., alias="handleId")
-    #: 从 0 开始的连续序号，服务端严格按序落盘（乱序即失败删半截文件）
+    #: 从 0 开始的连续序号，服务端严格按序落盘（乱序记为流终态错误，
+    #: 由随后的 done 回报——v1.12 起失败/中止不再删半成品）
     seq: int
     chunk: bytes
     #: 标记最后一个数据块；流仍须以 fs/writeStream/done 请求收尾确认

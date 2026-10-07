@@ -64,4 +64,11 @@ pub use rpc::*;
 ///        客户端存在，不背 legacy 包袱）——策略目录只经 policyContext 承载；
 ///        保留"客户端整个省略 policyContext 时 executor 入口回退自身 cwd"
 ///        的人机工学（**形状不兼容演化**，客户端须同步升级）。
-pub const PROTOCOL_VERSION: &str = "1.11";
+/// 1.12 = fs/writeStream 收编句柄族底层 + 上传断点续传（nova 自有通道）：
+///        writeStream 与 fs/open 共享开门链路（沙箱开门 fd 传递），chunk 经与
+///        writeBlock 共享的定位写核心落每流追加游标；`FsWriteStreamParams`
+///        新增可选 `offset`（Some(n) = 不截断、从 n 续写，越界/缺失文件 n>0
+///        拒绝）；**中断语义翻转：中止/断连不再删半成品**，文件留在盘上
+///        （对齐 writeBlock/scp，为续传让路）；长命沙箱 helper 写管道拆除。
+///        （可选增量：新增 optional 字段，minor 纪律）
+pub const PROTOCOL_VERSION: &str = "1.12";

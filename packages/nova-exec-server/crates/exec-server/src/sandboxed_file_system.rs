@@ -25,18 +25,16 @@ use crate::WriteFileOptions;
 use crate::fs_helper::FsHelperPayload;
 use crate::fs_helper::FsHelperRequest;
 use crate::fs_sandbox::FileSystemSandboxRunner;
-use crate::fs_sandbox::SandboxFsHelperWriteStream;
 use crate::protocol::FsCanonicalizeParams;
 use crate::protocol::FsCopyParams;
 use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsGetMetadataParams;
-use crate::protocol::FsOpenMode;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadFileParams;
 use crate::protocol::FsRemoveParams;
 use crate::protocol::FsWalkParams;
 use crate::protocol::FsWriteFileParams;
-use crate::protocol::FsWriteStreamParams;
+use crate::regular_file::OpenMode;
 
 #[derive(Clone)]
 pub struct SandboxedFileSystem {
@@ -61,14 +59,15 @@ impl SandboxedFileSystem {
             .map_err(map_sandbox_error)
     }
 
-    /// 沙箱化开门（fs/open 与 fs/readStream 共用）：一次性 helper 在平台沙箱内
-    /// 按 `mode` open 目标文件后把 fd/handle 传回 executor（Unix 经 SCM_RIGHTS、
-    /// Windows 经句柄复制，见 [`crate::sandboxed_file_open`]），executor 自持句柄
-    /// 读/写文件——开门在沙箱内发生即执法（helper 的沙箱命令按上下文权限档构建）。
+    /// 沙箱化开门（fs/open、fs/readStream 与 fs/writeStream 共用）：一次性
+    /// helper 在平台沙箱内按 `mode` open 目标文件后把 fd/handle 传回 executor
+    /// （Unix 经 SCM_RIGHTS、Windows 经句柄复制，见 [`crate::sandboxed_file_open`]），
+    /// executor 自持句柄读/写文件——开门在沙箱内发生即执法（helper 的沙箱命令
+    /// 按上下文权限档构建）。写流的长命 helper 管道已于 v1.12 拆除。
     pub(crate) async fn open_file(
         &self,
         path: &PathUri,
-        mode: FsOpenMode,
+        mode: OpenMode,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
         let sandbox = require_platform_sandbox(sandbox)?;
@@ -79,24 +78,6 @@ impl SandboxedFileSystem {
             .prepare_command(sandbox)
             .map_err(map_sandbox_error)?;
         crate::sandboxed_file_open::open(command, path.clone(), mode)
-            .await
-            .map_err(map_sandbox_error)
-    }
-
-    /// 为 fs/writeStream 启动长命沙箱 helper：helper 进程在平台沙箱内持续写
-    /// 文件，executor 逐行转发 chunk/finish 事件帧并收最终确认（线上
-    /// writeStream 三件套形状不变）。
-    pub(crate) async fn spawn_write_stream(
-        &self,
-        params: &FsWriteStreamParams,
-    ) -> FileSystemResult<SandboxFsHelperWriteStream> {
-        let sandbox = require_platform_sandbox(params.sandbox.as_ref())?;
-        validate_native_path(&params.path)?;
-        // helper 进程自身已在沙箱内运行，内部请求不再携带沙箱上下文
-        let mut helper_params = params.clone();
-        helper_params.sandbox = None;
-        self.sandbox_runner
-            .spawn_streaming_write(sandbox, FsHelperRequest::WriteStream(helper_params))
             .await
             .map_err(map_sandbox_error)
     }
@@ -358,7 +339,7 @@ impl ExecutorFileSystem for SandboxedFileSystem {
         // 沙箱开门把 fd/handle 传回本进程，executor 自持句柄流式读——进程内
         // 流抽象与 RPC 层 fs/readStream 共用同一开门通道。
         Box::pin(async move {
-            let file = self.open_file(path, FsOpenMode::Read, sandbox).await?;
+            let file = self.open_file(path, OpenMode::Read, sandbox).await?;
             Ok(FileSystemReadStream::new(ReaderStream::with_capacity(
                 file,
                 FILE_READ_CHUNK_SIZE,

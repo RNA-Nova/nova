@@ -44,7 +44,6 @@ use crate::protocol::INITIALIZED_METHOD;
 use crate::protocol::InitializeResponse;
 use crate::protocol::WireFsGetMetadataParams;
 use crate::protocol::WireFsReadFileParams;
-use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 #[tokio::test]

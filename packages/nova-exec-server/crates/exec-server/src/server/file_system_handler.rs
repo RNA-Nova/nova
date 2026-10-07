@@ -3,15 +3,11 @@ use std::io;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use nova_exec_server_protocol::JSONRPCErrorError;
-use nova_exec_server_utils_path_uri::PathUri;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use crate::CopyOptions;
 use crate::CreateDirectoryOptions;
 use crate::ExecServerRuntimePaths;
 use crate::ExecutorFileSystem;
-use crate::FileSystemSandboxContext;
 use crate::GetMetadataOptions;
 use crate::ReadFileOptions;
 use crate::RemoveOptions;
@@ -20,11 +16,8 @@ use crate::file_handle::DEFAULT_READ_STREAM_BLOCK_SIZE;
 use crate::file_handle::FileHandleManager;
 use crate::file_handle::MAX_READ_STREAM_BLOCK_SIZE;
 use crate::file_handle::stream_file_blocks;
-use crate::file_write::FileWriteHandleManager;
-use crate::file_write::FileWriteSandboxed;
-use crate::file_write::SandboxedWriteCommand;
-use crate::fs_sandbox::SandboxFsHelperWriteStream;
 use crate::local_file_system::LocalFileSystem;
+use crate::regular_file::OpenMode;
 use crate::protocol::FS_READ_DIRECTORY_METHOD;
 use crate::protocol::FS_WRITE_FILE_METHOD;
 use crate::protocol::FsCanonicalizeParams;
@@ -37,7 +30,6 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
-use crate::protocol::FsOpenMode;
 use crate::protocol::FsOpenParams;
 use crate::protocol::FsOpenResponse;
 use crate::protocol::FsReadBlockParams;
@@ -68,21 +60,17 @@ use crate::rpc::RpcNotificationSender;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_request;
 use crate::rpc::not_found;
-use crate::sandboxed_file_system::map_sandbox_error;
 
 const MAX_FILE_HANDLE_ID_BYTES: usize = 32;
 const MAX_FILE_WRITE_HANDLE_ID_BYTES: usize = 32;
 // Each read-directory entry needs four JSON values. Keep same-version
 // producers comfortably below the shared 256K-value decoder budget.
 const MAX_READ_DIRECTORY_ENTRIES: usize = 50_000;
-/// 沙箱化写流的命令通道容量：满时背压经 RPC 层自然传导（helper 持续消费）
-const SANDBOXED_WRITE_COMMAND_QUEUE: usize = 8;
 
 #[derive(Clone)]
 pub(crate) struct FileSystemHandler {
     file_system: LocalFileSystem,
     file_handles: FileHandleManager,
-    file_writes: FileWriteHandleManager,
     notifications: Option<RpcNotificationSender>,
 }
 
@@ -91,7 +79,6 @@ impl FileSystemHandler {
         Self {
             file_system: LocalFileSystem::with_runtime_paths(runtime_paths),
             file_handles: FileHandleManager::default(),
-            file_writes: FileWriteHandleManager::default(),
             notifications: None,
         }
     }
@@ -103,7 +90,6 @@ impl FileSystemHandler {
 
     pub(crate) async fn shutdown(&self) {
         self.file_handles.close_all();
-        self.file_writes.close_all().await;
     }
 
     pub(crate) async fn open(
@@ -118,7 +104,7 @@ impl FileSystemHandler {
             .open(
                 params.handle_id,
                 self.file_system
-                    .open_file(&params.path, params.mode, params.sandbox.as_ref()),
+                    .open_file(&params.path, params.mode.into(), params.sandbox.as_ref()),
             )
             .await
             .map_err(map_fs_error)?;
@@ -160,9 +146,9 @@ impl FileSystemHandler {
         params: FsCloseParams,
     ) -> Result<FsCloseResponse, JSONRPCErrorError> {
         validate_file_handle_id(&params.handle_id)?;
+        // v1.12 语义翻转：写流句柄的 close 即中止，但不再删半成品——文件留在
+        // 盘上（对齐 writeBlock/scp 等一切上传工具，为断点续传让路）
         self.file_handles.close(&params.handle_id);
-        // 对写流句柄的 close 即中止：删除未完成流的半截文件
-        self.file_writes.abort(&params.handle_id).await;
         Ok(FsCloseResponse {})
     }
 
@@ -201,7 +187,7 @@ impl FileSystemHandler {
             .open(
                 params.handle_id.clone(),
                 self.file_system
-                    .open_file(&params.path, FsOpenMode::Read, params.sandbox.as_ref()),
+                    .open_file(&params.path, OpenMode::Read, params.sandbox.as_ref()),
             )
             .await
             .map_err(map_fs_error)?;
@@ -307,99 +293,57 @@ impl FileSystemHandler {
         Ok(FsWriteFileResponse {})
     }
 
-    /// `fs/writeStream`：打开（创建/截断）目标文件并注册写流句柄，
-    /// 随后客户端经 `fs/writeStream/chunk` 通知分片推数据。
+    /// `fs/writeStream`：打开目标文件并注册写流句柄（v1.12 起收编句柄族——
+    /// 与 fs/open 同一条开门链路：写权限档分流、沙箱开门 fd 传递、非沙箱直开，
+    /// 随后客户端经 `fs/writeStream/chunk` 通知分片推数据）。
+    ///
+    /// `offset`（nova 自有续传）：Some(n) = 不截断、从 n 续写（Resume 开门）；
+    /// None = 创建/截断。边界：n 不得超当前文件长度（不许隔洞写）；文件不存在
+    /// 时 n>0 同样落此拒绝（Resume 开门创建的空文件长度为 0）。
     pub(crate) async fn write_stream(
         &self,
         params: FsWriteStreamParams,
     ) -> Result<FsWriteStreamResponse, JSONRPCErrorError> {
         validate_file_write_handle_id(&params.handle_id)?;
 
-        // 平台沙箱上下文：文件写入委托给长命沙箱 helper 子进程，
-        // 线上 writeStream/chunk/done 三件套形状不变。
-        // 对位 codex a4ee536f01：nova 自有写流通道按写权限档分流（同一纪律）
-        if params
-            .sandbox
-            .as_ref()
-            .is_some_and(FileSystemSandboxContext::should_write_into_sandbox)
-        {
-            return self.write_stream_sandboxed(params).await;
-        }
-
-        let file = self
-            .file_system
-            .open_file_for_write(&params.path, params.sandbox.as_ref())
-            .await
-            .map_err(map_fs_error)?;
+        let offset = params.offset;
+        let file_system = self.file_system.clone();
+        let path = params.path.clone();
+        let sandbox = params.sandbox;
+        // 句柄管理器先查重复 ID/占槽再 await 开门（开门即截断/创建，顺序不能反）。
         let handle_id = self
-            .file_writes
-            .open(params.handle_id, params.path, file)
+            .file_handles
+            .open_write_stream(
+                params.handle_id,
+                async move {
+                    let file = file_system
+                        .open_file(
+                            &path,
+                            match offset {
+                                Some(_) => OpenMode::Resume,
+                                None => OpenMode::Replace,
+                            },
+                            sandbox.as_ref(),
+                        )
+                        .await?;
+                    if let Some(offset) = offset {
+                        let file_len = file.metadata().await?.len();
+                        if offset > file_len {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!(
+                                    "file write stream offset {offset} exceeds the current file length {file_len}"
+                                ),
+                            ));
+                        }
+                    }
+                    Ok(file)
+                },
+                offset,
+            )
             .await
             .map_err(map_fs_error)?;
         Ok(FsWriteStreamResponse { handle_id })
-    }
-
-    /// fs/writeStream 的沙箱路径：启动长命 fs_helper 沙箱子进程持续写文件，
-    /// 后台任务（supervisor）把客户端的 chunk/done 原样转发给 helper 并收最终确认。
-    ///
-    /// 生命周期：流句柄注册进 `file_writes`（Sandboxed 形态），客户端 fs/close
-    /// 与连接关闭（close_all）都会取消中断令牌 → supervisor 击杀 helper 并经
-    /// 一次性沙箱 helper 删除半截文件；正常 done 后 supervisor 等 helper 退出
-    /// 回收——两条路径都不留孤儿。
-    async fn write_stream_sandboxed(
-        &self,
-        params: FsWriteStreamParams,
-    ) -> Result<FsWriteStreamResponse, JSONRPCErrorError> {
-        // 调用方已判别 should_write_into_sandbox，这里必然带平台沙箱上下文
-        let sandbox = params.sandbox.clone().ok_or_else(|| {
-            internal_error("sandboxed write stream requires a sandbox context".to_string())
-        })?;
-        let path = params.path.clone();
-        let handle_id = params.handle_id.clone();
-
-        let mut session = self
-            .file_system
-            .spawn_sandboxed_write_stream(&params)
-            .await
-            .map_err(map_fs_error)?;
-        // 启动握手：打开失败等请求级错误在此同步返回（与非沙箱路径语义一致）
-        let response = match session.write_start().await {
-            Ok(response) => response,
-            Err(err) => {
-                session.finish().await; // 击杀并回收 helper
-                return Err(err);
-            }
-        };
-
-        // 启动 supervisor：独占 helper 会话，负责命令转发、中断清理与 helper 回收
-        let (commands_tx, commands_rx) = mpsc::channel(SANDBOXED_WRITE_COMMAND_QUEUE);
-        let cancel = CancellationToken::new();
-        let supervisor = tokio::spawn(run_sandboxed_write_stream(
-            session,
-            self.file_system.clone(),
-            path,
-            sandbox,
-            commands_rx,
-            cancel.clone(),
-        ));
-        let registered = self
-            .file_writes
-            .open_sandboxed(
-                handle_id,
-                FileWriteSandboxed {
-                    commands: commands_tx,
-                    cancel: cancel.clone(),
-                    supervisor,
-                },
-            )
-            .await;
-        if let Err(err) = registered {
-            // 并发重复句柄等：取消令牌让 supervisor 走中止清理（击杀 helper、
-            // 删除半截文件），注册失败原样上报
-            cancel.cancel();
-            return Err(map_fs_error(err));
-        }
-        Ok(response)
     }
 
     /// `fs/writeStream/chunk` 是通知（无回执）：业务错误只在句柄状态机内
@@ -408,8 +352,8 @@ impl FileSystemHandler {
         &self,
         params: FsWriteStreamChunkNotification,
     ) -> Result<(), String> {
-        self.file_writes
-            .write_chunk(
+        self.file_handles
+            .write_stream_chunk(
                 &params.handle_id,
                 params.seq,
                 params.chunk.into_inner(),
@@ -426,8 +370,8 @@ impl FileSystemHandler {
     ) -> Result<FsWriteStreamDoneResponse, JSONRPCErrorError> {
         validate_file_write_handle_id(&params.handle_id)?;
         let total_bytes = self
-            .file_writes
-            .finish(&params.handle_id)
+            .file_handles
+            .finish_write_stream(&params.handle_id)
             .await
             .map_err(map_fs_error)?;
         Ok(FsWriteStreamDoneResponse {
@@ -568,154 +512,6 @@ impl FileSystemHandler {
     }
 }
 
-/// 沙箱化 fs/writeStream 的后台任务（supervisor）：独占 helper 会话，
-/// 把 chunk/finish 命令逐条转发给沙箱 helper；中断（fs/close、连接关闭）
-/// 与异常（helper 死亡）负责击杀 helper 并删除半截文件。
-///
-/// 错误传播对齐非沙箱路径：chunk 转发失败不直接回报（通知无回执），
-/// 记为终态错误，由随后的 finish 命令应答给 done 请求。
-async fn run_sandboxed_write_stream(
-    session: SandboxFsHelperWriteStream,
-    file_system: LocalFileSystem,
-    path: PathUri,
-    sandbox: FileSystemSandboxContext,
-    mut commands: mpsc::Receiver<SandboxedWriteCommand>,
-    cancel: CancellationToken,
-) {
-    let mut session = Some(session);
-    // 半截文件是否仍需 executor 侧清理（helper 内的业务失败已自行删除；
-    // 成功收尾无半截——force 语义让重复删除为空操作）
-    let mut partial_pending = true;
-    // 首个不可恢复错误（helper 死亡等）：留待 finish 命令应答
-    let mut terminal_error: Option<io::Error> = None;
-
-    loop {
-        tokio::select! {
-            // biased：中断优先于继续转发，close 后不再向 helper 发块
-            biased;
-            _ = cancel.cancelled() => {
-                cleanup_sandboxed_write_stream(
-                    &file_system,
-                    &path,
-                    &sandbox,
-                    session.take(),
-                    partial_pending,
-                )
-                .await;
-                return;
-            }
-            command = commands.recv() => {
-                let Some(command) = command else {
-                    // 句柄被移除且未走 cancel（防御性路径）：同中止语义
-                    cleanup_sandboxed_write_stream(
-                        &file_system,
-                        &path,
-                        &sandbox,
-                        session.take(),
-                        partial_pending,
-                    )
-                    .await;
-                    return;
-                };
-                match command {
-                    SandboxedWriteCommand::Chunk(chunk) => {
-                        if terminal_error.is_some() {
-                            // 失败终态：静默忽略后续块，等 finish 回报首个错误
-                            continue;
-                        }
-                        let send = match session.as_mut() {
-                            Some(session) => session.send_chunk(&chunk).await,
-                            None => Err(internal_error(
-                                "fs sandbox write helper session is closed".to_string(),
-                            )),
-                        };
-                        if let Err(err) = send {
-                            // stdin 断裂 = helper 已死亡：回收并删半截，
-                            // 错误留待 finish 应答（done 回报）
-                            cleanup_sandboxed_write_stream(
-                                &file_system,
-                                &path,
-                                &sandbox,
-                                session.take(),
-                                /*remove_partial*/ true,
-                            )
-                            .await;
-                            partial_pending = false;
-                            terminal_error = Some(map_sandbox_error(err));
-                        }
-                    }
-                    SandboxedWriteCommand::Finish { done, respond } => {
-                        let result = if let Some(error) = terminal_error.take() {
-                            Err(error)
-                        } else if let Some(session) = session.as_mut() {
-                            match session.send_finish(&done).await {
-                                Ok(()) => session
-                                    .read_done()
-                                    .await
-                                    .map(|done| done.total_bytes)
-                                    .map_err(map_sandbox_error),
-                                Err(err) => Err(map_sandbox_error(err)),
-                            }
-                        } else {
-                            Err(io::Error::other(
-                                "file write stream sandbox helper is gone",
-                            ))
-                        };
-                        if result.is_ok() {
-                            // 成功：文件已完整落盘，回收 helper 进程
-                            if let Some(session) = session.take() {
-                                session.finish().await;
-                            }
-                        } else {
-                            // 失败收尾：helper 业务错误已在 helper 内删过半截，
-                            // helper 死亡/帧损坏则这里补删（force 容忍重复）
-                            cleanup_sandboxed_write_stream(
-                                &file_system,
-                                &path,
-                                &sandbox,
-                                session.take(),
-                                /*remove_partial*/ true,
-                            )
-                            .await;
-                        }
-                        let _ = respond.send(result);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// 沙箱写流的中断/异常清理：先击杀并回收 helper，再经一次性沙箱 helper
-/// 删除半截文件——删除与写入走同一沙箱授权面，executor 主进程不越权直删。
-async fn cleanup_sandboxed_write_stream(
-    file_system: &LocalFileSystem,
-    path: &PathUri,
-    sandbox: &FileSystemSandboxContext,
-    session: Option<SandboxFsHelperWriteStream>,
-    remove_partial: bool,
-) {
-    if let Some(session) = session {
-        session.finish().await;
-    }
-    if remove_partial
-        && let Err(err) = file_system
-            .remove(
-                path,
-                RemoveOptions {
-                    recursive: false,
-                    force: true,
-                    follow_symlinks: true,
-                },
-                Some(sandbox),
-            )
-            .await
-    {
-        tracing::warn!("failed to remove partial sandboxed write stream file `{path}`: {err}");
-    }
-}
-
 fn validate_file_handle_id(handle_id: &str) -> Result<(), JSONRPCErrorError> {
     if handle_id.len() > MAX_FILE_HANDLE_ID_BYTES {
         return Err(invalid_request(format!(
@@ -746,15 +542,8 @@ fn map_fs_error(err: io::Error) -> JSONRPCErrorError {
 
 #[cfg(test)]
 mod tests {
-    use nova_exec_server_protocol_core::models::PermissionProfile;
-    use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
-    use nova_exec_server_protocol_core::permissions::FileSystemPath;
-    use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
-    use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
-    use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
     use nova_exec_server_protocol_core::protocol::NetworkAccess;
     use nova_exec_server_protocol_core::protocol::SandboxPolicy;
-    use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
     use nova_exec_server_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
 
@@ -783,6 +572,7 @@ mod tests {
             .write_stream(FsWriteStreamParams {
                 handle_id: "w1".to_string(),
                 path: path.clone(),
+                offset: None,
                 sandbox: None,
             })
             .await
@@ -825,7 +615,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_stream_close_aborts_and_removes_partial_file() {
+    async fn write_stream_close_aborts_and_keeps_partial_file() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let handler = FileSystemHandler::new(test_runtime_paths());
         let native_path = temp_dir.path().join("aborted.bin");
@@ -835,6 +625,7 @@ mod tests {
             .write_stream(FsWriteStreamParams {
                 handle_id: "w1".to_string(),
                 path,
+                offset: None,
                 sandbox: None,
             })
             .await
@@ -849,14 +640,18 @@ mod tests {
             .await
             .expect("chunk");
 
-        // fs/close 对写流句柄即中止：半截文件删除
+        // fs/close 对写流句柄即中止（v1.12 语义翻转：不删半成品——文件留在
+        // 盘上，为断点续传让路）
         handler
             .close(FsCloseParams {
                 handle_id: "w1".to_string(),
             })
             .await
             .expect("close");
-        assert!(!native_path.exists(), "partial file should be removed");
+        assert_eq!(
+            std::fs::read(&native_path).expect("partial file stays"),
+            b"half"
+        );
 
         let err = handler
             .write_stream_done(FsWriteStreamDoneParams {
@@ -868,7 +663,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_stream_done_without_eof_fails_and_removes_partial_file() {
+    async fn write_stream_done_without_eof_fails_and_keeps_partial_file() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let handler = FileSystemHandler::new(test_runtime_paths());
         let native_path = temp_dir.path().join("no-eof.bin");
@@ -878,6 +673,7 @@ mod tests {
             .write_stream(FsWriteStreamParams {
                 handle_id: "w1".to_string(),
                 path,
+                offset: None,
                 sandbox: None,
             })
             .await
@@ -899,11 +695,15 @@ mod tests {
             .await
             .expect_err("done without eof should fail");
         assert_eq!(err.code, -32600);
-        assert!(!native_path.exists(), "partial file should be removed");
+        // 语义翻转：失败也不删半成品
+        assert_eq!(
+            std::fs::read(&native_path).expect("partial file stays"),
+            b"half"
+        );
     }
 
     #[tokio::test]
-    async fn write_stream_out_of_order_chunk_fails_done_and_removes_partial_file() {
+    async fn write_stream_out_of_order_chunk_fails_done_and_keeps_partial_file() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let handler = FileSystemHandler::new(test_runtime_paths());
         let native_path = temp_dir.path().join("out-of-order.bin");
@@ -913,6 +713,7 @@ mod tests {
             .write_stream(FsWriteStreamParams {
                 handle_id: "w1".to_string(),
                 path,
+                offset: None,
                 sandbox: None,
             })
             .await
@@ -937,11 +738,14 @@ mod tests {
             .expect_err("done should report the seq violation");
         assert_eq!(err.code, -32600);
         assert!(err.message.contains("expected seq 1, got 2"));
-        assert!(!native_path.exists(), "partial file should be removed");
+        assert_eq!(
+            std::fs::read(&native_path).expect("partial file stays"),
+            b"aa"
+        );
     }
 
     #[tokio::test]
-    async fn write_stream_shutdown_removes_partial_files() {
+    async fn write_stream_shutdown_keeps_partial_files() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let handler = FileSystemHandler::new(test_runtime_paths());
         let native_path = temp_dir.path().join("shutdown.bin");
@@ -951,6 +755,7 @@ mod tests {
             .write_stream(FsWriteStreamParams {
                 handle_id: "w1".to_string(),
                 path,
+                offset: None,
                 sandbox: None,
             })
             .await
@@ -966,41 +771,157 @@ mod tests {
             .expect("chunk");
 
         handler.shutdown().await;
-        assert!(!native_path.exists(), "partial file should be removed");
+        // 语义翻转：连接关闭也不再删半成品
+        assert_eq!(
+            std::fs::read(&native_path).expect("partial file stays"),
+            b"half"
+        );
     }
 
+    /// offset 续传（v1.12，nova 自有通道）：中止后文件留在盘上，
+    /// 带 offset 重开不截断、从断点续写；done 的 totalBytes 为全量语义
+    /// （offset 起点 + 本次流式字节数）。
     #[tokio::test]
-    async fn open_file_for_write_still_rejects_platform_sandbox_context() {
-        // RPC 层 fs/writeStream 已支持平台沙箱（走长命沙箱 helper）；这里守住
-        // 的是进程内 file 句柄直开的兜底边界（句柄无法跨 helper 进程持有）
+    async fn write_stream_resumes_from_offset_after_close() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
-        let file_system = LocalFileSystem::with_runtime_paths(test_runtime_paths());
-        let path = PathUri::from_host_native_path(temp_dir.path().join("sandboxed.bin"))
-            .expect("path URI");
-        let native_cwd =
-            AbsolutePathBuf::from_absolute_path(temp_dir.path()).expect("absolute cwd");
-        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-            path: FileSystemPath::Path {
-                path: native_cwd.into(),
-            },
-            access: FileSystemAccessMode::Write,
-            missing_path_behavior: None,
-        }]);
-        let sandbox = FileSystemSandboxContext::from_permission_profile(
-            PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
-            PathUri::from_host_native_path(temp_dir.path()).expect("cwd URI"),
-        );
-        assert!(sandbox.should_write_into_sandbox());
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("resumed.bin");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
 
-        let err = file_system
-            .open_file_for_write(&path, Some(&sandbox))
+        handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w1".to_string(),
+                path: path.clone(),
+                offset: None,
+                sandbox: None,
+            })
             .await
-            .expect_err("direct open with platform sandbox should be rejected");
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-        assert!(
-            err.to_string()
-                .contains("streaming file writes do not support platform sandboxing")
+            .expect("open write stream");
+        handler
+            .write_stream_chunk(FsWriteStreamChunkNotification {
+                handle_id: "w1".to_string(),
+                seq: 0,
+                chunk: ByteChunk::from(b"hello ".to_vec()),
+                eof: false,
+            })
+            .await
+            .expect("chunk");
+        // 中止（断连/close）：文件留在盘上
+        handler
+            .close(FsCloseParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect("close");
+
+        // 续传：从 6 续写，不截断
+        handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w2".to_string(),
+                path: path.clone(),
+                offset: Some(6),
+                sandbox: None,
+            })
+            .await
+            .expect("reopen write stream");
+        handler
+            .write_stream_chunk(FsWriteStreamChunkNotification {
+                handle_id: "w2".to_string(),
+                seq: 0,
+                chunk: ByteChunk::from(b"world".to_vec()),
+                eof: true,
+            })
+            .await
+            .expect("chunk");
+        let done = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w2".to_string(),
+            })
+            .await
+            .expect("done");
+        assert_eq!(done.total_bytes, 11);
+        assert_eq!(
+            std::fs::read(&native_path).expect("read file"),
+            b"hello world"
         );
+    }
+
+    /// offset 越界（超当前文件长度）即拒——不许隔洞写；文件不存在 +
+    /// Some(offset>0) 同此拒绝。
+    #[tokio::test]
+    async fn write_stream_rejects_offset_beyond_file_end() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("bounded.bin");
+        std::fs::write(&native_path, b"abc").expect("write fixture");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
+
+        let err = handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w1".to_string(),
+                path: path.clone(),
+                offset: Some(4),
+                sandbox: None,
+            })
+            .await
+            .expect_err("offset beyond file length should fail");
+        assert_eq!(err.code, -32600);
+        // 拒绝不改动既有内容
+        assert_eq!(std::fs::read(&native_path).expect("read file"), b"abc");
+        assert_eq!(handler.file_handles.open_handle_count(), 0);
+
+        // 文件不存在 + offset>0：同样 invalid_params
+        let missing = PathUri::from_host_native_path(temp_dir.path().join("missing.bin"))
+            .expect("path URI");
+        let err = handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w2".to_string(),
+                path: missing,
+                offset: Some(1),
+                sandbox: None,
+            })
+            .await
+            .expect_err("resume beyond a missing file should fail");
+        assert_eq!(err.code, -32600);
+        assert_eq!(handler.file_handles.open_handle_count(), 0);
+    }
+
+    /// offset Some(0)：不截断但从 0 覆写——与创建/截断的默认语义区分。
+    #[tokio::test]
+    async fn write_stream_offset_zero_overwrites_without_truncating() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("overwrite.bin");
+        std::fs::write(&native_path, b"aabbcc").expect("write fixture");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
+
+        handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w1".to_string(),
+                path: path.clone(),
+                offset: Some(0),
+                sandbox: None,
+            })
+            .await
+            .expect("open write stream");
+        handler
+            .write_stream_chunk(FsWriteStreamChunkNotification {
+                handle_id: "w1".to_string(),
+                seq: 0,
+                chunk: ByteChunk::from(b"zz".to_vec()),
+                eof: true,
+            })
+            .await
+            .expect("chunk");
+        let done = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect("done");
+        assert_eq!(done.total_bytes, 2);
+        // 不截断：覆写区之外的尾部内容保留
+        assert_eq!(std::fs::read(&native_path).expect("read file"), b"zzbbcc");
     }
 
     #[tokio::test]
@@ -1325,7 +1246,9 @@ mod tests {
     }
 
     /// 带平台沙箱上下文的 fs/writeStream 端到端测试：真实拉起沙箱化
-    /// fs_helper 子进程（helper 即当前测试二进制，ctor 分派与读流模块相同）。
+    /// fs_helper 子进程开门（helper 即当前测试二进制，ctor 分派与读流模块相同；
+    /// v1.12 起写流收编句柄族——helper 只开门传 fd，写落 executor 进程内的
+    /// 共享定位写核心）。
     #[cfg(target_os = "macos")]
     mod sandboxed_write_stream {
         use std::path::Path;
@@ -1384,6 +1307,7 @@ mod tests {
             FsWriteStreamParams {
                 handle_id: handle_id.to_string(),
                 path: PathUri::from_host_native_path(path).expect("path URI"),
+                offset: None,
                 sandbox: Some(writable_sandbox(root)),
             }
         }
@@ -1420,10 +1344,10 @@ mod tests {
                 .await
                 .expect("open write stream");
             assert_eq!(opened.handle_id, "ws-ok");
-            // 握手成功 = helper 已在沙箱内创建/截断目标文件
+            // 开门成功 = 一次性 helper 已在沙箱内创建/截断目标文件并传回句柄
             assert!(file_path.exists());
 
-            // 64KB 分块推送（末块带 eof），经 supervisor 逐帧转发给 helper
+            // 64KB 分块推送（末块带 eof），executor 内经共享定位写核心落盘
             let block = 64 * 1024;
             let blocks: Vec<&[u8]> = data.chunks(block).collect();
             assert!(blocks.len() > 1, "expected multiple chunks");
@@ -1447,7 +1371,7 @@ mod tests {
             assert_eq!(done.handle_id, "ws-ok");
             assert_eq!(done.total_bytes, data.len() as u64);
             assert_eq!(std::fs::read(&file_path).expect("read file"), data);
-            assert_eq!(handler.file_writes.open_handle_count().await, 0);
+            assert_eq!(handler.file_handles.open_handle_count(), 0);
         }
 
         #[tokio::test]
@@ -1468,11 +1392,11 @@ mod tests {
             // 返回，与非沙箱路径语义一致）
             assert_eq!(err.code, -32600);
             assert!(!file_path.exists());
-            assert_eq!(handler.file_writes.open_handle_count().await, 0);
+            assert_eq!(handler.file_handles.open_handle_count(), 0);
         }
 
         #[tokio::test]
-        async fn close_aborts_stream_and_removes_partial_file() {
+        async fn close_aborts_stream_and_keeps_partial_file() {
             let temp_dir = tempfile::tempdir().expect("tempdir");
             let root = std::fs::canonicalize(temp_dir.path()).expect("canonical root");
             let file_path = root.join("aborted.bin");
@@ -1484,15 +1408,15 @@ mod tests {
                 .expect("open write stream");
             push_chunk(&handler, "ws-int", 0, b"half", false).await;
 
-            // fs/close 对写流句柄即中止：击杀 helper 并经一次性沙箱 helper
-            // 删除半截文件（abort 等 supervisor 收尾完成后才返回）
+            // fs/close 对写流句柄即中止（v1.12 语义翻转：不删半成品——
+            // 文件留在盘上，为断点续传让路）
             handler
                 .close(FsCloseParams {
                     handle_id: "ws-int".to_string(),
                 })
                 .await
                 .expect("close");
-            assert!(!file_path.exists(), "partial file should be removed");
+            assert_eq!(std::fs::read(&file_path).expect("partial file stays"), b"half");
 
             let err = handler
                 .write_stream_done(FsWriteStreamDoneParams {
@@ -1504,7 +1428,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn done_reports_seq_violation_and_removes_partial_file() {
+        async fn done_reports_seq_violation_and_keeps_partial_file() {
             let temp_dir = tempfile::tempdir().expect("tempdir");
             let root = std::fs::canonicalize(temp_dir.path()).expect("canonical root");
             let file_path = root.join("out-of-order.bin");
@@ -1525,11 +1449,11 @@ mod tests {
                 .expect_err("done should report the seq violation");
             assert_eq!(err.code, -32600);
             assert!(err.message.contains("expected seq 1, got 2"));
-            assert!(!file_path.exists(), "partial file should be removed");
+            assert_eq!(std::fs::read(&file_path).expect("partial file stays"), b"aa");
         }
 
         #[tokio::test]
-        async fn done_without_eof_fails_and_removes_partial_file() {
+        async fn done_without_eof_fails_and_keeps_partial_file() {
             let temp_dir = tempfile::tempdir().expect("tempdir");
             let root = std::fs::canonicalize(temp_dir.path()).expect("canonical root");
             let file_path = root.join("no-eof.bin");
@@ -1549,7 +1473,7 @@ mod tests {
                 .expect_err("done without eof should fail");
             assert_eq!(err.code, -32600);
             assert!(err.message.contains("without an eof chunk"));
-            assert!(!file_path.exists(), "partial file should be removed");
+            assert_eq!(std::fs::read(&file_path).expect("partial file stays"), b"half");
         }
     }
 }

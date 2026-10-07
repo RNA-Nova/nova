@@ -27,11 +27,9 @@ use crate::RemoveOptions;
 use crate::WalkOptions;
 use crate::WalkOutcome;
 use crate::WriteFileOptions;
-use crate::fs_sandbox::SandboxFsHelperWriteStream;
 use crate::no_follow;
-use crate::protocol::FsOpenMode;
-use crate::protocol::FsWriteStreamParams;
 use crate::regular_file;
+use crate::regular_file::OpenMode;
 use crate::sandboxed_file_system::SandboxedFileSystem;
 
 const MAX_READ_FILE_BYTES: u64 = 512 * 1024 * 1024;
@@ -125,12 +123,14 @@ impl LocalFileSystem {
 impl LocalFileSystem {
     /// fs/open 的开门入口（对位 codex c39bfa4c8f `open_file(path, mode, sandbox)`）：
     /// 沙箱判别按打开模式分流——Read 看读权限档（should_read_from_sandbox），
-    /// Replace 看写权限档（should_write_into_sandbox，全盘整读不豁免写执法）；
-    /// 需要沙箱时经一次性 helper 在沙箱内开门并把 fd/handle 传回本进程。
+    /// Replace/Resume 看写权限档（should_write_into_sandbox，全盘整读不豁免写
+    /// 执法）；需要沙箱时经一次性 helper 在沙箱内开门并把 fd/handle 传回本进程。
+    /// `Resume`（nova 自有，v1.12）：不截断写打开——fs/writeStream 的 offset
+    /// 续传用，沙箱分流与写打开同一姿态。
     pub(crate) async fn open_file(
         &self,
         path: &PathUri,
-        mode: FsOpenMode,
+        mode: OpenMode,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<tokio::fs::File> {
         // 对位 codex 841b5490b2 + a4ee536f01：先本机兼容校验，再按打开模式的
@@ -138,41 +138,14 @@ impl LocalFileSystem {
         if let Some(sandbox) = sandbox {
             sandbox.validate_file_system_paths_for_current_host()?;
             let needs_sandbox = match mode {
-                FsOpenMode::Read => sandbox.should_read_from_sandbox(),
-                FsOpenMode::Replace => sandbox.should_write_into_sandbox(),
+                OpenMode::Read => sandbox.should_read_from_sandbox(),
+                OpenMode::Replace | OpenMode::Resume => sandbox.should_write_into_sandbox(),
             };
             if needs_sandbox {
                 return self.sandboxed()?.open_file(path, mode, Some(sandbox)).await;
             }
         }
         regular_file::open(path.to_abs_path()?.as_path(), mode).await
-    }
-
-    pub(crate) async fn open_file_for_write(
-        &self,
-        path: &PathUri,
-        sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<tokio::fs::File> {
-        // 对位 codex a4ee536f01：写按写权限档分流（全盘整读不豁免写执法）
-        if sandbox.is_some_and(FileSystemSandboxContext::should_write_into_sandbox) {
-            // 进程内 file 句柄无法跨沙箱 helper 持有；fs/writeStream 不在此列——
-            // 它走 spawn_sandboxed_write_stream 的长命 helper（调用方先分支）
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "streaming file writes do not support platform sandboxing",
-            ));
-        }
-        self.unsandboxed.open_file_for_write(path, sandbox).await
-    }
-
-    /// fs/writeStream 的沙箱执行体：经长命沙箱 fs_helper 子进程持续写文件，
-    /// chunk/finish 事件帧由调用方（FileSystemHandler）转发，helper 回传最终确认。
-    /// 非沙箱上下文不应走到这里（调用方先判别 `should_write_into_sandbox`）。
-    pub(crate) async fn spawn_sandboxed_write_stream(
-        &self,
-        params: &FsWriteStreamParams,
-    ) -> FileSystemResult<SandboxFsHelperWriteStream> {
-        self.sandboxed()?.spawn_write_stream(params).await
     }
 
     async fn canonicalize(
@@ -382,17 +355,6 @@ impl ExecutorFileSystem for LocalFileSystem {
 }
 
 impl UnsandboxedFileSystem {
-    async fn open_file_for_write(
-        &self,
-        path: &PathUri,
-        sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<tokio::fs::File> {
-        reject_platform_sandbox_context(sandbox)?;
-        self.file_system
-            .open_file_for_write(path, /*sandbox*/ None)
-            .await
-    }
-
     async fn canonicalize(
         &self,
         path: &PathUri,
@@ -602,8 +564,8 @@ impl ExecutorFileSystem for UnsandboxedFileSystem {
 
 impl DirectFileSystem {
     /// 直开读句柄（对位 codex `DirectFileSystem::open_file`——恒 Read 模式；
-    /// 写方向句柄由 fs/open replace 经 `LocalFileSystem::open_file` 直落
-    /// `regular_file::open`，fs/writeStream 走下方 open_file_for_write）。
+    /// 写方向句柄由 fs/open replace 与 fs/writeStream 经 `LocalFileSystem::open_file`
+    /// 直落 `regular_file::open`）。
     pub(crate) async fn open_file(
         &self,
         path: &PathUri,
@@ -611,17 +573,7 @@ impl DirectFileSystem {
     ) -> FileSystemResult<tokio::fs::File> {
         reject_sandbox_context(sandbox)?;
         let path = path.to_abs_path()?;
-        regular_file::open(path.as_path(), FsOpenMode::Read).await
-    }
-
-    pub(crate) async fn open_file_for_write(
-        &self,
-        path: &PathUri,
-        sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<tokio::fs::File> {
-        reject_sandbox_context(sandbox)?;
-        let path = path.to_abs_path()?;
-        regular_file::create(path.as_path()).await
+        regular_file::open(path.as_path(), OpenMode::Read).await
     }
 
     async fn canonicalize(

@@ -8,8 +8,32 @@ use tokio::io::AsyncReadExt as _;
 
 use crate::protocol::FsOpenMode;
 
+/// 开门模式（nova 内部件）：线上 fs/open 的 `FsOpenMode`（read|replace）之外
+/// 补 `Resume`（不截断写打开）——fs/writeStream 的 offset 续传与 fs helper
+/// IPC（nova 自有协议，见 fs_helper.rs `FS_HELPER_IPC_PROTOCOL_VERSION`）共用
+/// 此形态；serde 形状供 helper IPC 使用。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum OpenMode {
+    /// 打开既有文件只读（缺省，与线上 fs/open 同）
+    #[default]
+    Read,
+    Replace,
+    /// 不截断写打开（write+create，无 truncate）——断点续传从既有内容尾部续写
+    Resume,
+}
+
+impl From<FsOpenMode> for OpenMode {
+    fn from(mode: FsOpenMode) -> Self {
+        match mode {
+            FsOpenMode::Read => Self::Read,
+            FsOpenMode::Replace => Self::Replace,
+        }
+    }
+}
+
 /// 对位 codex c39bfa4c8f `regular_file::open(path, mode)`：spawn_blocking 包同步开。
-pub(crate) async fn open(path: &Path, mode: FsOpenMode) -> io::Result<tokio::fs::File> {
+pub(crate) async fn open(path: &Path, mode: OpenMode) -> io::Result<tokio::fs::File> {
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || open_sync(&path, mode).map(tokio::fs::File::from_std))
         .await
@@ -17,16 +41,20 @@ pub(crate) async fn open(path: &Path, mode: FsOpenMode) -> io::Result<tokio::fs:
 }
 
 /// Opens a regular file without blocking on Unix FIFOs or impersonating Windows pipe servers.
-/// （对位 codex `open_sync(path, mode)`：Replace 时 write+create+truncate）
-pub(crate) fn open_sync(path: &Path, mode: FsOpenMode) -> io::Result<std::fs::File> {
+/// （对位 codex `open_sync(path, mode)`：Replace 时 write+create+truncate；
+/// nova 补 Resume：write+create 不截断——断点续传形态）
+pub(crate) fn open_sync(path: &Path, mode: OpenMode) -> io::Result<std::fs::File> {
     reject_named_pipe(path)?;
     let mut options = std::fs::OpenOptions::new();
     match mode {
-        FsOpenMode::Read => {
+        OpenMode::Read => {
             options.read(true);
         }
-        FsOpenMode::Replace => {
+        OpenMode::Replace => {
             options.write(true).create(true).truncate(true);
+        }
+        OpenMode::Resume => {
+            options.write(true).create(true);
         }
     }
     configure_open(&mut options);
@@ -70,26 +98,6 @@ pub async fn read_sensitive_file_to_string(path: &Path) -> io::Result<String> {
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     Ok(contents)
-}
-
-/// 以写模式打开（创建/截断）普通文件，与 `fs/writeFile` 的整文件覆写语义一致
-/// （nova 自有件：fs/writeStream 非沙箱路径用——显式拒绝沙箱上下文的那条通道）。
-///
-/// 已存在的路径必须是普通文件——拒绝向目录、设备或 FIFO 等特殊文件截断写入。
-pub(crate) async fn create(path: &Path) -> io::Result<tokio::fs::File> {
-    reject_named_pipe(path)?;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    configure_open(&mut options);
-
-    let file = tokio::fs::OpenOptions::from(options).open(path).await?;
-    if !is_disk_file(&file) || !file.metadata().await?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("path `{}` is not a file", path.display()),
-        ));
-    }
-    Ok(file)
 }
 
 // nova 自有加固（上游无此步）：windows 命名管道不能当普通文件读写。
