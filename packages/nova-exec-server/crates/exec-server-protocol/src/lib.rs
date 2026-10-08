@@ -71,4 +71,12 @@ pub use rpc::*;
 ///        拒绝）；**中断语义翻转：中止/断连不再删半成品**，文件留在盘上
 ///        （对齐 writeBlock/scp，为续传让路）；长命沙箱 helper 写管道拆除。
 ///        （可选增量：新增 optional 字段，minor 纪律）
+///        后补（版本号未动，语义透明增量）：队列有界背压——chunk 通知
+///        fire-and-forget，队列满（领先落盘 16 块）流终态失败、done 报 -32600
+///        "queue full"（ResourceBusy 归 -32600，与兄弟违规同档）；done 一次性
+///        （done 后句柄摘除，重复/断连后 done 均 -32004）；并发同名句柄拒绝
+///        竞态安全化（per-id 在飞预约，重复 ID 在碰文件前即拒——此前并发
+///        分发下落表复查才拒、败者截断副作用已发生）；py 客户端权限内层
+///        键名归正 snake_case（file_system/glob_scan_max_depth/
+///        missing_path_behavior——py 侧曾误配 camelCase alias）。
 pub const PROTOCOL_VERSION: &str = "1.12";

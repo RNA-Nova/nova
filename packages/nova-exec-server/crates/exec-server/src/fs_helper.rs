@@ -241,7 +241,11 @@ impl FsHelperPayload {
     pub(crate) fn expect_open(self) -> Result<FsHelperOpenResponse, JSONRPCErrorError> {
         match self {
             Self::Open(response) => Ok(response),
-            other => Err(unexpected_response(FS_OPEN_METHOD, other.operation())),
+            // 对位 codex sandboxed_file_open::open_response：开门路径的错型载荷
+            // 归 invalid_request（其余 expect_* 家族与 codex 一致归 internal_error）
+            other => Err(invalid_request(
+                "invalid fs sandbox helper open response".to_string(),
+            )),
         }
     }
 }

@@ -388,7 +388,9 @@ class ProcessExitedNotification(BaseModel):
     process_id: str = Field(..., alias="processId")
     seq: int
     exit_code: int = Field(..., alias="exitCode")
-    sandbox_denied: bool = Field(default=False, alias="sandboxDenied")
+    # RS 端为 Option<bool>（三态：true/false/未报告——对端发显式 null 时容忍，
+    # 对位 protocol.rs:1213 的 Option 形状；ProcessReadResponse 侧仍为必填 bool）
+    sandbox_denied: bool | None = Field(default=None, alias="sandboxDenied")
 
 
 # =============================================================================
