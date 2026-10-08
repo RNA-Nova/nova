@@ -533,9 +533,10 @@ fn validate_file_write_handle_id(handle_id: &str) -> Result<(), JSONRPCErrorErro
 fn map_fs_error(err: io::Error) -> JSONRPCErrorError {
     match err.kind() {
         io::ErrorKind::NotFound => not_found(err.to_string()),
-        io::ErrorKind::InvalidInput | io::ErrorKind::PermissionDenied => {
-            invalid_request(err.to_string())
-        }
+        // ResourceBusy（写流 queue full）与兄弟违规同档：客户端灌速引发的流控
+        // 终态 = 客户端语义"降速重来"，与乱序/超限/eof 违规同族，不归内部错误
+        io::ErrorKind::InvalidInput | io::ErrorKind::PermissionDenied
+        | io::ErrorKind::ResourceBusy => invalid_request(err.to_string()),
         _ => internal_error(err.to_string()),
     }
 }
@@ -940,6 +941,17 @@ mod tests {
         assert_eq!(err.code, -32004);
         // 镜像结构下 close_all 只摘条目——写任务排空队列后退出，半成品保留
         await_file_content(&native_path, b"half").await;
+    }
+
+    /// queue full（ResourceBusy）的错误码归 -32600（与乱序/超限/eof 违规同档，
+    /// 客户端语义"降速重来"）——不归 -32603 内部错误
+    #[test]
+    fn map_fs_error_resource_busy_is_invalid_request() {
+        let err = map_fs_error(io::Error::new(
+            io::ErrorKind::ResourceBusy,
+            "file write stream `w` queue full: writer fell behind",
+        ));
+        assert_eq!(err.code, -32600);
     }
 
     /// 两写流并发同 path（不同 handle_id）：协议不加锁不互斥——开门即截断

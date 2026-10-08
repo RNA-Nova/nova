@@ -156,7 +156,7 @@ shell 启动状态（`.zshrc`/`.bashrc` 求值结果：函数/别名/setopt/导�
 | `fs/readFile` | 小文件读取（base64） |
 | `fs/open` / `fs/readBlock` / `fs/writeBlock` / `fs/close` | 随机访问句柄（每连接上限 128 个，在飞行打开也占槽；重复 ID/超限在触碰文件前拒绝）。`fs/open` 带 `mode?`（`read`（缺省）|`replace`——v1.9 起 `replace` 生效：创建/截断写打开，带沙箱上下文时按**写权限档**进沙箱 helper 开门执法，全盘整读不豁免）；`fs/writeBlock`（v1.9）显式 `offset` 定位写——`chunk` 为非空 base64 块（解码后 ≤1MiB），写区间不得超 i64 上限（越限 `invalid_request`），成功响应即确认全部字节落盘；写侧由能力位 `fileWriteStreaming` 门控 |
 | `fs/readStream` (+ `fs/readStream/chunk` / `fs/readStream/done` 通知） | 大文件流式读取。沙箱语义：带平台沙箱上下文时经一次性沙箱化 `fs_helper` 开门并把 fd/handle 传回 executor 自读（受限范围生效）；不带时 executor 直读 |
-| `fs/writeStream`（请求开句柄）+ `fs/writeStream/chunk`（通知，客户端→服务端，seq 严格序 append）+ `fs/writeStream/done`（请求收尾确认） | 大文件流式写入。v1.12 起收编句柄族底层：与 `fs/open` 同一开门链路（带平台沙箱上下文时经一次性沙箱化 `fs_helper` 开门并把 fd/handle 传回 executor，受限范围生效；不带时 executor 直开），chunk 经与 `fs/writeBlock` 共享的定位写核心落到每流追加游标，句柄与 readBlock/writeBlock 同一张连接级句柄表（容量/ID 校验共享）。**中断语义翻转（v1.12）：中止/断连不再删半成品**，文件留在盘上（对齐 writeBlock/scp 等一切上传工具，为断点续传让路）。**断点续传**：开句柄带 `offset?`——None = 创建/截断（现状语义）；Some(n) = 不截断、从 n 续写（n 不得超当前文件长度，文件不存在时 n>0 拒绝，均 `invalid_request`）；`done` 的 `totalBytes` 为全量语义（offset 起点 + 本次流式字节数，客户端对账用）。chunk 块上限 4MB；done 要求流已见 eof 块；乱序/超限/写盘失败由 done 回报首个错误 |
+| `fs/writeStream`（请求开句柄）+ `fs/writeStream/chunk`（通知，客户端→服务端，seq 严格序 append）+ `fs/writeStream/done`（请求收尾确认） | 大文件流式写入。v1.12 起收编句柄族底层：与 `fs/open` 同一开门链路（带平台沙箱上下文时经一次性沙箱化 `fs_helper` 开门并把 fd/handle 传回 executor，受限范围生效；不带时 executor 直开），chunk 经与 `fs/writeBlock` 共享的定位写核心落到每流追加游标，句柄与 readBlock/writeBlock 同一张连接级句柄表（容量/ID 校验共享）。**中断语义翻转（v1.12）：中止/断连不再删半成品**，文件留在盘上（对齐 writeBlock/scp 等一切上传工具，为断点续传让路）。**断点续传**：开句柄带 `offset?`——None = 创建/截断（现状语义）；Some(n) = 不截断、从 n 续写（n 不得超当前文件长度，文件不存在时 n>0 拒绝，均 `invalid_request`）；`done` 的 `totalBytes` 为全量语义（offset 起点 + 本次流式字节数，客户端对账用）。chunk 块上限 4MB；done 要求流已见 eof 块；乱序/超限/写盘失败由 done 回报首个错误。**队列有界背压（v1.12 后补）**：chunk 为 fire-and-forget 通知——服务端不再拖慢发送方，队列满（客户端持续领先落盘 16 块）流终态失败，done 回报 `-32600` "queue full"（客户端语义=降速后重试）；服务端内存恒有界（最坏 16×4MB/流）。**done 一次性**：done 后句柄摘除，重复 done 或连接关闭后 done 均 unknown handle（-32004） |
 | `fs/writeFile` | 写文件（base64） |
 | `fs/readDirectory` | 列目录 |
 | `fs/createDirectory` | 建目录（`recursive?`） |
@@ -264,6 +264,11 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
   - fs helper IPC 升 v2（nova 自有内部协议）：`FsHelperRequest` 删除
     `WriteStream` 变体，`FsHelperOpenParams.mode` 换 `OpenMode` 并补
     `resume`（不截断写打开）。
+  - 后补两项（版本号未动，语义透明增量）：队列有界背压——chunk 通知
+    fire-and-forget，队列满（领先落盘 16 块）流终态失败、done 报 -32600
+    "queue full"；done 一次性——done 后句柄摘除，重复/断连后 done 均
+    -32004；并发同名句柄拒绝竞态安全化（per-id 在飞预约，重复 ID 在碰
+    文件前即拒——此前并发分发下落表复查才拒、败者截断副作用已发生）。
 - **v1.11**（policyContext 终态化）：删除 v1.10 沿 codex 841b5490b2 保留的
   legacy 平铺 `cwd`/`workspaceRoots` 双形状字段（nova 从未对外发布，没有老
   客户端存在，不背 legacy 包袱）——策略目录只经 `policyContext` 承载；保留

@@ -423,3 +423,57 @@ def test_windows_sandbox_private_desktop_removed_from_wire():
         {"windowsSandboxPrivateDesktop": True, "windowsSandboxLevel": "elevated"}
     )
     assert legacy.windows_sandbox_level.value == "elevated"
+
+
+def test_permission_profile_wire_shape_matches_codex_golden():
+    """permissions 内层命名金标（对位 codex exec-server-protocol tests 的线上字面量）：
+
+    历史 bug：py 曾把内层键配成 camelCase alias（fileSystem/globScanMaxDepth/
+    missingPathBehavior），而 codex/RS 线上是 snake_case——py 发的带沙箱请求
+    在 RS 端反序列化必败。本用例把 codex 自家金标字面量钉为唯一形状。
+    """
+    from nova_protocol import (
+        ExecFileSystemPath,
+        ExecFileSystemSandboxEntry,
+        ExecManagedFileSystemPermissions,
+        ExecPermissionProfile,
+        FileSystemAccessMode,
+        NetworkSandboxPolicy,
+    )
+
+    profile = ExecPermissionProfile(
+        type="managed",
+        file_system=ExecManagedFileSystemPermissions(
+            type="restricted",
+            entries=[
+                ExecFileSystemSandboxEntry(
+                    path=ExecFileSystemPath(type="path", path="file:///C:/a%20b"),
+                    access=FileSystemAccessMode.READ,
+                ),
+                ExecFileSystemSandboxEntry(
+                    path=ExecFileSystemPath(type="path", path="file://host/s/a%20b"),
+                    access=FileSystemAccessMode.READ,
+                ),
+            ],
+        ),
+        network=NetworkSandboxPolicy.RESTRICTED,
+    )
+
+    # 与 codex exec-server-protocol tests 的线上字面量逐字符一致
+    # （exclude_none 对齐 codex serde skip_serializing_if 的紧凑形态；
+    #  py 出货路径带 null 亦可——RS serde 对 Option 字段 null→None 容忍）
+    assert profile.model_dump(by_alias=True, exclude_none=True) == {
+        "type": "managed",
+        "file_system": {
+            "type": "restricted",
+            "entries": [
+                {"path": {"type": "path", "path": "file:///C:/a%20b"}, "access": "read"},
+                {"path": {"type": "path", "path": "file://host/s/a%20b"}, "access": "read"},
+            ],
+        },
+        "network": "restricted",
+    }
+    # 同一字面量 roundtrip 不丢字段
+    assert ExecPermissionProfile.model_validate(
+        profile.model_dump(by_alias=True, exclude_none=True)
+    ) == profile

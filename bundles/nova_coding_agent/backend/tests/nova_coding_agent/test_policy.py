@@ -94,7 +94,7 @@ def test_resolve_read_only_wire_shape(tmp_path):
     permissions = payload["permissions"]
     assert permissions["type"] == "managed"
     assert permissions["network"] == "restricted"
-    entries = permissions["fileSystem"]["entries"]
+    entries = permissions["file_system"]["entries"]
     assert entries[0]["access"] == "read"
 
 
@@ -107,7 +107,7 @@ def test_resolve_workspace_write_wire_shape(tmp_path):
     )
     permissions = payload["permissions"]
     assert permissions["network"] == "restricted"
-    entries = permissions["fileSystem"]["entries"]
+    entries = permissions["file_system"]["entries"]
     # codex 形态：第 1 条是全盘只读基座（符号 :root），第 2 条项目根可写
     assert entries[0]["access"] == "read"
     assert entries[0]["path"]["value"]["kind"] == "root"

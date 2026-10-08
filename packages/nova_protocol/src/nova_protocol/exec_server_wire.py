@@ -862,9 +862,9 @@ class ExecFileSystemSandboxEntry(BaseModel):
     path: ExecFileSystemPath
     access: FileSystemAccessMode
     #: 路径不存在时的行为（wire 现仅 "skip"）
-    missing_path_behavior: Literal["skip"] | None = Field(
-        default=None, alias="missingPathBehavior"
-    )
+    # 线上键即 snake_case（codex 原版无 rename——py 曾误配 camelCase alias
+    # 导致带沙箱载荷在 RS 端反序列化失败，二轮审计抓出）
+    missing_path_behavior: Literal["skip"] | None = None
 
 
 class ExecManagedFileSystemPermissions(BaseModel):
@@ -873,7 +873,8 @@ class ExecManagedFileSystemPermissions(BaseModel):
 
     type: Literal["restricted", "unrestricted"] = "restricted"
     entries: list[ExecFileSystemSandboxEntry] = Field(default_factory=list)
-    glob_scan_max_depth: int | None = Field(default=None, alias="globScanMaxDepth")
+    # 线上键 snake_case（同 codex；alias 历史误配见上）
+    glob_scan_max_depth: int | None = None
 
 
 class ExecPermissionProfile(BaseModel):
@@ -881,9 +882,10 @@ class ExecPermissionProfile(BaseModel):
     """wire：internally-tagged "type"（managed/disabled/external）"""
 
     type: Literal["managed", "disabled", "external"] = "managed"
+    # 线上键 snake_case `file_system`（codex 原版即此——py 曾误配 `fileSystem`
+    # alias，带沙箱的 process/start 与 fs 请求在 RS 端全部反序列化失败）
     file_system: ExecManagedFileSystemPermissions = Field(
         default_factory=ExecManagedFileSystemPermissions,
-        alias="fileSystem",
     )
     network: NetworkSandboxPolicy = NetworkSandboxPolicy.RESTRICTED
 

@@ -21,8 +21,8 @@ def test_read_only_sandbox_serializes_wire_shape():
     # exclude_none 对齐 process/start 的真实出货路径（None 项不上线）
     data = ctx.model_dump(by_alias=True, exclude_none=True)
     assert data["permissions"]["type"] == "managed"
-    assert data["permissions"]["fileSystem"]["type"] == "restricted"
-    entries = data["permissions"]["fileSystem"]["entries"]
+    assert data["permissions"]["file_system"]["type"] == "restricted"
+    entries = data["permissions"]["file_system"]["entries"]
     assert entries == [
         {"path": {"type": "special", "value": {"kind": "root"}}, "access": "read"}
     ]
@@ -104,7 +104,7 @@ def test_workspace_write_sandbox_serializes_roots_and_network():
     ctx = FileSystemSandboxContext.workspace_write("/tmp/proj", ["/tmp/extra"])
     profile = ctx.model_dump(by_alias=True, exclude_none=True)["permissions"]
     assert profile["network"] == "restricted"
-    entries = profile["fileSystem"]["entries"]
+    entries = profile["file_system"]["entries"]
     # _file_url 不 resolve（对位 rust from_host_native_path 只查绝对性），按字面路径算期望
     extra_uri = "file:///tmp/extra"
     assert [(e["path"], e["access"]) for e in entries] == [
@@ -170,7 +170,7 @@ def test_exec_permission_profile_external_variant():
     # external 变体带默认 file_system 字段（pydantic 含默认值字段照常序列化）
     assert wire == {
         "type": "external",
-        "fileSystem": {"type": "restricted", "entries": [], "globScanMaxDepth": None},
+        "file_system": {"type": "restricted", "entries": [], "glob_scan_max_depth": None},
         "network": "enabled",
     }
 

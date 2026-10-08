@@ -226,12 +226,13 @@ class FileSystemManager:
         - 协议序列：`fs/writeStream` 请求开句柄 → `fs/writeStream/chunk`
           通知（seq 从 0 连续）→ 空块 `eof=True` 收尾 → `fs/writeStream/done`
           请求确认（done.totalBytes 为全量语义：offset 起点 + 本次流式字节数）
-        - 背压：chunk 通知逐条 await 写线（drain），服务端读慢时发送方
-          挂起而非内存膨胀
+        - 背压（队列有界，v1.12 之后）：chunk 通知 fire-and-forget——服务端
+          不再拖慢发送方；队列满（客户端持续领先落盘 16 块）流终态失败，
+          done 回报 -32600 "queue full"（语义=降速后重试）
         - 中断语义（v1.12 翻转）：服务端中止/断连不再删半成品——文件留在
           盘上可续传；本地异常时客户端发 `fs/close` 主动中止（须走数据面
           通道——句柄状态随连接）；chunk 通知无回执，服务端业务错误
-          （乱序/超限/写盘失败）留到 done 回报，这里转为 FileSystemError
+          （乱序/超限/队列满/写盘失败）留到 done 回报，这里转为 FileSystemError
         """
         if isinstance(chunks, (bytes, bytearray, memoryview)):
             raise TypeError("chunks 需为字节迭代器；整块字节请用 write_file")

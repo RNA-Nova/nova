@@ -10,5 +10,4 @@ license.workspace = true
 rustls = { workspace = true }
 
 [lib]
-test = false
 doctest = false
