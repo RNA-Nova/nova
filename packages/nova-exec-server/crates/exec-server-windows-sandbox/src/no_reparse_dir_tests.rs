@@ -172,7 +172,7 @@ fn open_existing_does_not_create_missing_directory() -> Result<()> {
 #[test]
 fn local_directory_path_accepts_drive_and_verbatim_drive_paths() {
     assert!(validate_local_directory_path(Path::new(r"C:\Users\alice\.nova")).is_ok());
-    assert!(validate_local_directory_path(Path::new(r"\\?\D:\Codex Data\home")).is_ok());
+    assert!(validate_local_directory_path(Path::new(r"\\?\D:\Nova Data\home")).is_ok());
 }
 
 #[test]

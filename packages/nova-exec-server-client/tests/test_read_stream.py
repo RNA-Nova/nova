@@ -7,6 +7,8 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_protocol import FileSystemSandboxContext
+
 from nova_exec_server_client import ExecutorClient, FileSystemError
 from nova_exec_server_client.fs import FileSystemManager
 
@@ -67,6 +69,32 @@ async def test_read_stream_happy_path():
     await transport.handlers[0](done_msg(handle_id, 5))
     with pytest.raises(StopAsyncIteration):
         await agen.__anext__()
+
+
+@pytest.mark.asyncio
+async def test_read_stream_sandbox_passes_through():
+    """sandbox 透传：readStream 开门参数携带按请求沙箱载荷（v1.10 起服务端
+    按请求沙箱开门）；缺省 None 时与现状一致（"sandbox": None 上线）"""
+    sandbox = FileSystemSandboxContext.read_only("/tmp/proj").model_dump(
+        by_alias=True, exclude_none=True
+    )
+
+    fs, transport = make_fs()
+    agen, handle_id, first = await start_stream(fs, transport, sandbox=sandbox)
+    assert transport.requests[0][1]["sandbox"] == sandbox
+    await transport.handlers[0](chunk_msg(handle_id, 0, b"x"))
+    assert await first == b"x"
+    await transport.handlers[0](done_msg(handle_id, 1))
+    with pytest.raises(StopAsyncIteration):
+        await agen.__anext__()
+
+    # 缺省（不下发沙箱）：同现状——模型 dump 恒含 "sandbox": None
+    fs, transport = make_fs()
+    agen, handle_id, first = await start_stream(fs, transport)
+    assert transport.requests[0][1]["sandbox"] is None
+    await transport.handlers[0](done_msg(handle_id, 0))
+    with pytest.raises(StopAsyncIteration):
+        await first
 
 
 @pytest.mark.asyncio

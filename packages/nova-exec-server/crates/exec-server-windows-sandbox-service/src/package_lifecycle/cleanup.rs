@@ -75,15 +75,15 @@ pub(super) fn clean_up(
                         installation.directory_handles.pop();
                     }
                     record_result(
-                        "remove desktop-created codex home",
+                        "remove desktop-created nova home",
                         std::fs::remove_dir_all(home),
                     );
                 } else {
                     prune_sandbox_home = true;
-                    log_cleanup("skipping recursive codex home removal: existing CLI home");
+                    log_cleanup("skipping recursive nova home removal: existing CLI home");
                     // Preserve CLI data without leaving inherited permissions for the deleted group.
                     record_result(
-                        "remove codex home sandbox permissions",
+                        "remove nova home sandbox permissions",
                         resolve_sid("NovaSandboxUsers")
                             .and_then(|mut sid| unsafe {
                                 revoke_ace(home, sid.as_mut_ptr().cast())
@@ -92,35 +92,63 @@ pub(super) fn clean_up(
                     );
                 }
             } else {
-                log_cleanup("skipping codex home: no pinned home");
+                log_cleanup("skipping nova home: no pinned home");
             }
-            // The cache may have been created after provisioning. Pin it only for cleanup.
-            let mut cache_directory_handles = Vec::new();
-            if desktop.cache_home.is_dir() {
-                match crate::ipc::pin_existing_ancestors(
-                    &desktop.cache_home,
-                    &mut cache_directory_handles,
-                ) {
+            // 运行时缓存有两个候选根（对位 setup_runtime_bin.rs 的 runtime_paths）：
+            // 托管主运行时在 profile\.cache\nova-exec-server-runtimes，其余运行时根在
+            // LocalAppData\Nova\ExecServer\runtimes（LocalAppData 由 profile 推导，
+            // 与安装侧的 USERPROFILE 回退一致）。缓存可能在 provisioning 之后创建，
+            // 仅在清理时按需 pin。
+            let local_runtime_root = desktop.cache_home.parent().map(|profile| {
+                profile
+                    .join("AppData")
+                    .join("Local")
+                    .join("Nova")
+                    .join("ExecServer")
+            });
+            if local_runtime_root.is_none() {
+                log_cleanup("skipping local runtime cache: cache home has no profile parent");
+            }
+            let mut runtime_roots =
+                vec![(desktop.cache_home.as_path(), "nova-exec-server-runtimes", "cache home")];
+            if let Some(root) = local_runtime_root.as_deref() {
+                runtime_roots.push((root, "runtimes", "runtime root"));
+            }
+            // pin 失败留到循环结束后合并：循环内直写 errors 会与 record_result
+            // 的 &mut 借用冲突（E0499）。
+            let mut pin_errors = Vec::new();
+            for (root, leaf, target) in runtime_roots {
+                if !root.is_dir() {
+                    log_cleanup(&format!(
+                        "skipping runtime cache {}: no accessible directory",
+                        root.display()
+                    ));
+                    continue;
+                }
+                let mut cache_directory_handles = Vec::new();
+                match crate::ipc::pin_existing_ancestors(root, &mut cache_directory_handles) {
                     Ok(()) => {
                         record_result(
-                            "remove codex runtime cache",
-                            std::fs::remove_dir_all(desktop.cache_home.join("codex-runtimes")),
+                            "remove nova runtime cache",
+                            std::fs::remove_dir_all(root.join(leaf)),
                         );
                         // Release only the cache root; its ancestors must remain pinned.
                         cache_directory_handles.pop();
-                        remove_empty_directory(&desktop.cache_home, "cache home");
+                        remove_empty_directory(root, target);
                     }
                     Err(error) => {
                         log_error(
                             EVENT_CLEANUP_DETAIL,
-                            &format!("skipping runtime cache: could not pin cache home, {error:#}"),
+                            &format!(
+                                "skipping runtime cache {}: could not pin cache root, {error:#}",
+                                root.display()
+                            ),
                         );
-                        errors.push(error.to_string());
+                        pin_errors.push(error.to_string());
                     }
                 }
-            } else {
-                log_cleanup("skipping cache home: no accessible directory");
             }
+            errors.extend(pin_errors);
             ensure!(
                 errors.is_empty(),
                 "remove desktop directories: {}",
@@ -137,12 +165,12 @@ pub(super) fn clean_up(
             if installation.directory_guard.take().is_some() {
                 installation.directory_handles.pop();
             }
-            remove_empty_directory(home, "codex home");
+            remove_empty_directory(home, "nova home");
             Ok(())
         }) {
             log_error(
                 EVENT_CLEANUP_DETAIL,
-                &format!("remove empty codex home: failed, {error:#}"),
+                &format!("remove empty nova home: failed, {error:#}"),
             );
         }
     }

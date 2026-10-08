@@ -89,7 +89,6 @@ impl ProcThreadAttributeList {
         // System shells otherwise leave the package environment and cannot launch
         // children from its protected directory. Keep the initial child and descendants
         // inside it, using the caller-provided restricted token and job containment.
-        // Compare compatibility outcomes via codex.windows_sandbox.runner_result.
         // https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute
         let policy = self.desktop_app_policy.insert(Box::new(
             PROCESS_CREATION_DESKTOP_APP_BREAKAWAY_DISABLE_PROCESS_TREE

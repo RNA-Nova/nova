@@ -2259,6 +2259,7 @@ dependencies = [
  "nova-exec-server-protocol-core",
  "nova-exec-server-utils-absolute-path",
  "nova-exec-server-utils-path-uri",
+ "pretty_assertions",
  "serde",
 ]
 

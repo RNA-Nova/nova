@@ -378,7 +378,7 @@ fn registered_non_tty_cmd_forwards_env_output_and_exit() {
                 "C:\\Windows\\System32\\cmd.exe".into(),
                 "/d".into(),
                 "/c".into(),
-                "echo %CODEX_REGISTERED_TEST%& exit /b 23".into(),
+                "echo %NOVA_EXEC_SERVER_REGISTERED_TEST%& exit /b 23".into(),
             ],
             cwd.path(),
             env_map,

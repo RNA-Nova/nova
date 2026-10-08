@@ -124,8 +124,14 @@ class FileSystemManager:
         block_size: int = 256 * 1024,
         offset: int = 0,
         length: int | None = None,
+        *,
+        sandbox: dict | None = None,
     ) -> AsyncIterator[bytes]:
         """流式读取文件（大文件推荐）
+
+        `sandbox`（v1.10 起服务端按请求沙箱开门，能力位
+        sandboxedFileStreaming）：FileSystemSandboxContext 的线上 dict，
+        语义同 `open()`；None = 无上下文直开（现状语义）。
 
         协议序列：先注册推送路由再发 `fs/readStream` 请求（服务端响应后即开始
         推送，注册不能比推送晚到）→ 逐块收 `fs/readStream/chunk` →
@@ -151,6 +157,7 @@ class FileSystemManager:
             offset=offset,
             len=length,
             blockSize=block_size,
+            sandbox=sandbox,
         )
         try:
             result = await self._transport.send_request(
@@ -201,6 +208,8 @@ class FileSystemManager:
         chunks: AsyncIterable[bytes] | Iterable[bytes],
         block_size: int = 256 * 1024,
         offset: int | None = None,
+        *,
+        sandbox: dict | None = None,
     ) -> int:
         """流式写入文件（大文件推荐），返回实际落盘总字节数。
 
@@ -211,6 +220,9 @@ class FileSystemManager:
         - `offset`（v1.12 断点续传）：None = 创建/截断（现状语义）；
           Some(n) = 不截断、从 n 续写（n 不得超当前文件长度，服务端
           越界/缺失文件即拒）
+        - `sandbox`（v1.10 起服务端按请求沙箱开门写，能力位
+          sandboxedFileStreaming）：FileSystemSandboxContext 的线上 dict；
+          None = 无上下文直开（现状语义）
         - 协议序列：`fs/writeStream` 请求开句柄 → `fs/writeStream/chunk`
           通知（seq 从 0 连续）→ 空块 `eof=True` 收尾 → `fs/writeStream/done`
           请求确认（done.totalBytes 为全量语义：offset 起点 + 本次流式字节数）
@@ -230,7 +242,9 @@ class FileSystemManager:
             )
 
         handle_id = _new_handle_id("w")
-        params = FsWriteStreamParams(handleId=handle_id, path=path, offset=offset)
+        params = FsWriteStreamParams(
+            handleId=handle_id, path=path, offset=offset, sandbox=sandbox
+        )
         result = await self._transport.send_request(
             FS_WRITE_STREAM, params.model_dump(by_alias=True)
         )
@@ -292,6 +306,7 @@ class FileSystemManager:
         block_size: int = 256 * 1024,
         offset: int = 0,
         max_resume_attempts: int = 3,
+        sandbox: dict | None = None,
     ) -> int:
         """断点续传的流式写入（v1.12，nova 自有通道）：断线后重连续传。
 
@@ -305,6 +320,7 @@ class FileSystemManager:
         - `offset`：初始续传起点（0 = 新上传，创建/截断）
         - `max_resume_attempts`：断线后续传的最大重试次数（传输层恢复基建
           （ManagedTransport）兜不住时的兜底轮次）
+        - `sandbox`：语义同 `write_stream`；续传重开时同样透传
         - 返回服务端确认的全量字节数；done 对账不符或服务端文件缩水即
           FileSystemError
         """
@@ -318,6 +334,7 @@ class FileSystemManager:
                     chunks,
                     block_size=block_size,
                     offset=confirmed if confirmed > 0 else None,
+                    sandbox=sandbox,
                 )
             except (TransportError, TimeoutError) as err:
                 attempts += 1
@@ -347,6 +364,8 @@ class FileSystemManager:
         offset: int = 0,
         length: int | None = None,
         max_resume_attempts: int = 3,
+        *,
+        sandbox: dict | None = None,
     ) -> AsyncIterator[bytes]:
         """断点续传的流式读取（v1.12，nova 自有通道）：断线后重连续读。
 
@@ -354,6 +373,8 @@ class FileSystemManager:
         每轮 done 对账该轮字节数（read_stream 内建校验），跨轮游标连续。
         仅对传输截断（done 字节数不符）与连接/超时错误续传；服务端读失败
         （done 携带 error，如权限拒绝）原样抛出不重试。
+
+        `sandbox`：语义同 `read_stream`；重开 readStream 续读时同样透传。
         """
         produced = 0
         attempts = 0
@@ -367,6 +388,7 @@ class FileSystemManager:
                     block_size=block_size,
                     offset=offset + produced,
                     length=remaining,
+                    sandbox=sandbox,
                 ):
                     produced += len(chunk)
                     yield chunk

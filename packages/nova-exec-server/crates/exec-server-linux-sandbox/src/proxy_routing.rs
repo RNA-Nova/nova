@@ -48,11 +48,11 @@ const HOST_BRIDGE_READY: u8 = 1;
 const LOOPBACK_INTERFACE_NAME: &[u8] = b"lo";
 const HANDOFF_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
 
-// 归因帧（attribution frame）写入端：内联自 codex-network-proxy 的
-// attribution.rs（帧格式 = 8 字节 magic + u16 BE 长度 + token 字节）。
-// nova 的 executor-network-proxy 尚未 fork 对应的读取端，目前也不会下发
-// attribution token，因此该路径实际不触发；保留帧格式以便后续对齐。
-const ATTRIBUTION_FRAME_MAGIC: &[u8; 8] = b"\0CDXPXY1";
+// 归因帧（attribution frame）写入端：帧结构移植自 codex-network-proxy 的
+// attribution.rs（8 字节 magic + u16 BE 长度 + token 字节），读取端是
+// nova-exec-server-network-proxy 的 attribution.rs。两端均为 nova 自有且
+// 从未发布，魔数取 nova 命名（NVX），两端常量必须同步。
+const ATTRIBUTION_FRAME_MAGIC: &[u8; 8] = b"\0NVXPXY1";
 const MAX_ATTRIBUTION_TOKEN_LEN: usize = 128;
 
 /// Writes the trusted bridge preface consumed by the shared proxy ingress.

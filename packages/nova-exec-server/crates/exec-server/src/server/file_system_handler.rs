@@ -582,6 +582,18 @@ mod tests {
         });
     }
 
+    /// 等写任务在 done 交账后摘句柄退出（respond 先达、摘除在其后一拍——
+    /// 有界轮询，不赌调度窗口）。
+    async fn wait_for_handle_removal(handler: &FileSystemHandler) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while handler.file_handles.open_handle_count() > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("write stream handle should be removed");
+    }
+
     #[tokio::test]
     async fn write_stream_aggregates_chunks_and_done_confirms_total_bytes() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
@@ -791,6 +803,215 @@ mod tests {
         handler.shutdown().await;
         // 语义翻转：连接关闭也不再删半成品（写任务排空队列后退出）
         await_file_content(&native_path, b"half").await;
+    }
+
+    /// eof 后再来块：违规记为失败终态（file_handle.rs 的 eof_seen 校验臂），
+    /// done 回报 -32600 且文案含 "received chunk after eof"；违规块不落盘，
+    /// 半成品保留。
+    #[tokio::test]
+    async fn write_stream_done_reports_chunk_after_eof_and_keeps_partial_file() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("after-eof.bin");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
+
+        handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w1".to_string(),
+                path,
+                offset: None,
+                sandbox: None,
+            })
+            .await
+            .expect("open write stream");
+        for (seq, bytes, eof) in [(0, b"ab".to_vec(), true), (1, b"cd".to_vec(), false)] {
+            handler
+                .write_stream_chunk(FsWriteStreamChunkNotification {
+                    handle_id: "w1".to_string(),
+                    seq,
+                    chunk: ByteChunk::from(bytes),
+                    eof,
+                })
+                .await
+                .expect("chunk");
+        }
+
+        let err = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect_err("done should report the chunk after eof");
+        assert_eq!(err.code, -32600);
+        assert!(
+            err.message.contains("received chunk after eof"),
+            "unexpected error message: {}",
+            err.message,
+        );
+        // 违规块不落盘：半成品只含 eof 前的内容
+        assert_eq!(
+            std::fs::read(&native_path).expect("partial file stays"),
+            b"ab"
+        );
+    }
+
+    /// done 重复：首次交账后写任务摘句柄退出，二次 done 落 unknown handle
+    /// （-32004）。
+    #[tokio::test]
+    async fn write_stream_done_twice_reports_unknown_handle() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("done-twice.bin");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
+
+        handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w1".to_string(),
+                path,
+                offset: None,
+                sandbox: None,
+            })
+            .await
+            .expect("open write stream");
+        handler
+            .write_stream_chunk(FsWriteStreamChunkNotification {
+                handle_id: "w1".to_string(),
+                seq: 0,
+                chunk: ByteChunk::from(b"ab".to_vec()),
+                eof: true,
+            })
+            .await
+            .expect("chunk");
+
+        let done = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect("done");
+        assert_eq!(done.total_bytes, 2);
+        // 交账后写任务随即摘句柄退出（respond 先达、摘除在其后一拍）
+        wait_for_handle_removal(&handler).await;
+
+        let err = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect_err("repeated done should report unknown handle");
+        assert_eq!(err.code, -32004);
+    }
+
+    /// close_all（shutdown）后 done：句柄表已清空，done 落 unknown handle
+    /// （-32004）；半成品保留。
+    #[tokio::test]
+    async fn write_stream_done_after_shutdown_reports_unknown_handle() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("shutdown-done.bin");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
+
+        handler
+            .write_stream(FsWriteStreamParams {
+                handle_id: "w1".to_string(),
+                path,
+                offset: None,
+                sandbox: None,
+            })
+            .await
+            .expect("open write stream");
+        handler
+            .write_stream_chunk(FsWriteStreamChunkNotification {
+                handle_id: "w1".to_string(),
+                seq: 0,
+                chunk: ByteChunk::from(b"half".to_vec()),
+                eof: false,
+            })
+            .await
+            .expect("chunk");
+
+        handler.shutdown().await;
+        let err = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect_err("done after shutdown should report unknown handle");
+        assert_eq!(err.code, -32004);
+        // 镜像结构下 close_all 只摘条目——写任务排空队列后退出，半成品保留
+        await_file_content(&native_path, b"half").await;
+    }
+
+    /// 两写流并发同 path（不同 handle_id）：协议不加锁不互斥——开门即截断
+    /// （offset=None 走 Replace，后开者把先开者已落盘的内容截为空）；两流各自
+    /// 持独立句柄与游标经定位写落盘（无共享文件偏移），重叠区间后写者胜；
+    /// 两边 done 各自成功，totalBytes 为各自游标终点（全量语义）。
+    /// 依据：file_handle.rs `open_entry`（每流独立 File）与
+    /// `run_write_stream_task`（游标住进各自任务栈、write_block_at 定位写）。
+    #[tokio::test]
+    async fn write_stream_concurrent_streams_on_one_path_keep_independent_cursors() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let handler = FileSystemHandler::new(test_runtime_paths());
+        let native_path = temp_dir.path().join("shared.bin");
+        std::fs::write(&native_path, b"original").expect("write fixture");
+        let path = PathUri::from_host_native_path(&native_path).expect("path URI");
+        let open_stream = |handle_id: &str| {
+            handler.write_stream(FsWriteStreamParams {
+                handle_id: handle_id.to_string(),
+                path: path.clone(),
+                offset: None,
+                sandbox: None,
+            })
+        };
+        let push_chunk = |handle_id: &str, seq: u64, bytes: &'static [u8], eof: bool| {
+            handler.write_stream_chunk(FsWriteStreamChunkNotification {
+                handle_id: handle_id.to_string(),
+                seq,
+                chunk: ByteChunk::from(bytes.to_vec()),
+                eof,
+            })
+        };
+
+        // 开门即截断：第一条流的 open 返回时文件已清空
+        open_stream("w1").await.expect("open first stream");
+        assert_eq!(std::fs::read(&native_path).expect("read file"), b"");
+        push_chunk("w1", 0, b"hello ", false).await.expect("chunk");
+        await_file_content(&native_path, b"hello ").await;
+
+        // 后开者截断：第二条流 open（Replace）把先开者已落盘的内容截为空
+        open_stream("w2").await.expect("open second stream");
+        assert_eq!(std::fs::read(&native_path).expect("read file"), b"");
+        push_chunk("w2", 0, b"WORLD!", false).await.expect("chunk");
+        await_file_content(&native_path, b"WORLD!").await;
+
+        // 游标独立：w1 的游标仍是 6（截断不回卷其任务栈游标），重叠区间
+        // [0,6) 后写者（w2）胜；w1 续写落在 w2 内容之后
+        push_chunk("w1", 1, b"ONE", true).await.expect("chunk");
+        let done = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w1".to_string(),
+            })
+            .await
+            .expect("done first stream");
+        assert_eq!(done.total_bytes, 9);
+        assert_eq!(
+            std::fs::read(&native_path).expect("read file"),
+            b"WORLD!ONE"
+        );
+
+        // w2 续写同样落在自身游标 6 处（覆写 [6,10)），两边 done 各自成功
+        push_chunk("w2", 1, b"-TWO", true).await.expect("chunk");
+        let done = handler
+            .write_stream_done(FsWriteStreamDoneParams {
+                handle_id: "w2".to_string(),
+            })
+            .await
+            .expect("done second stream");
+        assert_eq!(done.total_bytes, 10);
+        assert_eq!(
+            std::fs::read(&native_path).expect("read file"),
+            b"WORLD!-TWO"
+        );
     }
 
     /// offset 续传（v1.12，nova 自有通道）：中止后文件留在盘上，

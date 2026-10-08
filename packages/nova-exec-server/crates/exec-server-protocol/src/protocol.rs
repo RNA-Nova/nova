@@ -2173,4 +2173,229 @@ mod tests {
         .expect("serialize restricted-token sandbox");
         assert_eq!(serialized["windowsSandboxLevel"], "restricted-token");
     }
+
+    /// `process/start` 线上形状金标（对位 codex 841b5490b2 `WireExecParams`）：
+    /// 完整字面量（含 sandbox→policyContext 承载策略目录、managedNetwork、
+    /// networkProxy、shellSnapshot 等代表字段）→ 反序列化 → 再序列化全等。
+    #[test]
+    fn wire_exec_params_round_trips_golden_wire_shape() {
+        use super::WireExecParams;
+
+        let expected = serde_json::json!({
+            "processId": "proc-golden",
+            "metadata": { "threadId": "thread-1", "toolCallId": "call-1" },
+            "argv": ["zsh", "-lc", "echo hi"],
+            "cwd": "file:///workspace/app",
+            "envPolicy": {
+                "inherit": "core",
+                "ignoreDefaultExcludes": true,
+                "exclude": ["SECRET_*"],
+                "set": { "FOO": "bar" },
+                "includeOnly": ["PATH"],
+            },
+            "shellSnapshot": {
+                "scopeId": "scope-1",
+                "shell": { "name": "zsh", "path": "/bin/zsh" },
+            },
+            "env": { "A": "1" },
+            "tty": true,
+            "pipeStdin": true,
+            "arg0": "custom-arg0",
+            "sandbox": {
+                "permissions": {
+                    "type": "managed",
+                    "file_system": {
+                        "type": "restricted",
+                        "entries": [
+                            {"path": {"type": "path", "path": "file:///workspace/app"}, "access": "write"},
+                            {"path": {"type": "glob_pattern", "pattern": "src/**"}, "access": "read"},
+                            {"path": {"type": "special", "value": {"kind": "project_roots", "subpath": ".nova"}}, "access": "read", "missing_path_behavior": "skip"},
+                        ],
+                        "glob_scan_max_depth": 2,
+                    },
+                    "network": "restricted",
+                },
+                "policyContext": {
+                    "cwd": "file:///workspace/app",
+                    "workspaceRoots": ["file:///workspace/app", "file:///workspace/lib"],
+                },
+                "userHomeDir": "file:///home/user",
+                "temporaryDirectories": ["file:///tmp"],
+                "windowsSandboxLevel": "disabled",
+                "windowsSandboxProxySettingsMode": "preserve",
+                "useLegacyLandlock": false,
+            },
+            "enforceManagedNetwork": true,
+            "managedNetwork": {
+                "loopbackPorts": [43123, 48081],
+                "allowLocalBinding": false,
+                "allowUnixSockets": ["/tmp/allowed.sock"],
+                "dangerouslyAllowAllUnixSockets": true,
+            },
+            "networkProxy": {
+                "proxy": {
+                    "enabled": false,
+                    "enableSocks5": false,
+                    "enableSocks5Udp": false,
+                    "allowUpstreamProxy": false,
+                    "dangerouslyAllowAllUnixSockets": false,
+                    "mode": "none",
+                    "domains": null,
+                    "unixSockets": null,
+                    "allowLocalBinding": false,
+                },
+                "auditMetadata": { "conversationId": "conversation-1", "turnId": null },
+                "environmentId": "remote",
+                "executionId": "execution-1",
+            },
+        });
+        let wire: WireExecParams =
+            serde_json::from_value(expected.clone()).expect("deserialize wire exec params");
+        assert_eq!(
+            serde_json::to_value(&wire).expect("serialize wire exec params"),
+            expected,
+        );
+    }
+
+    /// Executor 入口解析（`From<WireExecParams> for ExecParams`）：客户端省略
+    /// 沙箱策略 cwd 时回退为进程 cwd（legacy 进程语义）；显式策略 cwd 不被覆盖。
+    #[test]
+    fn wire_exec_params_ingress_falls_back_to_process_cwd_for_policy_cwd() {
+        use super::WireExecParams;
+        use nova_exec_server_file_system::WindowsSandboxSelection;
+
+        let process_cwd = PathUri::parse("file:///workspace/app").expect("process cwd URI");
+        let workspace_lib = PathUri::parse("file:///workspace/lib").expect("workspace root URI");
+        let sandbox_json = |policy_context: serde_json::Value| {
+            serde_json::json!({
+                "permissions": {
+                    "type": "managed",
+                    "file_system": {
+                        "type": "restricted",
+                        "entries": [
+                            {"path": {"type": "path", "path": process_cwd}, "access": "read"},
+                        ],
+                    },
+                    "network": "restricted",
+                },
+                "policyContext": policy_context,
+                "windowsSandboxLevel": "disabled",
+            })
+        };
+        let expected_permissions = PermissionProfile::Managed {
+            file_system: ManagedFileSystemPermissions::Restricted {
+                entries: vec![FileSystemSandboxEntry::new(
+                    FileSystemPath::Path {
+                        path: process_cwd.clone(),
+                    },
+                    FileSystemAccessMode::Read,
+                )],
+                glob_scan_max_depth: None,
+            },
+            network: NetworkSandboxPolicy::Restricted,
+        };
+        let expected_sandbox =
+            |cwd: PathUri, workspace_roots: Vec<PathUri>| FileSystemSandboxContext {
+                permissions: expected_permissions.clone(),
+                cwd,
+                workspace_roots,
+                user_home_dir: None,
+                temporary_directories: None,
+                windows_sandbox_selection: WindowsSandboxSelection::Disabled,
+                windows_sandbox_proxy_settings_mode: None,
+                use_legacy_landlock: false,
+            };
+        let exec_params = |sandbox: serde_json::Value| {
+            let wire: WireExecParams = serde_json::from_value(serde_json::json!({
+                "processId": "proc-ingress",
+                "argv": ["true"],
+                "cwd": process_cwd,
+                "env": {},
+                "tty": false,
+                "arg0": null,
+                "sandbox": sandbox,
+            }))
+            .expect("deserialize wire exec params");
+            ExecParams::from(wire)
+        };
+
+        // policyContext 省略 cwd（仅携 workspaceRoots）→ 策略 cwd 回退进程 cwd
+        let params = exec_params(sandbox_json(
+            serde_json::json!({ "workspaceRoots": [workspace_lib] }),
+        ));
+        assert_eq!(
+            params.sandbox,
+            Some(expected_sandbox(
+                process_cwd.clone(),
+                vec![workspace_lib.clone()],
+            )),
+        );
+
+        // policyContext 整个省略 → 策略 cwd 回退进程 cwd，workspaceRoots 为空
+        let mut without_context = sandbox_json(serde_json::Value::Null);
+        without_context
+            .as_object_mut()
+            .expect("sandbox object")
+            .remove("policyContext");
+        let params = exec_params(without_context);
+        assert_eq!(
+            params.sandbox,
+            Some(expected_sandbox(process_cwd.clone(), Vec::new())),
+        );
+
+        // 显式策略 cwd → 不被进程 cwd 覆盖
+        let selected = PathUri::parse("file:///workspace/selected").expect("policy cwd URI");
+        let params = exec_params(sandbox_json(serde_json::json!({ "cwd": selected })));
+        assert_eq!(params.sandbox, Some(expected_sandbox(selected, Vec::new())),);
+    }
+
+    /// 发送侧转换（`From<ExecParams> for WireExecParams`，v1.11 终态）：策略
+    /// 目录只经 policyContext 承载——cwd/workspaceRoots 逐项进入线上形状，
+    /// 回转后与原 ExecParams 全等。
+    #[test]
+    fn exec_params_send_side_carries_sandbox_policy_context() {
+        use super::WireExecParams;
+
+        let cwd = PathUri::parse("file:///workspace/app").expect("cwd URI");
+        let workspace_lib = PathUri::parse("file:///workspace/lib").expect("workspace root URI");
+        let sandbox = FileSystemSandboxContext {
+            workspace_roots: vec![cwd.clone(), workspace_lib.clone()],
+            ..FileSystemSandboxContext::from_permission_profile(
+                PermissionProfile::Disabled,
+                cwd.clone(),
+            )
+        };
+        let params = ExecParams {
+            process_id: ProcessId::from("proc-send"),
+            metadata: Some(ExecMetadata {
+                thread_id: Some("thread-1".to_string()),
+                tool_call_id: Some("call-1".to_string()),
+            }),
+            argv: vec!["true".to_string()],
+            cwd: cwd.clone(),
+            env_policy: None,
+            shell_snapshot: None,
+            env: HashMap::new(),
+            tty: false,
+            pipe_stdin: false,
+            arg0: None,
+            sandbox: Some(sandbox),
+            enforce_managed_network: false,
+            managed_network: None,
+            network_proxy: None,
+        };
+
+        let wire = serde_json::to_value(WireExecParams::from(params.clone()))
+            .expect("serialize wire exec params");
+        assert_eq!(
+            wire["sandbox"]["policyContext"],
+            serde_json::json!({
+                "cwd": cwd,
+                "workspaceRoots": [cwd, workspace_lib],
+            }),
+        );
+        let restored: WireExecParams =
+            serde_json::from_value(wire).expect("deserialize wire exec params");
+        assert_eq!(ExecParams::from(restored), params);
+    }
 }

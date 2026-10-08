@@ -32,7 +32,7 @@ impl SetupRuntime {
 }
 
 /// Package-scoped execution alias declared for the app's sandbox runner.
-pub const APP_CORE_RUNNER_ALIAS: &str = "codex-core-command-runner.exe";
+pub const APP_CORE_RUNNER_ALIAS: &str = "nova-command-runner.exe";
 
 /// The service may register its package only for these managed sandbox accounts.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -59,7 +59,7 @@ use crate::winutil::to_wide;
 // Old services overwrite the parent value and delete its key on uninstall.
 // A child key preserves Core state and makes that old whole-key delete fail.
 pub const CORE_INSTALLATION_KEY: &str =
-    r"SOFTWARE\OpenAI\Codex\WindowsSandboxService\RegisteredCore";
+    r"SOFTWARE\Nova\ExecServer\WindowsSandboxService\RegisteredCore";
 
 /// Written before registration so a service restart cannot lose cleanup ownership.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -11,7 +11,7 @@ use std::io::Write;
 pub const PROVISIONING_PROTOCOL_VERSION: u8 = 1;
 
 /// Named pipe used by the machine-wide Windows sandbox provisioning service.
-pub const SANDBOX_PROVISIONING_PIPE_NAME: &str = r"\\.\pipe\OpenAI.CodexSandbox";
+pub const SANDBOX_PROVISIONING_PIPE_NAME: &str = r"\\.\pipe\OpenAI.NovaSandbox";
 
 /// Pre-dispatch refusal: the caller may reconnect once to the refreshed pipe.
 pub const SANDBOX_GROUP_CHANGED: &str = "sandbox group changed before authentication";

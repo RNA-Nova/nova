@@ -15,8 +15,10 @@ use tokio::io::AsyncReadExt;
 #[doc(hidden)]
 pub use crate::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
 
-/// 帧魔数：attribution 帧格式标识（与 codex 保持同一线上格式）。
-const ATTRIBUTION_FRAME_MAGIC: &[u8; 8] = b"\0CDXPXY1";
+/// 帧魔数：attribution 帧格式标识（nova 自有线上格式——读写两端均为 nova
+/// 自有件且从未发布，魔数取 nova 命名，不再沿用 codex 的 CDX；写入端见
+/// exec-server-linux-sandbox 的 proxy_routing.rs，两端常量必须同步）。
+const ATTRIBUTION_FRAME_MAGIC: &[u8; 8] = b"\0NVXPXY1";
 const MAX_ATTRIBUTION_TOKEN_LEN: usize = 128;
 const ATTRIBUTION_FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 

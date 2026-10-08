@@ -6,10 +6,11 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_protocol import MAX_WRITE_STREAM_CHUNK_BYTES, FileSystemSandboxContext
+
 from nova_exec_server_client import FileSystemError, ProtocolError
 from nova_exec_server_client.fs import FileSystemManager
 from nova_exec_server_client.pool import CHANNEL_DATA
-from nova_protocol import MAX_WRITE_STREAM_CHUNK_BYTES
 
 
 def make_fs(responses: dict | None = None) -> tuple[FileSystemManager, FakeTransport]:
@@ -83,6 +84,24 @@ async def test_write_stream_empty_source_writes_empty_file():
     chunks = [p for m, p, _ in transport.notifications if m == "fs/writeStream/chunk"]
     assert len(chunks) == 1
     assert chunks[0]["seq"] == 0 and chunks[0]["eof"] is True
+
+
+@pytest.mark.asyncio
+async def test_write_stream_sandbox_passes_through():
+    """sandbox 透传：writeStream 开门参数携带按请求沙箱载荷（v1.10 起服务端
+    按请求沙箱开门写）；缺省 None 时与现状一致（"sandbox": None 上线）"""
+    sandbox = FileSystemSandboxContext.read_only("/tmp/proj").model_dump(
+        by_alias=True, exclude_none=True
+    )
+
+    fs, transport = make_fs(ok_responses(total=1))
+    await fs.write_stream("file:///tmp/out.bin", [b"x"], sandbox=sandbox)
+    assert transport.requests[0][1]["sandbox"] == sandbox
+
+    # 缺省（不下发沙箱）：同现状——模型 dump 恒含 "sandbox": None
+    fs, transport = make_fs(ok_responses(total=1))
+    await fs.write_stream("file:///tmp/out.bin", [b"x"])
+    assert transport.requests[0][1]["sandbox"] is None
 
 
 @pytest.mark.asyncio

@@ -9,5 +9,5 @@ fn main() {
 
 #[cfg(not(target_os = "windows"))]
 fn main() {
-    panic!("codex-windows-managed-deny-probe is Windows-only");
+    panic!("nova-windows-managed-deny-probe is Windows-only");
 }

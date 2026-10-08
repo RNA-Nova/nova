@@ -18,7 +18,7 @@ use crate::runtime_ownership::RuntimeRegistration;
 use crate::winutil::to_wide;
 
 // Package updates can replace the service key, so keep this record outside it.
-pub const INSTALLATION_KEY: &str = r"SOFTWARE\OpenAI\Codex\WindowsSandboxService";
+pub const INSTALLATION_KEY: &str = r"SOFTWARE\Nova\ExecServer\WindowsSandboxService";
 pub const INSTALLATION_VALUE: &str = "ProvisionedInstallation";
 const MAX_VALUE_UNITS: usize = 4096;
 

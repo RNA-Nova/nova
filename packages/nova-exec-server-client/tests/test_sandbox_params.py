@@ -37,6 +37,21 @@ def test_read_only_sandbox_serializes_wire_shape():
     assert data["useLegacyLandlock"] is False
 
 
+def test_legacy_flat_policy_fields_silently_ignored():
+    """纯 legacy 平铺载荷（v1.11 前的平铺 cwd/workspaceRoots 双形状字段）被
+    静默忽略并回退：model_validate 不炸、policy_context 落 None（= 客户端
+    整个省略时 executor 入口回退自身 cwd 的人机工学路径），dump 回线上也
+    不再出现平铺键（v1.11 终态单形状钉住）"""
+    legacy = FileSystemSandboxContext.model_validate(
+        {"cwd": "/tmp/proj", "workspaceRoots": ["/tmp/proj"]}
+    )
+    assert legacy.policy_context is None
+    data = legacy.model_dump(by_alias=True, exclude_none=True)
+    assert "cwd" not in data
+    assert "workspaceRoots" not in data
+    assert "policyContext" not in data
+
+
 def test_policy_context_is_the_only_directory_carrier():
     """任意策略形态（含 project_roots 符号/相对 glob）线上都只有
     policyContext 一种承载；平铺键永不出现（v1.11 终态，对位 codex

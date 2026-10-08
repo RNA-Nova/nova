@@ -66,7 +66,7 @@ fn runner_transport_request() -> RunnerTransportRequest {
     ]);
     RunnerTransportRequest {
         permissions,
-        sandbox_home: PathBuf::from(r"C:\Users\codex"),
+        sandbox_home: PathBuf::from(r"C:\Users\nova"),
         cwd: PathBuf::from(r"C:\workspace"),
         env_map: env_map.clone(),
         logs_base_dir: Some(PathBuf::from(r"C:\Users\tester\.sandbox")),

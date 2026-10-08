@@ -17,11 +17,11 @@ pub(super) fn cleanup_firewall_rules() -> Result<()> {
     let rules = unsafe { policy.Rules() }.context("access sandbox firewall rules")?;
     let mut errors = Vec::new();
     for name in [
-        "codex_sandbox_offline_block_outbound",
-        "codex_sandbox_offline_block_inbound",
-        "codex_sandbox_offline_block_loopback_tcp",
-        "codex_sandbox_offline_block_loopback_udp",
-        "codex_sandbox_offline_allow_loopback_proxy",
+        "nova_sandbox_offline_block_outbound",
+        "nova_sandbox_offline_block_inbound",
+        "nova_sandbox_offline_block_loopback_tcp",
+        "nova_sandbox_offline_block_loopback_udp",
+        "nova_sandbox_offline_allow_loopback_proxy",
     ] {
         if let Err(error) = unsafe { rules.Remove(&BSTR::from(name)) } {
             errors.push(format!("remove sandbox firewall rule {name}: {error}"));

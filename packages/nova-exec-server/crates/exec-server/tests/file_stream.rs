@@ -812,3 +812,105 @@ async fn write_stream_resumes_from_offset_after_abort() -> Result<()> {
     assert_eq!(std::fs::read(&path)?, b"hello world");
     Ok(())
 }
+
+/// fs/writeStream 乱序块（seq 跳号）：通知无回执，违规只在 done 交账时报出
+/// （-32600 含 "expected seq"）；乱序块不落盘，半成品保留。
+#[tokio::test]
+async fn write_stream_done_reports_out_of_order_seq() -> Result<()> {
+    let server = exec_server().await?;
+    let client = ExecServerClient::connect_websocket(RemoteExecServerConnectArgs::new(
+        server.websocket_url().to_string(),
+        "file-write-out-of-order-test".to_string(),
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    ))
+    .await?;
+    let tmp = TempDir::new()?;
+    let path = tmp.path().join("out-of-order.bin");
+    let uri = PathUri::from_host_native_path(&path)?;
+
+    client
+        .fs_write_stream(nova_exec_server_protocol::FsWriteStreamParams {
+            handle_id: "w-ooo".to_string(),
+            path: uri,
+            offset: None,
+            sandbox: None,
+        })
+        .await?;
+    for (seq, bytes, eof) in [(0, b"aa".to_vec(), false), (2, b"bb".to_vec(), true)] {
+        client
+            .fs_write_stream_chunk(nova_exec_server_protocol::FsWriteStreamChunkNotification {
+                handle_id: "w-ooo".to_string(),
+                seq,
+                chunk: bytes.into(),
+                eof,
+            })
+            .await?;
+    }
+
+    let error = client
+        .fs_write_stream_done(nova_exec_server_protocol::FsWriteStreamDoneParams {
+            handle_id: "w-ooo".to_string(),
+        })
+        .await
+        .expect_err("done should report the seq violation");
+    let ExecServerError::Server { code, message } = error else {
+        anyhow::bail!("expected server error, got {error:?}");
+    };
+    assert_eq!(code, -32600);
+    assert!(
+        message.contains("expected seq 1, got 2"),
+        "unexpected error message: {message}",
+    );
+    assert_eq!(std::fs::read(&path)?, b"aa");
+    Ok(())
+}
+
+/// fs/writeStream 未见 eof 即 done：-32600 含 "without an eof chunk"，
+/// 半成品保留。
+#[tokio::test]
+async fn write_stream_done_without_eof_is_rejected() -> Result<()> {
+    let server = exec_server().await?;
+    let client = ExecServerClient::connect_websocket(RemoteExecServerConnectArgs::new(
+        server.websocket_url().to_string(),
+        "file-write-no-eof-test".to_string(),
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    ))
+    .await?;
+    let tmp = TempDir::new()?;
+    let path = tmp.path().join("no-eof.bin");
+    let uri = PathUri::from_host_native_path(&path)?;
+
+    client
+        .fs_write_stream(nova_exec_server_protocol::FsWriteStreamParams {
+            handle_id: "w-noeof".to_string(),
+            path: uri,
+            offset: None,
+            sandbox: None,
+        })
+        .await?;
+    client
+        .fs_write_stream_chunk(nova_exec_server_protocol::FsWriteStreamChunkNotification {
+            handle_id: "w-noeof".to_string(),
+            seq: 0,
+            chunk: b"half".to_vec().into(),
+            eof: false,
+        })
+        .await?;
+
+    let error = client
+        .fs_write_stream_done(nova_exec_server_protocol::FsWriteStreamDoneParams {
+            handle_id: "w-noeof".to_string(),
+        })
+        .await
+        .expect_err("done without eof should fail");
+    let ExecServerError::Server { code, message } = error else {
+        anyhow::bail!("expected server error, got {error:?}");
+    };
+    assert_eq!(code, -32600);
+    assert!(
+        message.contains("without an eof chunk"),
+        "unexpected error message: {message}",
+    );
+    assert_eq!(std::fs::read(&path)?, b"half");
+    Ok(())
+}

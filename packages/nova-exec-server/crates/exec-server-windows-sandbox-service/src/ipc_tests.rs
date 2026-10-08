@@ -232,7 +232,7 @@ fn unavailable_response_round_trips_through_provisioning_frame() {
 #[test]
 fn provisioning_request_preserves_home_spaces_and_unicode() {
     let request = framed_request(SandboxProvisioningRequest {
-        sandbox_home: "D:\\Codex Homes\\Jos\u{00e9}\\.nova".to_string(),
+        sandbox_home: "D:\\Nova Homes\\Jos\u{00e9}\\.nova".to_string(),
         registered_core: false,
         refresh_only: false,
         settings: WindowsSandboxProvisioningSettings::default(),
@@ -241,7 +241,7 @@ fn provisioning_request_preserves_home_spaces_and_unicode() {
     assert_eq!(
         validate_request(&request).unwrap(),
         ServiceRequest::ProvisionSandbox(ProvisioningRequest {
-            sandbox_home: PathBuf::from("D:\\Codex Homes\\Jos\u{00e9}\\.nova"),
+            sandbox_home: PathBuf::from("D:\\Nova Homes\\Jos\u{00e9}\\.nova"),
             registered_core: false,
             refresh_only: false,
             listeners: WindowsSandboxProxyListeners::default(),
@@ -256,7 +256,7 @@ fn structured_provisioning_request_carries_normalized_proxy_settings() {
         [(8081, 3128, vec![3128, 8081]), (8081, 8081, vec![8081])]
     {
         let request = framed_request(SandboxProvisioningRequest {
-            sandbox_home: "D:\\Codex Homes\\Jos\u{00e9}\\.nova".to_string(),
+            sandbox_home: "D:\\Nova Homes\\Jos\u{00e9}\\.nova".to_string(),
             registered_core: false,
             refresh_only: false,
             settings: WindowsSandboxProvisioningSettings {
@@ -271,7 +271,7 @@ fn structured_provisioning_request_carries_normalized_proxy_settings() {
         assert_eq!(
             validate_request(&request).unwrap(),
             ServiceRequest::ProvisionSandbox(ProvisioningRequest {
-                sandbox_home: PathBuf::from("D:\\Codex Homes\\Jos\u{00e9}\\.nova"),
+                sandbox_home: PathBuf::from("D:\\Nova Homes\\Jos\u{00e9}\\.nova"),
                 registered_core: false,
                 refresh_only: false,
                 listeners: WindowsSandboxProxyListeners {
@@ -494,7 +494,7 @@ fn unpackaged_pipe_clients_are_rejected_before_sending_a_request() {
     assert!(
         error
             .to_string()
-            .contains("installed Codex package identity"),
+            .contains("installed Nova package identity"),
         "unexpected package authorization failure: {error:#}"
     );
 }
@@ -649,7 +649,7 @@ fn pipe_descriptor_denies_sandbox_group_before_interactive_users() {
 #[test]
 fn registered_home_preparation_does_not_touch_the_legacy_bin() -> anyhow::Result<()> {
     let root = std::env::temp_dir().join(format!(
-        "codex-service-home-{:?}",
+        "nova-service-home-{:?}",
         windows::core::GUID::new()?
     ));
     std::fs::create_dir(&root)?;

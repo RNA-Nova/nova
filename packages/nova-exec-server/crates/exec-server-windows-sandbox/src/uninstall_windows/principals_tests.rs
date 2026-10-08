@@ -95,9 +95,9 @@ impl Drop for ProfileFixture {
 fn profile_cleanup_preserves_account_until_profile_can_be_deleted() -> Result<()> {
     // Production names are static. This one unique name lives for this test process only.
     let name: &'static str =
-        Box::leak(format!("CodexPrf{:08x}", rand::rngs::OsRng.next_u32()).into_boxed_str());
+        Box::leak(format!("NovaPrf{:08x}", rand::rngs::OsRng.next_u32()).into_boxed_str());
     let username = to_wide(name);
-    let password = to_wide(format!("Cdx!a0{:016x}", rand::rngs::OsRng.next_u64()));
+    let password = to_wide(format!("Nva!a0{:016x}", rand::rngs::OsRng.next_u64()));
     let user_info = network::USER_INFO_1 {
         usri1_name: username.as_ptr().cast_mut(),
         usri1_password: password.as_ptr().cast_mut(),

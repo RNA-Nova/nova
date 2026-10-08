@@ -102,7 +102,7 @@ fn authenticate_impersonated_client(
     }
     let token = OwnedHandle(raw_token);
     crate::package_identity::authorize_client(authorized_process, token.0)
-        .context("authorize the packaged Codex provisioning client")?;
+        .context("authorize the packaged Nova provisioning client")?;
     let mut session = 0_u32;
     let mut returned = 0_u32;
     if unsafe {

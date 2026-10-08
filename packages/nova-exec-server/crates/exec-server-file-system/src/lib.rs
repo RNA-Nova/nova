@@ -914,3 +914,215 @@ fn reserve_walk_response_bytes(
     *response_bytes = total_bytes;
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    /// managed restricted 线上沙箱（无 policyContext——cwd 依赖判定与
+    /// policyContext 无关，只看权限条目形状）。
+    fn managed_wire(entries: Vec<ExecFileSystemSandboxEntry>) -> WireFileSystemSandboxContext {
+        WireFileSystemSandboxContext {
+            permissions: ExecPermissionProfile::Managed {
+                file_system: ExecManagedFileSystemPermissions::Restricted {
+                    entries,
+                    glob_scan_max_depth: None,
+                },
+                network: NetworkSandboxPolicy::Restricted,
+            },
+            policy_context: None,
+            user_home_dir: None,
+            temporary_directories: None,
+            windows_sandbox_selection: WindowsSandboxSelection::Disabled,
+            windows_sandbox_proxy_settings_mode: None,
+            use_legacy_landlock: false,
+        }
+    }
+
+    fn read_entry(path: ExecFileSystemPath) -> ExecFileSystemSandboxEntry {
+        ExecFileSystemSandboxEntry {
+            path,
+            access: FileSystemAccessMode::Read,
+            missing_path_behavior: None,
+        }
+    }
+
+    /// `requires_cwd` 判定矩阵（对位 codex 841b5490b2）：相对 glob 与
+    /// project_roots 符号依赖策略 cwd；绝对 glob / 显式路径 / 其余 special /
+    /// 非受限策略一律不依赖。
+    #[test]
+    fn requires_cwd_only_for_cwd_dependent_entries() {
+        // 相对 glob → 依赖 cwd
+        assert!(
+            managed_wire(vec![read_entry(ExecFileSystemPath::GlobPattern {
+                pattern: "src/**".to_string(),
+            })])
+            .requires_cwd()
+        );
+
+        // 绝对 glob → 不依赖（模式自身锚定，与 cwd 无关；绝对前缀按本机
+        // current_dir 构造，跨平台同真）
+        let absolute_pattern = std::env::current_dir()
+            .expect("current directory")
+            .join("**")
+            .to_string_lossy()
+            .into_owned();
+        assert!(Path::new(&absolute_pattern).is_absolute());
+        assert!(
+            !managed_wire(vec![read_entry(ExecFileSystemPath::GlobPattern {
+                pattern: absolute_pattern,
+            })])
+            .requires_cwd()
+        );
+
+        // project_roots 符号 → 依赖 cwd；显式路径与其余 special → 不依赖
+        assert!(
+            managed_wire(vec![read_entry(ExecFileSystemPath::Special {
+                value: FileSystemSpecialPath::ProjectRoots { subpath: None },
+            })])
+            .requires_cwd()
+        );
+        for path in [
+            ExecFileSystemPath::Path {
+                path: PathUri::parse("file:///workspace").expect("path URI"),
+            },
+            ExecFileSystemPath::Special {
+                value: FileSystemSpecialPath::Root,
+            },
+        ] {
+            assert!(!managed_wire(vec![read_entry(path)]).requires_cwd());
+        }
+
+        // 非受限策略（unrestricted / disabled / external）一律不依赖
+        for permissions in [
+            ExecPermissionProfile::Managed {
+                file_system: ExecManagedFileSystemPermissions::Unrestricted,
+                network: NetworkSandboxPolicy::Restricted,
+            },
+            ExecPermissionProfile::Disabled,
+            ExecPermissionProfile::External {
+                network: NetworkSandboxPolicy::Restricted,
+            },
+        ] {
+            let wire = WireFileSystemSandboxContext {
+                permissions,
+                ..managed_wire(Vec::new())
+            };
+            assert!(!wire.requires_cwd());
+        }
+    }
+
+    /// 读/写分流（对位 codex a4ee536f01）：是否进平台沙箱由各自权限档的
+    /// 全盘访问判定决定，互不株连。
+    #[test]
+    fn sandbox_decisions_follow_full_disk_access_per_direction() {
+        let cwd = PathUri::parse("file:///workspace").expect("cwd URI");
+        let restricted_context = |entries: Vec<FileSystemSandboxEntry>| {
+            FileSystemSandboxContext::from_permission_profile(
+                PermissionProfile::Managed {
+                    file_system: ManagedFileSystemPermissions::Restricted {
+                        entries,
+                        glob_scan_max_depth: None,
+                    },
+                    network: NetworkSandboxPolicy::Restricted,
+                },
+                cwd.clone(),
+            )
+        };
+        let root_entry = |access| {
+            FileSystemSandboxEntry::new(
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::Root,
+                },
+                access,
+            )
+        };
+
+        // Disabled（不受限）→ 读写都不进沙箱
+        let disabled = FileSystemSandboxContext::from_permission_profile(
+            PermissionProfile::Disabled,
+            cwd.clone(),
+        );
+        assert!(!disabled.should_read_from_sandbox());
+        assert!(!disabled.should_write_into_sandbox());
+
+        // 受限（仅工作区可读）→ 读写都进沙箱
+        let workspace_read = restricted_context(vec![FileSystemSandboxEntry::new(
+            PathUri::parse("file:///workspace")
+                .expect("path URI")
+                .into(),
+            FileSystemAccessMode::Read,
+        )]);
+        assert!(workspace_read.should_read_from_sandbox());
+        assert!(workspace_read.should_write_into_sandbox());
+
+        // 全盘读 → 读不进沙箱，写仍进（读档放行不株连写档）
+        let full_disk_read = restricted_context(vec![root_entry(FileSystemAccessMode::Read)]);
+        assert!(!full_disk_read.should_read_from_sandbox());
+        assert!(full_disk_read.should_write_into_sandbox());
+
+        // 全盘写（Write 兼可读，见 FileSystemAccessMode::can_read）→ 读写都不进
+        let full_disk_write = restricted_context(vec![root_entry(FileSystemAccessMode::Write)]);
+        assert!(!full_disk_write.should_read_from_sandbox());
+        assert!(!full_disk_write.should_write_into_sandbox());
+    }
+
+    /// `into_context`：策略 cwd 由入口解析结果接管（wire 内 policyContext 的
+    /// cwd 不随之迁移），workspaceRoots 与其余 executor 路径/选择项逐项保留；
+    /// 省略 policyContext 时 workspaceRoots 缺省为空。
+    #[test]
+    fn into_context_carries_resolved_cwd_and_policy_paths() {
+        let resolved = PathUri::parse("file:///resolved").expect("resolved cwd URI");
+        let root_a = PathUri::parse("file:///root-a").expect("workspace root URI");
+        let root_b = PathUri::parse("file:///root-b").expect("workspace root URI");
+        let home = PathUri::parse("file:///home/user").expect("home URI");
+        let tmp = PathUri::parse("file:///tmp").expect("temporary directory URI");
+
+        let wire = WireFileSystemSandboxContext {
+            policy_context: Some(WireFileSystemPolicyContext {
+                cwd: Some(PathUri::parse("file:///ignored").expect("policy cwd URI")),
+                workspace_roots: vec![root_a.clone(), root_b.clone()],
+            }),
+            user_home_dir: Some(home.clone()),
+            temporary_directories: Some(vec![tmp.clone()]),
+            windows_sandbox_selection: WindowsSandboxSelection::Mxc,
+            windows_sandbox_proxy_settings_mode: Some(WindowsSandboxProxySettingsMode::Preserve),
+            use_legacy_landlock: true,
+            ..managed_wire(vec![read_entry(ExecFileSystemPath::Path {
+                path: root_a.clone(),
+            })])
+        };
+
+        let context = wire.into_context(resolved.clone());
+        assert_eq!(
+            context,
+            FileSystemSandboxContext {
+                permissions: PermissionProfile::Managed {
+                    file_system: ManagedFileSystemPermissions::Restricted {
+                        entries: vec![FileSystemSandboxEntry::new(
+                            root_a.clone().into(),
+                            FileSystemAccessMode::Read,
+                        )],
+                        glob_scan_max_depth: None,
+                    },
+                    network: NetworkSandboxPolicy::Restricted,
+                },
+                cwd: resolved.clone(),
+                workspace_roots: vec![root_a, root_b],
+                user_home_dir: Some(home),
+                temporary_directories: Some(vec![tmp]),
+                windows_sandbox_selection: WindowsSandboxSelection::Mxc,
+                windows_sandbox_proxy_settings_mode: Some(
+                    WindowsSandboxProxySettingsMode::Preserve
+                ),
+                use_legacy_landlock: true,
+            }
+        );
+
+        // 省略 policyContext → workspaceRoots 缺省为空
+        let context = managed_wire(Vec::new()).into_context(resolved);
+        assert_eq!(context.workspace_roots, Vec::<PathUri>::new());
+    }
+}

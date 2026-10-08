@@ -20,7 +20,7 @@ fn attribution_frame_has_bounded_binary_prefix() -> io::Result<()> {
     let mut frame = Vec::new();
     write_attribution_frame(&mut frame, "token-1")?;
 
-    assert_eq!(&frame[..8], b"\0CDXPXY1");
+    assert_eq!(&frame[..8], b"\0NVXPXY1");
     assert_eq!(u16::from_be_bytes([frame[8], frame[9]]), 7);
     assert_eq!(&frame[10..], b"token-1");
     Ok(())

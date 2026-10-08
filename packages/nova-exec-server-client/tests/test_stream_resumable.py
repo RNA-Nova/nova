@@ -8,6 +8,7 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_protocol import FileSystemSandboxContext
 
 from nova_exec_server_client import FileSystemError
 from nova_exec_server_client.errors import TransportError
@@ -279,3 +280,65 @@ async def test_read_stream_resumable_server_error_not_resumed():
         await first
     # 只开了一条流（无续传重试）
     assert len(server.stream_params) == 1
+
+
+def _read_only_sandbox() -> dict:
+    """按请求沙箱载荷（FileSystemSandboxContext 线上 dict，对齐真实出货路径）"""
+    return FileSystemSandboxContext.read_only("/tmp/proj").model_dump(
+        by_alias=True, exclude_none=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_stream_resumable_sandbox_passes_through_on_reopen():
+    """sandbox 透传：首开与断线续传重开的 writeStream 参数都携带沙箱载荷"""
+    sandbox = _read_only_sandbox()
+    server = FakeWriteStreamServer(break_plan=[1, None])
+    fs = FileSystemManager(server)
+    opens: list[dict] = []
+    original = server.send_request
+
+    async def recording_send_request(method, params=None, *, channel=None):
+        if method == "fs/writeStream":
+            opens.append(params or {})
+        return await original(method, params, channel=channel)
+
+    server.send_request = recording_send_request  # type: ignore[method-assign]
+
+    total = await fs.write_stream_resumable(
+        "file:///tmp/out.bin", b"aabb", block_size=2, sandbox=sandbox
+    )
+
+    assert total == 4
+    assert bytes(server.file) == b"aabb"
+    # 首开 + 续传重开各一次，两次都带沙箱载荷
+    assert len(opens) == 2
+    assert all(p["sandbox"] == sandbox for p in opens)
+
+
+@pytest.mark.asyncio
+async def test_read_stream_resumable_sandbox_passes_through_on_reopen():
+    """sandbox 透传：首开与断尾续读重开的 readStream 参数都携带沙箱载荷"""
+    sandbox = _read_only_sandbox()
+    content = b"hello"
+    server = FakeReadStreamServer(content, drop_chunk=1)
+    fs = FileSystemManager(server)
+    opens: list[dict] = []
+    original = server.send_request
+
+    async def recording_send_request(method, params=None, *, channel=None):
+        if method == "fs/readStream":
+            opens.append(params or {})
+        return await original(method, params, channel=channel)
+
+    server.send_request = recording_send_request  # type: ignore[method-assign]
+
+    received = await drive_until_done(
+        fs.read_stream_resumable("file:///tmp/in.bin", block_size=2, sandbox=sandbox),
+        server,
+    )
+
+    assert bytes(received) == content
+    # 首开 + 续读重开各一次，两次都带沙箱载荷
+    assert len(opens) == 2
+    assert all(p["sandbox"] == sandbox for p in opens)

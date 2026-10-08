@@ -274,3 +274,71 @@ fn resolve_filesystem_sandbox(
     };
     Ok(sandbox.into_context(cwd))
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    /// 策略含 cwd 依赖项（相对 glob / project_roots 符号）却省略 policyContext
+    /// cwd → invalid_params（-32602，"requires cwd"），不回退。
+    #[test]
+    fn resolve_filesystem_sandbox_rejects_cwd_dependent_policy_without_cwd() {
+        for entries in [
+            serde_json::json!([
+                {"path": {"type": "glob_pattern", "pattern": "src/**"}, "access": "read"},
+            ]),
+            serde_json::json!([
+                {"path": {"type": "special", "value": {"kind": "project_roots"}}, "access": "read"},
+            ]),
+        ] {
+            let wire: WireFileSystemSandboxContext = serde_json::from_value(serde_json::json!({
+                "permissions": {
+                    "type": "managed",
+                    "file_system": { "type": "restricted", "entries": entries },
+                    "network": "restricted",
+                },
+                "windowsSandboxLevel": "disabled",
+            }))
+            .expect("wire sandbox should deserialize");
+
+            let err = resolve_filesystem_sandbox(wire)
+                .expect_err("cwd-dependent policy without cwd should be rejected");
+            assert_eq!(err.code, -32602);
+            assert!(
+                err.message.contains("requires cwd"),
+                "unexpected error message: {}",
+                err.message,
+            );
+        }
+    }
+
+    /// 省略 policyContext 但策略无 cwd 依赖项（绝对路径条目）→ 回退 executor
+    /// 自身当前目录（resolve_existing_path 规整），workspaceRoots 缺省为空。
+    #[test]
+    fn resolve_filesystem_sandbox_falls_back_to_executor_cwd_for_cwd_independent_policy() {
+        let wire: WireFileSystemSandboxContext = serde_json::from_value(serde_json::json!({
+            "permissions": {
+                "type": "managed",
+                "file_system": {
+                    "type": "restricted",
+                    "entries": [
+                        {"path": {"type": "path", "path": "file:///workspace"}, "access": "read"},
+                    ],
+                },
+                "network": "restricted",
+            },
+            "windowsSandboxLevel": "disabled",
+        }))
+        .expect("wire sandbox should deserialize");
+
+        let context = resolve_filesystem_sandbox(wire).expect("resolve filesystem sandbox");
+        let expected_cwd = std::env::current_dir()
+            .and_then(|cwd| resolve_existing_path(&cwd))
+            .and_then(PathUri::from_host_native_path)
+            .expect("executor cwd URI");
+        assert_eq!(context.cwd, expected_cwd);
+        assert_eq!(context.workspace_roots, Vec::new());
+    }
+}

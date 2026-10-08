@@ -41,8 +41,8 @@ fn large_deny_list_uses_environment_without_changing_the_request() {
     crate::environment_transport::encode("must not reach workload", &mut env).unwrap();
     let profile = PermissionProfile::read_only();
     let command = vec![
-        "codex.exe".to_string(),
-        "--codex-run-as-fs-helper".to_string(),
+        "app.exe".to_string(),
+        "--nova-run-as-fs-helper".to_string(),
     ];
     let args = create_windows_sandbox_command_args_for_permission_profile(
         command.clone(),

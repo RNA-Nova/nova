@@ -234,7 +234,7 @@ fn authorize_runner_receipt(
     );
     ensure!(
         record.sandbox_home == sandbox_home,
-        "registered Core setup belongs to another Codex home"
+        "registered Core setup belongs to another Nova home"
     );
     let runtime = record.runtime()?;
     ensure!(

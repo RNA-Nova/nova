@@ -1,4 +1,4 @@
-//! Binds provisioning requests to the packaged Codex client and its Windows user.
+//! Binds provisioning requests to the packaged Nova client and its Windows user.
 
 use std::io;
 #[cfg(debug_assertions)]
@@ -70,17 +70,17 @@ pub(crate) fn authorize_client_process(pipe: HANDLE) -> Result<AuthorizedClientP
             Some(_) => {}
             #[cfg(debug_assertions)]
             None if FOREGROUND_MODE.load(Ordering::Acquire)
-                && is_known_codex_package_family(&client_family) => {}
+                && is_debug_trusted_codex_package_family(&client_family) => {}
             #[cfg(debug_assertions)]
             None if FOREGROUND_MODE.load(Ordering::Acquire) => {
-                bail!("provisioning client does not belong to a trusted Codex package family")
+                bail!("provisioning client does not belong to a trusted package family")
             }
             None => bail!("provisioning service has no package identity"),
         },
         None if service_family.is_some() => {}
         #[cfg(debug_assertions)]
         None if FOREGROUND_MODE.load(Ordering::Acquire) => {}
-        None => bail!("provisioning clients must run with an installed Codex package identity"),
+        None => bail!("provisioning clients must run with an installed Nova package identity"),
     }
 
     Ok(AuthorizedClientProcess { handle: process })
@@ -110,8 +110,11 @@ pub(crate) fn authorize_client(
     Ok(())
 }
 
+// debug 联调通道：前台调试（未打包）服务没有包家族可供相等校验，此时仍允许
+// codex 打包客户端接入联调。行为保留——白名单维持 codex 包族；正式打包服务
+// 走上面的家族相等校验，不经过这里。
 #[cfg(debug_assertions)]
-fn is_known_codex_package_family(package_family: &str) -> bool {
+fn is_debug_trusted_codex_package_family(package_family: &str) -> bool {
     matches!(
         package_family,
         "OpenAI.Codex_3k8sg7r9htsxt"

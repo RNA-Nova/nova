@@ -1,16 +1,20 @@
 //! 连接级文件句柄表：定位读/写均有界（对位 codex d25c114d49+c39bfa4c8f
 //! `file_handle.rs`）。信号量槽位同时约束已注册句柄与在飞行打开；
-//! 句柄表用同步锁，锁不跨 await。
+//! 句柄表用同步锁，锁不跨 await。并发同名 ID 由 per-id 在飞预约拒在碰文件
+//! 之前（nova 比上游多的一层——上游仅靠落表复查，届时败者的开门副作用
+//! 已经发生）。
 //!
 //! 沙箱化 fs/open|readStream 也由 executor 进程自持句柄（一次性 helper 开门后
 //! 把 fd/handle 传回，见 sandboxed_file_open），因此句柄统一为普通 file 对象。
 //!
 //! fs/writeStream 与读流完全镜像（nova 自有通道，v1.12 起收编句柄族）：
 //! open 注册即 spawn 写任务（对读任务 `stream_file_blocks`）——chunk 通知只投进
-//! 写任务 channel，seq/eof 校验与定位写（经与 writeBlock 共享的核心）全部在
-//! 任务栈内完成；done 请求经一次性应答通道向任务交账。句柄条目零游标状态。
+//! 写任务 channel（bounded 16：满即背压记终态失败、done 回报），seq/eof 校验
+//! 与定位写（经与 writeBlock 共享的核心）全部在任务栈内完成；done 请求经
+//! 一次性应答通道向任务交账。句柄条目零游标状态。
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::fs::File;
 use std::future::Future;
@@ -33,6 +37,17 @@ pub(crate) const MAX_READ_STREAM_BLOCK_SIZE: usize = 4 * 1024 * 1024; // 4MB
 /// （v1.12 起随写流收编进句柄族——自 file_write.rs 迁入）。
 pub(crate) const MAX_WRITE_STREAM_CHUNK_BYTES: usize = 4 * 1024 * 1024; // 4MB
 
+/// 写流 channel 容量（chunk 在飞上限）：bounded + try_send 补回被真镜像拆掉的
+/// 天然背压（旧设计 inline 落盘，客户端发多快都只以磁盘速度前进；真镜像后
+/// UnboundedSender 等于失控/慢盘场景服务端内存无界）。取值 16：典型 256KB 块
+/// 即 4MB 在飞；最坏 16 × 4MB 块 = 64MB/流，有界。
+const WRITE_STREAM_QUEUE_CAPACITY: usize = 16;
+
+/// fs/writeStream 的背压终态 latch（chunk 投递端 → 写任务方向）：队列满时
+/// 由投递端置位（OnceLock set-once——并发满员只留首个错误），写任务汇入
+/// 本地终态后静默排空后续块、done 回报（与协议违规同一语义）。
+type WriteStreamBackpressureLatch = Arc<std::sync::OnceLock<(io::ErrorKind, String)>>;
+
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct FileReadBlock {
     pub(crate) bytes: Vec<u8>,
@@ -53,16 +68,28 @@ enum WriteStreamInput {
 }
 
 /// fs/writeStream 的句柄载荷（nova 自有通道，v1.12 起与读流完全镜像）：
-/// 条目只承载写任务的 channel 发送端——全部流状态（expected_seq/cursor/
-/// eof_seen/failed）住进写任务栈，不在句柄表里挂账。
+/// 条目只承载写任务的 channel 发送端与背压 latch——全部流状态
+/// （expected_seq/cursor/eof_seen/failed）住进写任务栈，不在句柄表里挂账。
 struct WriteStreamHandle {
-    tx: tokio::sync::mpsc::UnboundedSender<WriteStreamInput>,
+    tx: tokio::sync::mpsc::Sender<WriteStreamInput>,
+    /// 背压终态 latch（与写任务共享）：channel 满时投递端置位，done 回报
+    backpressure: WriteStreamBackpressureLatch,
 }
 
 #[derive(Clone)]
 pub(crate) struct FileHandleManager {
-    handles: Arc<Mutex<HashMap<String, FileHandleEntry>>>,
+    handles: Arc<Mutex<FileHandleTable>>,
     slots: Arc<Semaphore>,
+}
+
+/// 句柄表 + per-id 在飞预约（同一把同步锁，锁不跨 await）。
+#[derive(Default)]
+struct FileHandleTable {
+    entries: HashMap<String, FileHandleEntry>,
+    /// 在飞打开的 ID 预约（nova 自有，codex 上游无此层）：open future 在锁外
+    /// await——预约把并发同名打开的拒绝提前到碰文件之前；落表后才释放
+    /// （失败/取消路径由 [`InFlightReservation`] 的 Drop 释放）。
+    in_flight: HashSet<String>,
 }
 
 impl Default for FileHandleManager {
@@ -75,8 +102,9 @@ impl Default for FileHandleManager {
 }
 
 impl FileHandleManager {
-    /// 先占槽再 await 打开 future——在飞行打开也计入 128 槽上限（对位 codex
-    /// d25c114d49）；打开完成后复查重复 ID，并发同名时保留先到句柄。
+    /// 先查重并占 per-id 在飞预约，再占槽、await 打开 future——在飞行打开也
+    /// 计入 128 槽上限（对位 codex d25c114d49）；并发同名 ID 在碰文件前即拒
+    /// （nova 自有的预约层；落表复查保留兜底）。
     pub(crate) async fn open(
         &self,
         handle_id: String,
@@ -105,12 +133,25 @@ impl FileHandleManager {
         open_file: impl Future<Output = io::Result<tokio::fs::File>>,
         write_stream_offset: Option<u64>,
     ) -> io::Result<String> {
-        if self.lock_handles().contains_key(&handle_id) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("file handle `{handle_id}` already exists"),
-            ));
-        }
+        // 第 1 步（持锁，不跨 await）：已注册或在飞 → 重复 ID 即拒（碰文件前）；
+        // 否则占 per-id 在飞预约——并发同名打开在开门副作用（Replace=截断）
+        // 发生前分出胜负（nova 自有，比 codex 上游的落表复查更早）。
+        let reservation = {
+            let mut table = self.lock_handles();
+            if table.entries.contains_key(&handle_id) || table.in_flight.contains(&handle_id) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("file handle `{handle_id}` already exists"),
+                ));
+            }
+            table.in_flight.insert(handle_id.clone());
+            InFlightReservation {
+                manager: self,
+                handle_id: handle_id.clone(),
+            }
+        };
+        // 第 2 步（无锁）：占槽 → await 开门。失败/取消路径由预约守卫的 Drop
+        // 释放预约，不会泄漏。
         let permit = Arc::clone(&self.slots).try_acquire_owned().map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -118,13 +159,20 @@ impl FileHandleManager {
             )
         })?;
         let file = Arc::new(open_file.await?.into_std().await);
-        let write_stream_channel = write_stream_offset
-            .map(|_| tokio::sync::mpsc::unbounded_channel());
+        let write_stream_channel = write_stream_offset.map(|_| {
+            let (tx, rx) = tokio::sync::mpsc::channel(WRITE_STREAM_QUEUE_CAPACITY);
+            (tx, rx, WriteStreamBackpressureLatch::default())
+        });
         let write_stream = write_stream_channel
             .as_ref()
-            .map(|(tx, _rx)| WriteStreamHandle { tx: tx.clone() });
-        let mut handles = self.lock_handles();
-        let Entry::Vacant(entry) = handles.entry(handle_id.clone()) else {
+            .map(|(tx, _rx, backpressure)| WriteStreamHandle {
+                tx: tx.clone(),
+                backpressure: Arc::clone(backpressure),
+            });
+        // 第 3 步（持锁）：落表。Entry::Vacant 复查保留兜底（在飞预约使其实际
+        // 不可达——同名者第 1 步已被拒）。
+        let mut table = self.lock_handles();
+        let Entry::Vacant(entry) = table.entries.entry(handle_id.clone()) else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("file handle `{handle_id}` already exists"),
@@ -135,18 +183,21 @@ impl FileHandleManager {
             write_stream,
             _permit: permit,
         });
-        drop(handles);
+        drop(table);
         // 写任务在条目落表后才启动（与读任务的 spawn 时机一致）——重复 ID 被
         // 拒绝时 channel 随局部变量 drop，不会误摘既有句柄。
-        if let Some((_tx, rx)) = write_stream_channel {
+        if let Some((_tx, rx, backpressure)) = write_stream_channel {
             tokio::spawn(run_write_stream_task(
                 self.clone(),
                 handle_id.clone(),
                 file,
                 rx,
+                backpressure,
                 write_stream_offset.expect("write stream offset is set"),
             ));
         }
+        // 落表后释放预约（守卫 Drop 内取表锁——必须在表锁释放之后）
+        drop(reservation);
         Ok(handle_id)
     }
 
@@ -191,6 +242,9 @@ impl FileHandleManager {
     /// fire-and-forget）：只把块投进写任务的 channel，不碰任何流状态；
     /// seq/eof/块长校验与定位写全部在写任务栈内完成（状态翻转语义同前：
     /// 失败/中止不再删半成品——文件留在盘上，为断点续传让路）。
+    /// channel 为 bounded（容量 [`WRITE_STREAM_QUEUE_CAPACITY`]）：try_send
+    /// 满即背压——记终态失败 latch（首个错误 done 回报，后续块静默排空，
+    /// 与协议违规同一语义）。
     pub(crate) async fn write_stream_chunk(
         &self,
         handle_id: &str,
@@ -199,9 +253,12 @@ impl FileHandleManager {
         eof: bool,
     ) {
         let sender = {
-            let handles = self.lock_handles();
-            match handles.get(handle_id) {
-                Some(entry) => entry.write_stream.as_ref().map(|stream| stream.tx.clone()),
+            let table = self.lock_handles();
+            match table.entries.get(handle_id) {
+                Some(entry) => entry
+                    .write_stream
+                    .as_ref()
+                    .map(|stream| (stream.tx.clone(), Arc::clone(&stream.backpressure))),
                 None => {
                     // 未知句柄：流可能已完成或从未建立；通知无回执，忽略即可
                     tracing::warn!("ignoring write stream chunk for unknown handle `{handle_id}`");
@@ -210,10 +267,24 @@ impl FileHandleManager {
             }
         };
         match sender {
-            Some(tx) => {
-                // 任务已结束（理论上仅 done 之后——那时条目已摘除走不到这里；
-                // 防御性路径）静默即可，与通知无回执的姿态一致
-                let _ = tx.send(WriteStreamInput::Chunk { seq, bytes, eof });
+            Some((tx, backpressure)) => {
+                match tx.try_send(WriteStreamInput::Chunk { seq, bytes, eof }) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        // 背压终态：写任务以磁盘速度消费，客户端灌得快于落盘——
+                        // 记首个错误 latch（set-once，并发满员只留首个），写任务
+                        // 汇入后静默排空后续块，done 回报
+                        let _ = backpressure.set((
+                            io::ErrorKind::ResourceBusy,
+                            format!(
+                                "file write stream `{handle_id}` queue full: writer fell behind"
+                            ),
+                        ));
+                    }
+                    // 任务已结束（理论上仅 done 之后——那时条目已摘除走不到这里；
+                    // 防御性路径）静默即可，与通知无回执的姿态一致
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
+                }
             }
             None => {
                 tracing::warn!(
@@ -224,13 +295,14 @@ impl FileHandleManager {
     }
 
     /// fs/writeStream/done 执行体：把 Done 投进写任务的 channel 并等交账
-    /// （与读流的 done 收尾镜像）。流须已见 eof 块；失败终态回报首个错误。
+    /// （与读流的 done 收尾镜像；bounded 队列满时先等写任务排空）。流须已见
+    /// eof 块；失败终态回报首个错误。
     /// 成功返回全量字节数（offset 起点 + 本次流式字节数——游标终点，客户端
     /// 对账用），写任务随后摘句柄退出；无论成败文件均留在盘上。
     pub(crate) async fn finish_write_stream(&self, handle_id: &str) -> io::Result<u64> {
         let sender = {
-            let handles = self.lock_handles();
-            match handles.get(handle_id) {
+            let table = self.lock_handles();
+            match table.entries.get(handle_id) {
                 Some(entry) => match entry.write_stream.as_ref() {
                     Some(stream) => stream.tx.clone(),
                     None => {
@@ -246,6 +318,7 @@ impl FileHandleManager {
         let (respond_tx, respond_rx) = tokio::sync::oneshot::channel();
         if sender
             .send(WriteStreamInput::Done { respond: respond_tx })
+            .await
             .is_err()
         {
             return Err(io::Error::other(format!(
@@ -262,20 +335,21 @@ impl FileHandleManager {
 
     fn get(&self, handle_id: &str) -> io::Result<Arc<File>> {
         self.lock_handles()
+            .entries
             .get(handle_id)
             .map(|entry| Arc::clone(&entry.file))
             .ok_or_else(|| unknown_handle_error(handle_id))
     }
 
     pub(crate) fn close(&self, handle_id: &str) {
-        self.lock_handles().remove(handle_id);
+        self.lock_handles().entries.remove(handle_id);
     }
 
     pub(crate) fn close_all(&self) {
-        self.lock_handles().clear();
+        self.lock_handles().entries.clear();
     }
 
-    fn lock_handles(&self) -> MutexGuard<'_, HashMap<String, FileHandleEntry>> {
+    fn lock_handles(&self) -> MutexGuard<'_, FileHandleTable> {
         self.handles
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -284,7 +358,26 @@ impl FileHandleManager {
     /// nova 自有测试观察口（readStream/writeStream 的 handler 测试断言句柄回收）。
     #[cfg(test)]
     pub(crate) fn open_handle_count(&self) -> usize {
-        self.lock_handles().len()
+        self.lock_handles().entries.len()
+    }
+}
+
+/// per-id 在飞预约的守卫（nova 自有，codex 上游无此层）：开门 future 在锁外
+/// await，两个同名并发打开会同时通过"查表"——预约把重复 ID 的拒绝提前到
+/// 碰文件之前，败者的开门副作用（Replace=截断）不会发生。守卫 Drop 即释放
+/// 预约，覆盖落表成功、开门失败、占槽失败与 open future 被取消的全部路径。
+/// 注意：Drop 内会取句柄表锁——不得在持表锁的作用域内 drop 本守卫。
+struct InFlightReservation<'a> {
+    manager: &'a FileHandleManager,
+    handle_id: String,
+}
+
+impl Drop for InFlightReservation<'_> {
+    fn drop(&mut self) {
+        self.manager
+            .lock_handles()
+            .in_flight
+            .remove(&self.handle_id);
     }
 }
 
@@ -357,9 +450,12 @@ where
 
 /// fs/writeStream 的写任务（nova 自有通道，与读任务 `stream_file_blocks`
 /// 完全镜像）：全部流状态住进任务栈——expected_seq/cursor/eof_seen/failed
-/// （游标初值即续传 offset；done 的 totalBytes 全量语义 = 游标终点）。
+/// （游标初值即续传 offset；done 的 totalBytes 全量语义 = 游标终点）。唯一
+/// 例外是 `backpressure`：投递端在 bounded channel 满时置位的共享 latch
+/// （背压——本任务以磁盘速度消费，客户端灌得更快即失败，服务端内存有界）。
 ///
-/// 循环：从 channel 收块 → 协议校验（seq 严格序/eof 序/块长）→ 经
+/// 循环：从 channel 收块 → 汇入背压 latch（本地错误先到先得——它在时间上
+/// 更早）→ 协议校验（seq 严格序/eof 序/块长）→ 经
 /// `write_block_at` 定位落盘；失败记为终态（latch，由随后的 Done 回报首个
 /// 错误，与收编前语义逐字节一致）。Done 到来即交账并退出（句柄摘除）；
 /// channel 对端全掉（close/断连摘条目 → tx drop → recv=None）则自然结束——
@@ -368,7 +464,8 @@ async fn run_write_stream_task(
     manager: FileHandleManager,
     handle_id: String,
     file: Arc<File>,
-    mut rx: tokio::sync::mpsc::UnboundedReceiver<WriteStreamInput>,
+    mut rx: tokio::sync::mpsc::Receiver<WriteStreamInput>,
+    backpressure: WriteStreamBackpressureLatch,
     offset: u64,
 ) {
     let mut expected_seq = 0_u64;
@@ -379,6 +476,10 @@ async fn run_write_stream_task(
     while let Some(input) = rx.recv().await {
         match input {
             WriteStreamInput::Chunk { seq, bytes, eof } => {
+                // 背压 latch 汇入本地终态（本地错误时间上更早，先到先得）
+                if failed.is_none() {
+                    failed = backpressure.get().cloned();
+                }
                 if failed.is_some() {
                     // 失败终态：静默忽略后续块，等 Done 回报首个错误
                     continue;
@@ -418,6 +519,10 @@ async fn run_write_stream_task(
                 eof_seen = eof;
             }
             WriteStreamInput::Done { respond } => {
+                // 背压 latch 同样须在交账前汇入（队列满之后可能再无 chunk 进来）
+                if failed.is_none() {
+                    failed = backpressure.get().cloned();
+                }
                 let result = match (failed.take(), eof_seen) {
                     (Some(failure), _) => Err(failure),
                     (None, false) => Err((

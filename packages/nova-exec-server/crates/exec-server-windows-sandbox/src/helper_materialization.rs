@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn registered_request_does_not_materialize_or_replace_a_missing_source() {
         let tmp = TempDir::new().expect("tempdir");
-        let executable = tmp.path().join("codex.exe");
+        let executable = tmp.path().join("nova.exe");
         let home = tmp.path().join("home");
         for content in [None, Some(b"fixture".as_slice())] {
             if let Some(content) = content {
@@ -263,10 +263,10 @@ mod tests {
     #[test]
     fn legacy_request_materializes_the_same_source() {
         let tmp = TempDir::new().expect("tempdir");
-        let executable = tmp.path().join("codex.exe");
+        let executable = tmp.path().join("nova.exe");
         let home = tmp.path().join("home");
         fs::write(&executable, b"fixture").expect("write source");
-        let destination = helper_bin_dir(&home).join("codex.exe");
+        let destination = helper_bin_dir(&home).join("nova.exe");
         assert_eq!(
             resolve_exe_for_runtime(&executable, &home, SetupRuntime::Legacy),
             destination

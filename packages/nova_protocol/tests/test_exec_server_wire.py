@@ -60,26 +60,63 @@ def test_initialize_response_with_environment_info():
 
 
 def test_environment_capabilities_full_wire_shape():
-    """能力位镜像完整性：v1.6 全部能力位 camelCase 别名解析（防漏位）"""
+    """能力位镜像完整性：9 位全量（对照 RS `EnvironmentCapabilities` 与
+    `local()` 宣告值）——camelCase 别名逐一解析、缺省全 false、显式值
+    roundtrip 不丢位（防漏位）。
+
+    RS `local()` 语义（py 侧只测模型 roundtrip，不涉平台分支）：
+    networkProxyLaunch/environmentConfigRead/sandboxedFileStreaming/
+    fileWriteStreaming/httpHeaderEnvVars 恒 true；shellSnapshotV2 按
+    cfg(unix)、windowsMxc 按 windows 可用性、两个 linux 位按 cfg(linux)
+    如实 true/false。
+    """
     from nova_protocol import EnvironmentCapabilities
 
-    caps = EnvironmentCapabilities.model_validate(
-        {
-            "networkProxyLaunch": True,
-            "environmentConfigRead": True,
-            "sandboxedFileStreaming": True,
-            "httpHeaderEnvVars": True,
-            "shellSnapshotV2": True,
-        }
-    )
+    # 9 位全量显式 true：逐位钉住 camelCase 别名 → snake 属性映射
+    wire_full = {
+        "networkProxyLaunch": True,
+        "environmentConfigRead": True,
+        "sandboxedFileStreaming": True,
+        "fileWriteStreaming": True,
+        "httpHeaderEnvVars": True,
+        "shellSnapshotV2": True,
+        "windowsMxc": True,
+        "linuxRootWritePreservesDevices": True,
+        "linuxApprovedRootWritePreservesRestrictions": True,
+    }
+    caps = EnvironmentCapabilities.model_validate(wire_full)
     assert caps.network_proxy_launch is True
     assert caps.environment_config_read is True
     assert caps.sandboxed_file_streaming is True
+    assert caps.file_write_streaming is True
     assert caps.http_header_env_vars is True
     assert caps.shell_snapshot_v2 is True
+    assert caps.windows_mxc is True
+    assert caps.linux_root_write_preserves_devices is True
+    assert caps.linux_approved_root_write_preserves_restrictions is True
+
+    # 显式值 roundtrip：dump 回 9 位全量线上形态，再解析不丢字段
+    # （RS 两个 linux 位 false 时线上省略，serde default 等价于显式 false——
+    # py 模型恒出全键，语义一致）
     wire = caps.model_dump(by_alias=True)
-    assert wire["sandboxedFileStreaming"] is True
-    assert wire["httpHeaderEnvVars"] is True
+    assert wire == wire_full
+    assert EnvironmentCapabilities.model_validate(wire) == caps
+
+    # 缺省（旧服务端省略能力位）：9 位逐一回退 false（对位 serde default）
+    defaults = EnvironmentCapabilities.model_validate({})
+    assert defaults.network_proxy_launch is False
+    assert defaults.environment_config_read is False
+    assert defaults.sandboxed_file_streaming is False
+    assert defaults.file_write_streaming is False
+    assert defaults.http_header_env_vars is False
+    assert defaults.shell_snapshot_v2 is False
+    assert defaults.windows_mxc is False
+    assert defaults.linux_root_write_preserves_devices is False
+    assert defaults.linux_approved_root_write_preserves_restrictions is False
+    assert defaults.model_dump(by_alias=True) == {
+        alias: False for alias in wire_full
+    }
+
     # v1.6 撤除的端点位不得再出现在线上形态
     assert "readStream" not in wire
     assert "writeStream" not in wire
@@ -250,3 +287,139 @@ def test_environment_config_read_response_without_optional_fields():
     assert response.user_home_dir is None
     assert response.hostname is None
     assert response.config.layers == []
+
+
+def test_environment_info_executor_metadata_fields():
+    """EnvironmentInfo 新增 executorVersion/providerId/prependPathDirs 的线上
+    roundtrip（对位上游 EnvironmentInfo additive 字段）"""
+    from nova_protocol import EnvironmentInfo
+
+    info = EnvironmentInfo.model_validate(
+        {
+            "shell": {"name": "zsh", "path": "/bin/zsh"},
+            "executorVersion": "1.2.3-alpha.4",
+            "providerId": "commit-abc:target-x86_64",
+            "cwd": "file:///Users/test",
+            "prependPathDirs": ["file:///C:/tools/bin", "file:///D:/tools/bin"],
+        }
+    )
+    assert info.executor_version == "1.2.3-alpha.4"
+    assert info.provider_id == "commit-abc:target-x86_64"
+    assert info.prepend_path_dirs == ["file:///C:/tools/bin", "file:///D:/tools/bin"]
+    wire = info.model_dump(by_alias=True)
+    assert wire["executorVersion"] == "1.2.3-alpha.4"
+    assert wire["providerId"] == "commit-abc:target-x86_64"
+    assert wire["prependPathDirs"] == ["file:///C:/tools/bin", "file:///D:/tools/bin"]
+    # roundtrip：线上形态再解析不丢字段
+    assert EnvironmentInfo.model_validate(wire) == info
+
+
+def test_environment_info_legacy_payload_defaults():
+    """旧 executor 缺席三字段 → 默认值（executorVersion "0.0.0" 对位上游
+    unknown_executor_version），反序列化不炸"""
+    from nova_protocol import EnvironmentInfo
+
+    info = EnvironmentInfo.model_validate(
+        {"shell": {"name": "zsh", "path": "/bin/zsh"}}
+    )
+    assert info.executor_version == "0.0.0"
+    assert info.provider_id is None
+    assert info.prepend_path_dirs == []
+
+
+def test_process_start_params_metadata_roundtrip():
+    """ExecParams.metadata{threadId?,toolCallId?}（工具归因，非授权）roundtrip；
+    旧客户端省略 → None"""
+    from nova_protocol import ExecMetadata
+
+    params = ProcessStartParams(
+        processId="p1",
+        argv=["echo", "hi"],
+        cwd="file:///tmp",
+        env={},
+        metadata=ExecMetadata(
+            threadId="018f3d2a-7c4e-7b2a-9d1e-1234567890ab", toolCallId="call-1"
+        ),
+    )
+    wire = params.model_dump(by_alias=True, exclude_none=True)
+    assert wire["metadata"] == {
+        "threadId": "018f3d2a-7c4e-7b2a-9d1e-1234567890ab",
+        "toolCallId": "call-1",
+    }
+    again = ProcessStartParams.model_validate(wire)
+    assert again.metadata is not None
+    assert again.metadata.thread_id == "018f3d2a-7c4e-7b2a-9d1e-1234567890ab"
+    assert again.metadata.tool_call_id == "call-1"
+
+    legacy = ProcessStartParams.model_validate(
+        {"processId": "p1", "argv": ["echo"], "cwd": "file:///tmp", "env": {}}
+    )
+    assert legacy.metadata is None
+    # 部分字段缺席（只有 toolCallId）也能解析
+    partial = ExecMetadata.model_validate({"toolCallId": "call-2"})
+    assert partial.thread_id is None
+
+
+def test_managed_network_sandbox_context_unix_socket_fields():
+    """ManagedNetworkSandboxContext 新增 allowUnixSockets /
+    dangerouslyAllowAllUnixSockets roundtrip；旧数据缺席=默认"""
+    from nova_protocol import ManagedNetworkSandboxContext
+
+    ctx = ManagedNetworkSandboxContext.model_validate(
+        {
+            "loopbackPorts": [19001],
+            "allowLocalBinding": True,
+            "allowUnixSockets": ["/tmp/allowed.sock"],
+            "dangerouslyAllowAllUnixSockets": True,
+        }
+    )
+    assert ctx.allow_unix_sockets == ["/tmp/allowed.sock"]
+    assert ctx.dangerously_allow_all_unix_sockets is True
+    wire = ctx.model_dump(by_alias=True)
+    assert wire["allowUnixSockets"] == ["/tmp/allowed.sock"]
+    assert wire["dangerouslyAllowAllUnixSockets"] is True
+    assert ManagedNetworkSandboxContext.model_validate(wire) == ctx
+
+    legacy = ManagedNetworkSandboxContext.model_validate({"loopbackPorts": [19001]})
+    assert legacy.allow_unix_sockets == []
+    assert legacy.dangerously_allow_all_unix_sockets is False
+
+
+def test_fs_open_params_mode_defaults_read():
+    """fs/open 新增 mode（read|replace，缺省 read——旧调用方保持只读打开）"""
+    from nova_protocol import FsOpenMode, FsOpenParams
+
+    legacy = FsOpenParams.model_validate({"handleId": "h1", "path": "file:///tmp/a"})
+    assert legacy.mode is FsOpenMode.READ
+    assert legacy.model_dump(by_alias=True)["mode"] == "read"
+
+    replace = FsOpenParams(handleId="h2", path="file:///tmp/b", mode=FsOpenMode.REPLACE)
+    wire = replace.model_dump(by_alias=True)
+    assert wire["mode"] == "replace"
+    assert FsOpenParams.model_validate(wire).mode is FsOpenMode.REPLACE
+
+
+def test_windows_sandbox_level_mxc_roundtrip():
+    """windowsSandboxLevel 枚举新增 mxc 值（独立沙箱实现而非 RestrictedToken 档位）"""
+    from nova_protocol import FileSystemSandboxContext, WindowsSandboxLevel
+
+    ctx = FileSystemSandboxContext(windowsSandboxLevel=WindowsSandboxLevel.MXC)
+    wire = ctx.model_dump(by_alias=True)
+    assert wire["windowsSandboxLevel"] == "mxc"
+    assert (
+        FileSystemSandboxContext.model_validate(wire).windows_sandbox_level
+        is WindowsSandboxLevel.MXC
+    )
+
+
+def test_windows_sandbox_private_desktop_removed_from_wire():
+    """windowsSandboxPrivateDesktop 已从线上撤除（对位上游删除）：dump 不再出现；
+    旧数据残留该字段时解析忽略不炸"""
+    from nova_protocol import FileSystemSandboxContext
+
+    wire = FileSystemSandboxContext().model_dump(by_alias=True)
+    assert "windowsSandboxPrivateDesktop" not in wire
+    legacy = FileSystemSandboxContext.model_validate(
+        {"windowsSandboxPrivateDesktop": True, "windowsSandboxLevel": "elevated"}
+    )
+    assert legacy.windows_sandbox_level.value == "elevated"
