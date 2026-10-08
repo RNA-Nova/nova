@@ -18,9 +18,13 @@ struct Cli {
     listen: String,
 
     /// Maximum number of requests to process concurrently on each connection.
-    /// 默认 32：Agent 客户端会并行下发工具调用（并行进程/文件操作），
-    /// 默认 1 会把同一连接上的所有调用串行化。1 = 串行（Inline）模式。
-    #[arg(long, value_name = "COUNT", default_value = "32")]
+    /// 默认 1（Inline 串行，与 codex 对齐）：把跨请求竞态从结构上消灭——
+    /// 服务端共享状态不再被并发摸，无需维护"先查后做"审计纪律；
+    /// 长命令/流传输本就后台异步执行不受影响（实测薄 handler 下与并发无差）。
+    /// 显式调大仅用于"慢 handler + 并行调用"场景（如大 fs/readFile 整读时
+    /// 不堵整轮——实测该组合下并发快 150x）；并发模式的安全由句柄表
+    /// per-id 在飞预约等防线承载。
+    #[arg(long, value_name = "COUNT", default_value = "1")]
     concurrent_requests: usize,
 
     /// Path to the executor executable used to launch hidden helper modes.
