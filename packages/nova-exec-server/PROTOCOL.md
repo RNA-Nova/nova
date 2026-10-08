@@ -101,12 +101,12 @@ mode = "full"               # off | full（缺省 full）；allow_domains 预留
 | 方法 | 说明 |
 |---|---|
 | `process/start` | 启动进程。参数：`processId`（客户端选定的连接内句柄）、`metadata?`（v1.7，`{threadId?, toolCallId?}`——遥测归因预留，服务端存而不取，不参与鉴权/调度）、`argv`、`cwd`（PathUri）、`env`、`envPolicy?`、`shellSnapshot?`（ShellSnapshotRequest，`{scopeId, shell}`）、`tty`、`pipeStdin?`、`arg0?`、`sandbox?`（FileSystemSandboxContext）、`enforceManagedNetwork?`、`managedNetwork?`（v1.7 补 `allowUnixSockets`/`dangerouslyAllowAllUnixSockets`——缺省受限：独立 unix socket 默认拒绝，仅 allow-all 时 Linux 沙箱放行 AF_UNIX）、`networkProxy?`（RemoteNetworkProxyLaunchConfig，v1.3 起真实生效，见「托管网络」） |
-| `process/read` | 读输出（`waitMs` 轮询等待） |
+| `process/read` | 读输出（`waitMs` 轮询等待；响应含 `sandboxDenied: bool`——执行端把失败归类为沙箱拒绝的标记） |
 | `process/write` | 写 stdin |
 | `process/signal` | 发信号 |
 | `process/terminate` | 终止 |
 | → `process/output` | 通知：输出增量（stdout/stderr/pty） |
-| → `process/exited` | 通知：退出（exitCode） |
+| → `process/exited` | 通知：退出（exitCode；`sandboxDenied: bool?`——三态：true/false/未报告（null）） |
 | → `process/closed` | 通知：句柄关闭 |
 
 **沙箱**：每次 `process/start` 由客户端下发沙箱意图（`sandbox` 字段 +

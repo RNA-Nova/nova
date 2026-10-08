@@ -1156,10 +1156,11 @@ mod tests {
     // 并行固有限制：span callsite 的兴趣缓存是全局的，并发用例在本测试
     // rebuild 与建 span 之间会把"禁用"重新写回（进程内无解；Dispatch+
     // with_subscriber 修法已采用，对位 codex test_support——但它只保证
-    // 事件捕获类断言，本测试断言 outbound span 拿到**新** span id 更严格）。
-    // CI 的 nextest（每测试独立进程）常跑；本地单跑：
-    // `cargo test -p nova-exec-server --lib -- --ignored <测试名>`
-    #[ignore = "otel callsite interest races under in-process parallelism; CI runs it via nextest"]
+    // 事件捕获类断言，本测试断言 outbound span 拿到**新** span id 更严格——
+    // in-process 并行（cargo test）下与全局 subscriber 竞态，nextest 进程隔离
+    // 可过；但 CI 的 nextest 无 --run-ignored 通道，目前哪儿都不跑（覆盖缺口，
+    // 恢复需先修测试的 span-id 竞态或为其立 nextest 专属组）
+    #[ignore = "races with global subscriber under in-process parallelism"]
     #[tokio::test(flavor = "current_thread")]
     async fn rpc_client_propagates_current_trace_context() {
         let span_exporter = InMemorySpanExporter::default();

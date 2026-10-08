@@ -41,7 +41,7 @@
   (sysctl-name "hw.ncpu")
   (sysctl-name "hw.nperflevels")
   ; Chrome locks these CPU feature detection down a bit more tightly,
-  ; but mostly for fingerprinting concerns which isn't an issue for codex.
+  ; but mostly for fingerprinting concerns which isn't an issue for nova.
   (sysctl-name-prefix "hw.optional.arm.")
   (sysctl-name-prefix "hw.optional.armv8_")
   (sysctl-name "hw.packages")

@@ -243,7 +243,7 @@ impl FsHelperPayload {
             Self::Open(response) => Ok(response),
             // 对位 codex sandboxed_file_open::open_response：开门路径的错型载荷
             // 归 invalid_request（其余 expect_* 家族与 codex 一致归 internal_error）
-            other => Err(invalid_request(
+            _other => Err(invalid_request(
                 "invalid fs sandbox helper open response".to_string(),
             )),
         }
