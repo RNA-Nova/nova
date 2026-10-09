@@ -339,10 +339,8 @@ fn dynamic_network_policy_for_network(
             policy.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
             policy.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
         }
-        if proxy.allow_local_binding && !proxy.ports.is_empty() {
-            policy.push_str("; allow DNS lookups while application traffic remains proxy-routed\n");
-            policy.push_str("(allow network-outbound (remote ip \"*:53\"))\n");
-        }
+        // 对位 codex 37eaae6eeb：删除 \"*:53\" DNS 放行块——托管沙箱中允许本地绑定
+        // 不再附带外网 DNS 出口（上游安全修复）。
         for port in &proxy.ports {
             policy.push_str(&format!(
                 "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
@@ -1127,3 +1125,8 @@ mod fcntl_tests;
 #[cfg(test)]
 #[path = "seatbelt_tls_tests.rs"]
 mod tls_tests;
+
+// 对位 codex 37eaae6eeb：真实 Seatbelt 子进程验证托管网络限制（外网 DNS 被拒）。
+#[cfg(test)]
+#[path = "seatbelt_network_tests.rs"]
+mod network_tests;

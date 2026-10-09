@@ -18,6 +18,8 @@ mod attribution;
 mod authorization_path;
 mod config;
 mod connect_policy;
+// 对位 codex 529cd6b860：域名通配匹配器（替代 globset 域名匹配路径）。
+mod domain_matcher;
 mod environment_policy;
 mod http_proxy;
 mod network_policy;

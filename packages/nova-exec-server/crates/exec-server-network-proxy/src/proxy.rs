@@ -17,6 +17,7 @@ use crate::config;
 use crate::http_proxy;
 use crate::runtime::BlockedRequestObserver;
 use crate::runtime::ConfigState;
+use crate::runtime::HostAuthorization;
 use crate::runtime::HostBlockDecision;
 use crate::runtime::HostBlockReason;
 use crate::runtime::unix_socket_permissions_supported;
@@ -701,15 +702,36 @@ impl NetworkProxy {
                         crate::NetworkDecision::deny(crate::reasons::REASON_NOT_ALLOWED)
                     }
                     decision = async {
-                        match state.host_blocked(&request.host, request.port).await {
+                        // 对位 codex 37eaae6eeb：先以 RequireAllowlist 查（未命中 allowlist
+                        // 不触 DNS）；decider 判 Allow 后再以 Approved 复查基线，私网地址与
+                        // 显式 deny 不可被审批绕过。nova 裁点：`remote_policy_decider` 无
+                        // executor 侧 allow_local_binding 入参（`local_binding_policy` 未
+                        // 移植），两处均传 None 走 config 值。
+                        let host_decision = state.host_blocked_with_local_binding(
+                            &request.host, request.port, /*allow_local_binding*/ None,
+                            HostAuthorization::RequireAllowlist,
+                        ).await;
+                        let host_decision = match host_decision {
                             // 仅有 controller 批准不能绕过 attachment 策略。
                             Ok(HostBlockDecision::Allowed) if !environment_policy_applies => {
-                                NetworkDecision::Allow
+                                Ok(HostBlockDecision::Allowed)
                             }
                             Ok(HostBlockDecision::Allowed)
                             | Ok(HostBlockDecision::Blocked(HostBlockReason::NotAllowed)) => {
-                                decider.decide(request).await
+                                let decision = decider.decide(request.clone()).await;
+                                if !matches!(decision, NetworkDecision::Allow) {
+                                    return decision;
+                                }
+                                state.host_blocked_with_local_binding(
+                                    &request.host, request.port, /*allow_local_binding*/ None,
+                                    HostAuthorization::Approved,
+                                ).await
                             }
+                            Ok(HostBlockDecision::Blocked(reason)) => Ok(HostBlockDecision::Blocked(reason)),
+                            Err(err) => Err(err),
+                        };
+                        match host_decision {
+                            Ok(HostBlockDecision::Allowed) => NetworkDecision::Allow,
                             Ok(HostBlockDecision::Blocked(reason)) => {
                                 NetworkDecision::deny_with_source(
                                     reason.as_str(),

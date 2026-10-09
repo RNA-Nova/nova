@@ -15,6 +15,7 @@ use crate::NetworkMode;
 use crate::NetworkProxyAuditMetadata;
 use crate::NetworkProxyConfig;
 use crate::config::ValidatedUnixSocketPath;
+use crate::domain_matcher::DomainPatternSet;
 use crate::network_policy::NetworkPolicyAuditObserver;
 use crate::policy::Host;
 use crate::policy::is_loopback_host;
@@ -30,7 +31,6 @@ use crate::state::build_config_state;
 use crate::state::validate_policy_against_constraints;
 use anyhow::Context;
 use anyhow::Result;
-use globset::GlobSet;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -77,6 +77,13 @@ impl std::fmt::Display for HostBlockReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+// 对位 codex 37eaae6eeb：主机名做 DNS 解析前的授权级别。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostAuthorization {
+    RequireAllowlist,
+    Approved,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,8 +149,9 @@ fn blocked_request_violation_log_line(entry: &crate::BlockedRequest) -> String {
 #[derive(Clone)]
 pub struct ConfigState {
     pub config: NetworkProxyConfig,
-    pub allow_set: GlobSet,
-    pub deny_set: GlobSet,
+    // 对位 codex 529cd6b860：GlobSet 替换为 DomainPatternSet。
+    pub allow_set: DomainPatternSet,
+    pub deny_set: DomainPatternSet,
     pub constraints: NetworkProxyConstraints,
     pub blocked: VecDeque<crate::BlockedRequest>,
     pub blocked_total: u64,
@@ -226,7 +234,8 @@ struct ExecutionAttribution {
 
 impl std::fmt::Debug for NetworkProxyState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // 避免记录内部状态（配置内容、派生 globset 等可能含敏感路径且噪音大）。
+        // 对位 codex 529cd6b860：避免记录内部状态（配置内容、编译后的域名匹配模式
+        // 等可能含敏感路径且噪音大）。
         f.debug_struct("NetworkProxyState").finish_non_exhaustive()
     }
 }
@@ -453,6 +462,50 @@ impl NetworkProxyState {
     }
 
     pub async fn host_blocked(&self, host: &str, port: u16) -> Result<HostBlockDecision> {
+        // 对位 codex 37eaae6eeb：常规检查要求 allowlist 命中才授权 DNS 解析。
+        self.host_blocked_with_local_binding(
+            host,
+            port,
+            /*allow_local_binding*/ None,
+            HostAuthorization::RequireAllowlist,
+        )
+        .await
+    }
+
+    pub(crate) async fn host_blocked_with_local_binding(
+        &self,
+        host: &str,
+        port: u16,
+        allow_local_binding: Option<bool>,
+        authorization: HostAuthorization,
+    ) -> Result<HostBlockDecision> {
+        // 对位 codex 37eaae6eeb：真实 DNS 解析闭包在此注入，便于测试替换。
+        self.host_blocked_with_lookup(
+            host,
+            port,
+            allow_local_binding,
+            authorization,
+            |host, port| async move {
+                lookup_host((host.as_str(), port))
+                    .await
+                    .map(Iterator::collect)
+            },
+        )
+        .await
+    }
+
+    async fn host_blocked_with_lookup<F, Fut>(
+        &self,
+        host: &str,
+        port: u16,
+        allow_local_binding: Option<bool>,
+        authorization: HostAuthorization,
+        lookup: F,
+    ) -> Result<HostBlockDecision>
+    where
+        F: FnOnce(String, u16) -> Fut,
+        Fut: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+    {
         self.reload_if_needed().await?;
         let host = match Host::parse(host) {
             Ok(host) => host,
@@ -464,11 +517,14 @@ impl NetworkProxyState {
             (
                 guard.deny_set.clone(),
                 guard.allow_set.clone(),
-                guard.config.allow_local_binding,
+                // 对位 codex 37eaae6eeb 的 controller 限制优先解析；nova 裁点：
+                // 未移植 `local_binding_policy`，config 字段为确定 bool，等价于
+                // 上游 `... && config.allow_local_binding != Some(false)`。
+                allow_local_binding.unwrap_or(guard.config.allow_local_binding)
+                    && guard.config.allow_local_binding,
                 allowed_domains,
             )
         };
-        let allowed_domains_empty = allowed_domains.is_none();
         let allowed_domains = allowed_domains.unwrap_or_default();
 
         let host_str = host.as_str();
@@ -476,12 +532,13 @@ impl NetworkProxyState {
         // 决策顺序敏感：
         //  1) 显式 deny 永远胜出
         //  2) 本地/私网访问默认关闭（纵深防御）
-        //  3) 配置了 allowlist 时按 allowlist 执行
-        if globset_matches_host_or_unscoped(&deny_set, host_str) {
+        //  3) 对位 codex 37eaae6eeb：DNS 解析需要 allowlist 命中或审批授权
+        if domains_match_host_or_unscoped(&deny_set, host_str) {
             return Ok(HostBlockDecision::Blocked(HostBlockReason::Denied));
         }
 
-        let is_allowlisted = globset_matches_host_or_unscoped(&allow_set, host_str);
+        let is_authorized = authorization == HostAuthorization::Approved
+            || domains_match_host_or_unscoped(&allow_set, host_str);
         if !allow_local_binding {
             // 若意图是"禁止访问本地/内网"，就不能只依赖 `localhost` / `127.0.0.1`
             // 这类字符串检查。攻击者可用 DNS rebinding 或把主机名映射到私网 IP 的
@@ -505,23 +562,17 @@ impl NetworkProxyState {
                 if !is_explicit_local_allowlisted(&allowed_domains, &host) {
                     return Ok(HostBlockDecision::Blocked(HostBlockReason::NotAllowedLocal));
                 }
-            } else if host_resolves_to_non_public_ip(
-                host_str,
-                port,
-                DNS_LOOKUP_TIMEOUT,
-                |host, port| async move {
-                    lookup_host((host.as_str(), port))
-                        .await
-                        .map(Iterator::collect)
-                },
-            )
-            .await
+            // 对位 codex 37eaae6eeb：未授权（不在 allowlist 且非审批后复查）不做 DNS
+            // 解析，避免把未批准主机名泄露给 DNS。
+            } else if is_authorized
+                && host_resolves_to_non_public_ip(host_str, port, DNS_LOOKUP_TIMEOUT, lookup).await
             {
                 return Ok(HostBlockDecision::Blocked(HostBlockReason::NotAllowedLocal));
             }
         }
 
-        if allowed_domains_empty || !is_allowlisted {
+        // 对位 codex 37eaae6eeb：`allowed_domains_empty || !is_allowlisted` 收敛为 `!is_authorized`。
+        if !is_authorized {
             Ok(HostBlockDecision::Blocked(HostBlockReason::NotAllowed))
         } else {
             Ok(HostBlockDecision::Allowed)
@@ -911,7 +962,8 @@ fn log_domain_list_changes(list_name: &str, previous: &[String], next: &[String]
     }
 }
 
-fn globset_matches_host_or_unscoped(set: &GlobSet, host: &str) -> bool {
+// 对位 codex 529cd6b860：globset 匹配助手更名为 DomainPatternSet 版本。
+fn domains_match_host_or_unscoped(set: &DomainPatternSet, host: &str) -> bool {
     set.is_match(host) || unscoped_ip_literal(host).is_some_and(|ip| set.is_match(ip))
 }
 
@@ -943,17 +995,14 @@ pub(crate) fn network_proxy_state_for_policy(
     // 测试 helper 语义与 codex 一致：强制 enabled，让策略路径可被直接驱动。
     config.enabled = true;
     let state = ConfigState {
-        allow_set: crate::policy::compile_allowlist_globset(
-            &config.allowed_domains().unwrap_or_default(),
-        )
-        .unwrap(),
+        // 对位 codex 529cd6b860：编译入口换成 DomainPatternSet 版本。
+        allow_set: crate::policy::compile_allowlist(&config.allowed_domains().unwrap_or_default())
+            .unwrap(),
         blocked: VecDeque::new(),
         blocked_total: 0,
         constraints: NetworkProxyConstraints::default(),
-        deny_set: crate::policy::compile_denylist_globset(
-            &config.denied_domains().unwrap_or_default(),
-        )
-        .unwrap(),
+        deny_set: crate::policy::compile_denylist(&config.denied_domains().unwrap_or_default())
+            .unwrap(),
         config,
     };
 
@@ -984,8 +1033,8 @@ mod tests {
 
     use crate::BlockedRequest;
     use crate::BlockedRequestArgs;
-    use crate::policy::compile_allowlist_globset;
-    use crate::policy::compile_denylist_globset;
+    use crate::policy::compile_allowlist;
+    use crate::policy::compile_denylist;
     use crate::state::NetworkProxyConstraints;
     use crate::state::build_config_state;
     use crate::state::validate_policy_against_constraints;
@@ -1768,10 +1817,12 @@ mod tests {
         assert!(validate_policy_against_constraints(&config, &constraints).is_ok());
     }
 
+    // 对位 codex 529cd6b860：以下 compile_globset_* 测试保留原名，编译入口换成
+    // DomainPatternSet 版本（compile_allowlist / compile_denylist）。
     #[test]
     fn compile_globset_is_case_insensitive() {
         let patterns = vec!["ExAmPle.CoM".to_string()];
-        let set = compile_denylist_globset(&patterns).unwrap();
+        let set = compile_denylist(&patterns).unwrap();
         assert!(set.is_match("example.com"));
         assert!(set.is_match("EXAMPLE.COM"));
     }
@@ -1779,7 +1830,7 @@ mod tests {
     #[test]
     fn compile_globset_excludes_apex_for_subdomain_patterns() {
         let patterns = vec!["*.openai.com".to_string()];
-        let set = compile_denylist_globset(&patterns).unwrap();
+        let set = compile_denylist(&patterns).unwrap();
         assert!(set.is_match("api.openai.com"));
         assert!(!set.is_match("openai.com"));
         assert!(!set.is_match("evilopenai.com"));
@@ -1788,7 +1839,7 @@ mod tests {
     #[test]
     fn compile_globset_includes_apex_for_double_wildcard_patterns() {
         let patterns = vec!["**.openai.com".to_string()];
-        let set = compile_denylist_globset(&patterns).unwrap();
+        let set = compile_denylist(&patterns).unwrap();
         assert!(set.is_match("openai.com"));
         assert!(set.is_match("api.openai.com"));
         assert!(!set.is_match("evilopenai.com"));
@@ -1797,13 +1848,13 @@ mod tests {
     #[test]
     fn compile_globset_rejects_global_wildcard() {
         let patterns = vec!["*".to_string()];
-        assert!(compile_denylist_globset(&patterns).is_err());
+        assert!(compile_denylist(&patterns).is_err());
     }
 
     #[test]
     fn compile_globset_allows_global_wildcard_when_enabled() {
         let patterns = vec!["*".to_string()];
-        let set = compile_allowlist_globset(&patterns).unwrap();
+        let set = compile_allowlist(&patterns).unwrap();
         assert!(set.is_match("example.com"));
         assert!(set.is_match("api.openai.com"));
         assert!(set.is_match("localhost"));
@@ -1812,19 +1863,19 @@ mod tests {
     #[test]
     fn compile_globset_rejects_bracketed_global_wildcard() {
         let patterns = vec!["[*]".to_string()];
-        assert!(compile_denylist_globset(&patterns).is_err());
+        assert!(compile_denylist(&patterns).is_err());
     }
 
     #[test]
     fn compile_globset_rejects_double_wildcard_bracketed_global_wildcard() {
         let patterns = vec!["**.[*]".to_string()];
-        assert!(compile_denylist_globset(&patterns).is_err());
+        assert!(compile_denylist(&patterns).is_err());
     }
 
     #[test]
     fn compile_globset_dedupes_patterns_without_changing_behavior() {
         let patterns = vec!["example.com".to_string(), "example.com".to_string()];
-        let set = compile_denylist_globset(&patterns).unwrap();
+        let set = compile_denylist(&patterns).unwrap();
         assert!(set.is_match("example.com"));
         assert!(set.is_match("EXAMPLE.COM"));
         assert!(!set.is_match("not-example.com"));
@@ -1833,7 +1884,7 @@ mod tests {
     #[test]
     fn compile_globset_rejects_invalid_patterns() {
         let patterns = vec!["[".to_string()];
-        assert!(compile_denylist_globset(&patterns).is_err());
+        assert!(compile_denylist(&patterns).is_err());
     }
 
     #[test]
@@ -1974,3 +2025,8 @@ mod tests {
         assert!(!state.is_unix_socket_allowed(&socket_path).await.unwrap());
     }
 }
+
+// 对位 codex 37eaae6eeb：DNS 授权顺序与审批后强制复查的回归测试。
+#[cfg(test)]
+#[path = "host_policy_tests.rs"]
+mod host_policy_tests;

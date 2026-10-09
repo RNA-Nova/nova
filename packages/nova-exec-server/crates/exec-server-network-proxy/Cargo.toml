@@ -13,7 +13,8 @@ doctest = false
 anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-globset = { workspace = true }
+# 对位 codex 529cd6b860：域名匹配已换 DomainPatternSet；上游保留 globset 仅为
+# mitm_hook.rs（nova 未镜像），故此处移除该依赖。
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
