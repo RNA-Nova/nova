@@ -135,8 +135,11 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
     shell_name: &str,
 ) -> Result<()> {
     if use_sandbox
-        && let Some(warning) =
-            nova_exec_server_sandboxing::system_bwrap_warning(&PermissionProfile::read_only())
+        && let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+            &PermissionProfile::read_only(),
+            // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+            &std::env::current_dir()?,
+        )
     {
         eprintln!("skipping sandbox test: {warning}");
         return Ok(());
@@ -373,8 +376,11 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
     failures_before_repair: usize,
 ) -> Result<()> {
     if use_remote
-        && let Some(warning) =
-            nova_exec_server_sandboxing::system_bwrap_warning(&PermissionProfile::workspace_write())
+        && let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+            &PermissionProfile::workspace_write(),
+            // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+            &std::env::current_dir()?,
+        )
     {
         eprintln!("skipping sandbox test: {warning}");
         return Ok(());
@@ -477,9 +483,11 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_sandboxed_process_preserves_custom_arg0() -> Result<()> {
-    if let Some(warning) =
-        nova_exec_server_sandboxing::system_bwrap_warning(&PermissionProfile::read_only())
-    {
+    if let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+        &PermissionProfile::read_only(),
+        // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+        &std::env::current_dir()?,
+    ) {
         eprintln!("skipping bwrap test: {warning}");
         return Ok(());
     }
@@ -583,9 +591,11 @@ async fn assert_exec_process_starts_and_exits(use_remote: bool) -> Result<()> {
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_process_keeps_sandbox_helper_visible_with_restricted_reads() -> Result<()> {
-    if let Some(warning) =
-        nova_exec_server_sandboxing::system_bwrap_warning(&PermissionProfile::read_only())
-    {
+    if let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+        &PermissionProfile::read_only(),
+        // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+        &std::env::current_dir()?,
+    ) {
         eprintln!("skipping bwrap test: {warning}");
         return Ok(());
     }
@@ -647,9 +657,11 @@ async fn remote_process_keeps_sandbox_helper_visible_with_restricted_reads() -> 
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_tty_process_uses_configured_sandbox_helper_with_hostile_path() -> Result<()> {
-    if let Some(warning) =
-        nova_exec_server_sandboxing::system_bwrap_warning(&PermissionProfile::read_only())
-    {
+    if let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+        &PermissionProfile::read_only(),
+        // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+        &std::env::current_dir()?,
+    ) {
         eprintln!("skipping bwrap test: {warning}");
         return Ok(());
     }
@@ -723,9 +735,11 @@ async fn remote_tty_process_uses_configured_sandbox_helper_with_hostile_path() -
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_process_preserves_empty_workspace_roots() -> Result<()> {
-    if let Some(warning) =
-        nova_exec_server_sandboxing::system_bwrap_warning(&PermissionProfile::read_only())
-    {
+    if let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+        &PermissionProfile::read_only(),
+        // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+        &std::env::current_dir()?,
+    ) {
         eprintln!("skipping bwrap test: {warning}");
         return Ok(());
     }

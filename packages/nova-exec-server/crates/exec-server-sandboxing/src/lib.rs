@@ -13,6 +13,8 @@ mod windows;
 mod windows_mxc;
 
 #[cfg(target_os = "linux")]
+pub use bwrap::find_pre_sandbox_executable_in_path;
+#[cfg(target_os = "linux")]
 pub use bwrap::find_system_bwrap_in_path;
 #[cfg(target_os = "linux")]
 pub use bwrap::system_bwrap_warning;
@@ -56,6 +58,8 @@ use nova_exec_server_protocol_core::error::ExecErr;
 #[cfg(not(target_os = "linux"))]
 pub fn system_bwrap_warning(
     _permission_profile: &nova_exec_server_protocol_core::models::PermissionProfile,
+    // 对位 codex 7aa8f51049：桩签名与 linux 版同步（新增 cwd 参）。
+    _sandbox_policy_cwd: &std::path::Path,
 ) -> Option<String> {
     None
 }

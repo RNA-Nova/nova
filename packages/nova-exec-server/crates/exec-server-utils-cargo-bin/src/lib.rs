@@ -5,6 +5,12 @@ use std::path::PathBuf;
 
 pub use runfiles;
 
+// 对位 codex 18344a972d：可执行测试 fixture 辅助件（bwrap_path 测试依赖）。
+mod executable;
+pub use executable::copy_executable;
+#[cfg(unix)]
+pub use executable::write_executable;
+
 /// Bazel sets this when runfiles directories are disabled, which we do on all platforms for consistency.
 const RUNFILES_MANIFEST_ONLY_ENV: &str = "RUNFILES_MANIFEST_ONLY";
 

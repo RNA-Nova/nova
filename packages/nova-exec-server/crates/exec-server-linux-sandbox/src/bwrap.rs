@@ -33,6 +33,7 @@ use nova_exec_server_protocol_core::protocol::FileSystemPath;
 use nova_exec_server_protocol_core::protocol::FileSystemSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::protocol::WritableRoot;
+use nova_exec_server_sandboxing::find_pre_sandbox_executable_in_path;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use globset::GlobBuilder;
 use globset::GlobSet;
@@ -448,10 +449,16 @@ fn create_filesystem_args(
     // Bubblewrap can only mask concrete paths. Expand unreadable glob patterns
     // to the existing matches we can see before constructing the mount overlay;
     // core tool helpers still evaluate the original patterns directly at read time.
+    // 对位 codex ccde2fc8b7：rg 查找改走受保护的可执行文件解析（传入策略）。
     unreadable_roots.extend(
-        expand_unreadable_globs_with_ripgrep(&unreadable_globs, cwd, glob_scan_max_depth)?
-            .into_iter()
-            .map(AbsolutePathBuf::into_path_buf),
+        expand_unreadable_globs_with_ripgrep(
+            &unreadable_globs,
+            cwd,
+            file_system_sandbox_policy,
+            glob_scan_max_depth,
+        )?
+        .into_iter()
+        .map(AbsolutePathBuf::into_path_buf),
     );
     unreadable_roots.sort();
     unreadable_roots.dedup();
@@ -722,14 +729,19 @@ fn append_metadata_path_masks_for_writable_root(
     }
 }
 
+// 对位 codex ccde2fc8b7：deny glob 展开发生在沙箱构建前，`rg` 必须经
+// `find_pre_sandbox_executable_in_path` 按策略选定；无合适候选回退内置 glob walker。
 fn expand_unreadable_globs_with_ripgrep(
     patterns: &[String],
     cwd: &Path,
+    file_system_policy: &FileSystemSandboxPolicy,
     max_depth: Option<usize>,
 ) -> Result<Vec<AbsolutePathBuf>> {
     if patterns.is_empty() || max_depth == Some(0) {
         return Ok(Vec::new());
     }
+
+    let rg_path = find_pre_sandbox_executable_in_path("rg", file_system_policy, cwd);
 
     // Group each pattern by the static path prefix before its first glob
     // metacharacter. That keeps scans narrow, avoids searching from `/`, and
@@ -754,7 +766,11 @@ fn expand_unreadable_globs_with_ripgrep(
     // bypassing an unreadable glob match.
     let mut expanded_paths = BTreeSet::new();
     for (search_root, globs) in patterns_by_search_root {
-        for path in ripgrep_files(search_root.as_path(), &globs, max_depth)? {
+        let paths = match &rg_path {
+            Some(rg_path) => ripgrep_files(rg_path, search_root.as_path(), &globs, max_depth)?,
+            None => glob_files(search_root.as_path(), &globs, max_depth)?,
+        };
+        for path in paths {
             if let Some(target) = canonical_target_if_symlinked_path(path.as_path()) {
                 expanded_paths.insert(AbsolutePathBuf::from_absolute_path_checked(target)?);
             }
@@ -835,7 +851,9 @@ fn escape_unclosed_glob_classes(glob: &str) -> String {
     escaped
 }
 
+// 对位 codex ccde2fc8b7：`rg_path` 首参（替代直接 `Command::new("rg")`）。
 fn ripgrep_files(
+    rg_path: &Path,
     search_root: &Path,
     globs: &[String],
     max_depth: Option<usize>,
@@ -843,8 +861,10 @@ fn ripgrep_files(
     // Use `rg --files` rather than shell expansion so dotfiles and ignored files
     // are still considered. A status 1 with no stderr is ripgrep's "no matches"
     // case, not a sandbox construction error.
-    let mut command = Command::new("rg");
+    let mut command = Command::new(rg_path);
     command
+        // 对位 codex ac9b5b8380：用户 ripgrep 配置（如 --quiet）不得抑制 deny 掩码的文件列表。
+        .arg("--no-config")
         .arg("--files")
         .arg("--hidden")
         .arg("--no-ignore")
@@ -861,7 +881,7 @@ fn ripgrep_files(
      * Prefer ripgrep for unreadable glob expansion because it is fast and
      * already implements the file-walking semantics we want here: include
      * dotfiles, ignore ignore files, and do not recurse through symlinked
-     * directories. If `rg` is not installed in the runtime environment, fall
+     * directories. If the selected `rg` is unavailable at execution time, fall
      * back to the internal globset walker so sandbox construction still masks
      * matching paths. Other ripgrep failures stay fatal so deny-read does not
      * silently weaken.

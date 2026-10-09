@@ -39,4 +39,6 @@ tempfile = { workspace = true }
 test-case = "3.3.1"
 # landlock/managed-proxy 集成套件的测试驱动依赖（移植自 codex 套件）
 nova-exec-server-utils-path-uri = { path = "../exec-server-utils-path-uri" }
+# bwrap_path 套件的可执行 fixture 与二进制定位辅助（对位 codex 7aa8f51049）
+nova-exec-server-utils-cargo-bin = { path = "../exec-server-utils-cargo-bin" }
 tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "time"] }
