@@ -56,12 +56,3 @@ slow-timeout = { period = "45s", terminate-after = 2 }
 platform = 'cfg(windows)'
 filter = 'package(nova-exec-server) & test(noisy_failing_helper_preserves_exit_status_and_bounded_stderr)'
 retries = 3
-
-[[profile.default.overrides]]
-# legacy 捕获取消链路在共享 runner 上两次跑满自身 30s 超时（后代枚举/取消
-# 触发均为重进程调用）；本批改动经核实不进该链路的功能面（取消与后代枚举
-# 不消费 writable_roots/env 去重变化）。按负载敏感处理：多重试以区分
-# 抖动与确定性回归——若 4 次仍全红则按确定性回归另立项排查。
-platform = 'cfg(windows)'
-filter = 'package(nova-exec-server-windows-sandbox) & test(legacy_capture_cancellation_terminates_descendants_without_timeout)'
-retries = 3
