@@ -9,6 +9,9 @@ mod ssh_config_dependencies;
 pub mod environment_transport;
 #[cfg(any(windows, test))]
 mod launch_environment;
+// 对位 codex dd178bb7ca：ACL 失败诊断（保留原生错误链）
+#[cfg(any(windows, test))]
+mod setup_acl_error;
 
 // 对位 codex `codex-utils-process`（nova 内联实现，不新增 workspace 成员）；
 // pub 是因为 bin target（command_runner 的 cwd_junction）也引用它。
@@ -118,6 +121,9 @@ mod provisioning_client;
 mod provisioning_protocol;
 #[cfg(target_os = "windows")]
 mod runtime_ownership;
+// 对位 codex c542fb93ef：服务停止诊断
+#[cfg(target_os = "windows")]
+mod service_diagnostics;
 #[cfg(target_os = "windows")]
 mod service_identity;
 #[cfg(target_os = "windows")]
@@ -144,6 +150,10 @@ pub use runtime_ownership::remove_installation;
 #[cfg(target_os = "windows")]
 #[doc(hidden)]
 pub use runtime_ownership::save_installation;
+// 对位 codex c542fb93ef
+#[cfg(target_os = "windows")]
+#[doc(hidden)]
+pub use service_diagnostics::ServiceStopReason;
 #[cfg(target_os = "windows")]
 mod resolved_permissions;
 #[cfg(target_os = "windows")]
@@ -377,6 +387,9 @@ pub use provisioning_client::provision_windows_sandbox_via_service;
 pub use provisioning_client::refresh_registered_core_via_service;
 #[cfg(target_os = "windows")]
 pub use provisioning_client::register_desktop_installation;
+// 对位 codex 580b18cb74
+#[cfg(target_os = "windows")]
+pub use provisioning_client::start_windows_sandbox_service_for_setup;
 #[cfg(target_os = "windows")]
 pub use provisioning_protocol::FramedProvisioningMessage;
 #[cfg(target_os = "windows")]
@@ -401,6 +414,9 @@ pub use provisioning_protocol::write_provisioning_frame;
 pub use resolved_permissions::ResolvedWindowsSandboxPermissions;
 #[cfg(target_os = "windows")]
 pub use resolved_permissions::WindowsSandboxTokenMode;
+// 对位 codex 7efc49b258：导出 `resolve_workload_temp_paths`
+#[cfg(target_os = "windows")]
+pub use resolved_permissions::resolve_workload_temp_paths;
 #[cfg(target_os = "windows")]
 pub use resolved_permissions::token_mode_for_permission_profile;
 #[cfg(target_os = "windows")]

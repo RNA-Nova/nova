@@ -546,20 +546,31 @@ unsafe fn ensure_allow_mask_aces_with_inheritance_impl(
     access_mode: ACCESS_MODE,
     inheritance: u32,
 ) -> Result<bool> {
-    let directory = if inheritance == 0 {
+    // 对位 codex dd12f892f1：MAXIMUM_ALLOWED 打开仅限需要阻断子 ACL 传播的目录；
+    // 对活跃 EXE/DLL 文件会请求导致共享冲突的访问
+    // Only directories need MAXIMUM_ALLOWED to suppress child ACL propagation.
+    // On active EXE/DLL files, it can request access that causes sharing violations.
+    let directory = if inheritance == 0
+        && path
+            .metadata()
+            .with_context(|| format!("inspect ACL target {}", path.display()))?
+            .is_dir()
+    {
         Some(
             OpenOptions::new()
                 .access_mode(MAXIMUM_ALLOWED)
                 .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
                 .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
                 .open(path)
-                .context("open ACL target for root-only update")?,
+                // 对位 codex dd178bb7ca：context 带上请求的访问权限
+                .context("open ACL target for root-only update (MAXIMUM_ALLOWED)")?,
         )
     } else {
         None
     };
     // A root-only grant must preserve existing permissions and deny ACEs.
-    let access_mode = if directory.is_some() {
+    // 对位 codex dd12f892f1：判定从 `directory.is_some()` 改为 `inheritance == 0`
+    let access_mode = if inheritance == 0 {
         GRANT_ACCESS
     } else {
         access_mode
@@ -610,7 +621,8 @@ unsafe fn ensure_allow_mask_aces_with_inheritance_impl(
             continue;
         }
         if !dacl_allow_mask_needs_refresh(p_dacl, *sid, allow_mask, disallow_mask)
-            || directory.is_some() && p_dacl.is_null()
+            // 对位 codex dd12f892f1：空 DACL 跳过条件从 `directory.is_some()` 改为 `inheritance == 0`
+            || inheritance == 0 && p_dacl.is_null()
         {
             continue;
         }
@@ -643,8 +655,9 @@ unsafe fn ensure_allow_mask_aces_with_inheritance_impl(
         if code2 != ERROR_SUCCESS {
             return Err(anyhow!("SetEntriesInAclW failed: {code2}"));
         }
-        // For inheriting grants, request ACL-write access only when an update
-        // is needed. Use the same long-path support as the read handle.
+        // 对位 codex dd12f892f1：注释同步——文件与可继承目录授权都按需请求 ACL 写访问
+        // For files and inheriting directory grants, request ACL-write access only
+        // when an update is needed. Use the same long-path support as the read handle.
         let handle = match directory {
             // MAXIMUM_ALLOWED suppresses propagation of existing inheritable ACEs too.
             Some(directory) => directory,
@@ -653,7 +666,8 @@ unsafe fn ensure_allow_mask_aces_with_inheritance_impl(
                 .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
                 .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
                 .open(path)
-                .context("open ACL target for update")?,
+                // 对位 codex dd178bb7ca：context 带上请求的访问权限
+                .context("open ACL target for update (READ_CONTROL | WRITE_DAC)")?,
         };
         let code3 = SetSecurityInfo(
             handle.as_raw_handle() as _,
@@ -903,7 +917,9 @@ unsafe fn add_deny_ace(path: &Path, psid: *mut c_void, kind: DenyAceKind) -> Res
             if deny_ace_already_present(&read_handle, path, psid, kind)? {
                 return Ok(false);
             }
-            return Err(write_error).context("open deny ACL target for update");
+            // 对位 codex dd178bb7ca：context 带上请求的访问权限
+            return Err(write_error)
+                .context("open deny ACL target for update (READ_CONTROL | WRITE_DAC)");
         }
     };
     if matches!(kind, DenyAceKind::Read) {

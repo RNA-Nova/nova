@@ -731,7 +731,8 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
                     environment_id: None,
                     network: None,
                     sandbox_policy_cwd: &cwd_uri,
-                    sandbox_exe: None,
+                    // 对位 codex 7efc49b258：sandbox_exe 改必填，测试传入 configured_helper
+                    sandbox_exe: Some(configured_helper.as_path()),
                     use_legacy_landlock: false,
                     windows_sandbox_level: WindowsSandboxLevel::Elevated,
                 },

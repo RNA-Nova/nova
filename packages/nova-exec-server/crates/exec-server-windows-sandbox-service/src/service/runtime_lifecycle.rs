@@ -7,6 +7,8 @@ use std::sync::atomic::Ordering;
 
 use anyhow::Context;
 use anyhow::Result;
+// 对位 codex c542fb93ef：run 返回停止原因供 service.rs 登记
+use nova_exec_server_windows_sandbox::ServiceStopReason;
 use windows_sys::Win32::Foundation::NO_ERROR;
 use windows_sys::Win32::System::Services::SERVICE_RUNNING;
 use windows_sys::Win32::System::Services::SERVICE_STOP_PENDING;
@@ -51,7 +53,10 @@ pub(super) fn foreground_owner(
     Ok(record)
 }
 
-pub(super) fn run(state: &ServiceState, package_lifecycle: &PackageLifecycle) -> Result<()> {
+pub(super) fn run(
+    state: &ServiceState,
+    package_lifecycle: &PackageLifecycle,
+) -> Result<ServiceStopReason> {
     let cleaned = Cell::new(false);
     let last_cleanup_error = Cell::new(None);
     let restore_owner = || -> Result<()> {
@@ -117,7 +122,14 @@ pub(super) fn run(state: &ServiceState, package_lifecycle: &PackageLifecycle) ->
     {
         package_lifecycle.clean_up()?;
     }
-    Ok(())
+    // 对位 codex c542fb93ef：按清理/停止请求/关机区分停止原因
+    Ok(if cleaned.get() {
+        ServiceStopReason::OwnerRemoved
+    } else if state.stop_requested.load(Ordering::Acquire) {
+        ServiceStopReason::StopRequested
+    } else {
+        ServiceStopReason::Shutdown
+    })
 }
 
 /// Retries the current teardown step, never a phase recovered from stored intent.

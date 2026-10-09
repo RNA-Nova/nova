@@ -304,6 +304,8 @@ pub(crate) async fn prepare_exec_request(
                 &permissions,
                 &native_sandbox_policy_cwd,
                 use_elevated,
+                // 对位 codex 7efc49b258：传入 workload env（transform 后的请求环境）
+                &request.env,
             )
         } else {
             resolve_windows_restricted_token_filesystem_overrides(

@@ -577,17 +577,17 @@ impl SandboxManager {
         &self,
         request: SandboxDirectSpawnTransformRequest<'_>,
     ) -> Result<SandboxExecRequest, SandboxTransformError> {
+        // 对位 codex 7efc49b258：仅 restricted-token 直接 spawn 进 Windows 包装路
+        // （nova 旧结构外层无条件进、内层按 request.sandbox 再设门槛；本提交对位
+        // 上游改为外层按 transform.sandbox 设门槛、内层无条件 wrap）
         #[cfg(target_os = "windows")]
-        {
+        if request.transform.sandbox == SandboxType::WindowsRestrictedToken {
             let executor_home = nova_exec_server_utils_home_dir::find_nova_exec_server_home()
                 .map_err(|err| SandboxTransformError::WindowsSandboxPreparation(err.to_string()))?;
-            self.transform_for_direct_spawn_with_executor_home(request, executor_home.as_path())
+            return self
+                .transform_for_direct_spawn_with_executor_home(request, executor_home.as_path());
         }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            self.transform(request.transform)
-        }
+        self.transform(request.transform)
     }
 
     #[cfg(target_os = "windows")]
@@ -598,15 +598,22 @@ impl SandboxManager {
     ) -> Result<SandboxExecRequest, SandboxTransformError> {
         let workspace_roots = request.workspace_roots;
         let proxy_settings_mode = request.windows_sandbox_proxy_settings_mode;
+        // 对位 codex 7efc49b258：sandbox_exe 改为必填
+        let sandbox_exe = request.transform.sandbox_exe.ok_or_else(|| {
+            SandboxTransformError::WindowsSandboxPreparation(
+                "missing nova executable path".to_string(),
+            )
+        })?;
         let mut request = self.transform(request.transform)?;
-        if request.sandbox == SandboxType::WindowsRestrictedToken {
-            wrap_windows_sandbox_exec_request_for_direct_spawn(
-                &mut request,
-                workspace_roots,
-                executor_home,
-                proxy_settings_mode,
-            )?;
-        }
+        // 对位 codex 7efc49b258：移除 `request.sandbox == WindowsRestrictedToken`
+        // 门槛，无条件调 wrap（入口已由外层按 transform.sandbox 把关）
+        wrap_windows_sandbox_exec_request_for_direct_spawn(
+            &mut request,
+            workspace_roots,
+            executor_home,
+            sandbox_exe,
+            proxy_settings_mode,
+        )?;
         Ok(request)
     }
 }
@@ -616,6 +623,8 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
     request: &mut SandboxExecRequest,
     workspace_roots: &[AbsolutePathBuf],
     executor_home: &Path,
+    // 对位 codex 7efc49b258：新增 sandbox_exe 参
+    sandbox_exe: &Path,
     proxy_settings_mode: crate::WindowsSandboxProxySettingsMode,
 ) -> Result<(), SandboxTransformError> {
     // TODO(nova): Keep PathUri through the Windows sandbox wrapper boundary.
@@ -638,10 +647,14 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
             "sandbox command was empty".to_string(),
         ));
     };
-    let source = std::path::PathBuf::from(&program);
-    let helper =
-        nova_exec_server_windows_sandbox::resolve_exe_for_launch(source.as_path(), executor_home);
-    *program = helper.to_string_lossy().into_owned();
+    // 对位 codex 7efc49b258：仅当 inner 命令本就是 executor 可执行文件时才物化 helper
+    // transform() may have made the inner command a Codex helper. Only that
+    // helper needs materializing; an arbitrary workload such as cmd.exe does not.
+    if Path::new(program.as_str()) == sandbox_exe {
+        let helper =
+            nova_exec_server_windows_sandbox::resolve_exe_for_launch(sandbox_exe, executor_home);
+        *program = helper.to_string_lossy().into_owned();
+    }
 
     let inner_command = std::mem::take(&mut request.command);
     let proxy_enforced = request.network.is_some();
@@ -665,6 +678,8 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
             &request.permission_profile,
             &native_sandbox_policy_cwd,
             use_elevated,
+            // 对位 codex 7efc49b258：传入 workload env
+            &request.env,
         )
     } else {
         resolve_windows_restricted_token_filesystem_overrides(
@@ -712,7 +727,12 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
         .map_err(|err| SandboxTransformError::WindowsSandboxPreparation(err.to_string()))?;
 
     request.command = Vec::with_capacity(1 + wrapper_args.len());
-    request.command.push(source.to_string_lossy().into_owned());
+    // 对位 codex 7efc49b258：外层命令改用 sandbox_exe（不再用 inner program）
+    // This outer process interprets Codex wrapper arguments, so it must be the
+    // supplied Codex executable even when the inner command is another program.
+    request
+        .command
+        .push(sandbox_exe.to_string_lossy().into_owned());
     request.command.append(&mut wrapper_args);
     request.sandbox = SandboxType::None;
     request.arg0 = None;
