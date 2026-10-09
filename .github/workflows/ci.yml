@@ -58,6 +58,19 @@ jobs:
           cp target/debug/nova-command-runner.exe target/debug/deps/
           cp target/debug/nova-windows-sandbox-setup.exe target/debug/deps/
 
+      # GHA 宿主 runner 的 TEMP 默认是 8.3 短名（C:\Users\RUNNER~1\...），
+      # 上游测试假设 temp.path() 与 dunce::canonicalize 同形（lexical==canonical，
+      # 对位 codex de3721a7be 的 deny_read_state_tests）；解析为长名后再跑测试。
+      - name: 解析 TEMP 为长路径名
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Add-Type -Namespace Native -Name Win32 -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] public static extern uint GetLongPathName(string lpszShortPath, System.Text.StringBuilder lpszLongPath, uint cchBuffer);'
+          $sb = New-Object System.Text.StringBuilder 1024
+          [void][Native.Win32]::GetLongPathName($env:TEMP, $sb, $sb.Capacity)
+          "TEMP=$($sb.ToString())" >> $env:GITHUB_ENV
+          "TMP=$($sb.ToString())" >> $env:GITHUB_ENV
+
       # nextest 天然全量重跑（失败不中断后续用例），无需 --no-fail-fast；
       # doc-tests 不在 nextest 覆盖范围（与 codex 一致）
       - name: cargo nextest run
