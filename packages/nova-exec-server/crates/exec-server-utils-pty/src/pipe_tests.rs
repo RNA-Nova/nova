@@ -1,4 +1,6 @@
 use super::*;
+// 对位 codex origin/main（spawn 管线批）：pipe.rs 不再转口 Stdio，测试自带
+use std::process::Stdio;
 
 #[test]
 fn process_fallback_interrupt_terminates_root() -> anyhow::Result<()> {

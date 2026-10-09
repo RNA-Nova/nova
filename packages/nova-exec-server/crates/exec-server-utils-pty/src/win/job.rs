@@ -14,6 +14,8 @@ use winapi::um::jobapi2::SetInformationJobObject;
 use winapi::um::jobapi2::TerminateJobObject;
 use winapi::um::processthreadsapi::OpenProcess;
 use winapi::um::processthreadsapi::TerminateProcess;
+// 对位 codex origin/main（spawn 管线批）：后台子进程抑制控制台窗口
+use winapi::um::winbase::CREATE_NO_WINDOW;
 use winapi::um::winbase::CREATE_SUSPENDED;
 use winapi::um::winnt::HANDLE;
 use winapi::um::winnt::JOB_OBJECT_LIMIT_BREAKAWAY_OK;
@@ -121,9 +123,15 @@ impl JobObject {
         }
     }
 
-    /// Prevents a child from running before it can be assigned to this job.
+    /// Prepares a background child to be assigned to this job before it runs.
+    ///
+    /// Replaces all creation flags with `CREATE_SUSPENDED | CREATE_NO_WINDOW`.
+    /// Interactive children that need to inherit a console require an explicit launch.
+    // 对位 codex origin/main（spawn 管线批）：创建标记整体替换为挂起＋无窗口
     pub fn prepare_suspended_spawn(&self, command: &mut Command) {
-        command.creation_flags(CREATE_SUSPENDED).kill_on_drop(true);
+        command
+            .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
+            .kill_on_drop(true);
     }
 
     /// Assigns and resumes a suspended child, returning whether assignment succeeded.
@@ -165,7 +173,30 @@ impl JobObject {
         }
     }
 
-    /// Starts a process only after assigning it to this Job Object.
+    /// Starts a console-free background process, falling back when containment is unavailable.
+    /// The returned job owns the contained process tree when assignment succeeds.
+    // 对位 codex origin/main（spawn 管线批）：后台启动及其两级回退
+    pub fn spawn_background(command: &mut Command) -> io::Result<(Child, Option<Self>)> {
+        Self::spawn_background_with_job(command, Self::create())
+    }
+
+    fn spawn_background_with_job(
+        command: &mut Command,
+        job: io::Result<Self>,
+    ) -> io::Result<(Child, Option<Self>)> {
+        match job.and_then(|job| job.spawn_contained(command).map(|child| (child, job))) {
+            Ok((child, job)) => Ok((child, Some(job))),
+            Err(_) => {
+                // Remove suspension before retrying, including after failed assignment.
+                command.creation_flags(CREATE_NO_WINDOW).kill_on_drop(true);
+                command.spawn().map(|child| (child, None))
+            }
+        }
+    }
+
+    /// Starts a background child without a console, assigning it to this job before it runs.
+    ///
+    /// Replaces existing creation flags as in [`Self::prepare_suspended_spawn`].
     pub fn spawn_contained(&self, command: &mut Command) -> io::Result<Child> {
         self.prepare_suspended_spawn(command);
         let child = command.spawn()?;
@@ -230,3 +261,8 @@ impl AsRawHandle for JobObject {
         self.handle.as_raw_handle()
     }
 }
+
+// 对位 codex origin/main（spawn 管线批）：job 生命周期测试挂点
+#[cfg(test)]
+#[path = "job_tests.rs"]
+mod tests;

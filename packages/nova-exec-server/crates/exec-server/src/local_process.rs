@@ -386,6 +386,13 @@ impl LocalProcess {
             );
         }
 
+        // 对位 codex origin/main（spawn 管线批）：上游此处从 snapshot_file 收集
+        // inherited_fds（shell_snapshot_file 面 nova 未镜像，快照文件回放归后续
+        // 立项），本批以空 vec 对位。
+        #[cfg(unix)]
+        let inherited_fds = Vec::new();
+        #[cfg(not(unix))]
+        let inherited_fds = Vec::new();
         let spawned_result =
             nova_exec_server_sandboxing::spawn_process(nova_exec_server_sandboxing::SpawnRequest {
                 command: &prepared.command,
@@ -396,7 +403,7 @@ impl LocalProcess {
                 windows_sandbox: prepared.windows_sandbox_spawn_request(),
                 tty: params.tty,
                 stdin_open: params.tty || params.pipe_stdin,
-                inherited_fds: &[],
+                inherited_fds: nova_exec_server_utils_pty::ChildFds::Attached(&inherited_fds),
             })
             .await;
         let spawned = match spawned_result {
@@ -1181,6 +1188,22 @@ mod tests {
     use crate::protocol::NetworkPolicyRequestParams;
     #[cfg(not(target_os = "windows"))]
     use crate::protocol::NetworkPolicyRequestResponse;
+
+    // 对位 codex origin/main（spawn 管线批）：测试二进制注册 spawn helper
+    //（在测试运行时起步前经 ctor 派发 --nova-run-as-process-setup 重入）
+    #[cfg(target_os = "linux")]
+    #[ctor::ctor]
+    fn initialize_spawn_helper() {
+        use std::os::unix::ffi::OsStringExt;
+        let command_line = std::fs::read("/proc/self/cmdline").expect("test command line");
+        nova_exec_server_utils_pty::init_spawn_helper(
+            command_line
+                .strip_suffix(&[0])
+                .unwrap_or(&command_line)
+                .split(|byte| *byte == 0)
+                .map(|arg| std::ffi::OsString::from_vec(arg.to_vec())),
+        );
+    }
 
     fn test_exec_params(env: HashMap<String, String>) -> ExecParams {
         ExecParams {

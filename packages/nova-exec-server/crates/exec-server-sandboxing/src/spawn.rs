@@ -12,8 +12,12 @@ use nova_exec_server_utils_pty::TerminalSize;
 use crate::SandboxType;
 use crate::WindowsSandboxFilesystemOverrides;
 use crate::WindowsSandboxProxySettingsMode;
+// 对位 codex origin/main（spawn 管线批）：tty 进程接入终端查询应答
+use crate::terminal_queries::respond_to_terminal_queries;
 
 /// Windows-specific inputs for an executor-native process spawn.
+// TODO(anp): Reconcile the Windows backend copy with the supplied sandbox
+// context (TurnEnvironment::sandbox_context for turns), preserving this launch snapshot.
 pub struct WindowsSandboxSpawnRequest<'a> {
     pub permission_profile: &'a PermissionProfile,
     pub workspace_roots: &'a [AbsolutePathBuf],
@@ -34,11 +38,24 @@ pub struct SpawnRequest<'a> {
     pub windows_sandbox: Option<WindowsSandboxSpawnRequest<'a>>,
     pub tty: bool,
     pub stdin_open: bool,
-    pub inherited_fds: &'a [i32],
+    // 对位 codex origin/main（spawn 管线批）：&[i32] → ChildFds（区分继承套接字
+    // 与启动附件语义）
+    pub inherited_fds: nova_exec_server_utils_pty::ChildFds<'a>,
 }
 
 /// Spawn a process using the backend selected by the prepared sandbox request.
+// 对位 codex origin/main（spawn 管线批）：指标命名映射 codex.process.spawn → nova.process.spawn
+#[tracing::instrument(name = "nova.process.spawn", skip_all)]
 pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> {
+    let tty = request.tty;
+    let finish_spawn = |spawned| {
+        if tty {
+            respond_to_terminal_queries(spawned)
+        } else {
+            spawned
+        }
+    };
+
     if request.sandbox == SandboxType::WindowsRestrictedToken {
         #[cfg(target_os = "windows")]
         {
@@ -81,7 +98,8 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
                     stdin_open: request.stdin_open,
                 },
             )
-            .await;
+            .await
+            .map(finish_spawn);
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -92,7 +110,7 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
         .command
         .split_first()
         .context("missing program for process spawn")?;
-    if request.tty {
+    let spawned = if tty {
         nova_exec_server_utils_pty::pty::spawn_process(
             program,
             args,
@@ -110,7 +128,7 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
             request.cwd,
             request.env,
             request.arg0,
-            request.inherited_fds,
+            request.inherited_fds.as_slice(),
         )
         .await
     } else {
@@ -120,8 +138,9 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
             request.cwd,
             request.env,
             request.arg0,
-            request.inherited_fds,
+            request.inherited_fds.as_slice(),
         )
         .await
-    }
+    };
+    spawned.map(finish_spawn)
 }

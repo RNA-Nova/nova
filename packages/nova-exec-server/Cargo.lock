@@ -2559,13 +2559,16 @@ name = "nova-exec-server-utils-pty"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ctor",
  "filedescriptor",
  "lazy_static",
  "libc",
  "log",
+ "nova-exec-server-utils-cargo-bin",
  "portable-pty",
  "pretty_assertions",
  "shared_library",
+ "tempfile",
  "tokio",
  "winapi",
 ]

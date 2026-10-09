@@ -1,18 +1,26 @@
+//! Pipe I/O and process-tree ownership on top of the shared local child launcher.
+
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::io;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::AtomicBool;
 
+use crate::ChildStdin;
+use crate::Command;
+#[cfg(unix)]
+use crate::DescriptorPolicy;
+#[cfg(unix)]
+use crate::ProcessMode;
+use crate::child_command::ChildDropPolicy;
 use anyhow::Result;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
-use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -22,9 +30,6 @@ use crate::process::ProcessHandle;
 use crate::process::ProcessSignal;
 use crate::process::SpawnedProcess;
 use crate::process::exit_code_from_status;
-
-#[cfg(target_os = "linux")]
-use libc;
 
 #[cfg(windows)]
 enum WindowsChildTerminator {
@@ -62,6 +67,9 @@ impl ChildTerminator for PipeChildTerminator {
     }
 
     fn kill(&mut self) -> io::Result<()> {
+        // 对位 codex origin/main（spawn 管线批）：上游已把 member fallback 合入
+        // kill_process_group（codex d6fb836f31，跨 core/rmcp-client，超出本批范围），
+        // nova 的 process_group 尚未做该合并，此处分叉保留 nova 的 macOS 回退调用。
         #[cfg(all(unix, not(target_os = "macos")))]
         {
             crate::process_group::kill_process_group(self.process_group_id)
@@ -131,7 +139,7 @@ enum PipeStdinMode {
 /// On Windows, process-tree containment is best-effort because Tokio returns
 /// only after the root process starts, so job assignment cannot be atomic.
 async fn spawn_process_with_stdin_mode(
-    program: &str,
+    program: &OsStr,
     args: &[String],
     cwd: &Path,
     env: &HashMap<String, String>,
@@ -146,48 +154,41 @@ async fn spawn_process_with_stdin_mode(
     #[cfg(not(unix))]
     let _ = inherited_fds;
 
+    // 对位 codex origin/main（spawn 管线批）：改走共享 child_command::Command
+    // 启动器（会话/描述符策略 + ReapOnly 托管回收），Linux 优先经 spawn helper。
     let mut command = Command::new(program);
     #[cfg(unix)]
     if let Some(arg0) = arg0 {
         command.arg0(arg0);
     }
+    #[cfg(unix)]
+    command
+        .process_mode(ProcessMode::NewSession)
+        .descriptor_policy(DescriptorPolicy::Explicit)
+        .inherit_fds(inherited_fds);
     #[cfg(target_os = "linux")]
-    let parent_pid = unsafe { libc::getpid() };
-    #[cfg(unix)]
-    let inherited_fds = inherited_fds.to_vec();
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(move || {
-            crate::process_group::detach_from_tty()?;
-            #[cfg(target_os = "linux")]
-            crate::process_group::set_parent_death_signal(parent_pid)?;
-            crate::pty::close_inherited_fds_except(&inherited_fds);
-            Ok(())
-        });
-    }
+    command.terminate_on_parent_death();
     #[cfg(not(unix))]
     let _ = arg0;
-    command.current_dir(cwd);
-    command.env_clear();
-    for (key, value) in env {
-        command.env(key, value);
-    }
-    for arg in args {
-        command.arg(arg);
-    }
-    match stdin_mode {
-        PipeStdinMode::Piped => {
-            command.stdin(Stdio::piped());
-        }
-        PipeStdinMode::Null => {
-            command.stdin(Stdio::null());
-        }
-    }
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
+    command
+        .current_dir(cwd)
+        .envs(env)
+        .args(args)
+        .drop_policy(ChildDropPolicy::ReapOnly)
+        .stdin(match stdin_mode {
+            PipeStdinMode::Piped => ChildStdin::Piped,
+            PipeStdinMode::Null => ChildStdin::Null,
+        });
 
     #[cfg(windows)]
     let job = crate::win::JobObject::create().map(Arc::new);
+    #[cfg(target_os = "linux")]
+    let mut child =
+        match crate::spawn_helper::spawn(&command, crate::spawn_helper::Setup::Pipe).await? {
+            Some(child) => child,
+            None => command.spawn()?,
+        };
+    #[cfg(not(target_os = "linux"))]
     let mut child = command.spawn()?;
     #[cfg(windows)]
     let windows_terminator = {
@@ -197,6 +198,7 @@ async fn spawn_process_with_stdin_mode(
             .id()
             .ok_or_else(|| io::Error::other("missing child pid"))?;
         let assigned_job = job.and_then(|job| {
+            let crate::child::ChildKind::Tokio(child) = &child.inner;
             let process_handle = child
                 .raw_handle()
                 .ok_or_else(|| io::Error::other("missing child process handle"))?;
@@ -325,9 +327,9 @@ async fn spawn_process_with_stdin_mode(
 }
 
 /// Spawn a process using regular pipes and preserve selected inherited file
-/// descriptors across exec on Unix.
+/// descriptors across exec on Unix. The executable path retains its native encoding.
 pub async fn spawn_process(
-    program: &str,
+    program: impl AsRef<OsStr>,
     args: &[String],
     cwd: &Path,
     env: &HashMap<String, String>,
@@ -335,7 +337,7 @@ pub async fn spawn_process(
     inherited_fds: &[i32],
 ) -> Result<SpawnedProcess> {
     spawn_process_with_stdin_mode(
-        program,
+        program.as_ref(),
         args,
         cwd,
         env,
@@ -347,9 +349,10 @@ pub async fn spawn_process(
 }
 
 /// Spawn a process using regular pipes, close stdin immediately, and preserve
-/// selected inherited file descriptors across exec on Unix.
+/// selected inherited file descriptors across exec on Unix. The executable path
+/// retains its native encoding.
 pub async fn spawn_process_no_stdin(
-    program: &str,
+    program: impl AsRef<OsStr>,
     args: &[String],
     cwd: &Path,
     env: &HashMap<String, String>,
@@ -357,7 +360,7 @@ pub async fn spawn_process_no_stdin(
     inherited_fds: &[i32],
 ) -> Result<SpawnedProcess> {
     spawn_process_with_stdin_mode(
-        program,
+        program.as_ref(),
         args,
         cwd,
         env,
@@ -371,3 +374,7 @@ pub async fn spawn_process_no_stdin(
 #[cfg(all(test, windows))]
 #[path = "pipe_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "pipe_unix_tests.rs"]
+mod unix_tests;

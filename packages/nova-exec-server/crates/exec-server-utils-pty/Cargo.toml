@@ -7,9 +7,14 @@ version = "0.1.0"
 [dependencies]
 anyhow = { workspace = true }
 portable-pty = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+# 对位 codex origin/main（spawn 管线批）：signal 供 posix_child 的 SIGCHLD 订阅
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
+# 对位 codex origin/main（spawn 管线批）：对位上游 dev-deps（cargo-bin fixture/ctor/tempfile）
+nova-exec-server-utils-cargo-bin = { workspace = true }
+ctor = { workspace = true }
+tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

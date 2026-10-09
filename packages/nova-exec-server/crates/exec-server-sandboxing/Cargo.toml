@@ -23,6 +23,8 @@ dunce = { workspace = true }
 libc = { workspace = true }
 serde_json = { workspace = true }
 regex-lite = { workspace = true }
+# 对位 codex origin/main（spawn 管线批）：terminal_queries 的 tokio::spawn/mpsc
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true }
 which = { workspace = true }
@@ -34,4 +36,4 @@ nova-exec-server-utils-home-dir = { path = "../exec-server-utils-home-dir" }
 anyhow = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

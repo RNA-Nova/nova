@@ -373,7 +373,13 @@ async fn no_follow_recursive_mkdir_handles_concurrent_creators() {
 async fn no_follow_metadata_preserves_linux_birthtime() {
     let file_system = unsandboxed();
     let tmp = TempDir::new().expect("tempdir");
-    let file = tmp.path().join("created.txt");
+    // 与同文件其他用例一致先 canonicalize：/tmp 在部分机器上是符号链接
+    // （如指向 /data/tmp），no-follow 按设计拒绝经符号链接的路径
+    let file = tmp
+        .path()
+        .canonicalize()
+        .expect("canonical tempdir")
+        .join("created.txt");
     std::fs::write(&file, "created").expect("created file");
     let expected = match std::fs::metadata(&file).expect("metadata").created() {
         Ok(created) => Some(

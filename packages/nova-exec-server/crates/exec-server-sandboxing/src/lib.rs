@@ -7,6 +7,8 @@ pub mod policy_transforms;
 #[cfg(target_os = "macos")]
 pub mod seatbelt;
 mod spawn;
+// 对位 codex origin/main（spawn 管线批）：终端查询应答
+mod terminal_queries;
 mod violation;
 mod windows;
 #[cfg(windows)]

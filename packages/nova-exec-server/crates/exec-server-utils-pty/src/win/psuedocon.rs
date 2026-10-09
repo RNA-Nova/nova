@@ -79,6 +79,11 @@ shared_library!(ConPtyFuncs,
     pub fn ClosePseudoConsole(hpc: HPCON),
 );
 
+// 对位 codex origin/main（spawn 管线批）：24H2+ 的 ReleasePseudoConsole 动态入口
+shared_library!(ConPtyReleaseFuncs,
+    pub fn ReleasePseudoConsole(hpc: HPCON) -> HRESULT,
+);
+
 shared_library!(Ntdll,
     pub fn RtlGetVersion(
         version_info: *mut OSVERSIONINFOW
@@ -89,6 +94,8 @@ lazy_static! {
     static ref CONPTY: ConPtyFuncs = ConPtyFuncs::open(Path::new("kernel32.dll")).expect(
         "this system does not support conpty.  Windows 10 October 2018 or newer is required",
     );
+    static ref CONPTY_RELEASE: Option<ConPtyReleaseFuncs> =
+        ConPtyReleaseFuncs::open(Path::new("kernel32.dll")).ok();
 }
 
 pub fn conpty_supported() -> bool {
@@ -109,10 +116,9 @@ fn windows_build_number() -> Option<u32> {
 
 pub struct PsuedoCon {
     con: HPCON,
-    // CreatePseudoConsole borrows these pipe handles for the lifetime of the
-    // pseudoconsole, so we must keep owning them until ClosePseudoConsole.
-    _input: FileDescriptor,
-    _output: FileDescriptor,
+    // Retain the creation handles until a client has attached. Keeping the
+    // output write handle afterward would prevent the reader from seeing EOF.
+    creation_handles: Option<(FileDescriptor, FileDescriptor)>,
 }
 
 unsafe impl Send for PsuedoCon {}
@@ -146,8 +152,7 @@ impl PsuedoCon {
         );
         Ok(Self {
             con,
-            _input: input,
-            _output: output,
+            creation_handles: Some((input, output)),
         })
     }
 
@@ -163,7 +168,7 @@ impl PsuedoCon {
         Ok(())
     }
 
-    pub fn spawn_command(&self, cmd: CommandBuilder) -> anyhow::Result<WinChild> {
+    pub fn spawn_command(&mut self, cmd: CommandBuilder) -> anyhow::Result<WinChild> {
         let job = Arc::new(JobObject::create()?);
         let mut si: STARTUPINFOEXW = unsafe { mem::zeroed() };
         si.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>() as u32;
@@ -214,9 +219,26 @@ impl PsuedoCon {
         let _main_thread = unsafe { OwnedHandle::from_raw_handle(pi.hThread as _) };
         let proc = unsafe { OwnedHandle::from_raw_handle(pi.hProcess as _) };
 
+        // 对位 codex origin/main（spawn 管线批）：客户端挂载后释放创建期句柄
+        self.creation_handles.take();
+        // Windows 11 24H2+ lets the console close its output after the last
+        // attached client exits, without terminating surviving descendants.
+        // Older Windows retains its existing ClosePseudoConsole-on-drop path.
+        if let Some(release) = CONPTY_RELEASE.as_ref() {
+            let result = unsafe { (release.ReleasePseudoConsole)(self.con) };
+            if result != S_OK {
+                log::warn!("failed to release pseudoconsole ownership: HRESULT {result}");
+            }
+        }
+
         Ok(WinChild::new(proc, job))
     }
 }
+
+// 对位 codex origin/main（spawn 管线批）：pseudocon 生命周期测试挂点
+#[cfg(test)]
+#[path = "psuedocon_tests.rs"]
+mod lifecycle_tests;
 
 fn resolve_current_directory(cmd: &CommandBuilder) -> Option<Vec<u16>> {
     let home = cmd
