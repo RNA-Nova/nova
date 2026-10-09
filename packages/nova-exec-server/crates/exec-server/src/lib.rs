@@ -13,6 +13,8 @@ mod fs_helper;
 mod fs_helper_main;
 mod fs_sandbox;
 mod local_file_system;
+// 对位 codex f2b2e5b2a9：有界可取消的 blocking 文件读
+mod local_file_system_read;
 mod local_process;
 mod network_policy_decisions;
 mod no_follow;
@@ -31,6 +33,11 @@ mod server;
 #[cfg(unix)]
 mod shell_snapshot;
 mod telemetry;
+// 对位 codex origin/main `websocket_pong_watchdog.rs`：pong 看门狗。
+// 上游接线点（noise_relay/harness.rs、relay.rs、relay_writer.rs）均为 nova
+// 未镜像的 relay/remote 面，当前仅移植模块与测试；接入 relay 面后移除此 allow。
+#[allow(dead_code)]
+mod websocket_pong_watchdog;
 
 // Shared limits for inbound executor messages across all transports.
 mod client_inbound_request_limit;

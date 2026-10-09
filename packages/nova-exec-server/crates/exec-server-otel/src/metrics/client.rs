@@ -337,7 +337,20 @@ impl MetricsClient {
                 build_provider(resource, exporter, export_interval, runtime_reader.clone())
             }
             MetricsExporter::Otlp(exporter) => {
-                let exporter = build_otlp_metric_exporter(exporter, Temporality::Delta)?;
+                // 对位 codex 28b91c7c31：先按
+                // OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE 环境变量选出
+                // 聚合时序，再传入 exporter 构造。
+                // 裁点：上游该分支同时把 exporter 包进
+                // `crate::network_policy::PolicyExporter`——nova 的 otel 未镜像
+                // network_policy 面，故只移植 temporality 选择逻辑本身，保留
+                // nova 现有 exporter 构造形态。
+                let temporality = otlp_metrics_temporality(
+                    &exporter,
+                    std::env::var("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
+                        .ok()
+                        .as_deref(),
+                );
+                let exporter = build_otlp_metric_exporter(exporter, temporality)?;
                 build_provider(resource, exporter, export_interval, runtime_reader.clone())
             }
         };
@@ -542,6 +555,26 @@ where
     let provider = provider_builder.with_reader(reader).build();
     let meter = provider.meter(METER_NAME);
     (provider, meter)
+}
+
+// 对位 codex 28b91c7c31：按 OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+// 环境变量选择 OTLP 导出器的聚合时序。`None` 恒 Delta；`OtlpGrpc`/`OtlpHttp`
+// 对环境变量值做大小写不敏感匹配（cumulative→Cumulative、lowmemory→LowMemory），
+// 未设/空/未知值保 Delta。
+// 裁点：上游 `OtelExporter` 另有内置 `Statsig` 变体（与 `None` 同臂恒 Delta——
+// 在其解析为 OTLP 路由之前先定死内建链路的时序）；nova 未移植 Statsig 出口，
+// 故该臂只保留 `None`。
+fn otlp_metrics_temporality(exporter: &OtelExporter, preference: Option<&str>) -> Temporality {
+    // 在把出口解析为具体 OTLP 形态之前选择，确保内建/禁用出口保持 Delta（对位上游注释）。
+    match exporter {
+        OtelExporter::None => Temporality::Delta,
+        OtelExporter::OtlpGrpc { .. } | OtelExporter::OtlpHttp { .. } => match preference {
+            Some(value) if value.eq_ignore_ascii_case("cumulative") => Temporality::Cumulative,
+            Some(value) if value.eq_ignore_ascii_case("lowmemory") => Temporality::LowMemory,
+            // 保留既有默认：未设、空串、未知值一律 Delta（对位上游注释）。
+            _ => Temporality::Delta,
+        },
+    }
 }
 
 fn build_otlp_metric_exporter(

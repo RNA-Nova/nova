@@ -305,11 +305,11 @@ impl From<DetectedShell> for ShellInfo {
     }
 }
 
-/// Optional tool attribution for executor telemetry, not authorization.
+/// Optional tool attribution for executor telemetry and child environments, not authorization.
 ///
-/// 线上形状对位 codex `ExecMetadata`：nova 服务端存而不取（归遥测归因预留），
-/// 不参与任何鉴权/调度决策。codex 的 `threadId` 是其 `ThreadId` 新型别的
-/// 字符串序列化（UUID），nova 侧以透明字符串收取，线上形状一致。
+/// 线上形状对位 codex `ExecMetadata`：nova 侧用于遥测归因与子进程环境标签
+/// （对位 codex 9b738582b1），不参与任何鉴权/调度决策。codex 的 `threadId`
+/// 是其 `ThreadId` 新型别的字符串序列化（UUID），nova 侧以透明字符串收取，线上形状一致。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecMetadata {

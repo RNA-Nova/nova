@@ -8,6 +8,7 @@ use nova_exec_server_otel::Result;
 use nova_exec_server_otel::current_span_w3c_trace_context;
 use nova_exec_server_otel::set_parent_from_w3c_trace_context;
 use nova_exec_server_protocol_core::protocol::W3cTraceContext;
+use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::Read as _;
@@ -140,7 +141,35 @@ fn write_http_response(stream: &mut TcpStream, status: &str) -> std::io::Result<
 }
 
 #[test]
-fn otlp_http_exporter_sends_metrics_to_collector() -> Result<()> {
+fn otlp_http_exporter_honors_cumulative_temporality_env() -> Result<()> {
+    // 对位 codex 28b91c7c31：用子进程隔离该环境变量，避免污染同进程的其他测试
+    //（libtest 并行或 Bazel 等沙箱执行器下同理）。
+    const CHILD_ENV: &str = "NOVA_OTEL_TEMPORALITY_TEST_CHILD";
+    if std::env::var_os(CHILD_ENV).is_none() {
+        let current_thread = thread::current();
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                current_thread.name().expect("test name"),
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env(
+                "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+                "cumulative",
+            )
+            .env("OTEL_METRIC_EXPORT_INTERVAL", "60000")
+            .output()
+            .expect("run test with cumulative temporality configured");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return Ok(());
+    }
+
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     listener.set_nonblocking(true).expect("set_nonblocking");
@@ -241,6 +270,20 @@ fn otlp_http_exporter_sends_metrics_to_collector() -> Result<()> {
     assert!(
         content_type.starts_with("application/json"),
         "unexpected content-type: {content_type}"
+    );
+
+    // 对位 codex 28b91c7c31：解析 OTLP JSON 负载，断言计数器以 Cumulative
+    // 聚合时序导出（OTLP proto 枚举 AGGREGATION_TEMPORALITY_CUMULATIVE = 2）。
+    let payload: serde_json::Value = serde_json::from_slice(&request.body).expect("OTLP JSON");
+    let counter = payload["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .expect("exported metrics")
+        .iter()
+        .find(|metric| metric["name"] == "nova.turns")
+        .expect("exported counter");
+    assert_eq!(
+        counter["sum"]["aggregationTemporality"],
+        serde_json::json!(2)
     );
 
     let body = String::from_utf8_lossy(&request.body);

@@ -3,6 +3,7 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
+use axum::http::HeaderMap;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::http::header::ORIGIN;
@@ -219,20 +220,30 @@ async fn websocket_upgrade_handler(
     websocket: WebSocketUpgrade,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     State(state): State<ExecServerWebSocketState>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
     info!(%peer_addr, "exec-server websocket client connected");
-    websocket.on_upgrade(move |stream| async move {
-        state
-            .processor
-            .run_connection(
-                JsonRpcConnection::from_axum_websocket(
-                    stream,
-                    format!("exec-server websocket {peer_addr}"),
-                ),
-                ConnectionTransport::WebSocket,
-            )
-            .await;
-    })
+    // 对位 codex 54685110a7：upgrade 响应回显请求头里的 `x-request-id`
+    let mut response = websocket
+        .on_upgrade(move |stream| async move {
+            state
+                .processor
+                .run_connection(
+                    JsonRpcConnection::from_axum_websocket(
+                        stream,
+                        format!("exec-server websocket {peer_addr}"),
+                    ),
+                    ConnectionTransport::WebSocket,
+                )
+                .await;
+        })
+        .into_response();
+    if let Some(request_id) = headers.get("x-request-id") {
+        response
+            .headers_mut()
+            .insert("x-request-id", request_id.clone());
+    }
+    response
 }
 
 #[cfg(test)]

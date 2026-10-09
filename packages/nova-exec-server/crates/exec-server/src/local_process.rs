@@ -17,6 +17,7 @@ use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicy;
 use nova_exec_server_protocol_core::exec_output::ExecToolCallOutput;
 use nova_exec_server_protocol_core::exec_output::StreamOutput;
 use nova_exec_server_protocol_core::shell_environment;
+use nova_exec_server_protocol_core::shell_environment::CODEX_THREAD_ID_ENV_VAR;
 use nova_exec_server_sandboxing::SandboxType;
 use nova_exec_server_sandboxing::is_likely_sandbox_denied;
 use nova_exec_server_utils_pty::ExecCommandSession;
@@ -711,7 +712,33 @@ fn child_env(params: &ExecParams) -> HashMap<String, String> {
     };
     env.remove(crate::NOVA_EXEC_SERVER_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR);
     env.retain(|name, _| !shell_environment::is_non_inheritable_env_var(name));
+    // 对位 codex 9b738582b1：在策略与 overlay 之后应用执行元数据的两个 ID
+    apply_exec_metadata(&mut env, params.metadata.as_ref());
     env
+}
+
+// 对位 codex 9b738582b1：Some(metadata) 时 thread_id 有则插入、无则清除
+// （Windows 先按大小写不敏感清理）；tool_call_id 无论 metadata 是否存在都重整
+pub(crate) fn apply_exec_metadata(
+    env: &mut HashMap<String, String>,
+    metadata: Option<&crate::protocol::ExecMetadata>,
+) {
+    if let Some(metadata) = metadata {
+        #[cfg(windows)]
+        env.retain(|name, _| !name.eq_ignore_ascii_case(CODEX_THREAD_ID_ENV_VAR));
+        match metadata.thread_id.as_ref() {
+            Some(thread_id) => {
+                env.insert(CODEX_THREAD_ID_ENV_VAR.to_string(), thread_id.clone());
+            }
+            None => {
+                env.remove(CODEX_THREAD_ID_ENV_VAR);
+            }
+        }
+    }
+    shell_environment::set_tool_call_id_env_var(
+        env,
+        metadata.and_then(|metadata| metadata.tool_call_id.as_deref()),
+    );
 }
 
 pub(crate) fn shell_environment_policy(env_policy: &ExecEnvPolicy) -> ShellEnvironmentPolicy {
@@ -1425,9 +1452,14 @@ mod tests {
 
     #[test]
     fn child_env_applies_policy_then_overlay() {
+        // 对位 codex 9b738582b1：metadata 的两个 ID 覆盖 policy/overlay 同名值
+        // （nova 的 thread_id 为透明字符串，对位上游 ThreadId 新型别）
+        let thread_id = "019d25f0-6728-7ce2-908f-c3c187323e5b";
         let mut params = test_exec_params(HashMap::from([
             ("OVERLAY".to_string(), "overlay".to_string()),
             ("POLICY_SET".to_string(), "overlay-wins".to_string()),
+            ("CODEX_THREAD_ID".into(), "overlay-thread".into()),
+            ("CODEX_TOOL_CALL_ID".into(), "overlay-call".into()),
             (
                 "openai_identity_token_file".to_string(),
                 "/run/identity-token".to_string(),
@@ -1440,19 +1472,89 @@ mod tests {
             r#set: HashMap::from([
                 ("POLICY_SET".to_string(), "policy".to_string()),
                 ("OpenAI_Federation_Rule_Id".to_string(), "rule".to_string()),
+                ("CODEX_THREAD_ID".into(), "policy-thread".into()),
+                ("CODEX_TOOL_CALL_ID".into(), "policy-call".into()),
             ]),
             include_only: Vec::new(),
+        });
+        params.metadata = Some(crate::protocol::ExecMetadata {
+            thread_id: Some(thread_id.to_string()),
+            tool_call_id: Some("current-call".into()),
         });
 
         let mut expected = HashMap::from([
             ("OVERLAY".to_string(), "overlay".to_string()),
             ("POLICY_SET".to_string(), "overlay-wins".to_string()),
+            ("CODEX_THREAD_ID".into(), thread_id.to_string()),
+            ("CODEX_TOOL_CALL_ID".into(), "current-call".into()),
         ]);
         if cfg!(target_os = "windows") {
             expected.insert("PATHEXT".to_string(), ".COM;.EXE;.BAT;.CMD".to_string());
         }
 
         assert_eq!(child_env(&params), expected);
+    }
+
+    // 对位 codex 9b738582b1：metadata 存在但字段缺失时清除陈旧 counterpart
+    #[test]
+    fn child_env_partial_metadata_removes_stale_counterpart() {
+        let thread_id = "019d25f0-6728-7ce2-908f-c3c187323e5b";
+        for (thread_id, call_id) in [
+            (Some(thread_id), None),
+            (None, Some("exec-call-only")),
+            (None, None),
+        ] {
+            let mut params = test_exec_params(HashMap::from([
+                ("CODEX_THREAD_ID".into(), "stale-thread".into()),
+                ("Codex_Thread_Id".into(), "mixed-case-thread".into()),
+                ("codex_thread_id".into(), "lowercase-thread".into()),
+                ("CODEX_TOOL_CALL_ID".into(), "stale-call".into()),
+                ("OTHER".into(), "unchanged".into()),
+            ]));
+            params.metadata = Some(crate::protocol::ExecMetadata {
+                thread_id: thread_id.map(str::to_string),
+                tool_call_id: call_id.map(str::to_string),
+            });
+
+            let mut expected = HashMap::from([("OTHER".into(), "unchanged".into())]);
+            #[cfg(not(windows))]
+            expected.insert("Codex_Thread_Id".into(), "mixed-case-thread".into());
+            #[cfg(not(windows))]
+            expected.insert("codex_thread_id".into(), "lowercase-thread".into());
+            if let Some(thread_id) = thread_id {
+                expected.insert("CODEX_THREAD_ID".into(), thread_id.to_string());
+            }
+            if let Some(call_id) = call_id {
+                expected.insert("CODEX_TOOL_CALL_ID".into(), call_id.to_string());
+            }
+            assert_eq!(
+                child_env(&params),
+                expected,
+                "metadata: {:?}",
+                params.metadata
+            );
+        }
+    }
+
+    // 对位 codex 9b738582b1：无 metadata 时保留线程上下文、移除调用 ID
+    #[test]
+    fn child_env_without_metadata_preserves_thread_only_context() {
+        let params = test_exec_params(HashMap::from([
+            ("CODEX_THREAD_ID".into(), "prewarm-thread".into()),
+            ("Codex_Thread_Id".into(), "mixed-case-thread".into()),
+            ("CODEX_TOOL_CALL_ID".into(), "stale-call".into()),
+            ("Codex_Tool_Call_Id".into(), "mixed-case-call".into()),
+        ]));
+
+        assert_eq!(
+            child_env(&params),
+            HashMap::from([
+                ("CODEX_THREAD_ID".into(), "prewarm-thread".into()),
+                ("Codex_Thread_Id".into(), "mixed-case-thread".into()),
+                #[cfg(not(windows))]
+                ("Codex_Tool_Call_Id".into(), "mixed-case-call".into()),
+            ]),
+        );
     }
 
     #[tokio::test]

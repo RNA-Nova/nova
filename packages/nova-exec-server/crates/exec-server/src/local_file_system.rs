@@ -7,7 +7,6 @@ use std::sync::LazyLock;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tokio::io;
-use tokio::io::AsyncReadExt;
 use tokio_util::io::ReaderStream;
 
 use crate::CopyOptions;
@@ -31,15 +30,6 @@ use crate::no_follow;
 use crate::regular_file;
 use crate::regular_file::OpenMode;
 use crate::sandboxed_file_system::SandboxedFileSystem;
-
-const MAX_READ_FILE_BYTES: u64 = 512 * 1024 * 1024;
-
-fn file_too_large_error() -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidInput,
-        format!("file is too large to read: limit is {MAX_READ_FILE_BYTES} bytes"),
-    )
-}
 
 pub static LOCAL_FS: LazyLock<Arc<dyn ExecutorFileSystem>> =
     LazyLock::new(|| -> Arc<dyn ExecutorFileSystem> { Arc::new(LocalFileSystem::unsandboxed()) });
@@ -595,24 +585,9 @@ impl DirectFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<u8>> {
         reject_sandbox_context(sandbox)?;
-        // no-follow：逐组件不跟符号链接直开（rustix openat 族），符号链接即报错
-        let file = if options.follow_symlinks {
-            self.open_file(path, /*sandbox*/ None).await?
-        } else {
-            no_follow::open_file(path.to_abs_path()?.as_path()).await?
-        };
-        let metadata = file.metadata().await?;
-        if metadata.len() > MAX_READ_FILE_BYTES {
-            return Err(file_too_large_error());
-        }
-        let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(MAX_READ_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .await?;
-        if bytes.len() as u64 > MAX_READ_FILE_BYTES {
-            return Err(file_too_large_error());
-        }
-        Ok(bytes)
+        // 对位 codex f2b2e5b2a9：改经 local_file_system_read 的有界可取消 blocking 读
+        let path = path.to_abs_path()?;
+        crate::local_file_system_read::read_file(path, options).await
     }
 
     async fn read_file_stream(

@@ -28,6 +28,11 @@ const PROCESS_DURATION_DESCRIPTION: &str = "Duration of exec-server processes in
 // tags 携带 version=v2 / success / failure_reason，对齐上游 codex.shell_snapshot 语义
 const SHELL_SNAPSHOT_TOTAL_METRIC: &str = "exec_server_shell_snapshot_total";
 const SHELL_SNAPSHOT_DURATION_METRIC: &str = "exec_server_shell_snapshot_duration_ms";
+// 对位 codex 588f616e8b：每条命令的快照使用/等待观测——上游
+// codex.shell_snapshot.command / codex.shell_snapshot.wait_ms，按本文件
+// codex.* → exec_server_*（计数加 _total）命名惯例改名
+const SHELL_SNAPSHOT_COMMAND_TOTAL_METRIC: &str = "exec_server_shell_snapshot_command_total";
+const SHELL_SNAPSHOT_WAIT_METRIC: &str = "exec_server_shell_snapshot_wait_ms";
 
 #[derive(Clone, Copy)]
 pub(crate) enum ConnectionTransport {
@@ -160,6 +165,30 @@ impl ExecServerTelemetry {
             tags.push(("failure_reason", failure_reason));
         }
         let _ = metrics.counter(SHELL_SNAPSHOT_TOTAL_METRIC, /*inc*/ 1, &tags);
+    }
+
+    /// 每次符合条件的执行准备观测一次，不含 prewarm。
+    /// `used` 表示选中回放，不代表恢复或执行成功。（对位 codex 588f616e8b）
+    #[cfg(unix)]
+    pub(crate) fn shell_snapshot_command(
+        &self,
+        wait: Duration,
+        state: &'static str,
+        outcome: &'static str,
+    ) {
+        // 与 shell_snapshot_captured 相同的 client 选取：显式服务端 client 优先，
+        // 缺席时回退宿主全局 metrics client
+        let Some(metrics) = self
+            .inner
+            .as_ref()
+            .map(|inner| inner.metrics.clone())
+            .or_else(nova_exec_server_otel::global)
+        else {
+            return;
+        };
+        let tags = [("version", "v2"), ("state", state), ("outcome", outcome)];
+        let _ = metrics.counter(SHELL_SNAPSHOT_COMMAND_TOTAL_METRIC, /*inc*/ 1, &tags);
+        let _ = metrics.record_duration(SHELL_SNAPSHOT_WAIT_METRIC, wait, &tags);
     }
 
     pub(crate) fn process_started(&self) -> ProcessMetricGuard {

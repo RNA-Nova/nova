@@ -8,6 +8,10 @@ use std::collections::HashMap;
 pub const OPENAI_FEDERATION_RULE_ID_ENV_VAR: &str = "OPENAI_FEDERATION_RULE_ID";
 pub const OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR: &str = "OPENAI_IDENTITY_TOKEN_FILE";
 
+// 对位 codex 9b738582b1：线程 / 工具调用关联标签环境变量名
+pub const CODEX_THREAD_ID_ENV_VAR: &str = "CODEX_THREAD_ID";
+pub const CODEX_TOOL_CALL_ID_ENV_VAR: &str = "CODEX_TOOL_CALL_ID";
+
 /// Environment variables that model-reachable child processes must not inherit.
 pub const NON_INHERITABLE_ENV_VARS: &[&str] = &[
     OPENAI_FEDERATION_RULE_ID_ENV_VAR,
@@ -18,6 +22,21 @@ pub fn is_non_inheritable_env_var(name: &str) -> bool {
     NON_INHERITABLE_ENV_VARS
         .iter()
         .any(|restricted| restricted.eq_ignore_ascii_case(name))
+}
+
+// 对位 codex 9b738582b1：写入工具调用 ID；空 ID 保留、含 NUL 的 ID 丢弃；
+// Windows 上按大小写不敏感清理同名变量
+pub fn set_tool_call_id_env_var(env: &mut HashMap<String, String>, tool_call_id: Option<&str>) {
+    #[cfg(windows)]
+    env.retain(|name, _| !name.eq_ignore_ascii_case(CODEX_TOOL_CALL_ID_ENV_VAR));
+    #[cfg(not(windows))]
+    env.remove(CODEX_TOOL_CALL_ID_ENV_VAR);
+    if let Some(tool_call_id) = tool_call_id.filter(|tool_call_id| !tool_call_id.contains('\0')) {
+        env.insert(
+            CODEX_TOOL_CALL_ID_ENV_VAR.to_string(),
+            tool_call_id.to_string(),
+        );
+    }
 }
 
 /// Configures a child command to omit non-inheritable variables from the

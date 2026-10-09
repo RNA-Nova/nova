@@ -103,6 +103,27 @@ async fn exec_server_accepts_binary_websocket_json() -> anyhow::Result<()> {
     Ok(())
 }
 
+// 对位 codex 54685110a7：WebSocket upgrade 响应回显请求头里的 `x-request-id`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_server_echoes_request_id_in_websocket_handshake() -> anyhow::Result<()> {
+    let mut server = exec_server().await?;
+    for request_id in [Some(HeaderValue::from_static("opaque-request-id")), None] {
+        let mut request = server.websocket_url().into_client_request()?;
+        if let Some(request_id) = &request_id {
+            request
+                .headers_mut()
+                .insert("x-request-id", request_id.clone());
+        }
+
+        let (stream, response) = connect_async(request).await?;
+        assert_eq!(response.headers().get("x-request-id"), request_id.as_ref());
+        drop(stream);
+    }
+
+    server.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_server_rejects_browser_origin_websocket_handshake() -> anyhow::Result<()> {
     let mut server = exec_server().await?;

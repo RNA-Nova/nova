@@ -9,6 +9,51 @@ const CHILD_MODE_ENV_VAR: &str = "NOVA_EXEC_SERVER_SHELL_ENVIRONMENT_SCRUBBER_TE
 const TEST_NAME: &str =
     "shell_environment::tests::command_scrubber_removes_names_from_real_child_environment";
 
+// 对位 codex 9b738582b1：工具调用 ID 的写入/清理语义（含平台同名变量）
+#[test]
+fn tool_call_id_replaces_platform_equivalent_names() {
+    let representable = format!("exec-雪-{}", "x".repeat(512));
+    for (call_id, expected_call) in [
+        (None, None),
+        (Some(""), Some("")),
+        (Some("invalid\0call"), None),
+        (Some("current-call"), Some("current-call")),
+        (Some(representable.as_str()), Some(representable.as_str())),
+    ] {
+        let mut env = HashMap::from([
+            ("CODEX_TOOL_CALL_ID".to_string(), "stale-call".to_string()),
+            (
+                "Codex_Tool_Call_Id".to_string(),
+                "mixed-case-call".to_string(),
+            ),
+            (
+                "codex_tool_call_id".to_string(),
+                "lowercase-call".to_string(),
+            ),
+            ("OTHER".to_string(), "unchanged".to_string()),
+        ]);
+
+        set_tool_call_id_env_var(&mut env, call_id);
+
+        let mut expected = HashMap::from([("OTHER".to_string(), "unchanged".to_string())]);
+        #[cfg(not(windows))]
+        expected.extend([
+            (
+                "Codex_Tool_Call_Id".to_string(),
+                "mixed-case-call".to_string(),
+            ),
+            (
+                "codex_tool_call_id".to_string(),
+                "lowercase-call".to_string(),
+            ),
+        ]);
+        if let Some(expected_call) = expected_call {
+            expected.insert("CODEX_TOOL_CALL_ID".to_string(), expected_call.to_string());
+        }
+        assert_eq!(env, expected, "call_id: {call_id:?}");
+    }
+}
+
 #[test]
 fn non_inheritable_environment_is_removed_after_policy_overrides() {
     let vars = [

@@ -9,6 +9,9 @@ use nova_exec_server_network_proxy::strip_managed_proxy_env;
 use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
 use nova_exec_server_protocol_core::shell_environment;
+// 对位 codex 9b738582b1：快照捕获/回放要剔除的两个关联标签变量
+use nova_exec_server_protocol_core::shell_environment::CODEX_THREAD_ID_ENV_VAR;
+use nova_exec_server_protocol_core::shell_environment::CODEX_TOOL_CALL_ID_ENV_VAR;
 use nova_exec_server_shell_command::shell_detect::ShellType;
 use nova_exec_server_shell_command::shell_snapshot::snapshot_state_and_environment_script;
 use nova_exec_server_utils_path_uri::PathUri;
@@ -19,6 +22,7 @@ use tokio::sync::OnceCell;
 use tokio::time::Instant;
 
 use crate::FileSystemSandboxContext;
+use crate::local_process::apply_exec_metadata;
 use crate::local_process::shell_environment_policy;
 use crate::process_sandbox::PreparedExecRequest;
 use crate::protocol::ExecEnvPolicy;
@@ -30,11 +34,26 @@ use crate::telemetry::ExecServerTelemetry;
 
 const MAX_CACHED_SNAPSHOTS: usize = 16;
 const MAX_SNAPSHOT_BYTES: usize = 512 * 1024;
+// 对位 codex e32365a2c6：文件回放允许更大的 shell 状态
+const MAX_FILE_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
+// 捕获输出还包含带引号的 export 记录与可选的启动前环境（对位 codex 常量注释）
+const MAX_SNAPSHOT_CAPTURE_BYTES: usize = 8 * MAX_SNAPSHOT_BYTES;
+// 对位 codex e32365a2c6：文件回放的捕获输出预算
+const MAX_FILE_SNAPSHOT_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SNAPSHOT_ENV_VALUE_BYTES: usize = 60 * 1024;
 const MAX_SNAPSHOT_SCOPE_BYTES: usize = 256;
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 const SNAPSHOT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_SNAPSHOT_ATTEMPTS: usize = 3;
+
+// 对位 codex e32365a2c6：回放方式（文件/环境）决定快照尺寸预算。
+// nova 尚未镜像文件回放（unnamed reader 探针），File 当前仅测试构造。
+#[derive(Clone, Copy)]
+enum SnapshotReplay {
+    #[allow(dead_code)]
+    File,
+    Environment,
+}
 
 #[derive(Default)]
 pub(crate) struct ShellSnapshotCache {
@@ -52,6 +71,8 @@ struct CachedShellSnapshot {
 }
 
 struct ShellSnapshot {
+    // 对位 codex 588f616e8b：标记快照是否由 prewarm 捕获（nova 暂无 prewarm 路径，恒为 false）
+    prewarmed: bool,
     state: String,
     environment: HashMap<String, String>,
 }
@@ -91,6 +112,8 @@ impl ShellSnapshotCache {
             }
         };
 
+        // 对位 codex 588f616e8b：从缓存查找前开始计快照等待时间
+        let wait_started_at = std::time::Instant::now();
         let snapshot = {
             let mut entries = self.entries.lock().await;
             let position = entries.iter().position(|entry| {
@@ -134,8 +157,17 @@ impl ShellSnapshotCache {
                 snapshot
             }
         };
-        let Ok(snapshot) = snapshot
+        // 对位 codex 588f616e8b：缓存可用性标签；prewarm_ready 在 nova 暂无触发路径
+        let mut availability = match snapshot.get() {
+            Some(Ok(snapshot)) if snapshot.prewarmed => "prewarm_ready",
+            Some(Ok(_)) => "cache_hit",
+            Some(Err(_)) => "unavailable",
+            None => "capture_pending",
+        };
+        let snapshot = snapshot
             .get_or_init(|| async {
+                // 对位 codex 588f616e8b：execution 按需捕获覆盖可用性标签
+                availability = "on_demand";
                 let started_at = std::time::Instant::now();
                 let result = capture_snapshot(params, prepared, shell_type).await;
                 telemetry.shell_snapshot_captured(
@@ -147,8 +179,11 @@ impl ShellSnapshotCache {
                     Instant::now() + SNAPSHOT_RETRY_BACKOFF
                 })
             })
-            .await
-        else {
+            .await;
+        let wait = wait_started_at.elapsed();
+        let Ok(snapshot) = snapshot else {
+            // 对位 codex 588f616e8b：回退普通 shell 启动同样计一次观测
+            telemetry.shell_snapshot_command(wait, availability, "fallback");
             return Ok(());
         };
 
@@ -169,6 +204,8 @@ impl ShellSnapshotCache {
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
         prepared.env.extend(request_overrides);
+        // 对位 codex 9b738582b1：快照回放后再应用执行元数据，覆盖快照中的陈旧 ID
+        apply_exec_metadata(&mut prepared.env, params.metadata.as_ref());
         prepared
             .env
             .retain(|name, _| !shell_environment::is_non_inheritable_env_var(name));
@@ -221,6 +258,8 @@ impl ShellSnapshotCache {
             prepared.command[shell_start + 2] = restore_script;
         }
 
+        // 对位 codex 588f616e8b：选中快照回放计一次 used 观测
+        telemetry.shell_snapshot_command(wait, availability, "used");
         Ok(())
     }
 }
@@ -245,6 +284,8 @@ async fn capture_snapshot(
         .current_dir(prepared.cwd.as_path())
         .env_clear()
         .envs(&prepared.env)
+        // 对位 codex 9b738582b1：调用 ID 不进捕获进程环境
+        .env_remove(CODEX_TOOL_CALL_ID_ENV_VAR)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -259,16 +300,23 @@ async fn capture_snapshot(
         .stdout
         .take()
         .ok_or_else(|| internal_error("missing shell snapshot output".to_string()))?;
+    // 对位 codex e32365a2c6：回放方式决定捕获输出预算；nova 尚未镜像文件回放
+    // （unnamed reader 探针），当前恒为环境回放
+    let replay = SnapshotReplay::Environment;
+    let capture_limit = match replay {
+        SnapshotReplay::File => MAX_FILE_SNAPSHOT_CAPTURE_BYTES,
+        SnapshotReplay::Environment => MAX_SNAPSHOT_CAPTURE_BYTES,
+    };
     let capture = async {
         let mut output = Vec::new();
         stdout
-            .take((MAX_SNAPSHOT_BYTES + 1) as u64)
+            .take((capture_limit + 1) as u64)
             .read_to_end(&mut output)
             .await
             .map_err(|err| internal_error(format!("cannot read shell snapshot: {err}")))?;
-        if output.len() > MAX_SNAPSHOT_BYTES {
+        if output.len() > capture_limit {
             return Err(internal_error(format!(
-                "shell snapshot exceeds {MAX_SNAPSHOT_BYTES} bytes"
+                "shell snapshot capture exceeds {capture_limit} bytes"
             )));
         }
         let status = child
@@ -286,12 +334,13 @@ async fn capture_snapshot(
         .await
         .map_err(|_| internal_error("shell snapshot capture timed out".to_string()))??;
 
-    parse_snapshot(&output, params.env_policy.as_ref())
+    parse_snapshot(&output, params.env_policy.as_ref(), replay)
 }
 
 fn parse_snapshot(
     output: &[u8],
     env_policy: Option<&ExecEnvPolicy>,
+    replay: SnapshotReplay,
 ) -> Result<ShellSnapshot, JSONRPCErrorError> {
     let separator = output
         .iter()
@@ -306,7 +355,25 @@ fn parse_snapshot(
     let state = std::str::from_utf8(&state[start..])
         .map_err(|err| internal_error(format!("shell snapshot state is not UTF-8: {err}")))?;
 
-    let mut environment = output[separator + 1..]
+    // 对位 codex e32365a2c6：捕获环境独立保持 512KiB 上限（过滤前计量原始记录）
+    let environment_bytes = &output[separator + 1..];
+    if environment_bytes.len() > MAX_SNAPSHOT_BYTES {
+        return Err(internal_error(format!(
+            "shell snapshot environment exceeds {MAX_SNAPSHOT_BYTES} bytes"
+        )));
+    }
+    // 对位 codex e32365a2c6：文件回放状态上限 4MiB；环境回放保持 512KiB 合并预算
+    let state_limit = match replay {
+        SnapshotReplay::File => MAX_FILE_SNAPSHOT_BYTES,
+        SnapshotReplay::Environment => MAX_SNAPSHOT_BYTES - environment_bytes.len(),
+    };
+    if state.len() > state_limit {
+        return Err(internal_error(format!(
+            "shell snapshot state exceeds {state_limit} bytes"
+        )));
+    }
+
+    let mut environment = environment_bytes
         .split(|byte| *byte == 0)
         .filter(|entry| !entry.is_empty())
         .filter_map(|entry| {
@@ -325,11 +392,16 @@ fn parse_snapshot(
         }
         None => environment,
     };
+    // 对位 codex 9b738582b1：两个关联标签 ID 不进新捕获的快照
+    environment.remove(CODEX_THREAD_ID_ENV_VAR);
+    environment.remove(CODEX_TOOL_CALL_ID_ENV_VAR);
     environment.remove("PWD");
     environment.remove("OLDPWD");
     environment.retain(|name, _| !shell_environment::is_non_inheritable_env_var(name));
 
     Ok(ShellSnapshot {
+        // 对位 codex 588f616e8b：prewarmed 由捕获方按 purpose 标记，解析处恒为 false
+        prewarmed: false,
         state: state.to_string(),
         environment,
     })
