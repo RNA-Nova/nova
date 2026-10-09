@@ -2240,6 +2240,7 @@ dependencies = [
  "nova-exec-server-otel",
  "nova-exec-server-sandboxing",
  "nova-exec-server-utils-home-dir",
+ "nova-exec-server-utils-pty",
  "pretty_assertions",
  "serde",
  "serde_json",

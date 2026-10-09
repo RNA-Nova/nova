@@ -22,6 +22,7 @@ nova-exec-server-http-client = { workspace = true }
 nova-exec-server-otel = { workspace = true }
 nova-exec-server-sandboxing = { workspace = true }
 nova-exec-server-utils-home-dir = { workspace = true }
+nova-exec-server-utils-pty = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

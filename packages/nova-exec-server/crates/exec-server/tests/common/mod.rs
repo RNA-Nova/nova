@@ -45,6 +45,14 @@ const NOVA_WINDOWS_SANDBOX_ARG1: &str = "--run-as-windows-sandbox";
 /// 这些入口全部直接退出进程，绝不返回到测试 main。
 #[ctor]
 static TEST_BINARY_DISPATCH: () = {
+    // 对位 codex arg0/src/lib.rs:61 与 exec-server/testing/exec_server.rs:16：
+    // 每个重入进程（含 exec-server 子进程与 spawn setup helper）启动早期注册/
+    // 分派 spawn helper——否则 is_available() 恒 false，pty 回退到 portable
+    // builder 路径（裸名 argv0 会被 child env PATH 搜索，测试 exec_process 的
+    // hostile PATH 用例即因此被劫持）。
+    #[cfg(target_os = "linux")]
+    nova_exec_server_utils_pty::init_spawn_helper(std::env::args_os());
+
     let mut args = env::args_os();
     let program = args.next();
 

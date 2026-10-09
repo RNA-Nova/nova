@@ -91,6 +91,13 @@ fn assemble_otel_provider() -> Option<nova_exec_server_otel::OtelProvider> {
 }
 
 fn main() -> Result<()> {
+    // 对位 codex arg0/src/lib.rs:61：启动早期注册/分派 spawn setup helper——
+    // Linux 下 pipe/PTY spawn 的原生启动（免 fork 主进程）依赖它；argv1 为
+    // "--nova-run-as-process-setup" 时由 init_spawn_helper 内部直接分派执行
+    // setup 并退出（不会走到下面的 clap 分派）。
+    #[cfg(target_os = "linux")]
+    nova_exec_server_utils_pty::init_spawn_helper(std::env::args_os());
+
     // 隐藏 helper 模式先于 clap 与 tokio 运行时分派：沙箱化 fs 操作与 arg0
     // 执行辅助分别以隐藏 flag 重启本二进制，helper 自建运行时并直接退出
     //（不能在已有 runtime 的 block_on 里再进 block_on）。
