@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: 上传测试归档
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f0245 # v7.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: nova-rust-tests-${{ matrix.os }}
           path: ${{ runner.temp }}/nova-rust-tests.tar.zst
@@ -89,7 +89,7 @@ jobs:
 
       - name: 上传运行时 helper
         if: matrix.os != 'macos-latest'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f0245 # v7.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: nova-rust-test-helpers-${{ matrix.os }}
           path: ${{ runner.temp }}/test-helpers/
@@ -174,7 +174,7 @@ jobs:
 
       - name: 上传 JUnit 报告
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f0245 # v7.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: nextest-junit-${{ matrix.os }}-shard-${{ matrix.shard }}
           path: ${{ env.NOVA_CI_BUILD_ROOT }}/cargo-target/nextest/default/junit.xml
