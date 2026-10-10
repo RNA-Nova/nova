@@ -67,17 +67,11 @@ impl ChildTerminator for PipeChildTerminator {
     }
 
     fn kill(&mut self) -> io::Result<()> {
-        // 对位 codex origin/main（spawn 管线批）：上游已把 member fallback 合入
-        // kill_process_group（codex d6fb836f31，跨 core/rmcp-client，超出本批范围），
-        // nova 的 process_group 尚未做该合并，此处分叉保留 nova 的 macOS 回退调用。
-        #[cfg(all(unix, not(target_os = "macos")))]
+        // 对位 codex d6fb836f31：member fallback 已合入 kill_process_group 本体，
+        // 此处删除 macOS 专用分支，收敛为单一 unix 调用（同上游 pipe.rs hunk）。
+        #[cfg(unix)]
         {
             crate::process_group::kill_process_group(self.process_group_id)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            crate::process_group::kill_process_group_with_member_fallback(self.process_group_id)
         }
 
         #[cfg(windows)]
