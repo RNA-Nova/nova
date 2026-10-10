@@ -58,7 +58,7 @@ jobs:
         run: cargo nextest --version | grep -F "0.9.103"
 
       - name: 构建测试归档
-        run: cargo nextest archive --archive-file "$RUNNER_TEMP/nova-rust-tests.tar.zst"
+        run: cargo nextest archive --archive-file "$NOVA_CI_BUILD_ROOT/nova-rust-tests.tar.zst"
 
       # 运行时 helper 单独构建上传（分片经 CARGO_BIN_EXE_* 运行时指认，
       # 对位 codex 的 TEST_HELPERS_ARTIFACT 形态）
@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          helper_dir="$RUNNER_TEMP/test-helpers"
+          helper_dir="$NOVA_CI_BUILD_ROOT/test-helpers"
           mkdir -p "$helper_dir"
           target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
@@ -83,7 +83,7 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: nova-rust-tests-${{ matrix.os }}
-          path: ${{ runner.temp }}/nova-rust-tests.tar.zst
+          path: ${{ env.NOVA_CI_BUILD_ROOT }}/nova-rust-tests.tar.zst
           if-no-files-found: error
           retention-days: 1
 
@@ -92,7 +92,7 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: nova-rust-test-helpers-${{ matrix.os }}
-          path: ${{ runner.temp }}/test-helpers/
+          path: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/
           if-no-files-found: error
           retention-days: 1
 
@@ -134,14 +134,14 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: nova-rust-tests-${{ matrix.os }}
-          path: ${{ runner.temp }}
+          path: ${{ env.NOVA_CI_BUILD_ROOT }}
 
       - name: 下载运行时 helper（Linux/Windows）
         if: matrix.os != 'macos-latest'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: nova-rust-test-helpers-${{ matrix.os }}
-          path: ${{ runner.temp }}/test-helpers
+          path: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers
 
       # 两个排除项均为"上游测试与其自身新代码在新环境不兼容"（移植代码与上游
       # 逐字一致、生产场景不触发，待上游回应后恢复）：
@@ -159,15 +159,15 @@ jobs:
           NEXTEST_STATUS_LEVEL: leak
           # helper 运行时指认（对位 codex CARGO_BIN_EXE_* 形态，连字符与下划线
           # 双形态都写——codex 同款惯例；nova 侧 cargo_bin 优先读运行时环境变量）
-          CARGO_BIN_EXE_nova_linux_sandbox: ${{ runner.temp }}/test-helpers/nova-linux-sandbox
-          CARGO_BIN_EXE_nova-linux-sandbox: ${{ runner.temp }}/test-helpers/nova-linux-sandbox
-          CARGO_BIN_EXE_nova_windows_sandbox_setup: ${{ runner.temp }}/test-helpers/nova-windows-sandbox-setup.exe
-          CARGO_BIN_EXE_nova-windows-sandbox-setup: ${{ runner.temp }}/test-helpers/nova-windows-sandbox-setup.exe
-          CARGO_BIN_EXE_nova_command_runner: ${{ runner.temp }}/test-helpers/nova-command-runner.exe
-          CARGO_BIN_EXE_nova-command-runner: ${{ runner.temp }}/test-helpers/nova-command-runner.exe
+          CARGO_BIN_EXE_nova_linux_sandbox: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-linux-sandbox
+          CARGO_BIN_EXE_nova-linux-sandbox: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-linux-sandbox
+          CARGO_BIN_EXE_nova_windows_sandbox_setup: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-windows-sandbox-setup.exe
+          CARGO_BIN_EXE_nova-windows-sandbox-setup: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-windows-sandbox-setup.exe
+          CARGO_BIN_EXE_nova_command_runner: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-command-runner.exe
+          CARGO_BIN_EXE_nova-command-runner: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-command-runner.exe
         run: >-
           cargo nextest run
-          --archive-file "$RUNNER_TEMP/nova-rust-tests.tar.zst"
+          --archive-file "$NOVA_CI_BUILD_ROOT/nova-rust-tests.tar.zst"
           --workspace-remap "$PWD"
           --partition "hash:${{ matrix.shard }}/4"
           -E 'not (test(root_metadata_symlinks_cannot_reopen_approved_denials) | test(legacy_capture_cancellation_terminates_descendants_without_timeout))'
