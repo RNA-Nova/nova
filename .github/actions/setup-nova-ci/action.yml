@@ -1,0 +1,45 @@
+name: setup-nova-ci
+description: executor CI 公共环境准备（对位 codex .github/actions/setup-ci 的 nova 裁剪版）
+
+runs:
+  using: composite
+  steps:
+    # 受控构建根 + 受控临时目录（对位 codex setup-ci）：TEMP/TMP/TMPDIR 指向
+    # 受控长路径——杜绝 GHA 宿主 8.3 短名 TEMP（C:\Users\RUNNER~1\...）类差异；
+    # CARGO_TARGET_DIR 归到构建根（自建 runner 上常驻 = 增量构建）。
+    - name: 配置 CI 构建根与受控临时目录
+      shell: bash
+      run: |
+        set -euo pipefail
+        build_root="$HOME/.cache/nova-ci"
+        mkdir -p "$build_root/tmp" "$build_root/cargo-target"
+        {
+          echo "NOVA_CI_BUILD_ROOT=$build_root"
+          echo "TEMP=$build_root/tmp"
+          echo "TMP=$build_root/tmp"
+          echo "TMPDIR=$build_root/tmp"
+          echo "CARGO_TARGET_DIR=$build_root/cargo-target"
+        } >> "$GITHUB_ENV"
+        # 自建 runner 的非交互 shell 可能不加载 ~/.bashrc 里的 cargo PATH
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+    # Linux 沙箱测试依赖（幂等：自建 runner 已预配 /usr/bin/bwrap + sysctl，
+    # 即跳过；GHA 宿主每次新机现场装——runner 一次性 VM，无残留影响）。
+    - name: Linux 沙箱测试依赖
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v bwrap >/dev/null 2>&1; then
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+        fi
+        if [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" != "0" ]]; then
+          sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
+        fi
+
+    # Windows 长路径（对位 codex setup-ci 末尾）
+    - name: 启用 Git 长路径（Windows）
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.longpaths true
