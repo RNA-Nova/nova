@@ -447,8 +447,14 @@ async fn file_system_elevated_relative_read_denial_uses_policy_cwd(
     for name in ["nova-windows-sandbox-setup", "nova-command-runner"] {
         let source = nova_exec_server_utils_cargo_bin::cargo_bin(name)?;
         let destination = resources.join(Path::new(name).with_extension("exe"));
-        if let Err(error) = std::fs::copy(&source, &destination)
-            && !(error.kind() == std::io::ErrorKind::PermissionDenied && destination.is_file())
+        // 对位 codex 841b5490b2 现行形态：经 copy_executable（防兄弟 spawn 持
+        // 可写描述符）。归档分片形态下多个测试进程并发 stage 同一目标——
+        // 目标已被兄弟进程 stage 完（存在即完工）时，PermissionDenied 与
+        // ERROR_SHARING_VIOLATION(32)（目标正被执行/写入）都按并发完工容忍。
+        if let Err(error) = nova_exec_server_utils_cargo_bin::copy_executable(&source, &destination)
+            && !((error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(32))
+                && destination.is_file())
         {
             return Err(error).with_context(|| format!("stage Windows sandbox helper {name}"));
         }

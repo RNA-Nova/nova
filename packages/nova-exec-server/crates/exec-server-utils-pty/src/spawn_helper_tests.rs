@@ -198,10 +198,15 @@ async fn helper_preserves_cwd_env_arg0_and_streams() -> anyhow::Result<()> {
         unsafe { libc::pthread_atfork(None, Some(after_fork), None) },
         0
     );
+    // 对位上游本用例，唯一环境适配：上游以 /tmp 为 cwd 并断言子进程 $PWD 不变，
+    // 但 /tmp 在部分机器上是符号链接（245 自建 runner 的 /tmp→/data/tmp），
+    // 子进程 $PWD 落到物理路径——改用 canonicalize 后的临时目录，断言语义不变。
+    let cwd_dir = tempfile::tempdir()?;
+    let cwd = cwd_dir.path().canonicalize()?;
     let mut child = spawn_pipe_process(
         "sh",
         &["-c".into(), "read value; printf '%s|%s|%s|%s' \"$0\" \"$MARKER\" \"$PWD\" \"$value\"; printf error >&2; exit 23".into()],
-        Path::new("/tmp"),
+        &cwd,
         &HashMap::from([("PATH".into(), "/bin".into()), ("MARKER".into(), "a value".into())]),
         &Some("custom-arg0".into()),
         &[],
@@ -226,7 +231,7 @@ async fn helper_preserves_cwd_env_arg0_and_streams() -> anyhow::Result<()> {
     assert_eq!(
         (stdout, stderr, child.exit_rx.await?),
         (
-            b"custom-arg0|a value|/tmp|input".to_vec(),
+            format!("custom-arg0|a value|{}|input", cwd.display()).into_bytes(),
             b"error".to_vec(),
             23
         )
