@@ -56,3 +56,11 @@ slow-timeout = { period = "45s", terminate-after = 2 }
 platform = 'cfg(windows)'
 filter = 'package(nova-exec-server) & test(noisy_failing_helper_preserves_exit_status_and_bounded_stderr)'
 retries = 3
+
+[[profile.default.overrides]]
+# ConPTY Ctrl-C 后 PowerShell 终止前台 ping 并重建提示符，在共享 runner 上
+# 超过该用例的 10s 等待预算（绿跑 38035034011 里也是首试红、重试绿）。
+# 负载敏感，retries 吸收。
+platform = 'cfg(windows)'
+filter = 'package(nova-exec-server-utils-pty) & test(conpty_ctrl_c_interrupts_powershell_foreground_child)'
+retries = 3
