@@ -195,6 +195,12 @@ jobs:
           name: nova-rust-test-helpers-${{ matrix.os }}
           path: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers
 
+      # GHA 制品 zip 不保留可执行位（对位 codex 分片步的 chmod +x）
+      - name: 恢复 helper 可执行位
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: chmod +x "$NOVA_CI_BUILD_ROOT/test-helpers/nova-linux-sandbox"
+
       # 两个排除项均为"上游测试与其自身新代码在新环境不兼容"（移植代码与上游
       # 逐字一致、生产场景不触发，待上游回应后恢复）：
       # 1. root_metadata：测试自造 `--unshare-user --uid 0 --tmpfs /` 命名空间
@@ -204,6 +210,22 @@ jobs:
       #    7efc49b258 删除宿主 TEMP 回退后 :tmpdir 授权消失，后代写不了 TEMP
       #    下的 ready 标记，取消令牌永不触发（上游自建 runner 无 pwsh 7 静默
       #    跳过；GHA 预装 pwsh 7 才真实执行）。
+      - name: 准备解压目录 + 摆放 Windows helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract_dir="$NOVA_CI_BUILD_ROOT/nextest-extract"
+          rm -rf "$extract_dir" && mkdir -p "$extract_dir"
+          # 先 list 解压（不跑测试）：Windows 提升沙箱的 helper 物化按
+          # "当前可执行文件旁/nova-resources 下"解析，helper 需以平名落到
+          # 测试二进制同目录（归档里非测试二进制带 hash 后缀，直接解析不到）。
+          cargo nextest list --archive-file "$NOVA_CI_BUILD_ROOT/nova-rust-tests.tar.zst" --extract-to "$extract_dir" >/dev/null
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp "$NOVA_CI_BUILD_ROOT/test-helpers/nova-windows-sandbox-setup.exe" \
+               "$NOVA_CI_BUILD_ROOT/test-helpers/nova-command-runner.exe" \
+               "$extract_dir/target/debug/deps/"
+          fi
+
       - name: 运行测试分片
         env:
           RUST_BACKTRACE: "1"
@@ -217,9 +239,12 @@ jobs:
           CARGO_BIN_EXE_nova-windows-sandbox-setup: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-windows-sandbox-setup.exe
           CARGO_BIN_EXE_nova_command_runner: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-command-runner.exe
           CARGO_BIN_EXE_nova-command-runner: ${{ env.NOVA_CI_BUILD_ROOT }}/test-helpers/nova-command-runner.exe
+        shell: bash
         run: >-
           cargo nextest run
           --archive-file "$NOVA_CI_BUILD_ROOT/nova-rust-tests.tar.zst"
+          --extract-to "$NOVA_CI_BUILD_ROOT/nextest-extract"
+          --extract-overwrite
           --workspace-remap "$PWD"
           --partition "hash:${{ matrix.shard }}/4"
           -E 'not (test(root_metadata_symlinks_cannot_reopen_approved_denials) | test(legacy_capture_cancellation_terminates_descendants_without_timeout))'
