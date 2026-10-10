@@ -7,7 +7,11 @@ runs:
     # 受控构建根 + 受控临时目录（对位 codex setup-ci）：TEMP/TMP/TMPDIR 指向
     # 受控长路径——杜绝 GHA 宿主 8.3 短名 TEMP（C:\Users\RUNNER~1\...）类差异；
     # CARGO_TARGET_DIR 归到构建根（自建 runner 上常驻 = 增量构建）。
-    - name: 配置 CI 构建根与受控临时目录
+    # Windows 必须走 pwsh（$env:USERPROFILE）：git-bash 的 $HOME 是 MSYS 形
+    # （/c/Users/...），写进 CARGO_TARGET_DIR 会被 cargo/link.exe 错拼成
+    # D:/c/Users/...（CI run 38074535685 实证 LNK1104）。
+    - name: 配置 CI 构建根与受控临时目录（Unix）
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         set -euo pipefail
@@ -22,6 +26,17 @@ runs:
         } >> "$GITHUB_ENV"
         # 自建 runner 的非交互 shell 可能不加载 ~/.bashrc 里的 cargo PATH
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+    - name: 配置 CI 构建根与受控临时目录（Windows）
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $build_root = ($env:USERPROFILE -replace '\\','/') + "/.cache/nova-ci"
+        New-Item -ItemType Directory -Force -Path "$build_root/tmp", "$build_root/cargo-target" | Out-Null
+        "NOVA_CI_BUILD_ROOT=$build_root" >> $env:GITHUB_ENV
+        "TEMP=$build_root/tmp" >> $env:GITHUB_ENV
+        "TMP=$build_root/tmp" >> $env:GITHUB_ENV
+        "CARGO_TARGET_DIR=$build_root/cargo-target" >> $env:GITHUB_ENV
 
     # Linux 沙箱测试依赖（幂等：自建 runner 已预配 /usr/bin/bwrap + sysctl，
     # 即跳过；GHA 宿主每次新机现场装——runner 一次性 VM，无残留影响）。
