@@ -71,7 +71,7 @@ jobs:
 
       - name: 安装 cargo-nextest（GHA 腿）
         if: ${{ !(matrix.os == 'ubuntu-latest' && github.event_name == 'push') }}
-        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
           version: 0.9.103
