@@ -78,6 +78,8 @@ impl FileSystemSandboxRunner {
         request: FsHelperRequest,
     ) -> Result<FsHelperPayload, JSONRPCErrorError> {
         let command = self.prepare_command(sandbox)?;
+        // 对位 codex cba716c0f1：helper 启动前跑完整性检查（纯观测，不影响执行）
+        crate::run_integrity_checks(&command).await;
         let request_json = serde_json::to_vec(&request).map_err(json_error)?;
         run_command(command, request_json).await
     }
@@ -169,7 +171,9 @@ impl FileSystemSandboxRunner {
             managed_network: None,
             additional_permissions: None,
         };
-        sandbox_manager
+        // 对位 codex 622e9e3696：transform 后的请求覆写控制面选定的覆盖决策
+        // （仅观测随行，不改变沙箱命令）
+        let mut request = sandbox_manager
             .transform_for_direct_spawn(SandboxDirectSpawnTransformRequest {
                 workspace_roots,
                 windows_sandbox_proxy_settings_mode:
@@ -192,7 +196,9 @@ impl FileSystemSandboxRunner {
                         .unwrap_or(nova_exec_server_protocol_core::config_types::WindowsSandboxLevel::Disabled),
                 },
             })
-            .map_err(|err| invalid_request(format!("failed to prepare fs sandbox: {err}")))
+            .map_err(|err| invalid_request(format!("failed to prepare fs sandbox: {err}")))?;
+        request.sandbox_override = sandbox_context.sandbox_override;
+        Ok(request)
     }
 }
 
@@ -541,6 +547,8 @@ mod tests {
     use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
     use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
     use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
+    // 对位 codex 622e9e3696
+    use nova_exec_server_protocol_core::sandbox::SandboxOverride;
     use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
     use nova_exec_server_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
@@ -807,8 +815,10 @@ mod tests {
             FileSystemSpecialPath::Root,
             FileSystemAccessMode::Read,
         )]);
-        let sandbox_context =
+        // 对位 codex 622e9e3696：覆盖决策从上下文传播到执行请求
+        let mut sandbox_context =
             sandbox_context_with_cwd(&policy, PathUri::from_abs_path(&selected_cwd));
+        sandbox_context.sandbox_override = SandboxOverride::EscalatedSandboxWithRestrictions;
         #[cfg(windows)]
         let sandbox_context = crate::FileSystemSandboxContext {
             windows_sandbox_selection:
@@ -822,10 +832,15 @@ mod tests {
             .expect("sandbox command");
 
         assert_eq!(
-            (request.cwd, request.sandbox_policy_cwd),
+            (
+                request.cwd,
+                request.sandbox_policy_cwd,
+                request.sandbox_override
+            ),
             (
                 PathUri::from_abs_path(&root),
-                PathUri::from_abs_path(&selected_cwd)
+                PathUri::from_abs_path(&selected_cwd),
+                SandboxOverride::EscalatedSandboxWithRestrictions,
             )
         );
     }

@@ -77,6 +77,8 @@ impl SandboxedFileSystem {
             .sandbox_runner
             .prepare_command(sandbox)
             .map_err(map_sandbox_error)?;
+        // 对位 codex cba716c0f1：开门前跑完整性检查（纯观测，不影响执行）
+        crate::run_integrity_checks(&command).await;
         crate::sandboxed_file_open::open(command, path.clone(), mode)
             .await
             .map_err(map_sandbox_error)

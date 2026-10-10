@@ -22,6 +22,8 @@ use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::SandboxPolicy;
+// 对位 codex 622e9e3696：SandboxOverride 随行执行请求（观测用途，不改沙箱命令）
+use nova_exec_server_protocol_core::sandbox::SandboxOverride;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_path_uri::PathUri;
 use std::collections::HashMap;
@@ -112,8 +114,12 @@ pub struct SandboxCommand {
 /// Build this only at the execution boundary: in exec-server, or in its logical equivalent within
 /// app-server. Orchestration and transport code should retain [`PathUri`] values and defer
 /// conversion to native paths until this request is created.
-#[derive(Debug)]
+// 对位 codex c2eb1f42a0：Clone 供完整性 runner 把请求搬进阻塞线程
+#[derive(Clone, Debug)]
 pub struct SandboxExecRequest {
+    /// Controller-selected override, retained for observations without altering the sandbox command.
+    /// （对位 codex 622e9e3696）
+    pub sandbox_override: SandboxOverride,
     pub command: Vec<String>,
     pub cwd: PathUri,
     pub sandbox_policy_cwd: PathUri,
@@ -560,6 +566,9 @@ impl SandboxManager {
             });
 
         Ok(SandboxExecRequest {
+            // 对位 codex 622e9e3696：transform 统一默认 NoOverride；
+            // 控制面的实际选择由调用方在 transform 后覆写（见 exec-server 两侧接线）
+            sandbox_override: SandboxOverride::NoOverride,
             command: argv,
             cwd: command.cwd,
             sandbox_policy_cwd: sandbox_policy_cwd.clone(),

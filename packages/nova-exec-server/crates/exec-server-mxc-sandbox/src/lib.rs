@@ -99,6 +99,45 @@ pub fn is_available() -> bool {
     }
 }
 
+// 对位 codex 3342ee8c07：deny glob 扫描器常量转出口（供完整性清点引用）
+#[cfg(windows)]
+pub use nova_exec_server_windows_sandbox::GLOB_SCAN_PROGRAM;
+
+/// Resolve configured symbols and snapshot deny globs for policy inspection.
+/// Reuses MXC's resolution without adding native grants or protections.
+/// （对位 codex 3342ee8c07 `prepare_file_system_policy`）
+#[cfg(windows)]
+pub fn prepare_file_system_policy(
+    policy: nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy,
+    env: &HashMap<String, String>,
+    policy_cwd: &nova_exec_server_utils_absolute_path::AbsolutePathBuf,
+    command_cwd: &Path,
+) -> Result<nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy> {
+    use nova_exec_server_utils_path_uri::PathUri;
+
+    let env_entries = env
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    let mut policy = policy::materialize_temporary_paths(policy, &env_entries)?;
+    let denied = nova_exec_server_windows_sandbox::resolve_windows_deny_read_paths_in_environment(
+        &policy,
+        policy_cwd,
+        env,
+        command_cwd,
+    )
+    .map_err(anyhow::Error::msg)?;
+    policy = policy.with_expanded_deny_globs(denied);
+    if policy.has_full_disk_write_access() {
+        return Ok(policy);
+    }
+    let volumes = windows::volume_roots(policy_cwd.as_path(), command_cwd)?
+        .into_iter()
+        .map(PathUri::from_host_native_path)
+        .collect::<std::io::Result<Vec<_>>>()?;
+    Ok(policy::materialize_volume_roots(policy, &volumes)?)
+}
+
 /// Entry point dispatched before ordinary nova CLI parsing.
 pub fn run_main() -> ! {
     #[cfg(windows)]

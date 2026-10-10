@@ -79,4 +79,12 @@ pub use rpc::*;
 ///        分发下落表复查才拒、败者截断副作用已发生）；py 客户端权限内层
 ///        键名归正 snake_case（file_system/glob_scan_max_depth/
 ///        missing_path_behavior——py 侧曾误配 camelCase alias）。
-pub const PROTOCOL_VERSION: &str = "1.12";
+/// 1.13 = FileSystemSandboxContext 补可选 `sandboxOverride`（对位 codex
+///        622e9e3696）：控制面选定的沙箱覆盖决策（noOverride 默认 /
+///        escalatedSandboxWithRestrictions / bypassSandboxFirstAttempt）
+///        随行进 executor 作观测用途——从不作为放宽权限的授权，也不改变
+///        沙箱命令；缺省回退 noOverride，序列化省略该默认值（可选增量，
+///        minor 纪律，向后兼容）。同批落地沙箱完整性检查（对位 codex
+///        11da6b9edc/3342ee8c07/d9960e12bb/b5c37c35fd/c2eb1f42a0/cba716c0f1），
+///        纯观测遥测，不改变线上契约形状。
+pub const PROTOCOL_VERSION: &str = "1.13";

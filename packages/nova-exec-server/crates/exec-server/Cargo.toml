@@ -49,12 +49,19 @@ rustls = { workspace = true }
 
 arc-swap = { workspace = true }
 
+# 对位 codex d9960e12bb：bubblewrap 完整性后端（bundled bwrap 清点 + deny glob 快照）
+[target.'cfg(target_os = "linux")'.dependencies]
+nova-exec-server-linux-sandbox = { workspace = true }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 # 沙箱开门 fd 传递：SCM_RIGHTS 收发（net）与 CLOEXEC 设置（fs）
 rustix = { version = "1.1.4", features = ["net", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
+# 对位 codex 3342ee8c07：MXC 完整性后端（依赖清点 + 策略准备）
+nova-exec-server-mxc-sandbox = { workspace = true }
+which = { workspace = true }
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     # no_follow 原语：SECURITY_QUALITY_OF_SERVICE / SecurityIdentification

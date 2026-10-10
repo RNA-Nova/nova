@@ -4,6 +4,7 @@ use crate::metrics::MetricsError;
 use crate::metrics::Result;
 use crate::metrics::config::MetricsConfig;
 use crate::metrics::config::MetricsExporter;
+use crate::metrics::timer::Timer;
 use crate::metrics::validation::validate_metric_name;
 use crate::metrics::validation::validate_tag_key;
 use crate::metrics::validation::validate_tag_value;
@@ -496,6 +497,17 @@ impl MetricsClient {
             SECOND_DURATION_BOUNDARIES,
             tags,
         )
+    }
+
+    /// Start a drop-timing timer for a duration metric.
+    /// （对位 codex otel `MetricsClient::start_timer`——上游既有件，nova 侧随
+    /// c2eb1f42a0 的完整性遥测需求补镜像；otel crate 非本批主改面，仅限此方法）
+    pub fn start_timer(
+        &self,
+        name: &str,
+        tags: &[(&str, &str)],
+    ) -> std::result::Result<Timer, MetricsError> {
+        Ok(Timer::new(name, tags, self))
     }
 
     /// Collect a runtime metrics snapshot without shutting down the provider.

@@ -1,5 +1,6 @@
 use std::ffi::CStr;
 use std::ffi::CString;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
 use std::os::fd::AsRawFd;
@@ -28,7 +29,32 @@ pub(crate) fn launcher() -> Option<BundledBwrapLauncher> {
     let current_exe = std::env::current_exe().ok()?;
     // 与 codex 的差异：nova 未 fork codex-install-context（npm/standalone 安装
     // 布局探测），这里只保留"可执行文件相邻资源目录"的 legacy 查找路径。
-    find_legacy_for_exe(&current_exe).map(|program| BundledBwrapLauncher { program })
+    // 对位 codex d9960e12bb：bazel 候选与查找路径改经 find_program 共享，
+    // cwd/env 显式化（本进程语境即 Path::new(".") + 进程环境）。
+    find_program(&current_exe, Path::new("."), |key| {
+        std::env::var_os(key)
+    })
+    .map(|program| BundledBwrapLauncher { program })
+}
+
+/// Discover the bundled fallback for an explicit launcher and its environment.
+/// （对位 codex d9960e12bb `find_bundled_bwrap_for_exe`；InstallContext 未镜像，
+/// 只保留 legacy 候选路径——与 `launcher()` 的既有取舍一致）
+pub fn find_bundled_bwrap_for_exe(
+    exe: &Path,
+    command_cwd: &Path,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Option<AbsolutePathBuf> {
+    let exe = std::fs::canonicalize(exe).ok()?;
+    find_program(&exe, command_cwd, env)
+}
+
+fn find_program(
+    exe: &Path,
+    cwd: &Path,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Option<AbsolutePathBuf> {
+    find_legacy_for_exe(exe, bazel_bwrap::candidate(cwd, env))
 }
 
 impl BundledBwrapLauncher {
@@ -70,8 +96,8 @@ impl BundledBwrapLauncher {
     }
 }
 
-fn find_legacy_for_exe(exe: &Path) -> Option<AbsolutePathBuf> {
-    legacy_candidates_for_exe(exe)
+fn find_legacy_for_exe(exe: &Path, bazel_candidate: Option<PathBuf>) -> Option<AbsolutePathBuf> {
+    legacy_candidates_for_exe(exe, bazel_candidate)
         .into_iter()
         .find(|candidate| is_executable_file(candidate))
         .map(|path| {
@@ -84,7 +110,7 @@ fn find_legacy_for_exe(exe: &Path) -> Option<AbsolutePathBuf> {
         })
 }
 
-fn legacy_candidates_for_exe(exe: &Path) -> Vec<PathBuf> {
+fn legacy_candidates_for_exe(exe: &Path, bazel_candidate: Option<PathBuf>) -> Vec<PathBuf> {
     let Some(exe_dir) = exe.parent() else {
         return Vec::new();
     };
@@ -95,7 +121,8 @@ fn legacy_candidates_for_exe(exe: &Path) -> Vec<PathBuf> {
         candidates.push(package_target_dir.join("nova-resources").join("bwrap"));
     }
     candidates.push(exe_dir.join("bwrap"));
-    if let Some(path) = bazel_bwrap::candidate() {
+    // 对位 codex d9960e12bb：bazel 候选由调用方按显式 cwd/env 算出后传入
+    if let Some(path) = bazel_candidate {
         candidates.push(path);
     }
     candidates
@@ -198,7 +225,7 @@ mod tests {
         write_executable(&expected_bwrap);
 
         assert_eq!(
-            find_legacy_for_exe(&exe),
+            find_legacy_for_exe(&exe, /*bazel_candidate*/ None),
             Some(AbsolutePathBuf::from_absolute_path(&expected_bwrap).expect("absolute"))
         );
     }
@@ -213,7 +240,7 @@ mod tests {
         write_executable(&expected_bwrap);
 
         assert_eq!(
-            find_legacy_for_exe(&exe),
+            find_legacy_for_exe(&exe, /*bazel_candidate*/ None),
             Some(AbsolutePathBuf::from_absolute_path(&expected_bwrap).expect("absolute"))
         );
     }
@@ -227,7 +254,7 @@ mod tests {
         write_executable(&expected_bwrap);
 
         assert_eq!(
-            find_legacy_for_exe(&exe),
+            find_legacy_for_exe(&exe, /*bazel_candidate*/ None),
             Some(AbsolutePathBuf::from_absolute_path(&expected_bwrap).expect("absolute"))
         );
     }

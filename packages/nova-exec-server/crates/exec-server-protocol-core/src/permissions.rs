@@ -1842,6 +1842,20 @@ impl FileSystemSandboxPolicy {
         patterns
     }
 
+    /// Replace deny globs with a backend's concrete snapshot, preserving other entries.
+    /// An empty snapshot still removes the original patterns.
+    /// （对位 codex 3342ee8c07 `with_expanded_deny_globs`）
+    pub fn with_expanded_deny_globs(mut self, paths: Vec<AbsolutePathBuf>) -> Self {
+        self.entries
+            .retain(|entry| !matches!(entry.path, FileSystemPath::GlobPattern { .. }));
+        self.entries.extend(
+            paths
+                .into_iter()
+                .map(|path| FileSystemSandboxEntry::new(path.into(), FileSystemAccessMode::Deny)),
+        );
+        self
+    }
+
     pub fn to_legacy_sandbox_policy(
         &self,
         network_policy: NetworkSandboxPolicy,

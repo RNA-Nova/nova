@@ -9,6 +9,9 @@ use std::time::Duration;
 use nova_exec_server_protocol_core::config_types::WindowsSandboxLevel;
 #[cfg(windows)]
 use nova_exec_server_protocol_core::models::PermissionProfile;
+// 对位 codex 622e9e3696：SandboxExecRequest 新增覆盖字段
+#[cfg(windows)]
+use nova_exec_server_protocol_core::sandbox::SandboxOverride;
 #[cfg(windows)]
 use nova_exec_server_sandboxing::SandboxExecRequest;
 #[cfg(windows)]
@@ -250,6 +253,8 @@ fn powershell_command(script: &str, path: &Path) -> anyhow::Result<SandboxExecRe
     let cwd = PathUri::from_host_native_path(std::env::current_dir()?)?;
 
     Ok(SandboxExecRequest {
+        // 对位 codex 622e9e3696：字面量补覆盖字段（默认 NoOverride）
+        sandbox_override: SandboxOverride::NoOverride,
         command: vec![
             powershell.to_string_lossy().into_owned(),
             "-NoProfile".to_string(),

@@ -1,4 +1,4 @@
-# nova-exec-server 线上协议（v1.12）
+# nova-exec-server 线上协议（v1.13）
 
 > 本文件是 nova-exec-server 服务端与客户端之间的**唯一契约**。任何语言照本文档
 > 可实现客户端。协议语义只覆盖**执行**（进程/文件系统/PTY/环境/HTTP 代发），
@@ -191,6 +191,10 @@ sandbox`（同 scopeId 不同 shell 不命中——key 含 shell）。`scopeId` 
 - `userHomeDir?`/`temporaryDirectories?`：执行端家目录/临时目录（解析 `~`
   相对与 `:tmpdir` 条目）；
 - `windowsSandboxLevel`/`windowsSandboxProxySettingsMode?`/`useLegacyLandlock`。
+- `sandboxOverride?`（v1.13 起，对位 codex 622e9e3696）：控制面选定的沙箱
+  覆盖决策（`noOverride` 默认 / `escalatedSandboxWithRestrictions` /
+  `bypassSandboxFirstAttempt`），仅随行进 executor 作观测用途——不放宽权限、
+  不改变沙箱命令；缺省 = `noOverride`，为默认值时线上省略（additive 增量）。
 
 **读写路由**（v1.10，对位 codex a4ee536f01）：全部 fs 操作按读/写**各自**权限档
 分流——读类操作（`fs/readFile`/`fs/readStream`/`fs/getMetadata`/`fs/readDirectory`/
@@ -262,6 +266,12 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 
 完整版本注释以 `crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION`
 上方注释为准；本文件只记当前版本面的关键增量。
+
+- **v1.13**（sandboxOverride 随行，对位 codex 622e9e3696）：
+  `FileSystemSandboxContext` 新增可选 `sandboxOverride`——控制面选定的沙箱
+  覆盖决策（三态 camelCase），缺省 `noOverride` 且为默认值时线上省略，
+  executor 仅作观测随行（沙箱完整性检查的跳过判定依据之一），不放宽权限、
+  不改变沙箱命令（additive 增量，向后兼容）。
 
 - **v1.9**（可写文件流落地，对位 codex 10/2 启用三提交）：
   - `fs/open` 支持 `mode="replace"`（创建/截断写打开，写权限档分流执法——

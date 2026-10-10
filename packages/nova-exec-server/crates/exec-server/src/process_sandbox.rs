@@ -291,6 +291,10 @@ pub(crate) async fn prepare_exec_request(
         sandbox_manager.transform_for_direct_spawn(transform_request)
     }
     .map_err(|err| invalid_params(format!("failed to prepare process sandbox: {err}")))?;
+    // 对位 codex 622e9e3696：控制面选定的覆盖决策随行（观测用途，不改沙箱命令）
+    request.sandbox_override = sandbox_context.sandbox_override;
+    // 对位 codex cba716c0f1：进程启动前跑完整性检查（纯观测，不影响执行）
+    crate::run_integrity_checks(&request).await;
     let windows_sandbox = if sandbox == SandboxType::WindowsRestrictedToken {
         let windows_sandbox_level = windows_sandbox_level.ok_or_else(|| {
             invalid_params("restricted token sandbox requires a sandbox level".to_string())

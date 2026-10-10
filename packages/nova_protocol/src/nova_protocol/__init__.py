@@ -413,6 +413,7 @@ from .exec_server_wire import (
     ProcessWriteResponse,
     RemoteNetworkProxyConfig,
     RemoteNetworkProxyLaunchConfig,
+    SandboxOverride,
     ShellInfo,
     ShellSnapshotRequest,
     WalkEntry,

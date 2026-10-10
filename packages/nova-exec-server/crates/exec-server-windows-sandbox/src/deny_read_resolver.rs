@@ -5,14 +5,22 @@ use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
 use nova_exec_server_protocol_core::permissions::ReadDenyMatcher;
 use nova_exec_server_protocol_core::permissions::windows_deny_read_glob_scan;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
+// 对位 codex 3342ee8c07：扫描器可在显式命令环境/工作目录下运行（含空环境）
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[path = "deny_read_walker.rs"]
 mod walker;
 
 use walker::DirectoryScanMode;
 use walker::collect_existing_glob_directory_matches;
+
+/// External scanner used by deny-glob expansion and its dependency inventory.
+/// （对位 codex 3342ee8c07 `GLOB_SCAN_PROGRAM`）
+pub const GLOB_SCAN_PROGRAM: &str = "rg";
 
 #[derive(Debug, Eq, PartialEq)]
 struct GlobScanPlan {
@@ -31,6 +39,28 @@ struct GlobScanPlan {
 pub fn resolve_windows_deny_read_paths(
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
     cwd: &AbsolutePathBuf,
+) -> Result<Vec<AbsolutePathBuf>, String> {
+    resolve_deny_read_paths(file_system_sandbox_policy, cwd, |_| {})
+}
+
+/// Resolve deny paths with the launcher's scanner in an explicit command environment.
+/// The supplied environment replaces inheritance, including when it is empty.
+/// （对位 codex 3342ee8c07）
+pub fn resolve_windows_deny_read_paths_in_environment(
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    cwd: &AbsolutePathBuf,
+    env: &HashMap<String, String>,
+    command_cwd: &Path,
+) -> Result<Vec<AbsolutePathBuf>, String> {
+    resolve_deny_read_paths(file_system_sandbox_policy, cwd, |command| {
+        command.env_clear().envs(env).current_dir(command_cwd);
+    })
+}
+
+fn resolve_deny_read_paths(
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    cwd: &AbsolutePathBuf,
+    configure: impl Fn(&mut Command),
 ) -> Result<Vec<AbsolutePathBuf>, String> {
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
@@ -71,7 +101,7 @@ pub fn resolve_windows_deny_read_paths(
             continue;
         }
 
-        let directory_scan_mode = if let Some(file_paths) = ripgrep_files(&scan_plan)? {
+        let directory_scan_mode = if let Some(file_paths) = ripgrep_files(&scan_plan, &configure)? {
             for path in file_paths {
                 if matcher.is_read_denied(&path) {
                     push_absolute_path(&mut paths, &mut seen, path)?;
@@ -98,8 +128,14 @@ pub fn resolve_windows_deny_read_paths(
     Ok(paths)
 }
 
-fn ripgrep_files(scan_plan: &GlobScanPlan) -> Result<Option<Vec<PathBuf>>, String> {
-    let mut command = crate::background_command::background_command("rg");
+fn ripgrep_files(
+    scan_plan: &GlobScanPlan,
+    configure: &impl Fn(&mut Command),
+) -> Result<Option<Vec<PathBuf>>, String> {
+    // 对位 codex 3342ee8c07：扫描程序名走 GLOB_SCAN_PROGRAM 常量，
+    // 调用方先配置显式环境/工作目录再补参
+    let mut command = crate::background_command::background_command(GLOB_SCAN_PROGRAM);
+    configure(&mut command);
     command
         .arg("--files")
         .arg("--hidden")
@@ -512,11 +548,15 @@ mod tests {
             tmp.path().display()
         ))]);
 
-        if let Some(paths) = super::ripgrep_files(&GlobScanPlan {
-            root: tmp.path().to_path_buf(),
-            max_depth: None,
-            globs: vec!["**/*.env".to_string()],
-        })
+        if let Some(paths) = super::ripgrep_files(
+            &GlobScanPlan {
+                root: tmp.path().to_path_buf(),
+                max_depth: None,
+                globs: vec!["**/*.env".to_string()],
+            },
+            // 对位 codex 3342ee8c07：默认路径不配置环境
+            &|_| {},
+        )
         .expect("case-insensitive ripgrep scan")
         {
             assert!(paths.contains(&uppercase_env));

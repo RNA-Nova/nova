@@ -20,6 +20,8 @@ use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicyContext;
 use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::SandboxPolicy;
+// 对位 codex 622e9e3696：SandboxOverride 进入沙箱上下文（观测随行，不放宽权限）
+use nova_exec_server_protocol_core::sandbox::SandboxOverride;
 use nova_exec_server_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde::Serialize;
@@ -370,6 +372,10 @@ pub struct FileSystemSandboxContext {
     /// Serializes paths as executor file URIs instead of the profile's default native paths.
     #[serde(with = "exec_permission_profile_serde")]
     pub permissions: PermissionProfile,
+    /// Controller-selected override for observations, never an authorization to widen permissions.
+    /// （对位 codex 622e9e3696：缺省回退 NoOverride，线上省略该默认值。）
+    #[serde(default, skip_serializing_if = "SandboxOverride::is_no_override")]
+    pub sandbox_override: SandboxOverride,
     /// Working directory on the selected executor used to interpret sandbox permissions.
     /// Required even for absolute permissions; a process may use a different working directory.
     pub cwd: PathUri,
@@ -417,6 +423,8 @@ impl FileSystemSandboxContext {
         Self {
             workspace_roots: vec![cwd.clone()],
             permissions,
+            // 对位 codex 622e9e3696：构造器默认 NoOverride
+            sandbox_override: SandboxOverride::NoOverride,
             cwd,
             user_home_dir: None,
             temporary_directories: None,
@@ -497,6 +505,10 @@ impl FileSystemSandboxContext {
 #[serde(rename_all = "camelCase")]
 pub struct WireFileSystemSandboxContext {
     permissions: ExecPermissionProfile,
+    // 对位 codex 622e9e3696：sandboxOverride 加在线上顶层（非 policyContext），
+    // 缺省回退 NoOverride、序列化省略默认值以兼容既有请求
+    #[serde(default, skip_serializing_if = "SandboxOverride::is_no_override")]
+    sandbox_override: SandboxOverride,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     policy_context: Option<WireFileSystemPolicyContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -525,6 +537,7 @@ impl From<FileSystemSandboxContext> for WireFileSystemSandboxContext {
     fn from(sandbox: FileSystemSandboxContext) -> Self {
         let FileSystemSandboxContext {
             permissions,
+            sandbox_override,
             cwd,
             workspace_roots,
             user_home_dir,
@@ -536,6 +549,7 @@ impl From<FileSystemSandboxContext> for WireFileSystemSandboxContext {
         let permissions = ExecPermissionProfile::from(permissions);
         Self {
             permissions,
+            sandbox_override,
             policy_context: Some(WireFileSystemPolicyContext {
                 cwd: Some(cwd),
                 workspace_roots,
@@ -580,6 +594,8 @@ impl WireFileSystemSandboxContext {
     pub fn into_context(self, cwd: PathUri) -> FileSystemSandboxContext {
         FileSystemSandboxContext {
             permissions: self.permissions.into(),
+            // 对位 codex 622e9e3696：覆盖决策随行进域模型
+            sandbox_override: self.sandbox_override,
             cwd,
             workspace_roots: self
                 .policy_context
@@ -932,6 +948,7 @@ mod tests {
                 },
                 network: NetworkSandboxPolicy::Restricted,
             },
+            sandbox_override: SandboxOverride::NoOverride,
             policy_context: None,
             user_home_dir: None,
             temporary_directories: None,
@@ -1111,6 +1128,7 @@ mod tests {
                 },
                 cwd: resolved.clone(),
                 workspace_roots: vec![root_a, root_b],
+                sandbox_override: SandboxOverride::NoOverride,
                 user_home_dir: Some(home),
                 temporary_directories: Some(vec![tmp]),
                 windows_sandbox_selection: WindowsSandboxSelection::Mxc,

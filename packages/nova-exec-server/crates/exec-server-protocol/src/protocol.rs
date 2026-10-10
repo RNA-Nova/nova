@@ -1278,6 +1278,8 @@ mod tests {
     use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
     use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
     use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
+    // 对位 codex 622e9e3696
+    use nova_exec_server_protocol_core::sandbox::SandboxOverride;
     use nova_exec_server_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
@@ -1825,6 +1827,8 @@ mod tests {
         let workspace = PathUri::parse("file:///workspace/other").expect("selected workspace");
         let path = cwd.join("note.txt").expect("read path");
         let sandbox = FileSystemSandboxContext {
+            // 对位 codex 622e9e3696：覆盖字段随 fs 线上参数往返
+            sandbox_override: SandboxOverride::EscalatedSandboxWithRestrictions,
             workspace_roots: vec![workspace],
             ..FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled, cwd)
         };
@@ -2297,6 +2301,7 @@ mod tests {
         let expected_sandbox =
             |cwd: PathUri, workspace_roots: Vec<PathUri>| FileSystemSandboxContext {
                 permissions: expected_permissions.clone(),
+                sandbox_override: SandboxOverride::NoOverride,
                 cwd,
                 workspace_roots,
                 user_home_dir: None,
@@ -2397,5 +2402,37 @@ mod tests {
         let restored: WireExecParams =
             serde_json::from_value(wire).expect("deserialize wire exec params");
         assert_eq!(ExecParams::from(restored), params);
+
+        // 对位 codex 622e9e3696：sandboxOverride 三变体线上往返 + 无字段
+        // 反序列化回退 NoOverride（线上省略默认值，兼容既有请求）。
+        for sandbox_override in [
+            SandboxOverride::NoOverride,
+            SandboxOverride::EscalatedSandboxWithRestrictions,
+            SandboxOverride::BypassSandboxFirstAttempt,
+        ] {
+            let mut params = params.clone();
+            let mut sandbox = FileSystemSandboxContext::from_permission_profile(
+                PermissionProfile::read_only(),
+                params.cwd.clone(),
+            );
+            sandbox.sandbox_override = sandbox_override;
+            params.sandbox = Some(sandbox);
+            let mut json = serde_json::to_value(WireExecParams::from(params.clone()))
+                .expect("serialize sandboxed exec");
+            assert_eq!(
+                json["sandbox"].get("sandboxOverride").is_none(),
+                sandbox_override.is_no_override(),
+            );
+            let wire: WireExecParams = serde_json::from_value(json.clone()).expect("wire exec");
+            assert_eq!(ExecParams::from(wire), params);
+
+            json["sandbox"]
+                .as_object_mut()
+                .unwrap()
+                .remove("sandboxOverride");
+            params.sandbox.as_mut().unwrap().sandbox_override = SandboxOverride::NoOverride;
+            let legacy: WireExecParams = serde_json::from_value(json).expect("legacy wire exec");
+            assert_eq!(ExecParams::from(legacy), params);
+        }
     }
 }

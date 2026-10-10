@@ -28,7 +28,8 @@ from pydantic import (
 
 #: 客户端协议版本（与服务端 InitializeResponse.protocol_version 做 major 匹配；
 #: 跟随服务端 crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION）
-PROTOCOL_VERSION = "1.12"
+#: v1.13 = FileSystemSandboxContext 补可选 sandboxOverride（对位 codex 622e9e3696）
+PROTOCOL_VERSION = "1.13"
 
 INITIALIZE = "initialize"
 INITIALIZED = "initialized"
@@ -794,6 +795,15 @@ class WindowsSandboxProxySettingsMode(str, Enum):
     PRESERVE = "preserve"
 
 
+class SandboxOverride(str, Enum):
+    """sandboxOverride 线上枚举（v1.13，对位 codex 622e9e3696 protocol/sandbox.rs：
+    控制面选定的沙箱覆盖决策，camelCase 值；仅观测随行，不放宽权限）"""
+
+    NO_OVERRIDE = "noOverride"
+    ESCALATED_SANDBOX_WITH_RESTRICTIONS = "escalatedSandboxWithRestrictions"
+    BYPASS_SANDBOX_FIRST_ATTEMPT = "bypassSandboxFirstAttempt"
+
+
 class ExecFileSystemSpecialPath(BaseModel):
     """沙箱符号路径（wire：tag "kind"，snake_case——对位 executor-protocol-core
     FileSystemSpecialPath；执法时由服务端按 cwd 解析，不进套餐展开的具体路径）"""
@@ -911,6 +921,13 @@ class FileSystemSandboxContext(BaseModel):
     回退为自身 cwd（人机工学，保留）。"""
 
     permissions: ExecPermissionProfile = Field(default_factory=ExecPermissionProfile)
+    #: 控制面选定的沙箱覆盖决策（v1.13，对位 codex 622e9e3696 线上顶层字段——
+    #: 不进 policyContext）。None ≡ RS 缺省 NoOverride：出货路径 exclude_none
+    #: 负责省略，对位 RS 的 skip_serializing_if = "SandboxOverride::is_no_override"；
+    #: 显式 NO_OVERRIDE 与 None 在线上同义（服务端反序列化缺省即 NoOverride）。
+    sandbox_override: SandboxOverride | None = Field(
+        default=None, alias="sandboxOverride"
+    )
     #: 策略目录（cwd + workspaceRoots）。省略 = executor 入口回退自身 cwd
     policy_context: WireFileSystemPolicyContext | None = Field(
         default=None, alias="policyContext"

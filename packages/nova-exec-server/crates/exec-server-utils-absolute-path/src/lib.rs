@@ -27,8 +27,10 @@ pub struct AbsolutePathBuf(PathBuf);
 impl AbsolutePathBuf {
     fn maybe_expand_home_directory(path: &Path) -> PathBuf {
         if let Some(path_str) = path.to_str()
-            && let Some(home) = home_dir()
             && let Some(rest) = path_str.strip_prefix('~')
+            // 对位 codex f4936d7aba：家目录优先读线程局部覆盖
+            // （AbsolutePathBufGuard::with_home_directory），缺省回退账户家目录
+            && let Some(home) = AbsolutePathBufGuard::home_directory()
         {
             if rest.is_empty() {
                 return home;
@@ -332,6 +334,9 @@ impl TryFrom<String> for AbsolutePathBuf {
 
 thread_local! {
     static ABSOLUTE_PATH_BASE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    // 对位 codex f4936d7aba 引入的家目录线程局部覆盖（d9960e12bb 的 bubblewrap
+    // 完整性后端依赖它让 `~` 按命令 HOME 展开）。
+    static ABSOLUTE_PATH_HOME: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 /// Ensure this guard is held while deserializing `AbsolutePathBuf` values to
@@ -341,11 +346,28 @@ thread_local! {
 pub struct AbsolutePathBufGuard;
 
 impl AbsolutePathBufGuard {
+    /// Reads the effective native home, including the thread-local override.
+    /// （对位 codex `AbsolutePathBufGuard::home_directory`）
+    pub fn home_directory() -> Option<PathBuf> {
+        ABSOLUTE_PATH_HOME
+            .with(|cell| cell.borrow().clone())
+            .or_else(home_dir)
+    }
+
     pub fn new(base_path: &Path) -> Self {
         ABSOLUTE_PATH_BASE.with(|cell| {
             *cell.borrow_mut() = Some(base_path.to_path_buf());
         });
         Self
+    }
+
+    /// Runs `operation` with `~` expansion pinned to the supplied home directory.
+    /// （对位 codex `AbsolutePathBufGuard::with_home_directory`）
+    pub fn with_home_directory<T>(home_directory: &Path, operation: impl FnOnce() -> T) -> T {
+        let previous_home =
+            ABSOLUTE_PATH_HOME.with(|cell| cell.replace(Some(home_directory.to_path_buf())));
+        let _guard = HomeDirectoryGuard(previous_home);
+        operation()
     }
 }
 
@@ -353,6 +375,16 @@ impl Drop for AbsolutePathBufGuard {
     fn drop(&mut self) {
         ABSOLUTE_PATH_BASE.with(|cell| {
             *cell.borrow_mut() = None;
+        });
+    }
+}
+
+struct HomeDirectoryGuard(Option<PathBuf>);
+
+impl Drop for HomeDirectoryGuard {
+    fn drop(&mut self) {
+        ABSOLUTE_PATH_HOME.with(|cell| {
+            *cell.borrow_mut() = self.0.take();
         });
     }
 }

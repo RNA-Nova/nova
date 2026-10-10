@@ -180,3 +180,37 @@ def test_invalid_profile_type_rejected():
         ExecFileSystemPath(type="bogus")
     with pytest.raises(ValidationError):
         ExecPermissionProfile(type="bogus")
+
+
+def test_sandbox_override_wire_round_trip():
+    """sandboxOverride 三态线上往返 + 缺省省略（v1.13，对位 codex 622e9e3696 与
+    RS protocol 测试语义）：默认/None 不上线；三态 camelCase 值序列化后可回读。"""
+    from nova_protocol import SandboxOverride
+
+    ctx = FileSystemSandboxContext.read_only("/tmp/proj")
+    # 缺省（None ≡ RS NoOverride）→ exclude_none 出货路径省略
+    data = ctx.model_dump(by_alias=True, exclude_none=True)
+    assert "sandboxOverride" not in data
+    # 显式 NoOverride 与省略同义（RS 端缺省回退 NoOverride）
+    ctx_none = FileSystemSandboxContext(sandboxOverride=SandboxOverride.NO_OVERRIDE)
+    assert ctx_none.sandbox_override == SandboxOverride.NO_OVERRIDE
+    for override in SandboxOverride:
+        ctx = FileSystemSandboxContext(sandboxOverride=override)
+        data = ctx.model_dump(by_alias=True, exclude_none=True)
+        assert data["sandboxOverride"] == override.value
+        restored = FileSystemSandboxContext.model_validate(data)
+        assert restored.sandbox_override == override
+    # 无字段反序列化回退（legacy 请求无 sandboxOverride）→ None（≡ RS NoOverride）
+    legacy = FileSystemSandboxContext.model_validate(
+        FileSystemSandboxContext.read_only("/tmp/proj").model_dump(
+            by_alias=True, exclude_none=True
+        )
+    )
+    assert legacy.sandbox_override is None
+    # RS 线上 camelCase 值可被读回
+    escalated = FileSystemSandboxContext.model_validate(
+        {"sandboxOverride": "escalatedSandboxWithRestrictions"}
+    )
+    assert escalated.sandbox_override == (
+        SandboxOverride.ESCALATED_SANDBOX_WITH_RESTRICTIONS
+    )

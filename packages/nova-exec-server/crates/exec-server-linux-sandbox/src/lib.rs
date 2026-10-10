@@ -30,6 +30,14 @@ mod proxy_lifecycle;
 #[cfg(target_os = "linux")]
 mod proxy_routing;
 
+// 对位 codex d9960e12bb：完整性后端的依赖清点/策略准备复用件
+#[cfg(target_os = "linux")]
+pub use bundled_bwrap::find_bundled_bwrap_for_exe;
+#[cfg(target_os = "linux")]
+pub use bwrap::GLOB_SCAN_PROGRAM;
+#[cfg(target_os = "linux")]
+pub use bwrap::expand_unreadable_globs_in_environment;
+
 /// Exit status returned when bundled bubblewrap fails digest verification.
 #[cfg(target_os = "linux")]
 pub const BUNDLED_BWRAP_DIGEST_VERIFICATION_FAILURE_EXIT_CODE: i32 = 8;

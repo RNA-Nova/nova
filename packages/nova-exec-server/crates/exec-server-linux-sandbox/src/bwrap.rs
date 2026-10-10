@@ -11,6 +11,7 @@
 //! - bubblewrap used to construct the filesystem view before exec.
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
@@ -33,6 +34,7 @@ use nova_exec_server_protocol_core::protocol::FileSystemPath;
 use nova_exec_server_protocol_core::protocol::FileSystemSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::protocol::WritableRoot;
+use nova_exec_server_sandboxing::find_executable_in_search_paths;
 use nova_exec_server_sandboxing::find_pre_sandbox_executable_in_path;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use globset::GlobBuilder;
@@ -54,6 +56,10 @@ const LINUX_PLATFORM_DEFAULT_READ_ROOTS: &[&str] = &[
     "/nix/store",
     "/run/current-system/sw",
 ];
+
+/// External scanner used by deny-glob expansion and its dependency inventory.
+/// （对位 codex d9960e12bb `GLOB_SCAN_PROGRAM`）
+pub const GLOB_SCAN_PROGRAM: &str = "rg";
 
 const MAX_UNREADABLE_GLOB_MATCHES: usize = 8192;
 
@@ -454,8 +460,17 @@ fn create_filesystem_args(
         expand_unreadable_globs_with_ripgrep(
             &unreadable_globs,
             cwd,
-            file_system_sandbox_policy,
+            // 对位 codex d9960e12bb：扫描器解析闭包内联（默认路径走策略选定的
+            // 受保护解析），命令配置无额外覆盖
+            || {
+                find_pre_sandbox_executable_in_path(
+                    GLOB_SCAN_PROGRAM,
+                    file_system_sandbox_policy,
+                    cwd,
+                )
+            },
             glob_scan_max_depth,
+            |_| {},
         )?
         .into_iter()
         .map(AbsolutePathBuf::into_path_buf),
@@ -729,19 +744,52 @@ fn append_metadata_path_masks_for_writable_root(
     }
 }
 
-// 对位 codex ccde2fc8b7：deny glob 展开发生在沙箱构建前，`rg` 必须经
-// `find_pre_sandbox_executable_in_path` 按策略选定；无合适候选回退内置 glob walker。
-fn expand_unreadable_globs_with_ripgrep(
+/// Expand deny globs with the launcher's scanner in an explicit command environment.
+/// The supplied environment replaces inheritance, including when it is empty.
+/// （对位 codex d9960e12bb `expand_unreadable_globs_in_environment`：
+/// bubblewrap 完整性后端按命令显式环境做 deny glob 快照）
+pub fn expand_unreadable_globs_in_environment(
     patterns: &[String],
     cwd: &Path,
     file_system_policy: &FileSystemSandboxPolicy,
     max_depth: Option<usize>,
+    env: &HashMap<String, String>,
+    command_cwd: &Path,
+) -> Result<Vec<AbsolutePathBuf>> {
+    expand_unreadable_globs_with_ripgrep(
+        patterns,
+        cwd,
+        || {
+            find_executable_in_search_paths(
+                GLOB_SCAN_PROGRAM,
+                std::env::split_paths(env.get("PATH")?),
+                command_cwd,
+                file_system_policy,
+                cwd,
+            )
+        },
+        max_depth,
+        |command| {
+            command.env_clear().envs(env).current_dir(command_cwd);
+        },
+    )
+}
+
+// 对位 codex ccde2fc8b7：deny glob 展开发生在沙箱构建前，`rg` 必须经
+// `find_pre_sandbox_executable_in_path` 按策略选定；无合适候选回退内置 glob walker。
+// d9960e12bb 起扫描器解析与命令配置改为调用方注入（显式环境变体共用本体）。
+fn expand_unreadable_globs_with_ripgrep(
+    patterns: &[String],
+    cwd: &Path,
+    resolve_scanner: impl FnOnce() -> Option<PathBuf>,
+    max_depth: Option<usize>,
+    configure_command: impl Fn(&mut Command),
 ) -> Result<Vec<AbsolutePathBuf>> {
     if patterns.is_empty() || max_depth == Some(0) {
         return Ok(Vec::new());
     }
 
-    let rg_path = find_pre_sandbox_executable_in_path("rg", file_system_policy, cwd);
+    let rg_path = resolve_scanner();
 
     // Group each pattern by the static path prefix before its first glob
     // metacharacter. That keeps scans narrow, avoids searching from `/`, and
@@ -767,7 +815,13 @@ fn expand_unreadable_globs_with_ripgrep(
     let mut expanded_paths = BTreeSet::new();
     for (search_root, globs) in patterns_by_search_root {
         let paths = match &rg_path {
-            Some(rg_path) => ripgrep_files(rg_path, search_root.as_path(), &globs, max_depth)?,
+            Some(rg_path) => ripgrep_files(
+                rg_path,
+                search_root.as_path(),
+                &globs,
+                max_depth,
+                &configure_command,
+            )?,
             None => glob_files(search_root.as_path(), &globs, max_depth)?,
         };
         for path in paths {
@@ -852,16 +906,19 @@ fn escape_unclosed_glob_classes(glob: &str) -> String {
 }
 
 // 对位 codex ccde2fc8b7：`rg_path` 首参（替代直接 `Command::new("rg")`）。
+// 对位 codex d9960e12bb：命令环境/工作目录由调用方 configure_command 注入。
 fn ripgrep_files(
     rg_path: &Path,
     search_root: &Path,
     globs: &[String],
     max_depth: Option<usize>,
+    configure_command: &impl Fn(&mut Command),
 ) -> Result<Vec<AbsolutePathBuf>> {
+    let mut command = Command::new(rg_path);
+    configure_command(&mut command);
     // Use `rg --files` rather than shell expansion so dotfiles and ignored files
     // are still considered. A status 1 with no stderr is ripgrep's "no matches"
     // case, not a sandbox construction error.
-    let mut command = Command::new(rg_path);
     command
         // 对位 codex ac9b5b8380：用户 ripgrep 配置（如 --quiet）不得抑制 deny 掩码的文件列表。
         .arg("--no-config")
@@ -2762,7 +2819,8 @@ mod tests {
     }
 
     fn ripgrep_available() -> bool {
-        Command::new("rg")
+        // 对位 codex d9960e12bb：程序名走 GLOB_SCAN_PROGRAM 常量
+        Command::new(GLOB_SCAN_PROGRAM)
             .arg("--version")
             .output()
             .is_ok_and(|output| output.status.success())

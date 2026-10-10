@@ -4,6 +4,8 @@ mod denial;
 pub mod landlock;
 mod manager;
 pub mod policy_transforms;
+// 对位 codex 11da6b9edc：沙箱完整性检查件（FileContentsChecker 等）
+mod sandbox_integrity;
 #[cfg(target_os = "macos")]
 pub mod seatbelt;
 mod spawn;
@@ -14,6 +16,8 @@ mod windows;
 #[cfg(windows)]
 mod windows_mxc;
 
+#[cfg(target_os = "linux")]
+pub use bwrap::find_executable_in_search_paths;
 #[cfg(target_os = "linux")]
 pub use bwrap::find_pre_sandbox_executable_in_path;
 #[cfg(target_os = "linux")]
@@ -36,6 +40,10 @@ pub use manager::SandboxablePreference;
 pub use manager::compatibility_sandbox_policy_for_permission_profile;
 pub use manager::get_platform_sandbox;
 pub use manager::with_managed_mitm_ca_readable_root;
+// 对位 codex 11da6b9edc
+pub use sandbox_integrity::FileContentsChecker;
+pub use sandbox_integrity::IntegrityFinding;
+pub use sandbox_integrity::IntegrityFindingDetails;
 pub use nova_exec_server_protocol_core::config_types::WindowsSandboxProxySettingsMode;
 pub use spawn::SpawnRequest;
 pub use spawn::WindowsSandboxSpawnRequest;

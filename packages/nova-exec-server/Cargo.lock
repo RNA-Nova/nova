@@ -2191,6 +2191,7 @@ dependencies = [
  "nova-exec-server-file-system",
  "nova-exec-server-http-client",
  "nova-exec-server-linux-sandbox",
+ "nova-exec-server-mxc-sandbox",
  "nova-exec-server-network-proxy",
  "nova-exec-server-otel",
  "nova-exec-server-protocol",
@@ -2225,6 +2226,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "which",
  "windows-sys 0.52.0",
  "wiremock",
 ]
