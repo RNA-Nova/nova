@@ -58,12 +58,14 @@ filter = 'package(nova-exec-server) & test(noisy_failing_helper_preserves_exit_s
 retries = 3
 
 [[profile.default.overrides]]
-# ConPTY Ctrl-C 后 PowerShell 终止前台 ping 并重建提示符，在共享 runner 上
-# 超过该用例的 10s 等待预算（绿跑 38035034011 里也是首试红、重试绿）。
-# 负载敏感，retries 吸收。
+# ConPTY Ctrl-C 后 PowerShell 终止前台 ping 并重建提示符，GHA 共享 runner
+# 高峰时段可压过用例等待预算（用例内已提到 60s；run 38091815554 独占槽位
+# 下 10s 四连红，低谷 run 38035034011 同镜像同码可绿）。retries 吸收残余
+# 波动；slow-timeout 终止线放宽到 120s，给 60s 内部等待+启动开销留头间。
 platform = 'cfg(windows)'
 filter = 'package(nova-exec-server-utils-pty) & test(conpty_ctrl_c_interrupts_powershell_foreground_child)'
 retries = 3
+slow-timeout = { period = "60s", terminate-after = 2 }
 
 [[profile.default.overrides]]
 # ConPTY 用例是真实时交互（Ctrl-C→conhost 处理→PSReadLine 重建提示符），
