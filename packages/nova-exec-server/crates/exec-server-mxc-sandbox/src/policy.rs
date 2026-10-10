@@ -12,6 +12,8 @@ use nova_exec_server_protocol_core::protocol::FileSystemSpecialPath;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_path_uri::PathUri;
 use nova_exec_server_windows_sandbox::resolve_windows_deny_read_paths;
+// 对位 codex 1c7c43cd85：wxc_common 改由 mxc-sdk 1.0.0 re-export。
+use mxc_sdk::mxc_common as wxc_common;
 use thiserror::Error;
 use wxc_common::cmdline::CommandLineContext;
 use wxc_common::cmdline::CommandLineError;
@@ -276,7 +278,9 @@ pub(super) fn build_request(
             .to_str()
             .ok_or(PolicyError::NonUnicodeCommandCwd)?
             .to_owned(),
-        env,
+        // 对位 codex 1c7c43cd85：空 env 映射为 None 以保留 Windows 用户档案默认；
+        // 非空 env 保持显式传递（SDK 1.0.0 要求含 SystemRoot 与 LOCALAPPDATA）。
+        env: (!env.is_empty()).then_some(env),
         policy: ContainerPolicy {
             capabilities: vec!["registryRead".to_owned()],
             readwrite_paths: unicode_paths(write)?,

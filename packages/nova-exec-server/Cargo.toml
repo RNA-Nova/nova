@@ -134,6 +134,9 @@ libc = "0.2.182"
 lru = "0.16.3"
 mime_guess = "2.0.5"
 multimap = "0.10.0"
+# 对位 codex 1c7c43cd85：MXC SDK 1.0.0；crates.io 发布件与上游 pin 的 git rev
+# a846837d827b496fc4a08dfe60554515758c6647 同源（.cargo_vcs_info.json 记录一致）。
+mxc-sdk = "1.0.0"
 quick-xml = "0.41.0"
 rand = "0.9"
 rcgen = { version = "0.14.7", default-features = false, features = [

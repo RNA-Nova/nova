@@ -3,8 +3,10 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::ensure;
-use appcontainer_common::base_container_runner::BaseContainerRunner;
-use learning_mode_windows::SecurityEnvironmentApi;
+// 对位 codex 1c7c43cd85：旧 wxc_common/appcontainer_common/learning_mode_windows
+// 均由 mxc-sdk 1.0.0 的 re-export 取代。
+use mxc_sdk::mxc_common as wxc_common;
+use mxc_sdk::process_container_common::base_container_runner::BaseContainerRunner;
 use wxc_common::logger::Logger;
 use wxc_common::logger::Mode;
 use wxc_common::models::ExecutionRequest;
@@ -25,11 +27,11 @@ pub(super) fn launch(request: &ExecutionRequest) -> Result<i32> {
             .any(|capability| capability.eq_ignore_ascii_case("permissiveLearningMode")),
         "MXC native launch does not support permissiveLearningMode"
     );
-    // With no least-privilege mode, legacy proxy, or capture enabled, this
-    // probe guarantees BaseContainerRunner chooses PSEC rather than SBOX.
+    // 对位 codex 1c7c43cd85：deny-path 前置校验改用 SDK 的原生能力检查；
+    // 原生创建与其余按请求的能力校验由 SDK 在启动时完成。
     if !request.policy.denied_paths.is_empty() {
         ensure!(
-            SecurityEnvironmentApi::load()?.supports_deny_paths()?,
+            BaseContainerRunner::supports_native_denied_paths(),
             "this Windows build cannot enforce native MXC deny paths"
         );
     }

@@ -16,6 +16,8 @@ use nova_exec_server_protocol_core::protocol::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::protocol::NetworkSandboxPolicy;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_path_uri::PathUri;
+// 对位 codex 1c7c43cd85：wxc_common 改由 mxc-sdk 1.0.0 re-export。
+use mxc_sdk::mxc_common as wxc_common;
 use pretty_assertions::assert_eq;
 use wxc_common::models::NetworkAction;
 use wxc_common::models::NetworkCidr;
@@ -196,8 +198,13 @@ fn wrapper_preserves_exact_argv_and_separate_command_cwd() -> Result<()> {
         (
             r#""C:\Program Files\tool.exe" --permissions "" "quotes\" and slash\\""#.to_owned(),
             cwd.to_str().unwrap().to_owned(),
-            vec!["CUSTOM=value".to_owned()],
+            Some(vec!["CUSTOM=value".to_owned()]),
         )
+    );
+    // 对位 codex 1c7c43cd85：非空 env 保持显式；空 env 映射为 None。
+    assert_eq!(
+        build_request(&parsed, &cwd, Vec::new(), &[], &[])?.env,
+        None,
     );
     Ok(())
 }
