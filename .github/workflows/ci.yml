@@ -31,8 +31,34 @@ jobs:
     defaults:
       run:
         working-directory: packages/nova-exec-server
+        # 统一 bash（GHA Windows 的 run 默认 pwsh——bash 语法的 $VAR 在 pwsh
+        # 里被吃成空串，归档落到盘根；run 38076201418 实证）
+        shell: bash
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: checkout
+        id: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        continue-on-error: true
+
+      # 自建 runner（245）到 github.com 偶发 TLS reset/低速（中国侧网络），
+      # actions/checkout 无重试——失败后手动 clone 兜底（公开仓无需凭证）。
+      - name: checkout 兜底重试（网络抖动时）
+        if: steps.checkout.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          for attempt in 1 2 3 4 5; do
+            if git init -q . \
+              && git remote add origin https://github.com/RNA-Nova/nova.git \
+              && git fetch -q --depth 1 origin "${{ github.sha }}" \
+              && git checkout -q FETCH_HEAD; then
+              break
+            fi
+            echo "checkout 第 $attempt 次失败，30s 后重试"
+            sleep 30
+          done
+          git rev-parse HEAD
 
       - uses: ./.github/actions/setup-nova-ci
 
@@ -110,8 +136,34 @@ jobs:
     defaults:
       run:
         working-directory: packages/nova-exec-server
+        # 统一 bash（GHA Windows 的 run 默认 pwsh——bash 语法的 $VAR 在 pwsh
+        # 里被吃成空串，归档落到盘根；run 38076201418 实证）
+        shell: bash
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: checkout
+        id: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        continue-on-error: true
+
+      # 自建 runner（245）到 github.com 偶发 TLS reset/低速（中国侧网络），
+      # actions/checkout 无重试——失败后手动 clone 兜底（公开仓无需凭证）。
+      - name: checkout 兜底重试（网络抖动时）
+        if: steps.checkout.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          for attempt in 1 2 3 4 5; do
+            if git init -q . \
+              && git remote add origin https://github.com/RNA-Nova/nova.git \
+              && git fetch -q --depth 1 origin "${{ github.sha }}" \
+              && git checkout -q FETCH_HEAD; then
+              break
+            fi
+            echo "checkout 第 $attempt 次失败，30s 后重试"
+            sleep 30
+          done
+          git rev-parse HEAD
 
       - uses: ./.github/actions/setup-nova-ci
 
