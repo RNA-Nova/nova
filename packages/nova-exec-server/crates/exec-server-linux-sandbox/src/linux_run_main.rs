@@ -150,6 +150,12 @@ pub struct LandlockCommand {
     #[arg(long = "no-proc", default_value_t = false)]
     pub no_proc: bool,
 
+    /// Reuse the caller's PID namespace and `/proc` together.
+    /// Only trusted executor startup may select this mode.
+    /// （对位 codex 39f4277087 同名 hidden 旗标）
+    #[arg(long = "inherit-pid-namespace", hide = true)]
+    pub inherit_pid_namespace: bool,
+
     /// Full command args to run under the Linux sandbox helper.
     #[arg(trailing_var_arg = true)]
     pub command: Vec<String>,
@@ -173,6 +179,7 @@ pub fn run_main() -> ! {
         proxy_route_spec,
         verify_fd_mounts,
         no_proc,
+        inherit_pid_namespace,
         command,
     } = LandlockCommand::parse();
     let allow_network_for_proxy = managed_network.is_some();
@@ -305,6 +312,14 @@ pub fn run_main() -> ! {
         } else {
             (None, Vec::new())
         };
+        // 对位 codex 39f4277087：BwrapOptions 在调用处构造（inherit 与 no-proc
+        // 共同折算 mount_proc），随 options 流入预检与正式构建。
+        let options = BwrapOptions {
+            mount_proc: !no_proc && !inherit_pid_namespace,
+            inherit_pid_namespace,
+            network_mode: bwrap_network_mode(network_sandbox_policy, allow_network_for_proxy),
+            ..Default::default()
+        };
         let inner = build_inner_seccomp_command(InnerSeccompCommandArgs {
             sandbox_policy_cwd: &sandbox_policy_cwd,
             command_cwd: command_cwd.as_deref(),
@@ -317,10 +332,9 @@ pub fn run_main() -> ! {
             &sandbox_policy_cwd,
             command_cwd.as_deref(),
             &file_system_sandbox_policy,
-            bwrap_network_mode(network_sandbox_policy, allow_network_for_proxy),
+            options,
             inner,
             proxy_controls,
-            !no_proc,
         );
     }
 
@@ -406,32 +420,25 @@ fn run_bwrap_with_proc_fallback(
     sandbox_policy_cwd: &Path,
     command_cwd: Option<&Path>,
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
-    network_mode: BwrapNetworkMode,
+    mut options: BwrapOptions,
     inner: Vec<String>,
     proxy_controls: Vec<File>,
-    mount_proc: bool,
 ) -> ! {
-    let mut mount_proc = mount_proc;
     let command_cwd = command_cwd.unwrap_or(sandbox_policy_cwd);
 
     // Select before the preflight, whose synthetic policy omits writable roots.
     // （对位 codex 7aa8f51049）
     initialize_bwrap_launcher(file_system_sandbox_policy, sandbox_policy_cwd);
 
-    if mount_proc
-        && !preflight_proc_mount_support(network_mode)
+    if options.mount_proc
+        && !preflight_proc_mount_support(options)
             .unwrap_or_else(|err| exit_with_bwrap_build_error(err))
     {
         // Keep the retry silent so sandbox-internal diagnostics do not leak into the
         // child process stderr stream.
-        mount_proc = false;
+        options.mount_proc = false;
     }
 
-    let options = BwrapOptions {
-        mount_proc,
-        network_mode,
-        ..Default::default()
-    };
     let mut bwrap_args = build_bwrap_argv(
         inner,
         file_system_sandbox_policy,
@@ -528,15 +535,13 @@ fn current_process_argv0() -> String {
     }
 }
 
-fn preflight_proc_mount_support(network_mode: BwrapNetworkMode) -> NovaResult<bool> {
-    let preflight_argv = build_preflight_bwrap_argv(network_mode)?;
+fn preflight_proc_mount_support(options: BwrapOptions) -> NovaResult<bool> {
+    let preflight_argv = build_preflight_bwrap_argv(options)?;
     let stderr = run_bwrap_in_child_capture_stderr(preflight_argv);
     Ok(!is_proc_mount_failure(stderr.as_str()))
 }
 
-fn build_preflight_bwrap_argv(
-    network_mode: BwrapNetworkMode,
-) -> NovaResult<crate::bwrap::BwrapArgs> {
+fn build_preflight_bwrap_argv(options: BwrapOptions) -> NovaResult<crate::bwrap::BwrapArgs> {
     let file_system_sandbox_policy =
         FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Special {
@@ -553,8 +558,8 @@ fn build_preflight_bwrap_argv(
         Path::new("/"),
         BwrapOptions {
             mount_proc: true,
-            network_mode,
-            ..Default::default()
+            // 预检沿用主沙箱的其余 options（对位 codex 39f4277087 `..options`）。
+            ..options
         },
     )
 }

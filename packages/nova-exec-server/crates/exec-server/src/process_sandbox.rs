@@ -203,7 +203,8 @@ pub(crate) async fn prepare_exec_request(
         &file_system_policy,
         network_policy,
     );
-    let sandbox_manager = SandboxManager::new();
+    let sandbox_manager = SandboxManager::new()
+        .with_linux_sandbox_pid_namespace(runtime_paths.linux_sandbox_pid_namespace);
     // 对位 codex d13aeb77ea：进程沙箱套用 NOVA_HOME symlink opt-out
     #[cfg(target_os = "macos")]
     let sandbox_manager = sandbox_manager

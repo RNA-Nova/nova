@@ -98,6 +98,9 @@ nova-exec-server-network-proxy = { workspace = true }
 # 集成测试的 argv0 重入分派：landlock/bwrap 沙箱以 `nova-linux-sandbox`
 # 为 argv0 重入测试二进制，需要真正的 linux sandbox 入口（见 tests/common/mod.rs）
 nova-exec-server-linux-sandbox = { workspace = true }
+# pid_namespace e2e 直起真实 nova-exec-server / nova-linux-sandbox 二进制
+# （对位 codex pid_namespace_tests 对 codex-utils-cargo-bin 的依赖）
+nova-exec-server-utils-cargo-bin = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 nova-exec-server-windows-sandbox = { workspace = true }

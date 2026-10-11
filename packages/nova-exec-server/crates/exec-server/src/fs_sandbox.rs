@@ -139,7 +139,8 @@ impl FileSystemSandboxRunner {
         let helper = &self.runtime_paths.executor_self_exe;
         // fail-closed：fs helper 必须使用更窄的 FileSystemHelper profile，
         // 平台沙箱不可用时显式报错而不是静默裸跑
-        let sandbox_manager = SandboxManager::for_file_system_helpers();
+        let sandbox_manager = SandboxManager::for_file_system_helpers()
+            .with_linux_sandbox_pid_namespace(self.runtime_paths.linux_sandbox_pid_namespace);
         // 对位 codex d13aeb77ea：fs helper 同样套用 NOVA_HOME symlink opt-out
         #[cfg(target_os = "macos")]
         let sandbox_manager = sandbox_manager.with_allowed_symlinked_nova_home(
@@ -253,7 +254,7 @@ fn add_helper_runtime_permissions(
     }
 
     for helper_read_root in helper_read_roots {
-        if file_system_policy.can_read_path_with_cwd(helper_read_root.as_path(), cwd) {
+        if file_system_policy.can_read_local_path_with_cwd(helper_read_root.as_path(), cwd) {
             continue;
         }
 
@@ -613,8 +614,8 @@ mod tests {
             cwd.as_path(),
         );
 
-        assert!(policy.can_read_path_with_cwd(readable.as_path(), cwd.as_path()));
-        assert!(policy.can_write_path_with_cwd(writable.as_path(), cwd.as_path()));
+        assert!(policy.can_read_local_path_with_cwd(readable.as_path(), cwd.as_path()));
+        assert!(policy.can_write_local_path_with_cwd(writable.as_path(), cwd.as_path()));
     }
 
     #[test]
@@ -976,10 +977,10 @@ mod tests {
         );
 
         assert!(
-            policy.can_read_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
+            policy.can_read_local_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
         );
-        assert!(!policy.can_read_path_with_cwd(parent.as_path(), cwd.as_path()));
-        assert!(!policy.can_read_path_with_cwd(sibling.as_path(), cwd.as_path()));
+        assert!(!policy.can_read_local_path_with_cwd(parent.as_path(), cwd.as_path()));
+        assert!(!policy.can_read_local_path_with_cwd(sibling.as_path(), cwd.as_path()));
     }
 
     #[test]
@@ -1010,11 +1011,11 @@ mod tests {
         );
 
         assert!(
-            policy.can_read_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
+            policy.can_read_local_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
         );
-        assert!(policy.can_read_path_with_cwd(alias.as_path(), cwd.as_path()));
-        assert!(!policy.can_read_path_with_cwd(executor_parent.as_path(), cwd.as_path()));
-        assert!(!policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
+        assert!(policy.can_read_local_path_with_cwd(alias.as_path(), cwd.as_path()));
+        assert!(!policy.can_read_local_path_with_cwd(executor_parent.as_path(), cwd.as_path()));
+        assert!(!policy.can_read_local_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
     }
 
     fn restricted_policy(entries: Vec<FileSystemSandboxEntry>) -> FileSystemSandboxPolicy {

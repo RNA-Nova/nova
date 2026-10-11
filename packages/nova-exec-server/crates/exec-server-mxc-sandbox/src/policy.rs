@@ -163,7 +163,7 @@ pub(super) fn build_request(
     let mut read = collect_paths(
         fs.get_readable_roots_with_cwd(cwd)
             .into_iter()
-            .filter(|path| !fs.can_write_path_with_cwd(path.as_path(), cwd))
+            .filter(|path| !fs.can_write_local_path_with_cwd(path.as_path(), cwd))
             .map(|path| path.to_path_buf()),
     )?;
     let absolute_cwd = AbsolutePathBuf::from_absolute_path(cwd)
@@ -191,7 +191,7 @@ pub(super) fn build_request(
     read.extend(
         carveouts
             .iter()
-            .filter(|(_, path)| fs.can_read_path_with_cwd(path.as_path(), cwd))
+            .filter(|(_, path)| fs.can_read_local_path_with_cwd(path.as_path(), cwd))
             .map(|(key, path)| (key.clone(), path.clone())),
     );
     if policy.include_platform_defaults() {

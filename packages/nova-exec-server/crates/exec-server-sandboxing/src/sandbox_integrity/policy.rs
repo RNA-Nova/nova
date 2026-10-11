@@ -23,9 +23,9 @@ pub(super) fn prepare_policy(
     glob_policy
         .entries
         .retain(|entry| matches!(entry.path, FileSystemPath::GlobPattern { .. }));
-    // 对位 codex `ReadDenyMatcher::try_new_for_local_paths`（permissions.rs:359）：
-    // nova 同实现的既有名为 `try_new`（本地路径语义构造、畸形 glob 报错）。
-    let glob_denials = ReadDenyMatcher::try_new(&glob_policy, cwd.as_path())
+    // 对位 codex `ReadDenyMatcher::try_new_for_local_paths`（permissions.rs）：
+    // 本地路径语义构造、畸形 glob 报错。
+    let glob_denials = ReadDenyMatcher::try_new_for_local_paths(&glob_policy, cwd.as_path())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     Ok(PreparedPolicy {
         roots: policy.get_writable_roots_with_cwd(cwd.as_path()),

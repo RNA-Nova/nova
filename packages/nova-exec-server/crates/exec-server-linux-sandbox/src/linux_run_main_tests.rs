@@ -276,18 +276,24 @@ fn managed_proxy_preflight_argv_unshares_network() {
         NetworkSandboxPolicy::Enabled,
         /*allow_network_for_proxy*/ true,
     );
-    let argv = build_preflight_bwrap_argv(mode)
-        .expect("build preflight argv")
-        .args;
+    let argv = build_preflight_bwrap_argv(BwrapOptions {
+        network_mode: mode,
+        ..Default::default()
+    })
+    .expect("build preflight argv")
+    .args;
     assert!(argv.iter().any(|arg| arg == "--"));
     assert!(argv.iter().any(|arg| arg == "--unshare-net"));
 }
 
 #[test]
 fn proc_mount_preflight_does_not_bind_the_full_filesystem() {
-    let argv = build_preflight_bwrap_argv(BwrapNetworkMode::FullAccess)
-        .expect("build preflight argv")
-        .args;
+    let argv = build_preflight_bwrap_argv(BwrapOptions {
+        network_mode: BwrapNetworkMode::FullAccess,
+        ..Default::default()
+    })
+    .expect("build preflight argv")
+    .args;
 
     assert!(argv.windows(2).any(|window| window == ["--tmpfs", "/"]));
     assert!(argv.windows(2).any(|window| window == ["--proc", "/proc"]));

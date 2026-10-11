@@ -1,8 +1,8 @@
 //! Lower implicit process scratch access through the normal Seatbelt exclusions.
 //! Explicit restrictions and project metadata also constrain these broad grants.
 //! （对位 codex d84ebff592 `sandboxing/src/seatbelt_scratch.rs`；
-//! `can_write_local_path_with_cwd` 在上游经 7a7c188682/6f51c65958 改名并升级，
-//! nova 侧仍用 `can_write_path_with_cwd`，见移植报告挂账项）
+//! `can_write_local_path_with_cwd` 经 7a7c188682/6f51c65958 改名并升级，随本批
+//! 锚点 39f4277087 对齐）
 
 use super::SeatbeltAccessRoot;
 use super::SeatbeltPreparationError;
@@ -23,7 +23,7 @@ pub(super) fn scratch_access_roots(
     let mut read_only = policy
         .get_readable_roots_with_cwd(cwd)
         .into_iter()
-        .filter(|path| !policy.can_write_path_with_cwd(path.as_path(), cwd))
+        .filter(|path| !policy.can_write_local_path_with_cwd(path.as_path(), cwd))
         .collect::<Vec<_>>();
     read_only.extend(unreadable.iter().cloned());
     for root in writable_roots {

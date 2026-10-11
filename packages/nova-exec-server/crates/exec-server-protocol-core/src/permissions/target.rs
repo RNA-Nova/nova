@@ -20,6 +20,7 @@ use super::deny_read_validator::has_context_read_denials;
 use super::file_system_root;
 use nova_exec_server_utils_path_uri::PathConvention;
 use nova_exec_server_utils_path_uri::PathUri;
+use std::collections::HashSet;
 
 const INVALID_PATH: &str = "managed filesystem denial cannot be materialized safely";
 const SHADOWED: &str = "managed filesystem denial is shadowed by a selected profile grant";
@@ -147,6 +148,47 @@ impl FileSystemSandboxPolicy {
     ) -> Self {
         Self::workspace_write(&[], exclude_tmpdir_env_var, exclude_slash_tmp)
             .with_materialized_project_roots_for_path_uris(roots)
+    }
+
+    /// Returns explicitly denied roots using only the selected executor's paths.
+    /// A filesystem-root denial is omitted so it does not obscure narrower readable paths.
+    /// Fails rather than omit a denied temporary directory the executor did not report.
+    ///
+    /// 对位 codex 39f4277087 `permissions/target.rs` 同名方法。
+    pub fn get_unreadable_roots_with_context(
+        &self,
+        context: &FileSystemSandboxPolicyContext<'_>,
+    ) -> Result<Vec<PathUri>, String> {
+        if !matches!(self.kind, FileSystemSandboxKind::Restricted) {
+            return Ok(Vec::new());
+        }
+        if context.temporary_directories.is_none()
+            && self.entries.iter().any(|entry| {
+                entry.access == FileSystemAccessMode::Deny
+                    && matches!(
+                        &entry.path,
+                        FileSystemPath::Special {
+                            value: FileSystemSpecialPath::Tmpdir
+                        }
+                    )
+            })
+        {
+            return Err("executor did not report its denied temporary directories".into());
+        }
+        let filesystem_root = file_system_root(context);
+        let mut seen = HashSet::new();
+        Ok(self
+            .resolved_entries(context)
+            .into_iter()
+            .filter(|(path, access)| {
+                *access == FileSystemAccessMode::Deny
+                    && !filesystem_root
+                        .as_ref()
+                        .is_some_and(|root| path.starts_with(root) && root.starts_with(path))
+                    && seen.insert(path.clone())
+            })
+            .map(|(path, _)| path)
+            .collect())
     }
 
     /// Resolves deny glob text using the execution host's convention and home.

@@ -22,8 +22,46 @@ use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_path_uri::PathUri;
 use schemars::JsonSchema;
 
+// 对位 codex 39f4277087 `models.rs` L41-42 再导出。
+pub use crate::permission_profile_snapshot::PermissionProfileSnapshot;
+pub use crate::permission_profile_snapshot::ProfileWorkspaceRoot;
 
+/// Controls the per-command sandbox override requested by a shell-like tool call.
+///
+/// 对位 codex 39f4277087 `models.rs` `SandboxPermissions`。
+#[derive(
+    Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Serialize, Deserialize, JsonSchema, TS,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxPermissions {
+    /// Run with the turn's configured sandbox policy unchanged.
+    #[default]
+    UseDefault,
+    /// Request to run outside the sandbox.
+    RequireEscalated,
+    /// Request to stay in the sandbox while widening permissions for this
+    /// command only.
+    WithAdditionalPermissions,
+}
 
+impl SandboxPermissions {
+    /// True if SandboxPermissions requires full unsandboxed execution (i.e. RequireEscalated)
+    pub fn requires_escalated_permissions(self) -> bool {
+        matches!(self, SandboxPermissions::RequireEscalated)
+    }
+
+    /// True if SandboxPermissions requests any explicit per-command override
+    /// beyond `UseDefault`.
+    pub fn requests_sandbox_override(self) -> bool {
+        !matches!(self, SandboxPermissions::UseDefault)
+    }
+
+    /// True if SandboxPermissions uses the sandboxed per-command permission
+    /// widening flow.
+    pub fn uses_additional_permissions(self) -> bool {
+        matches!(self, SandboxPermissions::WithAdditionalPermissions)
+    }
+}
 
 #[derive(Debug, Clone, Default, Eq, Hash, PartialEq, JsonSchema, TS)]
 pub struct FileSystemPermissions {
@@ -31,6 +69,17 @@ pub struct FileSystemPermissions {
     #[ts(as = "Vec<RawFileSystemSandboxEntry>")]
     pub entries: Vec<FileSystemSandboxEntry>,
     pub glob_scan_max_depth: Option<NonZeroUsize>,
+}
+
+/// 对位 codex 39f4277087 `models.rs` `LegacyReadWriteRoots`（legacy
+/// `{read, write}` 读写根形状的双向接缝）。
+#[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyReadWriteRoots {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<Vec<AbsolutePathBuf>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write: Option<Vec<AbsolutePathBuf>>,
 }
 
 impl FileSystemPermissions {
@@ -76,6 +125,37 @@ impl FileSystemPermissions {
             glob_scan_max_depth: None,
         }
     }
+
+    /// 对位 codex 39f4277087 `FileSystemPermissions::legacy_read_write_roots`。
+    pub fn legacy_read_write_roots(&self) -> Option<LegacyReadWriteRoots> {
+        self.as_legacy_permissions()
+    }
+
+    fn as_legacy_permissions(&self) -> Option<LegacyReadWriteRoots> {
+        if self.glob_scan_max_depth.is_some() {
+            return None;
+        }
+
+        let mut read = Vec::new();
+        let mut write = Vec::new();
+
+        for entry in &self.entries {
+            let FileSystemPath::Path { path } = &entry.path else {
+                return None;
+            };
+            let path = path.to_abs_path().ok()?;
+            match entry.access {
+                FileSystemAccessMode::Read => read.push(path),
+                FileSystemAccessMode::Write => write.push(path),
+                FileSystemAccessMode::Deny => return None,
+            }
+        }
+
+        Some(LegacyReadWriteRoots {
+            read: (!read.is_empty()).then_some(read),
+            write: (!write.is_empty()).then_some(write),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -87,22 +167,33 @@ struct CanonicalFileSystemPermissions {
     glob_scan_max_depth: Option<NonZeroUsize>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum FileSystemPermissionsDe {
+    Canonical(CanonicalFileSystemPermissions),
+    Legacy(LegacyReadWriteRoots),
+}
+
 impl Serialize for FileSystemPermissions {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        CanonicalFileSystemPermissions {
-            entries: self
-                .entries
-                .clone()
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()
-                .map_err(serde::ser::Error::custom)?,
-            glob_scan_max_depth: self.glob_scan_max_depth,
+        if let Some(legacy) = self.as_legacy_permissions() {
+            legacy.serialize(serializer)
+        } else {
+            CanonicalFileSystemPermissions {
+                entries: self
+                    .entries
+                    .clone()
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .map_err(serde::ser::Error::custom)?,
+                glob_scan_max_depth: self.glob_scan_max_depth,
+            }
+            .serialize(serializer)
         }
-        .serialize(serializer)
     }
 }
 
@@ -111,18 +202,22 @@ impl<'de> Deserialize<'de> for FileSystemPermissions {
     where
         D: Deserializer<'de>,
     {
-        let CanonicalFileSystemPermissions {
-            entries,
-            glob_scan_max_depth,
-        } = CanonicalFileSystemPermissions::deserialize(deserializer)?;
-        Ok(Self {
-            entries: entries
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()
-                .map_err(serde::de::Error::custom)?,
-            glob_scan_max_depth,
-        })
+        match FileSystemPermissionsDe::deserialize(deserializer)? {
+            FileSystemPermissionsDe::Canonical(CanonicalFileSystemPermissions {
+                entries,
+                glob_scan_max_depth,
+            }) => Ok(Self {
+                entries: entries
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .map_err(serde::de::Error::custom)?,
+                glob_scan_max_depth,
+            }),
+            FileSystemPermissionsDe::Legacy(LegacyReadWriteRoots { read, write }) => {
+                Ok(Self::from_read_write_roots(read, write))
+            }
+        }
     }
 }
 
@@ -288,6 +383,15 @@ impl ManagedFileSystemPermissions {
     }
 }
 
+/// Reserved identifier for the built-in read-only permission profile.
+pub const BUILT_IN_PERMISSION_PROFILE_READ_ONLY: &str = ":read-only";
+
+/// Reserved identifier for the built-in workspace-write permission profile.
+pub const BUILT_IN_PERMISSION_PROFILE_WORKSPACE: &str = ":workspace";
+
+/// Reserved identifier for the built-in full-access permission profile.
+pub const BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS: &str = ":danger-full-access";
+
 /// Canonical active runtime permissions for a conversation, turn, or command.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -306,6 +410,41 @@ pub enum PermissionProfile {
     #[serde(rename_all = "snake_case")]
     #[ts(rename_all = "snake_case")]
     External { network: NetworkSandboxPolicy },
+}
+
+/// Metadata for the named or implicit built-in permissions profile that
+/// produced the active `PermissionProfile`.
+///
+/// The runtime must honor `PermissionProfile`; this sidecar exists so clients
+/// can display stable profile identity without trying to reverse-engineer a
+/// name from the compiled permissions.
+///
+/// 对位 codex 39f4277087 `models.rs` `ActivePermissionProfile`。
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
+pub struct ActivePermissionProfile {
+    /// Profile identifier from `default_permissions` or the implicit built-in
+    /// default, such as `:workspace` or a user-defined `[permissions.<id>]`
+    /// profile.
+    pub id: String,
+
+    /// Optional parent profile identifier from the selected permissions
+    /// profile's `extends` setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub extends: Option<String>,
+}
+
+impl ActivePermissionProfile {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            extends: None,
+        }
+    }
+
+    pub fn read_only() -> Self {
+        Self::new(BUILT_IN_PERMISSION_PROFILE_READ_ONLY)
+    }
 }
 
 impl Default for PermissionProfile {
@@ -328,6 +467,35 @@ impl PermissionProfile {
             file_system: ManagedFileSystemPermissions::from_sandbox_policy(&file_system),
             network: NetworkSandboxPolicy::Restricted,
         }
+    }
+
+    /// Intersects managed filesystem permissions with read-only access and restricts network.
+    ///
+    /// Returns `None` when filesystem enforcement belongs to an external caller.
+    ///
+    /// 对位 codex 39f4277087 `PermissionProfile::intersect_with_read_only`。
+    pub fn intersect_with_read_only(&self) -> Option<Self> {
+        let mut file_system = self.file_system_sandbox_policy();
+        match file_system.kind {
+            FileSystemSandboxKind::Restricted => {
+                for entry in &mut file_system.entries {
+                    entry.access = match entry.access {
+                        FileSystemAccessMode::Read | FileSystemAccessMode::Write => {
+                            FileSystemAccessMode::Read
+                        }
+                        FileSystemAccessMode::Deny => FileSystemAccessMode::Deny,
+                    };
+                }
+            }
+            FileSystemSandboxKind::Unrestricted => {
+                file_system = FileSystemSandboxPolicy::read_only();
+            }
+            FileSystemSandboxKind::ExternalSandbox => return None,
+        }
+        Some(Self::from_runtime_permissions(
+            &file_system,
+            NetworkSandboxPolicy::Restricted,
+        ))
     }
 
     /// Managed workspace-write filesystem access with restricted network
@@ -390,14 +558,28 @@ impl PermissionProfile {
         self,
         workspace_roots: &[AbsolutePathBuf],
     ) -> Self {
+        self.materialize_project_roots_with(|policy| {
+            policy.materialize_project_roots_with_workspace_roots(workspace_roots)
+        })
+    }
+
+    /// 对位 codex 39f4277087 `PermissionProfile::materialize_project_roots_with_path_uris`。
+    pub fn materialize_project_roots_with_path_uris(self, workspace_roots: &[PathUri]) -> Self {
+        self.materialize_project_roots_with(|policy| {
+            policy.materialize_project_roots_with_path_uris(workspace_roots)
+        })
+    }
+
+    fn materialize_project_roots_with(
+        self,
+        materialize: impl FnOnce(FileSystemSandboxPolicy) -> FileSystemSandboxPolicy,
+    ) -> Self {
         match self {
             Self::Managed {
                 file_system,
                 network,
             } => {
-                let file_system = file_system
-                    .to_sandbox_policy()
-                    .materialize_project_roots_with_workspace_roots(workspace_roots);
+                let file_system = materialize(file_system.to_sandbox_policy());
                 Self::Managed {
                     file_system: ManagedFileSystemPermissions::from_sandbox_policy(&file_system),
                     network,
@@ -635,5 +817,319 @@ impl From<&FileSystemPermissions> for FileSystemSandboxPolicy {
         let mut policy = FileSystemSandboxPolicy::restricted(value.entries.clone());
         policy.glob_scan_max_depth = value.glob_scan_max_depth.map(usize::from);
         policy
+    }
+}
+// 对位 codex 39f4277087 `models.rs` 测试模块的权限族子集（图像/MCP/user_input
+// 等未镜像面的测试不随本批移植）。
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    #[test]
+    fn sandbox_permissions_helpers_match_documented_semantics() {
+        let cases = [
+            (SandboxPermissions::UseDefault, false, false, false),
+            (SandboxPermissions::RequireEscalated, true, true, false),
+            (
+                SandboxPermissions::WithAdditionalPermissions,
+                false,
+                true,
+                true,
+            ),
+        ];
+
+        for (
+            sandbox_permissions,
+            requires_escalated_permissions,
+            requests_sandbox_override,
+            uses_additional_permissions,
+        ) in cases
+        {
+            assert_eq!(
+                sandbox_permissions.requires_escalated_permissions(),
+                requires_escalated_permissions
+            );
+            assert_eq!(
+                sandbox_permissions.requests_sandbox_override(),
+                requests_sandbox_override
+            );
+            assert_eq!(
+                sandbox_permissions.uses_additional_permissions(),
+                uses_additional_permissions
+            );
+        }
+    }
+
+    #[test]
+    fn additional_permission_profile_is_empty_when_all_fields_are_none() {
+        assert_eq!(AdditionalPermissionProfile::default().is_empty(), true);
+    }
+
+    #[test]
+    fn additional_permission_profile_is_not_empty_when_field_is_present_but_nested_empty() {
+        let permission_profile = AdditionalPermissionProfile {
+            network: Some(NetworkPermissions { enabled: None }),
+            file_system: None,
+        };
+        assert_eq!(permission_profile.is_empty(), false);
+    }
+
+    #[test]
+    fn permission_profile_round_trip_preserves_glob_scan_max_depth() {
+        let mut file_system_sandbox_policy =
+            FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+                path: FileSystemPath::GlobPattern {
+                    pattern: "**/*.env".to_string(),
+                },
+                access: FileSystemAccessMode::Deny,
+                missing_path_behavior: None,
+            }]);
+        file_system_sandbox_policy.glob_scan_max_depth = Some(2);
+
+        let permission_profile = PermissionProfile::from_runtime_permissions(
+            &file_system_sandbox_policy,
+            NetworkSandboxPolicy::Restricted,
+        );
+
+        assert_eq!(
+            permission_profile.file_system_sandbox_policy(),
+            file_system_sandbox_policy
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_profile_round_trip_preserves_ambiguous_native_denies() -> Result<()> {
+        let denied_path = AbsolutePathBuf::try_from(PathBuf::from("/C:/secret"))?;
+        let file_system_sandbox_policy = FileSystemSandboxPolicy::restricted(vec![
+            FileSystemSandboxEntry::new(
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::Root,
+                },
+                FileSystemAccessMode::Read,
+            ),
+            FileSystemSandboxEntry::new(denied_path.into(), FileSystemAccessMode::Deny),
+        ]);
+        let permission_profile = PermissionProfile::from_runtime_permissions(
+            &file_system_sandbox_policy,
+            NetworkSandboxPolicy::Restricted,
+        );
+
+        assert_eq!(
+            serde_json::from_value::<PermissionProfile>(serde_json::to_value(
+                &permission_profile
+            )?)?,
+            permission_profile
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn permission_profile_deserializes_legacy_rollout_shape() -> Result<()> {
+        let legacy = serde_json::json!({
+            "network": {
+                "enabled": true,
+            },
+            "file_system": {
+                "entries": [{
+                    "path": {
+                        "type": "special",
+                        "value": {
+                            "kind": "root",
+                        },
+                    },
+                    "access": "write",
+                }],
+                "glob_scan_max_depth": 2,
+            },
+        });
+
+        let permission_profile: PermissionProfile = serde_json::from_value(legacy)?;
+
+        assert_eq!(
+            permission_profile,
+            PermissionProfile::Managed {
+                file_system: ManagedFileSystemPermissions::Restricted {
+                    entries: vec![FileSystemSandboxEntry {
+                        path: FileSystemPath::Special {
+                            value: FileSystemSpecialPath::Root,
+                        },
+                        access: FileSystemAccessMode::Write,
+                        missing_path_behavior: None,
+                    }],
+                    glob_scan_max_depth: NonZeroUsize::new(2),
+                },
+                network: NetworkSandboxPolicy::Enabled,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn permission_profile_presets_match_legacy_defaults() {
+        assert_eq!(
+            PermissionProfile::read_only(),
+            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::new_read_only_policy())
+        );
+        assert_eq!(
+            PermissionProfile::workspace_write(),
+            PermissionProfile::from_legacy_sandbox_policy(
+                &SandboxPolicy::new_workspace_write_policy()
+            )
+        );
+    }
+
+    #[test]
+    fn permission_profile_round_trip_preserves_disabled_sandbox() -> Result<()> {
+        let cwd = tempdir()?;
+        let permission_profile =
+            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::DangerFullAccess);
+
+        assert_eq!(permission_profile, PermissionProfile::Disabled);
+        assert_eq!(
+            permission_profile.to_legacy_sandbox_policy(cwd.path())?,
+            SandboxPolicy::DangerFullAccess
+        );
+        assert_eq!(
+            permission_profile.to_runtime_permissions(),
+            (
+                FileSystemSandboxPolicy::unrestricted(),
+                NetworkSandboxPolicy::Enabled
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn disabled_permission_profile_ignores_runtime_network_policy() {
+        let permission_profile = PermissionProfile::from_runtime_permissions_with_enforcement(
+            SandboxEnforcement::Disabled,
+            &FileSystemSandboxPolicy::unrestricted(),
+            NetworkSandboxPolicy::Restricted,
+        );
+
+        assert_eq!(permission_profile, PermissionProfile::Disabled);
+    }
+
+    #[test]
+    fn permission_profile_from_runtime_permissions_preserves_external_sandbox() {
+        let permission_profile = PermissionProfile::from_runtime_permissions(
+            &FileSystemSandboxPolicy::external_sandbox(),
+            NetworkSandboxPolicy::Restricted,
+        );
+
+        assert_eq!(
+            permission_profile,
+            PermissionProfile::External {
+                network: NetworkSandboxPolicy::Restricted,
+            }
+        );
+        assert_eq!(
+            PermissionProfile::from_runtime_permissions_with_enforcement(
+                SandboxEnforcement::Managed,
+                &FileSystemSandboxPolicy::external_sandbox(),
+                NetworkSandboxPolicy::Restricted,
+            ),
+            permission_profile,
+        );
+    }
+
+    #[test]
+    fn permission_profile_from_runtime_permissions_preserves_unrestricted_managed_network() {
+        let permission_profile = PermissionProfile::from_runtime_permissions_with_enforcement(
+            SandboxEnforcement::External,
+            &FileSystemSandboxPolicy::unrestricted(),
+            NetworkSandboxPolicy::Restricted,
+        );
+
+        assert_eq!(
+            permission_profile,
+            PermissionProfile::Managed {
+                file_system: ManagedFileSystemPermissions::Unrestricted,
+                network: NetworkSandboxPolicy::Restricted,
+            },
+            "the legacy ExternalSandbox projection must not hide a split unrestricted filesystem policy"
+        );
+        assert_eq!(
+            permission_profile.to_runtime_permissions(),
+            (
+                FileSystemSandboxPolicy::unrestricted(),
+                NetworkSandboxPolicy::Restricted,
+            )
+        );
+    }
+
+    #[test]
+    fn permission_profile_round_trip_preserves_external_sandbox() -> Result<()> {
+        let cwd = tempdir()?;
+        let sandbox_policy = SandboxPolicy::ExternalSandbox {
+            network_access: crate::protocol::NetworkAccess::Restricted,
+        };
+        let permission_profile = PermissionProfile::from_legacy_sandbox_policy(&sandbox_policy);
+
+        assert_eq!(
+            permission_profile,
+            PermissionProfile::External {
+                network: NetworkSandboxPolicy::Restricted,
+            }
+        );
+        assert_eq!(
+            permission_profile.to_legacy_sandbox_policy(cwd.path())?,
+            sandbox_policy
+        );
+        assert_eq!(
+            permission_profile.to_runtime_permissions(),
+            (
+                FileSystemSandboxPolicy::external_sandbox(),
+                NetworkSandboxPolicy::Restricted
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_system_permissions_with_glob_scan_depth_uses_canonical_json() -> Result<()> {
+        let path = AbsolutePathBuf::try_from(PathBuf::from(if cfg!(windows) {
+            r"C:\tmp\allowed"
+        } else {
+            "/tmp/allowed"
+        }))
+        .expect("absolute path");
+        let file_system_permissions = FileSystemPermissions {
+            entries: vec![FileSystemSandboxEntry {
+                path: path.into(),
+                access: FileSystemAccessMode::Read,
+                missing_path_behavior: None,
+            }],
+            glob_scan_max_depth: NonZeroUsize::new(2),
+        };
+
+        let serialized = serde_json::to_value(&file_system_permissions)?;
+
+        assert_eq!(serialized.get("read"), None);
+        assert_eq!(serialized.get("write"), None);
+        assert_eq!(
+            serialized.get("glob_scan_max_depth"),
+            Some(&serde_json::json!(2))
+        );
+        assert!(serialized.get("entries").is_some());
+        assert_eq!(
+            serde_json::from_value::<FileSystemPermissions>(serialized)?,
+            file_system_permissions
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_system_permissions_rejects_zero_glob_scan_depth() {
+        serde_json::from_value::<FileSystemPermissions>(serde_json::json!({
+            "entries": [],
+            "glob_scan_max_depth": 0,
+        }))
+        .expect_err("zero glob scan depth should fail deserialization");
     }
 }

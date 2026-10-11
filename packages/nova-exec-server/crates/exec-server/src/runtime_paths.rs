@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use nova_exec_server_sandboxing::LinuxSandboxPidNamespace;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 
 /// Runtime paths needed by exec-server child processes.
@@ -11,6 +12,9 @@ pub struct ExecServerRuntimePaths {
     /// Path to the Linux sandbox helper alias used when the platform sandbox
     /// needs to re-enter nova-exec-server by argv0.
     pub executor_linux_sandbox_exe: Option<AbsolutePathBuf>,
+    /// Trusted startup policy; requests and repository config cannot change PID isolation.
+    /// （对位 codex 39f4277087 `ExecServerRuntimeOptions::linux_sandbox_pid_namespace`）
+    pub linux_sandbox_pid_namespace: LinuxSandboxPidNamespace,
     /// User-config opt-out of writable-root symlink checks beneath this host's home.
     /// （配置源未接入 nova，当前恒为 None，见移植报告挂账项）
     #[cfg(target_os = "macos")]
@@ -36,6 +40,7 @@ impl ExecServerRuntimePaths {
         executor_linux_sandbox_exe: Option<PathBuf>,
     ) -> std::io::Result<Self> {
         Ok(Self {
+            linux_sandbox_pid_namespace: LinuxSandboxPidNamespace::default(),
             executor_self_exe: absolute_path(executor_self_exe)?,
             executor_linux_sandbox_exe: executor_linux_sandbox_exe
                 .map(absolute_path)
@@ -43,6 +48,13 @@ impl ExecServerRuntimePaths {
             #[cfg(target_os = "macos")]
             allowed_symlinked_nova_home: None,
         })
+    }
+
+    /// Applies the PID namespace policy chosen by trusted executor provisioning.
+    /// （对位 codex 39f4277087）
+    pub fn with_linux_sandbox_pid_namespace(mut self, mode: LinuxSandboxPidNamespace) -> Self {
+        self.linux_sandbox_pid_namespace = mode;
+        self
     }
 
     /// Applies the symlink opt-in resolved by the execution host's config loader.

@@ -35,6 +35,13 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     executor_linux_sandbox_exe: Option<PathBuf>,
 
+    /// Linux PID namespace: isolate (default) or inherit. Inherit allows signals to
+    /// other same-UID processes; enable only when provisioning a dedicated environment.
+    /// （对位 codex 39f4277087 `exec_server_command.rs` 同名旗标；nova CLI 无
+    /// subcommand，故不带 codex 的 global = true）
+    #[arg(long, value_name = "MODE", default_value = "isolate")]
+    linux_sandbox_pid_namespace: nova_exec_server_sandboxing::LinuxSandboxPidNamespace,
+
     /// 父死子随：WS 托管 spawn 场景下，父进程持有的 stdin 管道关闭即退出
     /// （对位 codex --exit-on-stdin-close / ParentLifetime::StdinPipe）。
     /// stdio 形态下 stdin 本就是传输线，EOF 自然结束服务，此旗标为 no-op。
@@ -151,7 +158,8 @@ async fn run_server() -> Result<()> {
         .or_else(|| std::env::current_exe().ok())
         .context("executor self executable path is not configured")?;
     let runtime_paths =
-        ExecServerRuntimePaths::new(executor_self_exe, cli.executor_linux_sandbox_exe)?;
+        ExecServerRuntimePaths::new(executor_self_exe, cli.executor_linux_sandbox_exe)?
+            .with_linux_sandbox_pid_namespace(cli.linux_sandbox_pid_namespace);
 
     // 构建请求分派模式
     let request_dispatch_mode = if cli.concurrent_requests <= 1 {

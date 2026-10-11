@@ -2,6 +2,8 @@
 mod bwrap;
 mod denial;
 pub mod landlock;
+// 对位 codex 39f4277087：Linux PID 命名空间启动策略
+mod linux_pid_namespace;
 mod manager;
 pub mod policy_transforms;
 // 对位 codex 11da6b9edc：沙箱完整性检查件（FileContentsChecker 等）
@@ -26,6 +28,7 @@ pub use bwrap::find_system_bwrap_in_path;
 pub use bwrap::system_bwrap_warning;
 pub use denial::is_likely_executor_managed_sandbox_denied;
 pub use denial::is_likely_sandbox_denied;
+pub use linux_pid_namespace::LinuxSandboxPidNamespace;
 pub use manager::SandboxCommand;
 pub use nova_exec_server_mxc_sandbox::NOVA_EXEC_SERVER_WINDOWS_MXC_ARG1;
 pub use nova_exec_server_mxc_sandbox::is_available as windows_mxc_available;

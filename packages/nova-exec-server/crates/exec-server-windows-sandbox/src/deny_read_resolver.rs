@@ -86,7 +86,7 @@ fn resolve_deny_read_paths(
             })
             .collect(),
     );
-    let Some(matcher) = ReadDenyMatcher::try_new(&glob_policy, cwd.as_path())?
+    let Some(matcher) = ReadDenyMatcher::try_new_for_local_paths(&glob_policy, cwd.as_path())?
     else {
         return Ok(paths);
     };
@@ -103,7 +103,7 @@ fn resolve_deny_read_paths(
 
         let directory_scan_mode = if let Some(file_paths) = ripgrep_files(&scan_plan, &configure)? {
             for path in file_paths {
-                if matcher.is_read_denied(&path) {
+                if matcher.is_local_path_read_denied(&path) {
                     push_absolute_path(&mut paths, &mut seen, path)?;
                 }
             }
@@ -169,7 +169,7 @@ fn ripgrep_files(
             // Windows directories. Its output may be incomplete. The caller
             // must enumerate again using the matcher-backed walker; policy
             // syntax has already been validated by
-            // ReadDenyMatcher::try_new.
+            // ReadDenyMatcher::try_new_for_local_paths.
             return Ok(None);
         }
 

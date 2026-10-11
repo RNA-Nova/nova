@@ -41,7 +41,16 @@ struct SystemBwrapCapabilities {
 static LAUNCHER: OnceLock<BubblewrapLauncher> = OnceLock::new();
 
 pub(crate) fn exec_bwrap(mut argv: Vec<String>, preserved_files: Vec<File>) -> ! {
-    argv.insert(1, "--as-pid-1".to_string());
+    // 对位 codex 39f4277087：--as-pid-1 依赖 PID 隔离，仅在 --unshare-pid
+    // 在场时插入（PID 命名空间 inherit 模式下无 --unshare-pid，bwrap 拒绝
+    // 裸 --as-pid-1）。
+    if argv
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--unshare-pid")
+    {
+        argv.insert(1, "--as-pid-1".to_string());
+    }
 
     match preferred_bwrap_launcher() {
         BubblewrapLauncher::System(launcher) => {

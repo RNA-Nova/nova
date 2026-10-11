@@ -4,6 +4,7 @@ use crate::bwrap::WSL1_BWRAP_WARNING;
 use crate::bwrap::is_wsl1;
 use crate::landlock::NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0;
 use crate::landlock::create_linux_sandbox_command_args_for_permission_profile;
+use crate::linux_pid_namespace::LinuxSandboxPidNamespace;
 use crate::policy_transforms::effective_permission_profile;
 use crate::policy_transforms::should_require_platform_sandbox;
 #[cfg(target_os = "windows")]
@@ -284,6 +285,8 @@ impl std::error::Error for SandboxTransformError {
 
 #[derive(Default)]
 pub struct SandboxManager {
+    // 对位 codex 39f4277087：Linux PID 命名空间策略（Default 自动为 Isolate）
+    linux_sandbox_pid_namespace: LinuxSandboxPidNamespace,
     #[cfg(target_os = "macos")]
     seatbelt_profile: MacosSeatbeltProfile,
     // 对位 codex d13aeb77ea：NOVA_HOME symlink opt-out（配置源未接入，恒 None）
@@ -299,11 +302,19 @@ impl SandboxManager {
     /// Creates a manager that applies the narrower runtime profile required by filesystem helpers.
     pub fn for_file_system_helpers() -> Self {
         Self {
+            linux_sandbox_pid_namespace: LinuxSandboxPidNamespace::default(),
             #[cfg(target_os = "macos")]
             seatbelt_profile: MacosSeatbeltProfile::FileSystemHelper,
             #[cfg(target_os = "macos")]
             allowed_symlinked_nova_home: None,
         }
+    }
+
+    /// Applies a trusted executor startup policy, never a command or repository setting.
+    /// （对位 codex 39f4277087）
+    pub fn with_linux_sandbox_pid_namespace(mut self, mode: LinuxSandboxPidNamespace) -> Self {
+        self.linux_sandbox_pid_namespace = mode;
+        self
     }
 
     /// Allows otherwise-authorized writable roots beneath the opted-in user home
@@ -477,6 +488,12 @@ impl SandboxManager {
                     use_legacy_landlock,
                     managed_network.as_ref(),
                 );
+                // Keep default invocations compatible with older helpers. Only the
+                // startup opt-in requires a helper that understands PID inheritance.
+                // （对位 codex 39f4277087：默认调用不带旗标，保持旧 helper 兼容）
+                if self.linux_sandbox_pid_namespace == LinuxSandboxPidNamespace::Inherit {
+                    args.insert(0, "--inherit-pid-namespace".to_string());
+                }
                 let mut full_command = Vec::with_capacity(1 + args.len());
                 full_command.push(os_string_to_command_component(exe.as_os_str().to_owned()));
                 full_command.append(&mut args);
@@ -801,11 +818,11 @@ fn compatibility_workspace_write_policy(
         .and_then(|tmpdir| {
             AbsolutePathBuf::from_absolute_path(std::path::PathBuf::from(tmpdir)).ok()
         })
-        .is_some_and(|tmpdir| file_system_policy.can_write_path_with_cwd(tmpdir.as_path(), cwd));
+        .is_some_and(|tmpdir| file_system_policy.can_write_local_path_with_cwd(tmpdir.as_path(), cwd));
     let slash_tmp = Path::new("/tmp");
     let slash_tmp_writable = slash_tmp.is_absolute()
         && slash_tmp.is_dir()
-        && file_system_policy.can_write_path_with_cwd(slash_tmp, cwd);
+        && file_system_policy.can_write_local_path_with_cwd(slash_tmp, cwd);
 
     SandboxPolicy::WorkspaceWrite {
         writable_roots,

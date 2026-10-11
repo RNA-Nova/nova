@@ -64,12 +64,11 @@ impl FileContentsChecker {
         }
         let resolved_target = target.canonicalize()?;
         // Denying an alias does not establish protection of the resolved contents.
-        // （对位命名：codex `is_local_path_read_denied` 在 nova 名为 `is_read_denied`）
         if self
             .policy
             .glob_denials
             .as_ref()
-            .is_some_and(|matcher| matcher.is_read_denied(resolved_target.as_path()))
+            .is_some_and(|matcher| matcher.is_local_path_read_denied(resolved_target.as_path()))
         {
             return Ok(None);
         }

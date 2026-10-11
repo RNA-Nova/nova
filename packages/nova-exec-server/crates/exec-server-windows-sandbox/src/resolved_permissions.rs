@@ -107,10 +107,10 @@ impl ResolvedWindowsSandboxPermissions {
             .ancestors()
             .last()
             .ok_or_else(|| anyhow::anyhow!("command cwd has no filesystem root"))?;
-        let root_is_denied = ReadDenyMatcher::try_new(&self.file_system, cwd)
+        let root_is_denied = ReadDenyMatcher::try_new_for_local_paths(&self.file_system, cwd)
             .map_err(anyhow::Error::msg)?
-            .is_some_and(|matcher| matcher.is_read_denied(root));
-        if !self.file_system.can_read_path_with_cwd(root, cwd) || root_is_denied {
+            .is_some_and(|matcher| matcher.is_local_path_read_denied(root));
+        if !self.file_system.can_read_local_path_with_cwd(root, cwd) || root_is_denied {
             anyhow::bail!("elevated Windows sandbox requires effective `:root` read access");
         }
         Ok(())
@@ -127,7 +127,7 @@ impl ResolvedWindowsSandboxPermissions {
         }) && cwd
             .ancestors()
             .last()
-            .is_some_and(|root| self.file_system.can_read_path_with_cwd(root, cwd))
+            .is_some_and(|root| self.file_system.can_read_local_path_with_cwd(root, cwd))
     }
 
     pub(crate) fn include_platform_defaults(&self) -> bool {

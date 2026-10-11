@@ -387,8 +387,9 @@ fn managed_mitm_ca_bundle_becomes_readable_for_restricted_sandbox() {
 #[cfg(target_os = "linux")]
 fn transform_linux_seccomp_request(
     sandbox_exe: &std::path::Path,
+    mode: crate::LinuxSandboxPidNamespace,
 ) -> super::SandboxExecRequest {
-    let manager = SandboxManager::new();
+    let manager = SandboxManager::new().with_linux_sandbox_pid_namespace(mode);
     let cwd = AbsolutePathBuf::current_dir().expect("current dir");
     let cwd_uri = PathUri::from_abs_path(&cwd);
     let permissions = PermissionProfile::Disabled;
@@ -490,7 +491,10 @@ fn wsl1_allows_non_bubblewrap_linux_paths() {
 #[test]
 fn transform_linux_seccomp_preserves_helper_path_in_arg0_when_available() {
     let nova_linux_sandbox_exe = std::path::PathBuf::from("/tmp/nova-linux-sandbox");
-    let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe);
+    let exec_request = transform_linux_seccomp_request(
+        &nova_linux_sandbox_exe,
+        crate::LinuxSandboxPidNamespace::default(),
+    );
 
     assert_eq!(
         exec_request.arg0,
@@ -502,9 +506,22 @@ fn transform_linux_seccomp_preserves_helper_path_in_arg0_when_available() {
 #[test]
 fn transform_linux_seccomp_uses_helper_alias_when_launcher_is_not_helper_path() {
     let nova_linux_sandbox_exe = std::path::PathBuf::from("/tmp/nova-executor");
-    let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe);
-
-    assert_eq!(exec_request.arg0, Some("nova-linux-sandbox".to_string()));
+    // 对位 codex 39f4277087：参数化 PID 命名空间模式——inherit 时
+    // `--inherit-pid-namespace` 须为 helper 的首个参数
+    for (mode, first_helper_arg) in [
+        (
+            crate::LinuxSandboxPidNamespace::Isolate,
+            "--sandbox-policy-cwd",
+        ),
+        (
+            crate::LinuxSandboxPidNamespace::Inherit,
+            "--inherit-pid-namespace",
+        ),
+    ] {
+        let exec_request = transform_linux_seccomp_request(&nova_linux_sandbox_exe, mode);
+        assert_eq!(exec_request.arg0, Some("nova-linux-sandbox".to_string()));
+        assert_eq!(exec_request.command[1], first_helper_arg);
+    }
 }
 
 // 托管网络上下文随 `--managed-network` 传输的矩阵：缺省保守、路径授予保持
