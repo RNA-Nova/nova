@@ -28,6 +28,9 @@ const MACOS_SEATBELT_PREFERENCES_POLICY: &str = include_str!("seatbelt_preferenc
 // 对位 codex 75388bf321：上游已将该文件改名为 seatbelt_read_only_platform_defaults.sbpl
 const MACOS_RESTRICTED_READ_ONLY_PLATFORM_DEFAULTS: &str =
     include_str!("seatbelt_read_only_platform_defaults.sbpl");
+// 对位 codex 39f4277087：daemon socket 目录保护（预封未来 daemon 的公认路径）
+#[path = "seatbelt_daemon.rs"]
+mod daemon;
 // 对位 codex d84ebff592：进程 scratch 访问改走常规 Seatbelt 排除规则
 #[path = "seatbelt_scratch.rs"]
 mod scratch;
@@ -1067,6 +1070,15 @@ pub(crate) fn create_seatbelt_command_args_with_profile(
             policy_sections.push("(allow file-read* (subpath \"/Applications\"))".to_string());
         }
     }
+    // Network grants and Unix-socket allowlists must never reopen the
+    // privileged app-server RPC transport to filesystem-restricted commands.
+    // （对位 codex 39f4277087：预封 daemon 公认路径——nova 尚无 daemon 本体，
+    // 规则先行防抢占；全程可写整盘的命令不受此限，与上游一致）
+    if !file_system_sandbox_policy.has_full_disk_write_access() {
+        let directory = daemon::shared_daemon_socket_directory()
+            .map_err(|error| SeatbeltPreparationError::FileSystem(error.to_string()))?;
+        policy_sections.push(daemon::protection_policy(&directory)?);
+    }
     // 对位 codex 78245b47af：封堵 XPC service lookup
     policy_sections.push("(deny mach-lookup (xpc-service-name-prefix \"\"))".to_string());
     policy_sections.push(deny_read_policy);
@@ -1115,9 +1127,13 @@ pub(crate) fn create_seatbelt_command_args_with_profile(
 #[path = "seatbelt_tests.rs"]
 mod tests;
 
-// 对位 codex 04e4d2b40f / 228ae3da8d 的实测子模块；
-// 上游 seatbelt_daemon_socket_tests.rs 依赖 app-server UDS daemon 目录机制，
-// nova 无对位，未移植（见移植报告挂账项）。
+// 对位 codex 39f4277087：daemon socket 目录保护实测子模块（预封形态落地后
+// 已有本体可依）。
+#[cfg(test)]
+#[path = "seatbelt_daemon_socket_tests.rs"]
+mod daemon_socket_tests;
+
+// 对位 codex 04e4d2b40f / 228ae3da8d 的实测子模块。
 #[cfg(test)]
 #[path = "seatbelt_fcntl_tests.rs"]
 mod fcntl_tests;
