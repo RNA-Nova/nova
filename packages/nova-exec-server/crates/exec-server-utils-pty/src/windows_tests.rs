@@ -469,10 +469,7 @@ async fn conpty_ctrl_c_interrupts_powershell_foreground_child() -> anyhow::Resul
     // Ctrl-C 后 PowerShell 需要终止 ping 并重建提示符；CI 慢机上这可能远超
     // 固定 sleep 的时长，过早发送的命令会被吞掉（无回显、无执行）。等到
     // 提示符重新出现（以 "> " 结尾）再发下一条命令。
-    // 预算 60s：GHA 共享 Windows runner 高峰时段底层织物饥饿会把 Ctrl-C
-    // 投递压过 10s（run 38091815554 独占槽位下仍四连红；低谷同镜像同码
-    // 可绿，run 38035034011）。
-    wait_for_output_contains(&mut output_rx, "> ", /*timeout_ms*/ 60_000).await?;
+    wait_for_output_contains(&mut output_rx, "> ", /*timeout_ms*/ 10_000).await?;
     writer.send(b"cmd.exe /D /C ver\n".to_vec()).await?;
     let mut output = wait_for_output_contains(
         &mut output_rx,

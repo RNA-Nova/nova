@@ -58,21 +58,11 @@ filter = 'package(nova-exec-server) & test(noisy_failing_helper_preserves_exit_s
 retries = 3
 
 [[profile.default.overrides]]
-# ConPTY Ctrl-C 后 PowerShell 终止前台 ping 并重建提示符，GHA 共享 runner
-# 高峰时段可压过用例等待预算（用例内已提到 60s；run 38091815554 独占槽位
-# 下 10s 四连红，低谷 run 38035034011 同镜像同码可绿）。retries 吸收残余
-# 波动；slow-timeout 终止线放宽到 120s，给 60s 内部等待+启动开销留头间。
+# ConPTY Ctrl-C 用例在共享 runner 上偶发超时（提示符重建短暂超 10s 预算，
+# 重试即绿，run 38035034011 实证），retries 吸收残余波动。
+# 注：该用例曾在 GHA 上确定性连红，真因是测试步 git-bash 壳的进程树差异
+# 导致 Ctrl-C 不投递（ci-probe-conpty 分支三轮对照实验），与负载无关——
+# Windows 测试步已改 pwsh（见 ci.yml 注释），勿改回 bash。
 platform = 'cfg(windows)'
 filter = 'package(nova-exec-server-utils-pty) & test(conpty_ctrl_c_interrupts_powershell_foreground_child)'
 retries = 3
-slow-timeout = { period = "60s", terminate-after = 2 }
-
-[[profile.default.overrides]]
-# ConPTY 用例是真实时交互（Ctrl-C→conhost 处理→PSReadLine 重建提示符），
-# 对 CPU 饥饿敏感：共享 4-vCPU runner 高负载时段全链被压过 10s 预算
-# （run 38091815554 三连红实证：ping 在窗口内续命 ~9s；低谷 run
-# 38035034011 同镜像可绿）。要求全部 CPU 槽位、独占整机放行该包用例，
-# 消除并行竞争（codex 跑自建 Windows 池天然无此问题，我们没有该条件）。
-platform = 'cfg(windows)'
-filter = 'package(nova-exec-server-utils-pty)'
-threads-required = 'num-cpus'

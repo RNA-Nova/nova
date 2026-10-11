@@ -105,7 +105,26 @@ jobs:
       #    7efc49b258 删除宿主 TEMP 回退后 :tmpdir 授权消失，后代写不了 TEMP
       #    下的 ready 标记，取消令牌永不触发（上游自建 runner 无 pwsh 7 静默
       #    跳过；GHA 预装 pwsh 7 才真实执行）。
-      - name: cargo nextest run
+      #
+      # Windows 测试步必须走 pwsh，不能走 git-bash：MSYS2 壳 spawn 原生进程
+      # 链的进程树状态差异会让 ConPTY 用例的 Ctrl-C（0x03）永不翻译为
+      # CTRL_C_EVENT（前台 ping 全程不被打断，60s 预算照样四连红）——
+      # ci-probe-conpty 分支三轮对照实证：bash 红、pwsh/cmd 绿、摘净 MSYS
+      # 环境变量仍红（run 38096735214 / 38098671149）。环境变量无关，是
+      # 进程树层面差异。此步脚本无 bash 语法依赖，pwsh 直跑安全。
+      - name: cargo nextest run（Unix）
+        if: matrix.os != 'windows-latest'
+        env:
+          RUST_BACKTRACE: "1"
+          RUST_MIN_STACK: "8388608"
+          NEXTEST_STATUS_LEVEL: leak
+        run: >-
+          cargo nextest run --workspace
+          -E 'not (test(root_metadata_symlinks_cannot_reopen_approved_denials) | test(legacy_capture_cancellation_terminates_descendants_without_timeout))'
+
+      - name: cargo nextest run（Windows）
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
         env:
           RUST_BACKTRACE: "1"
           RUST_MIN_STACK: "8388608"
