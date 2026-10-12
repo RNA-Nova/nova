@@ -63,6 +63,11 @@ pub const GLOB_SCAN_PROGRAM: &str = "rg";
 
 const MAX_UNREADABLE_GLOB_MATCHES: usize = 8192;
 
+// 对位 codex 39f4277087 `bwrap.rs::WSLG_DISTRO_ROOT`：WSLg 遮蔽主体（wslg.rs /
+// `BwrapOptions::mask_wslg_distro`）尚未移植，常量目前仅供 daemon_mounts 测试引用。
+#[allow(dead_code)]
+pub(crate) const WSLG_DISTRO_ROOT: &str = "/mnt/wslg/distro";
+
 /// Options that control how bubblewrap is invoked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BwrapOptions {
@@ -395,6 +400,14 @@ fn create_filesystem_args(
     cwd: &Path,
     options: BwrapOptions,
 ) -> Result<BwrapArgs> {
+    // 对位 codex 39f4277087 `bwrap.rs:436-442`：取 daemon socket 目录并分析主机
+    // 挂载别名（nova 适配：`codex_uds::` → `nova_exec_server_sandboxing::`；
+    // WSLg distro root 遮蔽尚未移植，masked_root 恒 None）。
+    let daemon_directory = nova_exec_server_sandboxing::prepare_shared_daemon_socket_directory()?;
+    let daemon_directories = crate::daemon_mounts::daemon_socket_mask_paths(
+        &daemon_directory,
+        /*masked_root*/ None,
+    )?;
     let unreadable_globs = file_system_sandbox_policy.get_unreadable_globs_with_cwd(cwd);
     // Bubblewrap requires bind mount targets to exist. Skip missing writable
     // roots so mixed-platform configs can keep harmless paths for other
@@ -484,7 +497,7 @@ fn create_filesystem_args(
     unreadable_roots.sort();
     unreadable_roots.dedup();
 
-    let args = if file_system_sandbox_policy.has_full_disk_read_access() {
+    let mut args = if file_system_sandbox_policy.has_full_disk_read_access() {
         // Read-only root, then mount a minimal device tree.
         // In bubblewrap (`bubblewrap.c`, `SETUP_MOUNT_DEV`), `--dev /dev`
         // creates the standard minimal nodes: null, zero, full, random,
@@ -558,11 +571,15 @@ fn create_filesystem_args(
                 args.push("--ro-bind".to_string());
                 args.push(path_to_string(&mount_root));
                 args.push(path_to_string(&mount_root));
+                append_daemon_socket_masks(&mut args, &mount_root, &daemon_directories)?;
             }
         }
 
         args
     };
+    if args[0] == "--ro-bind" {
+        append_daemon_socket_masks(&mut args, Path::new("/"), &daemon_directories)?;
+    }
     let mut bwrap_args = BwrapArgs {
         args,
         preserved_files: Vec::new(),
@@ -641,6 +658,7 @@ fn create_filesystem_args(
                     "/dev/shm".to_string(),
                 ]);
             }
+            append_daemon_socket_masks(&mut bwrap_args.args, mount_root, &daemon_directories)?;
         }
 
         let mut read_only_subpaths: Vec<PathBuf> = writable_root
@@ -668,7 +686,12 @@ fn create_filesystem_args(
         );
         read_only_subpaths.sort_by_key(|path| path_depth(path));
         for subpath in read_only_subpaths {
-            append_read_only_subpath_args(&mut bwrap_args, &subpath, &allowed_write_paths)?;
+            append_read_only_subpath_args(
+                &mut bwrap_args,
+                &subpath,
+                &allowed_write_paths,
+                &daemon_directories,
+            )?;
         }
         // Protect the registry only where a writable bind exposes it. Apply
         // this before deny masks so a denied parent stays hidden, rather than
@@ -686,6 +709,7 @@ fn create_filesystem_args(
             bwrap_args.args.push("--ro-bind".to_string());
             bwrap_args.args.push(path_to_string(registry_mount));
             bwrap_args.args.push(path_to_string(registry_mount));
+            append_daemon_socket_masks(&mut bwrap_args.args, registry_mount, &daemon_directories)?;
         }
         let mut nested_unreadable_roots: Vec<PathBuf> = unreadable_roots
             .iter()
@@ -754,6 +778,44 @@ fn append_metadata_path_masks_for_writable_root(
             read_only_subpaths.push(path);
         }
     }
+}
+
+// Mask immediately after every bind that exposes the directory, before policy
+// deny masks can hide its parent. Use the mount destination for read-root aliases.
+// （对位 codex 39f4277087 `bwrap.rs::append_daemon_socket_masks` 全文；
+// `CodexErr::Fatal` → `ExecErr::Fatal`）
+fn append_daemon_socket_masks(
+    args: &mut Vec<String>,
+    mount_root: &Path,
+    daemon_directories: &BTreeSet<PathBuf>,
+) -> Result<()> {
+    let source = fs::canonicalize(mount_root)?;
+    for daemon_directory in daemon_directories {
+        if source.starts_with(daemon_directory) {
+            return Err(ExecErr::Fatal(
+                "app-server socket directory cannot be a sandbox mount root".to_string(),
+            ));
+        }
+        if let Ok(relative) = daemon_directory.strip_prefix(&source) {
+            let destination = mount_root.join(relative);
+            // A lossy conversion could mask a different path and expose the socket.
+            let destination = destination
+                .to_str()
+                .ok_or_else(|| {
+                    ExecErr::Fatal("app-server socket mask path must be valid UTF-8".to_string())
+                })?
+                .to_string();
+            args.extend([
+                "--perms".to_string(),
+                "000".to_string(),
+                "--tmpfs".to_string(),
+                destination.clone(),
+                "--remount-ro".to_string(),
+                destination,
+            ]);
+        }
+    }
+    Ok(())
 }
 
 /// Expand deny globs with the launcher's scanner in an explicit command environment.
@@ -1139,6 +1201,7 @@ fn append_read_only_subpath_args(
     bwrap_args: &mut BwrapArgs,
     subpath: &Path,
     allowed_write_paths: &[PathBuf],
+    daemon_directories: &BTreeSet<PathBuf>,
 ) -> Result<()> {
     if let Some(symlink) = first_writable_symlink_component_in_path(subpath, allowed_write_paths) {
         /*
@@ -1184,6 +1247,7 @@ fn append_read_only_subpath_args(
         bwrap_args.args.push("--ro-bind".to_string());
         bwrap_args.args.push(path_to_string(subpath));
         bwrap_args.args.push(path_to_string(subpath));
+        append_daemon_socket_masks(&mut bwrap_args.args, subpath, daemon_directories)?;
     }
     Ok(())
 }
@@ -2303,6 +2367,62 @@ mod tests {
             .expect("/dev bind");
         assert!(*initial_dev_mount < root_bind && root_bind < *restored_dev_mount);
         assert!(*restored_dev_mount < dev_bind);
+    }
+
+    // 对位 codex 39f4277087 `bwrap.rs::non_utf8_daemon_socket_mask_path_is_rejected`
+    #[test]
+    fn non_utf8_daemon_socket_mask_path_is_rejected() {
+        let daemon_directory =
+            PathBuf::from(OsString::from_vec(b"/tmp/nova-daemon-\xff".to_vec()));
+        assert!(
+            append_daemon_socket_masks(
+                &mut Vec::new(),
+                Path::new("/"),
+                &BTreeSet::from([daemon_directory]),
+            )
+            .is_err()
+        );
+    }
+
+    // 对位 codex 39f4277087 `bwrap.rs::read_only_tmp_carveout_keeps_daemon_sockets_masked`
+    // （`codex_uds::` → `nova_exec_server_sandboxing::`）
+    #[test]
+    fn read_only_tmp_carveout_keeps_daemon_sockets_masked() {
+        let policy = FileSystemSandboxPolicy::restricted(
+            [
+                ("/", FileSystemAccessMode::Write),
+                ("/tmp", FileSystemAccessMode::Read),
+            ]
+            .into_iter()
+            .map(|(path, access)| {
+                FileSystemSandboxEntry::new(
+                    AbsolutePathBuf::from_absolute_path(path).unwrap().into(),
+                    access,
+                )
+            })
+            .collect(),
+        );
+        let args = create_filesystem_args(&policy, Path::new("/"), BwrapOptions::default())
+            .expect("filesystem args");
+        let tmp_bind = args
+            .args
+            .windows(3)
+            .position(|window| window == ["--ro-bind", "/tmp", "/tmp"])
+            .expect("read-only tmp bind");
+        let daemon_directory = path_to_string(
+            &nova_exec_server_sandboxing::shared_daemon_socket_directory().unwrap(),
+        );
+        assert_eq!(
+            &args.args[tmp_bind + 3..tmp_bind + 9],
+            [
+                "--perms",
+                "000",
+                "--tmpfs",
+                &daemon_directory,
+                "--remount-ro",
+                &daemon_directory
+            ],
+        );
     }
 
     #[test]

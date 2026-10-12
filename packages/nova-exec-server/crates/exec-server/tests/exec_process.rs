@@ -1,4 +1,8 @@
 mod common;
+// 对位 codex 39f4277087：shell snapshot 文件回放/进程组守卫的端到端用例
+#[cfg(unix)]
+#[path = "exec_process/shell_snapshot.rs"]
+mod shell_snapshot;
 
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
@@ -32,6 +36,8 @@ use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::SandboxPolicy;
 use nova_exec_server::ExecBackend;
+#[cfg(unix)]
+use nova_exec_server::Environment;
 #[cfg(unix)]
 use nova_exec_server::ExecEnvPolicy;
 use nova_exec_server::ExecOutputStream;

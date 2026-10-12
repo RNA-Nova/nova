@@ -150,11 +150,16 @@ sandbox`（同 scopeId 不同 shell 不命中——key 含 shell）。`scopeId` 
 ≤256 字节（违即 `invalid_params`）；`shell.name` 只认 `bash`/`zsh`/`sh`
 （其余 `invalid_params`）；非 unix 端下发即 `invalid_params`。
 仅对 `<shell.path> -lc <command>` 形态的启动生效（其余 argv 原样放行）；
-命中缓存的后续启动跳过启动文件，改用 bash `-pc` / zsh `-fc`（sh 为 `-c`）
-加 eval 恢复脚本执行原命令——快照 state 切成 ≤60KB 的环境变量
-（`__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_<n>`）传入子进程。首次执行时同步跑一次
-捕获（10s 超时、失败按 1s 退避最多 3 次、并发单飞），缓存上限 LRU 16 条、
-单条 512KB；捕获失败永远回退为原始 `shell -lc` 行为。快照环境在捕获后仍
+命中缓存的后续启动跳过启动文件，改用 bash `--norc -pc` / zsh `-fc`（sh 为 `-c`）
+加恢复脚本执行原命令。恢复有两种形态（对位 codex 39f4277087）：bash/zsh 且
+捕获沙箱允许打开 fd 路径时走**文件回放**——每次启动在 daemon 保护目录物化
+一份匿名（已 unlink）只读 CLOEXEC 读端，经 `inherited_fds` 随 spawn 传入子进程，
+恢复脚本以 `. /dev/fd/N` 源入，状态上限放宽到 4MiB；sh（无法可移植关闭 >9
+的 fd）或 fd 路径被沙箱拒绝时保持**环境回放**——快照 state 切成 ≤60KB 的
+环境变量（`__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_<n>`）传入子进程经 eval 恢复，
+状态与环境合计 512KB 预算。首次执行时同步跑一次
+捕获（10s 超时、失败按 1s 退避最多 3 次、并发单飞），缓存上限 LRU 16 条；
+捕获失败永远回退为原始 `shell -lc` 行为。快照环境在捕获后仍
 按当次 `envPolicy` 过滤，且剔除托管代理注入的代理变量与 `PWD`/`OLDPWD`。
 非 unix 端收到 `shellSnapshot` 字段返回 `invalid_params`。
 

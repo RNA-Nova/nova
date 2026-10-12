@@ -1,5 +1,20 @@
+//! Cache captured shell state in executor memory. Replay through a per-launch
+//! unnamed reader when the capture sandbox permits it; otherwise retain env replay.
+//! Command metrics exclude prewarm and measure lookup/capture wait before replay.
+//! File replay admits larger shell state while environment replay keeps its launch budget.
+//!
+//! （对位 codex 39f4277087 `exec-server/src/shell_snapshot.rs`；nova delta：
+//! 状态变量前缀 `__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_`、SOURCE_MARKER 改名
+//! `NOVA_EXEC_SERVER_SNAPSHOT_SOURCE`、指标名/span 名 nova 化、bash 恢复插
+//! `--norc`（rshd 误判防护，见下文）、`create_env_from_vars` 保持 nova 两参形态
+//! （锚点第三参 thread_id 属 codex core 的 ThreadId 机制，nova 无对位）。
+//! 对位裁点：`CapturePurpose::Prewarm` 及其路径不移植——nova 无进程内 Rust
+//! 调用方，锚点也无 RPC 面；purpose 标签恒为 "execution"。）
+
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::fs::File;
+use std::os::fd::AsRawFd;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,10 +25,14 @@ use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
 use nova_exec_server_protocol_core::shell_environment;
 // 对位 codex 9b738582b1：快照捕获/回放要剔除的两个关联标签变量
+// （变量名为线上 env 契约，不随 crate 改名）
 use nova_exec_server_protocol_core::shell_environment::CODEX_THREAD_ID_ENV_VAR;
 use nova_exec_server_protocol_core::shell_environment::CODEX_TOOL_CALL_ID_ENV_VAR;
 use nova_exec_server_shell_command::shell_detect::ShellType;
-use nova_exec_server_shell_command::shell_snapshot::snapshot_state_and_environment_script;
+use nova_exec_server_shell_command::shell_snapshot::CapturedSnapshot;
+use nova_exec_server_shell_command::shell_snapshot::SnapshotCaptureOptions;
+use nova_exec_server_shell_command::shell_snapshot::SnapshotStartup;
+use nova_exec_server_shell_command::shell_snapshot::snapshot_source_capture_script;
 use nova_exec_server_utils_path_uri::PathUri;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -30,13 +49,14 @@ use crate::protocol::ExecParams;
 use crate::protocol::ShellSnapshotRequest;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
+use crate::shell_snapshot_process::SnapshotCapture;
 use crate::telemetry::ExecServerTelemetry;
 
 const MAX_CACHED_SNAPSHOTS: usize = 16;
 const MAX_SNAPSHOT_BYTES: usize = 512 * 1024;
 // 对位 codex e32365a2c6：文件回放允许更大的 shell 状态
 const MAX_FILE_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
-// 捕获输出还包含带引号的 export 记录与可选的启动前环境（对位 codex 常量注释）
+// Capture also includes quoted export records and an optional pre-startup environment.
 const MAX_SNAPSHOT_CAPTURE_BYTES: usize = 8 * MAX_SNAPSHOT_BYTES;
 // 对位 codex e32365a2c6：文件回放的捕获输出预算
 const MAX_FILE_SNAPSHOT_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
@@ -47,10 +67,8 @@ const SNAPSHOT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_SNAPSHOT_ATTEMPTS: usize = 3;
 
 // 对位 codex e32365a2c6：回放方式（文件/环境）决定快照尺寸预算。
-// nova 尚未镜像文件回放（unnamed reader 探针），File 当前仅测试构造。
 #[derive(Clone, Copy)]
 enum SnapshotReplay {
-    #[allow(dead_code)]
     File,
     Environment,
 }
@@ -71,21 +89,34 @@ struct CachedShellSnapshot {
 }
 
 struct ShellSnapshot {
-    // 对位 codex 588f616e8b：标记快照是否由 prewarm 捕获（nova 暂无 prewarm 路径，恒为 false）
+    // 对位 codex 588f616e8b：标记快照是否由 prewarm 捕获（nova 无 prewarm 路径，恒为 false）
     prewarmed: bool,
     state: String,
+    // 对位 codex 39f4277087：捕获探针判定本快照能否走文件回放（`. /dev/fd/N`）
+    file_source: bool,
     environment: HashMap<String, String>,
 }
 
+// Keep a bounded metric label alongside the original RPC error.
+// （对位 codex 39f4277087：失败原因标签化，进 telemetry 的 failure_reason）
+type CaptureResult = Result<ShellSnapshot, (&'static str, JSONRPCErrorError)>;
+
 impl ShellSnapshotCache {
+    // 对位 codex 39f4277087：span 名按 nova 前缀改名；锚点 fields 里的 process.id
+    // 走 crate::process_telemetry::trace_process_id——nova 无对位模块，跳过该字段
+    #[tracing::instrument(
+        name = "nova.exec_server.process_prepare_shell_snapshot",
+        skip_all,
+        fields(snapshot_requested = params.shell_snapshot.is_some()),
+    )]
     pub(crate) async fn prepare(
         &self,
         params: &ExecParams,
         prepared: &mut PreparedExecRequest,
         telemetry: &ExecServerTelemetry,
-    ) -> Result<(), JSONRPCErrorError> {
+    ) -> Result<Option<File>, JSONRPCErrorError> {
         let Some(request) = params.shell_snapshot.as_ref() else {
-            return Ok(());
+            return Ok(None);
         };
         if request.scope_id.is_empty() || request.scope_id.len() > MAX_SNAPSHOT_SCOPE_BYTES {
             return Err(invalid_params(format!(
@@ -98,7 +129,7 @@ impl ShellSnapshotCache {
             || params.argv[1] != "-lc"
             || !prepared.command.ends_with(&params.argv)
         {
-            return Ok(());
+            return Ok(None);
         }
 
         let shell_type = match request.shell.name.as_str() {
@@ -114,7 +145,7 @@ impl ShellSnapshotCache {
 
         // 对位 codex 588f616e8b：从缓存查找前开始计快照等待时间
         let wait_started_at = std::time::Instant::now();
-        let snapshot = {
+        let (snapshot, attempt) = {
             let mut entries = self.entries.lock().await;
             let position = entries.iter().position(|entry| {
                 &entry.request == request
@@ -126,6 +157,8 @@ impl ShellSnapshotCache {
                 let mut entry = entries.remove(position)?;
                 // Share each failed attempt during backoff. After the retry
                 // budget is exhausted, keep falling back until eviction.
+                // （对位裁点：锚点此处另有 purpose == Execution 门——prewarm
+                //  不移植后仅剩 execution 路径，门恒真故省略）
                 if entry.attempts < MAX_SNAPSHOT_ATTEMPTS
                     && let Some(Err(retry_at)) = entry.snapshot.get()
                     && Instant::now() >= *retry_at
@@ -134,8 +167,9 @@ impl ShellSnapshotCache {
                     entry.snapshot = Arc::new(OnceCell::new());
                 }
                 let snapshot = Arc::clone(&entry.snapshot);
+                let attempt = entry.attempts;
                 entries.push_back(entry);
-                Some(snapshot)
+                Some((snapshot, attempt))
             });
             if let Some(snapshot) = cached {
                 snapshot
@@ -154,27 +188,38 @@ impl ShellSnapshotCache {
                     entries.pop_front();
                 }
 
-                snapshot
+                (snapshot, 1)
             }
         };
-        // 对位 codex 588f616e8b：缓存可用性标签；prewarm_ready 在 nova 暂无触发路径
+        // 对位 codex 588f616e8b：缓存可用性标签；prewarm_ready 在 nova 无触发路径
         let mut availability = match snapshot.get() {
             Some(Ok(snapshot)) if snapshot.prewarmed => "prewarm_ready",
             Some(Ok(_)) => "cache_hit",
             Some(Err(_)) => "unavailable",
             None => "capture_pending",
         };
+        let capture = async {
+            let attempt = attempt.to_string();
+            let started_at = std::time::Instant::now();
+            let result = capture_snapshot(params, prepared, shell_type).await;
+            telemetry.shell_snapshot_captured(
+                started_at.elapsed(),
+                result.as_ref().map(|_| ()).map_err(|(reason, _)| *reason),
+                &[
+                    // 对位裁点：nova 无 prewarm 路径，purpose 恒为 execution
+                    ("purpose", "execution"),
+                    ("attempt", &attempt),
+                    ("shell", request.shell.name.as_str()),
+                    ("sandbox", prepared.sandbox.as_metric_tag()),
+                ],
+            );
+            result.map_err(|(_, error)| error)
+        };
         let snapshot = snapshot
             .get_or_init(|| async {
                 // 对位 codex 588f616e8b：execution 按需捕获覆盖可用性标签
                 availability = "on_demand";
-                let started_at = std::time::Instant::now();
-                let result = capture_snapshot(params, prepared, shell_type).await;
-                telemetry.shell_snapshot_captured(
-                    started_at.elapsed(),
-                    result.as_ref().map(|_| ()).map_err(|_| "capture_failed"),
-                );
-                result.map_err(|err| {
+                capture.await.map_err(|err| {
                     tracing::warn!("failed to capture shell snapshot: {err:?}");
                     Instant::now() + SNAPSHOT_RETRY_BACKOFF
                 })
@@ -184,7 +229,35 @@ impl ShellSnapshotCache {
         let Ok(snapshot) = snapshot else {
             // 对位 codex 588f616e8b：回退普通 shell 启动同样计一次观测
             telemetry.shell_snapshot_command(wait, availability, "fallback");
-            return Ok(());
+            return Ok(None);
+        };
+        if availability == "capture_pending" && snapshot.prewarmed {
+            availability = "prewarm_pending";
+        }
+
+        // POSIX sh cannot portably close arbitrary descriptors above 9. Keep its
+        // existing replay until the launcher supports remapping child descriptors.
+        // （对位 codex 39f4277087：文件回放物化——每次启动一份匿名只读端；
+        //  物化失败回退普通启动）
+        let reader = if snapshot.file_source {
+            let state = snapshot.state.clone();
+            match tokio::task::spawn_blocking(move || {
+                crate::shell_snapshot_file::materialize(shell_type, &state)
+            })
+            .await
+            {
+                Ok(Ok(reader)) => Some(reader),
+                error => {
+                    tracing::warn!(
+                        ?error,
+                        "cannot prepare shell snapshot transport; using normal startup"
+                    );
+                    telemetry.shell_snapshot_command(wait, availability, "fallback");
+                    return Ok(None);
+                }
+            }
+        } else {
+            None
         };
 
         let request_overrides = params
@@ -210,27 +283,34 @@ impl ShellSnapshotCache {
             .env
             .retain(|name, _| !shell_environment::is_non_inheritable_env_var(name));
 
-        let mut state = snapshot.state.as_str();
-        let mut state_variables = Vec::new();
-        while !state.is_empty() {
-            let mut end = state.len().min(MAX_SNAPSHOT_ENV_VALUE_BYTES);
-            while !state.is_char_boundary(end) {
-                end -= 1;
+        // 对位 codex 39f4277087：文件回放走 `. /dev/fd/N`；环境回放保持 60KiB
+        // 切块经 eval 恢复
+        let restore = if let Some(reader) = &reader {
+            format!(". /dev/fd/{}", reader.as_raw_fd())
+        } else {
+            let mut state = snapshot.state.as_str();
+            let mut state_variables = Vec::new();
+            while !state.is_empty() {
+                let mut end = state.len().min(MAX_SNAPSHOT_ENV_VALUE_BYTES);
+                while !state.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let (chunk, remaining) = state.split_at(end);
+                let name = format!(
+                    "__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_{}",
+                    state_variables.len()
+                );
+                prepared.env.insert(name.clone(), chunk.to_string());
+                state_variables.push(name);
+                state = remaining;
             }
-            let (chunk, remaining) = state.split_at(end);
-            let name = format!(
-                "__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_{}",
-                state_variables.len()
-            );
-            prepared.env.insert(name.clone(), chunk.to_string());
-            state_variables.push(name);
-            state = remaining;
-        }
-        let state_expansion = state_variables
-            .iter()
-            .map(|name| format!("${{{name}}}"))
-            .collect::<String>();
-        let state_variables = state_variables.join(" ");
+            let state_expansion = state_variables
+                .iter()
+                .map(|name| format!("${{{name}}}"))
+                .collect::<String>();
+            let state_variables = state_variables.join(" ");
+            format!("eval \"unset {state_variables}\n{state_expansion}\"")
+        };
         let shell_start = prepared.command.len() - params.argv.len();
         // Automatic startup files run before the restoration script and could
         // reintroduce environment variables that the snapshot already filtered.
@@ -244,7 +324,7 @@ impl ShellSnapshotCache {
             ShellType::PowerShell | ShellType::Cmd => unreachable!(),
         };
         let restore_script = format!(
-            "{startup}if ! eval \"unset {state_variables}\n{state_expansion}\" >/dev/null; then printf 'failed to restore shell snapshot\\n' >&2; fi\n{}",
+            "{startup}if ! {restore} >/dev/null; then printf 'failed to restore shell snapshot\\n' >&2; fi\n{}",
             params.argv[2]
         );
         if norc {
@@ -260,23 +340,71 @@ impl ShellSnapshotCache {
 
         // 对位 codex 588f616e8b：选中快照回放计一次 used 观测
         telemetry.shell_snapshot_command(wait, availability, "used");
-        Ok(())
+        Ok(reader)
     }
 }
 
+// 对位 codex 39f4277087：span 名按 nova 前缀改名；锚点 fields 里的 process.id
+// 走 crate::process_telemetry::trace_process_id——nova 无对位模块，跳过该字段
+#[tracing::instrument(name = "nova.exec_server.process_capture_shell_snapshot", skip_all)]
 async fn capture_snapshot(
     params: &ExecParams,
     prepared: &PreparedExecRequest,
     shell_type: ShellType,
-) -> Result<ShellSnapshot, JSONRPCErrorError> {
-    let script = snapshot_state_and_environment_script(shell_type)
-        .ok_or_else(|| invalid_params("unsupported shell snapshot script".to_string()))?;
+) -> CaptureResult {
+    let mut script = snapshot_source_capture_script(
+        shell_type,
+        SnapshotCaptureOptions {
+            startup: SnapshotStartup::Interactive,
+            declarations: false,
+            environment: true,
+        },
+    )
+    .ok_or_else(|| {
+        (
+            "unsupported_shell",
+            invalid_params("unsupported shell snapshot script".to_string()),
+        )
+    })?;
+    // Probe under the exact capture sandbox, including its /proc fallback and
+    // read policy. Keep cached env replay when descriptor paths cannot be opened.
+    // （对位 codex 39f4277087：空串物化探 fd 路径可行性；sh 不可移植关闭
+    //  >9 的 fd，恒走环境回放）
+    let probe = if shell_type == ShellType::Sh {
+        None
+    } else {
+        tokio::task::spawn_blocking(move || crate::shell_snapshot_file::materialize(shell_type, ""))
+            .await
+            .ok()
+            .and_then(Result::ok)
+    };
+    let capture_limit = if probe.is_some() {
+        MAX_FILE_SNAPSHOT_CAPTURE_BYTES
+    } else {
+        MAX_SNAPSHOT_CAPTURE_BYTES
+    };
+    // 对位 codex 39f4277087 `SOURCE_MARKER`（命名适配 CODEX_ → NOVA_EXEC_SERVER_）：
+    // framing 标记探针结果（1=文件回放可行），与捕获输出同通道回传
+    const SOURCE_MARKER: &str = "NOVA_EXEC_SERVER_SNAPSHOT_SOURCE";
+    script = if let Some(probe) = &probe {
+        let fd = probe.as_raw_fd();
+        // Automatic startup has already run: do not call exec/unset here,
+        // which may be user functions. Capture exit closes this harmless probe.
+        format!(
+            "if case '' in '') ;; esac 2>/dev/null </dev/fd/{fd}; then printf '\\0%s\\0%s\\0' '{SOURCE_MARKER}' 1; else printf '\\0%s\\0%s\\0' '{SOURCE_MARKER}' 0; fi\n{script}"
+        )
+    } else {
+        format!("printf '\\0%s\\0%s\\0' '{SOURCE_MARKER}' 0\n{script}")
+    };
     let shell_start = prepared.command.len() - params.argv.len();
     let mut argv = prepared.command.clone();
     argv[shell_start + 2] = script;
-    let (program, args) = argv
-        .split_first()
-        .ok_or_else(|| internal_error("missing shell snapshot command".to_string()))?;
+    let (program, args) = argv.split_first().ok_or_else(|| {
+        (
+            "missing_command",
+            internal_error("missing shell snapshot command".to_string()),
+        )
+    })?;
 
     let mut command = Command::new(program);
     command
@@ -288,92 +416,154 @@ async fn capture_snapshot(
         .env_remove(CODEX_TOOL_CALL_ID_ENV_VAR)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
+        .stderr(Stdio::null());
     if let Some(arg0) = &prepared.arg0 {
         command.arg0(arg0);
     }
-    let mut child = command
-        .spawn()
-        .map_err(|err| internal_error(format!("cannot capture shell snapshot: {err}")))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| internal_error("missing shell snapshot output".to_string()))?;
-    // 对位 codex e32365a2c6：回放方式决定捕获输出预算；nova 尚未镜像文件回放
-    // （unnamed reader 探针），当前恒为环境回放
-    let replay = SnapshotReplay::Environment;
-    let capture_limit = match replay {
-        SnapshotReplay::File => MAX_FILE_SNAPSHOT_CAPTURE_BYTES,
-        SnapshotReplay::Environment => MAX_SNAPSHOT_CAPTURE_BYTES,
-    };
+    if let Some(probe) = &probe {
+        let fd = probe.as_raw_fd();
+        // SAFETY: the caller owns the CLOEXEC reader through spawn. This only
+        // changes the child's descriptor table, without allocating after fork.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    // 对位 codex 39f4277087：捕获进程组守卫替换 kill_on_drop——武装期间 Drop
+    // 杀整组，验证通过才 preserve_helpers 放行启动助手
+    let mut child = SnapshotCapture::spawn(&mut command).map_err(|err| {
+        (
+            "spawn_failed",
+            internal_error(format!("cannot capture shell snapshot: {err}")),
+        )
+    })?;
+    drop(probe);
+    let stdout = child.stdout.take().ok_or_else(|| {
+        (
+            "missing_output",
+            internal_error("missing shell snapshot output".to_string()),
+        )
+    })?;
     let capture = async {
         let mut output = Vec::new();
         stdout
             .take((capture_limit + 1) as u64)
             .read_to_end(&mut output)
             .await
-            .map_err(|err| internal_error(format!("cannot read shell snapshot: {err}")))?;
+            .map_err(|err| {
+                (
+                    "read_failed",
+                    internal_error(format!("cannot read shell snapshot: {err}")),
+                )
+            })?;
         if output.len() > capture_limit {
-            return Err(internal_error(format!(
-                "shell snapshot capture exceeds {capture_limit} bytes"
-            )));
+            return Err((
+                "capture_too_large",
+                internal_error(format!(
+                    "shell snapshot capture exceeds {capture_limit} bytes"
+                )),
+            ));
         }
-        let status = child
-            .wait()
-            .await
-            .map_err(|err| internal_error(format!("cannot finish shell snapshot: {err}")))?;
+        let status = child.wait_for_exit().await.map_err(|err| {
+            (
+                "wait_failed",
+                internal_error(format!("cannot finish shell snapshot: {err}")),
+            )
+        })?;
         if !status.success() {
-            return Err(internal_error(format!(
-                "shell snapshot capture exited with {status}"
-            )));
+            return Err((
+                "nonzero_exit",
+                internal_error(format!("shell snapshot capture exited with {status}")),
+            ));
         }
         Ok(output)
     };
     let output = tokio::time::timeout(SNAPSHOT_TIMEOUT, capture)
         .await
-        .map_err(|_| internal_error("shell snapshot capture timed out".to_string()))??;
+        .map_err(|_| {
+            (
+                "timeout",
+                internal_error("shell snapshot capture timed out".to_string()),
+            )
+        })??;
 
-    parse_snapshot(&output, params.env_policy.as_ref(), replay)
+    let marker = format!("\0{SOURCE_MARKER}\0");
+    let marker_end = output
+        .windows(marker.len())
+        .position(|part| part == marker.as_bytes())
+        .map(|index| index + marker.len())
+        .ok_or_else(|| {
+            (
+                "invalid_capture",
+                internal_error("missing snapshot source probe".to_string()),
+            )
+        })?;
+    let (flag, captured) = output[marker_end..].split_at_checked(2).ok_or_else(|| {
+        (
+            "invalid_capture",
+            internal_error("incomplete snapshot source probe".to_string()),
+        )
+    })?;
+    let replay = if flag == b"1\0" {
+        SnapshotReplay::File
+    } else {
+        if output.len() > MAX_SNAPSHOT_CAPTURE_BYTES {
+            return Err((
+                "capture_too_large",
+                internal_error(format!(
+                    "shell snapshot capture exceeds {MAX_SNAPSHOT_CAPTURE_BYTES} bytes"
+                )),
+            ));
+        }
+        SnapshotReplay::Environment
+    };
+    let snapshot = parse_snapshot(shell_type, captured, params.env_policy.as_ref(), replay)?;
+    child.preserve_helpers();
+    Ok(snapshot)
 }
 
 fn parse_snapshot(
+    shell_type: ShellType,
     output: &[u8],
     env_policy: Option<&ExecEnvPolicy>,
     replay: SnapshotReplay,
-) -> Result<ShellSnapshot, JSONRPCErrorError> {
-    let separator = output
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or_else(|| internal_error("shell snapshot is missing its environment".to_string()))?;
-    let state = &output[..separator];
-    let marker = b"# Snapshot file";
-    let start = state
-        .windows(marker.len())
-        .position(|window| window == marker)
-        .ok_or_else(|| internal_error("shell snapshot is missing its state marker".to_string()))?;
-    let state = std::str::from_utf8(&state[start..])
-        .map_err(|err| internal_error(format!("shell snapshot state is not UTF-8: {err}")))?;
-
+) -> CaptureResult {
+    // 对位 codex 39f4277087：捕获格式解析收编进 shell-command 的
+    // CapturedSnapshot::parse + render_state（state/aliases/exports 分区解码）
+    let captured = CapturedSnapshot::parse(shell_type, output).ok_or_else(|| {
+        (
+            "invalid_capture",
+            internal_error("invalid shell snapshot capture".to_string()),
+        )
+    })?;
+    let state = captured.render_state();
     // 对位 codex e32365a2c6：捕获环境独立保持 512KiB 上限（过滤前计量原始记录）
-    let environment_bytes = &output[separator + 1..];
-    if environment_bytes.len() > MAX_SNAPSHOT_BYTES {
-        return Err(internal_error(format!(
-            "shell snapshot environment exceeds {MAX_SNAPSHOT_BYTES} bytes"
-        )));
+    if captured.environment.len() > MAX_SNAPSHOT_BYTES {
+        return Err((
+            "environment_too_large",
+            internal_error(format!(
+                "shell snapshot environment exceeds {MAX_SNAPSHOT_BYTES} bytes"
+            )),
+        ));
     }
     // 对位 codex e32365a2c6：文件回放状态上限 4MiB；环境回放保持 512KiB 合并预算
     let state_limit = match replay {
         SnapshotReplay::File => MAX_FILE_SNAPSHOT_BYTES,
-        SnapshotReplay::Environment => MAX_SNAPSHOT_BYTES - environment_bytes.len(),
+        SnapshotReplay::Environment => MAX_SNAPSHOT_BYTES - captured.environment.len(),
     };
     if state.len() > state_limit {
-        return Err(internal_error(format!(
-            "shell snapshot state exceeds {state_limit} bytes"
-        )));
+        return Err((
+            "state_too_large",
+            internal_error(format!("shell snapshot state exceeds {state_limit} bytes")),
+        ));
     }
 
-    let mut environment = environment_bytes
+    let mut environment = captured
+        .environment
         .split(|byte| *byte == 0)
         .filter(|entry| !entry.is_empty())
         .filter_map(|entry| {
@@ -388,6 +578,8 @@ fn parse_snapshot(
         Some(policy) => {
             let mut policy = shell_environment_policy(policy);
             policy.inherit = ShellEnvironmentPolicyInherit::All;
+            // 对位裁点：锚点第三参 thread_id 属 codex core 的 ThreadId 机制，
+            // nova 无对位（保持 nova 既有两参形态）
             shell_environment::create_env_from_vars(environment, &policy)
         }
         None => environment,
@@ -402,7 +594,8 @@ fn parse_snapshot(
     Ok(ShellSnapshot {
         // 对位 codex 588f616e8b：prewarmed 由捕获方按 purpose 标记，解析处恒为 false
         prewarmed: false,
-        state: state.to_string(),
+        state,
+        file_source: matches!(replay, SnapshotReplay::File),
         environment,
     })
 }

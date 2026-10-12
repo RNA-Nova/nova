@@ -147,6 +147,8 @@ impl ExecServerTelemetry {
         &self,
         duration: Duration,
         result: Result<(), &'static str>,
+        // 对位 codex 39f4277087：捕获侧补充标签（purpose/attempt/shell/sandbox）
+        capture_tags: &[(&str, &str)],
     ) {
         // 本地执行没有 exec-server 遥测归属方——优先显式配置的服务端 client，
         // 缺席时回退宿主全局 metrics client
@@ -160,10 +162,13 @@ impl ExecServerTelemetry {
         };
         let success = if result.is_ok() { "true" } else { "false" };
         let mut tags = vec![("version", "v2"), ("success", success)];
-        let _ = metrics.record_duration(SHELL_SNAPSHOT_DURATION_METRIC, duration, &tags);
+        tags.extend_from_slice(capture_tags);
+        // 对位 codex 39f4277087：failure_reason 同时进直方图与计数（nova 旧序
+        // 只进计数，本次对齐锚点）
         if let Err(failure_reason) = result {
             tags.push(("failure_reason", failure_reason));
         }
+        let _ = metrics.record_duration(SHELL_SNAPSHOT_DURATION_METRIC, duration, &tags);
         let _ = metrics.counter(SHELL_SNAPSHOT_TOTAL_METRIC, /*inc*/ 1, &tags);
     }
 

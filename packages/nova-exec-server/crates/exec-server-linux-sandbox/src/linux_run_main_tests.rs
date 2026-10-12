@@ -74,29 +74,12 @@ fn inserts_bwrap_argv0_before_command_separator() {
         /*supports_argv0*/ true,
         "/tmp/nova-arg0-session/nova-linux-sandbox".to_string(),
     );
+    // 对位 codex 39f4277087：daemon socket 目录遮蔽参数插在分隔符之前，条数随
+    // 主机挂载别名拓扑变化（如 /tmp 是绑定时多出一条），故只断言 argv0 后缀。
+    let separator = argv.iter().position(|arg| arg == "--").unwrap();
     assert_eq!(
-        argv,
-        vec![
-            "bwrap".to_string(),
-            "--new-session".to_string(),
-            "--die-with-parent".to_string(),
-            "--ro-bind".to_string(),
-            "/".to_string(),
-            "/".to_string(),
-            "--dev".to_string(),
-            "/dev".to_string(),
-            "--unshare-user".to_string(),
-            "--unshare-pid".to_string(),
-            "--unshare-ipc".to_string(),
-            "--proc".to_string(),
-            "/proc".to_string(),
-            "--cap-drop".to_string(),
-            "ALL".to_string(),
-            "--argv0".to_string(),
-            "nova-linux-sandbox".to_string(),
-            "--".to_string(),
-            "/bin/true".to_string(),
-        ]
+        &argv[separator - 2..],
+        ["--argv0", "nova-linux-sandbox", "--", "/bin/true"]
     );
 }
 

@@ -36,6 +36,11 @@ mod sandboxed_file_system;
 mod server;
 #[cfg(unix)]
 mod shell_snapshot;
+// 对位 codex 39f4277087：快照文件回放传输物化 + 捕获进程组守卫
+#[cfg(unix)]
+mod shell_snapshot_file;
+#[cfg(unix)]
+mod shell_snapshot_process;
 mod telemetry;
 // 对位 codex origin/main `websocket_pong_watchdog.rs`：pong 看门狗。
 // 上游接线点（noise_relay/harness.rs、relay.rs、relay_writer.rs）均为 nova

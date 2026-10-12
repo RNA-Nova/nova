@@ -57,6 +57,9 @@ nova-exec-server-linux-sandbox = { workspace = true }
 libc = "0.2"
 # 沙箱开门 fd 传递：SCM_RIGHTS 收发（net）与 CLOEXEC 设置（fs）
 rustix = { version = "1.1.4", features = ["net", "fs"] }
+# 对位 codex 39f4277087：shell snapshot 文件回放的 daemon 目录临时载体
+# （dev-dependencies 仍保留 tempfile 供非 unix 测试目标使用）
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 # 对位 codex 3342ee8c07：MXC 完整性后端（依赖清点 + 策略准备）

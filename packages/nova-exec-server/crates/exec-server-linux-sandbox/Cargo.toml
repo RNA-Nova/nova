@@ -26,7 +26,7 @@ nova-exec-server-network-proxy = { path = "../exec-server-network-proxy" }
 nova-exec-server-protocol-core = { path = "../exec-server-protocol-core" }
 nova-exec-server-sandboxing = { path = "../exec-server-sandboxing" }
 nova-exec-server-utils-absolute-path = { path = "../exec-server-utils-absolute-path" }
-rustix = { workspace = true }
+rustix = { workspace = true, features = ["fs"] }
 seccompiler = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

@@ -356,8 +356,11 @@ impl LocalProcess {
         .await?;
         #[cfg(unix)]
         let mut prepared = prepared;
+        // 对位 codex 39f4277087：prepare 返回文件回放的只读读端（Some 时经
+        // inherited_fds 传入子进程，spawn 完成后丢弃）
         #[cfg(unix)]
-        self.inner
+        let snapshot_file = self
+            .inner
             .shell_snapshots
             .prepare(&params, &mut prepared, &self.inner.telemetry)
             .await?;
@@ -386,11 +389,13 @@ impl LocalProcess {
             );
         }
 
-        // 对位 codex origin/main（spawn 管线批）：上游此处从 snapshot_file 收集
-        // inherited_fds（shell_snapshot_file 面 nova 未镜像，快照文件回放归后续
-        // 立项），本批以空 vec 对位。
+        // 对位 codex 39f4277087（spawn 管线批）：从 snapshot_file 收集 inherited_fds
+        // ——文件回放的只读读端随 spawn 传入子进程，供 `. /dev/fd/N` 恢复
         #[cfg(unix)]
-        let inherited_fds = Vec::new();
+        let inherited_fds = snapshot_file
+            .iter()
+            .map(std::os::fd::AsRawFd::as_raw_fd)
+            .collect::<Vec<_>>();
         #[cfg(not(unix))]
         let inherited_fds = Vec::new();
         let spawned_result =
@@ -406,6 +411,8 @@ impl LocalProcess {
                 inherited_fds: nova_exec_server_utils_pty::ChildFds::Attached(&inherited_fds),
             })
             .await;
+        #[cfg(unix)]
+        drop(snapshot_file);
         let spawned = match spawned_result {
             Ok(spawned) => spawned,
             Err(err) => {

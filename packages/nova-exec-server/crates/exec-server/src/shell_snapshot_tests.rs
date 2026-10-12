@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use nova_exec_server_otel::MetricsClient;
 use nova_exec_server_otel::MetricsConfig;
 use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
+use nova_exec_server_shell_command::shell_detect::ShellType;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use opentelemetry_sdk::metrics::data::AggregatedMetrics;
 use opentelemetry_sdk::metrics::data::MetricData;
@@ -25,6 +26,8 @@ use crate::protocol::ShellInfo;
 use crate::protocol::ShellSnapshotRequest;
 use crate::telemetry::ExecServerTelemetry;
 
+// 对位 codex 39f4277087：锚点另有 3 个 prewarm 用例（failed_prewarm_*）——
+// 对位裁点，nova 无 prewarm 路径，不移植。
 #[test_case(1; "succeeds_on_first_attempt")]
 #[test_case(2; "recovers_on_second_attempt")]
 #[test_case(3; "recovers_on_last_attempt")]
@@ -37,7 +40,7 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
     let profile = home.path().join(".bashrc");
     std::fs::write(&profile, "printf x >> \"$HOME/captures\"\nexit 7\n")?;
     let params = ExecParams {
-        metadata: None,
+        metadata: Default::default(),
         process_id: ProcessId::from("snapshot-retry"),
         argv: vec![
             "/bin/bash".to_string(),
@@ -111,8 +114,17 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
             cache.prepare(&params, &mut prepared, &telemetry),
             cache.prepare(&params, &mut concurrent, &telemetry),
         );
-        first.expect("capture failure must preserve command fallback");
-        second.expect("concurrent request must share the capture attempt");
+        let first = first.expect("capture failure must preserve command fallback");
+        let second = second.expect("concurrent request must share the capture attempt");
+        // 对位 codex 39f4277087：文件回放的读端 fd 每次 prepare 独立物化，
+        // 比较前归一化（nova delta：bash 插 --norc，脚本槽位从锚点的 [2] 移到 [3]）
+        for (prepared, reader) in [(&mut prepared, first), (&mut concurrent, second)] {
+            if let Some(reader) = reader {
+                let fd = std::os::fd::AsRawFd::as_raw_fd(&reader);
+                prepared.command[3] =
+                    prepared.command[3].replace(&format!("/dev/fd/{fd}"), "/dev/fd/SNAPSHOT");
+            }
+        }
         assert_eq!(
             (&prepared.command, &prepared.env),
             (&concurrent.command, &concurrent.env)
@@ -222,29 +234,54 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
     );
     let mut expected_counters = BTreeMap::new();
     let mut expected_durations = BTreeMap::new();
-    let failures = (recovery_attempt - 1).min(MAX_SNAPSHOT_ATTEMPTS) as u64;
-    for (success, count) in [
-        ("false", failures),
-        ("true", u64::from(recovery_attempt <= MAX_SNAPSHOT_ATTEMPTS)),
-    ] {
-        if count == 0 {
-            continue;
-        }
+    // 对位 codex 39f4277087：捕获标签携带 purpose/attempt/shell/sandbox，失败带
+    // 类型化 failure_reason（锚点此处还链入 prewarm 的 ("prewarm", 1)——裁点不移植）
+    let captures =
+        (1..=recovery_attempt.min(MAX_SNAPSHOT_ATTEMPTS)).map(|attempt| ("execution", attempt));
+    for (purpose, attempt) in captures {
+        let success = purpose == "execution" && attempt == recovery_attempt;
         let mut tags = BTreeMap::from([
             ("version".to_string(), "v2".to_string()),
             ("success".to_string(), success.to_string()),
+            ("purpose".to_string(), purpose.to_string()),
+            ("attempt".to_string(), attempt.to_string()),
+            ("shell".to_string(), "bash".to_string()),
+            ("sandbox".to_string(), "none".to_string()),
         ]);
-        expected_durations.insert(tags.clone(), count);
-        if success == "false" {
-            tags.insert("failure_reason".to_string(), "capture_failed".to_string());
+        if !success {
+            tags.insert("failure_reason".to_string(), "nonzero_exit".to_string());
         }
-        expected_counters.insert(tags, count);
+        expected_durations.insert(tags.clone(), /*value*/ 1);
+        expected_counters.insert(tags, /*value*/ 1);
     }
     assert_eq!(
         (counters, durations),
         (expected_counters, expected_durations)
     );
     Ok(())
+}
+
+// 对位 codex 39f4277087 新增：尺寸上限在策略过滤前计量 state 与 environment
+#[test]
+fn snapshot_size_limit_counts_state_and_environment_before_filtering() {
+    let half = "x".repeat(MAX_SNAPSHOT_BYTES / 2);
+    let oversized = format!("# Snapshot file\n# {half}\n\0\0\0FILTERED={half}\0");
+    let policy = ExecEnvPolicy {
+        inherit: ShellEnvironmentPolicyInherit::All,
+        ignore_default_excludes: false,
+        exclude: vec!["FILTERED".to_string()],
+        r#set: HashMap::new(),
+        include_only: Vec::new(),
+    };
+    assert!(
+        parse_snapshot(
+            ShellType::Bash,
+            oversized.as_bytes(),
+            Some(&policy),
+            SnapshotReplay::Environment
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -266,8 +303,11 @@ fn snapshot_filters_profile_exports_after_capture() {
             "CODEX_TOOL_CALL_ID".to_string(),
         ],
     };
+    // 对位 codex 39f4277087：捕获格式负载（state NUL aliases NUL export 记录 NUL
+    // 空键 NUL environment）
     let snapshot = parse_snapshot(
-        b"profile noise\n# Snapshot file\nfunction profile_helper() { :; }\n\0PROFILE_ALLOWED=profile\0PROFILE_DENIED=denied\0PROFILE_SECRET=secret\0PWD=/tmp\0CODEX_THREAD_ID=capture-thread\0CODEX_TOOL_CALL_ID=profile-call\0",
+        ShellType::Bash,
+        b"profile \xff noise\n# Snapshot file\nfunction profile_helper() { :; }\n\0alias profile_alias='profile_helper'\n\0PROFILE_DENIED\0export PROFILE_DENIED=denied\n\0NON_UTF8\0export NON_UTF8='\xff'\n\0\0PROFILE_ALLOWED=profile\0PROFILE_DENIED=denied\0PROFILE_SECRET=secret\0PWD=/tmp\0NON_UTF8=\xff\0CODEX_THREAD_ID=capture-thread\0CODEX_TOOL_CALL_ID=profile-call\0",
         Some(&policy),
         SnapshotReplay::Environment,
     )
@@ -279,7 +319,7 @@ fn snapshot_filters_profile_exports_after_capture() {
     );
     assert_eq!(
         snapshot.state,
-        "# Snapshot file\nfunction profile_helper() { :; }\n"
+        "# Snapshot file\nfunction profile_helper() { :; }\nalias profile_alias='profile_helper'\n"
     );
 }
 
@@ -297,7 +337,8 @@ fn snapshot_preserves_profile_exports_with_restrictive_inheritance() {
             include_only: Vec::new(),
         };
         let snapshot = parse_snapshot(
-            b"# Snapshot file\n\0PROFILE_ALLOWED=profile\0SDKROOT=/sdk\0PROFILE_SECRET=secret\0PROFILE_DENIED=denied\0",
+            ShellType::Bash,
+            b"# Snapshot file\n\0\0\0PROFILE_ALLOWED=profile\0SDKROOT=/sdk\0PROFILE_SECRET=secret\0PROFILE_DENIED=denied\0",
             Some(&policy),
             SnapshotReplay::Environment,
         )
@@ -316,6 +357,8 @@ fn snapshot_preserves_profile_exports_with_restrictive_inheritance() {
 #[test]
 fn snapshot_caches_only_unmanaged_proxy_state() {
     for (exports, expected) in [
+        // 对位裁点：锚点首组还含 CODEX_NETWORK_PROXY_CREDENTIAL_BROKER_ACTIVE=1——
+        // credential broker 属 codex 未镜像面，nova 无该键，略去
         (
             "PROFILE_ALLOWED=profile\0HTTP_PROXY=http://127.0.0.1:4321\0NOVA_EXEC_SERVER_NETWORK_PROXY_ACTIVE=1\0",
             HashMap::from([("PROFILE_ALLOWED".to_string(), "profile".to_string())]),
@@ -333,9 +376,10 @@ fn snapshot_caches_only_unmanaged_proxy_state() {
     ] {
         // 对位 codex 9b738582b1：捕获输出混入两个 ID 也必须被剔除
         let output = format!(
-            "# Snapshot file\n\0{exports}CODEX_THREAD_ID=capture-thread\0CODEX_TOOL_CALL_ID=profile-call\0"
+            "# Snapshot file\n\0\0\0{exports}CODEX_THREAD_ID=capture-thread\0CODEX_TOOL_CALL_ID=profile-call\0"
         );
         let snapshot = parse_snapshot(
+            ShellType::Bash,
             output.as_bytes(),
             /*env_policy*/ None,
             SnapshotReplay::Environment,
@@ -346,12 +390,12 @@ fn snapshot_caches_only_unmanaged_proxy_state() {
     }
 }
 
-// 对位 codex e32365a2c6：回放尺寸上限。上游以 reason 标签区分失败类别，
-// nova 无该标签机制，断错误消息片段。
+// 对位 codex 39f4277087：回放尺寸上限以类型化 reason 标签断言（nova 旧版断
+// 错误消息片段，本次对齐锚点形态）
 #[test_case(SnapshotReplay::File, 1024 * 1024, 0, None; "file_accepts_large_state")]
-#[test_case(SnapshotReplay::Environment, 1024 * 1024, 0, Some("state exceeds"); "fallback_rejects_large_state")]
-#[test_case(SnapshotReplay::File, MAX_FILE_SNAPSHOT_BYTES, 0, Some("state exceeds"); "file_rejects_oversized_state")]
-#[test_case(SnapshotReplay::File, 0, MAX_SNAPSHOT_BYTES, Some("environment exceeds"); "file_keeps_environment_limit")]
+#[test_case(SnapshotReplay::Environment, 1024 * 1024, 0, Some("state_too_large"); "fallback_rejects_large_state")]
+#[test_case(SnapshotReplay::File, MAX_FILE_SNAPSHOT_BYTES, 0, Some("state_too_large"); "file_rejects_oversized_state")]
+#[test_case(SnapshotReplay::File, 0, MAX_SNAPSHOT_BYTES, Some("environment_too_large"); "file_keeps_environment_limit")]
 fn snapshot_replay_size_limits(
     replay: SnapshotReplay,
     state_bytes: usize,
@@ -363,18 +407,11 @@ fn snapshot_replay_size_limits(
         "x".repeat(state_bytes),
         "x".repeat(environment_bytes),
     );
-    let result = parse_snapshot(output.as_bytes(), /*env_policy*/ None, replay);
-    match expected_failure {
-        Some(fragment) => {
-            let error = result.err().expect("snapshot should be rejected");
-            assert!(
-                error.message.contains(fragment),
-                "unexpected error: {}",
-                error.message
-            );
-        }
-        None => {
-            result.expect("snapshot should parse");
-        }
-    }
+    let result = parse_snapshot(
+        ShellType::Bash,
+        output.as_bytes(),
+        /*env_policy*/ None,
+        replay,
+    );
+    assert_eq!(result.err().map(|(reason, _)| reason), expected_failure);
 }

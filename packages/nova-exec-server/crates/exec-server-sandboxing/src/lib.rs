@@ -10,6 +10,12 @@ pub mod policy_transforms;
 mod sandbox_integrity;
 #[cfg(target_os = "macos")]
 pub mod seatbelt;
+// 对位 codex 39f4277087 `uds/src/daemon_directory.rs`：nova 无独立 uds crate，
+// daemon 目录函数归并本 crate。文件同时挂在 seatbelt::daemon（macOS 保护策略），
+// 此处为 unix 通用的 crate 根挂载（供下方 pub use 导出）。
+#[cfg(unix)]
+#[path = "seatbelt_daemon.rs"]
+mod seatbelt_daemon;
 mod spawn;
 // 对位 codex origin/main（spawn 管线批）：终端查询应答
 mod terminal_queries;
@@ -47,6 +53,11 @@ pub use manager::with_managed_mitm_ca_readable_root;
 pub use sandbox_integrity::FileContentsChecker;
 pub use sandbox_integrity::IntegrityFinding;
 pub use sandbox_integrity::IntegrityFindingDetails;
+// 对位 codex 39f4277087 `codex_uds::` 同名函数（nova 的 uds 归并在本 crate）
+#[cfg(unix)]
+pub use seatbelt_daemon::prepare_shared_daemon_socket_directory;
+#[cfg(unix)]
+pub use seatbelt_daemon::shared_daemon_socket_directory;
 pub use nova_exec_server_protocol_core::config_types::WindowsSandboxProxySettingsMode;
 pub use spawn::SpawnRequest;
 pub use spawn::WindowsSandboxSpawnRequest;
