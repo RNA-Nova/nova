@@ -10,7 +10,10 @@
 - 版本协商：`initialize` 响应携带 `protocolVersion`（`"major.minor"`）；
   **major 不等即不兼容**（客户端应拒绝连接），minor 只增不减（新能力新字段）
 - 服务端版本常量：`crates/exec-server-protocol/src/lib.rs::PROTOCOL_VERSION`
-- 鉴权：executor 只做本地回环（WS 回环 / stdio 承载），**无入站鉴权**；
+- 鉴权：executor 只做本地回环（WS 回环 / stdio 承载），入站鉴权机制在、
+  **默认关**（对位 codex 39f4277087 websocket-auth：`--ws-auth
+  capability-token|signed-bearer-token` 配合 `--ws-token-file` 等旗标开启，
+  开启后 WS 升级握手须带 `Authorization: Bearer …`，校验失败 401）；
   对外暴露与鉴权归上层中继层，不归 executor
 
 ## 生命周期

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use nova_exec_server::ExecServerRuntimePaths;
 use nova_exec_server::RequestDispatchMode;
 use nova_exec_server::run_main_with_telemetry;
+use nova_exec_server_websocket_auth::WebsocketAuthArgs;
 
 /// nova-exec-server - 远程执行服务
 #[derive(Debug, Parser)]
@@ -16,6 +17,12 @@ struct Cli {
     /// （wss 不支持：服务端只做回环承载，TLS 归上层隧道/中继层）
     #[arg(long, value_name = "URL", default_value = "ws://127.0.0.1:8080")]
     listen: String,
+
+    /// WebSocket 入站鉴权旗标组（对位 codex 39f4277087
+    /// `exec_server_command.rs:78` 的 `#[command(flatten)] WebsocketAuthArgs`；
+    /// 默认关——不传 `--ws-auth` 时保持无鉴权现状）。
+    #[command(flatten)]
+    websocket_auth: WebsocketAuthArgs,
 
     /// Maximum number of requests to process concurrently on each connection.
     /// 默认 1（Inline 串行，与 codex 对齐）：把跨请求竞态从结构上消灭——
@@ -157,6 +164,10 @@ async fn run_server() -> Result<()> {
     install_stderr_logging();
     let cli = Cli::parse();
 
+    // 对位 codex 39f4277087 exec_server_command.rs：鉴权旗标组先折叠成
+    // settings（组合非法在此即报错）；默认 None = 无鉴权，保持现状。
+    let websocket_auth = cli.websocket_auth.try_into_settings()?;
+
     // 父死子随：WS 托管场景挂 stdin 监视（stdio 形态 stdin 是传输线，
     // EOF 已由传输层自然结束服务）
     if cli.exit_on_stdin_close && !cli.listen.starts_with("stdio") {
@@ -205,7 +216,8 @@ async fn run_server() -> Result<()> {
         }
     };
 
-    // 本地模式：WS 回环 / stdio 承载，不做入站鉴权
+    // 本地模式：WS 回环 / stdio 承载；入站鉴权机制在、默认关
+    // （--ws-auth 不传即无鉴权；stdio 形态下配鉴权会被传输层拒绝）
     run_main_with_telemetry(
         &cli.listen,
         runtime_paths,
@@ -214,6 +226,7 @@ async fn run_server() -> Result<()> {
             nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
         ),
         request_dispatch_mode,
+        websocket_auth,
     )
     .await
     .map_err(|err| anyhow::anyhow!("{err}"))?;

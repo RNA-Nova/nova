@@ -17,6 +17,7 @@ pub use transport::ExecServerListenUrlParseError;
 use crate::ExecServerRuntimePaths;
 use crate::ExecServerTelemetry;
 use nova_exec_server_http_client::HttpClientFactory;
+use nova_exec_server_websocket_auth::WebsocketAuthSettings;
 
 pub async fn run_main(
     listen_url: &str,
@@ -29,6 +30,7 @@ pub async fn run_main(
         ExecServerTelemetry::default(),
         http_client_factory,
         RequestDispatchMode::Inline,
+        WebsocketAuthSettings::default(),
     )
     .await
 }
@@ -44,6 +46,7 @@ pub async fn run_main_with_telemetry(
     telemetry: ExecServerTelemetry,
     http_client_factory: HttpClientFactory,
     request_dispatch_mode: RequestDispatchMode,
+    websocket_auth: WebsocketAuthSettings,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     transport::run_transport(
         listen_url,
@@ -51,6 +54,7 @@ pub async fn run_main_with_telemetry(
         telemetry,
         http_client_factory,
         request_dispatch_mode,
+        websocket_auth,
     )
     .await
 }
@@ -90,6 +94,7 @@ mod tests {
                 ExecServerTelemetry::default(),
                 HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
                 super::RequestDispatchMode::Inline,
+                nova_exec_server_websocket_auth::WebsocketAuthSettings::default(),
             )
             .await
             .expect_err("invalid listen URL should fail");

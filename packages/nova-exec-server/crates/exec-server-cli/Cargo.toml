@@ -23,6 +23,7 @@ nova-exec-server-otel = { workspace = true }
 nova-exec-server-sandboxing = { workspace = true }
 nova-exec-server-utils-home-dir = { workspace = true }
 nova-exec-server-utils-pty = { workspace = true }
+nova-exec-server-websocket-auth = { workspace = true }
 
 # Linux 沙箱 helper 内嵌（argv0 basename 分派自分身，对位 codex arg0 形态）
 [target.'cfg(target_os = "linux")'.dependencies]

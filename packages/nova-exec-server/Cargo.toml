@@ -22,6 +22,7 @@ members = [
     "crates/exec-server-windows-sandbox-service",
     "crates/exec-server-otel",
     "crates/exec-server-websocket-client",
+    "crates/exec-server-websocket-auth",
     "crates/exec-server-linux-sandbox",
 ]
 
@@ -52,6 +53,7 @@ nova-exec-server-mxc-sandbox = { path = "crates/exec-server-mxc-sandbox" }
 nova-exec-server-windows-sandbox-service = { path = "crates/exec-server-windows-sandbox-service" }
 nova-exec-server-otel = { path = "crates/exec-server-otel" }
 nova-exec-server-websocket-client = { path = "crates/exec-server-websocket-client" }
+nova-exec-server-websocket-auth = { path = "crates/exec-server-websocket-auth" }
 nova-exec-server-linux-sandbox = { path = "crates/exec-server-linux-sandbox" }
 
 # 基础
@@ -112,6 +114,10 @@ rustls-native-certs = "0.8.3"
 rustls-pki-types = "1.14.0"
 sha1 = "0.10.6"
 sha2 = "0.10"
+# 对位 codex 39f4277087 codex-rs/Cargo.toml 的版本钉（websocket-auth 移植所需）
+constant_time_eq = "0.3.1"
+hmac = "0.12.1"
+jsonwebtoken = "9.3.1"
 
 # 命令行
 clap = "4"

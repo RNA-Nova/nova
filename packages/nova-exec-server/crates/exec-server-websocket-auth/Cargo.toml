@@ -1,0 +1,27 @@
+# 对位 codex 39f4277087 codex-rs/websocket-auth/Cargo.toml
+# （nova workspace 无 [workspace.lints]/workspace version，按本仓 crate 惯例省略）
+[package]
+name = "nova-exec-server-websocket-auth"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+nova-exec-server-utils-absolute-path = { workspace = true }
+constant_time_eq = { workspace = true }
+http = { workspace = true }
+jsonwebtoken = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+base64 = { workspace = true }
+hmac = { workspace = true }
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }

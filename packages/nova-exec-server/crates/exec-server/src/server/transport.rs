@@ -1,3 +1,7 @@
+//! Exec-server stdio 与 WebSocket 监听器（对位 codex 39f4277087
+//! codex-rs/exec-server/src/server/transport.rs）。配置鉴权后由它把守
+//! WebSocket 升级握手；无鉴权监听器保持兼容支持（默认关）。
+
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -14,6 +18,10 @@ use axum::response::Response;
 use axum::routing::any;
 use axum::routing::get;
 use nova_exec_server_http_client::HttpClientFactory;
+use nova_exec_server_websocket_auth::WebsocketAuthPolicy;
+use nova_exec_server_websocket_auth::WebsocketAuthSettings;
+use nova_exec_server_websocket_auth::authorize_upgrade;
+use nova_exec_server_websocket_auth::policy_from_settings;
 use std::io::Write as _;
 use std::net::SocketAddr;
 use tokio::io;
@@ -88,6 +96,7 @@ pub(crate) async fn run_transport(
     telemetry: ExecServerTelemetry,
     http_client_factory: HttpClientFactory,
     request_dispatch_mode: RequestDispatchMode,
+    websocket_auth: WebsocketAuthSettings,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match parse_listen_url(listen_url)? {
         ExecServerListenTransport::WebSocket(bind_address) => {
@@ -97,10 +106,18 @@ pub(crate) async fn run_transport(
                 telemetry,
                 http_client_factory,
                 request_dispatch_mode,
+                policy_from_settings(&websocket_auth)?,
             )
             .await
         }
         ExecServerListenTransport::Stdio => {
+            if websocket_auth.config.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "WebSocket auth requires a WebSocket listener, not stdio",
+                )
+                .into());
+            }
             run_stdio_connection(
                 runtime_paths,
                 telemetry,
@@ -165,6 +182,7 @@ async fn run_websocket_listener(
     telemetry: ExecServerTelemetry,
     http_client_factory: HttpClientFactory,
     request_dispatch_mode: RequestDispatchMode,
+    auth_policy: WebsocketAuthPolicy,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(bind_address).await?;
     let local_addr = listener.local_addr()?;
@@ -182,7 +200,10 @@ async fn run_websocket_listener(
         .route("/", any(websocket_upgrade_handler))
         .route("/readyz", get(readiness_handler))
         .layer(middleware::from_fn(reject_requests_with_origin_header))
-        .with_state(ExecServerWebSocketState { processor });
+        .with_state(ExecServerWebSocketState {
+            processor,
+            auth_policy,
+        });
     axum::serve(
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
@@ -194,6 +215,7 @@ async fn run_websocket_listener(
 #[derive(Clone)]
 struct ExecServerWebSocketState {
     processor: ConnectionProcessor,
+    auth_policy: WebsocketAuthPolicy,
 }
 
 async fn readiness_handler() -> StatusCode {
@@ -222,6 +244,10 @@ async fn websocket_upgrade_handler(
     State(state): State<ExecServerWebSocketState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    // 对位 codex 39f4277087：升级握手前先过 bearer 鉴权（默认策略放行）
+    if let Err(err) = authorize_upgrade(&headers, &state.auth_policy) {
+        return (err.status_code(), err.message()).into_response();
+    }
     info!(%peer_addr, "exec-server websocket client connected");
     // 对位 codex 54685110a7：upgrade 响应回显请求头里的 `x-request-id`
     let mut response = websocket

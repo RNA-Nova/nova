@@ -309,6 +309,8 @@ fn run_exec_server_from_test_binary(mut args: impl Iterator<Item = std::ffi::OsS
         ExecServerTelemetry::default(),
         http_client_factory,
         request_dispatch_mode,
+        // 对位 codex 39f4277087 tests/common/mod.rs：测试基建默认无鉴权
+        nova_exec_server_websocket_auth::WebsocketAuthSettings::default(),
     )) {
         Ok(()) => 0,
         Err(error) => {

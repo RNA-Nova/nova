@@ -36,6 +36,7 @@ nova-exec-server-network-proxy = { workspace = true }
 nova-exec-server-utils-home-dir = { workspace = true }
 nova-exec-server-utils-rustls-provider = { workspace = true }
 nova-exec-server-http-client = { workspace = true }
+nova-exec-server-websocket-auth = { workspace = true }
 nova-exec-server-websocket-client = { workspace = true }
 nova-exec-server-otel = { workspace = true }
 nova-exec-server-shell-command = { workspace = true }
