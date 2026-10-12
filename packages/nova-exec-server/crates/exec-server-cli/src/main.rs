@@ -105,6 +105,23 @@ fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     nova_exec_server_utils_pty::init_spawn_helper(std::env::args_os());
 
+    // 对位 codex arg0_dispatch（arg0/src/lib.rs:61-72）：argv0 basename 分派
+    // 先于 argv1 隐藏旗标——以 "nova-linux-sandbox" 之名启动（软链别名自分身
+    // 或 bwrap --argv0 注入）时直接执行沙箱 helper 并退出，主二进制自足。
+    #[cfg(target_os = "linux")]
+    {
+        let mut dispatch_args = std::env::args_os();
+        let argv0 = dispatch_args.next().unwrap_or_default();
+        let exe_name = std::path::Path::new(&argv0)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_owned();
+        if exe_name == nova_exec_server_sandboxing::landlock::NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0 {
+            nova_exec_server_linux_sandbox::run_main();
+        }
+    }
+
     // 隐藏 helper 模式先于 clap 与 tokio 运行时分派：沙箱化 fs 操作与 arg0
     // 执行辅助分别以隐藏 flag 重启本二进制，helper 自建运行时并直接退出
     //（不能在已有 runtime 的 block_on 里再进 block_on）。
@@ -157,8 +174,23 @@ async fn run_server() -> Result<()> {
         .executor_self_exe
         .or_else(|| std::env::current_exe().ok())
         .context("executor self executable path is not configured")?;
+    // 对位 codex arg0 `linux_sandbox_exe_path`：helper 路径缺省时自我回退——
+    // 优先每进程临时目录里的软链别名（basename 即分派名，无 --argv0 的老
+    // bwrap 也能触发）；别名建不了退化为二进制本体（现代 bwrap 经 --argv0
+    // 注入 magic 名照常分派）。裁点：codex 的别名目录带跨进程锁，我们收窄
+    // 为进程私有 TempDir（无跨进程共享面）。
+    #[cfg(target_os = "linux")]
+    let (executor_linux_sandbox_exe, _alias_guard) = match cli.executor_linux_sandbox_exe {
+        Some(path) => (Some(path), None),
+        None => match create_linux_sandbox_alias(executor_self_exe.as_path()) {
+            Some((alias, guard)) => (Some(alias), Some(guard)),
+            None => (Some(executor_self_exe.clone()), None),
+        },
+    };
+    #[cfg(not(target_os = "linux"))]
+    let executor_linux_sandbox_exe = cli.executor_linux_sandbox_exe;
     let runtime_paths =
-        ExecServerRuntimePaths::new(executor_self_exe, cli.executor_linux_sandbox_exe)?
+        ExecServerRuntimePaths::new(executor_self_exe, executor_linux_sandbox_exe)?
             .with_linux_sandbox_pid_namespace(cli.linux_sandbox_pid_namespace);
 
     // 构建请求分派模式
@@ -192,4 +224,19 @@ async fn run_server() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 建主二进制的 `nova-linux-sandbox` 软链别名（每进程临时目录，随进程退出
+/// 自动清理）。对位 codex arg0 crate 的别名段；其跨进程锁文件收窄掉——
+/// 进程私有目录无共享面。
+#[cfg(target_os = "linux")]
+fn create_linux_sandbox_alias(
+    self_exe: &std::path::Path,
+) -> Option<(std::path::PathBuf, tempfile::TempDir)> {
+    let guard = tempfile::tempdir().ok()?;
+    let alias = guard
+        .path()
+        .join(nova_exec_server_sandboxing::landlock::NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0);
+    std::os::unix::fs::symlink(self_exe, &alias).ok()?;
+    Some((alias, guard))
 }

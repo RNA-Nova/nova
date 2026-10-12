@@ -2274,6 +2274,7 @@ dependencies = [
  "clap",
  "nova-exec-server",
  "nova-exec-server-http-client",
+ "nova-exec-server-linux-sandbox",
  "nova-exec-server-otel",
  "nova-exec-server-sandboxing",
  "nova-exec-server-utils-home-dir",
