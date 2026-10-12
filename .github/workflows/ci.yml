@@ -61,11 +61,15 @@ jobs:
       - uses: ./.github/actions/setup-nova-ci
 
       - name: 安装 Rust 工具链
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
 
+      # 注意：runner 在 job setup 阶段无条件下载所有 uses: 动作（if 排除
+      # 只挡执行不挡下载）——245 到 codeload 偶发低速会卡死 100s 超时
+      # （run 38107186269 实证）。全部钉 hash：自建腿 _actions 缓存键不变
+      # 则永久命中，不再重复下载。
       - name: Rust 构建缓存（GHA 腿；自建腿 cargo-target 常驻本地卷）
         if: ${{ !(matrix.os == 'ubuntu-latest' && github.event_name == 'push') }}
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: packages/nova-exec-server
 
