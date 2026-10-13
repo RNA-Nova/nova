@@ -61,7 +61,11 @@ where
                     "unknown network proxy attribution token",
                 )
             })?,
-            None => self.state.as_ref().clone(),
+            // 对位 codex 39f4277087 attribution.rs：无 token 的连接按本服务的
+            // environment_id 归一（None 时保留 state 原值），不再原样克隆。
+            None => self
+                .state
+                .for_environment_id(self.environment_id.as_deref()),
         };
         if let Some(expected_environment_id) = self.environment_id.as_deref()
             && state

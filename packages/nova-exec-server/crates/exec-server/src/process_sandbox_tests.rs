@@ -31,7 +31,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
 
-use super::prepare_exec_request;
+use super::PreparedExecRequest;
+use super::prepare_exec_request_with_telemetry;
 use crate::ExecParams;
 #[cfg(any(unix, windows))]
 use crate::ExecServerRuntimePaths;
@@ -40,6 +41,31 @@ use crate::FileSystemSandboxContext;
 #[cfg(unix)]
 use crate::NOVA_EXEC_SERVER_ARG0_EXEC_HELPER_ARG1;
 use crate::ProcessId;
+use crate::process_telemetry::ProcessTelemetry;
+
+// 对位 codex 39f4277087 `process_sandbox_tests.rs`：测试侧薄包装，
+// 默认空遥测透传到带遥测的正式入口。
+async fn prepare_exec_request(
+    params: &ExecParams,
+    env: HashMap<String, String>,
+    runtime_paths: Option<&crate::ExecServerRuntimePaths>,
+    network_policy_decider: Option<
+        std::sync::Arc<dyn nova_exec_server_network_proxy::NetworkPolicyDecider>,
+    >,
+    network_policy_audit_observer: Option<
+        nova_exec_server_network_proxy::NetworkPolicyAuditObserver,
+    >,
+) -> Result<PreparedExecRequest, nova_exec_server_protocol::JSONRPCErrorError> {
+    prepare_exec_request_with_telemetry(
+        params,
+        env,
+        runtime_paths,
+        network_policy_decider,
+        network_policy_audit_observer,
+        &ProcessTelemetry::default(),
+    )
+    .await
+}
 
 #[cfg(unix)]
 #[tokio::test]

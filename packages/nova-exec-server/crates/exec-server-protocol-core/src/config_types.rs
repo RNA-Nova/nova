@@ -1,25 +1,13 @@
-use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Metadata;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
-use std::fmt;
-use std::num::NonZeroU64;
-use std::ops::Deref;
-use std::str::FromStr;
-use std::time::Duration;
 use strum_macros::Display;
-use strum_macros::EnumIter;
 use ts_rs::TS;
 use wildmatch::WildMatchPattern;
 
 
+// 锚点子集保留件（pub API 面，挂账用）：当前全 workspace 无树内消费方。
 #[derive(
     Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize, Display, JsonSchema, TS,
 )]
@@ -52,6 +40,7 @@ pub enum ShellEnvironmentPolicyInherit {
     None,
 }
 
+// 锚点子集保留件（pub API 面，挂账用）：当前全 workspace 无树内消费方。
 /// Assigns a shell environment variable pattern to the include-only or exclude
 /// set. Includes do not re-add variables removed by another exclude pattern.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
@@ -104,24 +93,6 @@ impl Default for ShellEnvironmentPolicy {
             use_profile: false,
         }
     }
-}
-
-fn string_enum_schema_with_description(values: &[&str], description: &str) -> Schema {
-    let mut schema = SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        metadata: Some(Box::new(Metadata {
-            description: Some(description.to_string()),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-    schema.enum_values = Some(
-        values
-            .iter()
-            .map(|value| Value::String((*value).to_string()))
-            .collect(),
-    );
-    Schema::Object(schema)
 }
 
 #[derive(

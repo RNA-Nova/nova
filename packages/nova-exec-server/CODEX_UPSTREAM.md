@@ -31,6 +31,52 @@
 - **`CODEX_SESSION_ID_ENV_VAR`**：锚点 protocol/shell_environment.rs 的常量，
   其注入方在 codex core `exec_env.rs`（agent 运行时面），nova exec 侧无
   生产/消费方，不镜像。
+- **ChatGPT 亲和面**（对位 codex 39f4277087：http-client 的
+  `chatgpt_cloudflare_cookies.rs`/`chatgpt_hosts.rs`/`windows_tls.rs` 模块、
+  `client_builder.rs`/`outbound_proxy.rs` 的 ChatGPT cookie 仓字段与构造器、
+  websocket-client 的握手 cookie 注入/回存（12acac2a66 #46506）与
+  `cookie_tests.rs`）——该面为 ChatGPT 后端（chatgpt.com/backend-api）过
+  Cloudflare 机器人检测的亲和机器；nova executor 是编程无绑定执行后端，
+  模型流量全在 Python 侧 nova_ai（且不走 ChatGPT 后端），整面裁除。
+  代码内裁点注释在案（http-client lib.rs:71、websocket-client lib.rs:168/354）。
+- **Statsig/会话遥测出口**：`install_global_statsig_settings` 无安装方
+  （dead_code 存留备查）、SessionTelemetry/business metrics/会话遥测面
+  不镜像（otel crate README 在案）；锚点 `otel/tests/suite/snapshot.rs`
+  后两例（`manager_snapshot_metrics_*`/`manager_turn_cost_*`）随该面未移植
+  （snapshot.rs 文件头有裁点注释）。
+- **远程环境注册面**：Noise 协议、`environment/accepted.rs`（host-accepted
+  WebSocket）、`environment/connect_options.rs`（RemoteEnvironmentOptions
+  http_headers）、cloud registry 注册/forward 子命令、
+  `client/connection_failure.rs`（双变体塌缩为 String，已核实 nova WS 路径
+  不丢重试覆盖）、`client_refresh_tests.rs`/`client_transport_tests.rs`——
+  codex 云生态的 executor 注册/托管面不镜像；nova 的远程执行归 Python 侧
+  SSH/executor 体系（`executor_switch` 扩展）。
+- **Windows 沙箱 CI 环境弱化三处**（均为 GHA 托管 runner 与 codex 自管
+  runner 池的环境差，带 TODO，真机/自管环境可恢复）：
+  `unified_exec/tests.rs` 三个 legacy 后端用例 CI 跳门（:675/:753/:1046——
+  hosted runner job-object 层级干扰沙箱后代生命周期）、
+  `fs_sandbox_windows_tests.rs` 两例 CI 跳门（:159/:204——hosted-runner
+  service session 卡死，commit 2e446cee 实证）、pwsh readiness 超时
+  5s→30s（`unified_exec/tests.rs:489`——托管 runner Defender 扫描冷启动）。
+  与 ci.yml 既有两个排除项（root_metadata 嵌套盲区、
+  legacy_capture_cancellation pwsh7 盲区）同类。
+- **Windows 执行别名同名**（挂账待核）：`runtime_ownership.rs` 的
+  `APP_CORE_RUNNER_ALIAS = "nova-command-runner.exe"` 与 helper exe 同名
+  （锚点刻意不同名：`codex-core-command-runner.exe` ≠ `codex-command-runner.exe`）。
+  Rust 侧全树走 const 自洽；执行别名是 MSIX 清单的外部契约，待 nova MSIX
+  打包工程核对 `<uap3:ExecutionAlias>` 声明。
+- **`EXIT_ON_STDIN_CLOSE` 无 spawn 方注入**：codex 由宿主 spawn 托管
+  executor 时注入该 env 实现父死子随；nova 侧目前仅有手工 CLI flag/env
+  （`NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE`），spawn 方注入归上层 SDK/包
+  体系（出口挂账）。
+- **句柄表 per-id 在飞预约层**（`file_handle.rs` 模块头注释在案）：并发同名
+  ID 的打开在碰文件之前即拒（先到者胜）——codex 上游仅靠落表复查（后到者
+  胜，败者的开门副作用已发生）。nova 有意多加的一层加固，消除败者截断
+  副作用；行为差异方向是收紧而非放宽。
+- **推送式 fs/readStream 断线/放弃语义**（nova 自有通道，锚点为拉循环）：
+  推送路由按 handle_id 键控；客户端放弃即 best-effort fs/close（对位锚点
+  拉模式的 drop 收摊）；close→同名重开的代际防护（条目代际校验）为 nova
+  自有加固（锚点拉模式无长驻服务端任务，天然无此竞态）。
 
 ## 同步节奏
 

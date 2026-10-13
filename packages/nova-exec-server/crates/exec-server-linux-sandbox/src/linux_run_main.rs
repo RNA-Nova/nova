@@ -23,6 +23,7 @@ use std::time::Duration;
 use crate::bwrap::BwrapNetworkMode;
 use crate::bwrap::BwrapOptions;
 use crate::bwrap::WSL_INTEROP_DIR;
+use crate::bwrap::WSLG_DISTRO_ROOT;
 use crate::bwrap::create_bwrap_command_args;
 use crate::landlock::apply_permission_profile_to_current_thread;
 use crate::launcher::exec_bwrap;
@@ -317,8 +318,30 @@ pub fn run_main() -> ! {
             // 对位 codex f71543813f：文件系统受限且宿主存在 WSL interop 目录时遮蔽之
             mask_wsl_interop: !file_system_sandbox_policy.has_full_disk_write_access()
                 && Path::new(WSL_INTEROP_DIR).is_dir(),
+            // 对位 codex 39f4277087：宿主暴露 WSLg 的 / bind 别名且文件系统受限
+            //（含带 unreadable glob 的整盘写）时遮蔽别名根
+            mask_wslg_distro: (!file_system_sandbox_policy.has_full_disk_write_access()
+                || !file_system_sandbox_policy
+                    .get_unreadable_globs_with_cwd(&sandbox_policy_cwd)
+                    .is_empty())
+                && crate::wslg::is_duplicate_root(Path::new(WSLG_DISTRO_ROOT))
+                    .unwrap_or_else(|err| exit_with_bwrap_build_error(err.into())),
             ..Default::default()
         };
+        // 对位 codex 39f4277087：受限视图遮蔽别名根后，经别名寻址的可执行文件
+        // 会静默失配，构建挂载前先行拒绝
+        if options.mask_wslg_distro
+            && let Some(executable) = command
+                .first()
+                .filter(|executable| executable.contains('/'))
+        {
+            let executable = command_cwd
+                .as_deref()
+                .unwrap_or(&sandbox_policy_cwd)
+                .join(executable);
+            crate::wslg::ensure_supported_path(&executable)
+                .unwrap_or_else(|err| exit_with_bwrap_build_error(err));
+        }
         let inner = build_inner_seccomp_command(InnerSeccompCommandArgs {
             sandbox_policy_cwd: &sandbox_policy_cwd,
             command_cwd: command_cwd.as_deref(),

@@ -249,7 +249,8 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 ## 已移除（v0 → v1 清洗）
 
 - `capabilityRoots/discoverV1`（agent 插件/技能发现——不属于执行后端）
-- `EnvironmentCapabilities.capabilityDiscoverySandbox` 字段
+- `capabilities/discoverV2` 与 `EnvironmentCapabilities.capabilityDiscoverySandbox` /
+  `capabilityDiscoveryV2` 字段（同属发现面，随 V1 一并移除）
 - 模型 API / 会话 / compact / memories 等 Codex agent 端点（随 `executor-codex-api` 整 crate 移除）
 
 ## 环境变量清单（用户/部署可见）
@@ -257,7 +258,7 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 - `NOVA_EXEC_SERVER_HOME` — executor 家目录（`~/.nova/exec-server`）覆盖
 - `NOVA_EXEC_SERVER_CA_CERTIFICATE` / `SSL_CERT_FILE` — 自定义 CA 证书路径
   （企业自签场景；影响 `http/request` 与 WS TLS 信任链）
-- `NOVA_EXEC_SERVER_EXEC_SERVER_EXIT_ON_STDIN_CLOSE` — **WS 托管 spawn** 时父进程
+- `NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE` — **WS 托管 spawn** 时父进程
   持有 stdin 管道、关闭即退出（父死子随）；**stdio 形态下为 no-op**（stdin 本是
   传输线，EOF 自然结束服务）
 - `NOVA_EXEC_SERVER_NETWORK_PROXY_ACTIVE` — 打进沙箱进程环境：标记"活在托管

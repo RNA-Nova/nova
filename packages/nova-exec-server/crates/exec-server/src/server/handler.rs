@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use nova_exec_server_http_client::HttpClientFactory;
 use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_protocol::RequestId;
+use opentelemetry::trace::SpanContext;
 use serde_json::to_value;
 use std::collections::HashSet;
 use tokio::sync::Mutex;
@@ -55,6 +56,7 @@ use crate::protocol::FsWriteStreamDoneParams;
 use crate::protocol::FsWriteStreamDoneResponse;
 use crate::protocol::FsWriteStreamParams;
 use crate::protocol::FsWriteStreamResponse;
+use crate::protocol::HTTP_REQUEST_METHOD;
 use crate::protocol::HttpRequestParams;
 use crate::protocol::InitializeParams;
 use crate::protocol::InitializeResponse;
@@ -70,12 +72,16 @@ use crate::rpc::RpcNotificationSender;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
 use crate::rpc::invalid_request;
+use crate::server::build_identity::local_environment_info;
 use crate::server::file_system_handler::FileSystemHandler;
-use crate::server::release_version::local_environment_info;
 use crate::server::session_registry::SessionHandle;
 use crate::server::session_registry::SessionRegistry;
+use crate::telemetry::ExecutorRegistration;
 
 pub(crate) struct ExecServerHandler {
+    // 对位 codex 39f4277087：注册面签发身份（nova 无 relay 注册面，恒为 None；
+    // pub(super) 供 server 模块内测试装配）
+    pub(super) executor_registration: Option<Arc<ExecutorRegistration>>,
     session_registry: Arc<SessionRegistry>,
     notifications: RpcNotificationSender,
     session: StdMutex<Option<SessionHandle>>,
@@ -97,6 +103,7 @@ impl ExecServerHandler {
         http_client_factory: HttpClientFactory,
     ) -> Self {
         Self {
+            executor_registration: None,
             session_registry,
             notifications: notifications.clone(),
             session: StdMutex::new(None),
@@ -180,9 +187,25 @@ impl ExecServerHandler {
         Ok(())
     }
 
-    pub(crate) async fn exec(&self, params: ExecParams) -> Result<ExecResponse, JSONRPCErrorError> {
+    // 对位 codex 39f4277087：launch_context 来自请求载体的 W3C traceparent，
+    // 与注册身份一起作为启动期捕获的进程遥测传入。
+    pub(crate) async fn exec(
+        &self,
+        params: ExecParams,
+        launch_context: Option<SpanContext>,
+    ) -> Result<ExecResponse, JSONRPCErrorError> {
         let session = self.require_initialized_for("exec")?;
-        session.process().exec(params).await
+        session
+            .process()
+            .exec(
+                params,
+                crate::process_telemetry::ProcessTelemetry {
+                    launch_context,
+                    executor_registration: self.executor_registration.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
     }
 
     pub(crate) fn environment_info(&self) -> Result<EnvironmentInfo, JSONRPCErrorError> {
@@ -281,6 +304,16 @@ impl ExecServerHandler {
             }
             return Err(error);
         }
+        // 该响应绕过了 dispatcher；在 body-stream 建立前记录。
+        // （对位 codex 39f4277087 `handler.rs` response_enqueued trace_safe 事件）
+        tracing::event!(
+            name: "nova.exec_server.response_enqueued",
+            target: "nova_exec_server_otel.trace_safe",
+            tracing::Level::INFO,
+            event.name = "nova.exec_server.response_enqueued",
+            rpc.method = HTTP_REQUEST_METHOD,
+            outcome = "success",
+        );
         if let Some(pending_stream) = pending_stream {
             self.start_http_body_stream(pending_stream).await;
         }
@@ -356,7 +389,11 @@ impl ExecServerHandler {
         params: FsWriteStreamChunkNotification,
     ) -> Result<(), String> {
         if let Err(err) = self.require_initialized_for("filesystem") {
-            // 通知无回执：初始化前的 chunk 只告警忽略，不让协议错误关闭连接
+            // 通知无回执：初始化前的 chunk 只告警忽略，不让协议错误关闭连接。
+            // 作用边界：本函数只对"到达 handler"的 chunk 恒成功；params 反序列化
+            // 失败（如非法 base64）在 router decode 阶段即返回 Err，由 dispatcher
+            // 关闭连接（与 INITIALIZED 通知同纪律：通知路由 Err 即 ConnectionClosed），
+            // 不经此处。
             tracing::warn!(
                 "ignoring fs/writeStream/chunk before initialize: {}",
                 err.message

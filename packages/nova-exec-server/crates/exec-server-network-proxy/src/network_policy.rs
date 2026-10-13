@@ -501,6 +501,11 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    // 对位 codex 39f4277087：旧拆分事件名负断言（命名随 nova.network_proxy.* 映射）。
+    const LEGACY_DOMAIN_POLICY_DECISION_EVENT_NAME: &str =
+        "nova.network_proxy.domain_policy_decision";
+    const LEGACY_BLOCK_DECISION_EVENT_NAME: &str = "nova.network_proxy.block_decision";
+
     #[derive(Clone)]
     struct StaticReloader {
         state: ConfigState,
@@ -661,6 +666,14 @@ mod tests {
             .field("event.timestamp")
             .expect("event timestamp should be present");
         assert!(is_rfc3339_utc_millis(timestamp));
+        assert_eq!(
+            find_event_by_name(&events, LEGACY_DOMAIN_POLICY_DECISION_EVENT_NAME),
+            None
+        );
+        assert_eq!(
+            find_event_by_name(&events, LEGACY_BLOCK_DECISION_EVENT_NAME),
+            None
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -900,6 +913,10 @@ mod tests {
         assert_eq!(event.field("http.request.method"), Some("POST"));
         assert_eq!(event.field("client.address"), Some(DEFAULT_CLIENT_ADDRESS));
         assert_eq!(event.field("network.policy.override"), Some("false"));
+        assert_eq!(
+            find_event_by_name(&events, LEGACY_BLOCK_DECISION_EVENT_NAME),
+            None
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

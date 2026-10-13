@@ -2,6 +2,7 @@ use nova_exec_server_protocol::JSONRPCErrorError;
 
 use crate::ExecServerRuntimePaths;
 use crate::local_process::LocalProcess;
+use crate::process_telemetry::ProcessTelemetry;
 use crate::protocol::ExecParams;
 use crate::protocol::ExecResponse;
 use crate::protocol::ReadParams;
@@ -39,8 +40,12 @@ impl ProcessHandler {
         self.process.set_notification_sender(notifications);
     }
 
-    pub(crate) async fn exec(&self, params: ExecParams) -> Result<ExecResponse, JSONRPCErrorError> {
-        self.process.exec(params).await
+    pub(crate) async fn exec(
+        &self,
+        params: ExecParams,
+        telemetry: ProcessTelemetry,
+    ) -> Result<ExecResponse, JSONRPCErrorError> {
+        self.process.exec(params, telemetry).await
     }
 
     pub(crate) async fn exec_read(

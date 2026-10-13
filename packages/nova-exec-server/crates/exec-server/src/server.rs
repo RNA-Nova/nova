@@ -1,3 +1,4 @@
+mod build_identity;
 mod file_system_handler;
 mod handler;
 mod process_handler;
@@ -7,6 +8,11 @@ mod release_version;
 mod request_dispatcher;
 mod session_registry;
 mod transport;
+
+// 对位 codex 39f4277087：进程遥测 e2e（otel 导出面）
+#[cfg(all(test, unix))]
+#[path = "server/process_otel_tests.rs"]
+mod process_otel_tests;
 
 pub(crate) use handler::ExecServerHandler;
 pub use request_dispatcher::ConcurrentRequestLimit;
@@ -36,7 +42,7 @@ pub async fn run_main(
 }
 
 #[tracing::instrument(
-    name = "nova.executor",
+    name = "nova.exec_server",
     skip_all,
     fields(otel.kind = "internal")
 )]
@@ -48,6 +54,8 @@ pub async fn run_main_with_telemetry(
     request_dispatch_mode: RequestDispatchMode,
     websocket_auth: WebsocketAuthSettings,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 对位 codex 39f4277087：接受连接前解析构建身份（启动期缓存）
+    std::sync::LazyLock::force(&build_identity::PROVIDER_ID);
     transport::run_transport(
         listen_url,
         runtime_paths,
@@ -105,7 +113,7 @@ mod tests {
         provider.force_flush().expect("flush traces");
         let spans = exporter.get_finished_spans().expect("span export");
         assert!(
-            spans.iter().any(|span| span.name == "nova.executor"),
+            spans.iter().any(|span| span.name == "nova.exec_server"),
             "root exec-server span missing: {spans:?}"
         );
     }

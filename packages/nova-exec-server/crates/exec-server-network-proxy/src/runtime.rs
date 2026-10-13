@@ -8,7 +8,8 @@
 //!   `restore_child_credentials` / `virtualize_brokered_text` / `inject_request_credentials` /
 //!   `plaintext_credential_injection_enabled` 未移植；`current_cfg_with_brokerage_provenance`
 //!   随之裁掉（broker 创建的默认白名单概念不复存在）。
-//! - `BlockedRequest` 以 crate 根线上类型为准：无 codex 端 `execution_id` 字段。
+//! - `BlockedRequest` 以 crate 根线上类型为准：`execution_id` 为 `#[serde(skip)]`
+//!   的进程内字段（对位 codex 39f4277087），由 `record_blocked` 统一盖章。
 
 use crate::NetworkDomainPermission;
 use crate::NetworkMode;
@@ -126,6 +127,8 @@ impl crate::BlockedRequest {
             method,
             mode,
             protocol,
+            // 对位 codex 39f4277087：构造时未盖章，由 `record_blocked` 统一填。
+            execution_id: None,
             decision,
             source,
             port,
@@ -438,6 +441,17 @@ impl NetworkProxyState {
         })
     }
 
+    /// 对位 codex 39f4277087：按给定 environment_id 派生视图；传 None 时保留
+    /// 本 state 已有的 environment_id（覆盖语义只在显式 Some 时发生）。
+    pub(crate) fn for_environment_id(&self, environment_id: Option<&str>) -> Self {
+        Self {
+            environment_id: environment_id
+                .map(Arc::from)
+                .or_else(|| self.environment_id.clone()),
+            ..self.clone()
+        }
+    }
+
     pub(crate) fn environment_id(&self) -> Option<&str> {
         self.environment_id.as_deref()
     }
@@ -652,8 +666,10 @@ impl NetworkProxyState {
         }
     }
 
-    pub async fn record_blocked(&self, entry: crate::BlockedRequest) -> Result<()> {
+    pub async fn record_blocked(&self, mut entry: crate::BlockedRequest) -> Result<()> {
         self.reload_if_needed().await?;
+        // 对位 codex 39f4277087：落缓冲/发观察器前统一盖上本代理的执行 ID。
+        entry.execution_id = self.execution_id();
         let blocked_for_observer = entry.clone();
         let blocked_request_observer = self.blocked_request_observer.read().await.clone();
         let violation_line = blocked_request_violation_log_line(&entry);
@@ -775,7 +791,9 @@ impl NetworkProxyState {
     pub async fn allow_local_binding(&self) -> Result<bool> {
         self.reload_if_needed().await?;
         let guard = self.state.read().await;
-        Ok(guard.config.allow_local_binding())
+        // 对位 codex 39f4277087：省略值由 executor 侧 `LocalBindingPolicy` 归一；
+        // 直接读配置的 unwrap_or(false) 会把 RequireTrue 下的省略翻转成 false。
+        Ok(self.local_binding_policy.resolve(&guard.config))
     }
 
     pub async fn network_mode(&self) -> Result<NetworkMode> {
@@ -794,7 +812,10 @@ impl NetworkProxyState {
                 (candidate, guard.constraints.clone())
             };
 
-            validate_policy_against_constraints(&candidate, &constraints)
+            // 对位 codex 39f4277087：先按 local-binding 策略归一候选配置再校验，
+            // 避免省略值被当成显式 false 而误伤托管约束。
+            let resolved = self.local_binding_policy.resolved_config(&candidate);
+            validate_policy_against_constraints(&resolved, &constraints)
                 .map_err(NetworkProxyConstraintError::into_anyhow)
                 .context("network.mode constrained by managed config")?;
 
@@ -854,7 +875,10 @@ impl NetworkProxyState {
                 normalize_host,
             );
 
-            validate_policy_against_constraints(&candidate, &constraints)
+            // 对位 codex 39f4277087：先按 local-binding 策略归一候选配置再校验，
+            // 避免省略值被当成显式 false 而误伤托管约束。
+            let resolved = self.local_binding_policy.resolved_config(&candidate);
+            validate_policy_against_constraints(&resolved, &constraints)
                 .map_err(NetworkProxyConstraintError::into_anyhow)
                 .with_context(|| format!("{constraint_field} constrained by managed config"))?;
 
@@ -1386,6 +1410,7 @@ mod tests {
             method: Some("GET".to_string()),
             mode: Some(NetworkMode::Proxy),
             protocol: "http".to_string(),
+            execution_id: None,
             decision: Some("ask".to_string()),
             source: Some("decider".to_string()),
             port: Some(80),

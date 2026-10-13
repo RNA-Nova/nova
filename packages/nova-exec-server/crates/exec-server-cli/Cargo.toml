@@ -30,6 +30,22 @@ nova-exec-server-websocket-auth = { workspace = true }
 nova-exec-server-linux-sandbox = { workspace = true }
 tempfile = { workspace = true }
 
+# Windows 沙箱包装器分派（--run-as-windows-sandbox，对位 codex arg0）
+[target.'cfg(target_os = "windows")'.dependencies]
+nova-exec-server-windows-sandbox = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
+# CLI e2e（tests/ 对位 codex cli/tests 适配组）
+anyhow = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+jsonwebtoken = { workspace = true }
+nova-exec-server-utils-cargo-bin = { workspace = true }
+sha2 = { workspace = true }
+tokio-tungstenite = { workspace = true }
+wiremock = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = { workspace = true }

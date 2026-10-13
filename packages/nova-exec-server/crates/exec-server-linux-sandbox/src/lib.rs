@@ -31,6 +31,8 @@ mod linux_run_main;
 mod proxy_lifecycle;
 #[cfg(target_os = "linux")]
 mod proxy_routing;
+#[cfg(target_os = "linux")]
+mod wslg;
 
 // 对位 codex d9960e12bb：完整性后端的依赖清点/策略准备复用件
 #[cfg(target_os = "linux")]

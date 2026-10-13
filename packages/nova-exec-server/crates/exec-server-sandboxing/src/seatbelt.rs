@@ -456,11 +456,10 @@ fn normalize_writable_root_for_sandbox(
     if !allow_symlinks && let Some(symlink) = nested_symlink_component(root.as_path()) {
         return Err(SeatbeltPreparationError::FileSystem(format!(
             "writable root {} contains symlink component {}; symlinked writable roots are not supported.\n\
-             If this writable root is at or beneath the executor home and you trust its symlink targets, \
-             set `allow_symlinked_nova_home = true` at the top level of `$NOVA_EXEC_SERVER_HOME/config.toml` \
-             (normally `~/.nova/exec-server/config.toml`) on the execution host, then restart the executor. \
-             This opt-out trusts targets outside the executor home and targets changed between commands. \
-             It does not apply to other writable roots.",
+             Remove the symlink from the writable root (or point the writable root at its canonical \
+             target) and retry. An opt-out for executor-home symlinked roots \
+             (`allow_symlinked_nova_home`) exists in the executor, but its config source is not \
+             wired up yet, so the switch currently never takes effect.",
             root.display(),
             symlink.display()
         )));

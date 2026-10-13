@@ -17,8 +17,12 @@ bytes = { workspace = true }
 futures = { workspace = true }
 gethostname = { workspace = true }
 http = { workspace = true }
+# 对位 codex 39f4277087：进程遥测面的 SpanContext/launch_context（原仅 dev 依赖）
+opentelemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# 对位 codex 39f4277087 build-info build_id：provider_id 的 SHA-256 派生
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -100,6 +104,9 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 wiremock = { workspace = true }
 nova-exec-server-network-proxy = { workspace = true }
+# 对位 codex 39f4277087 exec-server dev-dependencies：shell snapshot 测试的
+# profile-bin/wc 包装器写入（write_executable）需要全平台可用
+nova-exec-server-utils-cargo-bin = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # 集成测试的 argv0 重入分派：landlock/bwrap 沙箱以 `nova-linux-sandbox`

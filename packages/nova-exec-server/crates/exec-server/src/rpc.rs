@@ -16,6 +16,7 @@ use nova_exec_server_protocol::JSONRPCNotification;
 use nova_exec_server_protocol::JSONRPCRequest;
 use nova_exec_server_protocol::JSONRPCResponse;
 use nova_exec_server_protocol::RequestId;
+use nova_exec_server_protocol_core::protocol::W3cTraceContext;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -222,13 +223,26 @@ where
         F: Fn(Arc<S>, P) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<R, JSONRPCErrorError>> + Send + 'static,
     {
+        self.request_with_trace(method, move |state, params, _trace| handler(state, params));
+    }
+
+    /// 向需要 W3C 载体的 handler 供给入站 trace，不要求配置 trace 导出器。
+    /// （对位 codex 39f4277087 `RpcRouter::request_with_trace`）
+    pub(crate) fn request_with_trace<P, R, F, Fut>(&mut self, method: &'static str, handler: F)
+    where
+        P: DeserializeOwned + Send + 'static,
+        R: Serialize + Send + 'static,
+        F: Fn(Arc<S>, P, Option<W3cTraceContext>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<R, JSONRPCErrorError>> + Send + 'static,
+    {
         self.request_routes.insert(
             method,
             Box::new(move |state, request| {
+                let trace = request.trace;
                 let request_id = request.id;
                 let params = request.params;
                 let response =
-                    decode_request_params::<P>(params).map(|params| handler(state, params));
+                    decode_request_params::<P>(params).map(|params| handler(state, params, trace));
                 Box::pin(async move {
                     let response = match response {
                         Ok(response) => response.await,
@@ -529,7 +543,7 @@ impl RpcClient {
     }
 
     #[tracing::instrument(
-        name = "nova.executor.request",
+        name = "nova.exec_server.request",
         level = "info",
         skip_all,
         fields(
@@ -563,7 +577,7 @@ impl RpcClient {
     }
 
     #[tracing::instrument(
-        name = "nova.executor.request",
+        name = "nova.exec_server.request",
         level = "info",
         skip_all,
         fields(
@@ -640,6 +654,14 @@ impl RpcClient {
         {
             return Err(RpcCallError::Closed);
         }
+        // 对位 codex 39f4277087：trace_safe 事件（请求写入出站队列即记录）
+        tracing::event!(
+            name: "nova.exec_server.request_enqueued",
+            target: "nova_exec_server_otel.trace_safe",
+            tracing::Level::INFO,
+            event.name = "nova.exec_server.request_enqueued",
+            rpc.method = method,
+        );
 
         // Do not race in-flight requests directly against the transport-close
         // watch value. The connection reader receives JSON-RPC messages and

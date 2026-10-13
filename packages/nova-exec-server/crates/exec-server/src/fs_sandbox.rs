@@ -457,6 +457,7 @@ async fn run_command(
 
 /// 等待一次性 helper 退出并收集其输出：非零退出即内部错误（附 stderr 摘要）。
 /// 一次性请求与沙箱开门（sandboxed_file_open）共用。
+#[cfg(not(windows))]
 pub(crate) async fn wait_for_helper_output(
     child: Child,
 ) -> Result<std::process::Output, JSONRPCErrorError> {
@@ -1001,7 +1002,7 @@ mod tests {
         ]);
         let sandbox_context = crate::FileSystemSandboxContext {
             windows_sandbox_selection:
-                nova_exec_server_file_system::WindowsSandboxSelection::Elevated,
+                nova_exec_server_file_system::WindowsSandboxSelection::RestrictedToken,
             ..sandbox_context_with_cwd(&policy, cwd_uri)
         };
         selected.close().expect("remove selected directory");

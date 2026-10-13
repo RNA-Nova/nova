@@ -6,6 +6,29 @@ use std::time::Instant;
 use nova_exec_server_otel::MetricsClient;
 use tracing::warn;
 
+/// 注册面签发的身份，取自 executor 经认证的 relay 连接。
+/// （对位 codex 39f4277087 `telemetry.rs`；nova 无 relay 注册面，当前恒为 None，
+/// 词汇保留供 process_telemetry / network-proxy 日志身份链使用）
+pub(crate) struct ExecutorRegistration {
+    pub(crate) environment_id: String,
+    pub(crate) executor_registration_id: String,
+}
+
+impl ExecutorRegistration {
+    pub(crate) fn new(environment_id: String, executor_registration_id: String) -> Option<Self> {
+        if [&environment_id, &executor_registration_id]
+            .iter()
+            .any(|id| id.trim().is_empty() || id.len() > 256 || id.chars().any(char::is_control))
+        {
+            return None;
+        }
+        Some(Self {
+            environment_id,
+            executor_registration_id,
+        })
+    }
+}
+
 const CONNECTIONS_ACTIVE_METRIC: &str = "exec_server_connections_active";
 const CONNECTIONS_ACTIVE_DESCRIPTION: &str = "Number of active exec-server connections.";
 const CONNECTIONS_TOTAL_METRIC: &str = "exec_server_connections_total";
@@ -14,6 +37,9 @@ const REQUESTS_TOTAL_METRIC: &str = "exec_server_requests_total";
 const REQUESTS_TOTAL_DESCRIPTION: &str = "Total number of exec-server requests.";
 const REQUEST_DURATION_METRIC: &str = "exec_server_request_duration_seconds";
 const REQUEST_DURATION_DESCRIPTION: &str = "Duration of exec-server requests in seconds.";
+// 对位 codex 39f4277087：端到端总时长（含排队），从解码接收至响应入队或断连
+const REQUEST_TOTAL_DURATION_METRIC: &str = "exec_server_request_total_duration_seconds";
+const REQUEST_TOTAL_DURATION_DESCRIPTION: &str = "Total exec-server request duration in seconds, including queueing, from decoded receipt until response enqueue or disconnection.";
 const REQUEST_QUEUE_DURATION_METRIC: &str = "exec_server_request_queue_duration_seconds";
 const REQUEST_QUEUE_DURATION_DESCRIPTION: &str =
     "Time exec-server requests spend queued before execution in seconds.";
@@ -82,6 +108,7 @@ pub(crate) struct ConnectionMetricGuard {
 
 pub(crate) struct ProcessMetricGuard {
     telemetry: ExecServerTelemetry,
+    span: tracing::Span,
     started_at: Instant,
     result: &'static str,
 }
@@ -118,6 +145,8 @@ impl ExecServerTelemetry {
         method: &'static str,
         result: &'static str,
         duration: Duration,
+        // 对位 codex 39f4277087：第 4 参为含排队的端到端总时长
+        total_duration: Duration,
     ) {
         self.with_inner(|inner| {
             let tags = [("method", method), ("result", result)];
@@ -126,6 +155,12 @@ impl ExecServerTelemetry {
                 REQUEST_DURATION_METRIC,
                 REQUEST_DURATION_DESCRIPTION,
                 duration,
+                &tags,
+            );
+            inner.duration(
+                REQUEST_TOTAL_DURATION_METRIC,
+                REQUEST_TOTAL_DURATION_DESCRIPTION,
+                total_duration,
                 &tags,
             );
         });
@@ -196,12 +231,27 @@ impl ExecServerTelemetry {
         let _ = metrics.record_duration(SHELL_SNAPSHOT_WAIT_METRIC, wait, &tags);
     }
 
-    pub(crate) fn process_started(&self) -> ProcessMetricGuard {
+    pub(crate) fn process_started(&self, process_id: &str) -> ProcessMetricGuard {
         self.with_inner(|inner| {
             inner.adjust_process_count(/*delta*/ 1);
         });
+        let parent = nova_exec_server_otel::current_span_w3c_trace_context();
+        // `parent:` 只接受本地 tracing span/ID，不接受 W3C 上下文。本地父级会把
+        // 请求 span 挂到进程退出才关闭、延迟其导出。故用 `parent: None`，再在下面
+        // 设置 W3C 父级——链接两个 span 而不留住请求 span。（对位 codex 39f4277087）
+        let span = tracing::info_span!(
+            parent: None,
+            "nova.exec_server.process",
+            otel.kind = "internal",
+            process.id = process_id,
+            result = tracing::field::Empty,
+        );
+        if let Some(parent) = parent {
+            nova_exec_server_otel::set_parent_from_w3c_trace_context(&span, &parent);
+        }
         ProcessMetricGuard {
             telemetry: self.clone(),
+            span,
             started_at: Instant::now(),
             result: "unknown",
         }
@@ -251,6 +301,7 @@ impl ProcessMetricGuard {
 
 impl Drop for ProcessMetricGuard {
     fn drop(&mut self) {
+        self.span.record("result", self.result);
         self.telemetry
             .process_finished(self.result, self.started_at.elapsed());
     }

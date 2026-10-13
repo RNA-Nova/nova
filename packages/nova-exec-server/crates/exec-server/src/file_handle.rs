@@ -90,6 +90,10 @@ struct FileHandleTable {
     /// await——预约把并发同名打开的拒绝提前到碰文件之前；落表后才释放
     /// （失败/取消路径由 [`InFlightReservation`] 的 Drop 释放）。
     in_flight: HashSet<String>,
+    /// 单调递增的条目代际：close→同名重开后，旧流任务（readStream/writeStream）
+    /// 凭代际识别"条目已非我那一届"——收尾摘除只动自己那代（防误摘新句柄），
+    /// 逐块读取也校验代际（防从新文件串流）。
+    next_generation: u64,
 }
 
 impl Default for FileHandleManager {
@@ -109,20 +113,21 @@ impl FileHandleManager {
         &self,
         handle_id: String,
         open_file: impl Future<Output = io::Result<tokio::fs::File>>,
-    ) -> io::Result<String> {
+    ) -> io::Result<(String, u64)> {
         self.open_entry(handle_id, open_file, None).await
     }
 
     /// fs/writeStream 开门注册（nova 自有通道）：与 `open` 同一套容量/ID 校验；
     /// 注册即 spawn 写任务（与读任务 `stream_file_blocks` 完全镜像——状态全部
     /// 住进任务栈），条目只承载 channel 发送端。`offset` = 续传起点（写任务
-    /// 游标初值；None = 创建/截断语义）。
+    /// 游标初值；None = 创建/截断语义）。返回句柄 ID 与条目代际（流任务的
+    /// 收尾摘除/逐块校验用，防 close→同名重开误伤新条目）。
     pub(crate) async fn open_write_stream(
         &self,
         handle_id: String,
         open_file: impl Future<Output = io::Result<tokio::fs::File>>,
         offset: Option<u64>,
-    ) -> io::Result<String> {
+    ) -> io::Result<(String, u64)> {
         self.open_entry(handle_id, open_file, Some(offset.unwrap_or(0)))
             .await
     }
@@ -132,7 +137,7 @@ impl FileHandleManager {
         handle_id: String,
         open_file: impl Future<Output = io::Result<tokio::fs::File>>,
         write_stream_offset: Option<u64>,
-    ) -> io::Result<String> {
+    ) -> io::Result<(String, u64)> {
         // 第 1 步（持锁，不跨 await）：已注册或在飞 → 重复 ID 即拒（碰文件前）；
         // 否则占 per-id 在飞预约——并发同名打开在开门副作用（Replace=截断）
         // 发生前分出胜负（nova 自有，比 codex 上游的落表复查更早）。
@@ -172,6 +177,10 @@ impl FileHandleManager {
         // 第 3 步（持锁）：落表。Entry::Vacant 复查保留兜底（在飞预约使其实际
         // 不可达——同名者第 1 步已被拒）。
         let mut table = self.lock_handles();
+        // 先取代际再落表（Entry 借用存续期间不能再碰表的其他字段；
+        // 重复 ID 被拒时浪费一个代际号，无害——代际只需唯一）
+        let generation = table.next_generation;
+        table.next_generation += 1;
         let Entry::Vacant(entry) = table.entries.entry(handle_id.clone()) else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -181,15 +190,18 @@ impl FileHandleManager {
         entry.insert(FileHandleEntry {
             file: Arc::clone(&file),
             write_stream,
+            generation,
             _permit: permit,
         });
         drop(table);
         // 写任务在条目落表后才启动（与读任务的 spawn 时机一致）——重复 ID 被
-        // 拒绝时 channel 随局部变量 drop，不会误摘既有句柄。
+        // 拒绝时 channel 随局部变量 drop，不会误摘既有句柄。任务随身携带本条
+        // 目的代际：收尾摘除只动自己那代（close→同名重开不误摘新句柄）。
         if let Some((_tx, rx, backpressure)) = write_stream_channel {
             tokio::spawn(run_write_stream_task(
                 self.clone(),
                 handle_id.clone(),
+                generation,
                 file,
                 rx,
                 backpressure,
@@ -198,7 +210,7 @@ impl FileHandleManager {
         }
         // 落表后释放预约（守卫 Drop 内取表锁——必须在表锁释放之后）
         drop(reservation);
-        Ok(handle_id)
+        Ok((handle_id, generation))
     }
 
     pub(crate) async fn read_block(
@@ -207,8 +219,35 @@ impl FileHandleManager {
         offset: u64,
         len: usize,
     ) -> io::Result<FileReadBlock> {
+        self.read_block_impl(handle_id, None, offset, len).await
+    }
+
+    /// readStream 专用（nova 自有通道）：逐块读取携带条目代际——句柄被摘除或
+    /// 同名重开（代际不符）即报 NotFound，旧任务不会读到新条目的文件；
+    /// 读失败的关句柄同样只关自己那代。
+    pub(crate) async fn read_block_for_generation(
+        &self,
+        handle_id: &str,
+        generation: u64,
+        offset: u64,
+        len: usize,
+    ) -> io::Result<FileReadBlock> {
+        self.read_block_impl(handle_id, Some(generation), offset, len)
+            .await
+    }
+
+    async fn read_block_impl(
+        &self,
+        handle_id: &str,
+        generation: Option<u64>,
+        offset: u64,
+        len: usize,
+    ) -> io::Result<FileReadBlock> {
         validate_read_block_len(len)?;
-        let file = self.get(handle_id)?;
+        let file = match generation {
+            Some(generation) => self.get_for_generation(handle_id, generation)?,
+            None => self.get(handle_id)?,
+        };
         let result =
             match tokio::task::spawn_blocking(move || read_block_at(&file, offset, len)).await {
                 Ok(result) => result,
@@ -217,7 +256,10 @@ impl FileHandleManager {
                 ))),
             };
         if result.is_err() {
-            self.close(handle_id);
+            match generation {
+                Some(generation) => self.close_if_generation(handle_id, generation),
+                None => self.close(handle_id),
+            }
         }
         result
     }
@@ -287,9 +329,7 @@ impl FileHandleManager {
                 }
             }
             None => {
-                tracing::warn!(
-                    "ignoring write stream chunk for non-stream handle `{handle_id}`"
-                );
+                tracing::warn!("ignoring write stream chunk for non-stream handle `{handle_id}`");
             }
         }
     }
@@ -317,7 +357,9 @@ impl FileHandleManager {
         };
         let (respond_tx, respond_rx) = tokio::sync::oneshot::channel();
         if sender
-            .send(WriteStreamInput::Done { respond: respond_tx })
+            .send(WriteStreamInput::Done {
+                respond: respond_tx,
+            })
             .await
             .is_err()
         {
@@ -341,8 +383,39 @@ impl FileHandleManager {
             .ok_or_else(|| unknown_handle_error(handle_id))
     }
 
+    /// 代际校验取文件（持锁一次判定，检查与取件原子化）：条目不存在或代际
+    /// 不符（close→同名重开）都报 NotFound——旧流任务永远不会拿到新条目的文件。
+    fn get_for_generation(&self, handle_id: &str, generation: u64) -> io::Result<Arc<File>> {
+        let table = self.lock_handles();
+        match table.entries.get(handle_id) {
+            Some(entry) if entry.generation == generation => Ok(Arc::clone(&entry.file)),
+            _ => Err(unknown_handle_error(handle_id)),
+        }
+    }
+
+    /// 当前条目代际（None = 已摘除）：流任务判定"我那一届还在不在"用。
+    pub(crate) fn handle_generation(&self, handle_id: &str) -> Option<u64> {
+        self.lock_handles()
+            .entries
+            .get(handle_id)
+            .map(|entry| entry.generation)
+    }
+
     pub(crate) fn close(&self, handle_id: &str) {
         self.lock_handles().entries.remove(handle_id);
+    }
+
+    /// 代际守卫摘除（nova 自有，流任务收尾专用）：仅当当前条目仍是调用方那
+    /// 一代才摘除——close→同名重开后旧任务的收尾 close 不会误摘新句柄。
+    pub(crate) fn close_if_generation(&self, handle_id: &str, generation: u64) {
+        let mut table = self.lock_handles();
+        if table
+            .entries
+            .get(handle_id)
+            .is_some_and(|entry| entry.generation == generation)
+        {
+            table.entries.remove(handle_id);
+        }
     }
 
     pub(crate) fn close_all(&self) {
@@ -385,6 +458,10 @@ struct FileHandleEntry {
     file: Arc<File>,
     /// fs/writeStream 的写任务 channel 发送端（nova 自有通道；None = 非流句柄）
     write_stream: Option<WriteStreamHandle>,
+    /// 条目代际（落表时取自表的单调计数）：close→同名重开后新条目代际不同，
+    /// 旧流任务据此识别"条目已非我那一届"（见 close_if_generation /
+    /// read_block_for_generation / stream_file_blocks）。
+    generation: u64,
     // Closing an entry releases capacity even if a read or write still holds the file.
     _permit: OwnedSemaphorePermit,
 }
@@ -393,21 +470,25 @@ struct FileHandleEntry {
 /// 的校验上限是线上 fs/readBlock 的 FILE_READ_CHUNK_SIZE（1 MiB）——超过校验
 /// 上限的读块拆成 ≤FILE_READ_CHUNK_SIZE 的子读串行合并（对外块长语义不变：
 /// eof 仅当末次子读短读即文件结尾；子读失败的关句柄语义与单读一致）。
-async fn read_stream_block(
+/// 全程携带条目代际（见 read_block_for_generation）。
+async fn read_stream_block_for_generation(
     file_handles: &FileHandleManager,
     handle_id: &str,
+    generation: u64,
     offset: u64,
     len: usize,
 ) -> io::Result<FileReadBlock> {
     if len <= FILE_READ_CHUNK_SIZE {
-        return file_handles.read_block(handle_id, offset, len).await;
+        return file_handles
+            .read_block_for_generation(handle_id, generation, offset, len)
+            .await;
     }
     let mut bytes = Vec::with_capacity(len);
     let mut sub_offset = offset;
     loop {
         let sub_len = (len - bytes.len()).min(FILE_READ_CHUNK_SIZE);
         let block = file_handles
-            .read_block(handle_id, sub_offset, sub_len)
+            .read_block_for_generation(handle_id, generation, sub_offset, sub_len)
             .await?;
         sub_offset = sub_offset.saturating_add(block.bytes.len() as u64);
         let eof = block.eof;
@@ -423,15 +504,20 @@ async fn read_stream_block(
 ///
 /// 逐块读取已注册句柄并经 `emit_chunk(seq, bytes, eof)` 推出；`emit_chunk`
 /// 返回 false 表示对端已消失，循环静默停止（不再读取，error 保持 None）。
-/// 返回 `(total_bytes, error)`，与 fs/readStream/done 通知的载荷一致。
+/// 返回 `(total_bytes, error, superseded)`，前两者与 fs/readStream/done 通知的
+/// 载荷一致；`superseded = true` 表示句柄被 close→同名重开取代——任务静默收尾：
+/// 不发 done（迟到终态不串入新流路由）、收尾摘除由调用方以代际守卫执行
+/// （新条目不动）。句柄被纯摘除（close/断连，无重开）保持既有"done 带
+/// unknown handle 错误"语义。
 pub(crate) async fn stream_file_blocks<F>(
     file_handles: &FileHandleManager,
     handle_id: &str,
+    generation: u64,
     offset: u64,
     len: Option<u64>,
     block_size: usize,
     mut emit_chunk: F,
-) -> (u64, Option<String>)
+) -> (u64, Option<String>, bool)
 where
     F: AsyncFnMut(u64, Vec<u8>, bool) -> bool,
 {
@@ -449,13 +535,31 @@ where
             break;
         }
 
-        match read_stream_block(file_handles, handle_id, current_offset, read_len).await {
+        match read_stream_block_for_generation(
+            file_handles,
+            handle_id,
+            generation,
+            current_offset,
+            read_len,
+        )
+        .await
+        {
             Ok(block) => {
                 let bytes_len = block.bytes.len() as u64;
                 let eof = block.eof || remaining.is_some_and(|r| r <= bytes_len);
                 total_bytes = total_bytes.saturating_add(bytes_len);
                 current_offset = current_offset.saturating_add(bytes_len);
 
+                // 读取期间被同名重开取代：本块不再发射——本代流的迟到 chunk
+                // 不得串入新流路由（路由在客户端按 handle_id 键控；判定与发射
+                // 之间的残余窗口已压到纳秒级，无法再小）。
+                // 注意仅"条目还在但非本代"才算取代；纯摘除（close/断连）不算——
+                // 后续读块会以 NotFound 收尾，保持 done 带 error 的既有语义。
+                if let Some(current) = file_handles.handle_generation(handle_id)
+                    && current != generation
+                {
+                    return (total_bytes, None, true);
+                }
                 if !emit_chunk(seq, block.bytes, eof).await {
                     break;
                 }
@@ -464,6 +568,16 @@ where
                     break;
                 }
             }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                // NotFound = 条目摘除或代际不符（定位读对有效 fd 不产生
+                // NotFound）：条目还在即被同名重开取代——静默收尾；
+                // 条目没了即 close/断连中断——done 带 error（既有语义）。
+                if file_handles.handle_generation(handle_id).is_some() {
+                    return (total_bytes, None, true);
+                }
+                error = Some(err.to_string());
+                break;
+            }
             Err(err) => {
                 error = Some(err.to_string());
                 break;
@@ -471,7 +585,7 @@ where
         }
     }
 
-    (total_bytes, error)
+    (total_bytes, error, false)
 }
 
 /// fs/writeStream 的写任务（nova 自有通道，与读任务 `stream_file_blocks`
@@ -489,6 +603,7 @@ where
 async fn run_write_stream_task(
     manager: FileHandleManager,
     handle_id: String,
+    generation: u64,
     file: Arc<File>,
     mut rx: tokio::sync::mpsc::Receiver<WriteStreamInput>,
     backpressure: WriteStreamBackpressureLatch,
@@ -560,15 +675,18 @@ async fn run_write_stream_task(
                 };
                 // 先摘句柄再交账：客户端拿到 done 响应时同名 handle_id 已可复用
                 //（交账先于摘除会在 done 与任务收尾之间留出复用被误拒的窗口）。
-                manager.close(&handle_id);
+                // 代际守卫：Done 在 channel 里排队期间条目被 close→同名重开时，
+                // 此处只摘自己那代，不动新条目。
+                manager.close_if_generation(&handle_id, generation);
                 let _ = respond.send(result);
                 break;
             }
         }
     }
     // 无 Done 的收尾路径（close/断连摘条目 → channel 对端全掉 → recv=None）；
-    // Done 臂已摘除时此处为幂等空操作。
-    manager.close(&handle_id);
+    // Done 臂已摘除时此处为幂等空操作。代际守卫：close→同名重开后旧任务的
+    // 收尾不会误摘新句柄。
+    manager.close_if_generation(&handle_id, generation);
 }
 
 fn read_block_at(file: &File, offset: u64, len: usize) -> io::Result<FileReadBlock> {

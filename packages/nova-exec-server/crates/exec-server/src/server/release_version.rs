@@ -1,6 +1,6 @@
 //! 在执行端元数据中带上启动时解析的包发布版本（对位 codex
-//! `server/release_version.rs`；provider_id 需要 build-stamp 基建，nova 未引入，
-//! 保持线上缺省 None）。
+//! `server/release_version.rs`；provider_id 由同模块 `build_identity.rs`
+//! 在本函数结果上叠加，见该文件）。
 
 use crate::protocol::EnvironmentInfo;
 

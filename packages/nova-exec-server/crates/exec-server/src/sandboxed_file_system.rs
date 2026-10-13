@@ -449,7 +449,7 @@ fn require_platform_sandbox(
         })
 }
 
-pub(crate) fn map_sandbox_error(error: JSONRPCErrorError) -> io::Error {
+fn map_sandbox_error(error: JSONRPCErrorError) -> io::Error {
     match error.code {
         -32004 => io::Error::new(io::ErrorKind::NotFound, error.message),
         -32600 => io::Error::new(io::ErrorKind::InvalidInput, error.message),

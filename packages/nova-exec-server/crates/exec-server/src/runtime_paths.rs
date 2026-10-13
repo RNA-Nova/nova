@@ -15,6 +15,9 @@ pub struct ExecServerRuntimePaths {
     /// Trusted startup policy; requests and repository config cannot change PID isolation.
     /// （对位 codex 39f4277087 `ExecServerRuntimeOptions::linux_sandbox_pid_namespace`）
     pub linux_sandbox_pid_namespace: LinuxSandboxPidNamespace,
+    /// Trusted startup routing; request policy still controls destination access.
+    /// （对位 codex 39f4277087 `ExecServerRuntimeOptions::proxy_private_ips_via_upstream`）
+    pub proxy_private_ips_via_upstream: bool,
     /// User-config opt-out of writable-root symlink checks beneath this host's home.
     /// （配置源未接入 nova，当前恒为 None，见移植报告挂账项）
     #[cfg(target_os = "macos")]
@@ -41,6 +44,7 @@ impl ExecServerRuntimePaths {
     ) -> std::io::Result<Self> {
         Ok(Self {
             linux_sandbox_pid_namespace: LinuxSandboxPidNamespace::default(),
+            proxy_private_ips_via_upstream: false,
             executor_self_exe: absolute_path(executor_self_exe)?,
             executor_linux_sandbox_exe: executor_linux_sandbox_exe
                 .map(absolute_path)
@@ -54,6 +58,13 @@ impl ExecServerRuntimePaths {
     /// （对位 codex 39f4277087）
     pub fn with_linux_sandbox_pid_namespace(mut self, mode: LinuxSandboxPidNamespace) -> Self {
         self.linux_sandbox_pid_namespace = mode;
+        self
+    }
+
+    /// Routes permitted private IPs through the executor's configured upstream proxy.
+    /// （对位 codex 39f4277087 `with_proxy_private_ips_via_upstream`）
+    pub fn with_proxy_private_ips_via_upstream(mut self, enabled: bool) -> Self {
+        self.proxy_private_ips_via_upstream = enabled;
         self
     }
 

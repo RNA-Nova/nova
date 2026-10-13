@@ -6,8 +6,8 @@
 //!
 //! codex 侧经 `#[path]` 挂在 landlock.rs 下的子套件，nova 侧并入本 target
 //!（`tests/landlock_suite/` 子目录模块）：denied_files_tests、nested_metadata_tests、
-//! daemon_sockets_tests（对位 codex 39f4277087）；wslg_tests 为裁点（WSLG 主体
-//! 未移植）；root_metadata_tests 已内联在本文件尾部。
+//! daemon_sockets_tests、wslg_tests（对位 codex 39f4277087）；root_metadata_tests
+//! 已内联在本文件尾部。
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used)]
@@ -39,6 +39,8 @@ mod daemon_sockets_tests;
 mod denied_files_tests;
 #[path = "landlock_suite/nested_metadata_tests.rs"]
 mod nested_metadata_tests;
+#[path = "landlock_suite/wslg_tests.rs"]
+mod wslg_tests;
 
 // 超时与 codex 同款值（上游曾给 arm64 更长，后已归一）
 const SHORT_TIMEOUT_MS: u64 = 5_000;

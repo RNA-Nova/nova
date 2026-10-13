@@ -54,7 +54,7 @@ fn environment_config_read_params_use_stable_json_shape() {
 fn environment_config_read_response_uses_stable_json_shape() {
     let (repo, home) = fixture_roots();
     let user_home_uri = PathUri::from_host_native_path(&home).expect("home URI");
-    let executor_home = home.join(".nova").join("executor");
+    let executor_home = home.join(".nova").join("exec-server");
     let project_settings = repo.join(".nova").join("settings.json");
     let response = EnvironmentConfigReadResponse {
         user_home_dir: Some(user_home_uri.clone()),

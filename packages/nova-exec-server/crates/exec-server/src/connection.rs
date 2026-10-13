@@ -63,11 +63,15 @@ impl JsonRpcConnectionEvent {
         };
 
         let queued_at = Instant::now();
+        // 从接收时刻记录各阶段偏移，因为分离的任务可能让 span 保持打开。
+        // （对位 codex 39f4277087：恢复 dispatch/response_enqueue 偏移字段）
         let request_span = tracing::info_span!(
             "nova.exec_server.request",
             otel.kind = "server",
             otel.name = "unknown",
             method = request.method.as_str(),
+            rpc.dispatch_offset_ns = tracing::field::Empty,
+            rpc.response_enqueue_offset_ns = tracing::field::Empty,
             result = tracing::field::Empty,
         );
         if let Some(trace) = &request.trace

@@ -218,6 +218,9 @@ impl NetworkProxyBuilder {
             .set_blocked_request_observer(self.blocked_request_observer.clone())
             .await;
         let current_cfg = state.current_cfg().await?;
+        // 对位 codex 39f4277087 proxy.rs `build`：监听器地址与运行时设置都以
+        // local-binding 归一后的配置为准。
+        let current_cfg = state.local_binding_policy.resolved_config(&current_cfg);
         let (requested_http_addr, requested_socks_addr, reserved_listeners) =
             if self.managed_by_nova {
                 let runtime = config::resolve_runtime(&current_cfg)?;
@@ -1227,6 +1230,27 @@ mod tests {
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
 
+    // 对位锚点 network_policy.rs 测试的 StaticReloader：配置静态不可重载，
+    // 供需要绕过 network_proxy_state_for_policy 强制 enabled 的用例使用。
+    #[derive(Clone)]
+    struct StaticReloader {
+        state: ConfigState,
+    }
+
+    impl crate::runtime::ConfigReloader for StaticReloader {
+        fn maybe_reload(&self) -> crate::runtime::ConfigReloaderFuture<'_, Option<ConfigState>> {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn reload_now(&self) -> crate::runtime::ConfigReloaderFuture<'_, ConfigState> {
+            Box::pin(async { Ok(self.state.clone()) })
+        }
+
+        fn source_label(&self) -> String {
+            "static test reloader".to_string()
+        }
+    }
+
     fn https_request(host: &str) -> crate::NetworkPolicyRequest {
         crate::NetworkPolicyRequest::new(crate::NetworkPolicyRequestArgs {
             protocol: crate::NetworkProtocol::HttpsConnect,
@@ -1639,14 +1663,27 @@ mod tests {
 
     #[tokio::test]
     async fn remote_launch_config_carries_execution_scope() -> Result<()> {
-        // 改写自 codex 同名测试：裁掉 credential broker 的 broker-only 判定，
-        // 保留执行归因（environment/execution id 与 attribution token 注入）。
+        // 对位 codex 39f4277087 同名测试。nova 适配：credential broker 面未移植，
+        // 锚点经 broker-only 归一得到的 disabled 基座（`enabled &= !broker_only`）
+        // 无法经由 network_proxy_state_for_policy（测试 helper 强制 enabled=true，
+        // 语义与 codex 一致）复现，改用不强制 enabled 的 build_config_state + 静态
+        // reloader 直抵同一生效态；`!launch.proxy.enabled` 与下方 owner_scoped 的
+        // ensure 路径据此保持锚点原值。
         let config = NetworkProxyConfig {
-            enabled: true,
+            enabled: false,
             mode: NetworkMode::Proxy,
             ..NetworkProxyConfig::default()
         };
-        let state = Arc::new(network_proxy_state_for_policy(config));
+        let config_state = crate::state::build_config_state(
+            config,
+            crate::state::NetworkProxyConstraints::default(),
+        )?;
+        let state = Arc::new(NetworkProxyState::with_reloader(
+            config_state.clone(),
+            Arc::new(StaticReloader {
+                state: config_state,
+            }),
+        ));
         let proxy = match NetworkProxy::builder().state(state).build().await {
             Ok(proxy) => proxy,
             Err(err) => {
@@ -1680,7 +1717,30 @@ mod tests {
 
         assert_eq!(launch.environment_id.as_deref(), Some("remote-env"));
         assert_eq!(launch.execution_id.as_deref(), Some("execution-1"));
-        assert!(launch.proxy.enabled);
+        assert!(!launch.proxy.enabled);
+
+        // 对位 codex 39f4277087 同名用例段：attachment 的 environment policy 未
+        // 启用 executor proxy 时，remote_launch_config 必须命中
+        // "environment network policy requires an enabled executor proxy" ensure。
+        let mut owner_config = NetworkProxyConfig::default();
+        owner_config.set_allowed_domains(vec!["owner.example".to_string()]);
+        let owner_scoped = proxy.for_execution(
+            "remote-env",
+            "execution-2",
+            "token-2".to_string(),
+            Some(crate::EnvironmentNetworkPolicy::from_config(
+                &owner_config,
+                /*managed_allowed_domains_only*/ false,
+            )),
+            /*fallback_policy_decider*/ None,
+        )?;
+        assert!(
+            owner_scoped
+                .remote_launch_config(crate::LocalBindingPolicy::DefaultFalse)
+                .await
+                .is_err()
+        );
+
         assert_eq!(
             prepared
                 .env

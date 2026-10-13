@@ -32,7 +32,7 @@ async fn stalled_open_does_not_block_other_handles() -> Result<()> {
     let Poll::Ready(result) = futures::poll!(other.as_mut()) else {
         anyhow::bail!("an unrelated open was blocked by the stalled open");
     };
-    assert_eq!(result?, "other");
+    assert_eq!(result?.0, "other");
     manager.read_block("other", /*offset*/ 0, /*len*/ 1).await?;
     Ok(())
 }
@@ -132,7 +132,7 @@ async fn concurrent_opens_reject_duplicate_ids_without_replacing_the_file() -> R
     winning_file.write_all(b"first")?;
     send.send(File::from_std(winning_file))
         .map_err(|_| anyhow::anyhow!("the pending open dropped its receiver"))?;
-    assert_eq!(winner.await?, "shared");
+    assert_eq!(winner.await?.0, "shared");
     assert_eq!(
         manager
             .read_block("shared", /*offset*/ 0, /*len*/ 6)
@@ -161,6 +161,8 @@ async fn write_stream_task_exits_when_the_channel_drops() -> Result<()> {
     let task = tokio::spawn(super::run_write_stream_task(
         manager.clone(),
         "w-drop".to_string(),
+        /*generation*/
+        0, // 本用例不经 open_entry 注册条目，代际值不参与断言
         file,
         rx,
         Default::default(), // 背压 latch：本用例不触发
@@ -226,7 +228,7 @@ async fn duplicate_in_flight_open_is_rejected_before_polling_open_file() -> Resu
     // 胜者放行后正常落表，全程只开了一次文件
     send.send(File::from_std(tempfile::tempfile()?))
         .map_err(|_| anyhow::anyhow!("the pending open dropped its receiver"))?;
-    assert_eq!(winner.await?, "shared");
+    assert_eq!(winner.await?.0, "shared");
     assert_eq!(winner_opens.load(Ordering::SeqCst), 1);
     Ok(())
 }
@@ -261,7 +263,9 @@ async fn duplicate_in_flight_write_stream_open_is_rejected_before_polling_open_f
         None,
     ));
     let Poll::Ready(Err(error)) = futures::poll!(loser.as_mut()) else {
-        anyhow::bail!("the duplicate write stream open must be rejected before polling its file open");
+        anyhow::bail!(
+            "the duplicate write stream open must be rejected before polling its file open"
+        );
     };
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     assert!(!loser_polled.load(Ordering::SeqCst));
@@ -269,7 +273,7 @@ async fn duplicate_in_flight_write_stream_open_is_rejected_before_polling_open_f
     // 胜者放行后正常落表
     send.send(File::from_std(tempfile::tempfile()?))
         .map_err(|_| anyhow::anyhow!("the pending open dropped its receiver"))?;
-    assert_eq!(winner.await?, "shared");
+    assert_eq!(winner.await?.0, "shared");
     Ok(())
 }
 
@@ -287,11 +291,12 @@ async fn failed_open_releases_the_in_flight_reservation() -> Result<()> {
     assert_eq!(error.kind(), io::ErrorKind::Other);
 
     // 预约已随失败释放：同名重试正常开门落表
-    manager.open(
-        "retry".to_string(),
-        ready(Ok(File::from_std(tempfile::tempfile()?))),
-    )
-    .await?;
+    manager
+        .open(
+            "retry".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
     Ok(())
 }
 
@@ -304,11 +309,12 @@ async fn cancelled_open_releases_the_in_flight_reservation() -> Result<()> {
     drop(cancelled);
 
     // 预约已随取消释放：同名重试正常开门落表
-    manager.open(
-        "retry".to_string(),
-        ready(Ok(File::from_std(tempfile::tempfile()?))),
-    )
-    .await?;
+    manager
+        .open(
+            "retry".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
     Ok(())
 }
 
@@ -403,14 +409,15 @@ async fn read_stream_oversized_block_is_split_into_wire_sized_reads(
         .collect();
     let mut file = tempfile::tempfile()?;
     file.write_all(&data)?;
-    manager
+    let (_id, generation) = manager
         .open("big-read".to_string(), ready(Ok(File::from_std(file))))
         .await?;
 
     let mut emitted: Vec<(u64, Vec<u8>, bool)> = Vec::new();
-    let (total_bytes, error) = super::stream_file_blocks(
+    let (total_bytes, error, superseded) = super::stream_file_blocks(
         &manager,
         "big-read",
+        generation,
         /*offset*/ 0,
         /*len*/ None,
         block_size,
@@ -422,6 +429,7 @@ async fn read_stream_oversized_block_is_split_into_wire_sized_reads(
     .await;
 
     assert_eq!(error, None);
+    assert!(!superseded);
     assert_eq!(total_bytes, data.len() as u64);
     for (index, (seq, _, _)) in emitted.iter().enumerate() {
         assert_eq!(*seq, index as u64);
@@ -463,5 +471,179 @@ async fn write_stream_done_frees_the_handle_id_before_responding() -> Result<()>
             /*offset*/ None,
         )
         .await?;
+    Ok(())
+}
+
+/// 代际守卫摘除：只摘匹配代际的条目——close→同名重开后旧任务的收尾
+/// close_if_generation 不会误摘新句柄（S 级竞态回归：写流尾 close 摘除新条目）。
+#[tokio::test]
+async fn close_if_generation_only_removes_the_matching_generation() -> Result<()> {
+    let manager = FileHandleManager::default();
+    let (_id, first_generation) = manager
+        .open(
+            "gen".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
+    // 非本代：不动
+    manager.close_if_generation("gen", first_generation + 1);
+    assert_eq!(
+        manager.handle_generation("gen"),
+        Some(first_generation),
+        "foreign generation must not remove the entry"
+    );
+    // 本代：摘除
+    manager.close_if_generation("gen", first_generation);
+    assert_eq!(manager.handle_generation("gen"), None);
+
+    // 同名重开换代际；旧代际的收尾摘除不动新条目
+    let (_id, second_generation) = manager
+        .open(
+            "gen".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
+    assert_ne!(first_generation, second_generation);
+    manager.close_if_generation("gen", first_generation);
+    assert_eq!(
+        manager.handle_generation("gen"),
+        Some(second_generation),
+        "stale generation must not remove the reopened entry"
+    );
+    Ok(())
+}
+
+/// close→同名重开后，旧写任务的收尾 close 不得摘除新句柄（S 级竞态回归）。
+#[tokio::test]
+async fn write_stream_task_close_after_reopen_keeps_the_new_entry() -> Result<()> {
+    let manager = FileHandleManager::default();
+    manager
+        .open_write_stream(
+            "w-race".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+            /*offset*/ None,
+        )
+        .await?;
+    // 客户端 close 摘旧条目（写任务 channel 对端掉落，旧任务将被唤醒收尾），
+    // 随即同名重开普通句柄——无代际防护时旧任务的尾 close 会摘掉这个新条目。
+    manager.close("w-race");
+    manager
+        .open(
+            "w-race".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
+    // 让旧写任务充分调度（recv=None 即刻就绪，50ms 裕量足够其收尾执行）
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        manager.open_handle_count(),
+        1,
+        "the reopened entry must survive the stale writer task's teardown"
+    );
+    manager
+        .read_block("w-race", /*offset*/ 0, /*len*/ 1)
+        .await?;
+    Ok(())
+}
+
+/// close→同名重开后，旧读流任务静默收尾：不串读新文件、不再发射、不摘新句柄
+/// （S 级竞态回归：跨文件串流 + 误摘新句柄）。
+#[tokio::test]
+async fn read_stream_superseded_stops_quietly_without_touching_the_new_entry() -> Result<()> {
+    let manager = FileHandleManager::default();
+    let mut old_file = tempfile::tempfile()?;
+    old_file.write_all(&vec![b'a'; 256 * 1024])?;
+    old_file.flush()?;
+    let (_id, generation) = manager
+        .open(
+            "r-race".to_string(),
+            ready(Ok(File::from_std(old_file.try_clone()?))),
+        )
+        .await?;
+
+    // 首块发射期间完成 close→同名重开（emit 闭包内驱动，时序确定性）
+    let driver = manager.clone();
+    let mut reopened = false;
+    let (total_bytes, error, superseded) = super::stream_file_blocks(
+        &manager,
+        "r-race",
+        generation,
+        /*offset*/ 0,
+        /*len*/ None,
+        /*block_size*/ 64 * 1024,
+        async move |_seq, _bytes, _eof| {
+            if !reopened {
+                reopened = true;
+                driver.close("r-race");
+                let mut new_file = tempfile::tempfile().expect("new file");
+                new_file.write_all(b"b").expect("write new file");
+                new_file.flush().expect("flush new file");
+                driver
+                    .open(
+                        "r-race".to_string(),
+                        ready(Ok(File::from_std(new_file.try_clone().expect("clone")))),
+                    )
+                    .await
+                    .expect("reopen under the same id");
+            }
+            true
+        },
+    )
+    .await;
+
+    assert!(
+        superseded,
+        "the stale stream must detect the id reuse and stop quietly"
+    );
+    assert_eq!(error, None);
+    assert_eq!(total_bytes, (64 * 1024) as u64);
+    // 新条目未被旧任务误摘，且读到的是新文件内容（无跨文件串流）
+    let block = manager
+        .read_block("r-race", /*offset*/ 0, /*len*/ 1)
+        .await?;
+    assert_eq!(block.bytes, b"b");
+    Ok(())
+}
+
+/// 纯摘除（close 无重开）保持既有语义：流以 unknown handle 错误收尾、
+/// superseded = false（close_interrupts_stream 的 done 带 error 语义不落）。
+#[tokio::test]
+async fn read_stream_plain_close_still_finishes_with_unknown_handle_error() -> Result<()> {
+    let manager = FileHandleManager::default();
+    let mut old_file = tempfile::tempfile()?;
+    old_file.write_all(&vec![b'c'; 256 * 1024])?;
+    old_file.flush()?;
+    let (_id, generation) = manager
+        .open(
+            "r-close".to_string(),
+            ready(Ok(File::from_std(old_file.try_clone()?))),
+        )
+        .await?;
+
+    let driver = manager.clone();
+    let mut closed = false;
+    let (_total_bytes, error, superseded) = super::stream_file_blocks(
+        &manager,
+        "r-close",
+        generation,
+        /*offset*/ 0,
+        /*len*/ None,
+        /*block_size*/ 64 * 1024,
+        async move |_seq, _bytes, _eof| {
+            if !closed {
+                closed = true;
+                driver.close("r-close");
+            }
+            true
+        },
+    )
+    .await;
+
+    assert!(!superseded);
+    let error = error.expect("plain close must surface an error");
+    assert!(
+        error.contains("unknown file handle"),
+        "unexpected error: {error}"
+    );
     Ok(())
 }

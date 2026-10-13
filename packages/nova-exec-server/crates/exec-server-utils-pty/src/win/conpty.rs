@@ -185,7 +185,9 @@ impl MasterPty for ConPtyMasterPty {
 
 impl SlavePty for ConPtySlavePty {
     fn spawn_command(&self, cmd: CommandBuilder) -> anyhow::Result<Box<dyn Child + Send + Sync>> {
-        // 对位 codex origin/main（spawn 管线批）：spawn_command 改 &mut self（释放创建期句柄）
+        // 对位 codex origin/main（spawn 管线批）：改 &mut self 的是内部
+        // `ConPty::spawn_command`（psuedocon.rs:171，释放创建期句柄）；本 trait
+        // 实现维持 &self，经 Mutex 内部可变性调用。
         let mut inner = self.inner.lock().unwrap();
         let child = inner.con.spawn_command(cmd)?;
         Ok(Box::new(child))

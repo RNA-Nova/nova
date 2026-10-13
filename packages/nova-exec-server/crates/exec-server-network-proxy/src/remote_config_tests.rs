@@ -12,6 +12,46 @@ use crate::NetworkProxyState;
 use crate::RemoteNetworkProxyConfig;
 use crate::RemoteNetworkProxyLaunchConfig;
 
+/// 对位 codex 39f4277087 `remote_config_tests.rs`
+/// `optional_socket_policy_preserves_input_and_resolves_at_remote_boundary`：
+/// 钉住 `set_allow_unix_sockets(Vec::new())` 的三态语义——Some(空清单) 必须
+/// 原样序列化/往返（`None` = 未设上限，空清单 = 限制性上限），并在远程边界
+/// 归一。键名按 nova 线上形状适配：camelCase（`unixSockets` /
+/// `dangerouslyAllowAllUnixSockets`），空 Vec entries 序列化为 `{"entries":[]}`。
+#[test]
+fn optional_socket_policy_preserves_input_and_resolves_at_remote_boundary() {
+    for allow_all in [None, Some(false), Some(true)] {
+        let mut config = NetworkProxyConfig {
+            dangerously_allow_all_unix_sockets: allow_all,
+            ..NetworkProxyConfig::default()
+        };
+        config.set_allow_unix_sockets(Vec::new());
+        let serialized = serde_json::to_value(&config).expect("serialize config");
+        assert_eq!(
+            serialized.get("dangerouslyAllowAllUnixSockets"),
+            allow_all.map(serde_json::Value::Bool).as_ref()
+        );
+        assert_eq!(
+            serialized["unixSockets"],
+            serde_json::json!({"entries": []})
+        );
+        assert_eq!(
+            serde_json::from_value::<NetworkProxyConfig>(serialized).expect("deserialize config"),
+            config
+        );
+
+        let remote = RemoteNetworkProxyConfig::from_effective_config(&config)
+            .expect("supported remote config");
+        assert_eq!(
+            remote.dangerously_allow_all_unix_sockets,
+            allow_all.unwrap_or(false)
+        );
+        config.dangerously_allow_all_unix_sockets = Some(allow_all.unwrap_or(false));
+        config.allow_local_binding = Some(false);
+        assert_eq!(remote.into_network_proxy_config(), config);
+    }
+}
+
 #[test]
 fn round_trip_preserves_supported_effective_settings() {
     let mut config = NetworkProxyConfig {

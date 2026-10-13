@@ -210,7 +210,9 @@ impl NetworkProxyConfig {
                     permission,
                 });
         }
-        self.unix_sockets = (!unix_sockets.entries.is_empty()).then_some(unix_sockets);
+        // 对位 codex 39f4277087：恒 Some——Some(空清单)=显式空清单（限制性上限），
+        // None=未设上限；此前塌缩成 then_some 会把三态语义翻转成 fail-open。
+        self.unix_sockets = Some(unix_sockets);
     }
 }
 
@@ -862,7 +864,7 @@ mod tests {
         // 对位锚点 config.rs `resolve_runtime_validates_allow_unix_sockets_for_executor_os`
         // 的 NUL 用例：锚点带 executor_os 维度，nova 无该维度、校验即本机语义
         // （等价于锚点矩阵的 Platform::native() 行），两个 NUL 用例一律必拒。
-        for path in ["/tmp/\0example.sock", r"C:\example .sock"] {
+        for path in ["/tmp/\0example.sock", "C:\\example\0.sock"] {
             let cfg = settings_with_unix_sockets(&[path]);
             assert!(
                 resolve_runtime(&cfg).is_err(),

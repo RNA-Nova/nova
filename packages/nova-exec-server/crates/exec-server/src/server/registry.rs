@@ -3,6 +3,7 @@ use std::sync::Arc;
 use nova_exec_server_file_system::FileSystemSandboxContext;
 use nova_exec_server_file_system::WireFileSystemSandboxContext;
 use nova_exec_server_utils_path_uri::PathUri;
+use opentelemetry::trace::TraceContextExt;
 
 use crate::local_file_system::resolve_existing_path;
 use crate::protocol::ENVIRONMENT_CONFIG_READ_METHOD;
@@ -86,10 +87,16 @@ pub(crate) fn build_router() -> RpcRouter<ExecServerHandler> {
     );
     // 对位 codex 841b5490b2：process/start 走 WireExecParams 入口解析
     // （legacy 客户端省略沙箱策略 cwd 时回退为进程 cwd）。
-    router.request(
+    // 对位 codex 39f4277087：request_with_trace 从请求载体解析 W3C
+    // traceparent 为 launch_context，随 exec 传入进程遥测。
+    router.request_with_trace(
         EXEC_METHOD,
-        |handler: Arc<ExecServerHandler>, params: WireExecParams| async move {
-            handler.exec(params.into()).await
+        |handler: Arc<ExecServerHandler>, params: WireExecParams, trace| async move {
+            let launch_context = trace
+                .as_ref()
+                .and_then(nova_exec_server_otel::context_from_w3c_trace_context)
+                .map(|context| context.span().span_context().clone());
+            handler.exec(params.into(), launch_context).await
         },
     );
     router.request(

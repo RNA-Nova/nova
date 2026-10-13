@@ -378,6 +378,10 @@ pub struct BlockedRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<NetworkMode>,
     pub protocol: String,
+    /// 执行 ID（仅进程内盖章，不随线上序列化；对位 codex 39f4277087 runtime.rs
+    /// `BlockedRequest.execution_id`，由 `record_blocked` 统一盖章）。
+    #[serde(skip)]
+    pub execution_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decision: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -385,15 +389,6 @@ pub struct BlockedRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     pub timestamp: i64,
-}
-
-/// Windows sandbox 代理设置模式（跨平台占位类型）
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum WindowsSandboxProxySettingsMode {
-    #[default]
-    Reconcile,
-    Preserve,
 }
 
 // ---------------------------------------------------------------------------

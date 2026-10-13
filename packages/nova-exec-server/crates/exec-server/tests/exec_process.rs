@@ -112,6 +112,10 @@ async fn create_process_context(use_remote: bool) -> Result<ProcessContext> {
     }
 }
 
+// 对位 codex 39f4277087 tests/exec_process.rs:182-375 同名用例：200KB 大 profile
+// padding、bash-sh 变体、bash 专属回放（extglob/eval 重定义）、set -u 保留、内建
+// 影子 exit 41、profile PATH 挟持（wc 包装器）、3×60KB 大 env 值 + 1000 小条目、
+// posix ENV 快照路径形态全量恢复。
 #[cfg(unix)]
 #[test_case(false, false, false, false, "bash"; "local_pipe")]
 #[test_case(false, true, false, false, "bash"; "local_tty")]
@@ -119,6 +123,7 @@ async fn create_process_context(use_remote: bool) -> Result<ProcessContext> {
 #[test_case(true, true, false, false, "bash"; "remote_tty")]
 #[test_case(true, false, true, false, "bash"; "remote_sandbox")]
 #[test_case(false, false, false, false, "sh"; "local_sh_pipe")]
+#[test_case(false, false, false, false, "bash-sh"; "local_bash_backed_sh")]
 #[test_case(false, false, false, true, "bash"; "local_bash_env")]
 #[test_case(true, false, false, true, "bash"; "remote_bash_env")]
 #[cfg_attr(
@@ -160,6 +165,7 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
         "bash" if automatic_startup => ("/bin/bash", ".bash-env"),
         "bash" => ("/bin/bash", ".bashrc"),
         "sh" => ("/bin/sh", ".snapshot-env"),
+        "bash-sh" => ("/bin/bash", ".snapshot-env"),
         "zsh" if automatic_startup => ("/bin/zsh", ".zshenv"),
         "zsh" => ("/bin/zsh", ".zshrc"),
         name => anyhow::bail!("unsupported test shell {name}"),
@@ -167,23 +173,30 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
     let profile_path = home.path().join(profile_name);
     let profile_path_entry = home.path().join("profile-bin");
     let runtime_path_entry = home.path().join("runtime-bin");
+    std::fs::create_dir(&profile_path_entry)?;
+    let wc = profile_path_entry.join("wc");
+    nova_exec_server_utils_cargo_bin::write_executable(
+        &wc,
+        "#!/bin/sh\nprintf x >> \"$HOME/tool-captures\"\nexec /usr/bin/wc \"$@\"\n",
+    )?;
+    let posix_shell = matches!(shell_name, "sh" | "bash-sh");
     let padding = if !use_remote && !tty && shell_name == "bash" {
         format!(
             "snapshot_padding() {{ printf '%s' '{}'; }}\n",
-            "🦀".repeat(20_000)
+            "🦀".repeat(200_000)
         )
     } else {
         String::new()
     };
-    let shadowed_builtins = if shell_name == "sh" {
+    let shadowed_builtins = if posix_shell {
         ""
     } else {
-        "unset() { exit 41; }\nbuiltin() { :; }\n"
+        "unset() { exit 41; }\nbuiltin() { exit 41; }\nexec() { exit 41; }\n"
     };
     std::fs::write(
         &profile_path,
         format!(
-            "printf x >> \"$HOME/captures\"\nexport PATH=\"$HOME/profile-bin:/usr/bin:/bin\"\nexport PROFILE_ALLOWED=profile\nexport PROFILE_SECRET=secret\nexport PROFILE_DENIED=denied\nprofile_helper() {{ printf helper; }}\n{shadowed_builtins}{padding}"
+            "printf x >> \"$HOME/captures\"\nexport PATH=\"$HOME/profile-bin:/usr/bin:/bin\"\nexport PROFILE_ALLOWED=profile\nexport PROFILE_SECRET=secret\nexport PROFILE_DENIED=denied\nprofile_helper() {{ printf helper; }}\nif [ -n \"${{BASH_VERSION-}}\" ]; then\n  shopt -s extglob nocasematch\n  eval 'profile_helper() {{ case $1 in @(foo|bar)*) printf helper ;; *) return 1 ;; esac; }}'\nfi\nset -u\n{shadowed_builtins}{padding}"
         ),
     )?;
     if shell_name == "zsh" && automatic_startup {
@@ -196,16 +209,27 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
         "HOME".to_string(),
         home.path().to_string_lossy().into_owned(),
     )]);
-    if shell_name == "sh" {
+    if posix_shell {
         configured_environment.insert(
             "ENV".to_string(),
-            profile_path.to_string_lossy().into_owned(),
+            "${XDG_CONFIG_HOME:-$HOME}/.snapshot-env".to_string(),
         );
+        // Keep coverage for large values alongside the many-small-entry case below.
+        for index in 0..3 {
+            configured_environment.insert(format!("PROFILE_SDK_{index}"), "x".repeat(60 * 1024));
+        }
     }
     if shell_name == "bash" && automatic_startup {
         configured_environment.insert(
             "BASH_ENV".to_string(),
             profile_path.to_string_lossy().into_owned(),
+        );
+    }
+    // Many small entries exercise capture overhead separately from the byte limit above.
+    let many_entries = !use_remote && !tty && !automatic_startup;
+    if many_entries {
+        configured_environment.extend(
+            (0..1_000).map(|index| (format!("PROFILE_ENTRY_{index}"), format!("value-{index}"))),
         );
     }
     let policy = ExecEnvPolicy {
@@ -224,10 +248,15 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
     let (command_prefix, expected_prefix) = if shell_name == "sh" {
         ("", "")
     } else {
-        ("profile_helper; ", "helper")
+        ("profile_helper FOObar; ", "helper")
+    };
+    let entry_check = if many_entries {
+        "[ \"${PROFILE_ENTRY_999-missing}\" = value-999 ] || exit 43; "
+    } else {
+        ""
     };
     let command = format!(
-        "export PATH='{}':\"$PATH\"; {command_prefix}printf '|%s|%s|%s|%s|%s|%s' \"$PROFILE_ALLOWED\" \"${{PROFILE_SECRET-missing}}\" \"${{PROFILE_DENIED-missing}}\" \"$PATH\" \"${{__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_0-missing}}\" \"${{__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_1-missing}}\"",
+        "case $- in *u*) ;; *) exit 42 ;; esac; {entry_check}export PATH='{}':\"$PATH\"; {command_prefix}printf '|%s|%s|%s|%s|%s|%s' \"$PROFILE_ALLOWED\" \"${{PROFILE_SECRET-missing}}\" \"${{PROFILE_DENIED-missing}}\" \"$PATH\" \"${{__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_0-missing}}\" \"${{__NOVA_EXEC_SERVER_SHELL_SNAPSHOT_STATE_1-missing}}\"",
         runtime_path_entry.display(),
     );
     let expected_stdout = format!(
@@ -248,14 +277,14 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
                 shell_snapshot: Some(ShellSnapshotRequest {
                     scope_id: "attachment-1".to_string(),
                     shell: ShellInfo {
-                        name: shell_name.to_string(),
+                        name: if posix_shell { "sh" } else { shell_name }.to_string(),
                         path: shell_path.to_string(),
                     },
                 }),
                 env: HashMap::new(),
                 tty,
                 pipe_stdin: false,
-                arg0: None,
+                arg0: (shell_name == "bash-sh").then(|| "sh".to_string()),
                 sandbox: (use_sandbox && attempt == 0).then(|| {
                     FileSystemSandboxContext::from_permission_profile(
                         PermissionProfile::read_only(),
@@ -276,8 +305,14 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
     }
 
     assert_eq!(std::fs::read_to_string(home.path().join("captures"))?, "x");
+    assert!(!std::fs::read(home.path().join("tool-captures"))?.is_empty());
     if let Some(server) = context._server {
-        assert!(!server.nova_exec_server_home().join("shell_snapshots").exists());
+        assert!(
+            !server
+                .nova_exec_server_home()
+                .join("shell_snapshots")
+                .exists()
+        );
     }
     Ok(())
 }
@@ -488,15 +523,33 @@ async fn shell_snapshot_v2_remote_managed_proxy_uses_prepared_execution_context(
     Ok(())
 }
 
+// 对位 codex 39f4277087 tests/exec_process.rs:577-583：捕获失败形态
+// （退出码 / 取消 / 超时）驱动回退与重试路径。
 #[cfg(unix)]
-#[test_case(false, false, "bash", 1; "local_pipe_recovery")]
-#[test_case(false, true, "bash", 1; "local_tty_recovery")]
-#[test_case(true, false, "bash", 1; "remote_pipe_recovery")]
-#[test_case(true, true, "bash", 1; "remote_tty_recovery")]
-#[test_case(false, false, "bash", 3; "local_retry_budget_exhausted")]
-#[test_case(true, false, "bash", 3; "remote_retry_budget_exhausted")]
-#[cfg_attr(target_os = "macos", test_case(false, false, "zsh", 1; "local_zsh_recovery"))]
-#[cfg_attr(target_os = "macos", test_case(true, false, "zsh", 1; "remote_zsh_recovery"))]
+#[derive(Clone, Copy)]
+enum CaptureFailure {
+    Exit(i32),
+    Cancel,
+    Timeout,
+}
+
+// 对位 codex 39f4277087 tests/exec_process.rs:585-756 同名用例：含
+// local_invalid_output_recovery / local_zsh_invalid_output_recovery /
+// cancel_capture / timeout_capture 变体与 StartupProcesses 清理、
+// “failed capture left its startup child running” ps 检查段。
+#[cfg(unix)]
+#[test_case(false, false, "bash", 1, CaptureFailure::Exit(7); "local_pipe_recovery")]
+#[test_case(false, true, "bash", 1, CaptureFailure::Exit(7); "local_tty_recovery")]
+#[test_case(true, false, "bash", 1, CaptureFailure::Exit(7); "remote_pipe_recovery")]
+#[test_case(true, true, "bash", 1, CaptureFailure::Exit(7); "remote_tty_recovery")]
+#[test_case(false, false, "bash", 3, CaptureFailure::Exit(7); "local_retry_budget_exhausted")]
+#[test_case(true, false, "bash", 3, CaptureFailure::Exit(7); "remote_retry_budget_exhausted")]
+#[test_case(false, false, "bash", 1, CaptureFailure::Exit(0); "local_invalid_output_recovery")]
+#[cfg_attr(target_os = "macos", test_case(false, false, "zsh", 1, CaptureFailure::Exit(0); "local_zsh_invalid_output_recovery"))]
+#[cfg_attr(target_os = "macos", test_case(false, false, "zsh", 1, CaptureFailure::Exit(7); "local_zsh_recovery"))]
+#[cfg_attr(target_os = "macos", test_case(true, false, "zsh", 1, CaptureFailure::Exit(7); "remote_zsh_recovery"))]
+#[test_case(false, false, "bash", 1, CaptureFailure::Cancel; "cancel_capture")]
+#[test_case(false, false, "bash", 1, CaptureFailure::Timeout; "timeout_capture")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(remote_exec_server)]
 async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
@@ -504,6 +557,7 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
     tty: bool,
     shell_name: &str,
     failures_before_repair: usize,
+    failure: CaptureFailure,
 ) -> Result<()> {
     if use_remote
         && let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
@@ -523,9 +577,21 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
         "zsh" => ("/bin/zsh", ".zshrc"),
         name => anyhow::bail!("unsupported test shell {name}"),
     };
+    let child_pids = home.path().join("startup-pids");
+    let _cleanup = shell_snapshot::StartupProcesses(child_pids.clone());
+    // Sandboxed remote PIDs may be namespace-local; check descendants on the native path.
+    let startup_child = if use_remote {
+        ""
+    } else {
+        "/bin/sleep 30 >/dev/null 2>&1 &\nprintf '%s\\n' \"$!\" >> \"$HOME/startup-pids\"\n"
+    };
+    let finish = match failure {
+        CaptureFailure::Exit(code) => format!("exit {code}"),
+        CaptureFailure::Cancel | CaptureFailure::Timeout => "wait".to_string(),
+    };
     std::fs::write(
         home.path().join(profile_name),
-        "printf x >> \"$HOME/captures\"\nexit 7\n",
+        format!("printf x >> \"$HOME/captures\"\n{startup_child}{finish}\n"),
     )?;
     let policy = ExecEnvPolicy {
         inherit: ShellEnvironmentPolicyInherit::All,
@@ -571,12 +637,47 @@ async fn shell_snapshot_v2_capture_failure_falls_back_and_retries(
 
     for attempt in 0..failures_before_repair {
         params.process_id = ProcessId::from(format!("snapshot-fallback-{attempt}"));
-        let fallback = context.backend.start(params.clone()).await?;
-        let fallback_output = collect_process_output_from_events(fallback.process).await?;
-        assert_eq!(
-            fallback_output,
-            ("original".to_string(), String::new(), Some(0), true)
-        );
+        let mut start = context.backend.start(params.clone());
+        if matches!(failure, CaptureFailure::Cancel) {
+            tokio::select! {
+                result = &mut start => anyhow::bail!("capture finished before cancellation: {}", result.is_ok()),
+                _ = async {
+                    while std::fs::read_to_string(&child_pids).unwrap_or_default().trim().is_empty() {
+                        sleep(Duration::from_millis(20)).await;
+                    }
+                } => {}
+            }
+            drop(start);
+        } else {
+            let fallback = start.await?;
+            assert_eq!(
+                collect_process_output_from_events(fallback.process).await?,
+                ("original".to_string(), String::new(), Some(0), true)
+            );
+        }
+        if !use_remote {
+            let pids = std::fs::read_to_string(&child_pids)?;
+            let pid = pids
+                .split_whitespace()
+                .last()
+                .context("startup child PID")?;
+            timeout(Duration::from_secs(5), async {
+                loop {
+                    let output = std::process::Command::new("/bin/ps")
+                        .args(["-o", "stat=", "-p", pid])
+                        .output()?;
+                    let state = String::from_utf8(output.stdout)?;
+                    if state.trim().is_empty() || state.trim().starts_with('Z') {
+                        // Forget the completed child before retries can reuse its PID.
+                        std::fs::remove_file(&child_pids)?;
+                        return Ok::<_, anyhow::Error>(());
+                    }
+                    sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .context("failed capture left its startup child running")??;
+        }
         // A real remote executor has its own clock; the unit test uses a
         // paused clock to check requests made during the one-second backoff.
         sleep(Duration::from_millis(1100)).await;
@@ -687,18 +788,55 @@ async fn remote_sandboxed_process_preserves_custom_arg0() -> Result<()> {
     Ok(())
 }
 
+// 对位 codex 39f4277087 tests/exec_process.rs:834-903：执行元数据注入端到端断言——
+// NOVA_EXEC_SERVER_THREAD_ID / NOVA_EXEC_SERVER_TOOL_CALL_ID 覆盖陈旧与混合大小写
+// caller env、CUSTOM_ENV_VAR 保留、stdout 三元组；含 cfg(windows) powershell 分支。
+// （nova 词表：thread_id 为普通 String，对位上游 ThreadId 新型别。）
 async fn assert_exec_process_starts_and_exits(use_remote: bool) -> Result<()> {
     let context = create_process_context(use_remote).await?;
+    let thread_id = "019d25f0-6728-7ce2-908f-c3c187323e5b";
+    let call_id = "call-λ-'\";$()";
+    #[cfg(unix)]
+    let argv = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        "printf '%s|%s|%s' \"$NOVA_EXEC_SERVER_THREAD_ID\" \"$NOVA_EXEC_SERVER_TOOL_CALL_ID\" \"$CUSTOM_ENV_VAR\""
+            .to_string(),
+    ];
+    #[cfg(windows)]
+    let argv = vec![
+        "powershell.exe".into(),
+        "-NoProfile".into(),
+        "-Command".into(),
+        "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::Write($env:NOVA_EXEC_SERVER_THREAD_ID + '|' + $env:NOVA_EXEC_SERVER_TOOL_CALL_ID + '|' + $env:CUSTOM_ENV_VAR)".into(),
+    ];
+    let mut env = std::env::vars().collect::<HashMap<_, _>>();
+    env.extend([
+        ("NOVA_EXEC_SERVER_THREAD_ID".into(), "stale-thread".into()),
+        (
+            "Nova_Exec_Server_Thread_Id".into(),
+            "mixed-case-thread".into(),
+        ),
+        ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "stale-call".into()),
+        (
+            "Nova_Exec_Server_Tool_Call_Id".into(),
+            "mixed-case-call".into(),
+        ),
+        ("CUSTOM_ENV_VAR".into(), "caller-owned".into()),
+    ]);
     let session = context
         .backend
         .start(ExecParams {
-            metadata: None,
+            metadata: Some(ExecMetadata {
+                thread_id: Some(thread_id.to_string()),
+                tool_call_id: Some(call_id.to_string()),
+            }),
             process_id: ProcessId::from("proc-1"),
-            argv: vec!["true".to_string()],
+            argv,
             cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             shell_snapshot: None,
             env_policy: /*env_policy*/ None,
-            env: Default::default(),
+            env,
             tty: false,
             pipe_stdin: false,
             arg0: None,
@@ -710,6 +848,17 @@ async fn assert_exec_process_starts_and_exits(use_remote: bool) -> Result<()> {
         .await?;
     assert_eq!(session.process.process_id().as_str(), "proc-1");
     let wake_rx = session.process.subscribe_wake();
+    let (stdout, stderr, status, closed) =
+        collect_process_output_from_events(Arc::clone(&session.process)).await?;
+    assert_eq!(
+        (stdout, stderr, status, closed),
+        (
+            format!("{thread_id}|{call_id}|caller-owned"),
+            String::new(),
+            Some(0),
+            true,
+        )
+    );
     let (_, exit_code, closed) =
         collect_process_output_from_reads(session.process, wake_rx).await?;
 
@@ -1345,7 +1494,15 @@ async fn assert_exec_process_write_then_read_without_tty(use_remote: bool) -> Re
     Ok(())
 }
 
-async fn assert_remote_windows_sandbox_process_write() -> Result<()> {
+// 对位 codex 39f4277087 tests/exec_process.rs:1523-1602：RestrictedToken/MXC 双后端
+// 写 stdin 行为；MXC 不可用宿主跳过，tty 走 \r 且回显 sandbox_type。
+async fn assert_remote_windows_sandbox_process_write(
+    expected_sandbox_type: nova_exec_server_sandboxing::SandboxType,
+    tty: bool,
+) -> Result<()> {
+    if expected_sandbox_type == nova_exec_server_sandboxing::SandboxType::WindowsMxc {
+        crate::skip_if_mxc_unavailable!(Ok(()));
+    }
     let context = create_process_context(/*use_remote*/ true).await?;
     let workspace = TempDir::new()?;
     let blocked_file = workspace.path().join("blocked.txt");
@@ -1354,7 +1511,19 @@ async fn assert_remote_windows_sandbox_process_write() -> Result<()> {
         SandboxPolicy::new_read_only_policy(),
         cwd.clone(),
     )?;
-    sandbox.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
+    match expected_sandbox_type {
+        nova_exec_server_sandboxing::SandboxType::WindowsRestrictedToken => {
+            sandbox.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
+        }
+        nova_exec_server_sandboxing::SandboxType::WindowsMxc => {
+            sandbox.windows_sandbox_selection = WindowsSandboxSelection::Mxc;
+        }
+        nova_exec_server_sandboxing::SandboxType::None
+        | nova_exec_server_sandboxing::SandboxType::MacosSeatbelt
+        | nova_exec_server_sandboxing::SandboxType::LinuxSeccomp => {
+            anyhow::bail!("expected a Windows sandbox type")
+        }
+    }
 
     let session = match context
         .backend
@@ -1376,8 +1545,8 @@ async fn assert_remote_windows_sandbox_process_write() -> Result<()> {
             shell_snapshot: None,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
-            tty: false,
-            pipe_stdin: true,
+            tty,
+            pipe_stdin: !tty,
             arg0: None,
             sandbox: Some(sandbox),
             enforce_managed_network: false,
@@ -1389,8 +1558,10 @@ async fn assert_remote_windows_sandbox_process_write() -> Result<()> {
         Ok(session) => session,
         Err(err) => return Err(err.into()),
     };
+    assert_eq!(session.sandbox_type, Some(expected_sandbox_type));
 
-    let write_response = session.process.write(b"hello\n".to_vec()).await?;
+    let input = if tty { b"hello\r" } else { b"hello\n" };
+    let write_response = session.process.write(input.to_vec()).await?;
     assert_eq!(write_response.status, WriteStatus::Accepted);
     let StartedExecProcess { process, .. } = session;
     let wake_rx = process.subscribe_wake();
@@ -1738,7 +1909,6 @@ async fn remote_exec_process_recovers_after_transport_disconnect() -> Result<()>
 
 #[test_case(false ; "local")]
 #[test_case(true ; "remote")]
-#[cfg_attr(not(unix), ignore = "Unix-only exec-server process test")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 // Serialize tests that launch a real exec-server process through the full CLI.
 #[serial_test::serial(remote_exec_server)]
@@ -1808,11 +1978,31 @@ async fn exec_process_write_then_read_without_tty(use_remote: bool) -> Result<()
     assert_exec_process_write_then_read_without_tty(use_remote).await
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+// 对位 codex 39f4277087 tests/exec_process.rs:2004-2027：restricted_token /
+// mxc_pipe / mxc_conpty 三变体。
+#[test_case(
+    nova_exec_server_sandboxing::SandboxType::WindowsRestrictedToken,
+    false;
+    "restricted_token"
+)]
+#[test_case(
+    nova_exec_server_sandboxing::SandboxType::WindowsMxc,
+    false;
+    "mxc_pipe"
+)]
+#[test_case(
+    nova_exec_server_sandboxing::SandboxType::WindowsMxc,
+    true;
+    "mxc_conpty"
+)]
 #[cfg_attr(not(windows), ignore = "Windows-only exec-server sandbox process test")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(remote_exec_server)]
-async fn remote_windows_sandbox_process_accepts_process_write() -> Result<()> {
-    assert_remote_windows_sandbox_process_write().await
+async fn remote_windows_sandbox_process_accepts_process_write(
+    expected_sandbox_type: nova_exec_server_sandboxing::SandboxType,
+    tty: bool,
+) -> Result<()> {
+    assert_remote_windows_sandbox_process_write(expected_sandbox_type, tty).await
 }
 
 #[test_case(false ; "local")]

@@ -15,6 +15,8 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use nova_exec_server_network_proxy::NetworkPolicyDecider;
 use nova_exec_server_network_proxy::NetworkProxyAuditMetadata;
+use nova_exec_server_network_proxy::NetworkRequestCancellation;
+use nova_exec_server_network_proxy::NetworkRequestCancellationReason;
 use nova_exec_server_protocol::JSONRPCNotification;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -234,6 +236,9 @@ pub(crate) struct SessionState {
 struct NetworkPolicyState {
     controller: ArcSwapOption<NetworkPolicyDecisionController>,
     cancelled: CancellationToken,
+    // 对位 codex 39f4277087：记录策略请求撤回的首个已知原因（决策 future
+    // 丢弃前发布；词汇在 exec-server-network-proxy `request_cancellation.rs`）
+    cancellation: NetworkRequestCancellation,
     audit: Option<NetworkPolicyAuditContext>,
 }
 
@@ -875,6 +880,13 @@ impl ExecServerClient {
         &self,
         process_id: &ProcessId,
     ) -> Result<TerminateResponse, ExecServerError> {
+        // 对位 codex 39f4277087：closed 通知可能先于终止响应到达
+        if let Some(session) = self.inner.get_session(process_id) {
+            session
+                .network_policy
+                .cancellation
+                .record(NetworkRequestCancellationReason::ProcessCancelled);
+        }
         self.call_for_cleanup(
             EXEC_TERMINATE_METHOD,
             &TerminateParams {
@@ -1379,6 +1391,7 @@ impl SessionState {
             network_policy: NetworkPolicyState {
                 controller: ArcSwapOption::empty(),
                 cancelled: CancellationToken::new(),
+                cancellation: NetworkRequestCancellation::default(),
                 audit: None,
             },
         }
@@ -1442,6 +1455,12 @@ impl SessionState {
             let is_closed = matches!(&event, ExecProcessEvent::Closed { .. });
             ordered_events.closed_published |= is_closed;
             published_closed |= is_closed;
+            // 对位 codex 39f4277087：exit 与 closed 都发布后才记 ProcessFinished
+            if is_closed && ordered_events.exit_published {
+                self.network_policy
+                    .cancellation
+                    .record(NetworkRequestCancellationReason::ProcessFinished);
+            }
             self.events.publish(event);
         }
         published_closed
@@ -1642,6 +1661,10 @@ impl Session {
     }
 
     pub(crate) fn cancel_network_policy_decisions(&self) {
+        self.state
+            .network_policy
+            .cancellation
+            .record(NetworkRequestCancellationReason::ProcessCancelled);
         self.state.network_policy.cancelled.cancel();
     }
 
@@ -1699,6 +1722,10 @@ impl Inner {
         let mut next_sessions = sessions.as_ref().clone();
         next_sessions.remove(process_id);
         self.sessions.store(Arc::new(next_sessions));
+        expected
+            .network_policy
+            .cancellation
+            .record(NetworkRequestCancellationReason::ProcessCancelled);
         expected.network_policy.cancelled.cancel();
         expected.network_policy.controller.store(None);
     }
@@ -1857,6 +1884,10 @@ fn fail_all_sessions(inner: &Arc<Inner>, message: String) {
     let sessions = inner.take_all_sessions();
 
     for (_, session) in sessions {
+        session
+            .network_policy
+            .cancellation
+            .record(NetworkRequestCancellationReason::ConnectionClosed);
         session.network_policy.cancelled.cancel();
         session.network_policy.controller.store(None);
         // Sessions synthesize a closed read response and emit a pushed Failed
@@ -2080,6 +2111,11 @@ mod tests {
     // in-process 并行（cargo test）下与全局 subscriber 竞态，nextest 进程隔离
     // 可过；但 CI 的 nextest 无 --run-ignored 通道，目前哪儿都不跑（覆盖缺口，
     // 恢复需先修测试的 span-id 竞态或为其立 nextest 专属组）
+    //
+    // T3 遥测面恢复后复评（2026-10-14）：单独跑稳过；`cargo test --lib client::`
+    // 进程内并发 4/4 在 :2233 `assert_ne!(parts[2], expected_parts[2])` 失败——
+    // outbound span 的 callsite 兴趣被并发用例缓存为禁用，traceparent 复用父
+    // span id。竞态与遥测面无关，ignore 保留。
     #[ignore = "races with global subscriber under in-process parallelism"]
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn process_start_propagates_caller_trace_context_across_background_task() {

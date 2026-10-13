@@ -6,6 +6,11 @@
 //! - sensitive subpaths such as `.git`, `.agents`, and `.nova` remain
 //!   read-only even when their parent root is writable.
 //!
+//! Restricted execution also hides WSLg's duplicate distro root so it cannot
+//! expose filesystem contents outside the policy's path masks. Explicit grants and
+//! command paths using that alias are rejected before constructing mounts.
+//! （对位 codex 39f4277087）
+//!
 //! The overall Linux sandbox is composed of:
 //! - seccomp + `PR_SET_NO_NEW_PRIVS` applied in-process, and
 //! - bubblewrap used to construct the filesystem view before exec.
@@ -66,9 +71,8 @@ const MAX_UNREADABLE_GLOB_MATCHES: usize = 8192;
 // 对位 codex f71543813f `bwrap.rs::WSL_INTEROP_DIR`：WSL Windows interop socket 目录
 pub(crate) const WSL_INTEROP_DIR: &str = "/run/WSL";
 
-// 对位 codex 39f4277087 `bwrap.rs::WSLG_DISTRO_ROOT`：WSLg 遮蔽主体（wslg.rs /
-// `BwrapOptions::mask_wslg_distro`）尚未移植，常量目前仅供 daemon_mounts 测试引用。
-#[allow(dead_code)]
+// 对位 codex 39f4277087 `bwrap.rs::WSLG_DISTRO_ROOT`：WSLg 的 / bind 别名根
+//（受限文件系统视图中必须遮蔽，显式别名路径在构建挂载前拒绝）。
 pub(crate) const WSLG_DISTRO_ROOT: &str = "/mnt/wslg/distro";
 
 /// Options that control how bubblewrap is invoked.
@@ -87,6 +91,10 @@ pub(crate) struct BwrapOptions {
     /// Hide the WSL Windows interop socket from commands with restricted filesystem access.
     /// （对位 codex f71543813f）
     pub mask_wsl_interop: bool,
+    /// Whether the host exposes WSLg's duplicate distro root, which must be hidden
+    /// when constructing a restricted filesystem view.
+    /// （对位 codex 39f4277087）
+    pub mask_wslg_distro: bool,
     /// Optional maximum depth for expanding unreadable glob patterns with ripgrep.
     ///
     /// Keep this uncapped by default so existing nested deny-read matches are
@@ -101,6 +109,7 @@ impl Default for BwrapOptions {
             inherit_pid_namespace: false,
             network_mode: BwrapNetworkMode::FullAccess,
             mask_wsl_interop: false,
+            mask_wslg_distro: false,
             glob_scan_max_depth: None,
         }
     }
@@ -338,6 +347,25 @@ fn create_bwrap_flags(
     command_cwd: &Path,
     options: BwrapOptions,
 ) -> Result<BwrapArgs> {
+    // 对位 codex 39f4277087 `bwrap.rs:336-352`：受限视图将遮蔽 WSLg 别名根，
+    // 故授权根/策略 cwd/命令 cwd/可执行文件显式指向别名者先在构建挂载前拒绝。
+    if options.mask_wslg_distro {
+        let granted_paths = file_system_sandbox_policy.entries.iter().flat_map(|entry| {
+            FileSystemSandboxPolicy::restricted(vec![entry.clone()])
+                .get_readable_roots_with_cwd(sandbox_policy_cwd)
+        });
+        let executable = command
+            .first()
+            .filter(|executable| executable.contains('/'))
+            .map(|executable| AbsolutePathBuf::resolve_path_against_base(executable, command_cwd));
+        for path in granted_paths
+            .map(AbsolutePathBuf::into_path_buf)
+            .chain([sandbox_policy_cwd.to_path_buf(), command_cwd.to_path_buf()])
+            .chain(executable.map(AbsolutePathBuf::into_path_buf))
+        {
+            crate::wslg::ensure_supported_path(&path)?;
+        }
+    }
     let BwrapArgs {
         args: filesystem_args,
         preserved_files,
@@ -357,10 +385,7 @@ fn create_bwrap_flags(
         args.push("--tmpfs".to_string());
         args.push(WSL_INTEROP_DIR.to_string());
     }
-    // 对位 codex 39f4277087：锚点条件为 `(mask_wsl_interop || mask_wslg_distro)
-    // && !mount_proc`；mask_wslg_distro 属 WSLg 裁点未移植（恒 false），故此处
-    // 只保留 interop 析取支，语义等价。
-    if options.mask_wsl_interop && !options.mount_proc {
+    if (options.mask_wsl_interop || options.mask_wslg_distro) && !options.mount_proc {
         // Without a fresh procfs, the root bind retains the host procfs.
         // Hide it so host process roots cannot restore the masked WSL views.
         args.push("--tmpfs".to_string());
@@ -429,11 +454,13 @@ fn create_filesystem_args(
 ) -> Result<BwrapArgs> {
     // 对位 codex 39f4277087 `bwrap.rs:436-442`：取 daemon socket 目录并分析主机
     // 挂载别名（nova 适配：`codex_uds::` → `nova_exec_server_sandboxing::`；
-    // WSLg distro root 遮蔽尚未移植，masked_root 恒 None）。
+    // masked_root 在 WSLg 遮蔽生效时传入别名根）。
     let daemon_directory = nova_exec_server_sandboxing::prepare_shared_daemon_socket_directory()?;
     let daemon_directories = crate::daemon_mounts::daemon_socket_mask_paths(
         &daemon_directory,
-        /*masked_root*/ None,
+        options
+            .mask_wslg_distro
+            .then_some(Path::new(WSLG_DISTRO_ROOT)),
     )?;
     let unreadable_globs = file_system_sandbox_policy.get_unreadable_globs_with_cwd(cwd);
     // Bubblewrap requires bind mount targets to exist. Skip missing writable
@@ -809,6 +836,31 @@ fn create_filesystem_args(
     rootless_unreadable_roots.sort_by_key(|path| path_depth(path));
     for unreadable_root in rootless_unreadable_roots {
         append_unreadable_root_args(&mut bwrap_args, &unreadable_root, &allowed_write_paths)?;
+    }
+
+    // 对位 codex 39f4277087 `bwrap.rs:805-826`：别名根未被既有 deny 规则覆盖时，
+    // 追加不可读只读 tmpfs 遮蔽，排除 WSLg 的重复文件系统视图。
+    if options.mask_wslg_distro
+        && !unreadable_roots.iter().any(|denied| {
+            let distro = Path::new(WSLG_DISTRO_ROOT);
+            distro.starts_with(denied)
+                && !allowed_write_paths.iter().any(|root| {
+                    root.starts_with(denied)
+                        && (distro.starts_with(root) || root.starts_with(distro))
+                })
+        })
+    {
+        // Use the expanded masks, including symlink targets from deny globs.
+        // An already hidden ancestor cannot accommodate a new child mount.
+        // Otherwise apply this after every grant to exclude the duplicate view.
+        bwrap_args.args.extend([
+            "--perms".to_string(),
+            "000".to_string(),
+            "--tmpfs".to_string(),
+            WSLG_DISTRO_ROOT.to_string(),
+            "--remount-ro".to_string(),
+            WSLG_DISTRO_ROOT.to_string(),
+        ]);
     }
 
     Ok(bwrap_args)
@@ -1583,6 +1635,10 @@ fn find_first_non_existent_component(target_path: &Path) -> Option<PathBuf> {
 
     None
 }
+
+#[cfg(test)]
+#[path = "bwrap_wslg_tests.rs"]
+mod wslg_tests;
 
 #[cfg(test)]
 mod tests {

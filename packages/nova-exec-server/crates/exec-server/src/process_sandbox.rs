@@ -37,6 +37,8 @@ use nova_exec_server_utils_path_uri::PathUri;
 use crate::ExecServerRuntimePaths;
 #[cfg(unix)]
 use crate::NOVA_EXEC_SERVER_ARG0_EXEC_HELPER_ARG1;
+use crate::process_telemetry::ProcessTelemetry;
+use crate::process_telemetry::trace_process_id;
 use crate::protocol::ExecParams;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
@@ -80,12 +82,20 @@ impl PreparedExecRequest {
     }
 }
 
-pub(crate) async fn prepare_exec_request(
+// 对位 codex 39f4277087 `prepare_exec_request_with_telemetry`：恢复 instrument span
+// （process.id 经 trace_process_id 限长过滤）
+#[tracing::instrument(
+    name = "nova.exec_server.process_prepare_sandbox",
+    skip_all,
+    fields(process.id = trace_process_id(params.process_id.as_str())),
+)]
+pub(crate) async fn prepare_exec_request_with_telemetry(
     params: &ExecParams,
     env: HashMap<String, String>,
     runtime_paths: Option<&ExecServerRuntimePaths>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
+    telemetry: &ProcessTelemetry,
 ) -> Result<PreparedExecRequest, JSONRPCErrorError> {
     if let Some(sandbox) = params.sandbox.as_ref()
         && sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
@@ -123,9 +133,12 @@ pub(crate) async fn prepare_exec_request(
         prepare_managed_network(
             params,
             network_proxy,
+            // 对位 codex 39f4277087：可信启动路由供给（CLI flag 经 runtime paths 传入）
+            runtime_paths.is_some_and(|paths| paths.proxy_private_ips_via_upstream),
             env,
             network_policy_decider,
             network_policy_audit_observer,
+            telemetry,
         )
         .await?;
     let Some(sandbox_context) = params.sandbox.as_ref() else {
@@ -347,9 +360,11 @@ pub(crate) async fn prepare_exec_request(
 async fn prepare_managed_network(
     params: &ExecParams,
     network_proxy: Option<&RemoteNetworkProxyLaunchConfig>,
+    proxy_private_ips_via_upstream: bool,
     env: HashMap<String, String>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
+    telemetry: &ProcessTelemetry,
 ) -> Result<
     (
         HashMap<String, String>,
@@ -365,18 +380,39 @@ async fn prepare_managed_network(
     // 对位 codex a5c15ab5c0：MXC 选择专用 loopback 监听（其策略按端口放行
     // loopback），其余选择共享 ingress。nova 尚无共享 ingress 实现——
     // SharedIngress 的 restricting SID 取自未移植裁点，行为与既有桩一致。
-    let routing = if params.sandbox.as_ref().is_some_and(|sandbox| {
-        sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
-    }) {
-        ManagedProxyRouting::DedicatedListeners
-    } else {
-        ManagedProxyRouting::SharedIngress
-    };
+    let routing =
+        if params.sandbox.as_ref().is_some_and(|sandbox| {
+            sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
+        }) {
+            ManagedProxyRouting::DedicatedListeners
+        } else {
+            ManagedProxyRouting::SharedIngress
+        };
     let mut state = NetworkProxyState::from_remote_launch_config(network_proxy)
         .map_err(|err| invalid_params(format!("invalid network proxy config: {err}")))?;
+    // 对位 codex 39f4277087：上游代理路由旋钮 + launch 身份/进程日志元数据接线
+    state.set_proxy_private_ips_via_upstream(proxy_private_ips_via_upstream);
     if let Some(observer) = network_policy_audit_observer {
         state.set_policy_audit_observer(observer);
     }
+    if let Some(launch_context) = &telemetry.launch_context {
+        state.set_launch_span_context(launch_context.clone());
+    }
+    state.set_process_log_metadata(
+        nova_exec_server_network_proxy::NetworkProxyProcessLogMetadata {
+            thread_id: telemetry.thread_id.clone(),
+            tool_call_id: telemetry.tool_call_id.clone(),
+            executor_identity: telemetry
+                .executor_registration
+                .as_ref()
+                .map(
+                    |registration| nova_exec_server_network_proxy::ExecutorLogIdentity {
+                        environment_id: registration.environment_id.clone(),
+                        registration_id: registration.executor_registration_id.clone(),
+                    },
+                ),
+        },
+    );
     let mut builder = NetworkProxy::builder()
         .state(Arc::new(state))
         .managed_proxy_routing(routing);

@@ -54,7 +54,7 @@ executor 本体**无入站鉴权**——只做本地回环承载（stdio 管道 
 - `NOVA_EXEC_SERVER_HOME` — 配置目录覆盖
 - `NOVA_EXEC_SERVER_CA_CERTIFICATE` / `SSL_CERT_FILE` — 自定义 CA（企业自签场景，
   影响 `http/request` 与 WS TLS 信任）
-- `NOVA_EXEC_SERVER_EXEC_SERVER_EXIT_ON_STDIN_CLOSE` — stdio 托管 spawn 时
+- `NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE` — stdio 托管 spawn 时
   父进程管道关闭即退出（父死子随）
 
 ### 遥测（可选，默认全静默）

@@ -1,6 +1,8 @@
 mod arg0_exec_helper;
 mod client;
 mod client_api;
+// 对位 codex 39f4277087 lib.rs `mod client_error;`
+mod client_error;
 mod client_transport;
 mod connection;
 mod environment;
@@ -20,6 +22,8 @@ mod network_policy_decisions;
 mod no_follow;
 mod process;
 mod process_sandbox;
+// 对位 codex 39f4277087：进程生命周期遥测（launch 身份捕获 + 事件发出）
+mod process_telemetry;
 mod regular_file;
 mod remote_file_system;
 mod remote_process;
@@ -54,8 +58,8 @@ mod client_inbound_request_limit;
 use nova_exec_server_protocol as protocol;
 
 /// Process-local opt-in for tying a remote executor to its parent's stdin pipe.
-pub const NOVA_EXEC_SERVER_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR: &str =
-    "NOVA_EXEC_SERVER_EXEC_SERVER_EXIT_ON_STDIN_CLOSE";
+pub const NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR: &str =
+    "NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE";
 
 pub use arg0_exec_helper::NOVA_EXEC_SERVER_ARG0_EXEC_HELPER_ARG1;
 pub use arg0_exec_helper::main as run_arg0_exec_helper_main;

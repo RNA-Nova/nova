@@ -266,6 +266,44 @@ mod tests {
         assert_eq!(false, set.is_match("foo.region1.v2.argotunnel.com"));
     }
 
+    // 对位 codex 39f4277087：Keep this table one-for-one with the browser
+    // network-policy matchers' question-mark contract cases so grammar changes
+    // are checked on both sides.
+    #[test]
+    fn compile_globset_supports_question_mark_wildcards() -> Result<()> {
+        for (pattern, host, expected) in [
+            ("api?.example.com", "api1.example.com", true),
+            ("api?.example.com", "api.example.com", false),
+            ("api?.example.com", "api12.example.com", false),
+            ("api??.example.com", "api12.example.com", true),
+            ("api??.example.com", "api1.example.com", false),
+            ("api*?.example.com", "api.example.com", false),
+            ("api*?.example.com", "api1.example.com", true),
+            ("api*?.example.com", "api123.example.com", true),
+            ("api?example.com", "api.example.com", true),
+            ("*.api?.example.com", "api1.example.com", false),
+            ("*.api?.example.com", "www.api1.example.com", true),
+            ("*.api?.example.com", "nested.www.api1.example.com", true),
+            ("*.api?.example.com", "www.api12.example.com", false),
+            ("**.api?.example.com", "api1.example.com", true),
+            ("**.api?.example.com", "www.api1.example.com", true),
+            ("**.api?.example.com", "nested.www.api1.example.com", true),
+            ("**.api?.example.com", "api12.example.com", false),
+            ("**.api?.example.com", "www.api12.example.com", false),
+            (" API?.EXAMPLE.COM. ", "API1.EXAMPLE.COM.", true),
+        ] {
+            let patterns = [pattern.to_string()];
+            for set in [compile_allowlist(&patterns)?, compile_denylist(&patterns)?] {
+                assert_eq!(
+                    set.is_match(normalize_host(host)),
+                    expected,
+                    "pattern {pattern}, host {host}"
+                );
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn compile_globset_normalizes_apex_and_subdomains() {
         let set = compile_denylist(&["**.Example.COM.".to_string()]).unwrap();

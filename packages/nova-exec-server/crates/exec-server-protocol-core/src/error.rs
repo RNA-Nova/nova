@@ -47,8 +47,9 @@ pub enum SandboxErr {
 
 pub struct ExecErr {
     details: ExecErrorDetails,
-    // 裁剪残留（对位 codex 子集化）：上游此字段的读者（retry_after/
-    // server_retry_delay）在未镜像面；字段保留以维持线上形状，当前恒 None。
+    // 裁剪残留（对位 codex 子集化）：锚点字段为 `retry_after: Option<RetryAfter>`，
+    // 我方已改名改型；其读者（retry_after/server_retry_delay）在未镜像面。ExecErr
+    // 无 Serialize，本无线上形状可维持——以 #[allow(dead_code)] 保留备查，当前恒 None。
     #[allow(dead_code)]
     retry_delay: Option<Duration>,
 }

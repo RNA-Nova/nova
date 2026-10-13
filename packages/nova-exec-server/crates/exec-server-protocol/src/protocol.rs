@@ -1267,6 +1267,7 @@ mod tests {
     use super::ExecResponse;
     use super::FsOpenMode;
     use super::FsOpenParams;
+    use super::WireFsOpenParams;
     use super::FsReadFileParams;
     use super::FsWriteBlockParams;
     use super::FsWriteBlockResponse;
@@ -2057,25 +2058,28 @@ mod tests {
     }
 
     /// Legacy `fs/open` callers continue to open existing files for reading only.
+    /// （对位 codex 39f4277087：wire 层解析全链路——缺省 mode 在
+    /// WireFsOpenParams → FsOpenParams 转换处回退为 Read）
     #[test]
     fn filesystem_open_accepts_legacy_request_without_mode() {
-        let legacy: FsOpenParams = serde_json::from_value(serde_json::json!({
+        let wire: WireFsOpenParams = serde_json::from_value(serde_json::json!({
             "handleId": "legacy-handle",
             "path": "file:///tmp/existing.txt",
         }))
         .expect("legacy open should deserialize");
-
-        assert_eq!(legacy.mode, FsOpenMode::Read);
-
-        let replace: FsOpenParams = serde_json::from_value(serde_json::json!({
-            "handleId": "replace-handle",
-            "path": "file:///tmp/existing.txt",
-            "mode": "replace",
-        }))
-        .expect("replace open should deserialize");
-        assert_eq!(replace.mode, FsOpenMode::Replace);
-        let serialized = serde_json::to_value(replace).expect("replace open should serialize");
-        assert_eq!(serialized["mode"], serde_json::json!("replace"));
+        assert_eq!(
+            wire.try_into_request(|_| panic!("no sandbox to resolve"))
+                .expect("legacy open should resolve"),
+            FsOpenParams {
+                handle_id: "legacy-handle".to_string(),
+                path: nova_exec_server_utils_path_uri::PathUri::parse(
+                    "file:///tmp/existing.txt"
+                )
+                .expect("file URI"),
+                mode: FsOpenMode::Read,
+                sandbox: None,
+            }
+        );
     }
 
     /// `fs/writeBlock` 线上形状金标：camelCase 键 + chunk 透明 base64 字符串，
@@ -2115,8 +2119,10 @@ mod tests {
         );
     }
 
-    /// `fs/writeStream` 续传字段（v1.12，nova 自有通道）：offset 缺省省略/缺省即
-    /// None（创建/截断），Some(n) 线上直出；Wire 入口解析归一。
+    /// `fs/writeStream` 续传字段（v1.12，nova 自有通道）：offset/sandbox 仅带
+    /// `#[serde(default)]`（无 skip_serializing_if），序列化缺省也产出显式 null
+    /// （见下方金标 `"sandbox": null`）；反序列化缺省/显式 null 均归一为 None
+    /// （创建/截断），Some(n) 线上直出；Wire 入口解析归一。
     #[test]
     fn write_stream_offset_is_an_optional_wire_addition() {
         use super::FsWriteStreamParams;

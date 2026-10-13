@@ -440,10 +440,15 @@ fn map_remote_error(error: ExecServerError) -> io::Error {
         ExecServerError::Server { code, message } if code == INVALID_REQUEST_ERROR_CODE => {
             io::Error::new(io::ErrorKind::InvalidInput, message)
         }
-        ExecServerError::Server { message, .. } => io::Error::other(message),
         ExecServerError::Closed | ExecServerError::Disconnected(_) => {
             io::Error::new(io::ErrorKind::BrokenPipe, "exec-server transport closed")
         }
+        // 对位 codex 39f4277087 remote_file_system.rs:421-423：可重试的准备阶段
+        // 错误按传输断裂上报（BrokenPipe），供调用侧走重试路径。
+        error if error.is_retryable_preparation_error() => {
+            io::Error::new(io::ErrorKind::BrokenPipe, error.to_string())
+        }
+        ExecServerError::Server { message, .. } => io::Error::other(message),
         _ => io::Error::other(error.to_string()),
     }
 }
@@ -486,5 +491,29 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    // 对位 codex 39f4277087 remote_file_system.rs:469-488 同名测试。锚点首个用例为
+    // ConnectionAttempt(EnvironmentRegistryHttp{503})；registry 族在 nova 已随
+    // deferred-environment 裁剪（见 client_error.rs 头注），以同为瞬态握手失败的
+    // WebSocketConnectTimeout 代入，同样验证 retryable→BrokenPipe 臂。
+    #[test]
+    fn preparation_retryability_controls_filesystem_error_kind() {
+        let errors = [
+            ExecServerError::ConnectionAttempt(Arc::new(
+                ExecServerError::WebSocketConnectTimeout {
+                    url: "ws://127.0.0.1:1/".to_string(),
+                    timeout: std::time::Duration::from_secs(1),
+                },
+            )),
+            ExecServerError::Protocol("exec-server transport closed".to_string()),
+        ];
+
+        let kinds = errors
+            .into_iter()
+            .map(|error| map_remote_error(error).kind())
+            .collect::<Vec<_>>();
+
+        assert_eq!(kinds, vec![io::ErrorKind::BrokenPipe, io::ErrorKind::Other]);
     }
 }

@@ -108,8 +108,12 @@ fn record_duration_seconds_uses_fractional_seconds_and_scaled_buckets() -> Resul
 fn timer_result_records_success() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
 
-    // Timer API 已随死面清扫移除——等价覆盖：直接 record_duration 验证直方图记录
-    metrics.record_duration("nova.request_latency", std::time::Duration::from_millis(12), &[("route", "chat")])?;
+    // 对位 codex 39f4277087：Timer drop 路径记录时长（start_timer 已随
+    // c2eb1f42a0 补回 metrics/client.rs）。
+    {
+        let timer = metrics.start_timer("nova.request_latency", &[("route", "chat")]);
+        assert!(timer.is_ok());
+    }
 
     metrics.shutdown()?;
 

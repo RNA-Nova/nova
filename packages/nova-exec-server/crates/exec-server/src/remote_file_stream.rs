@@ -13,14 +13,37 @@ use crate::protocol::FsReadStreamParams;
 
 /// 推送式流式读的注册句柄：流被丢弃时注销路由，
 /// 避免服务端后续推送在注册表里找不到归属。
+/// 消费者中途放弃（未读到 Done 即 drop）时，best-effort 向服务端发
+/// fs/close 收摊（对位 codex `FileReadRegistration::drop`——拉模式放弃即关
+/// 句柄，服务端立刻停读；推送模式不补这一手，服务端会把整个文件读完并
+/// 推入无人接收的路由，槽位/fd 一直被占到流结束）。正常读到 Done 的完成
+/// 路径经 `active = false` 跳过（服务端已自行收摊）。
 struct PushReadRegistration {
     client: ExecServerClient,
     handle_id: String,
+    active: bool,
+    runtime: Option<tokio::runtime::Handle>,
 }
 
 impl Drop for PushReadRegistration {
     fn drop(&mut self) {
         self.client.remove_fs_read_stream(&self.handle_id);
+        if !self.active {
+            return;
+        }
+        let client = self.client.clone();
+        let handle_id = self.handle_id.clone();
+        let runtime = self
+            .runtime
+            .clone()
+            .or_else(|| tokio::runtime::Handle::try_current().ok());
+        if let Some(runtime) = runtime {
+            runtime.spawn(async move {
+                let _ = client
+                    .fs_close(crate::protocol::FsCloseParams { handle_id })
+                    .await;
+            });
+        }
     }
 }
 
@@ -37,6 +60,8 @@ pub(super) async fn open_push(
     let registration = PushReadRegistration {
         client,
         handle_id: Uuid::new_v4().simple().to_string(),
+        active: true,
+        runtime: tokio::runtime::Handle::try_current().ok(),
     };
     // 先注册路由再发请求：服务端响应后即开始推送，注册不能比推送晚到。
     let receiver = registration
@@ -62,7 +87,7 @@ pub(super) async fn open_push(
     }
     Ok(FileSystemReadStream::new(futures::stream::try_unfold(
         (receiver, registration),
-        |(mut receiver, registration): (
+        |(mut receiver, mut registration): (
             mpsc::Receiver<FsReadStreamEvent>,
             PushReadRegistration,
         )| async move {
@@ -70,11 +95,19 @@ pub(super) async fn open_push(
                 Some(FsReadStreamEvent::Chunk(chunk)) => {
                     Ok(Some((chunk, (receiver, registration))))
                 }
-                Some(FsReadStreamEvent::Done) => Ok(None),
-                Some(FsReadStreamEvent::Failed(message)) => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("fs/readStream failed: {message}"),
-                )),
+                Some(FsReadStreamEvent::Done) => {
+                    // 正常完成：服务端已自行收摊，drop 不再发 fs/close
+                    registration.active = false;
+                    Ok(None)
+                }
+                Some(FsReadStreamEvent::Failed(message)) => {
+                    // 服务端错误终态同样已收摊
+                    registration.active = false;
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("fs/readStream failed: {message}"),
+                    ))
+                }
                 // 发送端在 Done 之前全部 drop：连接异常断开的兜底（正常路径
                 // fail_all_fs_read_streams 会先推 Failed；这里防路由被绕过）。
                 None => Err(io::Error::new(

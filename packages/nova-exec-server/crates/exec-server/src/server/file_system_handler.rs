@@ -62,7 +62,6 @@ use crate::rpc::invalid_request;
 use crate::rpc::not_found;
 
 const MAX_FILE_HANDLE_ID_BYTES: usize = 32;
-const MAX_FILE_WRITE_HANDLE_ID_BYTES: usize = 32;
 // Each read-directory entry needs four JSON values. Keep same-version
 // producers comfortably below the shared 256K-value decoder budget.
 const MAX_READ_DIRECTORY_ENTRIES: usize = 50_000;
@@ -99,7 +98,7 @@ impl FileSystemHandler {
         validate_file_handle_id(&params.handle_id)?;
         // 对位 codex d25c114d49+c39bfa4c8f：mode 透传到开门执行体，句柄表先占槽
         // 再 await 打开（在飞行打开计入 128 槽上限，重复 ID/容量超限在碰文件前拒绝）
-        let handle_id = self
+        let (handle_id, _generation) = self
             .file_handles
             .open(
                 params.handle_id,
@@ -181,8 +180,10 @@ impl FileSystemHandler {
             None
         };
 
-        // 读流恒以 Read 模式开门（句柄表先占槽再 await 打开，与 fs/open 同）
-        let handle_id = self
+        // 读流恒以 Read 模式开门（句柄表先占槽再 await 打开，与 fs/open 同）；
+        // 条目代际随任务携带——close→同名重开时旧任务逐块校验即静默收尾
+        //（不串读新文件、不发迟到 done、不摘新句柄）
+        let (handle_id, generation) = self
             .file_handles
             .open(
                 params.handle_id.clone(),
@@ -201,9 +202,10 @@ impl FileSystemHandler {
         tokio::spawn(async move {
             let emit_notifications = notifications.clone();
             let emit_handle_id = handle_id_clone.clone();
-            let (total_bytes, error) = stream_file_blocks(
+            let (total_bytes, error, superseded) = stream_file_blocks(
                 &file_handles,
                 &handle_id_clone,
+                generation,
                 offset,
                 len,
                 block_size,
@@ -228,7 +230,10 @@ impl FileSystemHandler {
             )
             .await;
 
-            if let Some(notifications) = &notifications {
+            // 被同名重开取代时不发 done——本代流的迟到终态不得串入新流路由
+            if !superseded
+                && let Some(notifications) = &notifications
+            {
                 let _ = notifications
                     .notify(
                         crate::protocol::FS_READ_STREAM_DONE_METHOD,
@@ -241,7 +246,8 @@ impl FileSystemHandler {
                     .await;
             }
 
-            file_handles.close(&handle_id_clone);
+            // 代际守卫摘除：条目仍是本代才摘——同名重开的新条目不动
+            file_handles.close_if_generation(&handle_id_clone, generation);
         });
 
         Ok(FsReadStreamResponse {
@@ -304,18 +310,42 @@ impl FileSystemHandler {
         &self,
         params: FsWriteStreamParams,
     ) -> Result<FsWriteStreamResponse, JSONRPCErrorError> {
-        validate_file_write_handle_id(&params.handle_id)?;
+        validate_file_handle_id(&params.handle_id)?;
 
         let offset = params.offset;
         let file_system = self.file_system.clone();
         let path = params.path.clone();
         let sandbox = params.sandbox;
         // 句柄管理器先查重复 ID/占槽再 await 开门（开门即截断/创建，顺序不能反）。
-        let handle_id = self
+        let (handle_id, _generation) = self
             .file_handles
             .open_write_stream(
                 params.handle_id,
                 async move {
+                    // Resume 存在性预检（仅 offset>0）：missing 路径上 Resume
+                    // 开门 create(true) 会先造出 0 字节文件、再校验 offset 失败
+                    // ——把垃圾留在盘上。先经同一 file_system（沙箱透明）确认
+                    // 存在；不存在按同一文案拒绝（missing 即长度 0），盘上不留痕。
+                    // offset=0 不在此列：Resume 创建空文件并从 0 覆写是既有语义。
+                    if let Some(offset) = offset
+                        && offset > 0
+                    {
+                        match file_system
+                            .get_metadata(&path, GetMetadataOptions::default(), sandbox.as_ref())
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "file write stream offset {offset} exceeds the current file length 0"
+                                    ),
+                                ));
+                            }
+                            Err(err) => return Err(err),
+                        }
+                    }
                     let file = file_system
                         .open_file(
                             &path,
@@ -368,7 +398,7 @@ impl FileSystemHandler {
         &self,
         params: FsWriteStreamDoneParams,
     ) -> Result<FsWriteStreamDoneResponse, JSONRPCErrorError> {
-        validate_file_write_handle_id(&params.handle_id)?;
+        validate_file_handle_id(&params.handle_id)?;
         let total_bytes = self
             .file_handles
             .finish_write_stream(&params.handle_id)
@@ -516,15 +546,6 @@ fn validate_file_handle_id(handle_id: &str) -> Result<(), JSONRPCErrorError> {
     if handle_id.len() > MAX_FILE_HANDLE_ID_BYTES {
         return Err(invalid_request(format!(
             "file handle ID must not exceed {MAX_FILE_HANDLE_ID_BYTES} bytes"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_file_write_handle_id(handle_id: &str) -> Result<(), JSONRPCErrorError> {
-    if handle_id.len() > MAX_FILE_WRITE_HANDLE_ID_BYTES {
-        return Err(invalid_request(format!(
-            "file write handle ID must not exceed {MAX_FILE_WRITE_HANDLE_ID_BYTES} bytes"
         )));
     }
     Ok(())
@@ -1133,6 +1154,12 @@ mod tests {
             .expect_err("resume beyond a missing file should fail");
         assert_eq!(err.code, -32600);
         assert_eq!(handler.file_handles.open_handle_count(), 0);
+        // 拒绝续传不得在盘上留下 0 字节垃圾文件（Resume 开门 create(true)
+        // 会先造文件后校验——存在性预检把拒绝提前到开门之前）
+        assert!(
+            !temp_dir.path().join("missing.bin").exists(),
+            "rejected resume must not create a zero-byte file"
+        );
     }
 
     /// offset Some(0)：不截断但从 0 覆写——与创建/截断的默认语义区分。
