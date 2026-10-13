@@ -7,9 +7,9 @@ runs:
     # 受控构建根 + 受控临时目录（对位 codex setup-ci）：TEMP/TMP/TMPDIR 指向
     # 受控长路径——杜绝 GHA 宿主 8.3 短名 TEMP（C:\Users\RUNNER~1\...）类差异；
     # CARGO_TARGET_DIR 归到构建根（自建 runner 上常驻 = 增量构建）。
-    # Windows 必须走 pwsh（$env:USERPROFILE）：git-bash 的 $HOME 是 MSYS 形
-    # （/c/Users/...），写进 CARGO_TARGET_DIR 会被 cargo/link.exe 错拼成
-    # D:/c/Users/...（CI run 38074535685 实证 LNK1104）。
+    # Windows 构建根由 Dev Drive 步骤经 CI_BUILD_ROOT 注入（见下）；
+    # Windows 步骤必须走 pwsh——git-bash 的 $HOME 是 MSYS 形（/c/Users/...），
+    # 拼路径会被 cargo/link.exe 错拼（CI run 38074535685 实证 LNK1104）。
     - name: 配置 CI 构建根与受控临时目录（Unix）
       if: runner.os != 'Windows'
       shell: bash
@@ -26,11 +26,25 @@ runs:
         # 自建 runner 的非交互 shell 可能不加载 ~/.bashrc 里的 cargo PATH
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+    # Windows 构建根落在独立 Dev Drive（对位 codex setup-ci 的
+    # "Configure Dev Drive (Windows)" 步骤，脚本 setup-dev-drive.ps1 逐字
+    # 移植）：CI_BUILD_ROOT=D:（已是 Dev Drive）或新建 64GB 动态 VHD。
+    # 除 I/O 性能（ReFS + 关 AV 过滤器）外，它还规避 profile ACL 问题——
+    # 提升沙箱账户是另一个 Windows 用户，对 C:\Users\runneradmin 无遍历权，
+    # TEMP 若留在 profile 下，提升子进程以 TEMP 内目录为 cwd 时
+    # CreateProcessWithLogonW 报 267（ERROR_DIR_NOT_FOUND）——
+    # tmpdir_uses_command_environment_over_rpc::elevated 在 run 38383429724
+    # 实证；codex 的 TEMP 在 Dev Drive 根（新卷 ACL 开放），无此问题。
+    - name: 配置 Dev Drive（Windows）
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./.github/scripts/setup-dev-drive.ps1
+
     - name: 配置 CI 构建根与受控临时目录（Windows）
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        $build_root = ($env:USERPROFILE -replace '\\','/') + "/.cache/nova-ci"
+        $build_root = ($env:CI_BUILD_ROOT -replace '\\','/').TrimEnd('/')
         New-Item -ItemType Directory -Force -Path "$build_root/tmp", "$build_root/cargo-target" | Out-Null
         "NOVA_CI_BUILD_ROOT=$build_root" >> $env:GITHUB_ENV
         "TEMP=$build_root/tmp" >> $env:GITHUB_ENV
