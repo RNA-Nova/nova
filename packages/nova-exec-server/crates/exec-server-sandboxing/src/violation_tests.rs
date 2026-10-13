@@ -1,4 +1,7 @@
 use super::*;
+use nova_exec_server_network_proxy::BlockedRequest;
+use nova_exec_server_network_proxy::BlockedRequestArgs;
+use nova_exec_server_network_proxy::NetworkMode;
 use nova_exec_server_protocol_core::exec_output::ExecToolCallOutput;
 use nova_exec_server_protocol_core::exec_output::StreamOutput;
 use pretty_assertions::assert_eq;
@@ -201,7 +204,37 @@ fn does_not_classify_non_sandbox_mode() {
     assert!(classify_filesystem_sandbox_violation(SandboxType::None, &output).is_none());
 }
 
-// NOTE: the codex test `converts_blocked_request_to_network_violation` is not
-// restored here: the slimmed-down `nova-exec-server-network-proxy` placeholder
-// lacks `BlockedRequestArgs` / `BlockedRequest::new`, and its `NetworkMode`
-// enum has no `Limited` variant.
+// 对位 codex 39f4277087 violation_tests.rs:207-237：BlockedRequest→NetworkSandboxViolation
+// 转换断言；上游 NetworkMode::Limited 已随 MITM 面裁除，对位 nova 的 NetworkMode::Proxy
+// （同款替代先例见 seatbelt_tests.rs）。
+#[test]
+fn converts_blocked_request_to_network_violation() {
+    let blocked = BlockedRequest::new(BlockedRequestArgs {
+        host: "example.com".to_string(),
+        reason: "not_allowed".to_string(),
+        client: Some("curl".to_string()),
+        method: Some("CONNECT".to_string()),
+        mode: Some(NetworkMode::Proxy),
+        protocol: "https".to_string(),
+        decision: Some("block".to_string()),
+        source: Some("policy".to_string()),
+        port: Some(443),
+    });
+
+    assert_eq!(
+        NetworkSandboxViolation::from_blocked_request(&blocked),
+        NetworkSandboxViolation {
+            backend: SandboxViolationBackend::ManagedNetworkProxy,
+            host: "example.com".to_string(),
+            reason: "not_allowed".to_string(),
+            client: Some("curl".to_string()),
+            method: Some("CONNECT".to_string()),
+            mode: Some(NetworkMode::Proxy),
+            protocol: "https".to_string(),
+            decision: Some("block".to_string()),
+            source: Some("policy".to_string()),
+            port: Some(443),
+            timestamp: blocked.timestamp,
+        }
+    );
+}

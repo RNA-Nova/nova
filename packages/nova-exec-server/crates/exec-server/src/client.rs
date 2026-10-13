@@ -47,6 +47,7 @@ use crate::connection::JsonRpcConnection;
 use crate::process::ExecProcessEvent;
 use crate::process::ExecProcessEventLog;
 use crate::process::ExecProcessEventReceiver;
+use crate::process_telemetry::trace_process_id;
 use crate::protocol::ENVIRONMENT_CONFIG_READ_METHOD;
 use crate::protocol::ENVIRONMENT_INFO_METHOD;
 use crate::protocol::ENVIRONMENT_STATUS_METHOD;
@@ -725,7 +726,7 @@ impl ExecServerClient {
 
         timeout(initialize_timeout, async {
             let response: InitializeResponse = rpc_client
-                .call(
+                .call_untraced(
                     INITIALIZE_METHOD,
                     &InitializeParams {
                         client_name,
@@ -1059,6 +1060,13 @@ impl ExecServerClient {
         self.inner.remove_fs_read_stream(handle_id);
     }
 
+    // 对位 codex 39f4277087：client 侧 process_start span（process.id 经
+    // trace_process_id 限长——遥测恢复批补漏的调用点）
+    #[tracing::instrument(
+        name = "nova.exec_server.process_start",
+        skip_all,
+        fields(process.id = trace_process_id(params.process_id.as_str())),
+    )]
     pub(crate) async fn start_process(
         &self,
         params: ExecParams,

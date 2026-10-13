@@ -843,7 +843,6 @@ mod tests {
                 JsonRpcConnectionEvent::QueuedRequest { request, .. } => {
                     assert_eq!(JSONRPCMessage::Request(request), message)
                 }
-                JsonRpcConnectionEvent::Message(actual) => assert_eq!(actual, message),
                 event => anyhow::bail!("expected JSON-RPC message, got {event:?}"),
             }
 

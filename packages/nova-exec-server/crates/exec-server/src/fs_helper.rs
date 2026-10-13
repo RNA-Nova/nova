@@ -54,6 +54,7 @@ pub const NOVA_EXEC_SERVER_FS_HELPER_ARG1: &str = "--nova-run-as-fs-helper";
 /// 天然同步；常量只为审计与将来漂移检查留档）：1 = 初版（一次性请求 + 长命
 /// 写流管道）；2 = v1.12 长命写流管道拆除（writeStream 收编句柄族底层），
 /// `FsHelperOpenParams.mode` 换 `OpenMode` 并补 `resume`（不截断写打开）。
+#[allow(dead_code)] // 留档常量（测试钉值在 fs_helper.rs:482）
 pub(crate) const FS_HELPER_IPC_PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

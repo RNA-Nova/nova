@@ -551,8 +551,11 @@ where
                 current_offset = current_offset.saturating_add(bytes_len);
 
                 // 读取期间被同名重开取代：本块不再发射——本代流的迟到 chunk
-                // 不得串入新流路由（路由在客户端按 handle_id 键控；判定与发射
-                // 之间的残余窗口已压到纳秒级，无法再小）。
+                // 不得串入新流路由（路由在客户端按 handle_id 键控）。残余窗口
+                // = 本次判定与 emit 内 notify().await 的间隔：出站拥塞时阻塞
+                // notify 可挂数秒（数据完整性优先的刻意设计），窗口内
+                // close→同名重开仍可能让一个已读出的旧文件块串入新流——
+                // 彻底闭合需要协议级流令牌，本批明认的取舍。
                 // 注意仅"条目还在但非本代"才算取代；纯摘除（close/断连）不算——
                 // 后续读块会以 NotFound 收尾，保持 done 带 error 的既有语义。
                 if let Some(current) = file_handles.handle_generation(handle_id)
@@ -579,6 +582,14 @@ where
                 break;
             }
             Err(err) => {
+                // 与 NotFound 臂同一不变式：在飞读以非 NotFound 的 I/O 错误
+                //（如 EIO）失败时若已被同名重开取代，同样静默收尾——本代流的
+                // 迟到终态（done error）不得串入新流路由。
+                if let Some(current) = file_handles.handle_generation(handle_id)
+                    && current != generation
+                {
+                    return (total_bytes, None, true);
+                }
                 error = Some(err.to_string());
                 break;
             }

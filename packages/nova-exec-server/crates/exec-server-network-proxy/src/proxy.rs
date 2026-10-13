@@ -1705,7 +1705,7 @@ mod tests {
             /*fallback_policy_decider*/ None,
         )?;
         let launch = scoped
-            .remote_launch_config(crate::LocalBindingPolicy::DefaultFalse)
+            .remote_launch_config(crate::LocalBindingPolicy::RequireTrue)
             .await?;
         let prepared = scoped.prepare_for_optional_environment(
             HashMap::from([(

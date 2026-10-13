@@ -511,17 +511,15 @@ impl NetworkProxyState {
     }
 
     pub async fn force_reload(&self) -> Result<()> {
-        let previous_cfg = {
-            let guard = self.state.read().await;
-            guard.config.clone()
-        };
-
         match self.reloader.reload_now().await {
             Ok(mut new_state) => {
-                // 策略变更对运维敏感；记录 diff 让变更可追溯，而无需 dump 完整配置。
-                log_policy_changes(&previous_cfg, &new_state.config);
                 {
                     let mut guard = self.state.write().await;
+                    // 策略变更对运维敏感；记录 diff 让变更可追溯，而无需 dump 完整配置。
+                    //（对位 codex：diff 基准与 blocked 保留都在写锁内取——读锁快照
+                    // 会在重载窗口被并发写覆盖；credential_broker.configure 一行
+                    // 属已裁凭证经纪面，不随）
+                    log_policy_changes(&guard.config, &new_state.config);
                     new_state.blocked = guard.blocked.clone();
                     *guard = new_state;
                 }
@@ -904,19 +902,14 @@ impl NetworkProxyState {
         match self.reloader.maybe_reload().await? {
             None => Ok(()),
             Some(mut new_state) => {
-                let (previous_cfg, blocked, blocked_total) = {
-                    let guard = self.state.read().await;
-                    (
-                        guard.config.clone(),
-                        guard.blocked.clone(),
-                        guard.blocked_total,
-                    )
-                };
-                log_policy_changes(&previous_cfg, &new_state.config);
-                new_state.blocked = blocked;
-                new_state.blocked_total = blocked_total;
                 {
                     let mut guard = self.state.write().await;
+                    // 对位 codex：diff 基准/blocked 保留均在写锁内取——先在读锁
+                    // 克隆再写锁替换会把两锁之间 record_blocked 的落账覆盖丢失
+                    //（lost-update；blocked_total 亦随写锁内取值，不回退）。
+                    log_policy_changes(&guard.config, &new_state.config);
+                    new_state.blocked = guard.blocked.clone();
+                    new_state.blocked_total = guard.blocked_total;
                     *guard = new_state;
                 }
                 let source = self.reloader.source_label();

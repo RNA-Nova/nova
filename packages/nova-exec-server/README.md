@@ -20,7 +20,7 @@
 nova-exec-server --listen stdio
 
 # WebSocket 回环形态（配合 SSH 隧道或本机客户端）
-nova-exec-server --listen ws://127.0.0.1:8080
+nova-exec-server --listen ws://127.0.0.1:0
 ```
 
 SSH 远程场景不需要公网监听：远程 executor 只回环监听，经 SSH 隧道承载
@@ -29,7 +29,7 @@ SSH 远程场景不需要公网监听：远程 executor 只回环监听，经 SS
 ## 命令行参数
 
 ```
---listen <URL>                     传输端点：ws://IP:PORT（默认 ws://127.0.0.1:8080）或 stdio
+--listen <URL>                     传输端点：ws://IP:PORT（默认 ws://127.0.0.1:0 临时端口）或 stdio
 --concurrent-requests <COUNT>      单连接并发请求数 [默认 1 = 串行模式（与 codex 对齐）；≥2 并发]
 --exit-on-stdin-close              父死子随：WS 托管 spawn 时父进程 stdin 管道
                                    关闭即退出（stdio 形态下 EOF 本就结束服务）
@@ -89,7 +89,7 @@ subprocess ↔ executor 同缝切换），工具契约不变。
 cargo build --workspace          # 编译
 cargo test --workspace           # 测试（含 exec-server 端到端集成套件）
 cargo test -p nova-exec-server --test initialize   # 单套件
-cargo run -p nova-exec-server-cli -- --listen ws://127.0.0.1:8080   # 运行 CLI
+cargo run -p nova-exec-server-cli -- --listen ws://127.0.0.1:0     # 运行 CLI
 ```
 
 ### 集成测试基建（fork 自 codex exec-server）

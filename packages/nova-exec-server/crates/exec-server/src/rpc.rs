@@ -29,10 +29,16 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+use crate::client_telemetry::record_client_request;
 use crate::connection::JsonRpcConnection;
 use crate::connection::JsonRpcConnectionEvent;
 use crate::connection::JsonRpcTransport;
 use crate::rpc_server_requests::RpcServerRequestSender;
+use crate::rpc_timing::RpcCompletion;
+
+#[cfg(test)]
+#[path = "rpc_client_metrics_tests.rs"]
+mod client_metrics_tests;
 
 pub(crate) const SESSION_ALREADY_ATTACHED_ERROR_CODE: i64 = -32010;
 const MAX_IN_FLIGHT_REGULAR_CALLS: usize = 1024;
@@ -327,6 +333,9 @@ where
 }
 
 pub(crate) struct RpcClient {
+    // 对位 codex 39f4277087：调用方侧 RPC 计数（遥测面恢复批补回）——
+    // 构造时取全局 provider 的 metrics 快照；未装配 provider 即 None（noop）
+    metrics: Option<nova_exec_server_otel::MetricsClient>,
     write_tx: mpsc::Sender<JSONRPCMessage>,
     pending: Arc<StdMutex<HashMap<RequestId, PendingRequest>>>,
     inbound_request_ids: Arc<StdMutex<HashSet<RequestId>>>,
@@ -411,6 +420,7 @@ impl RpcClient {
 
         (
             Self {
+                metrics: nova_exec_server_otel::global(),
                 write_tx,
                 pending,
                 inbound_request_ids: Arc::new(StdMutex::new(HashSet::new())),
@@ -557,6 +567,25 @@ impl RpcClient {
         P: Serialize,
         T: DeserializeOwned,
     {
+        self.call_untraced(method, params).await
+    }
+
+    /// Send one request without creating the standard request span.
+    ///
+    /// Callers use this only when they install a more precise request span
+    /// around the same wire operation.
+    /// （对位 codex 39f4277087：入口即记调用方侧 RPC 计数——本地准入失败
+    /// 与取消也算一次尝试；通知与响应不走这些路径）
+    pub(crate) async fn call_untraced<P, T>(
+        &self,
+        method: &str,
+        params: &P,
+    ) -> Result<T, RpcCallError>
+    where
+        P: Serialize,
+        T: DeserializeOwned,
+    {
+        record_client_request(self.metrics.as_ref(), method);
         let _call_slot = self.acquire_regular_call_slot()?;
         self.call_inner(method, params, RpcCallTimeout::None).await
     }
@@ -571,6 +600,7 @@ impl RpcClient {
         P: Serialize,
         T: DeserializeOwned,
     {
+        record_client_request(self.metrics.as_ref(), method);
         let _call_slot = self.acquire_regular_call_slot()?;
         self.call_inner(method, params, RpcCallTimeout::After(call_timeout))
             .await
@@ -595,6 +625,7 @@ impl RpcClient {
         P: Serialize,
         T: DeserializeOwned,
     {
+        record_client_request(self.metrics.as_ref(), method);
         let _call_slot = match self.shared_call_slots.try_acquire() {
             Ok(call_slot) => call_slot,
             Err(_) => match self.cleanup_call_slots.try_acquire() {
@@ -681,11 +712,11 @@ impl RpcClient {
                 }
             },
         };
-        let result: Result<Value, RpcCallError> = response.map_err(|_| RpcCallError::Closed)?;
-        let response = match result {
-            Ok(response) => response,
-            Err(error) => return Err(error),
-        };
+        let completion = RpcCompletion::new(response.map_err(|_| RpcCallError::Closed)?);
+        // 对位 codex 39f4277087：响应接收即记 trace_safe 事件（reader→caller
+        // 纳秒时长随行；成功/服务端错误才记录）
+        completion.record_receipt(method);
+        let response = completion.result?;
         serde_json::from_value(response).map_err(RpcCallError::Json)
     }
 

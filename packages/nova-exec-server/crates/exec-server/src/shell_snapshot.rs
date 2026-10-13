@@ -102,12 +102,15 @@ struct ShellSnapshot {
 type CaptureResult = Result<ShellSnapshot, (&'static str, JSONRPCErrorError)>;
 
 impl ShellSnapshotCache {
-    // 对位 codex 39f4277087：span 名按 nova 前缀改名；锚点 fields 里的 process.id
-    // 走 crate::process_telemetry::trace_process_id——nova 无对位模块，跳过该字段
+    // 对位 codex 39f4277087：span 名按 nova 前缀改名；process.id 经
+    // crate::process_telemetry::trace_process_id（本批已移植）限长接入
     #[tracing::instrument(
         name = "nova.exec_server.process_prepare_shell_snapshot",
         skip_all,
-        fields(snapshot_requested = params.shell_snapshot.is_some()),
+        fields(
+            process.id = crate::process_telemetry::trace_process_id(params.process_id.as_str()),
+            snapshot_requested = params.shell_snapshot.is_some(),
+        ),
     )]
     pub(crate) async fn prepare(
         &self,
@@ -344,9 +347,13 @@ impl ShellSnapshotCache {
     }
 }
 
-// 对位 codex 39f4277087：span 名按 nova 前缀改名；锚点 fields 里的 process.id
-// 走 crate::process_telemetry::trace_process_id——nova 无对位模块，跳过该字段
-#[tracing::instrument(name = "nova.exec_server.process_capture_shell_snapshot", skip_all)]
+// 对位 codex 39f4277087：span 名按 nova 前缀改名；process.id 经
+// crate::process_telemetry::trace_process_id（本批已移植）限长接入
+#[tracing::instrument(
+    name = "nova.exec_server.process_capture_shell_snapshot",
+    skip_all,
+    fields(process.id = crate::process_telemetry::trace_process_id(params.process_id.as_str())),
+)]
 async fn capture_snapshot(
     params: &ExecParams,
     prepared: &PreparedExecRequest,

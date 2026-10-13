@@ -446,8 +446,9 @@ fn normalize_writable_root_for_sandbox(
     root: AbsolutePathBuf,
     allowed_symlinked_nova_home: Option<&AbsolutePathBuf>,
 ) -> Result<NormalizedWritableRoot, SeatbeltPreparationError> {
-    // 对位 codex d13aeb77ea：用户显式 opt-in 后，NOVA_HOME 下的 writable root
-    // 允许穿越 symlink（配置源尚未接入 nova，当前恒为 None，见移植报告挂账项）
+    // 对位 codex d13aeb77ea：用户显式 opt-in 后，NOVA_EXEC_SERVER_HOME 下的
+    // writable root 允许穿越 symlink（配置源尚未接入，当前恒为 None——
+    // 见 CODEX_UPSTREAM.md 裁点记录的 symlink opt-out 条目）
     let allow_symlinks = allowed_symlinked_nova_home.is_some_and(|home| {
         root.as_path().starts_with(home.as_path())
             || normalize_path_for_sandbox(home.as_path())
@@ -467,7 +468,7 @@ fn normalize_writable_root_for_sandbox(
 
     let normalized = if allow_symlinks {
         // This explicit opt-out trusts the current target, including targets
-        // outside NOVA_HOME and links changed by an earlier command.
+        // outside NOVA_EXEC_SERVER_HOME and links changed by an earlier command.
         normalize_path_for_sandbox(root.as_path()).unwrap_or(root)
     } else {
         // Otherwise preserve mutable components instead of granting their targets.

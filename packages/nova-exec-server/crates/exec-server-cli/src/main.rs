@@ -18,8 +18,10 @@ const OTEL_SERVICE_NAME: &str = "nova-exec-server";
 #[command(about = "Nova remote executor service")]
 struct Cli {
     /// Transport endpoint URL. Supported values: `ws://IP:PORT` (default), `stdio`/`stdio://`.
-    /// （wss 不支持：服务端只做回环承载，TLS 归上层隧道/中继层）
-    #[arg(long, value_name = "URL", default_value = "ws://127.0.0.1:8080")]
+    /// （wss 不支持：服务端只做回环承载，TLS 归上层隧道/中继层。
+    /// 默认值对位 codex 与 transport.rs 的 DEFAULT_LISTEN_URL——`:0` 临时端口，
+    /// 双实例不撞口，实际端口起服后打印在 stdout）
+    #[arg(long, value_name = "URL", default_value = nova_exec_server::DEFAULT_LISTEN_URL)]
     listen: String,
 
     /// WebSocket 入站鉴权旗标组（对位 codex 39f4277087
@@ -70,7 +72,7 @@ struct Cli {
     /// 父死子随：WS 托管 spawn 场景下，父进程持有的 stdin 管道关闭即退出
     /// （对位 codex --exit-on-stdin-close / ParentLifetime::StdinPipe）。
     /// stdio 形态下 stdin 本就是传输线，EOF 自然结束服务，此旗标为 no-op。
-    #[arg(long, env = "NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE")]
+    #[arg(long, env = nova_exec_server::NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR)]
     exit_on_stdin_close: bool,
 }
 
@@ -203,25 +205,28 @@ async fn run_until_shutdown(
 /// 遥测装配（codex build_provider 对位）：读 executor 配置根 config.toml 的
 /// [otel] 段 → 装全局 provider。无配置/无出口 = None（静默 noop）；
 /// 配置损坏/装配失败 = warn 后 None（响亮但不炸服务）。
+/// 注意用 eprintln 而非 tracing（对位 codex build_provider 的错误路径）：
+/// 本函数在 install_stderr_logging 之前运行（otel layer 要等 provider 出来
+/// 才能挂），此间任何 tracing::warn 都会落进无 subscriber 真空被丢弃。
 fn assemble_otel_provider() -> Option<nova_exec_server_otel::OtelProvider> {
     let home = match nova_exec_server_utils_home_dir::find_nova_exec_server_home() {
         Ok(home) => home,
         Err(error) => {
-            tracing::warn!(%error, "executor home 解析失败，遥测按静默 noop 继续");
+            eprintln!("executor home 解析失败，遥测按静默 noop 继续：{error}");
             return None;
         }
     };
     let settings = match nova_exec_server_otel::load_otel_settings(home.as_path()) {
         Ok(settings) => settings,
         Err(error) => {
-            tracing::warn!(%error, "[otel] 配置读取失败，遥测按静默 noop 继续");
+            eprintln!("[otel] 配置读取失败，遥测按静默 noop 继续：{error}");
             return None;
         }
     };
     match nova_exec_server_otel::OtelProvider::try_new(&settings) {
         Ok(provider) => provider,
         Err(error) => {
-            tracing::warn!(%error, "OTEL provider 装配失败，遥测按静默 noop 继续");
+            eprintln!("OTEL provider 装配失败，遥测按静默 noop 继续：{error}");
             None
         }
     }

@@ -98,11 +98,15 @@ pub(super) async fn open_push(
                 Some(FsReadStreamEvent::Done) => {
                     // 正常完成：服务端已自行收摊，drop 不再发 fs/close
                     registration.active = false;
+                    // 显式 drop 让 active 赋值被消费（rustc 不把隐式 Drop 当读，
+                    // 裸赋值会触发 unused_assignments 假阳性）
+                    drop(registration);
                     Ok(None)
                 }
                 Some(FsReadStreamEvent::Failed(message)) => {
                     // 服务端错误终态同样已收摊
                     registration.active = false;
+                    drop(registration);
                     Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("fs/readStream failed: {message}"),

@@ -331,6 +331,36 @@ fn proc_mount_preflight_does_not_bind_the_full_filesystem() {
     assert!(!argv.windows(3).any(|window| window == ["--bind", "/", "/"]));
 }
 
+// 对位 codex 39f4277087 linux_run_main_tests.rs:326-355：预检 argv 保留 WSL 双掩码
+// （--tmpfs /run/WSL 与 WSLg 的 --perms 000 --tmpfs <root> --remount-ro <root>）。
+#[test]
+fn proc_mount_preflight_preserves_wsl_masks() {
+    let argv = build_preflight_bwrap_argv(BwrapOptions {
+        mask_wsl_interop: true,
+        mask_wslg_distro: true,
+        ..Default::default()
+    })
+    .expect("build WSL preflight argv")
+    .args;
+
+    assert!(argv.windows(2).any(|window| window == ["--proc", "/proc"]));
+    assert!(
+        argv.windows(2)
+            .any(|window| window == ["--tmpfs", WSL_INTEROP_DIR])
+    );
+    assert!(argv.windows(6).any(|window| {
+        window
+            == [
+                "--perms",
+                "000",
+                "--tmpfs",
+                WSLG_DISTRO_ROOT,
+                "--remount-ro",
+                WSLG_DISTRO_ROOT,
+            ]
+    }));
+}
+
 #[test]
 fn cleanup_synthetic_mount_targets_removes_only_empty_mount_targets() {
     let temp_dir = tempfile::TempDir::new().expect("tempdir");

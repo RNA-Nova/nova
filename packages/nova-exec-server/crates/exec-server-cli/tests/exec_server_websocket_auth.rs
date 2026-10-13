@@ -150,7 +150,8 @@ async fn exec_server_websocket_auth_gates_rpc_connections() -> Result<()> {
                 let response: serde_json::Value = serde_json::from_str(response.to_text()?)?;
                 assert_eq!(response["id"], json!(1));
                 assert!(response.get("error").is_none(), "{response}");
-                let _ = websocket.close(None).await;
+                assert!(response["result"]["sessionId"].is_string(), "{response}");
+                websocket.close(/*msg*/ None).await?;
             }
 
             child.kill().await?;

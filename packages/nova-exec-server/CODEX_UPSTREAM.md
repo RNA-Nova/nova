@@ -76,7 +76,49 @@
 - **推送式 fs/readStream 断线/放弃语义**（nova 自有通道，锚点为拉循环）：
   推送路由按 handle_id 键控；客户端放弃即 best-effort fs/close（对位锚点
   拉模式的 drop 收摊）；close→同名重开的代际防护（条目代际校验）为 nova
-  自有加固（锚点拉模式无长驻服务端任务，天然无此竞态）。
+  自有加固（锚点拉模式无长驻服务端任务，天然无此竞态）；残余窗口
+  = 代际判定与阻塞 notify 间隔，彻底闭合需协议级流令牌（明认取舍）。
+- **prewarm_shell_snapshot 裁点**：锚点 `process.rs` trait 默认方法 +
+  `local_process.rs` 实现 + `CapturePurpose::Prewarm` + 3 个用例——锚点
+  唯一生产调用方在 codex core（unified_exec，未镜像面）；nova 无进程内
+  Rust 调用方，py 侧若需要应新增线上方法（届时恢复）。
+- **Windows managed-network 测试跳门两簇**：`process_sandbox_tests.rs` 的
+  `managed_network_honors_windows_sandbox_level` 双用例与 network-proxy
+  `tests/windows_stable_ingress.rs` 主路由测试均 `#[ignore]`——windows
+  共享 ingress 未移植（`network_proxy_restricting_sid` 恒 None 占位，
+  proxy.rs 有裁点注释），恢复 ingress 批次需一并恢复。
+- **arg0 启动面三处未镜像**：16MiB 线程栈预算（`THREAD_STACK_SIZE_BYTES`，
+  nova `#[tokio::main]` 默认栈）、`load_dotenv`（`~/.codex/.env` 过滤
+  `CODEX_` 前缀——codex 产品启动序）、`apply_patch` argv0/argv1 分派臂与
+  PATH prepend（codex 的补丁工具，nova 无此物）。
+- **linux-sandbox 别名目录跨进程锁收窄**：codex 的 `nova-linux-sandbox`
+  软链别名目录带跨进程锁文件；nova 收窄为进程私有 TempDir（无跨进程
+  共享面，CLI main.rs 就地注释在案）。
+- **MSIX 外部契约族**（与执行别名挂账并案）：`package_identity.rs` 的
+  debug 联调白名单保留 `OpenAI.Codex*` 包族（就地注释在案）——发布打包
+  时随执行别名一并核对。
+- **遥测面小裁点组**：`EnvironmentInfo::local_temporary_directories()`
+  公开方法（消费方在 codex core environment_selection，逻辑已内联进
+  `local()`）；`EnvironmentNetworkPolicy.requires_proxy` 字段（消费方在
+  codex-core orchestrator）；otel `network_policy.rs` OTLP 导出策略门控面；
+  otel `exporter`/`trace_exporter` 字段本批未接（`load_otel_settings`
+  有 warn—— traces/logs 接线归后续批次）。
+- **遥测命名家族约定**：shell snapshot 指标名按 `exec_server_shell_snapshot_*`
+  家族（与同文件 `exec_server_*`（计数加 `_total`）惯例一致，R1 更名期
+  决策），不按 `codex.*`→`nova.*` 逐字映射为 `nova.shell_snapshot.*`；
+  span/事件名统一 `nova.exec_server.*`。
+- **行为等价归一挂账（不逐条立项）**：`dirs_next`→`dirs`（env.rs 同一
+  Known Folder 语义）；`RetainedOutputChunk(Vec<u8>)` 对锚点
+  `ProcessOutputChunk(ByteChunk)`（协议面语义等价，存储/读取各多一次
+  深拷贝——性能保真差，R1 期历史决策）；`LocalProcess`/`RemoteProcess`
+  可见性 `pub(crate)`→`pub`（tests 消费方需要，锚点 crate 私有）；
+  CLI EnvFilter 默认 `warn`（锚点兜底 `error` + otel SDK 静音——otel
+  layer 自带 allowlist，SDK 噪声不回流出口）；`--strict-config` 面
+  （CLI crate 为 nova 自有，codex-config 严格校验面不随）。
+- **seatbelt symlink opt-out 配置源未接入**：`allow_symlinked_nova_home`
+  开关于 executor 存在（`with_allowed_symlinked_nova_home` setter），
+  但无配置读取方、恒 None——seatbelt.rs:449 的文案与 CODEX_UPSTREAM.md
+  本条互为指引；接入配置源（settings/config.toml 归上层）时恢复。
 
 ## 同步节奏
 

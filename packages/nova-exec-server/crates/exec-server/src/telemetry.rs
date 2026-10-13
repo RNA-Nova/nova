@@ -15,6 +15,8 @@ pub(crate) struct ExecutorRegistration {
 }
 
 impl ExecutorRegistration {
+    // 生产消费方在已裁的 relay 注册面（词汇保留，当前仅测试使用）
+    #[allow(dead_code)]
     pub(crate) fn new(environment_id: String, executor_registration_id: String) -> Option<Self> {
         if [&environment_id, &executor_registration_id]
             .iter()

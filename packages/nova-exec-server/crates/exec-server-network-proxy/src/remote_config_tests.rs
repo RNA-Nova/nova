@@ -5,7 +5,11 @@
 
 use pretty_assertions::assert_eq;
 
+use std::sync::Arc;
+
+use crate::LocalBindingPolicy::DefaultFalse;
 use crate::NetworkMode;
+use crate::NetworkProxy;
 use crate::NetworkProxyAuditMetadata;
 use crate::NetworkProxyConfig;
 use crate::NetworkProxyState;
@@ -52,8 +56,12 @@ fn optional_socket_policy_preserves_input_and_resolves_at_remote_boundary() {
     }
 }
 
-#[test]
-fn round_trip_preserves_supported_effective_settings() {
+/// 对位 codex 39f4277087 `round_trip_preserves_supported_effective_settings`。
+/// nova 适配点：Platform 维度已裁（`from_remote_launch_config` 不再收 executor_os，
+/// 一律按本机语义校验），锚点的 (Platform, socket) 四行循环收敛为本机单行，
+/// socket 取 unix 路径（与本文件其他用例一致）。
+#[tokio::test]
+async fn round_trip_preserves_supported_effective_settings() {
     let mut config = NetworkProxyConfig {
         enabled: true,
         enable_socks5: false,
@@ -70,9 +78,36 @@ fn round_trip_preserves_supported_effective_settings() {
 
     let remote =
         RemoteNetworkProxyConfig::from_effective_config(&config).expect("supported remote config");
-    let round_trip = remote.into_network_proxy_config();
+    let round_trip = remote.clone().into_network_proxy_config();
 
     assert_eq!(round_trip, config);
+
+    let state = Arc::new(
+        NetworkProxyState::from_remote_launch_config(RemoteNetworkProxyLaunchConfig::new(remote))
+            .unwrap(),
+    );
+    // 策略编辑与载体构造必须保持上线配置的内容不漂移。
+    state.add_allowed_domain("added.example.com").await.unwrap();
+    let proxy = NetworkProxy::builder()
+        .state(state)
+        .managed_by_nova(/*managed_by_nova*/ false)
+        .build()
+        .await
+        .unwrap();
+    config.upsert_domain_permission(
+        "added.example.com".into(),
+        crate::NetworkDomainPermission::Allow,
+        crate::normalize_host,
+    );
+    assert_eq!(
+        proxy
+            .remote_launch_config(DefaultFalse)
+            .await
+            .unwrap()
+            .proxy
+            .into_network_proxy_config(),
+        config
+    );
 }
 
 #[test]

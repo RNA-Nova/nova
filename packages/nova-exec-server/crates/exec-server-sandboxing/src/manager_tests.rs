@@ -719,6 +719,9 @@ fn wrapper_runtime_selection_uses_the_parent_not_environment_overrides() {
     }
 }
 
+// 对位 codex 39f4277087 manager_tests.rs:704-849：恢复锚点形态——blocked 为可写根内
+// 只读豁免（Read）、windows_sandbox_level 用 RestrictedToken（走
+// resolve_windows_restricted_token_filesystem_overrides 分支）、断言 --deny-write-paths-json。
 #[cfg(target_os = "windows")]
 #[test]
 fn transform_for_direct_spawn_windows_materializes_inner_helper() {
@@ -747,8 +750,8 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
                 missing_path_behavior: None,
             },
             FileSystemSandboxEntry {
-                path: FileSystemPath::Path { path: blocked.into() },
-                access: FileSystemAccessMode::Deny,
+                path: blocked.into(),
+                access: FileSystemAccessMode::Read,
                 missing_path_behavior: None,
             },
         ]),
@@ -785,12 +788,25 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
                     // 对位 codex 7efc49b258：sandbox_exe 改必填，测试传入 configured_helper
                     sandbox_exe: Some(configured_helper.as_path()),
                     use_legacy_landlock: false,
-                    windows_sandbox_level: WindowsSandboxLevel::Elevated,
+                    windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
                 },
             },
             executor_home.path(),
         )
         .expect("transform for direct spawn");
+
+    // 对位 codex 39f4277087 manager_tests.rs:782-792：workload env 经 wrapper 透传
+    // （wrapper 无条件序列化 --env-json，见 exec-server-windows-sandbox/src/wrapper.rs）。
+    let inner_env_json = exec_request
+        .command
+        .windows(2)
+        .find(|args| args[0] == "--env-json")
+        .expect("inner command environment");
+    assert_eq!(
+        serde_json::from_str::<HashMap<String, String>>(&inner_env_json[1])
+            .expect("decode inner command environment"),
+        HashMap::from([("Path".to_string(), r"C:\Windows\System32".to_string())])
+    );
 
     let separator_index = exec_request
         .command
@@ -819,7 +835,7 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
         exec_request
             .command
             .iter()
-            .any(|arg| arg == "--deny-read-paths-json")
+            .any(|arg| arg == "--deny-write-paths-json")
     );
     assert_eq!(
         exec_request.command[separator_index + 2],

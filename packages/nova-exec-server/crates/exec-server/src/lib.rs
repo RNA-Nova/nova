@@ -3,6 +3,8 @@ mod client;
 mod client_api;
 // 对位 codex 39f4277087 lib.rs `mod client_error;`
 mod client_error;
+// 对位 codex 39f4277087 lib.rs `mod client_telemetry;`（调用方侧 RPC 计数）
+mod client_telemetry;
 mod client_transport;
 mod connection;
 mod environment;
@@ -29,6 +31,8 @@ mod remote_file_system;
 mod remote_process;
 mod rpc;
 mod rpc_server_requests;
+// 对位 codex 39f4277087 lib.rs `mod rpc_timing;`（响应接收计时 trace_safe 事件）
+mod rpc_timing;
 mod sandbox_selection;
 mod runtime_paths;
 // 对位 codex 3342ee8c07 / d9960e12bb / b5c37c35fd / c2eb1f42a0：沙箱完整性模块

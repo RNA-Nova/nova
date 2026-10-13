@@ -5,6 +5,8 @@
 
 use std::io::BufRead as _;
 use std::io::BufReader as StdBufReader;
+use std::io::Read as _;
+use std::io::Write as _;
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::Command;
@@ -12,6 +14,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use std::time::Instant;
 
+use anyhow::Context as _;
 use anyhow::Result;
 use tempfile::TempDir;
 
@@ -96,21 +99,33 @@ fn local_exec_server_exits_successfully_on_sigterm() -> Result<()> {
     StdBufReader::new(child.stdout.take().expect("child stdout")).read_line(&mut listen_url)?;
     assert!(listen_url.starts_with("ws://127.0.0.1:"), "{listen_url}");
 
-    // 端口可达即就绪（listen URL 在 bind 之后才打印；再探一次确认在听）
+    // 就绪门对位锚点：GET /readyz 返 200 才算就绪（裸 TCP connect 只证明
+    // accept 在听，不代表 HTTP 路由已装配）。
     let listen_addr = listen_url
         .trim()
         .strip_prefix("ws://")
-        .expect("listen URL should use ws://");
+        .expect("listen URL should use ws://")
+        .parse()?;
     let deadline = Instant::now() + Duration::from_secs(5);
-    let ready = loop {
-        if TcpStream::connect(listen_addr).is_ok() {
-            break true;
-        }
-        if Instant::now() > deadline {
-            break false;
+    let mut ready = false;
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        if let Ok(mut stream) =
+            TcpStream::connect_timeout(&listen_addr, remaining.min(Duration::from_millis(100)))
+        {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+            let request =
+                format!("GET /readyz HTTP/1.1\r\nHost: {listen_addr}\r\nConnection: close\r\n\r\n");
+            let mut response = String::new();
+            if stream.write_all(request.as_bytes()).is_ok()
+                && stream.read_to_string(&mut response).is_ok()
+                && response.starts_with("HTTP/1.1 200")
+            {
+                ready = true;
+                break;
+            }
         }
         std::thread::sleep(Duration::from_millis(10));
-    };
+    }
     assert!(ready, "exec-server did not become ready at {listen_url}");
 
     // SAFETY: `child.id()` is the live process spawned above.
@@ -138,6 +153,13 @@ fn local_exec_server_gracefully_stops_when_parent_stdin_closes() -> Result<()> {
     StdBufReader::new(child.stdout.take().expect("child stdout")).read_line(&mut listen_url)?;
     assert!(listen_url.starts_with("ws://127.0.0.1:"), "{listen_url}");
 
+    // 关 stdin 前先确认服务活着（对位锚点 try_wait 反向断言——leash 极性
+    // 反转类 bug 下服务可能早已退出，缺此断言测试会假绿）。
+    anyhow::ensure!(
+        child.try_wait()?.is_none(),
+        "exec-server exited while its parent stdin remained open"
+    );
+
     // 父侧关闭 stdin（drop 写端 → 子进程读到 EOF → leash 触发优雅退出）
     drop(child.stdin.take());
 
@@ -146,11 +168,15 @@ fn local_exec_server_gracefully_stops_when_parent_stdin_closes() -> Result<()> {
     Ok(())
 }
 
-/// 对位 codex local_exec_server_flushes_telemetry_on_stdio_disconnect：
-/// 配好 [otel] metrics 出口后，stdio 断开（stdin EOF）退出前必须把
-/// 队列里的指标 flush 到采集器（进程启动计数启动即发射，退出时必有载荷）。
+/// 对位 codex local_exec_server_flushes_telemetry_on_stdio_disconnect（全形态）：
+/// 配好 [otel] metrics 出口后，走完整 initialize + process/start 握手再断开
+/// stdio——退出前 flush 必须把**服务端遥测接线**产生的具名指标送达采集器。
+/// 只断言"收到任意请求"不够：进程启动计数不经 ExecServerTelemetry 接线，
+/// 接线断（inner=None）也能收到——必须断言经接线产生的指标点。
 #[tokio::test]
 async fn local_exec_server_flushes_telemetry_on_stdio_disconnect() -> Result<()> {
+    use tokio::io::AsyncReadExt;
+    use tokio::io::BufReader;
     use wiremock::Mock;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
@@ -177,30 +203,200 @@ metrics_exporter = {{ OtlpHttp = {{ endpoint = "{collector_url}/v1/metrics", pro
         ),
     )?;
 
-    let mut child = nova_command(home.path())?
-        .args(["--listen", "stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    // 给 provider 装配与首批指标一点窗口，然后断开 stdio（EOF）
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    drop(child.stdin.take());
-    let status = wait_with_timeout(&mut child, Duration::from_secs(15))?;
-    assert!(status.success(), "{status}");
-
-    // 退出前 flush 已把指标送达采集器
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let received = collector.received_requests().await.unwrap_or_default();
-        if !received.is_empty() {
-            break;
-        }
+    let cwd = url::Url::from_directory_path(std::env::current_dir()?)
+        .map_err(|()| anyhow::anyhow!("could not convert cwd to file URL"))?
+        .to_string();
+    #[cfg(windows)]
+    let argv = vec!["ping.exe", "-n", "61", "127.0.0.1"];
+    #[cfg(not(windows))]
+    let argv = vec!["/bin/sleep", "60"];
+    let bin = nova_exec_server_bin()?;
+    let home_path = home.path().to_path_buf();
+    let subprocess = async move {
+        let mut command = tokio::process::Command::new(bin);
+        command
+            .env("NOVA_EXEC_SERVER_HOME", &home_path)
+            .env("NO_PROXY", "127.0.0.1,localhost")
+            .env("no_proxy", "127.0.0.1,localhost")
+            .args(["--listen", "stdio"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(true);
+        let mut child = command.spawn()?;
+        let mut stdin = child.stdin.take().context("exec-server stdin was not piped")?;
+        let stdout = child.stdout.take().context("exec-server stdout was not piped")?;
+        let mut stdout = BufReader::new(stdout);
+        send_json_line(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {"clientName": "otel-test", "resumeSessionId": null}
+            }),
+        )
+        .await?;
+        wait_for_response(&mut stdout, /*expected_id*/ 1).await?;
+        send_json_line(
+            &mut stdin,
+            &serde_json::json!({"method": "initialized", "params": {}}),
+        )
+        .await?;
+        send_json_line(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 2,
+                "method": "process/start",
+                "params": {
+                    "processId": "otel-process",
+                    "argv": argv,
+                    "cwd": cwd,
+                    "env": {},
+                    "tty": false,
+                    "pipeStdin": false,
+                    "arg0": null
+                }
+            }),
+        )
+        .await?;
+        wait_for_response(&mut stdout, /*expected_id*/ 2).await?;
+        drop(stdin);
+        let mut remaining_stdout = String::new();
+        stdout.read_to_string(&mut remaining_stdout).await?;
+        let status = child.wait().await?;
         anyhow::ensure!(
-            Instant::now() <= deadline,
-            "no metrics reached the collector"
+            status.success(),
+            "exec-server exited with {status}; remaining stdout: {remaining_stdout}"
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+        Ok::<(), anyhow::Error>(())
+    };
+    let subprocess_result = tokio::time::timeout(Duration::from_secs(30), subprocess)
+        .await
+        .map_err(|_| anyhow::anyhow!("exec-server subprocess timed out"))?;
+    subprocess_result?;
+
+    let requests = collector
+        .received_requests()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("failed to read OTLP collector requests"))?;
+    let metrics = requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/metrics")
+        .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body))
+        .collect::<serde_json::Result<Vec<_>>>()?;
+    assert_metric_point(
+        &metrics,
+        "exec_server_connections_active",
+        &[("transport", "stdio")],
+        Some(0),
+    );
+    assert_metric_point(
+        &metrics,
+        "exec_server_connections_total",
+        &[("transport", "stdio")],
+        Some(1),
+    );
+    assert_metric_point(
+        &metrics,
+        "exec_server_requests_total",
+        &[("method", "process/start"), ("result", "success")],
+        Some(1),
+    );
+    assert_metric_point(&metrics, "exec_server_processes_active", &[], Some(0));
+    assert_metric_point(
+        &metrics,
+        "exec_server_processes_finished_total",
+        &[("result", "terminated")],
+        Some(1),
+    );
+    assert_metric_point(
+        &metrics,
+        "exec_server_request_duration_seconds",
+        &[("method", "process/start"), ("result", "success")],
+        /*value*/ None,
+    );
+    assert_metric_point(
+        &metrics,
+        "exec_server_process_duration_seconds",
+        &[("result", "terminated")],
+        /*value*/ None,
+    );
     Ok(())
+}
+
+async fn send_json_line(
+    stdin: &mut (impl tokio::io::AsyncWrite + Unpin),
+    message: &serde_json::Value,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let mut encoded = serde_json::to_vec(message)?;
+    encoded.push(b'\n');
+    stdin.write_all(&encoded).await?;
+    stdin.flush().await?;
+    Ok(())
+}
+
+async fn wait_for_response(
+    stdout: &mut (impl tokio::io::AsyncBufRead + Unpin),
+    expected_id: i64,
+) -> Result<serde_json::Value> {
+    use tokio::io::AsyncBufReadExt;
+    loop {
+        let mut line = String::new();
+        if stdout.read_line(&mut line).await? == 0 {
+            anyhow::bail!("exec-server stdout closed before response {expected_id}");
+        }
+        let message: serde_json::Value = serde_json::from_str(&line)?;
+        if message["id"].as_i64() == Some(expected_id) {
+            anyhow::ensure!(
+                message.get("error").is_none(),
+                "exec-server request {expected_id} failed: {message}"
+            );
+            return Ok(message);
+        }
+    }
+}
+
+/// 对位 codex assert_metric_point：在 OTLP JSON 载荷里按 指标名 + 属性集
+/// （+可选值）找数据点；值 None = 只断言存在（直方图）。
+fn assert_metric_point(
+    payloads: &[serde_json::Value],
+    name: &str,
+    attributes: &[(&str, &str)],
+    value: Option<i64>,
+) {
+    let found = payloads
+        .iter()
+        .flat_map(|payload| payload["resourceMetrics"].as_array().into_iter().flatten())
+        .flat_map(|resource| resource["scopeMetrics"].as_array().into_iter().flatten())
+        .flat_map(|scope| scope["metrics"].as_array().into_iter().flatten())
+        .filter(|metric| metric["name"].as_str() == Some(name))
+        .flat_map(|metric| {
+            ["gauge", "sum", "histogram"]
+                .into_iter()
+                .find_map(|kind| metric[kind]["dataPoints"].as_array())
+                .into_iter()
+                .flatten()
+        })
+        .any(|point| {
+            let actual_attributes = point["attributes"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let attributes_match = actual_attributes.len() == attributes.len()
+                && attributes.iter().all(|(expected_key, expected_value)| {
+                    actual_attributes.iter().any(|actual| {
+                        actual["key"].as_str() == Some(*expected_key)
+                            && actual["value"]["stringValue"].as_str() == Some(*expected_value)
+                    })
+                });
+            let actual_value = point["asInt"]
+                .as_i64()
+                .or_else(|| point["asInt"].as_str()?.parse().ok());
+            attributes_match && value.is_none_or(|expected| actual_value == Some(expected))
+        });
+    assert!(
+        found,
+        "metric {name} with attributes {attributes:?} and value {value:?} missing"
+    );
 }
