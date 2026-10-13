@@ -66,3 +66,12 @@ retries = 3
 platform = 'cfg(windows)'
 filter = 'package(nova-exec-server-utils-pty) & test(conpty_ctrl_c_interrupts_powershell_foreground_child)'
 retries = 3
+
+[[profile.default.overrides]]
+# 快照并发回放族（8 路并发沙箱回放）：内部事件死线 2s，全量并行时共享
+# runner 上互相挤压会超时（CI run 38352412796 隔离探针 0.36s 绿、全量 4.3s
+# 红实证；同族 protected_transport 变体本就是 retries 吸收的 flaky 族）。
+# 负载敏感，retries 吸收。
+platform = 'cfg(unix)'
+filter = 'package(nova-exec-server) & test(shell_snapshot_concurrent_replays_keep_independent_readers)'
+retries = 3
