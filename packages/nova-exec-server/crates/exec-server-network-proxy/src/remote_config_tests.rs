@@ -19,7 +19,7 @@ fn round_trip_preserves_supported_effective_settings() {
         enable_socks5: false,
         enable_socks5_udp: false,
         allow_upstream_proxy: false,
-        dangerously_allow_all_unix_sockets: true,
+        dangerously_allow_all_unix_sockets: Some(true),
         mode: NetworkMode::None,
         allow_local_binding: Some(true),
         ..NetworkProxyConfig::default()

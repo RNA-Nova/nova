@@ -947,7 +947,7 @@ async fn prepared_managed_network_context_takes_precedence_over_live_proxy_socke
         enabled: true,
         // 上游 NetworkMode::Full 对位 nova 的 NetworkMode::Proxy
         mode: NetworkMode::Proxy,
-        dangerously_allow_all_unix_sockets: true,
+        dangerously_allow_all_unix_sockets: Some(true),
         ..Default::default()
     };
     let state = build_config_state(network_config, NetworkProxyConstraints::default())?;

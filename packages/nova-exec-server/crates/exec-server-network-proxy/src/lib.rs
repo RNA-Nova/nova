@@ -240,8 +240,12 @@ pub struct NetworkProxyConfig {
     pub enable_socks5_udp: bool,
     #[serde(default)]
     pub allow_upstream_proxy: bool,
-    #[serde(default)]
-    pub dangerously_allow_all_unix_sockets: bool,
+    /// When no socket map is set, omission defers to attachment policy; execution defaults to false.
+    /// 对位 codex 39f4277087 config.rs：三态 Option<bool>——省略=交给 attachment
+    /// 策略归一（`EnvironmentNetworkPolicy::apply_to` 的三态公式）；显式 false 仍是
+    /// 上限。旧报文显式 false/true 不变（修复 124 复核 B-2：bool 化丢三态）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dangerously_allow_all_unix_sockets: Option<bool>,
     #[serde(default)]
     pub mode: NetworkMode,
     #[serde(default)]
@@ -343,7 +347,9 @@ impl RemoteNetworkProxyConfig {
             enable_socks5: config.enable_socks5,
             enable_socks5_udp: config.enable_socks5_udp,
             allow_upstream_proxy: config.allow_upstream_proxy,
-            dangerously_allow_all_unix_sockets: config.dangerously_allow_all_unix_sockets,
+            dangerously_allow_all_unix_sockets: config
+                .dangerously_allow_all_unix_sockets
+                .unwrap_or(false),
             mode: config.mode,
             domains: config.domains.clone(),
             unix_sockets: config.unix_sockets.clone(),

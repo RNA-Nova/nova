@@ -2174,6 +2174,11 @@ fn parse_project_roots_glob_pattern(pattern: &str) -> Option<&Path> {
 }
 
 fn resolve_project_roots_glob_pattern(subpath: &Path, root: &AbsolutePathBuf) -> String {
+    // 潜伏边角记录（nova 自增的 cwd 变体；当前无生产调用方——唯一调用点
+    // materialize_project_roots_with_cwd 仅测试触及）：cwd 含非 UTF-8 字节时
+    // to_string_lossy 会产生 U+FFFD，合成的 deny glob 不再匹配真实路径
+    //（fail-open 方向）。上游走 URI 字符串无此面；将来有真实调用方时改
+    // fallible。
     AbsolutePathBuf::resolve_path_against_base(subpath, root.as_path())
         .to_string_lossy()
         .into_owned()

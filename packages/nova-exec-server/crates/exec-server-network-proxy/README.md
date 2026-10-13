@@ -19,3 +19,14 @@
   bool→Option<bool> + `remote_launch_config(policy)` 参数与 MXC 兜底 ensure。
 - `socket_path.rs` 的 executor_os 维度不镜像（裁点注释见 config.rs）；
   `brokered_tunnel.rs` / `main.rs` 不镜像（理由见 lib.rs 裁点）。
+
+## 二轮复核修复批（对位 codex 39f4277087，审计 124-B）
+
+- `dangerously_allow_all_unix_sockets` 线上形状 bool → `Option<bool>`（serde
+  default + skip_serializing_if），`apply_to` 三态归一公式恢复（controller 省略
+  socket 面时 attachment 的 Allow 授予不再被静默删）；Vec 承载的重复 path 冲突
+  按 deny 优先归并（锚点 BTreeMap 为 serde 后写覆盖，nova 更保守）。
+- unix socket 白名单 NUL 拒绝恢复（`ValidatedUnixSocketPath::parse`）+ 锚点矩阵
+  的 native 语义对位用例随迁。
+- `proxy/managed_routing_tests.rs`（e2e 两代理策略隔离）与
+  `wait_fails_fast_when_either_listener_fails`（监听器失败快速传播）随迁。

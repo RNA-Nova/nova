@@ -29,6 +29,8 @@ winapi = { version = "0.3.9", features = [
     "libloaderapi",
     "minwinbase",
     "processthreadsapi",
+    # "std" 为 nova 自增（上游无此项）：实证必需——摘掉后 windows-gnu 交叉
+    # 编译报 3 错（winapi std 特性提供我们使用的 std 链接辅助）。
     "std",
     "synchapi",
     "winbase",

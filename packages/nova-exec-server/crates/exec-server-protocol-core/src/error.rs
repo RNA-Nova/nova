@@ -47,6 +47,9 @@ pub enum SandboxErr {
 
 pub struct ExecErr {
     details: ExecErrorDetails,
+    // 裁剪残留（对位 codex 子集化）：上游此字段的读者（retry_after/
+    // server_retry_delay）在未镜像面；字段保留以维持线上形状，当前恒 None。
+    #[allow(dead_code)]
     retry_delay: Option<Duration>,
 }
 

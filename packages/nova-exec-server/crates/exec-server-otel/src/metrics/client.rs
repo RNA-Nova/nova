@@ -531,7 +531,9 @@ impl MetricsClient {
 }
 
 fn os_resource_attributes() -> Vec<KeyValue> {
-    let os_info = os_info::get();
+    // 对位 codex 39f4277087：OS 信息静态缓存一次（LazyLock），不每次现取
+    static OS_INFO: std::sync::LazyLock<os_info::Info> = std::sync::LazyLock::new(os_info::get);
+    let os_info = &*OS_INFO;
     let os_type_raw = os_info.os_type().to_string();
     let os_type = sanitize_metric_tag_value(os_type_raw.as_str());
     let os_version_raw = os_info.version().to_string();

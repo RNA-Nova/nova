@@ -389,6 +389,35 @@ struct FileHandleEntry {
     _permit: OwnedSemaphorePermit,
 }
 
+/// readStream 的对外块长可达 MAX_READ_STREAM_BLOCK_SIZE（4 MiB），而 read_block
+/// 的校验上限是线上 fs/readBlock 的 FILE_READ_CHUNK_SIZE（1 MiB）——超过校验
+/// 上限的读块拆成 ≤FILE_READ_CHUNK_SIZE 的子读串行合并（对外块长语义不变：
+/// eof 仅当末次子读短读即文件结尾；子读失败的关句柄语义与单读一致）。
+async fn read_stream_block(
+    file_handles: &FileHandleManager,
+    handle_id: &str,
+    offset: u64,
+    len: usize,
+) -> io::Result<FileReadBlock> {
+    if len <= FILE_READ_CHUNK_SIZE {
+        return file_handles.read_block(handle_id, offset, len).await;
+    }
+    let mut bytes = Vec::with_capacity(len);
+    let mut sub_offset = offset;
+    loop {
+        let sub_len = (len - bytes.len()).min(FILE_READ_CHUNK_SIZE);
+        let block = file_handles
+            .read_block(handle_id, sub_offset, sub_len)
+            .await?;
+        sub_offset = sub_offset.saturating_add(block.bytes.len() as u64);
+        let eof = block.eof;
+        bytes.extend_from_slice(&block.bytes);
+        if eof || bytes.len() >= len {
+            return Ok(FileReadBlock { bytes, eof });
+        }
+    }
+}
+
 /// fs/readStream 的共享流式读循环（nova 自有件，上游无对应）：executor 自读路径与
 /// 沙箱开门（fd 传递）路径共用同一份 offset/len/eof 语义，保证两种执行体线上行为一致。
 ///
@@ -420,10 +449,7 @@ where
             break;
         }
 
-        match file_handles
-            .read_block(handle_id, current_offset, read_len)
-            .await
-        {
+        match read_stream_block(file_handles, handle_id, current_offset, read_len).await {
             Ok(block) => {
                 let bytes_len = block.bytes.len() as u64;
                 let eof = block.eof || remaining.is_some_and(|r| r <= bytes_len);
@@ -532,11 +558,16 @@ async fn run_write_stream_task(
                     // 定位写经 spawn_blocking 内同步 write 落定，交账即全部落盘
                     (None, true) => Ok(cursor),
                 };
+                // 先摘句柄再交账：客户端拿到 done 响应时同名 handle_id 已可复用
+                //（交账先于摘除会在 done 与任务收尾之间留出复用被误拒的窗口）。
+                manager.close(&handle_id);
                 let _ = respond.send(result);
                 break;
             }
         }
     }
+    // 无 Done 的收尾路径（close/断连摘条目 → channel 对端全掉 → recv=None）；
+    // Done 臂已摘除时此处为幂等空操作。
     manager.close(&handle_id);
 }
 

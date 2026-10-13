@@ -728,6 +728,28 @@ impl ExecServerClient {
                     },
                 )
                 .await?;
+            // 协议版本 major 匹配（对位 nova-exec-server-client py 侧的
+            // `_check_protocol_version` 与 PROTOCOL.md 版本协商节——major 不等即
+            // 不兼容，minor 只增不减）：旧服务端线上省略该字段（serde 缺省空串）
+            // 放行兼容。
+            if !response.protocol_version.is_empty() {
+                let server_major = response
+                    .protocol_version
+                    .split('.')
+                    .next()
+                    .unwrap_or_default();
+                let client_major = crate::protocol::PROTOCOL_VERSION
+                    .split('.')
+                    .next()
+                    .unwrap_or_default();
+                if server_major != client_major {
+                    return Err(ExecServerError::Protocol(format!(
+                        "exec-server protocol version {} is incompatible with client {}",
+                        response.protocol_version,
+                        crate::protocol::PROTOCOL_VERSION
+                    )));
+                }
+            }
             let session_id = self
                 .inner
                 .session_id
@@ -1766,9 +1788,19 @@ impl Inner {
             Some(error) => FsReadStreamEvent::Failed(error),
             None => FsReadStreamEvent::Done,
         };
-        // 队列满时终止事件可能推不进去——无妨，发送端随即将 drop，
-        // 接收端看到通道关闭同样结束流。
-        let _ = sender.try_send(event);
+        // 数据块的 try_send 背压纪律不变，但终止事件不许丢：每流恰好一个
+        //（路由已摘除，这是该流的唯一残余推送）——若被满队列挤丢，收齐数据
+        // 的流会以 UnexpectedEof 误终。满员时转异步 send 排队（接收端消失则
+        // send 即败返回，任务不滞留）。
+        match sender.try_send(event) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(event)) => {
+                tokio::spawn(async move {
+                    let _ = sender.send(event).await;
+                });
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
+        }
     }
 
     fn fail_all_fs_read_streams(&self, message: String) {
@@ -4006,6 +4038,182 @@ mod tests {
             panic!("expected stream failure after disconnect, got {event:?}");
         };
         assert_eq!(message, "exec-server transport disconnected");
+        server.await.expect("server task should finish");
+    }
+
+    use super::ExecServerError;
+
+    /// initialize 响应的 protocolVersion 可由测试自定义（None = 线上省略
+    /// 该字段，模拟旧服务端）。返回客户端的连接结果与服务端任务句柄。
+    async fn connect_with_protocol_version(
+        protocol_version: Option<&str>,
+    ) -> Result<(ExecServerClient, tokio::task::JoinHandle<()>), ExecServerError> {
+        let (client_stdin, server_reader) = duplex(1 << 20);
+        let (mut server_writer, client_stdout) = duplex(1 << 20);
+        let protocol_version = protocol_version.map(str::to_string);
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let initialize = match read_jsonrpc_line(&mut lines).await {
+                JSONRPCMessage::Request(request) if request.method == INITIALIZE_METHOD => request,
+                other => panic!("expected initialize request, got {other:?}"),
+            };
+            let mut result = serde_json::json!({ "sessionId": "version-test" });
+            if let Some(protocol_version) = protocol_version {
+                result["protocolVersion"] = serde_json::Value::String(protocol_version);
+            }
+            write_jsonrpc_line(
+                &mut server_writer,
+                JSONRPCMessage::Response(JSONRPCResponse {
+                    id: initialize.id,
+                    result,
+                }),
+            )
+            .await;
+            // 握手的下一帧只为等客户端收尾：接受时读出 initialized，拒连时
+            // 客户端断开（EOF）。不用 read_jsonrpc_line——其 EOF 即 panic。
+            let _ = timeout(Duration::from_secs(1), lines.next_line()).await;
+        });
+        ExecServerClient::connect(
+            JsonRpcConnection::from_stdio(
+                client_stdout,
+                client_stdin,
+                "version-test-client".to_string(),
+            ),
+            ExecServerClientConnectOptions::default(),
+        )
+        .await
+        .map(|client| (client, server))
+    }
+
+    /// 协议版本 major 匹配（对位 py SDK `_check_protocol_version` 与
+    /// PROTOCOL.md 版本协商节）：major 不等即拒绝连接。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn initialize_rejects_incompatible_protocol_major() {
+        let error = connect_with_protocol_version(Some("0.9"))
+            .await
+            .map(drop)
+            .expect_err("major mismatch must reject the connection");
+        assert!(
+            matches!(&error, ExecServerError::Protocol(_)),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.to_string().contains("0.9"),
+            "error should name the server version: {error}"
+        );
+    }
+
+    /// 同一 major 的 minor 差放行（协议 minor 只增不减）；旧服务端线上省略
+    /// protocolVersion（serde 缺省空串）放行兼容。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn initialize_accepts_matching_major_and_legacy_servers() {
+        let (client, server) = connect_with_protocol_version(Some("1.99"))
+            .await
+            .expect("same major must connect");
+        // 服务端先读到 initialized 再收尾（先于客户端 drop，避免 EOF 竞态）
+        server.await.expect("server task should finish");
+        drop(client);
+
+        let (client, server) = connect_with_protocol_version(None)
+            .await
+            .expect("legacy server without protocolVersion must connect");
+        server.await.expect("server task should finish");
+        drop(client);
+    }
+
+    /// 终止事件不许丢：推送队列恰好填满时 done 仍须送达（满员转异步排队），
+    /// 收齐全部数据的流不得以 UnexpectedEof 误终（数据块的 try_send 背压
+    /// 纪律不变——溢出仍断流）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn fs_read_stream_done_is_delivered_on_a_full_queue() {
+        let chunk_count = super::FS_READ_STREAM_QUEUE_CAPACITY as u64;
+        let (client, server) =
+            connect_with_fake_server(move |mut lines, mut server_writer| async move {
+                let request = match read_jsonrpc_line(&mut lines).await {
+                    JSONRPCMessage::Request(request)
+                        if request.method == FS_READ_STREAM_METHOD =>
+                    {
+                        request
+                    }
+                    other => panic!("expected fs/readStream request, got {other:?}"),
+                };
+                write_jsonrpc_line(
+                    &mut server_writer,
+                    JSONRPCMessage::Response(JSONRPCResponse {
+                        id: request.id,
+                        result: serde_json::to_value(FsReadStreamResponse {
+                            handle_id: "handle-full".to_string(),
+                            total_size: Some(chunk_count),
+                        })
+                        .expect("readStream response should serialize"),
+                    }),
+                )
+                .await;
+                for seq in 0..chunk_count {
+                    write_jsonrpc_line(
+                        &mut server_writer,
+                        JSONRPCMessage::Notification(JSONRPCNotification {
+                            method: FS_READ_STREAM_CHUNK_METHOD.to_string(),
+                            params: Some(
+                                serde_json::to_value(FsReadStreamChunkNotification {
+                                    handle_id: "handle-full".to_string(),
+                                    seq,
+                                    chunk: b"x".to_vec().into(),
+                                    eof: seq + 1 == chunk_count,
+                                })
+                                .expect("chunk notification should serialize"),
+                            ),
+                        }),
+                    )
+                    .await;
+                }
+                write_jsonrpc_line(
+                    &mut server_writer,
+                    JSONRPCMessage::Notification(JSONRPCNotification {
+                        method: FS_READ_STREAM_DONE_METHOD.to_string(),
+                        params: Some(
+                            serde_json::to_value(FsReadStreamDoneNotification {
+                                handle_id: "handle-full".to_string(),
+                                total_bytes: chunk_count,
+                                error: None,
+                            })
+                            .expect("done notification should serialize"),
+                        ),
+                    }),
+                )
+                .await;
+            })
+            .await;
+
+        let mut rx = client
+            .register_fs_read_stream("handle-full".to_string())
+            .expect("register should succeed");
+        client
+            .fs_read_stream(FsReadStreamParams {
+                handle_id: "handle-full".to_string(),
+                path: PathUri::from_host_native_path(stream_fixture_path("big.log"))
+                    .expect("path uri"),
+                offset: 0,
+                len: None,
+                block_size: None,
+                sandbox: None,
+            })
+            .await
+            .expect("readStream should succeed");
+
+        for expected_seq in 0..chunk_count {
+            match rx.recv().await {
+                Some(FsReadStreamEvent::Chunk(chunk)) => {
+                    assert_eq!(chunk.as_ref(), b"x", "chunk {expected_seq}");
+                }
+                other => panic!("expected chunk {expected_seq}, got {other:?}"),
+            }
+        }
+        // 队列曾满：done 的 try_send 失败后转异步排队，仍须在末块之后送达
+        match rx.recv().await {
+            Some(FsReadStreamEvent::Done) => {}
+            other => panic!("done must be delivered even on a full queue, got {other:?}"),
+        }
         server.await.expect("server task should finish");
     }
 

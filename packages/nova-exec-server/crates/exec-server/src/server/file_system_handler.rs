@@ -583,8 +583,7 @@ mod tests {
         });
     }
 
-    /// 等写任务在 done 交账后摘句柄退出（respond 先达、摘除在其后一拍——
-    /// 有界轮询，不赌调度窗口）。
+    /// 等写任务摘句柄退出（done 交账前句柄已摘除；有界轮询，不赌调度窗口）。
     async fn wait_for_handle_removal(handler: &FileSystemHandler) {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while handler.file_handles.open_handle_count() > 0 {

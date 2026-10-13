@@ -1,3 +1,6 @@
+// 对位 codex 39f4277087 `otel/tests/suite/otlp_http_loopback.rs`。
+// CI 加固适配：锚点的内部死线（3s deadline / 1s recv_timeout）在共享 runner
+// 上偏紧，统一放宽为 15s/10s——纯测试时序余量，不影响被测语义。
 use nova_exec_server_otel::MetricsClient;
 use nova_exec_server_otel::MetricsConfig;
 use nova_exec_server_otel::OtelExporter;

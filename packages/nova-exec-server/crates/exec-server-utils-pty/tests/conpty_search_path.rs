@@ -42,8 +42,10 @@ fn conpty_ignores_dll_in_current_directory() -> anyhow::Result<()> {
     let candidate = temp_dir.join("conpty.dll");
     // A kernel32 copy exports the ConPTY functions, so the old bare-name probe
     // would successfully load and retain this repository-controlled file.
-    fs::copy(
-        PathBuf::from(system_root)
+    // 对位 codex：用 copy_executable（子进程写文件，防 sibling fork 继承可写
+    // fd 的竞态），不是裸 fs::copy。
+    nova_exec_server_utils_cargo_bin::copy_executable(
+        &PathBuf::from(system_root)
             .join("System32")
             .join("kernel32.dll"),
         &candidate,

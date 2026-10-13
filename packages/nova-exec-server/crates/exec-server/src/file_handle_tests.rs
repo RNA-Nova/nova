@@ -383,3 +383,85 @@ async fn write_stream_small_stream_is_unaffected_by_backpressure() -> Result<()>
     assert_eq!(std::fs::read(&path)?, b"hello world");
     Ok(())
 }
+
+/// 读流块长超线上 fs/readBlock 校验上限（FILE_READ_CHUNK_SIZE）时拆子读
+/// 合并：字节拼接还原、seq 递增、仅末块 eof（回归：块长区间
+/// (FILE_READ_CHUNK_SIZE, MAX_READ_STREAM_BLOCK_SIZE] 曾撞上 read_block 的
+/// 校验上限而整流作废）。
+#[test_case::test_case(2 * 1024 * 1024; "two_mib_blocks")]
+#[test_case::test_case(4 * 1024 * 1024; "max_size_blocks")]
+#[tokio::test]
+async fn read_stream_oversized_block_is_split_into_wire_sized_reads(
+    block_size: usize,
+) -> Result<()> {
+    use nova_exec_server_file_system::FILE_READ_CHUNK_SIZE;
+
+    assert!(block_size > FILE_READ_CHUNK_SIZE);
+    let manager = FileHandleManager::default();
+    let data: Vec<u8> = (0..(2 * FILE_READ_CHUNK_SIZE + 77) as u32)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let mut file = tempfile::tempfile()?;
+    file.write_all(&data)?;
+    manager
+        .open("big-read".to_string(), ready(Ok(File::from_std(file))))
+        .await?;
+
+    let mut emitted: Vec<(u64, Vec<u8>, bool)> = Vec::new();
+    let (total_bytes, error) = super::stream_file_blocks(
+        &manager,
+        "big-read",
+        /*offset*/ 0,
+        /*len*/ None,
+        block_size,
+        async |seq, bytes, eof| {
+            emitted.push((seq, bytes, eof));
+            true
+        },
+    )
+    .await;
+
+    assert_eq!(error, None);
+    assert_eq!(total_bytes, data.len() as u64);
+    for (index, (seq, _, _)) in emitted.iter().enumerate() {
+        assert_eq!(*seq, index as u64);
+    }
+    assert!(emitted.iter().all(|(_, bytes, _)| !bytes.is_empty()));
+    assert!(!emitted[..emitted.len() - 1].iter().any(|(_, _, eof)| *eof));
+    assert!(emitted.last().is_some_and(|(_, _, eof)| *eof));
+    let reassembled: Vec<u8> = emitted
+        .into_iter()
+        .flat_map(|(_, bytes, _)| bytes)
+        .collect();
+    assert_eq!(reassembled, data);
+    manager.close("big-read");
+    Ok(())
+}
+
+/// done 响应返回时同名 handle_id 必须已可复用（写任务先摘句柄再交账——
+/// 交账先于摘除会在 done 与任务收尾之间留出复用被误拒的窗口）。
+#[tokio::test]
+async fn write_stream_done_frees_the_handle_id_before_responding() -> Result<()> {
+    let manager = FileHandleManager::default();
+    manager
+        .open_write_stream(
+            "w-reuse".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+            /*offset*/ None,
+        )
+        .await?;
+    manager
+        .write_stream_chunk("w-reuse", 0, b"x".to_vec(), true)
+        .await;
+    let total = manager.finish_write_stream("w-reuse").await?;
+    assert_eq!(total, 1);
+
+    manager
+        .open_write_stream(
+            "w-reuse".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+            /*offset*/ None,
+        )
+        .await?;
+    Ok(())
+}

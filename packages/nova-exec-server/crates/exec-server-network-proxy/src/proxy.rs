@@ -10,6 +10,10 @@
 //!   `apply_proxy_env_overrides` 的 CA 注入段未移植；
 //!   `managed_mitm_ca_trust_bundle_path` 保留恒 None（MITM 恢复前无托管 bundle）。
 
+#[cfg(test)]
+#[path = "proxy/managed_routing_tests.rs"]
+mod managed_routing_tests;
+
 mod execution_scope;
 
 use crate::NetworkDecision;
@@ -306,7 +310,7 @@ impl NetworkProxyRuntimeSettings {
                 config.allow_unix_sockets().into()
             },
             dangerously_allow_all_unix_sockets: !cfg!(target_os = "windows")
-                && config.dangerously_allow_all_unix_sockets,
+                && config.dangerously_allow_all_unix_sockets.unwrap_or(false),
         }
     }
 }
@@ -1260,7 +1264,7 @@ mod tests {
             proxy_url: Some("http://0.0.0.0:3128".to_string()),
             socks_url: Some("http://0.0.0.0:8081".to_string()),
             dangerously_allow_non_loopback_proxy: true,
-            dangerously_allow_all_unix_sockets: true,
+            dangerously_allow_all_unix_sockets: Some(true),
             unix_sockets: Some(unix_sockets.clone()),
             ..NetworkProxyConfig::default()
         };
@@ -1614,7 +1618,7 @@ mod tests {
             .await?;
 
         for allow_all in [false, true] {
-            config.dangerously_allow_all_unix_sockets = allow_all;
+            config.dangerously_allow_all_unix_sockets = Some(allow_all);
             let replacement = crate::state::build_config_state(config.clone(), Default::default())?;
             proxy.replace_config_state(replacement).await?;
             let prepared = proxy
@@ -1987,5 +1991,43 @@ mod tests {
                 48081
             )))
         );
+    }
+
+    // 对位锚点 proxy.rs `wait_fails_fast_when_either_listener_fails`（124 复核
+    // 补随迁）：任一监听器任务失败时 `NetworkProxyHandle::wait` 必须立即失败，
+    // 不得挂起。nova 适配：无 `windows_active_route` 字段（Windows 共享 ingress
+    // 未镜像，见 lib.rs 裁点）。
+    #[tokio::test]
+    async fn wait_fails_fast_when_either_listener_fails() {
+        for failing_listener in ["http", "socks"] {
+            let http_fails = failing_listener == "http";
+            let mut listeners = ProxyListeners::new();
+            listeners.spawn(move |_guard| async move {
+                if http_fails {
+                    anyhow::bail!("http proxy listener failed");
+                }
+                std::future::pending::<Result<()>>().await
+            });
+            listeners.spawn(move |_guard| async move {
+                if !http_fails {
+                    anyhow::bail!("socks proxy listener failed");
+                }
+                std::future::pending::<Result<()>>().await
+            });
+            let handle = NetworkProxyHandle {
+                runtime: Some(ProxyRuntime::Listeners(listeners)),
+                environment_proxies: Some(Arc::new(Mutex::new(HashMap::new()))),
+            };
+
+            let error = tokio::time::timeout(std::time::Duration::from_secs(1), handle.wait())
+                .await
+                .expect("proxy wait should not hang when a listener fails")
+                .unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                format!("{failing_listener} proxy listener failed")
+            );
+        }
     }
 }

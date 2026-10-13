@@ -120,10 +120,19 @@ impl NetworkProxyConfig {
         self.unix_sockets
             .as_ref()
             .map(|unix_sockets| {
+                // 重复 path 冲突按 deny 优先归并（注释见 environment_policy.rs 头注）：
+                // 锚点 BTreeMap 单键单值、serde 后写覆盖；nova 的线上数组可携带同
+                // path 双条目，读取面取 deny 优先（比锚点后写赢更保守）。
                 unix_sockets
                     .entries
                     .iter()
                     .filter(|entry| matches!(entry.permission, NetworkUnixSocketPermission::Allow))
+                    .filter(|entry| {
+                        !unix_sockets.entries.iter().any(|other| {
+                            other.path == entry.path
+                                && matches!(other.permission, NetworkUnixSocketPermission::Deny)
+                        })
+                    })
                     .map(|entry| entry.path.clone())
                     .collect()
             })
@@ -245,7 +254,9 @@ pub(crate) fn clamp_bind_addrs(
         "SOCKS5 proxy",
         "dangerously_allow_non_loopback_proxy",
     );
-    if cfg.allow_unix_sockets().is_empty() && !cfg.dangerously_allow_all_unix_sockets {
+    if cfg.allow_unix_sockets().is_empty()
+        && !cfg.dangerously_allow_all_unix_sockets.unwrap_or(false)
+    {
         return (http_addr, socks_addr);
     }
 
@@ -296,6 +307,14 @@ pub(crate) enum ValidatedUnixSocketPath {
 
 impl ValidatedUnixSocketPath {
     pub(crate) fn parse(socket_path: &str) -> Result<Self> {
+        // 对位 codex 39f4277087 `config.rs:520-524`：NUL-free 是硬校验
+        //（此前裁剩"只验绝对性"是漏洞——含 NUL 的路径能过校验、运行期
+        // 才炸；锚点测试矩阵 `/tmp/\0example.sock`/`C:\example\0.sock` 正是
+        // 防这条）。
+        anyhow::ensure!(
+            !socket_path.contains('\0'),
+            "expected a NUL-free absolute path, got {socket_path:?}"
+        );
         let path = Path::new(socket_path);
         if path.is_absolute() {
             let path = AbsolutePathBuf::from_absolute_path(path)
@@ -516,7 +535,9 @@ mod tests {
                 enable_socks5: false,
                 enable_socks5_udp: false,
                 allow_upstream_proxy: false,
-                dangerously_allow_all_unix_sockets: false,
+                // 三态 Option（对位锚点 config.rs）：默认 None（省略），由 attachment
+                // 策略/executor 归一；语义不等同显式 false。
+                dangerously_allow_all_unix_sockets: None,
                 mode: NetworkMode::None,
                 domains: None,
                 unix_sockets: None,
@@ -807,7 +828,7 @@ mod tests {
     fn clamp_bind_addrs_forces_loopback_when_all_unix_sockets_enabled() {
         let cfg = NetworkProxyConfig {
             dangerously_allow_non_loopback_proxy: true,
-            dangerously_allow_all_unix_sockets: true,
+            dangerously_allow_all_unix_sockets: Some(true),
             ..Default::default()
         };
         let http_addr = "0.0.0.0:3128".parse::<SocketAddr>().unwrap();
@@ -834,6 +855,20 @@ mod tests {
             err.to_string().contains("network.allow_unix_sockets[0]"),
             "error should point at the invalid allow_unix_sockets entry: {err:#}"
         );
+    }
+
+    #[test]
+    fn resolve_runtime_rejects_nul_allow_unix_sockets_entries() {
+        // 对位锚点 config.rs `resolve_runtime_validates_allow_unix_sockets_for_executor_os`
+        // 的 NUL 用例：锚点带 executor_os 维度，nova 无该维度、校验即本机语义
+        // （等价于锚点矩阵的 Platform::native() 行），两个 NUL 用例一律必拒。
+        for path in ["/tmp/\0example.sock", r"C:\example .sock"] {
+            let cfg = settings_with_unix_sockets(&[path]);
+            assert!(
+                resolve_runtime(&cfg).is_err(),
+                "NUL-containing allow_unix_sockets entry must be rejected: {path:?}"
+            );
+        }
     }
 
     #[test]

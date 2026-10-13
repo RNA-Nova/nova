@@ -1425,10 +1425,14 @@ fn append_existing_unreadable_path_args(
         let mount_target = unreadable_root
             .canonicalize()
             .unwrap_or_else(|_| unreadable_root.to_path_buf());
-        let mut writable_descendants: Vec<&Path> = allowed_write_paths
+        // 比较基准随挂载点一起切 canonical（修复自检不对称）：逻辑名下（如
+        // usrmerge 的 /sbin→/usr/sbin）与 canonical 名下的可写后代都要收到，
+        // 且后代目录在 tmpfs 内按 canonical 名重建（与挂载点一致）。
+        let mut writable_descendants: Vec<PathBuf> = allowed_write_paths
             .iter()
-            .map(PathBuf::as_path)
-            .filter(|path| *path != unreadable_root && path.starts_with(unreadable_root))
+            .filter(|path| path.starts_with(unreadable_root) || path.starts_with(&mount_target))
+            .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()))
+            .filter(|path| *path != mount_target && path.starts_with(&mount_target))
             .collect();
         bwrap_args.args.push("--perms".to_string());
         // Execute-only perms let the process traverse into explicitly
@@ -1446,11 +1450,11 @@ fn append_existing_unreadable_path_args(
         // the denied parent read-only. Otherwise bubblewrap cannot mkdir the
         // nested mount targets after the parent has been frozen.
         writable_descendants.sort_by_key(|path| path_depth(path));
-        for writable_descendant in writable_descendants {
+        for writable_descendant in &writable_descendants {
             append_mount_target_parent_dir_args(
                 &mut bwrap_args.args,
                 writable_descendant,
-                unreadable_root,
+                &mount_target,
             );
         }
         bwrap_args.args.push("--remount-ro".to_string());
@@ -1458,9 +1462,16 @@ fn append_existing_unreadable_path_args(
         return Ok(());
     }
 
+    // 同族修复（nova 自修，与目录分支同理）：deny 指向"软链→文件"时
+    //（/etc/resolv.conf → /run/... 这类 systemd 常态），ro-bind-data 的
+    // 挂载目标若按逻辑路径落在 pivot 后的新根里解析不到目标即 ENOENT——
+    // 先 canonicalize 落到真实文件路径。
+    let file_target = unreadable_root
+        .canonicalize()
+        .unwrap_or_else(|_| unreadable_root.to_path_buf());
     bwrap_args.args.push("--perms".to_string());
     bwrap_args.args.push("000".to_string());
-    append_empty_file_bind_data_args(bwrap_args, unreadable_root)
+    append_empty_file_bind_data_args(bwrap_args, &file_target)
 }
 
 /// Returns true when `path` is under any allowed writable root.
@@ -1952,6 +1963,91 @@ mod tests {
                     ]
             }),
             "tmpfs 遮蔽未落到 canonical 目标: {:?}",
+            args.args
+        );
+    }
+
+    // 同族（文件分支）：deny 目标是"软链→文件"时，ro-bind-data 目标同样
+    // 必须落到 canonical 真实文件路径。
+    #[cfg(unix)]
+    #[test]
+    fn denied_symlinked_file_masks_canonical_target() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let real_file = temp_dir.path().join("real-denied.txt");
+        std::fs::write(&real_file, "secret").expect("write real file");
+        let link_path = temp_dir.path().join("link-denied.txt");
+        std::os::unix::fs::symlink(&real_file, &link_path).expect("create symlink");
+
+        let link_path =
+            AbsolutePathBuf::from_absolute_path(&link_path).expect("absolute link path");
+        let real_file_str = path_to_string(&real_file);
+        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+            path: link_path.into(),
+            access: FileSystemAccessMode::Deny,
+            missing_path_behavior: None,
+        }]);
+
+        let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
+            .expect("filesystem args");
+
+        assert!(
+            args.args.windows(3).any(|window| {
+                window[0] == "--ro-bind-data" && window[2] == real_file_str.as_str()
+            }),
+            "文件遮蔽未落到 canonical 目标: {:?}",
+            args.args
+        );
+    }
+
+    // usrmerge 场景（/sbin→/usr/sbin）：deny 逻辑名 + 可写后代 canonical 名
+    // 混合时，后代必须被收进遮蔽（perms 111 + 父目录重建在 canonical tmpfs 下）。
+    #[cfg(unix)]
+    #[test]
+    fn denied_symlinked_dir_keeps_canonically_named_writable_descendants() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let real_dir = temp_dir.path().join("real-denied");
+        let real_child = real_dir.join("child");
+        std::fs::create_dir_all(&real_child).expect("create child dir");
+        let link_path = temp_dir.path().join("link-denied");
+        std::os::unix::fs::symlink(&real_dir, &link_path).expect("create symlink");
+
+        let link_path_buf =
+            AbsolutePathBuf::from_absolute_path(&link_path).expect("absolute link path");
+        let real_dir_str = path_to_string(&real_dir);
+        let real_child_str = path_to_string(&real_child);
+        let policy = FileSystemSandboxPolicy::restricted(vec![
+            FileSystemSandboxEntry {
+                path: link_path_buf.into(),
+                access: FileSystemAccessMode::Deny,
+                missing_path_behavior: None,
+            },
+            FileSystemSandboxEntry {
+                path: AbsolutePathBuf::from_absolute_path(&real_child)
+                    .expect("abs")
+                    .into(),
+                access: FileSystemAccessMode::Write,
+                missing_path_behavior: None,
+            },
+        ]);
+
+        let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
+            .expect("filesystem args");
+
+        assert!(
+            args.args.windows(6).any(|window| {
+                window[0] == "--perms"
+                    && window[1] == "111"
+                    && window[2] == "--tmpfs"
+                    && window[3] == real_dir_str.as_str()
+            }),
+            "可写后代未被收进遮蔽（perms 111 缺失）: {:?}",
+            args.args
+        );
+        assert!(
+            args.args.windows(2).any(|window| {
+                window[0] == "--dir" && window[1] == real_child_str.as_str()
+            }),
+            "可写后代未在 canonical 遮蔽下重建: {:?}",
             args.args
         );
     }

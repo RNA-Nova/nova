@@ -333,9 +333,12 @@ if sys.argv[6] == 'host-proc' and not os.path.isdir('/run/WSL'):
         /*exclude_slash_tmp*/ false,
     );
     let mut env = create_env_from_core_vars();
-    // 对位 codex 的 CODEX_HOME：nova 产品家目录环境变量为 NOVA_HOME
+    // 对位 codex 的 CODEX_HOME 置位：证明 daemon 目录与家目录变量无关
+    //（两侧该变量均为惰性——nova 的家目录读取点只认 NOVA_EXEC_SERVER_HOME，
+    // 而 daemon 目录由 shared_daemon_socket_directory() 硬推导，不读任何
+    // 家目录变量）。
     env.insert(
-        "NOVA_HOME".to_string(),
+        "NOVA_EXEC_SERVER_HOME".to_string(),
         workspace.path().display().to_string(),
     );
     env.insert("TMPDIR".to_string(), workspace.path().display().to_string());
