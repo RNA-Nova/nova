@@ -246,7 +246,9 @@ fn kill_direct_child(child_process: &mut Child, action: &str) {
 #[cfg(windows)]
 fn kill_windows_process_tree(pid: u32) -> bool {
     let pid = pid.to_string();
-    match std::process::Command::new("taskkill")
+    // 对位 codex 39f4277087 connection.rs：经 background_command 构造（CREATE_NO_WINDOW
+    // 抑制控制台分配）；nova 对位物在 exec-server-windows-sandbox crate。
+    match nova_exec_server_windows_sandbox::background_command::background_command("taskkill")
         .args(["/PID", pid.as_str(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -118,7 +118,7 @@ fn native_open_rejects_named_pipes_before_connecting() {
         )
     };
     assert_ne!(pipe, INVALID_HANDLE_VALUE);
-    let _pipe = unsafe { OwnedHandle::from_raw_handle(pipe as RawHandle) };
+    let _pipe = unsafe { OwnedHandle::from_raw_handle(pipe) };
 
     // A DOS drive alias could target a pipe; the root open must reject a pipe
     // before obtaining a client connection, even before final-path validation.

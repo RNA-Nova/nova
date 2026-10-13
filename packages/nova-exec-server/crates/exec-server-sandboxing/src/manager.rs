@@ -32,8 +32,14 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 
+// 对位 codex 39f4277087：wrapper setup env allowlist（含 SYSTEMROOT 条目）。
 #[cfg(target_os = "windows")]
-const WINDOWS_SANDBOX_WRAPPER_SETUP_ENV_ALLOWLIST: &[&str] = &["USERNAME", "USERPROFILE"];
+const WINDOWS_SANDBOX_WRAPPER_SETUP_ENV_ALLOWLIST: &[&str] = &[
+    "USERNAME",
+    "USERPROFILE",
+    // ShellExecuteExW needs SystemRoot to elevate the setup helper.
+    "SYSTEMROOT",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SandboxType {
@@ -283,7 +289,7 @@ impl std::error::Error for SandboxTransformError {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SandboxManager {
     // 对位 codex 39f4277087：Linux PID 命名空间策略（Default 自动为 Isolate）
     linux_sandbox_pid_namespace: LinuxSandboxPidNamespace,
@@ -768,14 +774,31 @@ fn wrap_windows_sandbox_exec_request_for_direct_spawn(
 
 #[cfg(target_os = "windows")]
 fn add_windows_sandbox_wrapper_setup_env(env: &mut HashMap<String, String>) {
-    add_windows_sandbox_wrapper_setup_env_from_vars(env, std::env::vars_os());
+    add_windows_sandbox_wrapper_setup_env_from_vars(
+        env,
+        std::env::vars_os(),
+        nova_exec_server_windows_sandbox::registered_core_requested(),
+    );
 }
 
+// 对位 codex 39f4277087：registered_core 参数 + NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE
+// 传播（锚点名 CODEX_WINDOWS_REGISTERED_CORE）。
 #[cfg(target_os = "windows")]
 fn add_windows_sandbox_wrapper_setup_env_from_vars(
     env: &mut HashMap<String, String>,
     vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    registered_core: bool,
 ) {
+    // This outer helper must use the parent's runtime selection, not shell-policy overrides.
+    env.retain(|key, _| {
+        !key.eq_ignore_ascii_case("NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE")
+    });
+    if registered_core {
+        env.insert(
+            "NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE".into(),
+            "1".into(),
+        );
+    }
     for (key, value) in vars {
         let key = key.to_string_lossy().into_owned();
         if !WINDOWS_SANDBOX_WRAPPER_SETUP_ENV_ALLOWLIST

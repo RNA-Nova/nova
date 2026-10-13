@@ -8,12 +8,15 @@ mod shared;
 #[path = "file_system/support.rs"]
 mod support;
 
+use std::collections::BTreeSet;
+use std::ffi::c_void;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use anyhow::Result;
+use futures::TryStreamExt;
 use nova_exec_server_file_system::WindowsSandboxSelection;
 use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
@@ -34,6 +37,8 @@ use test_case::test_case;
 use tokio::net::windows::named_pipe::ServerOptions;
 use tokio::time::timeout;
 use uuid::Uuid;
+use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 use crate::support::FileSystemImplementation;
 use crate::support::create_file_system_context;
@@ -540,4 +545,172 @@ async fn file_system_elevated_relative_read_denial_uses_policy_cwd(
         "expected Windows access denial, got: {denied}"
     );
     Ok(())
+}
+
+// 对位 codex 39f4277087 tests/file_system_windows.rs 同名用例：私有桌面归主进程持有，
+// helper 退出后仍存活；RestrictedToken 与既有桌面权限隔离。（桌面名前缀换 nova 命名）
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn file_system_private_desktop_survives_helper_exits_and_separates_permissions() -> Result<()>
+{
+    let context = create_file_system_context(FileSystemImplementation::Local).await?;
+    let file_system = context.file_system;
+    let tmp = tempfile::TempDir::new()?;
+    let path = tmp.path().join("contents.txt");
+    std::fs::write(&path, b"initial")?;
+    let uri = PathUri::from_host_native_path(&path)?;
+    let sandbox = workspace_write_sandbox(tmp.path().to_path_buf());
+    let before = process_private_desktops()?;
+    let write = file_system
+        .write_file(
+            &uri,
+            b"initial".to_vec(),
+            WriteFileOptions::default(),
+            Some(&sandbox),
+        )
+        .await;
+    if is_unsupported_restricted_token_host(&write) {
+        eprintln!("Skipping private desktop reuse: this host cannot create restricted tokens");
+        return Ok(());
+    }
+    write?;
+
+    // Ownership must outlive each helper; a desktop held only by the helper disappears here.
+    let warmed = process_private_desktops()?;
+    assert_eq!(warmed.difference(&before).count(), 1);
+    for contents in ["updated", "updated again"] {
+        file_system
+            .write_file(
+                &uri,
+                contents.as_bytes().to_vec(),
+                WriteFileOptions::default(),
+                Some(&sandbox),
+            )
+            .await?;
+        assert_eq!(process_private_desktops()?, warmed);
+        assert_eq!(
+            file_system
+                .read_file(&uri, ReadFileOptions::default(), Some(&sandbox))
+                .await?,
+            contents.as_bytes()
+        );
+        assert_eq!(process_private_desktops()?, warmed);
+        assert!(
+            file_system
+                .get_metadata(&uri, GetMetadataOptions::default(), Some(&sandbox))
+                .await?
+                .is_file
+        );
+        assert_eq!(process_private_desktops()?, warmed);
+        let chunks = file_system
+            .read_file_stream(&uri, Some(&sandbox))
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+        assert_eq!(chunks.concat(), contents.as_bytes());
+        assert_eq!(process_private_desktops()?, warmed);
+    }
+
+    let mut readonly = read_only_sandbox_for_cwd(tmp.path().to_path_buf())?;
+    readonly.windows_sandbox_selection = WindowsSandboxSelection::RestrictedToken;
+    file_system
+        .write_file(
+            &uri,
+            b"blocked".to_vec(),
+            WriteFileOptions::default(),
+            Some(&readonly),
+        )
+        .await
+        .expect_err("read-only filesystem requests must reject writes");
+    assert_eq!(std::fs::read(&path)?, b"updated again");
+    let separated = process_private_desktops()?;
+    assert!(warmed.is_subset(&separated));
+    assert_eq!(separated.difference(&warmed).count(), 1);
+    assert_eq!(
+        file_system
+            .read_file(&uri, ReadFileOptions::default(), Some(&readonly))
+            .await?,
+        b"updated again"
+    );
+    assert_eq!(process_private_desktops()?, separated);
+    Ok(())
+}
+
+fn process_private_desktops() -> Result<BTreeSet<String>> {
+    // Query this process so other tests' private desktops cannot affect the assertions.
+    // Native layout: https://github.com/winsiderss/phnt/blob/master/ntpsapi.h
+    #[repr(C)]
+    struct HandleEntry {
+        handle: HANDLE,
+        _handle_count: usize,
+        _pointer_count: usize,
+        _granted_access: u32,
+        _object_type_index: u32,
+        _handle_attributes: u32,
+        _reserved: u32,
+    }
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn NtQueryInformationProcess(
+            process: HANDLE,
+            class: u32,
+            information: *mut c_void,
+            length: u32,
+            return_length: *mut u32,
+        ) -> i32;
+    }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetUserObjectInformationW(
+            object: HANDLE,
+            index: i32,
+            information: *mut c_void,
+            length: u32,
+            length_needed: *mut u32,
+        ) -> i32;
+    }
+    let mut snapshot = vec![0usize; 8192];
+    let bytes = std::mem::size_of_val(snapshot.as_slice());
+    let status = unsafe {
+        NtQueryInformationProcess(
+            GetCurrentProcess(),
+            /*class*/ 51,
+            snapshot.as_mut_ptr().cast(),
+            bytes as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    anyhow::ensure!(status >= 0, "process handle query failed: {status:#x}");
+    let count = snapshot[0];
+    anyhow::ensure!(
+        count <= (bytes - 2 * size_of::<usize>()) / size_of::<HandleEntry>(),
+        "process handle snapshot exceeds its buffer"
+    );
+    let entries = unsafe {
+        std::slice::from_raw_parts(snapshot.as_ptr().add(2).cast::<HandleEntry>(), count)
+    };
+    let mut desktops = BTreeSet::new();
+    for entry in entries {
+        let mut name = [0u16; 64];
+        let mut length_needed = 0;
+        if unsafe {
+            GetUserObjectInformationW(
+                entry.handle,
+                /*index*/ 2,
+                name.as_mut_ptr().cast(),
+                std::mem::size_of_val(&name) as u32,
+                &mut length_needed,
+            )
+        } != 0
+        {
+            let end = name
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(name.len());
+            let name = String::from_utf16(&name[..end])?;
+            if name.starts_with("NovaSandboxDesktop-") {
+                desktops.insert(name);
+            }
+        }
+    }
+    Ok(desktops)
 }

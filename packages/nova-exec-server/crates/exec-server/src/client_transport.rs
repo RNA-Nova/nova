@@ -196,6 +196,17 @@ impl ExecServerClient {
 }
 
 fn stdio_command_process(stdio_command: &StdioExecServerCommand) -> Command {
+    // 对位 codex 39f4277087 client_transport.rs：经 background_command 构造（Windows 下
+    // CREATE_NO_WINDOW 抑制控制台分配）。偏差说明：nova 的对位物内联在
+    // exec-server-windows-sandbox crate，exec-server 仅在 Windows 目标依赖该 crate；
+    // 非 Windows 平台 background_command 语义本就等同 Command::new，故直接构造。
+    #[cfg(windows)]
+    let mut command = Command::from(
+        nova_exec_server_windows_sandbox::background_command::background_command(
+            &stdio_command.program,
+        ),
+    );
+    #[cfg(not(windows))]
     let mut command = Command::new(&stdio_command.program);
     command.args(&stdio_command.args);
     command.envs(&stdio_command.env);

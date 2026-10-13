@@ -312,7 +312,10 @@ fn load_environments_toml(path: &Path) -> Result<Option<EnvironmentsToml>, ExecS
     };
 
     toml::from_str(&contents)
-        .map_err(|err| {
+        .map_err(|mut err| {
+            // 对位 codex 39f4277087：擦除错误携带的输入原文，避免把配置内容
+            // （可能含带凭据的 URL）泄进错误消息。
+            err.set_input(/*input*/ None);
             ExecServerError::Protocol(format!(
                 "failed to parse environment config `{}`: {err}",
                 path.display()
@@ -506,10 +509,10 @@ mod tests {
             (
                 EnvironmentToml {
                     id: "devbox".to_string(),
-                    url: Some("http://127.0.1:8765".to_string()),
+                    url: Some("http://127.0.0.1:8765".to_string()),
                     ..Default::default()
                 },
-                "environment url `http://127.0.1:8765` must use ws:// or wss://",
+                "environment url `http://127.0.0.1:8765` must use ws:// or wss://",
             ),
             (
                 EnvironmentToml {

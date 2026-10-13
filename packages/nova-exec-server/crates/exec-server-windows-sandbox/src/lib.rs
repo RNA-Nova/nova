@@ -512,6 +512,12 @@ pub use unified_exec::spawn_windows_sandbox_session_for_level;
 pub use unified_exec::spawn_windows_sandbox_session_legacy;
 #[cfg(target_os = "windows")]
 pub use uninstall_windows::PreparedWindowsSandboxCleanup;
+// 裁点（对位 codex 39f4277087 `lib.rs` 此处的
+// `pub use uninstall_windows::clean_up_legacy_windows_sandbox;`）：该函数是
+// codex-cli `sandbox_uninstall` 命令的整机清理入口（remove_installation +
+// 无 home 回调的 packaged 清理）；nova 侧无对应 CLI 消费方，uninstall_windows
+// 模块未移植该函数。若未来补齐，注意其依赖 setup/setup_mutex/runtime_ownership
+// 三件套（均已在本 crate 内）。
 #[cfg(target_os = "windows")]
 pub use uninstall_windows::clean_up_packaged_windows_sandbox;
 #[cfg(target_os = "windows")]

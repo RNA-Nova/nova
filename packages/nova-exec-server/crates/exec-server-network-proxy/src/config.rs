@@ -73,10 +73,7 @@ impl NetworkDomainPermissions {
             .filter_map(|domain| {
                 effective_permissions
                     .remove(&domain)
-                    .map(|permission| NetworkDomainPermissionEntry {
-                        domain,
-                        permission,
-                    })
+                    .map(|permission| NetworkDomainPermissionEntry { domain, permission })
             })
             .collect()
     }
@@ -112,6 +109,13 @@ impl NetworkProxyConfig {
             .filter(|entries: &Vec<String>| !entries.is_empty())
     }
 
+    /// Omission resolves to false for ordinary proxy execution; executor launch
+    /// resolves it through `LocalBindingPolicy` before this accessor sees the config.
+    /// 对位 codex 39f4277087 config.rs。
+    pub fn allow_local_binding(&self) -> bool {
+        self.allow_local_binding.unwrap_or(false)
+    }
+
     pub fn allow_unix_sockets(&self) -> Vec<String> {
         self.unix_sockets
             .as_ref()
@@ -119,9 +123,7 @@ impl NetworkProxyConfig {
                 unix_sockets
                     .entries
                     .iter()
-                    .filter(|entry| {
-                        matches!(entry.permission, NetworkUnixSocketPermission::Allow)
-                    })
+                    .filter(|entry| matches!(entry.permission, NetworkUnixSocketPermission::Allow))
                     .map(|entry| entry.path.clone())
                     .collect()
             })
@@ -189,9 +191,9 @@ impl NetworkProxyConfig {
             .retain(|entry| entry.permission != permission);
         for entry in entries {
             // codex 端该集合是 BTreeMap（path 唯一）；Vec 形状下同 path 先去重再追加。
-            unix_sockets.entries.retain(|existing| {
-                existing.permission == permission || existing.path != entry
-            });
+            unix_sockets
+                .entries
+                .retain(|existing| existing.permission == permission || existing.path != entry);
             unix_sockets
                 .entries
                 .push(crate::NetworkUnixSocketPermissionEntry {
@@ -280,6 +282,12 @@ impl UnixStyleAbsolutePath {
     }
 }
 
+// 裁点（对位 codex 39f4277087 `socket_path.rs`）：锚点以 `executor_os: Platform`
+// 维度做不读本机的跨平台校验（Windows 语法的绝对路径在 macOS controller 上也可
+// 预验）。nova 不补该维度：executor_os 只在 executor 本地启动路径
+// （`from_remote_launch_config`）进入校验链，而 nova 的两个调用点都以本机语义
+// 校验（等价于锚点 `Platform::native()` 分支）；controller 侧跨平台预验面
+// （exec-server 调用点换签名）超出本 crate 边界，待 exec-server 批次评估。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ValidatedUnixSocketPath {
     Native(AbsolutePathBuf),
@@ -512,7 +520,9 @@ mod tests {
                 mode: NetworkMode::None,
                 domains: None,
                 unix_sockets: None,
-                allow_local_binding: false,
+                // 对位 codex 39f4277087：默认 None（省略），由 executor 的
+                // LocalBindingPolicy 归一；语义等价于旧的默认 false。
+                allow_local_binding: None,
                 mitm: false,
                 credential_broker: false,
                 dangerously_allow_plaintext_credential_injection: false,

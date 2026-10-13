@@ -9,7 +9,11 @@ bytes = { workspace = true }
 nova-exec-server-utils-rustls-provider = { path = "../exec-server-utils-rustls-provider"  }
 futures = { workspace = true }
 http = { workspace = true }
+# 对位 codex 39f4277087 codex-rs/http-client/Cargo.toml：response.rs 的 PolicyBody
+# 需要 http_body trait；failure_class() 需要 native_tls::Error 下行识别。
+http-body = "1.0.1"
 httpdate = { workspace = true }
+native-tls = "0.2"
 opentelemetry = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls-native-roots", "stream"] }
 rustls = { workspace = true }
@@ -17,6 +21,8 @@ rustls-native-certs = { workspace = true }
 rustls-pki-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# request_builder.rs 的 query() 序列化（对位锚点同名单依赖）。
+serde_urlencoded = "0.7"
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time", "sync"] }

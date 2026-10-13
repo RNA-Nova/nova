@@ -443,8 +443,10 @@ fn posts_to_tls13_server_using_custom_ca_bundle() {
     let server = spawn_tls13_test_server();
     let cert_path = write_cert_file(&temp_dir, "tls-ca.pem", &server.ca_cert_pem);
 
-    let output =
-        run_probe_posting_to_tls13_server(&[(NOVA_EXEC_SERVER_CA_CERT_ENV, cert_path.as_path())], &server.url);
+    let output = run_probe_posting_to_tls13_server(
+        &[(NOVA_EXEC_SERVER_CA_CERT_ENV, cert_path.as_path())],
+        &server.url,
+    );
     let server_result = server.request_rx.recv_timeout(Duration::from_secs(5));
 
     assert!(

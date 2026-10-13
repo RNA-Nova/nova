@@ -65,16 +65,19 @@ tempfile = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 # 对位 codex 3342ee8c07：MXC 完整性后端（依赖清点 + 策略准备）
 nova-exec-server-mxc-sandbox = { workspace = true }
+# 对位 codex codex-utils-process：background_command（CREATE_NO_WINDOW）对位物在该 crate
+nova-exec-server-windows-sandbox = { workspace = true }
 which = { workspace = true }
-windows-sys = { version = "0.52", features = [
+# 对位 codex 39f4277087 workspace 钉版（windows-sys = "0.61.2"）：与 mxc-sandbox 统一
+# 0.61——HANDLE 为指针类型，OBJ_CASE_INSENSITIVE/OBJ_DONT_REPARSE 迁至 Win32::Foundation，
+# SECURITY_QUALITY_OF_SERVICE.EffectiveOnly / FILE_DISPOSITION_INFO.DeleteFile 为 bool。
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     # no_follow 原语：SECURITY_QUALITY_OF_SERVICE / SecurityIdentification
     "Win32_Security",
     "Win32_Storage_FileSystem",
     # no_follow 原语：IO_STATUS_BLOCK
     "Win32_System_IO",
-    # no_follow 原语：OBJ_CASE_INSENSITIVE / OBJ_DONT_REPARSE
-    "Win32_System_Kernel",
     # no_follow windows 测试：CreateNamedPipeW
     "Win32_System_Pipes",
     # 沙箱开门句柄复制：OpenProcess / GetCurrentProcess / DuplicateHandle

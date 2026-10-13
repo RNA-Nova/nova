@@ -18,6 +18,9 @@ use std::time::Duration;
 use std::time::Instant;
 
 const SYSTEM_BWRAP_PROGRAM: &str = "bwrap";
+// 对位 codex 39f4277087 bwrap.rs:21-25，裁点：锚点文案含
+// "See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. "
+// 两行——该 URL 是 codex 官方文档址，nova 无对等页面，不能保留，故改写为无 URL 版本。
 const MISSING_BWRAP_WARNING: &str = concat!(
     "Nova could not find bubblewrap on PATH. ",
     "Install bubblewrap with your OS package manager. ",

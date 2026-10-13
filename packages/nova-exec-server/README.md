@@ -30,7 +30,7 @@ SSH 远程场景不需要公网监听：远程 executor 只回环监听，经 SS
 
 ```
 --listen <URL>                     传输端点：ws://IP:PORT（默认 ws://127.0.0.1:8080）或 stdio
---concurrent-requests <COUNT>      单连接并发请求数 [默认 32；1 = 串行模式]
+--concurrent-requests <COUNT>      单连接并发请求数 [默认 1 = 串行模式（与 codex 对齐）；≥2 并发]
 --exit-on-stdin-close              父死子随：WS 托管 spawn 时父进程 stdin 管道
                                    关闭即退出（stdio 形态下 EOF 本就结束服务）
 --executor-self-exe <PATH>         executor 可执行文件路径（隐藏 helper 模式用）
@@ -134,8 +134,8 @@ crates/
    `initialize` 响应新增 `protocolVersion`（major/minor 协商）。
 4. **http/request 凭据保护**：`valueEnvVar` 头代发有敏感环境变量保护名单
    （执行端 token/供应商 key/云凭据点名即 -32602 拒绝）。
-5. **并发默认值**：`--concurrent-requests` 默认 1 → 32（Agent 客户端并行工具调用
-   不再被串行化；1 = 串行模式）。
+5. **并发默认值**：`--concurrent-requests` 默认保持 1（Inline 串行，与 codex 对齐，
+   结构上消灭跨请求竞态）；显式调到 ≥2 才并发，仅建议"慢 handler + 并行调用"场景。
 
 ## License
 

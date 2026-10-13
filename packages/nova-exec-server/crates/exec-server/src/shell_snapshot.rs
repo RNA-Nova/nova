@@ -25,9 +25,9 @@ use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
 use nova_exec_server_protocol_core::shell_environment;
 // 对位 codex 9b738582b1：快照捕获/回放要剔除的两个关联标签变量
-// （变量名为线上 env 契约，不随 crate 改名）
-use nova_exec_server_protocol_core::shell_environment::CODEX_THREAD_ID_ENV_VAR;
-use nova_exec_server_protocol_core::shell_environment::CODEX_TOOL_CALL_ID_ENV_VAR;
+// （命名铁律改名：值随常量一并改为 NOVA_EXEC_SERVER_*，见 PROTOCOL.md 环境变量清单）
+use nova_exec_server_protocol_core::shell_environment::NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR;
+use nova_exec_server_protocol_core::shell_environment::NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR;
 use nova_exec_server_shell_command::shell_detect::ShellType;
 use nova_exec_server_shell_command::shell_snapshot::CapturedSnapshot;
 use nova_exec_server_shell_command::shell_snapshot::SnapshotCaptureOptions;
@@ -413,7 +413,7 @@ async fn capture_snapshot(
         .env_clear()
         .envs(&prepared.env)
         // 对位 codex 9b738582b1：调用 ID 不进捕获进程环境
-        .env_remove(CODEX_TOOL_CALL_ID_ENV_VAR)
+        .env_remove(NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -585,8 +585,8 @@ fn parse_snapshot(
         None => environment,
     };
     // 对位 codex 9b738582b1：两个关联标签 ID 不进新捕获的快照
-    environment.remove(CODEX_THREAD_ID_ENV_VAR);
-    environment.remove(CODEX_TOOL_CALL_ID_ENV_VAR);
+    environment.remove(NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR);
+    environment.remove(NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR);
     environment.remove("PWD");
     environment.remove("OLDPWD");
     environment.retain(|name, _| !shell_environment::is_non_inheritable_env_var(name));

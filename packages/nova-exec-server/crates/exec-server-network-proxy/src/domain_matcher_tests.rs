@@ -183,9 +183,7 @@ fn policy_loading_rejects_an_invalid_entry_in_either_list() {
             config.set_allowed_domains(invalid);
         }
         // nova 适配：`build_config_state` 两参签名（无 `Platform` 入参）。
-        assert!(
-            crate::state::build_config_state(config, Default::default()).is_err()
-        );
+        assert!(crate::state::build_config_state(config, Default::default()).is_err());
     }
 }
 

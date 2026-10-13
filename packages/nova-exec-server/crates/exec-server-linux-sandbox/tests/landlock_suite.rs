@@ -3,6 +3,11 @@
 //!（agent 工具调用语义）；nova 侧直调 nova-linux-sandbox 二进制 CLI
 //!（与 codex 套件同构；二进制即 exec-server 生产路径的同款沙箱入口）。
 //! 测试体与 codex 逐行一致。
+//!
+//! codex 侧经 `#[path]` 挂在 landlock.rs 下的子套件，nova 侧并入本 target
+//!（`tests/landlock_suite/` 子目录模块）：denied_files_tests、nested_metadata_tests、
+//! daemon_sockets_tests（对位 codex 39f4277087）；wslg_tests 为裁点（WSLG 主体
+//! 未移植）；root_metadata_tests 已内联在本文件尾部。
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used)]
@@ -24,6 +29,16 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tempfile::NamedTempFile;
+
+// 对位 codex 39f4277087 `tests/suite/landlock.rs` 顶部的 #[path] 子模块挂载
+//（nova 独立 integration target：crate 根的 mod 默认解析到 tests/ 平级目录，
+// 故同样用 #[path] 指进 tests/landlock_suite/ 子目录，与锚点形态一致）。
+#[path = "landlock_suite/daemon_sockets_tests.rs"]
+mod daemon_sockets_tests;
+#[path = "landlock_suite/denied_files_tests.rs"]
+mod denied_files_tests;
+#[path = "landlock_suite/nested_metadata_tests.rs"]
+mod nested_metadata_tests;
 
 // 超时与 codex 同款值（上游曾给 arm64 更长，后已归一）
 const SHORT_TIMEOUT_MS: u64 = 5_000;

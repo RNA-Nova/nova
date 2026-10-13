@@ -267,6 +267,12 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
   （内部 wire 标记）
 - `NOVA_EXEC_SERVER_WINDOWS_SANDBOX_PROXY_PORTS` — Windows 沙箱回环代理端口清单
   （内部 wire 标记）
+- `NOVA_EXEC_SERVER_THREAD_ID` / `NOVA_EXEC_SERVER_TOOL_CALL_ID` — 子进程环境的
+  线程/工具调用关联标签（executor 按 `process/start` 的 metadata 注入；快照
+  捕获/回放一律剔除）。**线上形状变化**：沿用 codex 时期的旧名
+  `CODEX_THREAD_ID` / `CODEX_TOOL_CALL_ID` 已按命名铁律改名（常量名与值同改，
+  对位 codex 9b738582b1 语义不变）；依赖旧名观测子进程环境的外部方须同步
+  改名。
 - 构建期：`NOVA_EXEC_SERVER_BWRAP_SHA256`（bundled bwrap 的 pin 校验——当前无
   生产者，休眠链路）
 

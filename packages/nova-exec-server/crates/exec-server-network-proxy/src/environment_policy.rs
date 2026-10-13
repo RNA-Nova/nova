@@ -26,7 +26,10 @@ pub struct EnvironmentNetworkPolicy {
     pub unix_sockets: Option<NetworkUnixSocketPermissions>,
     pub allow_upstream_proxy: bool,
     pub dangerously_allow_all_unix_sockets: bool,
-    pub allow_local_binding: bool,
+    /// Omission inherits local-binding policy; an explicit false remains a restriction.
+    /// 对位 codex 39f4277087：bool → Option<bool>（省略 = 交给 executor 侧
+    /// LocalBindingPolicy 归一；显式 false 仍是限制）。
+    pub allow_local_binding: Option<bool>,
     pub managed_allowed_domains_only: bool,
 }
 
@@ -61,8 +64,8 @@ impl EnvironmentNetworkPolicy {
         // "允许全部" 不能覆盖任一策略 deny 的 socket。
         let inherited_permits_all = config.dangerously_allow_all_unix_sockets
             && !has_socket_deny(&inherited_sockets.entries);
-        let owner_permits_all = self.dangerously_allow_all_unix_sockets
-            && !has_socket_deny(&effective_sockets.entries);
+        let owner_permits_all =
+            self.dangerously_allow_all_unix_sockets && !has_socket_deny(&effective_sockets.entries);
 
         // 保留共享的 socket 授权；controller 的 deny 永远优先。
         effective_sockets.entries.retain(|entry| {
@@ -81,7 +84,12 @@ impl EnvironmentNetworkPolicy {
         config.unix_sockets = (!effective_sockets.entries.is_empty()).then_some(effective_sockets);
         config.dangerously_allow_all_unix_sockets = inherited_permits_all && owner_permits_all;
         config.allow_upstream_proxy &= self.allow_upstream_proxy;
-        config.allow_local_binding &= self.allow_local_binding;
+        // 对位 codex 39f4277087：任一显式否认胜出；双方都省略则保持省略，
+        // 交给 executor 的 LocalBindingPolicy 归一。
+        config.allow_local_binding = match (config.allow_local_binding, self.allow_local_binding) {
+            (Some(controller), Some(owner)) => Some(controller && owner),
+            (controller, owner) => controller.or(owner),
+        };
     }
 }
 

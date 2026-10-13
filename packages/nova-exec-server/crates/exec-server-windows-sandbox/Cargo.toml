@@ -93,6 +93,10 @@ features = [
     "Win32_System_Registry",
     "Win32_System_Services",
 ]
+# 钉 0.52 的理由：上游 codex 39f4277087 workspace manifest 钉 windows-sys 0.61.2，
+# 但其 committed Cargo.lock 实解 0.52.0（0.61.2 从未真正参与构建）；nova vendored
+# 依赖以 0.52 校验干净，且本 crate 的句柄代码按 0.52 的 isize 句柄类型改写
+#（被迫适配，0.61 的 *mut c_void 句柄形态未经验证）。
 version = "0.52"
 
 [dev-dependencies]

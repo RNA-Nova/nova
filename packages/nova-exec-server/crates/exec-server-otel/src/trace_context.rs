@@ -19,6 +19,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRACEPARENT_ENV_VAR: &str = "TRACEPARENT";
 const TRACESTATE_ENV_VAR: &str = "TRACESTATE";
+// 对位 codex fa1242c83b：进程级缓存 TRACEPARENT 环境继承的父上下文。
+static TRACEPARENT_CONTEXT: OnceLock<Option<Context>> = OnceLock::new();
 
 // Trace context propagation can happen outside the provider object, so configured
 // tracestate lives beside the process-global tracer provider.
@@ -119,6 +121,13 @@ pub fn set_parent_from_context(span: &Span, context: Context) {
     let _ = span.set_parent(context);
 }
 
+/// 对位 codex fa1242c83b：从 TRACEPARENT/TRACESTATE 环境变量继承父 trace 上下文（进程级缓存）。
+pub fn traceparent_context_from_env() -> Option<Context> {
+    TRACEPARENT_CONTEXT
+        .get_or_init(load_traceparent_context)
+        .clone()
+}
+
 pub(crate) fn context_from_trace_headers(
     traceparent: Option<&str>,
     tracestate: Option<&str>,
@@ -130,11 +139,30 @@ pub(crate) fn context_from_trace_headers(
         headers.insert("tracestate".to_string(), tracestate.to_string());
     }
 
-    let context = TraceContextPropagator::new().extract(&headers);
+    // 对位 codex f53c91be2c：无效外来 header 不得回退到无关的活跃 span。
+    // Invalid incoming headers must not fall back to an unrelated active span.
+    let context = TraceContextPropagator::new().extract_with_context(&Context::new(), &headers);
     if !context.span().span_context().is_valid() {
         return None;
     }
     Some(context)
+}
+
+/// 对位 codex fa1242c83b。
+fn load_traceparent_context() -> Option<Context> {
+    let traceparent = env::var(TRACEPARENT_ENV_VAR).ok()?;
+    let tracestate = env::var(TRACESTATE_ENV_VAR).ok();
+
+    match context_from_trace_headers(Some(&traceparent), tracestate.as_deref()) {
+        Some(context) => {
+            debug!("TRACEPARENT detected; continuing trace from parent context");
+            Some(context)
+        }
+        None => {
+            warn!("TRACEPARENT is set but invalid; ignoring trace context");
+            None
+        }
+    }
 }
 
 
@@ -347,6 +375,13 @@ mod tests {
 
     #[test]
     fn invalid_traceparent_returns_none() {
+        // 对位 codex f53c91be2c：挂上有效父上下文后，无效 header 仍须返回 None。
+        let parent = context_from_trace_headers(
+            Some("00-11111111111111111111111111111111-2222222222222222-01"),
+            /*tracestate*/ None,
+        )
+        .expect("valid ambient context");
+        let _guard = parent.attach();
         assert!(
             context_from_trace_headers(Some("not-a-traceparent"), /*tracestate*/ None).is_none()
         );

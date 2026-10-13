@@ -21,7 +21,7 @@ fn round_trip_preserves_supported_effective_settings() {
         allow_upstream_proxy: false,
         dangerously_allow_all_unix_sockets: true,
         mode: NetworkMode::None,
-        allow_local_binding: true,
+        allow_local_binding: Some(true),
         ..NetworkProxyConfig::default()
     };
     config.set_allowed_domains(vec!["example.com".into()]);
@@ -136,4 +136,41 @@ fn policy_decision_callback_timeout_round_trips() {
             .expect("deserialize launch timeout"),
         launch
     );
+}
+
+// 对位 codex 39f4277087 remote_config_tests.rs：省略/显式值在各 executor 的
+// LocalBindingPolicy 下的归一矩阵；RequireTrue 下显式 false 被 MXC ensure 拒绝。
+#[tokio::test]
+async fn local_binding_is_resolved_for_each_executor() -> anyhow::Result<()> {
+    use crate::LocalBindingPolicy::DefaultFalse;
+    use crate::LocalBindingPolicy::RequireTrue;
+    for (binding, policy, expected) in [
+        (None, DefaultFalse, Some(false)),
+        (None, RequireTrue, Some(true)),
+        (Some(false), DefaultFalse, Some(false)),
+        (Some(false), RequireTrue, None),
+        (Some(true), DefaultFalse, Some(true)),
+    ] {
+        let config = NetworkProxyConfig {
+            enabled: true,
+            allow_local_binding: binding,
+            ..Default::default()
+        };
+        let mut state = crate::runtime::network_proxy_state_for_policy(config);
+        state.local_binding_policy = RequireTrue;
+        let proxy = crate::NetworkProxy::builder()
+            .state(std::sync::Arc::new(state))
+            .managed_by_nova(false)
+            .build()
+            .await?;
+        assert_eq!(
+            proxy
+                .remote_launch_config(policy)
+                .await
+                .ok()
+                .map(|launch| launch.proxy.allow_local_binding),
+            expected,
+        );
+    }
+    Ok(())
 }

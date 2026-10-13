@@ -7,12 +7,6 @@
 // 相对 codex 的机械适配：crate 名 codex_windows_sandbox →
 // nova_exec_server_windows_sandbox；`NetworkMode::Full` → `NetworkMode::Proxy`。
 
-use nova_exec_server_windows_sandbox::ConsoleMode;
-use nova_exec_server_windows_sandbox::LaunchDesktop;
-use nova_exec_server_windows_sandbox::LocalSid;
-use nova_exec_server_windows_sandbox::create_process_as_user;
-use nova_exec_server_windows_sandbox::create_readonly_token_with_caps_and_user_from;
-use nova_exec_server_windows_sandbox::get_current_token_for_restriction;
 use nova_exec_server_network_proxy::ConfigReloader;
 use nova_exec_server_network_proxy::ConfigReloaderFuture;
 use nova_exec_server_network_proxy::ConfigState;
@@ -25,6 +19,12 @@ use nova_exec_server_network_proxy::NetworkProxy;
 use nova_exec_server_network_proxy::NetworkProxyConfig;
 use nova_exec_server_network_proxy::NetworkProxyState;
 use nova_exec_server_network_proxy::build_config_state;
+use nova_exec_server_windows_sandbox::ConsoleMode;
+use nova_exec_server_windows_sandbox::LaunchDesktop;
+use nova_exec_server_windows_sandbox::LocalSid;
+use nova_exec_server_windows_sandbox::create_process_as_user;
+use nova_exec_server_windows_sandbox::create_readonly_token_with_caps_and_user_from;
+use nova_exec_server_windows_sandbox::get_current_token_for_restriction;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::BufRead;

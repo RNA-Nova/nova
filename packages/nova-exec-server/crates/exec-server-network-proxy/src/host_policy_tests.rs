@@ -3,11 +3,9 @@
 //!
 //! nova 适配点：
 //! - `NetworkProxyConfig` 从 crate 根导入（nova 线上类型的家在 lib.rs，非 config 模块）。
-//! - `allow_local_binding` 字段为确定 bool（codex 为 `Option<bool>`），构造用 `false`。
 //! - `managed_by_codex` 对位为 `managed_by_nova`。
-//! - `remote_policy_decider()` 无 executor 侧 `allow_local_binding` 入参（nova 未移植
-//!   `local_binding_policy`）；"controller 显式 false 不被 executor 覆盖"的语义由
-//!   config 值 `false` 直接承载。
+//! （追新批 124-F4 后 `allow_local_binding` 已回到锚点的 `Option<bool>` +
+//! `LocalBindingPolicy` 归一，旧适配点"确定 bool / 未移植 local_binding_policy"作废。）
 
 use super::*;
 use crate::NetworkProxyConfig;
@@ -82,7 +80,7 @@ async fn local_and_remote_approvals_recheck_dns_after_the_decider() -> Result<()
         });
         // Explicit controller false must survive an executor allowing local binding.
         let config = NetworkProxyConfig {
-            allow_local_binding: false,
+            allow_local_binding: Some(false),
             ..NetworkProxyConfig::default()
         };
         let state = Arc::new(network_proxy_state_for_policy(config));
@@ -99,7 +97,9 @@ async fn local_and_remote_approvals_recheck_dns_after_the_decider() -> Result<()
             /*environment_policy*/ None,
             /*fallback_policy_decider*/ None,
         )?;
-        let remote_decider = scoped.remote_policy_decider().unwrap();
+        let remote_decider = scoped
+            .remote_policy_decider(/*allow_local_binding*/ true)
+            .unwrap();
         for host in ["does-not-resolve.invalid", "8.8.8.8"] {
             let request = NetworkPolicyRequest::new(NetworkPolicyRequestArgs {
                 protocol: NetworkProtocol::HttpsConnect,

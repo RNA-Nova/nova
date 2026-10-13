@@ -354,8 +354,6 @@ fn write_fake_bwrap(contents: &str) -> tempfile::TempPath {
 }
 
 fn write_fake_bwrap_in(dir: &Path, contents: &str) -> tempfile::TempPath {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use tempfile::NamedTempFile;
 
     // Bazel can mount the OS temp directory `noexec`, so prefer the current
@@ -364,21 +362,23 @@ fn write_fake_bwrap_in(dir: &Path, contents: &str) -> tempfile::TempPath {
     let temp_file = NamedTempFile::new_in(dir)
         .ok()
         .unwrap_or_else(|| NamedTempFile::new().expect("temp file"));
-    // Linux rejects exec-ing a file that is still open for writing.
     let path = temp_file.into_temp_path();
-    fs::write(&path, contents).expect("write fake bwrap");
-    let permissions = fs::Permissions::from_mode(0o755);
-    fs::set_permissions(&path, permissions).expect("chmod fake bwrap");
+    // 对位 codex 39f4277087 bwrap_tests.rs:369：sibling spawn 可能继承临时文件的可写
+    // fd，先删 inode，再由 write_executable 的子进程重建可执行文件（防 fd 竞态）。
+    // A sibling spawn may retain the temporary file's writable descriptor.
+    // Remove that inode before the helper creates the executable in its child.
+    std::fs::remove_file(&path).expect("remove empty temporary file");
+    nova_exec_server_utils_cargo_bin::write_executable(&path, contents)
+        .expect("write fake bwrap");
     path
 }
 
 fn write_named_fake_bwrap_in(dir: &Path) -> PathBuf {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
 
     let path = dir.join("bwrap");
-    fs::write(&path, "#!/bin/sh\n").expect("write fake bwrap");
-    let permissions = fs::Permissions::from_mode(0o755);
-    fs::set_permissions(&path, permissions).expect("chmod fake bwrap");
+    // 对位 codex 39f4277087 bwrap_tests.rs:380：同上，走子进程写文件。
+    nova_exec_server_utils_cargo_bin::write_executable(&path, "#!/bin/sh\n")
+        .expect("write fake bwrap");
     fs::canonicalize(path).expect("canonicalize fake bwrap")
 }

@@ -609,6 +609,10 @@ impl TryFrom<FileSystemSandboxPolicy> for RawFileSystemSandboxPolicy {
     }
 }
 
+// 对位 codex 39f4277087 `PROJECT_ROOTS_GLOB_PATTERN_PREFIX`
+// （"codex-project-roots://"）；命名铁律改 scheme 为 nova-project-roots://。
+// 该前缀只用于策略求值内部合成的 glob 模式（target.rs 识别后剥除），不上线、
+// 不落盘，改名无线上兼容面。
 const PROJECT_ROOTS_GLOB_PATTERN_PREFIX: &str = "nova-project-roots://";
 
 pub fn project_roots_glob_pattern(subpath: &Path) -> String {
@@ -2289,11 +2293,9 @@ fn special_paths_share_target(left: &FileSystemSpecialPath, right: &FileSystemSp
     }
 }
 
-/// Matches cwd-independent special paths against absolute `Path` entries when
+/// Matches cwd-independent special paths against `PathUri` entries when
 /// they name the same location.
 ///
-/// We intentionally only fold the special paths whose concrete meaning is
-/// stable without a cwd, such as `/` and `/tmp`.
 /// We intentionally only fold the special paths whose concrete meaning is
 /// stable without a cwd, such as `/` and `/tmp`.
 ///
@@ -2439,6 +2441,13 @@ fn normalize_effective_absolute_path(path: AbsolutePathBuf) -> AbsolutePathBuf {
 /// 只规范化受信任的顶层系统别名（如 `/tmp -> /private/tmp`），不深追更深层
 /// 的组件——深层组件可能被已在沙箱内运行的进程改写，这里跟随它们会把一次
 /// 路径检查变成新的授权。
+// 对位 codex 39f4277087 `AbsolutePathBuf::normalize_system_aliases`
+// （codex-rs/utils/absolute-path/src/system_aliases.rs，经 permissions.rs 的
+// PreserveMutableComponents 臂 `normalize_system_aliases().unwrap_or(path)`
+// 调用）。有意分歧：nova 内联为不可失败的本地函数——任何元数据/规范化失败
+// 一律回退原路径（与锚点调用点的 unwrap_or(path) 同语义），且用 std
+// canonicalize 而非 dunce（本 crate 不引入 dunce；POSIX 顶层别名场景两者
+// 等价，Windows verbatim 前缀差异不适用于此处的顶层符号链接判定）。
 fn normalize_trusted_top_level_alias(path: AbsolutePathBuf) -> AbsolutePathBuf {
     let Some(top_level) = path.as_path().ancestors().find(|ancestor| {
         ancestor.parent().is_some() && ancestor.parent().and_then(Path::parent).is_none()

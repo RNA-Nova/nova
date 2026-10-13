@@ -12,8 +12,12 @@
 
 mod execution_scope;
 
+use crate::NetworkDecision;
+use crate::NetworkDecisionSource;
+use crate::NetworkPolicyDecider;
 use crate::attribution::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
 use crate::config;
+use crate::connection_lifecycle::ProxyListeners;
 use crate::http_proxy;
 use crate::runtime::BlockedRequestObserver;
 use crate::runtime::ConfigState;
@@ -23,9 +27,6 @@ use crate::runtime::HostBlockReason;
 use crate::runtime::unix_socket_permissions_supported;
 use crate::socks5;
 use crate::state::NetworkProxyState;
-use crate::NetworkDecision;
-use crate::NetworkDecisionSource;
-use crate::NetworkPolicyDecider;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
@@ -36,13 +37,15 @@ use std::net::TcpListener as StdTcpListener;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use tokio::task::JoinHandle;
 use tracing::warn;
 
 use self::execution_scope::ExecutionScope;
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "nova-exec-server-network-proxy", about = "Nova network sandbox proxy")]
+#[command(
+    name = "nova-exec-server-network-proxy",
+    about = "Nova network sandbox proxy"
+)]
 pub struct Args {}
 
 #[derive(Debug)]
@@ -296,7 +299,7 @@ struct NetworkProxyRuntimeSettings {
 impl NetworkProxyRuntimeSettings {
     fn from_config(config: &crate::NetworkProxyConfig) -> Self {
         Self {
-            allow_local_binding: config.allow_local_binding,
+            allow_local_binding: config.allow_local_binding(),
             allow_unix_sockets: if cfg!(target_os = "windows") {
                 Arc::default()
             } else {
@@ -320,14 +323,31 @@ struct EnvironmentProxyAddrs {
 /// crate 根（见 lib.rs）；这里只是使用点。
 struct EnvironmentProxy {
     addrs: EnvironmentProxyAddrs,
-    runtime: EnvironmentProxyRuntime,
+    runtime: ProxyRuntime,
 }
 
-enum EnvironmentProxyRuntime {
-    ListenerTasks {
-        http_task: JoinHandle<Result<()>>,
-        socks_task: Option<JoinHandle<Result<()>>>,
-    },
+// 对位 codex 39f4277087 connection_lifecycle：监听器与连接作用域同一宿主，
+// 停止 = cancel + 排干（drain），而非 JoinHandle::abort。nova 无 Windows 共享
+// ingress 变体（该面未镜像，见 lib.rs 裁点）。
+enum ProxyRuntime {
+    Listeners(ProxyListeners),
+}
+
+impl ProxyRuntime {
+    async fn wait(&mut self) -> Result<()> {
+        match self {
+            Self::Listeners(listeners) => listeners.wait().await,
+        }
+    }
+
+    fn stop(self) -> Option<ProxyListeners> {
+        match self {
+            Self::Listeners(mut listeners) => {
+                listeners.cancel();
+                Some(listeners)
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -446,8 +466,7 @@ pub fn is_managed_proxy_env_var(key: &str, value: &str) -> bool {
     // 第一期恒不匹配（见 lib.rs `is_managed_mitm_ca_trust_bundle_path`）。
     #[cfg(target_os = "macos")]
     {
-        key == PROXY_GIT_SSH_COMMAND_ENV_KEY
-            && value.starts_with(NOVA_PROXY_GIT_SSH_COMMAND_MARKER)
+        key == PROXY_GIT_SSH_COMMAND_ENV_KEY && value.starts_with(NOVA_PROXY_GIT_SSH_COMMAND_MARKER)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -466,12 +485,14 @@ pub const PROXY_GIT_SSH_COMMAND_ENV_KEY: &str = GIT_SSH_COMMAND_ENV_KEY;
 const FTP_PROXY_ENV_KEYS: &[&str] = &["FTP_PROXY", "ftp_proxy"];
 const WEBSOCKET_PROXY_ENV_KEYS: &[&str] = &["WS_PROXY", "WSS_PROXY", "ws_proxy", "wss_proxy"];
 
+// 对位 codex 39f4277087：NO_PROXY_ENV_KEYS 与锚点逐项一致（`YARN_NO_PROXY` 只在
+// PROXY_ENV_KEYS 出现——yarn 的 proxy 键纳入剥离/注入对称集，但其 no-proxy 键
+// 锚点未纳入 no-proxy 识别集，nova 不自增）。
 pub const NO_PROXY_ENV_KEYS: &[&str] = &[
     "NO_PROXY",
     "no_proxy",
     "npm_config_noproxy",
     "NPM_CONFIG_NOPROXY",
-    "YARN_NO_PROXY",
     "BUNDLE_NO_PROXY",
 ];
 
@@ -644,7 +665,14 @@ impl NetworkProxy {
     }
 
     /// 抓取启动一个匹配的 executor 本地代理所需的静态输入。
-    pub async fn remote_launch_config(&self) -> Result<crate::RemoteNetworkProxyLaunchConfig> {
+    ///
+    /// 对位 codex 39f4277087：`local_binding_policy` 由启动方（executor 宿主）按其
+    /// 沙箱后端能力给出；省略的 allow_local_binding 在此按该策略归一后才上线。
+    /// 裁点：锚点开头的 credential-broker broker_only 判定块随凭证经纪面裁掉。
+    pub async fn remote_launch_config(
+        &self,
+        local_binding_policy: crate::LocalBindingPolicy,
+    ) -> Result<crate::RemoteNetworkProxyLaunchConfig> {
         let mut config = self.state.current_cfg().await?;
         // 代理启用与否与 MITM/凭证配置归 controller 所有；远程边界由
         // `RemoteNetworkProxyConfig::from_effective_config` 拒绝不支持的配置。
@@ -655,9 +683,18 @@ impl NetworkProxy {
         if let Some(policy) = environment_policy {
             policy.apply_to(&mut config);
         }
+        config.allow_local_binding = Some(local_binding_policy.resolve(&config));
         anyhow::ensure!(
             environment_policy.is_none() || config.enabled,
             "environment network policy requires an enabled executor proxy"
+        );
+        // 对位锚点的 MXC 兜底 ensure：MXC 沙箱无法禁止宿主 loopback 双向访问，
+        // RequireTrue 下显式 false 必须在出网前被拒。
+        anyhow::ensure!(
+            !config.enabled
+                || local_binding_policy != crate::LocalBindingPolicy::RequireTrue
+                || config.allow_local_binding(),
+            "MXC cannot enforce allow_local_binding=false: native host-loopback access is bidirectional; use true or a different sandbox backend"
         );
         let proxy = crate::RemoteNetworkProxyConfig::from_effective_config(&config)?;
         let (environment_id, execution_id) = self
@@ -679,8 +716,12 @@ impl NetworkProxy {
         })
     }
 
-    /// 返回恢复了可信执行归因的策略 decider。
-    pub fn remote_policy_decider(&self) -> Option<Arc<dyn NetworkPolicyDecider>> {
+    /// Returns the policy decider with executor local-binding policy and trusted attribution.
+    /// 对位 codex 39f4277087：`allow_local_binding` 为 executor 侧归一后的本地绑定许可。
+    pub fn remote_policy_decider(
+        &self,
+        allow_local_binding: bool,
+    ) -> Option<Arc<dyn NetworkPolicyDecider>> {
         let scope = self.execution_scope.as_ref()?;
         self.state.for_execution_token(&scope.attribution_token)?;
         let decider = Arc::clone(self.policy_decider.as_ref()?);
@@ -704,11 +745,10 @@ impl NetworkProxy {
                     decision = async {
                         // 对位 codex 37eaae6eeb：先以 RequireAllowlist 查（未命中 allowlist
                         // 不触 DNS）；decider 判 Allow 后再以 Approved 复查基线，私网地址与
-                        // 显式 deny 不可被审批绕过。nova 裁点：`remote_policy_decider` 无
-                        // executor 侧 allow_local_binding 入参（`local_binding_policy` 未
-                        // 移植），两处均传 None 走 config 值。
+                        // 显式 deny 不可被审批绕过。executor 侧许可经 `allow_local_binding`
+                        // 入参进入（controller config 的显式 false 仍优先，见 runtime.rs）。
                         let host_decision = state.host_blocked_with_local_binding(
-                            &request.host, request.port, /*allow_local_binding*/ None,
+                            &request.host, request.port, Some(allow_local_binding),
                             HostAuthorization::RequireAllowlist,
                         ).await;
                         let host_decision = match host_decision {
@@ -723,7 +763,7 @@ impl NetworkProxy {
                                     return decision;
                                 }
                                 state.host_blocked_with_local_binding(
-                                    &request.host, request.port, /*allow_local_binding*/ None,
+                                    &request.host, request.port, Some(allow_local_binding),
                                     HostAuthorization::Approved,
                                 ).await
                             }
@@ -915,9 +955,6 @@ impl NetworkProxy {
             return Ok(proxy.addrs);
         }
 
-        let runtime = tokio::runtime::Handle::try_current().with_context(|| {
-            format!("failed to create network proxy for environment `{environment_id}`")
-        })?;
         let listeners =
             reserve_loopback_ephemeral_listeners(self.socks_enabled).with_context(|| {
                 format!("failed to reserve network proxy for environment `{environment_id}`")
@@ -937,49 +974,47 @@ impl NetworkProxy {
             socks_listener,
         } = listeners;
 
+        let mut listeners = ProxyListeners::new();
         let environment_id = environment_id.to_string();
         let http_state = self.state.clone();
         let http_decider = self.policy_decider.clone();
         let http_environment_id = Some(environment_id.clone());
-        let http_task = runtime.spawn(async move {
+        listeners.spawn(move |guard| async move {
             http_proxy::run_http_proxy_with_std_listener(
                 http_state,
                 http_listener,
                 http_decider,
                 http_environment_id,
+                guard,
             )
             .await
         });
 
-        let socks_task = if self.socks_enabled {
+        if self.socks_enabled
+            && let Some(listener) = socks_listener
+        {
             let socks_state = self.state.clone();
             let socks_decider = self.policy_decider.clone();
             let socks_environment_id = Some(environment_id.clone());
             let socks5_udp_enabled = self.socks5_udp_enabled;
-            socks_listener.map(|listener| {
-                runtime.spawn(async move {
-                    socks5::run_socks5_with_std_listener(
-                        socks_state,
-                        listener,
-                        socks_decider,
-                        socks_environment_id,
-                        socks5_udp_enabled,
-                    )
-                    .await
-                })
-            })
-        } else {
-            None
-        };
+            listeners.spawn(move |guard| async move {
+                socks5::run_socks5_with_std_listener(
+                    socks_state,
+                    listener,
+                    socks_decider,
+                    socks_environment_id,
+                    socks5_udp_enabled,
+                    guard,
+                )
+                .await
+            });
+        }
 
         proxies.insert(
             environment_id,
             EnvironmentProxy {
                 addrs,
-                runtime: EnvironmentProxyRuntime::ListenerTasks {
-                    http_task,
-                    socks_task,
-                },
+                runtime: ProxyRuntime::Listeners(listeners),
             },
         );
         Ok(addrs)
@@ -1007,7 +1042,13 @@ impl NetworkProxy {
             new_state.config.enable_socks5_udp == current_cfg.enable_socks5_udp,
             "cannot update network.enable_socks5_udp on a running proxy"
         );
-        let settings = NetworkProxyRuntimeSettings::from_config(&new_state.config);
+        // 对位 codex 39f4277087：运行时设置消费归一后的 config（省略已按本 executor
+        // 的 LocalBindingPolicy 落定）；线上 state 仍保留原始省略语义。
+        let config = self
+            .state
+            .local_binding_policy
+            .resolved_config(&new_state.config);
+        let settings = NetworkProxyRuntimeSettings::from_config(&config);
         self.state.replace_config_state(new_state).await?;
         let mut guard = self
             .runtime_settings
@@ -1045,10 +1086,11 @@ impl NetworkProxy {
         let http_listener = reserved_listeners.and_then(|listeners| listeners.take_http());
         let socks_listener = reserved_listeners.and_then(|listeners| listeners.take_socks());
 
+        let mut listeners = ProxyListeners::new();
         let http_state = self.state.clone();
         let http_decider = self.policy_decider.clone();
         let http_addr = self.http_addr;
-        let http_task = tokio::spawn(async move {
+        listeners.spawn(move |guard| async move {
             match http_listener {
                 Some(listener) => {
                     http_proxy::run_http_proxy_with_std_listener(
@@ -1056,6 +1098,7 @@ impl NetworkProxy {
                         listener,
                         http_decider,
                         /*environment_id*/ None,
+                        guard,
                     )
                     .await
                 }
@@ -1065,18 +1108,19 @@ impl NetworkProxy {
                         http_addr,
                         http_decider,
                         /*environment_id*/ None,
+                        guard,
                     )
                     .await
                 }
             }
         });
 
-        let socks_task = if current_cfg.enable_socks5 {
+        if current_cfg.enable_socks5 {
             let socks_state = self.state.clone();
             let socks_decider = self.policy_decider.clone();
             let socks_addr = self.socks_addr;
             let enable_socks5_udp = current_cfg.enable_socks5_udp;
-            Some(tokio::spawn(async move {
+            listeners.spawn(move |guard| async move {
                 match socks_listener {
                     Some(listener) => {
                         socks5::run_socks5_with_std_listener(
@@ -1085,6 +1129,7 @@ impl NetworkProxy {
                             socks_decider,
                             /*environment_id*/ None,
                             enable_socks5_udp,
+                            guard,
                         )
                         .await
                     }
@@ -1095,120 +1140,76 @@ impl NetworkProxy {
                             socks_decider,
                             /*environment_id*/ None,
                             enable_socks5_udp,
+                            guard,
                         )
                         .await
                     }
                 }
-            }))
-        } else {
-            None
-        };
+            });
+        }
 
         Ok(NetworkProxyHandle {
-            http_task: Some(http_task),
-            socks_task,
-            environment_proxies: self.environment_proxies.clone(),
-            completed: false,
+            runtime: Some(ProxyRuntime::Listeners(listeners)),
+            environment_proxies: Some(Arc::clone(&self.environment_proxies)),
         })
     }
 }
 
 pub struct NetworkProxyHandle {
-    http_task: Option<JoinHandle<Result<()>>>,
-    socks_task: Option<JoinHandle<Result<()>>>,
-    environment_proxies: Arc<Mutex<HashMap<String, EnvironmentProxy>>>,
-    completed: bool,
-}
-
-impl std::fmt::Debug for NetworkProxyHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NetworkProxyHandle")
-            .field("completed", &self.completed)
-            .finish_non_exhaustive()
-    }
+    runtime: Option<ProxyRuntime>,
+    environment_proxies: Option<Arc<Mutex<HashMap<String, EnvironmentProxy>>>>,
 }
 
 impl NetworkProxyHandle {
     fn noop() -> Self {
         Self {
-            http_task: Some(tokio::spawn(async { Ok(()) })),
-            socks_task: None,
-            environment_proxies: Arc::new(Mutex::new(HashMap::new())),
-            completed: true,
+            runtime: None,
+            environment_proxies: None,
         }
     }
 
     pub async fn wait(mut self) -> Result<()> {
-        let http_task = self.http_task.take().context("missing http proxy task")?;
-        let socks_task = self.socks_task.take();
-        let http_result = http_task.await;
-        let socks_result = match socks_task {
-            Some(task) => Some(task.await),
-            None => None,
+        let result = match self.runtime.as_mut() {
+            Some(runtime) => runtime.wait().await,
+            None => Ok(()),
         };
-        self.completed = true;
-        abort_environment_proxies(self.environment_proxies.clone()).await;
-        http_result??;
-        if let Some(socks_result) = socks_result {
-            socks_result??;
+        self.shutdown().await?;
+        result
+    }
+
+    pub async fn shutdown(mut self) -> Result<()> {
+        for listeners in self.stop_runtimes() {
+            listeners.shutdown().await;
         }
         Ok(())
     }
 
-    pub async fn shutdown(mut self) -> Result<()> {
-        abort_tasks(self.http_task.take(), self.socks_task.take()).await;
-        abort_environment_proxies(self.environment_proxies.clone()).await;
-        self.completed = true;
-        Ok(())
-    }
-}
-
-async fn abort_task(task: Option<JoinHandle<Result<()>>>) {
-    if let Some(task) = task {
-        task.abort();
-        let _ = task.await;
-    }
-}
-
-async fn abort_tasks(
-    http_task: Option<JoinHandle<Result<()>>>,
-    socks_task: Option<JoinHandle<Result<()>>>,
-) {
-    abort_task(http_task).await;
-    abort_task(socks_task).await;
-}
-
-async fn abort_environment_proxies(
-    environment_proxies: Arc<Mutex<HashMap<String, EnvironmentProxy>>>,
-) {
-    let proxies = {
-        let mut guard = environment_proxies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.drain().map(|(_, proxy)| proxy).collect::<Vec<_>>()
-    };
-    for proxy in proxies {
-        let EnvironmentProxyRuntime::ListenerTasks {
-            http_task,
-            socks_task,
-        } = proxy.runtime;
-        abort_task(Some(http_task)).await;
-        abort_task(socks_task).await;
+    fn stop_runtimes(&mut self) -> Vec<ProxyListeners> {
+        let environments = self
+            .environment_proxies
+            .take()
+            .map(|proxies| {
+                std::mem::take(
+                    &mut *proxies
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                )
+            })
+            .unwrap_or_default();
+        // Stop every runtime before awaiting any one of them. Cancellation of this
+        // cleanup future must not leave later environments accepting connections.
+        self.runtime
+            .take()
+            .into_iter()
+            .chain(environments.into_values().map(|proxy| proxy.runtime))
+            .filter_map(ProxyRuntime::stop)
+            .collect()
     }
 }
 
 impl Drop for NetworkProxyHandle {
     fn drop(&mut self) {
-        if self.completed {
-            return;
-        }
-        let http_task = self.http_task.take();
-        let socks_task = self.socks_task.take();
-        let environment_proxies = self.environment_proxies.clone();
-        tokio::spawn(async move {
-            abort_tasks(http_task, socks_task).await;
-            abort_environment_proxies(environment_proxies).await;
-        });
+        drop(self.stop_runtimes());
     }
 }
 
@@ -1291,7 +1292,9 @@ mod tests {
         assert!(proxy.dangerously_allow_all_unix_sockets());
         assert_eq!(proxy.current_cfg().await?, config);
 
-        let remote = proxy.remote_launch_config().await?;
+        let remote = proxy
+            .remote_launch_config(crate::LocalBindingPolicy::DefaultFalse)
+            .await?;
         assert_eq!(
             (
                 remote.proxy.unix_sockets,
@@ -1315,7 +1318,7 @@ mod tests {
         let captured = Arc::new(Mutex::new(None));
         let captured_request = Arc::clone(&captured);
         let mut config = NetworkProxyConfig {
-            allow_local_binding: true,
+            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         config.set_allowed_domains(vec!["controller.example".to_string()]);
@@ -1348,7 +1351,7 @@ mod tests {
             Some(Arc::clone(&fallback_policy_decider)),
         )?;
         let decider = scoped
-            .remote_policy_decider()
+            .remote_policy_decider(/*allow_local_binding*/ true)
             .expect("execution-scoped proxy should expose its policy decider");
         let mut request = https_request("controller.example");
         request.environment_id = Some("forged-environment".to_string());
@@ -1387,7 +1390,11 @@ mod tests {
 
         owner_config.set_denied_domains(vec!["denied.example".to_string()]);
         assert_eq!(
-            scoped.remote_launch_config().await?.proxy.domains,
+            scoped
+                .remote_launch_config(crate::LocalBindingPolicy::DefaultFalse)
+                .await?
+                .proxy
+                .domains,
             owner_config.domains
         );
         let strict_scoped = proxy.for_execution(
@@ -1400,7 +1407,7 @@ mod tests {
             )),
             Some(fallback_policy_decider),
         )?;
-        assert!(strict_scoped.remote_policy_decider().is_none());
+        assert!(strict_scoped.remote_policy_decider(true).is_none());
         Ok(())
     }
 
@@ -1409,7 +1416,7 @@ mod tests {
         let decision_started = Arc::new(tokio::sync::Notify::new());
         let decision_started_for_decider = Arc::clone(&decision_started);
         let config = NetworkProxyConfig {
-            allow_local_binding: true,
+            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         let proxy = NetworkProxy::builder()
@@ -1432,7 +1439,7 @@ mod tests {
             /*fallback_policy_decider*/ None,
         )?;
         let decider = scoped
-            .remote_policy_decider()
+            .remote_policy_decider(/*allow_local_binding*/ true)
             .expect("execution-scoped proxy should expose its policy decider");
         let request = https_request("pending.example");
         let decision = tokio::spawn(async move { decider.decide(request).await });
@@ -1596,7 +1603,7 @@ mod tests {
             enable_socks5: true,
             proxy_url: Some("http://127.0.0.1:44129".to_string()),
             socks_url: Some("http://127.0.0.1:49082".to_string()),
-            allow_local_binding: true,
+            allow_local_binding: Some(true),
             unix_sockets: Some(unix_sockets),
             ..NetworkProxyConfig::default()
         };
@@ -1610,8 +1617,8 @@ mod tests {
             config.dangerously_allow_all_unix_sockets = allow_all;
             let replacement = crate::state::build_config_state(config.clone(), Default::default())?;
             proxy.replace_config_state(replacement).await?;
-            let prepared =
-                proxy.prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)?;
+            let prepared = proxy
+                .prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)?;
             assert_eq!(
                 prepared.sandbox_context,
                 crate::ManagedNetworkSandboxContext {
@@ -1656,7 +1663,9 @@ mod tests {
             /*environment_policy*/ None,
             /*fallback_policy_decider*/ None,
         )?;
-        let launch = scoped.remote_launch_config().await?;
+        let launch = scoped
+            .remote_launch_config(crate::LocalBindingPolicy::DefaultFalse)
+            .await?;
         let prepared = scoped.prepare_for_optional_environment(
             HashMap::from([(
                 PROXY_ATTRIBUTION_TOKEN_ENV_KEY.to_string(),

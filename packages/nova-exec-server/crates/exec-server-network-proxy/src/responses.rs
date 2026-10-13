@@ -59,7 +59,9 @@ pub fn blocked_message(reason: &str) -> &'static str {
         REASON_NOT_ALLOWED => "Domain not in allowlist.",
         REASON_NOT_ALLOWED_LOCAL => "Sandbox policy blocks local/private network addresses.",
         REASON_DENIED => "Domain denied by the sandbox policy.",
-        // 适配：nova 线上 NetworkMode 没有 limited 变体，None = 无网络访问。
+        // 用户面文案与 codex 的分歧（对位 codex 39f4277087 responses.rs：锚点文案为
+        // "Method not allowed in limited mode."）：nova 线上 NetworkMode 无 limited
+        // 变体（None = 无网络访问、Proxy = 全量放行），文案按当前模式表述。
         REASON_METHOD_NOT_ALLOWED => "Method not allowed by the current network mode.",
         REASON_PROXY_DISABLED => "network proxy is disabled",
         _ => "Request blocked by network policy.",

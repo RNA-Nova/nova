@@ -5,8 +5,18 @@
 //!   SOCKS5 TCP 只做策略检查后的直接转发。`NetworkMode::None`（无网络访问）下
 //!   TCP/UDP 一律拒绝（codex 的 Limited 语义在裁掉 MITM 后退化为全拒）。
 
+use crate::BlockedRequest;
+use crate::NetworkDecision;
+use crate::NetworkDecisionSource;
+use crate::NetworkMode;
+use crate::NetworkPolicyDecider;
+use crate::NetworkPolicyDecision;
+use crate::NetworkPolicyRequest;
+use crate::NetworkPolicyRequestArgs;
+use crate::NetworkProtocol;
 use crate::attribution::BindConnectionAttribution;
 use crate::connect_policy::TargetCheckedTcpConnector;
+use crate::connection_lifecycle::CancelOnShutdown;
 use crate::network_policy::BlockDecisionAuditEventArgs;
 use crate::network_policy::emit_block_decision_audit_event;
 use crate::network_policy::evaluate_host_policy;
@@ -17,20 +27,12 @@ use crate::responses::PolicyDecisionDetails;
 use crate::responses::blocked_message_with_policy;
 use crate::state::BlockedRequestArgs;
 use crate::state::NetworkProxyState;
-use crate::BlockedRequest;
-use crate::NetworkDecision;
-use crate::NetworkDecisionSource;
-use crate::NetworkMode;
-use crate::NetworkPolicyDecider;
-use crate::NetworkPolicyDecision;
-use crate::NetworkPolicyRequest;
-use crate::NetworkPolicyRequestArgs;
-use crate::NetworkProtocol;
 use anyhow::Context as _;
 use anyhow::Result;
 use rama_core::Service;
 use rama_core::error::BoxError;
 use rama_core::extensions::ExtensionsRef;
+use rama_core::graceful::ShutdownGuard;
 use rama_core::service::BoxService;
 use rama_core::service::service_fn;
 use rama_net::client::EstablishedClientConnection;
@@ -60,6 +62,7 @@ pub async fn run_socks5(
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     environment_id: Option<String>,
     enable_socks5_udp: bool,
+    guard: ShutdownGuard,
 ) -> Result<()> {
     let listener = TcpListener::build()
         .bind(addr)
@@ -75,6 +78,7 @@ pub async fn run_socks5(
         policy_decider,
         environment_id,
         enable_socks5_udp,
+        guard,
     )
     .await
 }
@@ -85,6 +89,7 @@ pub async fn run_socks5_with_std_listener(
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     environment_id: Option<String>,
     enable_socks5_udp: bool,
+    guard: ShutdownGuard,
 ) -> Result<()> {
     let listener =
         TcpListener::try_from(listener).context("convert std listener to SOCKS5 proxy listener")?;
@@ -94,6 +99,7 @@ pub async fn run_socks5_with_std_listener(
         policy_decider,
         environment_id,
         enable_socks5_udp,
+        guard,
     )
     .await
 }
@@ -104,6 +110,7 @@ async fn run_socks5_with_listener(
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     environment_id: Option<String>,
     enable_socks5_udp: bool,
+    guard: ShutdownGuard,
 ) -> Result<()> {
     let addr = listener
         .local_addr()
@@ -122,12 +129,15 @@ async fn run_socks5_with_listener(
     }
 
     listener
-        .serve(socks5_proxy_service(
-            state,
-            policy_decider,
-            environment_id,
-            enable_socks5_udp,
-        ))
+        .serve_graceful(
+            guard,
+            CancelOnShutdown::new(socks5_proxy_service(
+                state,
+                policy_decider,
+                environment_id,
+                enable_socks5_udp,
+            )),
+        )
         .await;
     Ok(())
 }
@@ -706,7 +716,7 @@ mod tests {
         let mut settings = NetworkProxyConfig {
             enabled: true,
             mode: NetworkMode::Proxy,
-            allow_local_binding: true,
+            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["127.0.0.1".to_string()]);

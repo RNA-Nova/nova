@@ -26,11 +26,14 @@ mod absolute_path_normalization;
 mod api_path_string;
 mod config_path;
 mod native_path_bytes;
+mod platform;
 
 use absolute_path_normalization::path_uri_from_segments;
 
 pub use api_path_string::LegacyAppPathString;
 pub use api_path_string::LegacyAppPathStringError;
+// 对位 codex 3724dc8361：跨路径/网络/沙箱配置共享的平台身份词汇。
+pub use platform::Platform;
 
 pub const FILE_SCHEME: &str = "file";
 const BAD_PATH_URI_PREFIX: &str = "file:///%00/bad/path/";
@@ -808,7 +811,8 @@ fn native_path_segments_start_with(
 }
 
 fn infer_opaque_path_convention(path_bytes: &[u8]) -> Option<PathConvention> {
-    if path_bytes.starts_with(b"/") {
+    // 对位 codex d6571322d2：UTF-16LE 的 Windows 斜杠以 `/\0` 开头，与 POSIX 根区分。
+    if path_bytes.starts_with(b"/") && !path_bytes.starts_with(b"/\0") {
         return Some(PathConvention::Posix);
     }
     if !path_bytes.len().is_multiple_of(2) {
@@ -822,7 +826,9 @@ fn infer_opaque_path_convention(path_bytes: &[u8]) -> Option<PathConvention> {
     let second = path_wide.next()?;
     let has_drive = u8::try_from(first).is_ok_and(|drive| drive.is_ascii_alphabetic())
         && second == u16::from(b':');
-    let has_unc_prefix = first == u16::from(b'\\') && second == u16::from(b'\\');
+    // 对位 codex d6571322d2：正斜杠/混合斜杠的 UNC 前缀同样判 Windows。
+    let is_separator = |character| character == u16::from(b'\\') || character == u16::from(b'/');
+    let has_unc_prefix = is_separator(first) && is_separator(second);
     (has_drive || has_unc_prefix).then_some(PathConvention::Windows)
 }
 
@@ -892,11 +898,22 @@ fn parse_unnormalized_windows_path(path: &str) -> Option<PathUri> {
         let mut components = path[2..].split(is_windows_separator_char);
         let host = components.next().filter(|host| !host.is_empty())?;
         let share = components.next().filter(|share| !share.is_empty())?;
+        // 对位 codex cc05ecfe17：`.`/`..` 不能充当 UNC host/share，否则规范化后会漂移目标。
+        if matches!(host, "." | "..") || matches!(share, "." | "..") {
+            return Some(windows_opaque_path_uri(path));
+        }
         return path_uri_from_segments(
             PathConvention::Windows,
             Some(host),
             std::iter::once(share).chain(components),
         )
+        // 对位 codex cc05ecfe17：URL host 规范化（如小写化、IDN）后必须仍与原 host
+        // 大小写不敏感地一致，否则退化为 opaque，避免去重后指向另一台主机。
+        .filter(|uri| {
+            uri.0
+                .host_str()
+                .is_some_and(|parsed| parsed.eq_ignore_ascii_case(host))
+        })
         .or_else(|| Some(windows_opaque_path_uri(path)));
     }
 

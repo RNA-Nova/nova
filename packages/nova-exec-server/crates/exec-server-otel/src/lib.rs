@@ -22,6 +22,8 @@ pub use crate::trace_context::inject_span_w3c_trace_headers;
 pub use crate::trace_context::set_parent_from_context;
 pub use crate::trace_context::set_parent_from_w3c_trace_context;
 pub use crate::trace_context::span_w3c_trace_context;
+// 对位 codex fa1242c83b：TRACEPARENT 环境继承入口（消费者在 app-server/exec 非镜像面，词汇照收）。
+pub use crate::trace_context::traceparent_context_from_env;
 pub use crate::trace_context::validate_tracestate_entries;
 pub use crate::trace_context::validate_tracestate_member;
 pub use nova_exec_server_utils_string::sanitize_metric_tag_value;

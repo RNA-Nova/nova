@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use crate::bwrap::BwrapNetworkMode;
 use crate::bwrap::BwrapOptions;
+use crate::bwrap::WSL_INTEROP_DIR;
 use crate::bwrap::create_bwrap_command_args;
 use crate::landlock::apply_permission_profile_to_current_thread;
 use crate::launcher::exec_bwrap;
@@ -196,12 +197,7 @@ pub fn run_main() -> ! {
         file_system_sandbox_policy,
         network_sandbox_policy,
     } = resolve_permission_profile(permission_profile).unwrap_or_else(|err| panic!("{err}"));
-    ensure_legacy_landlock_mode_supports_policy(
-        use_legacy_landlock,
-        &file_system_sandbox_policy,
-        network_sandbox_policy,
-        &sandbox_policy_cwd,
-    );
+    ensure_legacy_landlock_mode_supports_policy(use_legacy_landlock, &file_system_sandbox_policy);
 
     // Inner stage: apply seccomp/no_new_privs after bubblewrap has already
     // established the filesystem view.
@@ -318,6 +314,9 @@ pub fn run_main() -> ! {
             mount_proc: !no_proc && !inherit_pid_namespace,
             inherit_pid_namespace,
             network_mode: bwrap_network_mode(network_sandbox_policy, allow_network_for_proxy),
+            // 对位 codex f71543813f：文件系统受限且宿主存在 WSL interop 目录时遮蔽之
+            mask_wsl_interop: !file_system_sandbox_policy.has_full_disk_write_access()
+                && Path::new(WSL_INTEROP_DIR).is_dir(),
             ..Default::default()
         };
         let inner = build_inner_seccomp_command(InnerSeccompCommandArgs {
@@ -400,19 +399,14 @@ fn ensure_inner_stage_mode_is_valid(apply_seccomp_then_exec: bool, use_legacy_la
     }
 }
 
+// 对位 codex 49305d74b4：文件系统受限即要求 bubblewrap（隔离 app-server socket），
+// legacy landlock 一律拒绝。
 fn ensure_legacy_landlock_mode_supports_policy(
     use_legacy_landlock: bool,
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
-    network_sandbox_policy: NetworkSandboxPolicy,
-    sandbox_policy_cwd: &Path,
 ) {
-    if use_legacy_landlock
-        && file_system_sandbox_policy
-            .needs_direct_runtime_enforcement(network_sandbox_policy, sandbox_policy_cwd)
-    {
-        panic!(
-            "permission profiles requiring direct runtime enforcement are incompatible with --use-legacy-landlock"
-        );
+    if use_legacy_landlock && !file_system_sandbox_policy.has_full_disk_write_access() {
+        panic!("filesystem-restricted execution requires bubblewrap to isolate app-server sockets");
     }
 }
 

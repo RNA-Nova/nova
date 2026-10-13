@@ -129,7 +129,10 @@ async fn tungstenite_default_tls_mode_ignores_invalid_custom_ca_in_a_subprocess(
                 "NOVA_EXEC_SERVER_CA_CERTIFICATE",
                 "/nova-websocket-client-nonexistent-custom-ca.pem",
             )
-            .env("NOVA_EXEC_SERVER_WEBSOCKET_DEFAULT_TLS_PROBE_URL", target_url)
+            .env(
+                "NOVA_EXEC_SERVER_WEBSOCKET_DEFAULT_TLS_PROBE_URL",
+                target_url,
+            )
             .output()
             .expect("WebSocket default-TLS subprocess should run")
     })
@@ -194,10 +197,11 @@ async fn direct_route_connects_secure_websocket() {
         Some(tls_config),
         OutboundProxyRoute::Direct,
         TcpNodelay::Enabled,
+        /*loopback_direct*/ false,
     )
     .await
     .expect("direct websocket handshake should succeed");
-    drop(WebSocketConnection { inner });
+    drop(test_connection(inner));
 
     target_task.await.expect("target task should finish");
 }
@@ -245,33 +249,34 @@ async fn no_proxy_subprocess_probe() {
     let request = url
         .into_client_request()
         .expect("websocket request should build");
-    let tls_config =
-        if let Ok(certificate_hex) = std::env::var("NOVA_EXEC_SERVER_WEBSOCKET_NO_PROXY_PROBE_CA_DER") {
-            ensure_rustls_crypto_provider();
-            assert_eq!(
-                certificate_hex.len() % 2,
-                0,
-                "encoded certificate should contain complete bytes"
-            );
-            let certificate = (0..certificate_hex.len())
-                .step_by(2)
-                .map(|index| {
-                    u8::from_str_radix(&certificate_hex[index..index + 2], 16)
-                        .expect("encoded certificate should contain hexadecimal bytes")
-                })
-                .collect::<Vec<_>>();
-            let mut roots = RootCertStore::empty();
-            roots
-                .add(CertificateDer::from(certificate))
-                .expect("proxy certificate should be trusted");
-            Arc::new(
-                ClientConfig::builder()
-                    .with_root_certificates(roots)
-                    .with_no_client_auth(),
-            )
-        } else {
-            test_tls_configs().0
-        };
+    let tls_config = if let Ok(certificate_hex) =
+        std::env::var("NOVA_EXEC_SERVER_WEBSOCKET_NO_PROXY_PROBE_CA_DER")
+    {
+        ensure_rustls_crypto_provider();
+        assert_eq!(
+            certificate_hex.len() % 2,
+            0,
+            "encoded certificate should contain complete bytes"
+        );
+        let certificate = (0..certificate_hex.len())
+            .step_by(2)
+            .map(|index| {
+                u8::from_str_radix(&certificate_hex[index..index + 2], 16)
+                    .expect("encoded certificate should contain hexadecimal bytes")
+            })
+            .collect::<Vec<_>>();
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(CertificateDer::from(certificate))
+            .expect("proxy certificate should be trusted");
+        Arc::new(
+            ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        )
+    } else {
+        test_tls_configs().0
+    };
     let (inner, _) = connect(
         request,
         WebSocketConfig::default(),
@@ -281,10 +286,11 @@ async fn no_proxy_subprocess_probe() {
             no_proxy: Some(no_proxy),
         },
         TcpNodelay::Enabled,
+        /*loopback_direct*/ false,
     )
     .await
     .expect("websocket handshake should succeed");
-    let mut websocket = WebSocketConnection { inner };
+    let mut websocket = test_connection(inner);
     websocket
         .send(Message::Text("probe".into()))
         .await
@@ -357,6 +363,32 @@ async fn happy_eyeballs_does_not_wait_for_stalled_preferred_family() {
     assert_eq!(connected, reachable);
 }
 
+#[test]
+fn loopback_direct_drops_non_loopback_resolved_addresses() {
+    let loopback = "127.0.0.1:8080"
+        .parse::<SocketAddr>()
+        .expect("loopback address should parse");
+    let remote = "192.0.2.1:8080"
+        .parse::<SocketAddr>()
+        .expect("remote address should parse");
+
+    assert_eq!(
+        loopback_addresses(vec![remote, loopback]).expect("loopback result should remain"),
+        vec![loopback]
+    );
+}
+
+#[test]
+fn loopback_direct_rejects_localhost_resolution_without_loopback_addresses() {
+    let remote = "192.0.2.1:8080"
+        .parse::<SocketAddr>()
+        .expect("remote address should parse");
+
+    let error = loopback_addresses(vec![remote])
+        .expect_err("localhost resolution without loopback addresses must fail");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
 #[tokio::test]
 async fn routed_tcp_connections_only_enable_nodelay_when_requested() {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -383,7 +415,7 @@ async fn routed_tcp_connections_only_enable_nodelay_when_requested() {
 }
 
 fn websocket_tcp_nodelay(websocket: &WebSocketConnection) -> bool {
-    let ConnectionInner::TransportDefault(stream) = &websocket.inner else {
+    let Some(ConnectionInner::Left(stream)) = &websocket.inner else {
         panic!("default connector should use Tungstenite's transport");
     };
     let MaybeTlsStream::Plain(stream) = stream.get_ref() else {
@@ -527,7 +559,10 @@ async fn assert_no_proxy_subprocess(no_proxy: &str, expect_proxy: bool, proxy_tl
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>();
-            command.env("NOVA_EXEC_SERVER_WEBSOCKET_NO_PROXY_PROBE_CA_DER", certificate_hex);
+            command.env(
+                "NOVA_EXEC_SERVER_WEBSOCKET_NO_PROXY_PROBE_CA_DER",
+                certificate_hex,
+            );
         }
         command
             .output()
@@ -613,10 +648,11 @@ async fn assert_proxy_tunnels_secure_websocket(proxy_tls: bool) {
             no_proxy: None,
         },
         TcpNodelay::Enabled,
+        /*loopback_direct*/ false,
     )
     .await
     .expect("proxied websocket handshake should succeed");
-    drop(WebSocketConnection { inner });
+    drop(test_connection(inner));
 
     target_task.await.expect("target task should finish");
     proxy_task.await.expect("proxy task should finish");
@@ -675,4 +711,12 @@ fn test_tls_configs() -> (Arc<ClientConfig>, TlsAcceptor, CertificateDer<'static
         TlsAcceptor::from(Arc::new(server_config)),
         certificate,
     )
+}
+
+fn test_connection(inner: ConnectionInner) -> WebSocketConnection {
+    let policy = nova_exec_server_http_client::NetworkPolicy::unmanaged();
+    let lease = policy
+        .acquire(&url::Url::parse("wss://localhost/").unwrap())
+        .unwrap();
+    WebSocketConnection::new(inner, lease)
 }

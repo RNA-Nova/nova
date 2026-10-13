@@ -190,6 +190,49 @@ fn inserts_unshare_net_when_proxy_only_network_mode_requested() {
     assert!(argv.contains(&"--unshare-net".to_string()));
 }
 
+// 对位 codex f71543813f：WSL interop 遮蔽的两个单测
+#[test]
+fn masks_wsl_interop_with_full_network_and_restricted_filesystem() {
+    let argv = build_bwrap_argv(
+        vec!["/bin/true".to_string()],
+        &read_only_file_system_policy(),
+        Path::new("/"),
+        Path::new("/"),
+        BwrapOptions {
+            network_mode: BwrapNetworkMode::FullAccess,
+            mask_wsl_interop: true,
+            ..Default::default()
+        },
+    )
+    .expect("build bwrap argv")
+    .args;
+
+    assert!(argv.windows(2).any(|args| args == ["--tmpfs", "/run/WSL"]));
+    assert!(!argv.iter().any(|arg| arg == "--unshare-net"));
+}
+
+#[test]
+fn masks_inherited_procfs_when_wsl_interop_is_masked_without_fresh_proc() {
+    let argv = build_bwrap_argv(
+        vec!["/bin/true".to_string()],
+        &read_only_file_system_policy(),
+        Path::new("/"),
+        Path::new("/"),
+        BwrapOptions {
+            mount_proc: false,
+            network_mode: BwrapNetworkMode::FullAccess,
+            mask_wsl_interop: true,
+            ..Default::default()
+        },
+    )
+    .expect("build bwrap argv")
+    .args;
+
+    assert!(argv.windows(2).any(|args| args == ["--tmpfs", "/run/WSL"]));
+    assert!(argv.windows(2).any(|args| args == ["--tmpfs", "/proc"]));
+    assert!(!argv.windows(2).any(|args| args == ["--proc", "/proc"]));
+}
+
 #[test]
 fn proxy_only_mode_takes_precedence_over_full_network_policy() {
     let mode = bwrap_network_mode(
@@ -689,37 +732,14 @@ fn apply_seccomp_then_exec_with_legacy_landlock_panics() {
     assert!(result.is_err());
 }
 
+// 对位 codex 49305d74b4：替代旧形态测试 legacy_landlock_rejects_split_only_filesystem_policies
 #[test]
-fn legacy_landlock_rejects_split_only_filesystem_policies() {
-    let temp_dir = tempfile::TempDir::new().expect("tempdir");
-    let docs = temp_dir.path().join("docs");
-    std::fs::create_dir_all(&docs).expect("create docs");
-    let docs = AbsolutePathBuf::from_absolute_path(&docs).expect("absolute docs");
-    let policy = FileSystemSandboxPolicy::restricted(vec![
-        nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry {
-            path: nova_exec_server_protocol_core::permissions::FileSystemPath::Special {
-                value: nova_exec_server_protocol_core::permissions::FileSystemSpecialPath::Root,
-            },
-            access: nova_exec_server_protocol_core::permissions::FileSystemAccessMode::Read,
-            missing_path_behavior: None,
-        },
-        nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry {
-            path: docs.into(),
-            access: nova_exec_server_protocol_core::permissions::FileSystemAccessMode::Write,
-            missing_path_behavior: None,
-        },
-    ]);
-
-    let result = std::panic::catch_unwind(|| {
-        ensure_legacy_landlock_mode_supports_policy(
-            /*use_legacy_landlock*/ true,
-            &policy,
-            NetworkSandboxPolicy::Restricted,
-            temp_dir.path(),
-        );
-    });
-
-    assert!(result.is_err());
+#[should_panic(expected = "filesystem-restricted execution requires bubblewrap")]
+fn legacy_landlock_cannot_bypass_daemon_socket_isolation() {
+    ensure_legacy_landlock_mode_supports_policy(
+        /*use_legacy_landlock*/ true,
+        &read_only_file_system_policy(),
+    );
 }
 
 #[test]

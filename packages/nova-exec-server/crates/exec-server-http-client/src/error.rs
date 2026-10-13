@@ -8,6 +8,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TransportError {
+    // 对位 codex 888e02db34：策略拒绝独立于可重试的网络失败（不可重试语义见 nova 侧消费方）。
+    #[error(transparent)]
+    Policy(#[from] crate::NetworkPolicyDenied),
     #[error("http {status}: {body:?}")]
     Http {
         status: StatusCode,
@@ -35,7 +38,8 @@ impl TransportError {
     pub fn retry_after(&self) -> Option<RetryAfter> {
         match self {
             Self::Http { retry_after, .. } => *retry_after,
-            Self::RetryLimit
+            Self::Policy(_)
+            | Self::RetryLimit
             | Self::Timeout
             | Self::Connection(_)
             | Self::Network(_)

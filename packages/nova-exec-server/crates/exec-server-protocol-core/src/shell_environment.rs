@@ -7,15 +7,23 @@ use std::collections::HashMap;
 /// 这些变量，机制保留防上游语义回归。
 pub const OPENAI_FEDERATION_RULE_ID_ENV_VAR: &str = "OPENAI_FEDERATION_RULE_ID";
 pub const OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR: &str = "OPENAI_IDENTITY_TOKEN_FILE";
+pub const OPENAI_WORKLOAD_IDENTITY_CONTEXT_ENV_VAR: &str = "OPENAI_WORKLOAD_IDENTITY_CONTEXT";
 
 // 对位 codex 9b738582b1：线程 / 工具调用关联标签环境变量名
-pub const CODEX_THREAD_ID_ENV_VAR: &str = "CODEX_THREAD_ID";
-pub const CODEX_TOOL_CALL_ID_ENV_VAR: &str = "CODEX_TOOL_CALL_ID";
+// （命名铁律改名：CODEX_THREAD_ID/CODEX_TOOL_CALL_ID →
+// NOVA_EXEC_SERVER_THREAD_ID/NOVA_EXEC_SERVER_TOOL_CALL_ID，常量名与值同改）
+pub const NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR: &str = "NOVA_EXEC_SERVER_THREAD_ID";
+pub const NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR: &str = "NOVA_EXEC_SERVER_TOOL_CALL_ID";
 
 /// Environment variables that model-reachable child processes must not inherit.
+// 对位 codex 39f4277087 shell_environment.rs:14-22 全量名单；
+// 裁点：CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN（noise 协议）与
+// CODEX_GUARDIAN_DECISIONS_API_KEY（guardian 决策 API）属未镜像面，剔除。
 pub const NON_INHERITABLE_ENV_VARS: &[&str] = &[
+    "NODE_REPL_AUTH_TOKEN",
     OPENAI_FEDERATION_RULE_ID_ENV_VAR,
     OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR,
+    OPENAI_WORKLOAD_IDENTITY_CONTEXT_ENV_VAR,
 ];
 
 pub fn is_non_inheritable_env_var(name: &str) -> bool {
@@ -28,12 +36,12 @@ pub fn is_non_inheritable_env_var(name: &str) -> bool {
 // Windows 上按大小写不敏感清理同名变量
 pub fn set_tool_call_id_env_var(env: &mut HashMap<String, String>, tool_call_id: Option<&str>) {
     #[cfg(windows)]
-    env.retain(|name, _| !name.eq_ignore_ascii_case(CODEX_TOOL_CALL_ID_ENV_VAR));
+    env.retain(|name, _| !name.eq_ignore_ascii_case(NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR));
     #[cfg(not(windows))]
-    env.remove(CODEX_TOOL_CALL_ID_ENV_VAR);
+    env.remove(NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR);
     if let Some(tool_call_id) = tool_call_id.filter(|tool_call_id| !tool_call_id.contains('\0')) {
         env.insert(
-            CODEX_TOOL_CALL_ID_ENV_VAR.to_string(),
+            NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR.to_string(),
             tool_call_id.to_string(),
         );
     }
@@ -158,7 +166,9 @@ where
         env_map.retain(|k, _| matches_any(k, &policy.include_only));
     }
 
-    // Step 6 - Populate the thread ID environment variable when provided.
+    // Step 6 - 裁点：锚点在此按 thread_id 参数注入 CODEX_THREAD_ID；nova 的
+    // populate_env/create_env 不接收 thread_id（对位 codex 9b738582b1 的注入
+    // 语义由消费侧 exec-server `apply_exec_metadata` 接管），本步不承载代码。
 
     // Restricted launch context cannot be restored through user-provided shell
     // environment overrides.
@@ -229,6 +239,7 @@ mod windows_tests {
         let vars = make_vars(&[
             ("Shell", "C:\\Program Files\\Git\\bin\\bash.exe"),
             ("SystemRoot", "C:\\Windows"),
+            ("WinDir", "C:\\Windows"),
             ("AppData", "C:\\Users\\nova\\AppData\\Roaming"),
             ("TmpDir", "C:\\Temp\\custom"),
             ("OPENAI_API_KEY", "secret"),
@@ -248,6 +259,7 @@ mod windows_tests {
                 "C:\\Program Files\\Git\\bin\\bash.exe".to_string(),
             ),
             ("SystemRoot".to_string(), "C:\\Windows".to_string()),
+            ("WinDir".to_string(), "C:\\Windows".to_string()),
             (
                 "AppData".to_string(),
                 "C:\\Users\\nova\\AppData\\Roaming".to_string(),
@@ -256,6 +268,22 @@ mod windows_tests {
         ]);
 
         assert_eq!(result, expected);
+
+        // 对位 codex 39f4277087 同名测试第二段：Inherit::All 下 r#set 覆盖
+        // 大小写不敏感（剔除仅大小写不同的既有键后再插入）。
+        let policy = ShellEnvironmentPolicy {
+            inherit: ShellEnvironmentPolicyInherit::All,
+            ignore_default_excludes: true,
+            r#set: HashMap::from([("gh_host".to_string(), "github.trusted.example".to_string())]),
+            ..Default::default()
+        };
+        assert_eq!(
+            populate_env(
+                make_vars(&[("GH_HOST", "github.stale.example")]),
+                &policy,
+            ),
+            HashMap::from([("gh_host".to_string(), "github.trusted.example".to_string(),)]),
+        );
     }
 
     #[test]

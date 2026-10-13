@@ -17,7 +17,7 @@ impl crate::RemoteNetworkProxyConfig {
             mode: self.mode,
             domains: self.domains,
             unix_sockets: self.unix_sockets,
-            allow_local_binding: self.allow_local_binding,
+            allow_local_binding: Some(self.allow_local_binding),
             ..NetworkProxyConfig::default()
         }
     }

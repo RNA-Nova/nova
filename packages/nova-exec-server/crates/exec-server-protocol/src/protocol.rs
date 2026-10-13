@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use nova_exec_server_file_system::FileSystemSandboxContext;
@@ -55,19 +56,28 @@ pub const HTTP_REQUEST_BODY_DELTA_METHOD: &str = "http/request/bodyDelta";
 /// Maximum decoded response-body bytes carried by one streamed HTTP notification.
 pub const MAX_HTTP_BODY_DELTA_BYTES: usize = 1024 * 1024;
 
+/// Shared immutable bytes, encoded as a base64 string on the wire.
+/// （对位 codex 39f4277087 Arc<Vec<u8>> 形态：克隆共享底层缓冲、零拷贝随消息
+/// 扇出；`into_inner` 在最后一个引用消费时归还所有权，否则克隆出独立副本。）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ByteChunk(#[serde(with = "base64_bytes")] pub Vec<u8>);
+pub struct ByteChunk(#[serde(with = "base64_bytes")] pub Arc<Vec<u8>>);
 
 impl ByteChunk {
     pub fn into_inner(self) -> Vec<u8> {
-        self.0
+        Arc::unwrap_or_clone(self.0)
     }
 }
 
 impl From<Vec<u8>> for ByteChunk {
     fn from(value: Vec<u8>) -> Self {
-        Self(value)
+        Self(Arc::new(value))
+    }
+}
+
+impl AsRef<[u8]> for ByteChunk {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
     }
 }
 
@@ -1226,6 +1236,7 @@ mod base64_bytes {
     use serde::Deserialize;
     use serde::Deserializer;
     use serde::Serializer;
+    use std::sync::Arc;
 
     pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -1234,13 +1245,14 @@ mod base64_bytes {
         serializer.serialize_str(&BASE64_STANDARD.encode(bytes))
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
     where
         D: Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
         BASE64_STANDARD
             .decode(encoded)
+            .map(Arc::new)
             .map_err(serde::de::Error::custom)
     }
 }
@@ -1283,6 +1295,26 @@ mod tests {
     use nova_exec_server_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
+
+    // 对位 codex 39f4277087 同名用例：共享块线上 base64 不变、into_inner 语义
+    // （克隆共享底层缓冲；最后引用消费归还所有权，否则克隆独立副本）。
+    #[test]
+    fn shared_byte_chunks_preserve_base64_and_owned_bytes() {
+        let chunk = super::ByteChunk::from(vec![0, 255, 10]);
+        let shared = chunk.clone();
+        assert_eq!(serde_json::to_string(&shared).unwrap(), r#""AP8K""#);
+        assert_eq!(
+            serde_json::from_str::<super::ByteChunk>(r#""AP8K""#).unwrap(),
+            chunk,
+        );
+
+        let mut owned = shared.into_inner();
+        owned[0] = 1;
+        assert_eq!(
+            (owned, chunk.into_inner()),
+            (vec![1, 255, 10], vec![0, 255, 10])
+        );
+    }
 
     #[test]
     fn exec_params_keeps_proxy_launch_separate_from_sandbox_facts() {
@@ -1510,6 +1542,9 @@ mod tests {
 
     #[test]
     fn environment_info_preserves_executor_metadata() {
+        // 金标在锚点基础上加料 `tempDir` 一行（对位 codex 39f4277087 同名用例：
+        // 锚点 EnvironmentInfo 已有 temp_dir 字段但金标未覆盖；nova 补上，
+        // 同时裁掉 capabilityDiscoverySandbox/V2 两个未镜像能力位）。
         let expected = serde_json::json!({
             "shell": { "name": "powershell", "path": "powershell.exe" },
             "executorVersion": "1.2.3-alpha.4",

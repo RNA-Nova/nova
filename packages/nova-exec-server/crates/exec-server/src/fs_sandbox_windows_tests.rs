@@ -2,7 +2,6 @@
 use std::collections::HashMap;
 #[cfg(windows)]
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 
 #[cfg(windows)]
@@ -18,11 +17,13 @@ use nova_exec_server_sandboxing::SandboxExecRequest;
 use nova_exec_server_sandboxing::SandboxType;
 #[cfg(windows)]
 use nova_exec_server_utils_path_uri::PathUri;
+// 对位 codex 39f4277087：与 fs_sandbox 同用 utils-pty 原生命令（默认 piped stdio +
+// kill_on_drop + env_clear，故补 envs 继承；posix_spawn 免 fork 路径）。
+use nova_exec_server_utils_pty::Command;
 use pretty_assertions::assert_eq;
 #[cfg(windows)]
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 use super::drain_helper_stderr;
 use super::read_helper_response;
@@ -88,9 +89,7 @@ async fn noisy_failing_helper_preserves_exit_status_and_bounded_stderr() {
             .arg("[Console]::Error.Write('expected helper diagnostic' + ('x' * 131072)); exit 7");
         command
     };
-    command.stdout(Stdio::null());
-    command.stderr(Stdio::piped());
-    command.kill_on_drop(true);
+    command.envs(std::env::vars_os());
     let mut child = command.spawn().expect("noisy helper process");
     let stderr = drain_helper_stderr(&mut child);
 
@@ -135,9 +134,7 @@ async fn helper_stderr_is_drained_before_the_response() {
         );
         command
     };
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command.kill_on_drop(true);
+    command.envs(std::env::vars_os());
     let mut child = command.spawn().expect("noisy helper process");
     let stdout = child.stdout.take().expect("helper stdout");
     let stderr = drain_helper_stderr(&mut child);

@@ -8,8 +8,8 @@ use super::literals;
 use super::posix_env_path_expansion_function;
 use crate::shell_detect::ShellType;
 use crate::shell_startup_script;
-use nova_exec_server_protocol_core::shell_environment::CODEX_THREAD_ID_ENV_VAR;
-use nova_exec_server_protocol_core::shell_environment::CODEX_TOOL_CALL_ID_ENV_VAR;
+use nova_exec_server_protocol_core::shell_environment::NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR;
+use nova_exec_server_protocol_core::shell_environment::NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR;
 use std::borrow::Cow;
 
 const SNAPSHOT_COMMAND_HELPER: &str = r#"__nova_exec_server_snapshot_command() {
@@ -368,7 +368,7 @@ impl<'a> CapturedSnapshot<'a> {
                 records.retain(|export| {
                     !matches!(
                         export.key,
-                        CODEX_THREAD_ID_ENV_VAR | CODEX_TOOL_CALL_ID_ENV_VAR
+                        NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR | NOVA_EXEC_SERVER_TOOL_CALL_ID_ENV_VAR
                     )
                 });
                 return Some(Self {

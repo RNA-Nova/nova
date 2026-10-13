@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(any(windows, test))]
 use std::time::Duration;
 
 use nova_exec_server_protocol::JSONRPCErrorError;
@@ -15,18 +16,25 @@ use nova_exec_server_sandboxing::SandboxExecRequest;
 use nova_exec_server_sandboxing::SandboxManager;
 use nova_exec_server_sandboxing::SandboxTransformRequest;
 use nova_exec_server_sandboxing::SandboxType;
-use nova_exec_server_sandboxing::SandboxablePreference;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 use nova_exec_server_utils_absolute_path::canonicalize_preserving_symlinks;
 #[cfg(any(windows, test))]
 use nova_exec_server_utils_path_uri::LegacyAppPathString;
 #[cfg(any(windows, test))]
 use nova_exec_server_utils_path_uri::PathConvention;
 use nova_exec_server_utils_path_uri::PathUri;
-use tokio::io::AsyncBufReadExt as _;
+use nova_exec_server_utils_pty::Child;
+use nova_exec_server_utils_pty::ChildStdin;
+use nova_exec_server_utils_pty::Command;
+#[cfg(target_os = "macos")]
+use nova_exec_server_utils_pty::DescriptorPolicy;
+use nova_exec_server_utils_pty::SpawnFallback;
+#[cfg(any(windows, test))]
+use tokio::io::AsyncBufReadExt;
+#[cfg(any(windows, test))]
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 use crate::ExecServerRuntimePaths;
 use crate::FileSystemSandboxContext;
@@ -39,8 +47,10 @@ use crate::rpc::invalid_request;
 
 const FS_HELPER_ENV_ALLOWLIST: &[&str] = &["PATH", "TMPDIR", "TMP", "TEMP"];
 /// helper 不应答时的收尸等待上限：先在窗口内等其自行退出，超时再强杀
+#[cfg(any(windows, test))]
 const FS_HELPER_EXIT_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 2);
 /// helper stderr 的限量排空上限（超出部分丢弃但继续排空，仅作诊断）
+#[cfg(any(windows, test))]
 const MAX_FS_HELPER_STDERR_BYTES: u64 = 4096;
 #[cfg(debug_assertions)]
 const FS_HELPER_BAZEL_BWRAP_ENV_ALLOWLIST: &[&str] = &[
@@ -115,7 +125,10 @@ impl FileSystemSandboxRunner {
             &helper_read_roots,
             cwd.native.as_path(),
         );
-        normalize_file_system_policy_root_aliases(&mut file_system_policy);
+        // 对位 codex 3b2d9a69e6：Linux 的别名规整由沙箱 helper 完成；
+        // 在此处同步探查无关权限根会占用执行端 runtime 线程。
+        #[cfg(not(target_os = "linux"))]
+        normalize_file_system_policy_root_aliases(&mut file_system_policy)?;
         // 对位 codex 841b5490b2：Windows 直启包装器会按 helper cwd 重估策略，
         // 先把 cwd 相对的拒绝 glob 绑定到策略目录，再把 helper 挪到文件系统根。
         #[cfg(windows)]
@@ -296,17 +309,36 @@ fn bind_windows_cwd_relative_deny_read_globs(
     Ok(())
 }
 
-fn normalize_file_system_policy_root_aliases(file_system_policy: &mut FileSystemSandboxPolicy) {
+// 对位 codex 3b2d9a69e6：Linux 不在此规整（helper 侧处理）；
+// macOS 走系统别名规整，失败即拒绝请求。
+#[cfg(not(target_os = "linux"))]
+fn normalize_file_system_policy_root_aliases(
+    file_system_policy: &mut FileSystemSandboxPolicy,
+) -> Result<(), JSONRPCErrorError> {
     for entry in &mut file_system_policy.entries {
         // 别名规整用的是本执行端的文件系统；外来平台或 opaque 的 PathUri 原样保留。
         if let FileSystemPath::Path { path } = &mut entry.path
             && let Ok(native_path) = path.to_abs_path()
         {
-            *path = normalize_top_level_alias(native_path).into();
+            #[cfg(target_os = "macos")]
+            {
+                *path = native_path
+                    .normalize_system_aliases()
+                    .map_err(|error| {
+                        invalid_request(format!("failed to normalize {path}: {error}"))
+                    })?
+                    .into();
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                *path = normalize_top_level_alias(native_path).into();
+            }
         }
     }
+    Ok(())
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn normalize_top_level_alias(path: AbsolutePathBuf) -> AbsolutePathBuf {
     let raw_path = path.to_path_buf();
     for ancestor in raw_path.ancestors() {
@@ -352,7 +384,12 @@ fn helper_env_key_is_allowed(key: &str) -> bool {
         // CoreFoundation consults this before falling back to user lookup during helper startup.
         || (cfg!(target_os = "macos") && key == "__CF_USER_TEXT_ENCODING")
         || bazel_bwrap_env_key_is_allowed(key)
-        || (cfg!(windows) && key.eq_ignore_ascii_case("PATH"))
+        // 对位 codex 023d81b057：MXC 需要 SystemDrive 解析平台目录、
+        // LOCALAPPDATA 创建沙箱 helper 进程。
+        || (cfg!(windows)
+            && ["PATH", "SystemDrive", "LOCALAPPDATA"]
+                .iter()
+                .any(|allowed| key.eq_ignore_ascii_case(allowed)))
 }
 
 #[cfg(debug_assertions)]
@@ -365,21 +402,46 @@ fn bazel_bwrap_env_key_is_allowed(_key: &str) -> bool {
     false
 }
 
+// 对位 codex 39f4277087：spawn 走 utils-pty 原生命令（见 spawn_command）。
+#[tracing::instrument(name = "fs.sandbox_execute", skip_all)]
 async fn run_command(
     command: SandboxExecRequest,
     request_json: Vec<u8>,
 ) -> Result<FsHelperPayload, JSONRPCErrorError> {
-    let mut child = spawn_command(command, std::process::Stdio::piped())?;
+    let mut child = spawn_command(command, ChildStdin::Piped)?;
     let mut stdin = child
         .stdin
         .take()
         .ok_or_else(|| internal_error("failed to open fs sandbox helper stdin".to_string()))?;
-    stdin.write_all(&request_json).await.map_err(io_error)?;
-    stdin.shutdown().await.map_err(io_error)?;
-    drop(stdin);
 
-    let output = wait_for_helper_output(child).await?;
-    let response: FsHelperResponse = serde_json::from_slice(&output.stdout).map_err(json_error)?;
+    #[cfg(windows)]
+    let mut request_json = request_json;
+    #[cfg(windows)]
+    request_json.push(b'\n');
+    stdin.write_all(&request_json).await.map_err(io_error)?;
+
+    #[cfg(windows)]
+    let response = {
+        stdin.flush().await.map_err(io_error)?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| internal_error("failed to open fs sandbox helper stdout".to_string()))?;
+        let stderr = drain_helper_stderr(&mut child);
+        let response = read_helper_response(stdout).await;
+        drop(stdin);
+        reap_helper_after_response(child, stderr).await?;
+        response?
+    };
+
+    #[cfg(not(windows))]
+    let response = {
+        stdin.shutdown().await.map_err(io_error)?;
+        drop(stdin);
+        wait_for_helper_output(child).await?.stdout
+    };
+
+    let response = serde_json::from_slice(&response).map_err(json_error)?;
     match response {
         FsHelperResponse::Ok(payload) => Ok(payload),
         FsHelperResponse::Error(error) => Err(error),
@@ -389,7 +451,7 @@ async fn run_command(
 /// 等待一次性 helper 退出并收集其输出：非零退出即内部错误（附 stderr 摘要）。
 /// 一次性请求与沙箱开门（sandboxed_file_open）共用。
 pub(crate) async fn wait_for_helper_output(
-    child: tokio::process::Child,
+    child: Child,
 ) -> Result<std::process::Output, JSONRPCErrorError> {
     let output = child.wait_with_output().await.map_err(io_error)?;
     if !output.status.success() {
@@ -404,7 +466,7 @@ pub(crate) async fn wait_for_helper_output(
 
 /// 读取 helper stdout 的一行响应帧（Windows 开门路径：helper 回完响应行后
 /// 仍保活句柄等待 ack，不能 wait 退出再读）。
-#[cfg(any(unix, windows))]
+#[cfg(any(windows, test))]
 pub(crate) async fn read_helper_response(
     stdout: impl tokio::io::AsyncRead + Unpin,
 ) -> Result<Vec<u8>, JSONRPCErrorError> {
@@ -422,9 +484,9 @@ pub(crate) async fn read_helper_response(
 }
 
 /// helper stderr 的后台限量排空（超出上限丢弃余量但继续排到 EOF，仅作诊断）。
-#[cfg(any(unix, windows))]
+#[cfg(any(windows, test))]
 pub(crate) fn drain_helper_stderr(
-    child: &mut tokio::process::Child,
+    child: &mut Child,
 ) -> tokio::task::JoinHandle<Result<Vec<u8>, std::io::Error>> {
     let stderr_pipe = child.stderr.take();
     tokio::spawn(async move {
@@ -442,9 +504,9 @@ pub(crate) fn drain_helper_stderr(
 
 /// 响应读取完毕后回收 helper（Windows 开门路径：ack 已发，helper 应立即退出；
 /// 超时不退则强杀收尸），并按退出状态把 helper 失败归为内部错误。
-#[cfg(any(unix, windows))]
+#[cfg(any(windows, test))]
 pub(crate) async fn reap_helper_after_response(
-    mut child: tokio::process::Child,
+    mut child: Child,
     stderr: tokio::task::JoinHandle<Result<Vec<u8>, std::io::Error>>,
 ) -> Result<(), JSONRPCErrorError> {
     let (status, stderr) = match tokio::time::timeout(FS_HELPER_EXIT_TIMEOUT, async {
@@ -475,6 +537,9 @@ pub(crate) async fn reap_helper_after_response(
     )))
 }
 
+// 对位 codex 39f4277087：经 nova_exec_server_utils_pty::Command 原生 spawn——
+// ReturnError 禁止 fork 回退重试，macOS 以 DescriptorPolicy::Explicit 替代
+// pre_exec 关 fd（保住 posix_spawn 免 fork 路径；tests/macos_fs_spawn.rs 守此语义）。
 pub(crate) fn spawn_command(
     SandboxExecRequest {
         command: argv,
@@ -483,8 +548,8 @@ pub(crate) fn spawn_command(
         arg0,
         ..
     }: SandboxExecRequest,
-    stdin: std::process::Stdio,
-) -> Result<tokio::process::Child, JSONRPCErrorError> {
+    stdin: ChildStdin,
+) -> Result<Child, JSONRPCErrorError> {
     let Some((program, args)) = argv.split_first() else {
         return Err(invalid_request("fs sandbox command was empty".to_string()));
     };
@@ -502,21 +567,13 @@ pub(crate) fn spawn_command(
     env.retain(|name, _| {
         !nova_exec_server_protocol_core::shell_environment::is_non_inheritable_env_var(name)
     });
-    command.env_clear();
     command.envs(env);
     command.stdin(stdin);
-    command.stdout(std::process::Stdio::piped());
-    command.stderr(std::process::Stdio::piped());
-    command.kill_on_drop(true);
+    // A helper is a known executable: native launch errors must not retry through fork.
+    command.fallback(SpawnFallback::ReturnError);
     // macOS cannot receive passed fds with close-on-exec set atomically.
     #[cfg(target_os = "macos")]
-    // SAFETY: Descriptor cleanup only uses fork-safe system calls.
-    unsafe {
-        command.pre_exec(|| {
-            nova_exec_server_utils_pty::pty::close_inherited_fds_except(&[]);
-            Ok(())
-        });
-    }
+    command.descriptor_policy(DescriptorPolicy::Explicit);
     command.spawn().map_err(io_error)
 }
 
@@ -681,10 +738,12 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn helper_env_preserves_windows_path_key_for_system_bwrap_discovery() {
+    fn helper_env_preserves_windows_runtime_variables_without_leaking_secrets() {
         let env = helper_env_from_vars(
             [
                 ("Path", r"C:\Windows\System32"),
+                ("LocalAppData", r"C:\Users\test\AppData\Local"),
+                ("SystemDrive", "C:"),
                 ("PATH_INJECTION", "bad"),
                 ("OPENAI_API_KEY", "secret"),
             ]
@@ -693,7 +752,14 @@ mod tests {
 
         assert_eq!(
             env,
-            HashMap::from([("Path".to_string(), r"C:\Windows\System32".to_string())])
+            HashMap::from([
+                ("Path".to_string(), r"C:\Windows\System32".to_string()),
+                (
+                    "LocalAppData".to_string(),
+                    r"C:\Users\test\AppData\Local".to_string()
+                ),
+                ("SystemDrive".to_string(), "C:".to_string()),
+            ])
         );
     }
 

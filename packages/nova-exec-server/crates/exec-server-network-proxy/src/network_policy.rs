@@ -5,11 +5,16 @@
 //!
 //! 适配点：
 //! - `NetworkProxyAuditMetadata` 线上形状只有 `conversation_id` / `turn_id` 两个字段
-//!   （codex 端为九个）；审计事件相应只发 `conversation.id` / `turn.id`。
+//!   （codex 端为九个——codex 产品账户面词汇，nova executor 无该产品面，刻意收窄）；
+//!   审计事件经 `process_log_metadata` / `launch_span_context` 另发 launch.trace_id /
+//!   launch.span_id / tool.call_id / executor.{environment_id,registration_id}
+//!   （对位 codex 39f4277087，逐字段理由见 `emit_policy_audit_event` 内注释）。
 //! - `NetworkPolicyRequest` 无 codex 端 `disconnect` 字段（`request_disconnect.rs`
-//!   第一期未移植）。
-//! - 遥测 target / 事件名沿用 codex 前缀（与 executor-otel 的 `codex.*` 指标名先例一致：
-//!   遥测契约不随 crate 改名）。
+//!   第一期未移植）；`cancellation` 词汇已备（request_cancellation.rs），
+//!   字段接线归 exec-server 批次（见 lib.rs 裁点）。
+//! - 遥测 target / 事件名按 nova 命名规则改为 `nova_exec_server_otel.network_proxy` /
+//!   `nova.network_proxy.policy_decision`（锚点为 `codex_otel.network_proxy` /
+//!   `codex.network_proxy.policy_decision`；nova 遥测契约自成体系，不沿用 codex 前缀）。
 
 use crate::NetworkDecision;
 use crate::NetworkDecisionSource;
@@ -120,13 +125,40 @@ struct PolicyAuditEventArgs<'a> {
 
 fn emit_policy_audit_event(state: &NetworkProxyState, args: PolicyAuditEventArgs<'_>) {
     let metadata = state.audit_metadata();
+    // 对位 codex 39f4277087：进程日志元数据（启动期捕获）优先于线上审计元数据。
+    let process_log_metadata = &state.process_log_metadata;
+    let conversation_id = process_log_metadata
+        .thread_id
+        .as_deref()
+        .or(metadata.conversation_id.as_deref());
     let timestamp = audit_timestamp();
+    let launch_trace_id = state
+        .launch_span_context
+        .as_ref()
+        .map(|context| context.trace_id().to_string());
+    let launch_span_id = state
+        .launch_span_context
+        .as_ref()
+        .map(|context| context.span_id().to_string());
+    let executor_identity = process_log_metadata.executor_identity.as_ref();
+    // 审计事件字段对照锚点逐字段说明（nova 线上 NetworkProxyAuditMetadata 收窄为
+    // conversation_id/turn_id，故锚点的以下字段无来源、不发出）：
+    //   app.version / auth_mode / originator / user.account_id / user.email /
+    //   terminal.type / model / slug —— 均为 codex 产品账户面词汇，nova executor
+    //   无该产品面（协议不含这些键），收窄是刻意的线上形状决策，非漏移植。
+    // launch.trace_id / launch.span_id / tool.call_id / executor.environment_id /
+    // executor.registration_id 随本批 process_log_metadata + launch_span_context 恢复。
     tracing::event!(
         target: AUDIT_TARGET,
         tracing::Level::INFO,
         event.name = POLICY_DECISION_EVENT_NAME,
         event.timestamp = %timestamp,
-        conversation.id = metadata.conversation_id.as_deref(),
+        launch.trace_id = launch_trace_id.as_deref(),
+        launch.span_id = launch_span_id.as_deref(),
+        conversation.id = conversation_id,
+        tool.call_id = process_log_metadata.tool_call_id.as_deref(),
+        executor.environment_id = executor_identity.map(|identity| identity.environment_id.as_str()),
+        executor.registration_id = executor_identity.map(|identity| identity.registration_id.as_str()),
         turn.id = metadata.turn_id.as_deref(),
         network.policy.scope = args.scope,
         network.policy.decision = args.decision,
@@ -499,7 +531,12 @@ mod tests {
         let reloader = Arc::new(StaticReloader {
             state: state.clone(),
         });
-        NetworkProxyState::with_reloader_and_audit_metadata(state, reloader, metadata)
+        NetworkProxyState::with_reloader_and_audit_metadata(
+            state,
+            reloader,
+            metadata,
+            crate::LocalBindingPolicy::DefaultFalse,
+        )
     }
 
     fn is_rfc3339_utc_millis(timestamp: &str) -> bool {
@@ -763,12 +800,14 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn evaluate_host_policy_emits_metadata_fields() {
-        // 适配：nova 线上 metadata 只有 conversation_id / turn_id 两个字段。
+        // 适配（对位 codex 39f4277087 同名测试）：nova 线上 metadata 只有
+        // conversation_id / turn_id 两个字段；thread_id 覆盖优先级与 tool.call_id /
+        // executor 身份断言照锚点保留，codex 产品面字段（app.version 等八个）无来源不断言。
         let metadata = NetworkProxyAuditMetadata {
             conversation_id: Some("conversation-1".to_string()),
             turn_id: Some("turn-1".to_string()),
         };
-        let state = state_with_metadata(metadata);
+        let mut state = state_with_metadata(metadata);
         let request = NetworkPolicyRequest::new(NetworkPolicyRequestArgs {
             protocol: NetworkProtocol::Http,
             host: "example.com".to_string(),
@@ -780,17 +819,43 @@ mod tests {
             exec_policy_hint: None,
         });
 
-        let (_decision, events) = capture_events(|| async {
-            evaluate_host_policy(&state, /*decider*/ None, &request)
-                .await
-                .unwrap()
-        })
-        .await;
+        for (thread_id, expected_conversation_id) in [
+            (None, "conversation-1"),
+            (Some("process-thread-1"), "process-thread-1"),
+            (None, "conversation-1"),
+        ] {
+            state.set_process_log_metadata(crate::NetworkProxyProcessLogMetadata {
+                thread_id: thread_id.map(str::to_string),
+                tool_call_id: Some("call-1".to_string()),
+                executor_identity: Some(crate::ExecutorLogIdentity {
+                    environment_id: "environment-1".to_string(),
+                    registration_id: "registration-1".to_string(),
+                }),
+            });
+            let (_decision, events) = capture_events(|| async {
+                evaluate_host_policy(&state, /*decider*/ None, &request)
+                    .await
+                    .unwrap()
+            })
+            .await;
 
-        let event = find_event_by_name(&events, POLICY_DECISION_EVENT_NAME)
-            .expect("expected policy decision audit event");
-        assert_eq!(event.field("conversation.id"), Some("conversation-1"));
-        assert_eq!(event.field("turn.id"), Some("turn-1"));
+            let event = find_event_by_name(&events, POLICY_DECISION_EVENT_NAME)
+                .expect("expected policy decision audit event");
+            assert_eq!(
+                event.field("conversation.id"),
+                Some(expected_conversation_id)
+            );
+            assert_eq!(event.field("tool.call_id"), Some("call-1"));
+            assert_eq!(
+                event.field("executor.environment_id"),
+                Some("environment-1")
+            );
+            assert_eq!(
+                event.field("executor.registration_id"),
+                Some("registration-1")
+            );
+            assert_eq!(event.field("turn.id"), Some("turn-1"));
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -842,7 +907,7 @@ mod tests {
         let state = network_proxy_state_for_policy({
             let mut network = NetworkProxyConfig::default();
             network.set_allowed_domains(vec!["example.com".to_string()]);
-            network.allow_local_binding = false;
+            network.allow_local_binding = Some(false);
             network
         });
         let request = NetworkPolicyRequest::new(NetworkPolicyRequestArgs {

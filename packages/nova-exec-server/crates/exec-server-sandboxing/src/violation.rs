@@ -44,12 +44,14 @@ pub enum SandboxViolationEvent {
 }
 
 /// Enforcement backend that observed a sandbox violation.
+// 对位 codex 39f4277087 violation.rs:42,51：含 WindowsMxc 变体。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SandboxViolationBackend {
     LinuxSandbox,
     ManagedNetworkProxy,
     Seatbelt,
     WindowsSandbox,
+    WindowsMxc,
 }
 
 impl SandboxViolationBackend {
@@ -59,6 +61,7 @@ impl SandboxViolationBackend {
             Self::ManagedNetworkProxy => "managed_network_proxy",
             Self::Seatbelt => "seatbelt",
             Self::WindowsSandbox => "windows_sandbox",
+            Self::WindowsMxc => "windows_mxc",
         }
     }
 }
@@ -142,9 +145,9 @@ fn classify_filesystem_sandbox_violation(
         SandboxType::None => return None,
         SandboxType::MacosSeatbelt => SandboxViolationBackend::Seatbelt,
         SandboxType::LinuxSeccomp => SandboxViolationBackend::LinuxSandbox,
-        SandboxType::WindowsRestrictedToken | SandboxType::WindowsMxc => {
-            SandboxViolationBackend::WindowsSandbox
-        }
+        SandboxType::WindowsRestrictedToken => SandboxViolationBackend::WindowsSandbox,
+        // 对位 codex 39f4277087 violation.rs:125-126：MXC 独立后端，不并入 WindowsSandbox。
+        SandboxType::WindowsMxc => SandboxViolationBackend::WindowsMxc,
     };
 
     if let Some((reason, output)) = filesystem_reason_from_output(exec_output) {

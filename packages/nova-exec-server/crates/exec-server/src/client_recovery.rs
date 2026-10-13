@@ -315,7 +315,7 @@ impl Inner {
         }
     }
 
-    fn request_recovery(
+    pub(super) fn request_recovery(
         self: &Arc<Self>,
         failed_rpc_client: Arc<RpcClient>,
         disconnect_message: String,
@@ -344,7 +344,12 @@ impl Inner {
         self.notify_connection_changed();
         let inner = Arc::clone(self);
         tokio::spawn(async move {
-            inner.recover(disconnect_message).await;
+            // 对位 codex 39f4277087：client 已退役（retired 取消）时立即放弃恢复任务。
+            tokio::select! {
+                biased;
+                _ = inner.retired.cancelled() => {},
+                _ = inner.recover(disconnect_message) => {},
+            }
         });
     }
 
@@ -424,7 +429,9 @@ impl Inner {
                 .connection
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !matches!(connection.status, ConnectionStatus::Recovering)
+            // 对位 codex 39f4277087：已退役的 client 不再安装恢复出的连接。
+            if self.retired.is_cancelled()
+                || !matches!(connection.status, ConnectionStatus::Recovering)
                 || rpc_client.is_disconnected()
             {
                 false

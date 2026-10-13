@@ -654,10 +654,12 @@ async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Resu
 #[cfg(target_os = "windows")]
 #[test]
 fn transform_for_direct_spawn_windows_preserves_only_wrapper_setup_identity() {
+    // 对位 codex 39f4277087 `..._preserves_only_wrapper_setup_environment`（含 SystemRoot 覆盖）。
     let mut env = HashMap::from([
         ("Path".to_string(), r"C:\Windows\System32".to_string()),
         ("username".to_string(), "wrong-user".to_string()),
         ("UserProfile".to_string(), r"C:\wrong".to_string()),
+        ("SYSTEMROOT".to_string(), r"C:\wrong".to_string()),
     ]);
 
     super::add_windows_sandbox_wrapper_setup_env_from_vars(
@@ -665,7 +667,9 @@ fn transform_for_direct_spawn_windows_preserves_only_wrapper_setup_identity() {
         [
             ("USERNAME", "alice"),
             ("USERPROFILE", r"C:\Users\alice"),
+            ("SystemRoot", r"C:\Windows"),
             ("OPENAI_API_KEY", "secret"),
+            ("HTTP_PROXY", "http://127.0.0.1:7890"),
         ]
         .map(|(key, value)| {
             (
@@ -673,6 +677,7 @@ fn transform_for_direct_spawn_windows_preserves_only_wrapper_setup_identity() {
                 std::ffi::OsString::from(value),
             )
         }),
+        /*registered_core*/ false,
     );
 
     assert_eq!(
@@ -681,8 +686,37 @@ fn transform_for_direct_spawn_windows_preserves_only_wrapper_setup_identity() {
             ("Path".to_string(), r"C:\Windows\System32".to_string()),
             ("USERNAME".to_string(), "alice".to_string()),
             ("USERPROFILE".to_string(), r"C:\Users\alice".to_string()),
+            ("SystemRoot".to_string(), r"C:\Windows".to_string()),
         ])
     );
+}
+
+// 对位 codex 39f4277087 manager_tests.rs:682-700（变量名适配 NOVA_ 前缀）。
+#[cfg(target_os = "windows")]
+#[test]
+fn wrapper_runtime_selection_uses_the_parent_not_environment_overrides() {
+    for registered_core in [false, true] {
+        let mut env = HashMap::from([(
+            "nova_exec_server_windows_registered_core".into(),
+            "1".into(),
+        )]);
+        super::add_windows_sandbox_wrapper_setup_env_from_vars(
+            &mut env,
+            [(
+                "NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE".into(),
+                "0".into(),
+            )],
+            registered_core,
+        );
+        assert_eq!(
+            env,
+            if registered_core {
+                HashMap::from([("NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE".into(), "1".into())])
+            } else {
+                HashMap::new()
+            }
+        );
+    }
 }
 
 #[cfg(target_os = "windows")]

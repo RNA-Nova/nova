@@ -444,7 +444,8 @@ impl LazyRemoteExecServerClient {
     }
 
     pub fn startup_finished(&self) -> bool {
-        self.startup.result.get().is_some()
+        // 对位 codex eb49f491c6：显式 refresh 可在未轮询 startup 的情况下装入首个 client。
+        self.cached_client().is_some() || self.startup.result.get().is_some()
     }
 
     pub fn readiness_result(&self) -> Option<Result<(), ExecServerError>> {
@@ -759,24 +760,36 @@ impl ExecServerClient {
     pub async fn environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
         self.inner
             .environment_info
-            .get_or_try_init(|| self.fetch_environment_info())
+            .get_or_try_init(|| self.force_environment_info())
             .await
             .cloned()
     }
 
-    /// 经 RPC 拉取执行端环境元数据，不读不写缓存。
-    async fn fetch_environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
-        let rpc_client = self.rpc_client().await?;
-        self.map_rpc_call_result(
-            rpc_client
-                .call_with_timeout(ENVIRONMENT_INFO_METHOD, &(), ENVIRONMENT_INFO_TIMEOUT)
-                .await,
-        )
-    }
-
     /// 拉取执行端元数据（不读缓存、不写缓存的强制刷新）。
+    // 对位 codex 67352b5b4a：外层 timeout 同时包住发送侧——卡死的传输可能积满
+    // 出站队列使请求阻塞在发送上；超时即关闭所探连接并请求会话恢复，直接返回
+    // 超时错误不重试该失败请求。
     pub async fn force_environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
-        self.fetch_environment_info().await
+        let rpc_client = self.rpc_client().await?;
+        // Bound sending as well as receiving: a stuck transport can fill the outbound queue.
+        let result = timeout(
+            ENVIRONMENT_INFO_TIMEOUT,
+            rpc_client.call(ENVIRONMENT_INFO_METHOD, &()),
+        )
+        .await;
+        match result {
+            Ok(result) => self.map_rpc_call_result(result),
+            Err(_) => {
+                let error = ExecServerError::from(RpcCallError::TimedOut {
+                    method: ENVIRONMENT_INFO_METHOD.to_string(),
+                    timeout: ENVIRONMENT_INFO_TIMEOUT,
+                });
+                // Retire only the connection we probed; recovery ignores a stale client.
+                rpc_client.close_transport().await;
+                self.inner.request_recovery(rpc_client, error.to_string());
+                Err(error)
+            }
+        }
     }
 
     /// 代读执行端本机配置层栈（environmentConfig/read，v1.4 起——能力位
@@ -2669,8 +2682,12 @@ mod tests {
         server.await.expect("server task should finish");
     }
 
+    // 对位 codex 67352b5b4a：补 health_check_timed_out 变体——environment/info 无人应答时
+    // 客户端须自行超时、关闭连接并恢复同一会话（client 实例保留）。
+    #[test_case::test_case(false; "socket_closed")]
+    #[test_case::test_case(true; "health_check_timed_out")]
     #[tokio::test]
-    async fn remote_websocket_client_resumes_session() {
+    async fn remote_websocket_client_resumes_session(health_check_timeout: bool) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener should bind");
@@ -2688,7 +2705,22 @@ mod tests {
                 /*expected_resume_session_id*/ None,
             )
             .await;
-            first.close(None).await.expect("websocket should close");
+            if health_check_timeout {
+                let JSONRPCMessage::Request(request) = read_jsonrpc_websocket(&mut first).await
+                else {
+                    panic!("expected environment info request");
+                };
+                assert_eq!(request.method, "environment/info");
+                // Keep the socket open without answering. The client must close it itself.
+                while let Some(Ok(message)) = first.next().await {
+                    assert!(matches!(message, Message::Ping(_) | Message::Close(_)));
+                    if matches!(message, Message::Close(_)) {
+                        break;
+                    }
+                }
+            } else {
+                first.close(None).await.expect("websocket should close");
+            }
 
             let mut resumed = accept_websocket(&listener).await;
             complete_websocket_initialize(
@@ -2710,6 +2742,13 @@ mod tests {
             HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
         );
         let stable_client = client.get().await.expect("client should connect");
+        if health_check_timeout {
+            let error = stable_client
+                .force_environment_info()
+                .await
+                .expect_err("unanswered health check should time out");
+            assert!(error.to_string().contains("timed out"));
+        }
         timeout(Duration::from_secs(1), resumed_rx)
             .await
             .expect("session resume should not time out")

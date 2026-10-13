@@ -17,7 +17,7 @@ use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicy;
 use nova_exec_server_protocol_core::exec_output::ExecToolCallOutput;
 use nova_exec_server_protocol_core::exec_output::StreamOutput;
 use nova_exec_server_protocol_core::shell_environment;
-use nova_exec_server_protocol_core::shell_environment::CODEX_THREAD_ID_ENV_VAR;
+use nova_exec_server_protocol_core::shell_environment::NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR;
 use nova_exec_server_sandboxing::SandboxType;
 use nova_exec_server_sandboxing::is_likely_sandbox_denied;
 use nova_exec_server_utils_pty::ExecCommandSession;
@@ -739,13 +739,16 @@ pub(crate) fn apply_exec_metadata(
 ) {
     if let Some(metadata) = metadata {
         #[cfg(windows)]
-        env.retain(|name, _| !name.eq_ignore_ascii_case(CODEX_THREAD_ID_ENV_VAR));
+        env.retain(|name, _| !name.eq_ignore_ascii_case(NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR));
         match metadata.thread_id.as_ref() {
             Some(thread_id) => {
-                env.insert(CODEX_THREAD_ID_ENV_VAR.to_string(), thread_id.clone());
+                env.insert(
+                    NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR.to_string(),
+                    thread_id.clone(),
+                );
             }
             None => {
-                env.remove(CODEX_THREAD_ID_ENV_VAR);
+                env.remove(NOVA_EXEC_SERVER_THREAD_ID_ENV_VAR);
             }
         }
     }
@@ -1488,8 +1491,8 @@ mod tests {
         let mut params = test_exec_params(HashMap::from([
             ("OVERLAY".to_string(), "overlay".to_string()),
             ("POLICY_SET".to_string(), "overlay-wins".to_string()),
-            ("CODEX_THREAD_ID".into(), "overlay-thread".into()),
-            ("CODEX_TOOL_CALL_ID".into(), "overlay-call".into()),
+            ("NOVA_EXEC_SERVER_THREAD_ID".into(), "overlay-thread".into()),
+            ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "overlay-call".into()),
             (
                 "openai_identity_token_file".to_string(),
                 "/run/identity-token".to_string(),
@@ -1502,8 +1505,8 @@ mod tests {
             r#set: HashMap::from([
                 ("POLICY_SET".to_string(), "policy".to_string()),
                 ("OpenAI_Federation_Rule_Id".to_string(), "rule".to_string()),
-                ("CODEX_THREAD_ID".into(), "policy-thread".into()),
-                ("CODEX_TOOL_CALL_ID".into(), "policy-call".into()),
+                ("NOVA_EXEC_SERVER_THREAD_ID".into(), "policy-thread".into()),
+                ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "policy-call".into()),
             ]),
             include_only: Vec::new(),
         });
@@ -1515,8 +1518,8 @@ mod tests {
         let mut expected = HashMap::from([
             ("OVERLAY".to_string(), "overlay".to_string()),
             ("POLICY_SET".to_string(), "overlay-wins".to_string()),
-            ("CODEX_THREAD_ID".into(), thread_id.to_string()),
-            ("CODEX_TOOL_CALL_ID".into(), "current-call".into()),
+            ("NOVA_EXEC_SERVER_THREAD_ID".into(), thread_id.to_string()),
+            ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "current-call".into()),
         ]);
         if cfg!(target_os = "windows") {
             expected.insert("PATHEXT".to_string(), ".COM;.EXE;.BAT;.CMD".to_string());
@@ -1535,10 +1538,16 @@ mod tests {
             (None, None),
         ] {
             let mut params = test_exec_params(HashMap::from([
-                ("CODEX_THREAD_ID".into(), "stale-thread".into()),
-                ("Codex_Thread_Id".into(), "mixed-case-thread".into()),
-                ("codex_thread_id".into(), "lowercase-thread".into()),
-                ("CODEX_TOOL_CALL_ID".into(), "stale-call".into()),
+                ("NOVA_EXEC_SERVER_THREAD_ID".into(), "stale-thread".into()),
+                (
+                    "Nova_Exec_Server_Thread_Id".into(),
+                    "mixed-case-thread".into(),
+                ),
+                (
+                    "nova_exec_server_thread_id".into(),
+                    "lowercase-thread".into(),
+                ),
+                ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "stale-call".into()),
                 ("OTHER".into(), "unchanged".into()),
             ]));
             params.metadata = Some(crate::protocol::ExecMetadata {
@@ -1548,14 +1557,20 @@ mod tests {
 
             let mut expected = HashMap::from([("OTHER".into(), "unchanged".into())]);
             #[cfg(not(windows))]
-            expected.insert("Codex_Thread_Id".into(), "mixed-case-thread".into());
+            expected.insert(
+                "Nova_Exec_Server_Thread_Id".into(),
+                "mixed-case-thread".into(),
+            );
             #[cfg(not(windows))]
-            expected.insert("codex_thread_id".into(), "lowercase-thread".into());
+            expected.insert(
+                "nova_exec_server_thread_id".into(),
+                "lowercase-thread".into(),
+            );
             if let Some(thread_id) = thread_id {
-                expected.insert("CODEX_THREAD_ID".into(), thread_id.to_string());
+                expected.insert("NOVA_EXEC_SERVER_THREAD_ID".into(), thread_id.to_string());
             }
             if let Some(call_id) = call_id {
-                expected.insert("CODEX_TOOL_CALL_ID".into(), call_id.to_string());
+                expected.insert("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), call_id.to_string());
             }
             assert_eq!(
                 child_env(&params),
@@ -1570,19 +1585,31 @@ mod tests {
     #[test]
     fn child_env_without_metadata_preserves_thread_only_context() {
         let params = test_exec_params(HashMap::from([
-            ("CODEX_THREAD_ID".into(), "prewarm-thread".into()),
-            ("Codex_Thread_Id".into(), "mixed-case-thread".into()),
-            ("CODEX_TOOL_CALL_ID".into(), "stale-call".into()),
-            ("Codex_Tool_Call_Id".into(), "mixed-case-call".into()),
+            ("NOVA_EXEC_SERVER_THREAD_ID".into(), "prewarm-thread".into()),
+            (
+                "Nova_Exec_Server_Thread_Id".into(),
+                "mixed-case-thread".into(),
+            ),
+            ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "stale-call".into()),
+            (
+                "Nova_Exec_Server_Tool_Call_Id".into(),
+                "mixed-case-call".into(),
+            ),
         ]));
 
         assert_eq!(
             child_env(&params),
             HashMap::from([
-                ("CODEX_THREAD_ID".into(), "prewarm-thread".into()),
-                ("Codex_Thread_Id".into(), "mixed-case-thread".into()),
+                ("NOVA_EXEC_SERVER_THREAD_ID".into(), "prewarm-thread".into()),
+                (
+                    "Nova_Exec_Server_Thread_Id".into(),
+                    "mixed-case-thread".into(),
+                ),
                 #[cfg(not(windows))]
-                ("Codex_Tool_Call_Id".into(), "mixed-case-call".into()),
+                (
+                    "Nova_Exec_Server_Tool_Call_Id".into(),
+                    "mixed-case-call".into(),
+                ),
             ]),
         );
     }

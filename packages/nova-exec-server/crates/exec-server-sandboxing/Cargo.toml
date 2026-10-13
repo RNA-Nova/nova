@@ -34,6 +34,9 @@ nova-exec-server-utils-home-dir = { path = "../exec-server-utils-home-dir" }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+# 对位 codex 39f4277087 sandboxing/Cargo.toml dev-dep codex-utils-cargo-bin
+# （bwrap_tests 的 write_executable 子进程写文件）。
+nova-exec-server-utils-cargo-bin = { path = "../exec-server-utils-cargo-bin" }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

@@ -418,7 +418,7 @@ fn infers_absolute_path_conventions_from_api_text() {
         (r"\\.\COM1", Some(PathConvention::Windows)),
         ("/workspace/file.rs", Some(PathConvention::Posix)),
         ("/C:/workspace/file.rs", Some(PathConvention::Posix)),
-        ("//server/share/file.rs", Some(PathConvention::Posix)),
+        ("//server/share/file.rs", Some(PathConvention::Windows)),
         ("", None),
         (".", None),
         ("subdir/file.rs", None),
@@ -464,6 +464,75 @@ fn converts_absolute_api_paths_using_the_inferred_convention() {
             path.to_path_uri(convention)
         );
     }
+}
+
+// 对位 codex cd8bd62c6e / d1d0e89558：以下两个测试覆盖 resolve_against 执行器上下文解析。
+#[test]
+fn resolves_legacy_paths_against_executor_context() {
+    for (cwd, path, user_home_dir, expected) in [
+        (
+            "file:///workspace",
+            "relative.txt",
+            None,
+            "file:///workspace/relative.txt",
+        ),
+        (
+            "file:///C:/workspace",
+            "/Windows",
+            None,
+            "file:///C:/Windows",
+        ),
+        (
+            "file:///C:/workspace",
+            "//server/share/file.txt",
+            None,
+            "file://server/share/file.txt",
+        ),
+        (
+            "file:///workspace",
+            "~//notes",
+            Some("file:///home/executor"),
+            "file:///home/executor/notes",
+        ),
+        (
+            "file:///C:/workspace",
+            r"~\\notes",
+            Some("file:///C:/Users/executor"),
+            "file:///C:/Users/executor/notes",
+        ),
+    ] {
+        let cwd = PathUri::parse(cwd).expect("valid cwd");
+        let user_home_dir = user_home_dir.map(|home| PathUri::parse(home).expect("valid home"));
+
+        assert_eq!(
+            LegacyAppPathString::from_string(path).resolve_against(&cwd, user_home_dir.as_ref()),
+            Ok(PathUri::parse(expected).expect("valid expected path")),
+            "resolving {path:?} against {cwd}"
+        );
+    }
+}
+
+#[test]
+fn rejects_legacy_paths_without_executor_context() {
+    let cwd = PathUri::parse("file:///workspace").expect("valid cwd");
+
+    assert_eq!(
+        LegacyAppPathString::from_string(r"C:\\tmp")
+            .resolve_against(&cwd, /*user_home_dir*/ None),
+        Err(LegacyAppPathStringError::MismatchedConvention {
+            path: r"C:\\tmp".to_string(),
+            path_convention: PathConvention::Windows,
+            cwd: cwd.to_string(),
+            convention: PathConvention::Posix,
+        })
+    );
+    assert_eq!(
+        LegacyAppPathString::from_string("~/secret")
+            .resolve_against(&cwd, /*user_home_dir*/ None),
+        Err(LegacyAppPathStringError::MissingHomeDirectory {
+            path: "~/secret".to_string(),
+        })
+    );
 }
 
 #[test]
@@ -588,4 +657,64 @@ fn serializes_and_deserializes_as_a_string() {
             .expect("rendered path should deserialize from a string"),
         rendered
     );
+}
+
+// 对位 codex d1d0e89558：以下两个测试覆盖正斜杠/混合斜杠 UNC 推断与显式 POSIX 约定。
+#[test]
+fn inferred_unc_paths_accept_forward_and_mixed_slashes_on_every_host() {
+    for raw in [
+        "//server/share/project",
+        r"//server/share\project",
+        r"/\server/share/project",
+        r"\/server/share/project",
+        r"\\server\share\project",
+        "//wsl.localhost/Ubuntu/home/user/project",
+        "//127.0.0.1/c$/project",
+        "//LOCALHOST/c$/project",
+        "//?/C:/project",
+    ] {
+        let path = LegacyAppPathString::from_string(raw);
+        let expected = path.to_path_uri(PathConvention::Windows).expect(raw);
+        let inferred = path.to_inferred_path_uri().expect(raw);
+        assert_eq!(
+            (inferred.clone(), inferred.infer_path_convention()),
+            (expected, Some(PathConvention::Windows)),
+            "{raw}"
+        );
+        let serialized = serde_json::to_string(&inferred).expect("serialize URI");
+        assert_eq!(
+            serde_json::from_str::<PathUri>(&serialized).expect("deserialize URI"),
+            inferred,
+            "{raw}"
+        );
+    }
+    let slash = LegacyAppPathString::from_string("//server/share/project")
+        .to_inferred_path_uri()
+        .unwrap();
+    assert_eq!(
+        slash,
+        PathUri::parse("file://server/share/project").unwrap()
+    );
+}
+
+#[test]
+fn double_slash_posix_paths_require_an_explicit_convention() {
+    let path = LegacyAppPathString::from_string("//server/share/project");
+    assert_eq!(
+        path.to_path_uri(PathConvention::Posix).unwrap(),
+        PathUri::parse("file:///server/share/project").unwrap()
+    );
+    let cwd = PathUri::parse("file:///workspace").unwrap();
+    assert!(matches!(
+        path.resolve_against(&cwd, /*user_home_dir*/ None),
+        Err(LegacyAppPathStringError::MismatchedConvention { .. })
+    ));
+    for raw in ["//", "//server", "//server/", "///server/share"] {
+        assert!(
+            LegacyAppPathString::from_string(raw)
+                .to_inferred_path_uri()
+                .is_none(),
+            "{raw}"
+        );
+    }
 }

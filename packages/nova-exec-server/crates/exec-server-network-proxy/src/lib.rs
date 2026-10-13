@@ -8,9 +8,16 @@
 //! - MITM 面（`mitm.rs` / `mitm_hook.rs` 实现 / `certs.rs` / `native_certs.rs`）未移植；
 //!   `MitmHookConfig` 等线上类型保留但暂无运行时使用者，`build_config_state` 对
 //!   MITM/hooks 配置 fail fast，`managed_mitm_ca_trust_bundle_path` 恒为 None。
-//! - 凭证经纪（`credential_broker/`）未移植。
+//! - 凭证经纪（`credential_broker/`）未移植；其隧道嗅探件 `brokered_tunnel.rs`
+//!   （PeekStream 协议探测 + 凭证注入隧道）随之不镜像——它只服务凭证经纪管道。
+//! - `main.rs`（codex 独立 `codex-network-proxy` 二进制）不镜像：nova 的代理只以
+//!   库形态嵌进 executor 进程（`nova-exec-server` 统一入口），无独立二进制产品面。
 //! - `request_disconnect`（HTTP 请求放弃跟踪）未移植：`NetworkPolicyRequest` 无
 //!   `disconnect` 字段。
+//! - `request_cancellation` 的词汇（`NetworkRequestCancellation` / Reason）已移植导出；
+//!   但 `NetworkPolicyRequest.cancellation` 字段与"撤销原因落点"接线在 exec-server 的
+//!   client_recovery 面（锚点由 exec-server 记录原因再丢决策 future），归 exec-server
+//!   批次——本 crate 只先备词汇，字段不镜像（避免 struct 字面量构造点跨 crate 破坏）。
 //! - Windows 专属面（`windows_proxy_ingress` / `windows_tcp_attribution`）未移植；
 //!   `network_proxy_restricting_sid` 保留 cfg(windows) 占位（恒 None）。
 
@@ -18,19 +25,26 @@ mod attribution;
 mod authorization_path;
 mod config;
 mod connect_policy;
+// 对位 codex 39f4277087：监听器/连接生命周期优雅关闭（drain 语义，取代 JoinHandle::abort）。
+mod connection_lifecycle;
 // 对位 codex 529cd6b860：域名通配匹配器（替代 globset 域名匹配路径）。
 mod domain_matcher;
 mod environment_policy;
 mod http_proxy;
 mod network_policy;
 mod policy;
+// 对位 codex 39f4277087：启动期进程归因元数据（审计关联，不授权）。
+mod process_log_metadata;
 mod proxy;
 pub(crate) mod reasons;
 mod remote_config;
+mod request_cancellation;
 mod responses;
 mod runtime;
 mod socks5;
 mod state;
+#[cfg(target_os = "macos")]
+mod system_dns;
 mod upstream;
 
 pub use attribution::write_attribution_frame;
@@ -40,14 +54,16 @@ pub use environment_policy::EnvironmentNetworkPolicy;
 pub use network_policy::NetworkPolicyAuditEvent;
 pub use network_policy::NetworkPolicyAuditObserver;
 pub use policy::normalize_host;
+pub use process_log_metadata::ExecutorLogIdentity;
+pub use process_log_metadata::NetworkProxyProcessLogMetadata;
 pub use proxy::ALL_PROXY_ENV_KEYS;
 pub use proxy::ALLOW_LOCAL_BINDING_ENV_KEY;
 pub use proxy::Args;
+pub use proxy::DEFAULT_NO_PROXY_VALUE;
 pub use proxy::ManagedProxyRouting;
+pub use proxy::NO_PROXY_ENV_KEYS;
 #[cfg(target_os = "macos")]
 pub use proxy::NOVA_PROXY_GIT_SSH_COMMAND_MARKER;
-pub use proxy::DEFAULT_NO_PROXY_VALUE;
-pub use proxy::NO_PROXY_ENV_KEYS;
 pub use proxy::NetworkProxy;
 pub use proxy::NetworkProxyBuilder;
 pub use proxy::NetworkProxyHandle;
@@ -60,12 +76,16 @@ pub use proxy::has_proxy_url_env_vars;
 pub use proxy::is_managed_proxy_env_var;
 pub use proxy::proxy_url_env_value;
 pub use proxy::strip_managed_proxy_env;
+pub use request_cancellation::NetworkRequestCancellation;
+pub use request_cancellation::NetworkRequestCancellationReason;
 pub use runtime::BlockedRequestArgs;
 pub use runtime::BlockedRequestObserver;
 pub use runtime::BlockedRequestObserverFuture;
 pub use runtime::ConfigReloader;
 pub use runtime::ConfigReloaderFuture;
 pub use runtime::ConfigState;
+// 对位 codex 39f4277087：executor 侧本地绑定归一策略（DefaultFalse/RequireTrue）。
+pub use runtime::LocalBindingPolicy;
 pub use runtime::NetworkProxyState;
 pub use state::NetworkProxyConstraintError;
 pub use state::NetworkProxyConstraints;
@@ -228,8 +248,11 @@ pub struct NetworkProxyConfig {
     pub domains: Option<NetworkDomainPermissions>,
     #[serde(default)]
     pub unix_sockets: Option<NetworkUnixSocketPermissions>,
-    #[serde(default)]
-    pub allow_local_binding: bool,
+    /// Omission is resolved for the selected sandbox; ordinary proxy execution defaults to false.
+    /// 对位 codex 39f4277087：线上形状 bool → Option<bool>（省略可区分），
+    /// 省略时由 executor 侧 `LocalBindingPolicy` 归一；旧报文显式 false/true 不变。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_local_binding: Option<bool>,
     #[serde(default)]
     pub mitm: bool,
     #[serde(default)]
@@ -324,12 +347,17 @@ impl RemoteNetworkProxyConfig {
             mode: config.mode,
             domains: config.domains.clone(),
             unix_sockets: config.unix_sockets.clone(),
-            allow_local_binding: config.allow_local_binding,
+            allow_local_binding: config.allow_local_binding(),
         })
     }
 }
 
-/// 可信网桥 attribution 帧的 env 键（跨进程契约，取值不变）。
+/// 可信网桥 attribution 帧的 env 键（跨进程契约）。
+/// 与 codex 值的分歧（对位 codex 39f4277087 `"CODEX_NETWORK_PROXY_ATTRIBUTION"`）：
+/// 该信道两端（写入 = exec-server-linux-sandbox `proxy_routing.rs`，读取 = 本 crate
+/// `attribution.rs`）均为 nova 自有件，且键按 nova 命名规则取
+/// `NOVA_EXEC_SERVER_*`——与 codex 生态互不兼容是刻意的（executor 不与 codex
+/// 组件混布）。两端经共享常量同步，无字面量漂移风险。
 pub const PROXY_ATTRIBUTION_TOKEN_ENV_KEY: &str = "NOVA_EXEC_SERVER_PROXY_ATTRIBUTION_TOKEN";
 
 /// 被阻止的请求

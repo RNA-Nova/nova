@@ -1,7 +1,6 @@
 //! Retry drive-letter opens from a verified physical volume root when strict NT opens reject
 //! the DOS alias. The root must be a local directory; all path components below it stay no-follow.
-//! （对位 codex 9545947c6d `exec-server/src/no_follow/windows_volume_fallback.rs`；
-//! windows-sys 0.52 适配：OBJ_DONT_REPARSE 为 i32 需 as u32，HANDLE 为 isize 需 as HANDLE）
+//! （对位 codex 9545947c6d `exec-server/src/no_follow/windows_volume_fallback.rs`）
 
 use super::*;
 use std::os::windows::fs::MetadataExt;
@@ -28,7 +27,7 @@ pub(super) fn open_relative_to_volume(
         desired_access,
         create_disposition,
         create_options,
-        OBJ_DONT_REPARSE as u32,
+        OBJ_DONT_REPARSE,
     )?
     .ok_or_else(reparse_error)
 }
@@ -52,7 +51,7 @@ pub(super) fn open_volume_root(name: &mut [u16]) -> io::Result<OwnedHandle> {
     let mut name = [0u16; 128];
     let length = unsafe {
         GetFinalPathNameByHandleW(
-            root.as_raw_handle() as HANDLE,
+            root.as_raw_handle(),
             name.as_mut_ptr(),
             name.len() as u32,
             VOLUME_NAME_NT,

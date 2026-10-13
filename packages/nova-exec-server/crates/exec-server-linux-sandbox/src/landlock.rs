@@ -37,7 +37,7 @@ use seccompiler::apply_filter;
 ///
 /// This function is responsible for:
 /// - enabling `PR_SET_NO_NEW_PRIVS` when restrictions apply, and
-/// - installing the network seccomp filter when network access is disabled.
+/// - installing seccomp restrictions for network isolation and VM sockets.
 ///
 /// Filesystem restrictions are intentionally handled by bubblewrap.
 pub(crate) fn apply_permission_profile_to_current_thread(
@@ -49,11 +49,21 @@ pub(crate) fn apply_permission_profile_to_current_thread(
 ) -> Result<()> {
     let (file_system_sandbox_policy, network_sandbox_policy) =
         permission_profile.to_runtime_permissions();
+    // 对位 codex f71543813f：网络seccomp未启用时，文件系统受限即自动启用
+    // VmSocketRestricted（挡 AF_VSOCK 宿主机桥）。
     let network_seccomp_mode = network_seccomp_mode(
         network_sandbox_policy,
         managed_network.is_some(),
         proxy_routing_active,
-    );
+    )
+    .or_else(|| {
+        // VM sockets can reach host services outside the filesystem sandbox.
+        // In WSL2 they also allow Windows process launch through an alias of
+        // the interop socket, even when /run/WSL is masked. Keep ordinary
+        // network access while denying that host bridge.
+        (!file_system_sandbox_policy.has_full_disk_write_access())
+            .then_some(NetworkSeccompMode::VmSocketRestricted)
+    });
 
     // `PR_SET_NO_NEW_PRIVS` is required for seccomp, but it also prevents
     // setuid privilege elevation. Many `bwrap` deployments rely on setuid, so
@@ -92,6 +102,8 @@ pub(crate) fn apply_permission_profile_to_current_thread(
 enum NetworkSeccompMode {
     Restricted,
     ProxyRouted,
+    // 对位 codex f71543813f：仅拒 AF_VSOCK 的轻量模式
+    VmSocketRestricted,
 }
 
 fn should_install_network_seccomp(
@@ -178,9 +190,15 @@ fn install_network_seccomp_filter_on_current_thread(
     // Build rule map.
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
 
-    deny_syscall(&mut rules, libc::SYS_ptrace);
-    deny_syscall(&mut rules, libc::SYS_process_vm_readv);
-    deny_syscall(&mut rules, libc::SYS_process_vm_writev);
+    // 对位 codex f71543813f：VmSocketRestricted 模式放行 ptrace/process_vm
+    //（该模式只为挡 AF_VSOCK，不施加网络级封锁）。
+    if mode != NetworkSeccompMode::VmSocketRestricted {
+        deny_syscall(&mut rules, libc::SYS_ptrace);
+        deny_syscall(&mut rules, libc::SYS_process_vm_readv);
+        deny_syscall(&mut rules, libc::SYS_process_vm_writev);
+    }
+    // io_uring can create AF_VSOCK sockets without a socket() syscall, so
+    // keep it unavailable in every mode with socket-family restrictions.
     deny_syscall(&mut rules, libc::SYS_io_uring_setup);
     deny_syscall(&mut rules, libc::SYS_io_uring_enter);
     deny_syscall(&mut rules, libc::SYS_io_uring_register);
@@ -256,6 +274,17 @@ fn install_network_seccomp_filter_on_current_thread(
             )?])?;
             rules.insert(libc::SYS_socket, vec![deny_non_ip_socket]);
             rules.insert(libc::SYS_socketpair, vec![deny_non_unix_socketpair]);
+        }
+        // 对位 codex f71543813f：deny AF_VSOCK socket/socketpair
+        NetworkSeccompMode::VmSocketRestricted => {
+            let deny_vsock = SeccompRule::new(vec![SeccompCondition::new(
+                0,
+                SeccompCmpArgLen::Dword,
+                SeccompCmpOp::Eq,
+                libc::AF_VSOCK as u64,
+            )?])?;
+            rules.insert(libc::SYS_socket, vec![deny_vsock.clone()]);
+            rules.insert(libc::SYS_socketpair, vec![deny_vsock]);
         }
     }
 

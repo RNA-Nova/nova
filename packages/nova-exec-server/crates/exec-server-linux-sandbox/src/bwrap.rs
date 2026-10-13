@@ -63,6 +63,9 @@ pub const GLOB_SCAN_PROGRAM: &str = "rg";
 
 const MAX_UNREADABLE_GLOB_MATCHES: usize = 8192;
 
+// 对位 codex f71543813f `bwrap.rs::WSL_INTEROP_DIR`：WSL Windows interop socket 目录
+pub(crate) const WSL_INTEROP_DIR: &str = "/run/WSL";
+
 // 对位 codex 39f4277087 `bwrap.rs::WSLG_DISTRO_ROOT`：WSLg 遮蔽主体（wslg.rs /
 // `BwrapOptions::mask_wslg_distro`）尚未移植，常量目前仅供 daemon_mounts 测试引用。
 #[allow(dead_code)]
@@ -81,6 +84,9 @@ pub(crate) struct BwrapOptions {
     pub inherit_pid_namespace: bool,
     /// How networking should be configured inside the bubblewrap sandbox.
     pub network_mode: BwrapNetworkMode,
+    /// Hide the WSL Windows interop socket from commands with restricted filesystem access.
+    /// （对位 codex f71543813f）
+    pub mask_wsl_interop: bool,
     /// Optional maximum depth for expanding unreadable glob patterns with ripgrep.
     ///
     /// Keep this uncapped by default so existing nested deny-read matches are
@@ -94,6 +100,7 @@ impl Default for BwrapOptions {
             mount_proc: true,
             inherit_pid_namespace: false,
             network_mode: BwrapNetworkMode::FullAccess,
+            mask_wsl_interop: false,
             glob_scan_max_depth: None,
         }
     }
@@ -342,8 +349,28 @@ fn create_bwrap_flags(
     args.push("--new-session".to_string());
     args.push("--die-with-parent".to_string());
     args.extend(filesystem_args);
+    // 对位 codex f71543813f：文件系统受限时遮蔽 WSL interop socket 目录
+    if options.mask_wsl_interop {
+        // WSL's Windows-process bridge uses Unix sockets under /run/WSL.
+        // Mask them after all filesystem binds so network access cannot bypass
+        // the Linux filesystem policy by launching an unrestricted Windows process.
+        args.push("--tmpfs".to_string());
+        args.push(WSL_INTEROP_DIR.to_string());
+    }
+    // 对位 codex 39f4277087：锚点条件为 `(mask_wsl_interop || mask_wslg_distro)
+    // && !mount_proc`；mask_wslg_distro 属 WSLg 裁点未移植（恒 false），故此处
+    // 只保留 interop 析取支，语义等价。
+    if options.mask_wsl_interop && !options.mount_proc {
+        // Without a fresh procfs, the root bind retains the host procfs.
+        // Hide it so host process roots cannot restore the masked WSL views.
+        args.push("--tmpfs".to_string());
+        args.push("/proc".to_string());
+    }
     // Request a user namespace explicitly rather than relying on bubblewrap's
     // auto-enable behavior, which is skipped when the caller runs as uid 0.
+    // This also blocks host procfs root/cwd/fd links through ptrace permission
+    // checks, including when a container requires retaining the host procfs.
+    // （后半句对位 codex 49305d74b4）
     args.push("--unshare-user".to_string());
     // 对位 codex 39f4277087：inherit 模式下复用调用方 PID 命名空间
     if !options.inherit_pid_namespace {
@@ -668,24 +695,67 @@ fn create_filesystem_args(
             .filter(|path| !unreadable_paths.contains(path))
             .filter(|path| !missing_auto_metadata_read_only_project_root_subpaths.contains(path))
             .collect();
-        let protected_metadata_names = writable_root.protected_metadata_names.clone();
+        // 对位 codex 8bbe8f8702：与更深层 writable root 共享的挂载延迟到该 root
+        // 绑定之后再挂载；路径不丢弃——下面仍要做 remap 与校验。
+        // Remember which mounts belong to a deeper writable root without dropping
+        // their paths: every path must still be remapped and validated below.
+        let mut deferred_read_only_subpaths: Vec<PathBuf> = read_only_subpaths
+            .iter()
+            .filter(|path| {
+                sorted_writable_roots.iter().any(|nested_root| {
+                    let nested_path = nested_root.root.as_path();
+                    nested_path != root
+                        && nested_path.starts_with(root)
+                        && path.starts_with(nested_path)
+                        && nested_root
+                            .read_only_subpaths
+                            .iter()
+                            .any(|nested_subpath| nested_subpath.as_path() == path.as_path())
+                })
+            })
+            .cloned()
+            .collect();
+        let protected_metadata_names = &writable_root.protected_metadata_names;
         append_metadata_path_masks_for_writable_root(
             &mut read_only_subpaths,
             root,
-            &protected_metadata_names,
+            protected_metadata_names,
         );
         if let Some(target) = &symlink_target {
             read_only_subpaths = remap_paths_for_symlink_target(read_only_subpaths, root, target);
+            deferred_read_only_subpaths =
+                remap_paths_for_symlink_target(deferred_read_only_subpaths, root, target);
         }
         append_protected_create_targets_for_writable_root(
             &mut bwrap_args,
-            &protected_metadata_names,
+            protected_metadata_names,
             root,
             symlink_target.as_deref(),
             &read_only_subpaths,
         );
         read_only_subpaths.sort_by_key(|path| path_depth(path));
         for subpath in read_only_subpaths {
+            // 对位 codex 8bbe8f8702：writable-symlink 校验在延迟判定之前——
+            // 延迟路径也必须经过与立即挂载相同的校验。
+            if let Some(symlink) =
+                first_writable_symlink_component_in_path(&subpath, &allowed_write_paths)
+            {
+                /*
+                 * A read-only carveout under a writable symlink cannot be made reliable
+                 * with bwrap path arguments. Binding the symlink's current target would
+                 * only protect a startup-time snapshot; the sandboxed process could
+                 * replace the writable symlink before it reads through the logical path.
+                 */
+                return Err(ExecErr::Fatal(format!(
+                    "cannot enforce sandbox read-only path {} because it crosses writable symlink {}",
+                    subpath.display(),
+                    symlink.display()
+                )));
+            }
+            // Defer only the mount, after the same validation as an immediate mount.
+            if deferred_read_only_subpaths.contains(&subpath) {
+                continue;
+            }
             append_read_only_subpath_args(
                 &mut bwrap_args,
                 &subpath,
@@ -1197,26 +1267,14 @@ fn append_mount_target_parent_dir_args(args: &mut Vec<String>, mount_target: &Pa
     }
 }
 
+/// Append mounts for a read-only path after writable-symlink validation.
+/// （对位 codex 8bbe8f8702：writable-symlink 校验在调用点完成，见主循环）
 fn append_read_only_subpath_args(
     bwrap_args: &mut BwrapArgs,
     subpath: &Path,
     allowed_write_paths: &[PathBuf],
     daemon_directories: &BTreeSet<PathBuf>,
 ) -> Result<()> {
-    if let Some(symlink) = first_writable_symlink_component_in_path(subpath, allowed_write_paths) {
-        /*
-         * A read-only carveout under a writable symlink cannot be made reliable
-         * with bwrap path arguments. Binding the symlink's current target would
-         * only protect a startup-time snapshot; the sandboxed process could
-         * replace the writable symlink before it reads through the logical path.
-         */
-        return Err(ExecErr::Fatal(format!(
-            "cannot enforce sandbox read-only path {} because it crosses writable symlink {}",
-            subpath.display(),
-            symlink.display()
-        )));
-    }
-
     if let Some(metadata) = transient_empty_metadata_path(subpath)
         && is_within_allowed_write_paths(subpath, allowed_write_paths)
     {
@@ -1253,10 +1311,11 @@ fn append_read_only_subpath_args(
 }
 
 fn append_empty_file_bind_data_args(bwrap_args: &mut BwrapArgs, path: &Path) -> Result<()> {
-    if bwrap_args.preserved_files.is_empty() {
-        bwrap_args.preserved_files.push(File::open("/dev/null")?);
-    }
-    let null_fd = bwrap_args.preserved_files[0].as_raw_fd().to_string();
+    // 对位 codex ae7aad586e：bubblewrap 会消耗并关闭每个 bind-data 挂载的 fd，
+    // 多个 --ro-bind-data 共享同一 fd 会导致沙箱无法启动，故每个挂载各开各的 null 文件。
+    let null_file = File::open("/dev/null")?;
+    let null_fd = null_file.as_raw_fd().to_string();
+    bwrap_args.preserved_files.push(null_file);
     bwrap_args.args.push("--ro-bind-data".to_string());
     bwrap_args.args.push(null_fd);
     bwrap_args.args.push(path_to_string(path));
@@ -2006,6 +2065,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("temp dir");
         let workspace = temp_dir.path().join("workspace");
         let blocked = workspace.join("blocked");
+        let second_blocked = workspace.join("second-blocked");
         std::fs::create_dir_all(&workspace).expect("create workspace");
 
         let workspace_root =
@@ -2022,20 +2082,31 @@ mod tests {
                 access: FileSystemAccessMode::Read,
                 missing_path_behavior: None,
             },
+            // 对位 codex ae7aad586e：第二个 blocked 条目验证多挂载各有独立 fd
+            FileSystemSandboxEntry {
+                path: AbsolutePathBuf::from_absolute_path(&second_blocked)
+                    .expect("absolute second blocked")
+                    .into(),
+                access: FileSystemAccessMode::Read,
+                missing_path_behavior: None,
+            },
         ]);
 
         let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
             .expect("filesystem args");
 
         assert_empty_file_bound_without_perms(&args.args, &blocked);
+        assert_empty_file_bound_without_perms(&args.args, &second_blocked);
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".git"));
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
         assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".nova"));
-        assert_eq!(args.preserved_files.len(), 1);
+        assert_eq!(args.preserved_files.len(), 2);
+        assert_bind_data_uses_distinct_preserved_fds(&args);
         assert_eq!(
             synthetic_mount_target_paths(&args),
             vec![
                 blocked.clone(),
+                second_blocked.clone(),
                 workspace.join(".git"),
                 workspace.join(".agents"),
                 workspace.join(".nova"),
@@ -2044,7 +2115,7 @@ mod tests {
             ]
         );
         assert!(
-            !blocked.exists(),
+            !blocked.exists() && !second_blocked.exists(),
             "missing path mask should not materialize host-side metadata paths at arg construction time",
         );
     }
@@ -2566,23 +2637,20 @@ mod tests {
         let docs = AbsolutePathBuf::from_absolute_path(&docs).expect("absolute docs");
         let docs_public =
             AbsolutePathBuf::from_absolute_path(&docs_public).expect("absolute docs/public");
-        let policy = FileSystemSandboxPolicy::restricted(vec![
-            FileSystemSandboxEntry {
-                path: writable_root.into(),
-                access: FileSystemAccessMode::Write,
-                missing_path_behavior: None,
-            },
-            FileSystemSandboxEntry {
-                path: docs.clone().into(),
-                access: FileSystemAccessMode::Read,
-                missing_path_behavior: None,
-            },
-            FileSystemSandboxEntry {
-                path: docs_public.clone().into(),
-                access: FileSystemAccessMode::Write,
-                missing_path_behavior: None,
-            },
-        ]);
+        // 对位 codex 8bbe8f8702（含 1d804e91b7 的 .aws）：补 skip_missing_path
+        // 元数据条目，验证嵌套可写根下元数据恰好挂载一次且在可写绑定之后
+        let mut entries = vec![
+            FileSystemSandboxEntry::new(writable_root.into(), FileSystemAccessMode::Write),
+            FileSystemSandboxEntry::new(docs.clone().into(), FileSystemAccessMode::Read),
+            FileSystemSandboxEntry::new(docs_public.clone().into(), FileSystemAccessMode::Write),
+        ];
+        for name in [".git", ".agents", ".nova", ".aws"] {
+            entries.push(FileSystemSandboxEntry::skip_missing_path(
+                docs_public.join(name).into(),
+                FileSystemAccessMode::Read,
+            ));
+        }
+        let policy = FileSystemSandboxPolicy::restricted(entries);
 
         let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
             .expect("filesystem args");
@@ -2606,6 +2674,23 @@ mod tests {
             "expected read-only parent remount before nested writable bind: {:#?}",
             args.args
         );
+        for name in [".git", ".agents", ".nova", ".aws"] {
+            let metadata_path = path_to_string(docs_public.join(name).as_path());
+            let mount_indices = args
+                .args
+                .windows(2)
+                .enumerate()
+                .filter_map(|(index, window)| {
+                    (window == ["--tmpfs", metadata_path.as_str()]).then_some(index)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(mount_indices.len(), 1, "one mount for {metadata_path}");
+            assert!(
+                docs_public_rw_index < mount_indices[0],
+                "metadata must be mounted after its writable root: {:#?}",
+                args.args
+            );
+        }
     }
 
     #[test]
@@ -2851,7 +2936,9 @@ mod tests {
     fn split_policy_masks_root_read_file_carveouts() {
         let temp_dir = TempDir::new().expect("temp dir");
         let blocked_file = temp_dir.path().join("blocked.txt");
+        let second_blocked_file = temp_dir.path().join("second-blocked.txt");
         std::fs::write(&blocked_file, "secret").expect("create blocked file");
+        std::fs::write(&second_blocked_file, "dummy secret").expect("create second blocked file");
         let blocked_file =
             AbsolutePathBuf::from_absolute_path(&blocked_file).expect("absolute blocked file");
         let policy = FileSystemSandboxPolicy::restricted(vec![
@@ -2867,20 +2954,48 @@ mod tests {
                 access: FileSystemAccessMode::Deny,
                 missing_path_behavior: None,
             },
+            // 对位 codex ae7aad586e：第二个 deny 文件条目
+            FileSystemSandboxEntry {
+                path: AbsolutePathBuf::from_absolute_path(&second_blocked_file)
+                    .expect("absolute second blocked file")
+                    .into(),
+                access: FileSystemAccessMode::Deny,
+                missing_path_behavior: None,
+            },
         ]);
 
         let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
             .expect("filesystem args");
-        let blocked_file_str = path_to_string(blocked_file.as_path());
-
-        assert_eq!(args.preserved_files.len(), 1);
+        assert_eq!(args.preserved_files.len(), 2);
+        assert_bind_data_uses_distinct_preserved_fds(&args);
         assert!(args.synthetic_mount_targets.is_empty());
-        assert!(args.args.windows(5).any(|window| {
-            window[0] == "--perms"
-                && window[1] == "000"
-                && window[2] == "--ro-bind-data"
-                && window[4] == blocked_file_str
-        }));
+        for blocked_file in [blocked_file.as_path(), second_blocked_file.as_path()] {
+            assert!(args.args.windows(5).any(|window| {
+                window[0] == "--perms"
+                    && window[1] == "000"
+                    && window[2] == "--ro-bind-data"
+                    && window[4] == path_to_string(blocked_file)
+            }));
+        }
+    }
+
+    /// 对位 codex ae7aad586e：校验每个 --ro-bind-data 挂载使用各自独立的 preserved fd。
+    fn assert_bind_data_uses_distinct_preserved_fds(args: &BwrapArgs) {
+        let mount_fds = args
+            .args
+            .windows(3)
+            .filter(|window| window[0] == "--ro-bind-data")
+            .map(|window| window[1].parse::<i32>().expect("bind-data fd"))
+            .collect::<Vec<_>>();
+        let distinct_fds = mount_fds.iter().copied().collect::<HashSet<_>>();
+        assert_eq!(mount_fds.len(), distinct_fds.len());
+        assert_eq!(
+            distinct_fds,
+            args.preserved_files
+                .iter()
+                .map(AsRawFd::as_raw_fd)
+                .collect()
+        );
     }
 
     #[test]

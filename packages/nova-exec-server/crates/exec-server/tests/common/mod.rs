@@ -33,6 +33,17 @@ pub(crate) const DELAYED_OUTPUT_AFTER_EXIT_PARENT_ARG: &str =
 pub(crate) const SYSTEM_PROXY_REQUEST_URL_ENV: &str = "NOVA_EXEC_SERVER_TEST_SYSTEM_PROXY_REQUEST_URL";
 pub(crate) const SYSTEM_PROXY_URL_ENV: &str = "NOVA_EXEC_SERVER_TEST_SYSTEM_PROXY_URL";
 
+// 对位 codex 39f4277087 tests/common/mod.rs 同名宏：宿主机无原生 MXC 时跳过用例。
+#[macro_export]
+macro_rules! skip_if_mxc_unavailable {
+    ($return_value:expr $(,)?) => {{
+        if !nova_exec_server_sandboxing::windows_mxc_available() {
+            eprintln!("skipping test: native MXC is unavailable on this host");
+            return $return_value;
+        }
+    }};
+}
+
 const DELAYED_OUTPUT_AFTER_EXIT_CHILD_ARG: &str = "--nova-test-delayed-output-after-exit-child";
 const EXEC_SERVER_SUBCOMMAND: &str = "exec-server";
 #[cfg(target_os = "windows")]

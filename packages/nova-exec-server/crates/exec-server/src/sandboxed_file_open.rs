@@ -58,7 +58,7 @@ async fn open_platform(
 
     let (mut receiver, sender) = UnixStream::pair().map_err(io_error)?;
     let sender: OwnedFd = sender.into();
-    let child = spawn_command(command, std::process::Stdio::from(sender))?;
+    let child = spawn_command(command, nova_exec_server_utils_pty::ChildStdin::File(sender))?;
     receiver.write_all(&request).map_err(io_error)?;
     receiver
         .shutdown(std::net::Shutdown::Write)
@@ -79,7 +79,7 @@ async fn open_platform(
 ) -> Result<tokio::fs::File, JSONRPCErrorError> {
     use tokio::io::AsyncWriteExt;
 
-    let mut child = spawn_command(command, std::process::Stdio::piped())?;
+    let mut child = spawn_command(command, nova_exec_server_utils_pty::ChildStdin::Piped)?;
     let mut stdin = child
         .stdin
         .take()
@@ -167,8 +167,8 @@ fn receive_file_descriptor(
             _ => None,
         })
         .ok_or_else(|| io::Error::other("missing transferred file descriptor"))?;
-    // macOS 无法原子设置 close-on-exec，fd 有短暂的可继承窗口；helper 启动时
-    // 关闭继承 fd 以压缩该窗口（见 fs_sandbox::spawn_command 的 pre_exec）。
+    // macOS 无法原子设置 close-on-exec，fd 有短暂的可继承窗口；helper 启动侧以
+    // DescriptorPolicy::Explicit 关闭继承 fd 压缩该窗口（见 fs_sandbox::spawn_command）。
     #[cfg(not(target_os = "linux"))]
     rustix::io::fcntl_setfd(&descriptor, rustix::io::FdFlags::CLOEXEC)?;
     Ok(descriptor)
@@ -189,16 +189,16 @@ fn duplicate_file_handle(process_id: u32, file_handle: u64) -> io::Result<std::f
 
     // SAFETY: OpenProcess 成功返回受拥有的句柄，失败返回 null。
     let process = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, process_id) };
-    if process == 0 {
+    if process.is_null() {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: 上面的 OpenProcess 成功结果归本作用域所有。
-    let process = unsafe { OwnedHandle::from_raw_handle(process as _) };
-    let mut duplicated: HANDLE = 0;
+    let process = unsafe { OwnedHandle::from_raw_handle(process) };
+    let mut duplicated = std::ptr::null_mut();
     // SAFETY: 两个进程句柄均有效，duplicated 接收受拥有的文件句柄。
     if unsafe {
         DuplicateHandle(
-            process.as_raw_handle() as HANDLE,
+            process.as_raw_handle(),
             file_handle as HANDLE,
             GetCurrentProcess(),
             &raw mut duplicated,
@@ -211,5 +211,5 @@ fn duplicate_file_handle(process_id: u32, file_handle: u64) -> io::Result<std::f
         return Err(io::Error::last_os_error());
     }
     // SAFETY: DuplicateHandle 已把新文件句柄的所有权转移过来。
-    Ok(unsafe { std::fs::File::from_raw_handle(duplicated as _) })
+    Ok(unsafe { std::fs::File::from_raw_handle(duplicated) })
 }

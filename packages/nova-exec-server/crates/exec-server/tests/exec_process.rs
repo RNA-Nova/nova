@@ -3,6 +3,9 @@ mod common;
 #[cfg(unix)]
 #[path = "exec_process/shell_snapshot.rs"]
 mod shell_snapshot;
+// 对位 codex 39f4277087 tests/exec_process.rs：Windows 沙箱 RPC 行为共用用例。
+#[path = "exec_process/windows_sandbox.rs"]
+mod windows_sandbox;
 
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
@@ -40,6 +43,7 @@ use nova_exec_server::ExecBackend;
 use nova_exec_server::Environment;
 #[cfg(unix)]
 use nova_exec_server::ExecEnvPolicy;
+use nova_exec_server::ExecMetadata;
 use nova_exec_server::ExecOutputStream;
 use nova_exec_server::ExecParams;
 use nova_exec_server::ExecProcess;
@@ -276,6 +280,127 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
     if let Some(server) = context._server {
         assert!(!server.nova_exec_server_home().join("shell_snapshots").exists());
     }
+    Ok(())
+}
+
+// 对位 codex 39f4277087 tests/exec_process.rs 同名用例（5 变体）：执行元数据的
+// thread/tool_call ID 最后应用，覆盖策略 r#set、快照缓存与 env overlay。
+// （nova 词表：ExecMetadata.thread_id 为普通 String；环境变量为
+// NOVA_EXEC_SERVER_THREAD_ID / NOVA_EXEC_SERVER_TOOL_CALL_ID。）
+#[cfg(unix)]
+#[test_case(false, false, false; "local_pipe")]
+#[test_case(false, true, false; "local_tty")]
+#[test_case(true, false, false; "remote_pipe")]
+#[test_case(true, true, false; "remote_tty")]
+#[test_case(true, false, true; "remote_sandbox")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(remote_exec_server)]
+async fn exec_metadata_overrides_policy_and_cached_snapshot(
+    use_remote: bool,
+    tty: bool,
+    use_sandbox: bool,
+) -> Result<()> {
+    if use_sandbox
+        && let Some(warning) = nova_exec_server_sandboxing::system_bwrap_warning(
+            &PermissionProfile::workspace_write(),
+            // 对位 codex 7aa8f51049：`system_bwrap_warning` 新增 cwd 参。
+            &std::env::current_dir()?,
+        )
+    {
+        eprintln!("skipping sandbox test: {warning}");
+        return Ok(());
+    }
+    let context = create_process_context(use_remote).await?;
+    let home = TempDir::new()?;
+    let cwd = PathUri::from_host_native_path(home.path())?;
+    std::fs::write(
+        home.path().join(".bashrc"),
+        "printf '%s|%s\n' \"${NOVA_EXEC_SERVER_THREAD_ID-unset}\" \"${NOVA_EXEC_SERVER_TOOL_CALL_ID-unset}\" >> \"$HOME/capture-env\"\nexport NOVA_EXEC_SERVER_THREAD_ID=snapshot-thread\nexport NOVA_EXEC_SERVER_TOOL_CALL_ID=snapshot-call\n",
+    )?;
+    let policy = ExecEnvPolicy {
+        inherit: ShellEnvironmentPolicyInherit::None,
+        ignore_default_excludes: true,
+        exclude: Vec::new(),
+        r#set: HashMap::from([
+            ("HOME".into(), home.path().to_string_lossy().into_owned()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+            ("NOVA_EXEC_SERVER_THREAD_ID".into(), "policy-thread".into()),
+            ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "policy-call".into()),
+        ]),
+        include_only: Vec::new(),
+    };
+    let thread_id = "019d25f0-6728-7ce2-908f-c3c187323e5b";
+    let later_thread_id = "019d25f0-6728-7ce2-908f-c3c187323e5c";
+
+    for (attempt, call_id, expected) in [
+        (0, Some(""), ""),
+        (1, Some("call-λ-'\";$()"), "call-λ-'\";$()"),
+        (2, None, "unset"),
+        (3, Some("exec-invalid\0call"), "unset"),
+    ] {
+        let execution_thread_id = if attempt == 1 {
+            later_thread_id
+        } else {
+            thread_id
+        };
+        let started = context
+            .backend
+            .start(ExecParams {
+                metadata: Some(ExecMetadata {
+                    thread_id: Some(execution_thread_id.to_string()),
+                    tool_call_id: call_id.map(str::to_string),
+                }),
+                process_id: ProcessId::from(format!("metadata-snapshot-{attempt}")),
+                argv: vec![
+                    "/bin/bash".into(),
+                    "-lc".into(),
+                    "printf '%s|%s' \"$NOVA_EXEC_SERVER_THREAD_ID\" \"${NOVA_EXEC_SERVER_TOOL_CALL_ID-unset}\""
+                        .to_string(),
+                ],
+                cwd: cwd.clone(),
+                env_policy: Some(policy.clone()),
+                shell_snapshot: Some(ShellSnapshotRequest {
+                    scope_id: "metadata-attachment".into(),
+                    shell: ShellInfo {
+                        name: "bash".into(),
+                        path: "/bin/bash".into(),
+                    },
+                }),
+                env: HashMap::from([
+                    ("NOVA_EXEC_SERVER_THREAD_ID".into(), "overlay-thread".into()),
+                    ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "overlay-call".into()),
+                ]),
+                tty,
+                pipe_stdin: false,
+                arg0: None,
+                sandbox: use_sandbox.then(|| {
+                    FileSystemSandboxContext::from_permission_profile(
+                        PermissionProfile::workspace_write(),
+                        cwd.clone(),
+                    )
+                }),
+                enforce_managed_network: false,
+                managed_network: None,
+                network_proxy: None,
+            })
+            .await?;
+        let (stdout, stderr, status, closed) =
+            collect_process_output_from_events(started.process).await?;
+        assert_eq!(
+            (stdout, stderr, status, closed),
+            (
+                format!("{execution_thread_id}|{expected}"),
+                String::new(),
+                Some(0),
+                true,
+            )
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("capture-env"))?,
+        "019d25f0-6728-7ce2-908f-c3c187323e5b|unset\n"
+    );
     Ok(())
 }
 
@@ -847,12 +972,20 @@ async fn collect_process_output_from_reads(
 async fn collect_process_output_from_events(
     session: Arc<dyn ExecProcess>,
 ) -> Result<(String, String, Option<i32>, bool)> {
+    collect_process_output_from_events_with_timeout(session, Duration::from_secs(2)).await
+}
+
+// 对位 codex 39f4277087 tests/exec_process.rs：windows_sandbox 用例需要可调的事件超时。
+async fn collect_process_output_from_events_with_timeout(
+    session: Arc<dyn ExecProcess>,
+    event_timeout: Duration,
+) -> Result<(String, String, Option<i32>, bool)> {
     let mut events = session.subscribe_events();
     let mut stdout = String::new();
     let mut stderr = String::new();
     let mut exit_code = None;
     loop {
-        match timeout(Duration::from_secs(2), events.recv()).await?? {
+        match timeout(event_timeout, events.recv()).await?? {
             ExecProcessEvent::Output(chunk) => match chunk.stream {
                 ExecOutputStream::Stdout | ExecOutputStream::Pty => {
                     stdout.push_str(&String::from_utf8_lossy(&chunk.chunk.into_inner()));

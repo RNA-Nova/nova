@@ -293,21 +293,27 @@ fn snapshot_filters_profile_exports_after_capture() {
         // 对位 codex 9b738582b1：policy 里的两个 ID 也必须被快照解析剔除
         r#set: HashMap::from([
             ("PROFILE_ALLOWED".to_string(), "override".to_string()),
-            ("CODEX_THREAD_ID".to_string(), "policy-thread".to_string()),
-            ("CODEX_TOOL_CALL_ID".to_string(), "policy-call".to_string()),
+            (
+                "NOVA_EXEC_SERVER_THREAD_ID".to_string(),
+                "policy-thread".to_string(),
+            ),
+            (
+                "NOVA_EXEC_SERVER_TOOL_CALL_ID".to_string(),
+                "policy-call".to_string(),
+            ),
         ]),
         // Metadata must survive policy filtering so the cache owns its removal.
         include_only: vec![
             "PROFILE_*".to_string(),
-            "CODEX_THREAD_ID".to_string(),
-            "CODEX_TOOL_CALL_ID".to_string(),
+            "NOVA_EXEC_SERVER_THREAD_ID".to_string(),
+            "NOVA_EXEC_SERVER_TOOL_CALL_ID".to_string(),
         ],
     };
     // 对位 codex 39f4277087：捕获格式负载（state NUL aliases NUL export 记录 NUL
     // 空键 NUL environment）
     let snapshot = parse_snapshot(
         ShellType::Bash,
-        b"profile \xff noise\n# Snapshot file\nfunction profile_helper() { :; }\n\0alias profile_alias='profile_helper'\n\0PROFILE_DENIED\0export PROFILE_DENIED=denied\n\0NON_UTF8\0export NON_UTF8='\xff'\n\0\0PROFILE_ALLOWED=profile\0PROFILE_DENIED=denied\0PROFILE_SECRET=secret\0PWD=/tmp\0NON_UTF8=\xff\0CODEX_THREAD_ID=capture-thread\0CODEX_TOOL_CALL_ID=profile-call\0",
+        b"profile \xff noise\n# Snapshot file\nfunction profile_helper() { :; }\n\0alias profile_alias='profile_helper'\n\0PROFILE_DENIED\0export PROFILE_DENIED=denied\n\0NON_UTF8\0export NON_UTF8='\xff'\n\0\0PROFILE_ALLOWED=profile\0PROFILE_DENIED=denied\0PROFILE_SECRET=secret\0PWD=/tmp\0NON_UTF8=\xff\0NOVA_EXEC_SERVER_THREAD_ID=capture-thread\0NOVA_EXEC_SERVER_TOOL_CALL_ID=profile-call\0",
         Some(&policy),
         SnapshotReplay::Environment,
     )
@@ -376,7 +382,7 @@ fn snapshot_caches_only_unmanaged_proxy_state() {
     ] {
         // 对位 codex 9b738582b1：捕获输出混入两个 ID 也必须被剔除
         let output = format!(
-            "# Snapshot file\n\0\0\0{exports}CODEX_THREAD_ID=capture-thread\0CODEX_TOOL_CALL_ID=profile-call\0"
+            "# Snapshot file\n\0\0\0{exports}NOVA_EXEC_SERVER_THREAD_ID=capture-thread\0NOVA_EXEC_SERVER_TOOL_CALL_ID=profile-call\0"
         );
         let snapshot = parse_snapshot(
             ShellType::Bash,

@@ -1,7 +1,12 @@
+mod environment_accessor;
 mod exec_permission_profile_serde;
 mod find_up;
 
 use bytes::Bytes;
+pub use environment_accessor::EnvironmentAccess;
+pub use environment_accessor::EnvironmentAccessExt;
+pub use environment_accessor::EnvironmentAccessKey;
+pub use environment_accessor::FileSystemEnvironmentAccessor;
 pub use find_up::FindUpErrorPolicy;
 pub use find_up::find_nearest_ancestor_with_markers;
 pub use find_up::find_nearest_native_ancestor_with_markers;
@@ -44,8 +49,12 @@ pub const FILE_WRITE_CHUNK_SIZE: usize = 1024 * 1024;
 pub const MAX_WALK_DEPTH: usize = 64;
 pub const MAX_WALK_DIRECTORIES: usize = 10_000;
 pub const MAX_WALK_ENTRIES: usize = 50_000;
-const MAX_WALK_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-const WALK_RESPONSE_ITEM_OVERHEAD_BYTES: usize = 64;
+/// Maximum estimated size of a walk response.
+/// （对位 codex 39f4277087：与上游同为 pub，供调用方估算/构造超限用例）
+pub const MAX_WALK_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+/// Per-entry or per-error overhead charged to the walk response budget.
+/// （对位 codex 39f4277087：同上恢复 pub）
+pub const WALK_RESPONSE_ITEM_OVERHEAD_BYTES: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReadFileOptions {
@@ -704,6 +713,11 @@ pub trait ExecutorFileSystem: Send + Sync {
     ) -> ExecutorFileSystemFuture<'a, Vec<ReadDirectoryEntry>>;
 
     /// Recursively lists descendants, optionally following directory symlinks.
+    ///
+    /// 与上游关系（对位 codex 39f4277087 `ExecutorFileSystem::walk`）：上游该方法
+    /// 无默认实现，由各 filesystem 后端各自提供；nova 为实现 fs/walk 协议端点
+    /// 新增了基于 read_directory 原语的默认遍历（见 `walk_via_directory_reads`），
+    /// 有优化传输的后端可覆盖此方法。
     fn walk<'a>(
         &'a self,
         path: &'a PathUri,
@@ -716,6 +730,11 @@ pub trait ExecutorFileSystem: Send + Sync {
     /// Performs a bounded walk using the primitive filesystem operations.
     ///
     /// Implementations with an optimized walk transport can use this as a compatibility fallback.
+    ///
+    /// 与上游关系：nova 自增件（上游无对应函数）。codex 的 `walk` 由各后端自行实现；
+    /// 本默认实现以 `get_metadata`/`canonicalize`/`read_directory` 原语组合出等价语义，
+    /// 上限钳制沿用上游词汇（`MAX_WALK_DEPTH`/`MAX_WALK_DIRECTORIES`/`MAX_WALK_ENTRIES`/
+    /// `MAX_WALK_RESPONSE_BYTES`/`WALK_RESPONSE_ITEM_OVERHEAD_BYTES`）。
     fn walk_via_directory_reads<'a>(
         &'a self,
         path: &'a PathUri,
