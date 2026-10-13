@@ -75,3 +75,12 @@ retries = 3
 platform = 'cfg(unix)'
 filter = 'package(nova-exec-server) & test(shell_snapshot_concurrent_replays_keep_independent_readers)'
 retries = 3
+
+[[profile.default.overrides]]
+# 快照 v2 捕获失败回退族：内部事件死线同上（~5s 预算），共享 runner
+# 高负载下默认 retries=1 不够用（run 38389531315：remote_tty_recovery 两轮
+# 连超，同腿 1590 过/2 flaky 回收，机器 load ~10 来自他用户训练作业）。
+# 与快照并发回放族同类，retries 吸收负载波动。
+platform = 'cfg(unix)'
+filter = 'package(nova-exec-server) & test(shell_snapshot_v2_capture_failure_falls_back_and_retries)'
+retries = 3
