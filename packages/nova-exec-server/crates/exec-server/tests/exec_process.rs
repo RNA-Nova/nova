@@ -39,7 +39,6 @@ use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_protocol_core::protocol::SandboxPolicy;
 use nova_exec_server::ExecBackend;
-#[cfg(unix)]
 use nova_exec_server::Environment;
 #[cfg(unix)]
 use nova_exec_server::ExecEnvPolicy;
