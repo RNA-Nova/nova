@@ -1416,6 +1416,15 @@ fn append_existing_unreadable_path_args(
     allowed_write_paths: &[PathBuf],
 ) -> Result<()> {
     if unreadable_root.is_dir() {
+        // nova 自修（上游 bwrap 包裹层 bug，待回馈）：遮蔽目标若是符号链接
+        //（如 /dev/fd → /proc/self/fd），bwrap 在 pivot_root 之后才挂载，新根
+        // 内解析不到符号链接目标即 ENOENT、沙箱启动失败（245 实测 +
+        // codex vendored bwrap 0.11.2 源码同序实证）。挂载目标先
+        // canonicalize 落到真实路径——语义不变：符号链接在沙箱内仍解析到
+        // 同一目标。锚点同段无此处理（对位 codex 39f4277087 的缺口）。
+        let mount_target = unreadable_root
+            .canonicalize()
+            .unwrap_or_else(|_| unreadable_root.to_path_buf());
         let mut writable_descendants: Vec<&Path> = allowed_write_paths
             .iter()
             .map(PathBuf::as_path)
@@ -1432,7 +1441,7 @@ fn append_existing_unreadable_path_args(
             "111".to_string()
         });
         bwrap_args.args.push("--tmpfs".to_string());
-        bwrap_args.args.push(path_to_string(unreadable_root));
+        bwrap_args.args.push(path_to_string(&mount_target));
         // Recreate any writable descendants inside the tmpfs before remounting
         // the denied parent read-only. Otherwise bubblewrap cannot mkdir the
         // nested mount targets after the parent has been frozen.
@@ -1445,7 +1454,7 @@ fn append_existing_unreadable_path_args(
             );
         }
         bwrap_args.args.push("--remount-ro".to_string());
-        bwrap_args.args.push(path_to_string(unreadable_root));
+        bwrap_args.args.push(path_to_string(&mount_target));
         return Ok(());
     }
 
@@ -1903,6 +1912,48 @@ mod tests {
                     real_blocked_str.as_str(),
                 ]
         }));
+    }
+
+    // nova 自修（上游 bwrap 包裹层 bug，待回馈）：deny 目标自身是符号链接时
+    //（如 /dev/fd → /proc/self/fd），tmpfs 遮蔽必须落到 canonical 真实路径——
+    // bwrap 在 pivot_root 后才挂载，新根内解析不到符号链接目标即 ENOENT
+    //（245 实测 bwrap 0.9.0 + codex vendored 0.11.2 源码同序实证）。
+    #[cfg(unix)]
+    #[test]
+    fn denied_symlink_path_masks_canonical_target() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let real_dir = temp_dir.path().join("real-denied");
+        std::fs::create_dir_all(&real_dir).expect("create real dir");
+        let link_path = temp_dir.path().join("link-denied");
+        std::os::unix::fs::symlink(&real_dir, &link_path).expect("create symlink");
+
+        let link_path =
+            AbsolutePathBuf::from_absolute_path(&link_path).expect("absolute link path");
+        let real_dir_str = path_to_string(&real_dir);
+        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+            path: link_path.into(),
+            access: FileSystemAccessMode::Deny,
+            missing_path_behavior: None,
+        }]);
+
+        let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
+            .expect("filesystem args");
+
+        assert!(
+            args.args.windows(6).any(|window| {
+                window
+                    == [
+                        "--perms",
+                        "000",
+                        "--tmpfs",
+                        real_dir_str.as_str(),
+                        "--remount-ro",
+                        real_dir_str.as_str(),
+                    ]
+            }),
+            "tmpfs 遮蔽未落到 canonical 目标: {:?}",
+            args.args
+        );
     }
 
     #[cfg(unix)]
