@@ -41,22 +41,45 @@ jobs:
 
       # 自建 runner（245）到 github.com 偶发 TLS reset/低速（中国侧网络），
       # actions/checkout 无重试——失败后手动 clone 兜底（公开仓无需凭证）。
+      # 注意两点（run 38450910006 实证）：
+      # 1. runner 工作区已有 checkout 时 `git remote add origin` 必失败——
+      #    先用 get-url 探测，存在即跳过（此前直接 add，链断永远 fetch 不到）；
+      # 2. 兜底全失败必须硬报错——否则作业拿着陈旧 HEAD 跑出"假绿"
+      #    （该 run 的 ubuntu 腿就是在 4b14487 上绿的，而非目标提交）。
       - name: checkout 兜底重试（网络抖动时）
         if: steps.checkout.outcome == 'failure'
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
+          ok=0
           for attempt in 1 2 3 4 5; do
-            if git init -q . \
-              && git remote add origin https://github.com/RNA-Nova/nova.git \
-              && git fetch -q --depth 1 origin "${{ github.sha }}" \
+            git init -q .
+            git remote get-url origin >/dev/null 2>&1 \
+              || git remote add origin https://github.com/RNA-Nova/nova.git
+            if git fetch -q --depth 1 origin "${{ github.sha }}" \
               && git checkout -q FETCH_HEAD; then
+              ok=1
               break
             fi
             echo "checkout 第 $attempt 次失败，30s 后重试"
             sleep 30
           done
+          if [[ "$ok" != 1 ]]; then
+            echo "::error::checkout 兜底五次均失败，工作区不是目标提交 ${{ github.sha }}" >&2
+            exit 1
+          fi
           git rev-parse HEAD
+
+      # 防陈旧假绿的硬校验：工作区必须落在目标提交上（覆盖 checkout 各种
+      # 降级路径；GHA 宿主腿上是无害空转）。
+      - name: 校验 checkout 落在目标提交
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          if [[ "$head_sha" != "${{ github.sha }}" ]]; then
+            echo "::error::工作区 HEAD $head_sha 不是目标提交 ${{ github.sha }}" >&2
+            exit 1
+          fi
 
       - uses: ./.github/actions/setup-nova-ci
 
