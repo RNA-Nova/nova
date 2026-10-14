@@ -2395,9 +2395,6 @@ fn normalize_effective_absolute_path(path: AbsolutePathBuf) -> AbsolutePathBuf {
     path
 }
 
-/// 只规范化受信任的顶层系统别名（如 `/tmp -> /private/tmp`），不深追更深层
-/// 的组件——深层组件可能被已在沙箱内运行的进程改写，这里跟随它们会把一次
-/// 路径检查变成新的授权。
 pub(crate) fn default_read_only_subpaths_for_writable_root(
     writable_root: &AbsolutePathBuf,
     protect_missing_dot_nova: bool,

@@ -634,6 +634,10 @@ async fn run_write_stream_task(
                 // 时继续写会把旧流内容交错进新文件（同路径重开共享 inode），
                 // 故静默收尾——不落盘、不摘新句柄（收尾的代际守卫摘除在
                 // 循环外的尾 close）。
+                // 残余窗口明认：本判定与 write_block_at 落盘之间是
+                // check-then-act——在飞块的写入窗口内完成 close→重开，
+                // 该块仍可能落进新文件（窗口从"整个排空期"收窄到"单块在飞
+                // 期"，与读侧的残余窗口同类；彻底闭合需协议级流令牌）。
                 if let Some(current) = manager.handle_generation(&handle_id)
                     && current != generation
                 {
