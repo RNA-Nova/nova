@@ -15,6 +15,7 @@ from nova_protocol import (
     PROCESS_TERMINATE,
     PROCESS_WRITE,
     ExecEnvPolicy,
+    ExecMetadata,
     FileSystemSandboxContext,
     ManagedNetworkSandboxContext,
     ProcessReadParams,
@@ -111,6 +112,7 @@ class ProcessManager:
         pipe_stdin: bool = False,
         *,
         arg0: str | None = None,
+        metadata: ExecMetadata | None = None,
         env_policy: ExecEnvPolicy | dict[str, Any] | None = None,
         shell_snapshot: ShellSnapshotRequest | dict[str, Any] | None = None,
         sandbox: FileSystemSandboxContext | dict[str, Any] | None = None,
@@ -126,12 +128,15 @@ class ProcessManager:
         - enforce_managed_network/managed_network：托管网络强制与 loopback
           代理细节（fail-closed：无细节时服务端拒绝放行）
         - env_policy/shell_snapshot/arg0：环境策略、shell 快照、argv[0] 覆盖
+        - metadata：可选归因元数据（threadId/toolCallId，executor 遥测归因用，
+          非授权依据——v1.7 起；旧客户端省略、旧 executor 忽略）
         """
         if not argv:
             raise ProcessError("argv cannot be empty")
 
         params = ProcessStartParams(
             processId=process_id or f"proc-{uuid.uuid4().hex}",
+            metadata=metadata,
             argv=argv,
             cwd=cwd,
             env=env or {},

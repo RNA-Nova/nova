@@ -180,13 +180,27 @@ class EnvironmentManager:
             self._clients[environment.id] = client
             return client
 
-    def status(self, name: str) -> EnvironmentStatus:
-        """非变异状态观察（不触发连接/重连——对位 codex EnvironmentObservedStatus）"""
+    async def status(self, name: str) -> EnvironmentStatus:
+        """非变异状态观察（不触发连接/重连——对位 codex EnvironmentObservedStatus）
+
+        已缓存连接即实发一次 `environment/status` 探活（对位 Rust
+        `Environment::status`：每个可调 client 逐次实况探测，不给缓存的
+        健康结果）——探活失败即报 DISCONNECTED；恢复中或从未建立报
+        PENDING（观察不等待恢复）；已知连接失败报 DISCONNECTED 并带原因。
+        """
         client = self._clients.get(name)
         if client is None:
             return EnvironmentStatus(id=name, state=EnvironmentConnectionState.PENDING)
         control = client._control  # SDK 内部同窗（状态机归 recovery 层）
         if control.is_connected:
+            try:
+                await client.environment_status()
+            except Exception as err:
+                return EnvironmentStatus(
+                    id=name,
+                    state=EnvironmentConnectionState.DISCONNECTED,
+                    error=str(err),
+                )
             return EnvironmentStatus(
                 id=name, state=EnvironmentConnectionState.CONNECTED
             )
@@ -209,17 +223,26 @@ class EnvironmentManager:
 
         `token`：WS 鉴权 token 的侧表登记（运行时产物，不落配置条目）；
         None 时清除该环境的 token 登记。
+
+        增删与懒创建（get_client）经同一把锁互斥——否则竞态窗口里
+        懒创建可能把按旧注册表建出的连接留在缓存里。连接退役清扫在锁外
+        进行（与 close_all 同纪律：锁内只做注册表/缓存变更）。
         """
-        existing = self._clients.pop(environment.id, None)
+        async with self._lock:
+            existing = self._clients.pop(environment.id, None)
+            if token is not None:
+                self._tokens[environment.id] = token
+            else:
+                self._tokens.pop(environment.id, None)
+            environments = [
+                e for e in self._config.environments if e.id != environment.id
+            ]
+            environments.append(environment)
+            self._config = self._config.model_copy(
+                update={"environments": environments}
+            )
         if existing is not None:
             await existing.disconnect()
-        if token is not None:
-            self._tokens[environment.id] = token
-        else:
-            self._tokens.pop(environment.id, None)
-        environments = [e for e in self._config.environments if e.id != environment.id]
-        environments.append(environment)
-        self._config = self._config.model_copy(update={"environments": environments})
 
     async def refresh_environment(self, name: str | None = None) -> None:
         """计划内更换后刷新环境连接（对位 codex Environment::refresh_connection）。
@@ -235,15 +258,22 @@ class EnvironmentManager:
         await client.refresh_connection()
 
     async def remove_environment(self, name: str) -> bool:
-        """移除环境（断开并丢弃缓存连接）；返回是否真的存在过"""
-        client = self._clients.pop(name, None)
-        environments = [e for e in self._config.environments if e.id != name]
-        existed = client is not None or len(environments) != len(
-            self._config.environments
-        )
+        """移除环境（断开并丢弃缓存连接）；返回是否真的存在过。
+
+        与 get_client 同锁互斥（竞态窗口见 upsert_environment）；连接
+        退役清扫在锁外进行。
+        """
+        async with self._lock:
+            client = self._clients.pop(name, None)
+            environments = [e for e in self._config.environments if e.id != name]
+            existed = client is not None or len(environments) != len(
+                self._config.environments
+            )
+            self._config = self._config.model_copy(
+                update={"environments": environments}
+            )
         if client is not None:
             await client.disconnect()
-        self._config = self._config.model_copy(update={"environments": environments})
         return existed
 
     async def close_all(self) -> None:

@@ -90,7 +90,8 @@ def test_resolve_read_only_wire_shape(tmp_path):
     payload = sandbox.model_dump(by_alias=True, exclude_none=True)
     # v1.11 终态：策略目录只经 policyContext 承载（平铺字段已删）
     assert "cwd" not in payload
-    assert payload["policyContext"]["cwd"] == "/tmp/proj"
+    # 线上形状是 file:// URI（原生路径会被服务端 PathUri 拒绝）
+    assert payload["policyContext"]["cwd"] == "file:///tmp/proj"
     permissions = payload["permissions"]
     assert permissions["type"] == "managed"
     assert permissions["network"] == "restricted"
@@ -270,7 +271,8 @@ def test_attach_policy_ssh_uses_remote_cwd(monkeypatch, tmp_path):
     assert selection.spawn_policy is not None
     assert selection.spawn_policy.sandbox is not None
     # v1.11 终态：策略目录只经 policyContext 承载
-    assert selection.spawn_policy.sandbox["policyContext"]["cwd"] == "/remote/w"
+    # 线上形状是 file:// URI
+    assert selection.spawn_policy.sandbox["policyContext"]["cwd"] == "file:///remote/w"
 
 
 def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
@@ -287,7 +289,8 @@ def test_attach_policy_local_loopback_uses_local_cwd(monkeypatch, tmp_path):
     assert selection.spawn_policy is not None
     assert selection.spawn_policy.sandbox is not None
     # v1.11 终态：策略目录只经 policyContext 承载
-    assert selection.spawn_policy.sandbox["policyContext"]["cwd"] == "/tmp/proj"
+    # 线上形状是 file:// URI
+    assert selection.spawn_policy.sandbox["policyContext"]["cwd"] == "file:///tmp/proj"
 
 
 def test_attach_policy_ws_direct_without_remote_cwd_stays_unsandboxed(

@@ -7,13 +7,33 @@
   （recovery.ManagedTransport）共同遵守的接口协议，上层只面向它编程
 
 两种传输共享 `_JsonRpcTransport` 基类：pending 请求表、响应/通知分发、
-断线回调（`on_disconnect`——恢复层据此发起重连，对位 Rust 的
+入站限流闸门、服务端反向请求的准入与并发裁决、断线回调
+（`on_disconnect`——恢复层据此发起重连，对位 Rust 的
 RpcClientEvent::Disconnected 驱动 request_recovery）。
 
 边界处理（重写保留项，勿删）：
-- stdio 子进程 stderr 由独立任务持续消费，防缓冲填满死锁
-- stdio 断开逐级 reap：关 stdin 等 EOF 宽限 → terminate → kill
+- stdio 子进程 spawn 时独立进程组（process_group=0，pgid == 子进程 pid），
+  关闭逐级收割进程树：关 stdin 等 EOF 宽限 → terminate 进程组 → kill
+  进程组（对位 Rust connection.rs 的 terminate_process_tree /
+  kill_process_tree——沙箱 helper 等孙进程随组一并收割，不得漏杀）
+- 意外断线即收割底层承载（对位 Rust RpcClient::drop / 连接退役即
+  transport.terminate()）：stdio 后台组杀旧进程树、WS 后台关 socket——
+  恢复层只造新候选，旧承载（含 stdout EOF 但进程存活、stdin 写失败等
+  路径下的残留进程）由本层收尾
+- stdio 子进程 stderr 由独立任务按 8KiB 分块持续消费（对位 Rust
+  client_transport.rs 的 take() 分块读——行长无上限，超长行分块分发，
+  泵永不停），防缓冲填满死锁
 - stdio 单条 NDJSON 消息 64MB 上限（对齐服务端 MAX_STDIO_JSONRPC_MESSAGE_LEN）
+- 客户端入站限流三档（PROTOCOL v1.7，对位 Rust
+  client_inbound_request_limit.rs，WS/stdio 双侧生效）：反向请求/未知
+  通知/畸形消息 8KiB；数据面通知（process/output|exited|closed、
+  http/request/bodyDelta）2MiB；fs/readStream/chunk 8MiB；响应/错误
+  不受类别限流（仍受传输层单消息上限约束）。超限即断开连接
+- 畸形消息零容忍：JSON 解析失败/形状非法即连接级致命（对位 Rust
+  rpc.rs MalformedMessage → 断开+恢复），不静默吞
+- 服务端反向请求并发裁决（对位 Rust client_recovery.rs spawn_rpc_reader）：
+  准入校验（id 须非负整数、在飞去重，违规即断连+恢复）+ 256 在飞槽
+  （满员即时回 fail-closed deny）+ create_task 并发执行，接收循环不堵
 - 写路径 drain 提供天然背压（对端读慢时发送方挂起而非内存膨胀）
 - 连接断开传播：pending 请求一律以 ConnectionError 收尾
 """
@@ -24,12 +44,23 @@ import asyncio
 import json
 import logging
 import os
+import signal
 from abc import abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, Protocol
 
 import websockets.asyncio.client
 import websockets.exceptions
+from nova_protocol import (
+    FS_READ_STREAM_CHUNK,
+    HTTP_REQUEST_BODY_DELTA,
+    NETWORK_POLICY_REQUEST,
+    PROCESS_CLOSED,
+    PROCESS_EXITED,
+    PROCESS_OUTPUT,
+    NetworkPolicyDecision,
+    NetworkPolicyRequestResponse,
+)
 
 from .errors import (
     JSON_RPC_INTERNAL_ERROR,
@@ -46,6 +77,117 @@ logger = logging.getLogger(__name__)
 #: 通知处理器 / 断线回调 / stderr 回调的签名
 NotificationHandler = Callable[[dict], Awaitable[None]]
 DisconnectHandler = Callable[[str | None], None]
+#: 服务端反向请求处理器：收 params，回 result（异常由传输层转内部错误回执）
+RequestHandler = Callable[[dict], Awaitable[Any]]
+
+# ---------------------------------------------------------------------------
+# 客户端入站限流（PROTOCOL v1.7，对位 Rust client_inbound_request_limit.rs）
+# ---------------------------------------------------------------------------
+
+#: 反向请求 / 未知通知 / 畸形消息的单帧上限（超限即断开连接）
+MAX_CLIENT_INBOUND_REQUEST_LEN = 8 * 1024
+#: 数据面通知（process/output|exited|closed、http/request/bodyDelta）的放宽档
+MAX_CLIENT_INBOUND_NOTIFICATION_LEN = 2 * 1024 * 1024
+#: nova 扩展数据面 fs/readStream/chunk 的放宽档（协议最大块 4MiB +
+#: base64/分帧余量，对位 Rust MAX_FS_READ_STREAM_CHUNK_NOTIFICATION_LEN）
+MAX_FS_READ_STREAM_CHUNK_NOTIFICATION_LEN = 8 * 1024 * 1024
+
+#: 数据面通知放宽档的方法名单（对位 Rust 的豁免 matches!）
+_DATA_PLANE_NOTIFICATION_METHODS = frozenset(
+    {PROCESS_OUTPUT, PROCESS_EXITED, PROCESS_CLOSED, HTTP_REQUEST_BODY_DELTA}
+)
+
+#: 反向请求满员等路径的 fail-closed 拒决原因（对位 Rust NETWORK_POLICY_DENIAL_REASON）
+NETWORK_POLICY_DENIAL_REASON = "not_allowed"
+
+
+def _is_valid_request_id(value: Any) -> bool:
+    """对位 Rust RequestId（untagged String | Integer(i64)）的线形校验"""
+    if isinstance(value, str):
+        return True
+    if isinstance(value, bool):  # bool 是 int 子类——JSON true/false 不是合法 id
+        return False
+    return isinstance(value, int) and -(2**63) <= value < 2**63
+
+
+def _is_malformed_message(message: Any) -> bool:
+    """畸形消息判定——对位 Rust JSONRPCMessage 自定义反序列化（
+    exec-server-protocol rpc.rs）的失败面，serde 拒收 = 连接级致命：
+
+    - 非 JSON 对象
+    - method 非字符串；method+id 组合中 id 非法（含 null——Rust 按
+      contains_key 判型，`id: null` 走 Request 反序列化即失败）
+    - 无 method 有 result：须带合法 id（Response）
+    - 无 method 无 result：须为完整 error 形态（Error），否则拒收
+    """
+    if not isinstance(message, dict):
+        return True
+    if "method" in message:
+        if not isinstance(message["method"], str):
+            return True
+        return "id" in message and not _is_valid_request_id(message["id"])
+    if "result" in message:
+        return not _is_valid_request_id(message.get("id"))
+    error = message.get("error")
+    code = error.get("code") if isinstance(error, dict) else None
+    return not (
+        _is_valid_request_id(message.get("id"))
+        and isinstance(error, dict)
+        and isinstance(code, int)
+        and not isinstance(code, bool)
+        and isinstance(error.get("message"), str)
+    )
+
+
+def _inbound_message_limit(message: dict) -> int | None:
+    """按消息类别返回入站字节上限（对位 Rust
+    client_inbound_message_exceeded_limit 的分档；None = 响应/错误——
+    不受类别限流，仍受传输层单消息上限约束）"""
+    method = message.get("method")
+    if method is None:
+        return None
+    if message.get("id") is not None:
+        return MAX_CLIENT_INBOUND_REQUEST_LEN
+    if method == FS_READ_STREAM_CHUNK:
+        return MAX_FS_READ_STREAM_CHUNK_NOTIFICATION_LEN
+    if method in _DATA_PLANE_NOTIFICATION_METHODS:
+        return MAX_CLIENT_INBOUND_NOTIFICATION_LEN
+    return MAX_CLIENT_INBOUND_REQUEST_LEN
+
+
+def _gate_inbound_message(
+    payload: bytes | bytearray,
+) -> tuple[dict | None, str | None]:
+    """入站消息统一闸门（WS/stdio 共用，对位 Rust connection.rs 读循环的
+    parse + client_inbound_message_exceeded_limit 组合）。
+
+    返回 `(message, None)` = 放行分发；`(None, reason)` = 连接级致命
+    （断开+恢复）。顺序对位 Rust：先类别限流（畸形消息按 8KiB 档
+    fail-closed），再畸形判定。
+    """
+    encoded_len = len(payload)
+    parse_error: json.JSONDecodeError | None = None
+    try:
+        message: Any = json.loads(payload)
+    except json.JSONDecodeError as e:
+        message = None
+        parse_error = e
+    malformed = message is None or _is_malformed_message(message)
+    limit = (
+        MAX_CLIENT_INBOUND_REQUEST_LEN if malformed else _inbound_message_limit(message)
+    )
+    if limit is not None and encoded_len > limit:
+        return None, (
+            "JSON-RPC message from exec-server exceeds maximum length of "
+            f"{limit} bytes"
+        )
+    if message is None:
+        return None, (
+            f"failed to parse JSON-RPC message from exec-server: {parse_error}"
+        )
+    if malformed:
+        return None, "malformed JSON-RPC message from exec-server"
+    return message, None
 
 
 class Transport(Protocol):
@@ -91,12 +233,18 @@ class Transport(Protocol):
 
 
 class _JsonRpcTransport:
-    """JSON-RPC 收发公共机械：pending 表、消息分发、断线传播。
+    """JSON-RPC 收发公共机械：pending 表、消息分发、反向请求准入、断线传播。
 
-    子类实现 `_send_message`（写线）并启动各自的接收循环；接收循环逐条
-    调 `_resolve_response` / `_run_notification_handlers`，意外结束时调
-    `_mark_disconnected`。
+    子类实现 `_send_message`（写线）并启动各自的接收循环；接收循环逐条过
+    `_gate_inbound_message` 闸门后分发——反向请求走 `_dispatch_server_request`
+    （准入 + 并发执行）、通知走 `_run_notification_handlers`、响应走
+    `_resolve_response`；意外结束时调 `_mark_disconnected`。
     """
+
+    #: 服务端反向请求的在飞槽位上限（对位 Rust client.rs 的
+    #: rpc_inbound_request_slots = Semaphore::new(MAX_IN_FLIGHT_SERVER_CALLS)）：
+    #: 满员即时 fail-closed 拒决，裁决排队不得堵死接收循环
+    MAX_INBOUND_SERVER_CALLS = 256
 
     def __init__(self, request_timeout: float):
         self.request_timeout = request_timeout
@@ -105,6 +253,14 @@ class _JsonRpcTransport:
         self._notification_handlers: list[NotificationHandler] = []
         self._disconnect_handlers: list[DisconnectHandler] = []
         self._request_handlers: dict[str, RequestHandler] = {}
+        #: 在飞反向请求的 id 集（准入去重；任务收尾即释放——对位 Rust
+        #: RpcInboundRequestGuard 的 drop）
+        self._inbound_request_ids: set[int] = set()
+        #: 在飞反向请求任务（断线/关闭时统一取消——对位 Rust 的
+        #: connection_cancelled drop guard：连接退役后裁决不再回包）。
+        #: Rust 的槽位信号量跨重连共享（旧连接的在飞请求与新连接并存收尾）；
+        #: py 侧断线即取消在飞裁决，重叠窗口不存在，槽位故随连接实例
+        self._inbound_tasks: set[asyncio.Task] = set()
         self._closed = True  # 未连接即关闭态
 
     # ------------------------------------------------------------------
@@ -217,46 +373,140 @@ class _JsonRpcTransport:
         """注销服务端请求处理器（幂等）"""
         self._request_handlers.pop(method, None)
 
-    async def _handle_server_request(self, message: dict) -> None:
-        """分发服务端反向请求并回写响应。
+    def _dispatch_server_request(self, message: dict) -> None:
+        """反向请求的准入与并发分发（对位 Rust client_recovery.rs
+        spawn_rpc_reader + rpc.rs admit_inbound_request）。
 
-        判别键是 method 存在与否——服务端请求的 id 空间与本端 pending 独立，
-        不会与响应混淆。纪律：裁决类请求绝不让服务端干等超时——无处理器回
-        METHOD_NOT_FOUND、处理器异常回内部错误（服务端均 fail-closed 拒决）。
+        接收循环内同步调用、绝不 inline 等用户回调——回调期间后续消息照常
+        流动（对位 Rust 的 tokio::spawn 并发执行）。准入纪律：
+
+        - 无处理器：回 METHOD_NOT_FOUND（服务端 fail-closed 拒决），不占槽
+          （对位 Rust 分发分支的早退——方法路由先于准入校验）
+        - id 须为非负整数（对位 Rust RequestId::Integer >= 0）；字符串/负数/
+          布尔 id 即断连+恢复（对位 InvalidRequestId → close_transport +
+          request_recovery）
+        - id 在飞去重：重复即断连+恢复（对位 DuplicateRequestId）
+        - 在飞满槽：即时回 fail-closed 拒决（对位 AtCapacity），不排队
+        """
+        method = message.get("method") or ""
+        message_id = message["id"]
+        handler = self._request_handlers.get(method)
+        if handler is None:
+            self._spawn_inbound_task(
+                self._reply_to_server_request(
+                    message_id,
+                    error={
+                        "code": JSON_RPC_METHOD_NOT_FOUND,
+                        "message": f"no handler for {method}",
+                    },
+                )
+            )
+            return
+        if (
+            isinstance(message_id, bool)
+            or not isinstance(message_id, int)
+            or message_id < 0
+        ):
+            self._mark_disconnected("exec-server sent an invalid request ID")
+            return
+        if message_id in self._inbound_request_ids:
+            self._mark_disconnected("exec-server reused an in-flight request ID")
+            return
+        if len(self._inbound_request_ids) >= self.MAX_INBOUND_SERVER_CALLS:
+            self._spawn_inbound_task(self._reply_at_capacity(message_id, method))
+            return
+        self._inbound_request_ids.add(message_id)
+        self._spawn_inbound_task(self._run_server_request(message, handler))
+
+    def _spawn_inbound_task(self, coro: Coroutine[Any, Any, None]) -> None:
+        """反向请求相关协程统一 spawn 并跟踪（断线/关闭时取消）"""
+        task = asyncio.create_task(coro)
+        self._inbound_tasks.add(task)
+        task.add_done_callback(self._inbound_tasks.discard)
+
+    async def _run_server_request(self, message: dict, handler: RequestHandler) -> None:
+        """裁决执行任务（对位 Rust tokio::spawn 的决策 future）。
+
+        裁决类请求绝不让服务端干等超时：处理器异常回内部错误（服务端
+        fail-closed 拒决）。完成/异常/取消一律释放在飞 id（对位
+        RpcInboundRequestGuard drop）；取消（断线收尾）不回包（对位
+        connection_cancelled 分支提前返回）。
         """
         message_id = message["id"]
         method = message.get("method") or ""
-        handler = self._request_handlers.get(method)
-        if handler is None:
-            reply: dict = {
-                "id": message_id,
-                "error": {
-                    "code": JSON_RPC_METHOD_NOT_FOUND,
-                    "message": f"no handler for {method}",
-                },
-            }
-        else:
+        try:
             try:
                 result = await handler(message.get("params") or {})
-                reply = {
-                    "id": message_id,
-                    "result": result if result is not None else {},
-                }
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.warning(
                     "server request handler %s failed: %s", method, e, exc_info=True
                 )
-                reply = {
-                    "id": message_id,
-                    "error": {
+                await self._reply_to_server_request(
+                    message_id,
+                    error={
                         "code": JSON_RPC_INTERNAL_ERROR,
                         "message": f"handler failed: {e}",
                     },
-                }
+                )
+            else:
+                await self._reply_to_server_request(message_id, result=result)
+        finally:
+            self._inbound_request_ids.discard(message_id)
+
+    async def _reply_at_capacity(self, message_id: int, method: str) -> None:
+        """在飞满槽的即时拒决（对位 Rust AtCapacity 分支）：裁决请求回
+        `{deny, not_allowed}`（服务端 fail-closed 拒决）；其他方法回内部
+        错误——任何路径都不让服务端干等"""
+        if method == NETWORK_POLICY_REQUEST:
+            result = NetworkPolicyRequestResponse(
+                decision=NetworkPolicyDecision.deny(NETWORK_POLICY_DENIAL_REASON)
+            ).model_dump(by_alias=True, exclude_none=True)
+            await self._reply_to_server_request(message_id, result=result)
+        else:
+            await self._reply_to_server_request(
+                message_id,
+                error={
+                    "code": JSON_RPC_INTERNAL_ERROR,
+                    "message": (
+                        "too many in-flight server requests "
+                        f"(limit {self.MAX_INBOUND_SERVER_CALLS})"
+                    ),
+                },
+            )
+
+    async def _reply_to_server_request(
+        self,
+        message_id: Any,
+        *,
+        result: Any = None,
+        error: dict | None = None,
+    ) -> None:
+        """回写反向请求响应（写线失败仅留痕——连接收尾由各传输的断线路径负责）"""
+        reply: dict = {"id": message_id}
+        if error is not None:
+            reply["error"] = error
+        else:
+            reply["result"] = result if result is not None else {}
         try:
             await self._send_message(reply)
         except Exception as e:
-            logger.warning("failed to reply server request %s: %s", method, e)
+            logger.warning("failed to reply server request id=%s: %s", message_id, e)
+
+    def _cancel_inbound_tasks(self) -> None:
+        """取消在飞反向请求任务（断线/关闭收尾；幂等）"""
+        current = asyncio.current_task()
+        for task in self._inbound_tasks:
+            if task is not current:
+                task.cancel()
+
+    async def _drain_inbound_tasks(self) -> None:
+        """等已取消的反向请求任务收尾（disconnect 用——事件循环关闭前不留悬挂）"""
+        current = asyncio.current_task()
+        tasks = [task for task in self._inbound_tasks if task is not current]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     # ------------------------------------------------------------------
     # 断线
@@ -267,17 +517,26 @@ class _JsonRpcTransport:
         self._disconnect_handlers.append(handler)
 
     def _mark_disconnected(self, reason: str | None) -> None:
-        """意外断线的统一收尾：pending 以 ConnectionError 收尾并触发
-        on_disconnect 回调（主动 disconnect 不走这里；多路径并发只生效一次）"""
+        """意外断线的统一收尾：pending 以 ConnectionError 收尾、取消在飞反向
+        请求、关闭底层承载（`_abort_connection`——对位 Rust 连接退役即
+        transport.terminate()）、触发 on_disconnect 回调
+        （主动 disconnect 不走这里；多路径并发只生效一次）"""
         if self._closed:
             return
         self._closed = True
         self._fail_pending()
+        self._cancel_inbound_tasks()
+        self._abort_connection()
         for handler in self._disconnect_handlers:
             try:
                 handler(reason)
             except Exception:
                 logger.warning("disconnect handler raised", exc_info=True)
+
+    def _abort_connection(self) -> None:
+        """意外断线时关闭底层承载（对位 Rust close_transport 的 task abort /
+        stdio 的 transport.terminate()）。基类无承载可关；子类覆盖：
+        WebSocket 关 socket、stdio 收割进程树——否则恢复路径的旧连接泄漏"""
 
     def _fail_pending(self) -> None:
         """连接断开收尾：取消所有 pending 请求（幂等）"""
@@ -300,9 +559,12 @@ class WebSocketTransport(_JsonRpcTransport):
         super().__init__(request_timeout)
         self.url = url
         self.token = token
+        #: 传输层单消息上限（websockets max_size；类别限流见
+        #: `_gate_inbound_message`——两道口子语义不同，这里只兜底帧尺寸）
         self.max_payload = max_payload
         self._ws: websockets.asyncio.client.ClientConnection | None = None
         self._receive_task: asyncio.Task | None = None
+        self._abort_task: asyncio.Task | None = None
 
     async def connect(self) -> None:
         """建立 WebSocket 连接"""
@@ -331,6 +593,7 @@ class WebSocketTransport(_JsonRpcTransport):
     async def disconnect(self) -> None:
         """断开连接（主动关闭——不触发 on_disconnect）"""
         self._closed = True
+        self._cancel_inbound_tasks()
         if self._receive_task:
             self._receive_task.cancel()
             try:
@@ -341,6 +604,13 @@ class WebSocketTransport(_JsonRpcTransport):
         if self._ws:
             await self._ws.close()
             self._ws = None
+        if self._abort_task is not None:
+            try:
+                await self._abort_task
+            except Exception:
+                pass
+            self._abort_task = None
+        await self._drain_inbound_tasks()
         self._fail_pending()
 
     async def _send_message(self, message: dict) -> None:
@@ -349,23 +619,27 @@ class WebSocketTransport(_JsonRpcTransport):
         await self._ws.send(json.dumps(message))
 
     async def _receive_loop(self) -> None:
-        """接收消息循环；循环意外结束（对端关闭/读失败）即断线"""
+        """接收消息循环；循环意外结束（对端关闭/读失败/限流/畸形）即断线"""
         reason: str | None = None
         try:
             assert self._ws is not None
             async for raw in self._ws:
                 if self._closed:
                     return  # 主动 disconnect：收尾归 disconnect()，不触发回调
-                try:
-                    message = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
+                payload = raw if isinstance(raw, (bytes, bytearray)) else raw.encode()
+                message, fatal = _gate_inbound_message(payload)
+                if fatal is not None:
+                    reason = fatal
+                    break
                 if "method" in message:
                     if message.get("id") is not None:
-                        await self._handle_server_request(message)
+                        # 服务端反向请求：准入 + 并发执行，接收循环不堵
+                        self._dispatch_server_request(message)
+                        if self._closed:
+                            return  # 准入违规已标记断线（回调已触发）
                     else:
                         await self._run_notification_handlers(message)
-                elif message.get("id") is not None:
+                else:
                     self._resolve_response(message)
         except websockets.exceptions.ConnectionClosed as e:
             reason = str(e)
@@ -375,6 +649,21 @@ class WebSocketTransport(_JsonRpcTransport):
         finally:
             if not self._closed:
                 self._mark_disconnected(reason)
+
+    def _abort_connection(self) -> None:
+        """后台关闭 socket，接收循环随即退出（对位 Rust close_transport 的
+        transport task abort）"""
+        ws = self._ws
+        if ws is None or self._abort_task is not None:
+            return
+
+        async def close() -> None:
+            try:
+                await ws.close()
+            except Exception:
+                logger.debug("closing disconnected websocket failed", exc_info=True)
+
+        self._abort_task = asyncio.create_task(close())
 
     @property
     def is_connected(self) -> bool:
@@ -392,7 +681,8 @@ class StdioTransport(_JsonRpcTransport):
 
     注意：stderr 由独立任务持续消费（打日志或回调），防止子进程 stderr
     缓冲填满死锁；进程退出传播为连接断开（pending 请求以 ConnectionError 收尾，
-    并触发 on_disconnect——恢复层据此重 spawn）。
+    并触发 on_disconnect——恢复层据此重 spawn）。子进程 spawn 时入独立进程组
+    （POSIX），关闭/意外断线逐级组杀整个进程树。
     """
 
     #: 默认命令：本地 nova-exec-server 的 stdio 监听模式
@@ -402,6 +692,8 @@ class StdioTransport(_JsonRpcTransport):
     MAX_MESSAGE_SIZE = 64 * 1024 * 1024
     #: 关闭 stdin 后等待进程自行退出的宽限期（对齐服务端 2s 终止宽限）
     _SHUTDOWN_GRACE = 2.0
+    #: stderr 泵的分块读取尺寸（对位 Rust MAX_STDIO_STDERR_LOG_LINE_LEN）
+    _STDERR_READ_CHUNK = 8 * 1024
 
     def __init__(
         self,
@@ -424,11 +716,18 @@ class StdioTransport(_JsonRpcTransport):
         self._receive_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
         self._wait_task: asyncio.Task | None = None
+        #: 意外断线后的后台进程树收割任务（disconnect 时一并收尾）
+        self._reap_task: asyncio.Task | None = None
 
     async def connect(self) -> None:
         """spawn 子进程并启动收发循环"""
         # 对齐 Rust stdio_command_process：env 叠加在继承环境之上，而非整体替换
         env = {**os.environ, **self.env} if self.env else None
+        spawn_kwargs: dict[str, Any] = {}
+        if os.name == "posix":
+            # 独立进程组（pgid == 子进程 pid；对位 Rust client_transport.rs 的
+            # process_group(0)）——关闭/断线时 os.killpg 组杀依赖此前提
+            spawn_kwargs["process_group"] = 0
         try:
             self._process = await asyncio.create_subprocess_exec(
                 self.program,
@@ -440,6 +739,7 @@ class StdioTransport(_JsonRpcTransport):
                 env=env,
                 # StreamReader 行缓冲上限：服务端单条消息可达 64MB
                 limit=self.max_message_size,
+                **spawn_kwargs,
             )
         except OSError as e:
             self._process = None
@@ -453,22 +753,26 @@ class StdioTransport(_JsonRpcTransport):
         self._wait_task = asyncio.create_task(self._wait_loop())
 
     async def disconnect(self) -> None:
-        """断开连接：关 stdin 让服务端自行退出，宽限后 terminate/kill 兜底
-        （主动关闭——不触发 on_disconnect）"""
+        """断开连接：关 stdin 让服务端自行退出，宽限后 terminate/kill 进程组
+        兜底（主动关闭——不触发 on_disconnect）"""
         self._closed = True
+        self._cancel_inbound_tasks()
         for task in (self._receive_task, self._stderr_task, self._wait_task):
             if task:
                 task.cancel()
 
         process = self._process
         if process is not None:
-            # 先关 stdin：服务端读 EOF 即结束连接并自行退出（优雅路径）
-            if process.stdin is not None and not process.stdin.is_closing():
+            if self._reap_task is not None:
+                # 意外断线已起后台收割（同一升级序列、同一进程），等它收尾即可
                 try:
-                    process.stdin.close()
+                    await self._reap_task
                 except Exception:
                     pass
-            await self._reap_process(process)
+                self._reap_task = None
+            else:
+                self._close_stdin(process)
+                await self._reap_process_tree(process)
             self._process = None
 
         for task in (self._receive_task, self._stderr_task, self._wait_task):
@@ -480,29 +784,102 @@ class StdioTransport(_JsonRpcTransport):
         self._receive_task = None
         self._stderr_task = None
         self._wait_task = None
+        await self._drain_inbound_tasks()
         self._fail_pending()
 
-    async def _reap_process(self, process: asyncio.subprocess.Process) -> None:
-        """等待进程退出，逐级升级：EOF 宽限 → terminate → kill"""
+    @staticmethod
+    def _close_stdin(process: asyncio.subprocess.Process) -> None:
+        """关 stdin：服务端读 EOF 即结束连接并自行退出（优雅路径；已关/已坏幂等）"""
+        stdin = process.stdin
+        if stdin is not None and not stdin.is_closing():
+            try:
+                stdin.close()
+            except Exception:
+                pass
+
+    async def _reap_process_tree(self, process: asyncio.subprocess.Process) -> None:
+        """等待进程树退出，逐级升级：EOF 宽限 → terminate 进程组 → kill 进程组
+        （对位 Rust terminate_stdio_child + 监督器的 wait → kill_process_tree）。
+
+        直接子已自行退出时仍对组补一发 kill——收割可能存活的孙进程（对位
+        Rust 监督器在 child wait 完成后无条件 kill_process_tree）。
+        """
         try:
             await asyncio.wait_for(process.wait(), timeout=self._SHUTDOWN_GRACE)
-            return
         except asyncio.TimeoutError:
             pass
+        else:
+            self._kill_process_tree(process)
+            return
+        self._terminate_process_tree(process)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=self._SHUTDOWN_GRACE)
+        except asyncio.TimeoutError:
+            pass
+        self._kill_process_tree(process)
+        await process.wait()
+
+    @staticmethod
+    def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
+        """SIGTERM 到整个进程组（对位 Rust terminate_process_tree 的 unix
+        分支）；非 POSIX 或组杀失败回退直接子（对位 kill_direct_child 兜底）"""
+        if os.name == "posix":
+            try:
+                # pgid == 直接子 pid（spawn 时 process_group=0）
+                os.killpg(process.pid, signal.SIGTERM)
+                return
+            except ProcessLookupError:
+                return  # 组已整体退出
+            except OSError as e:
+                logger.warning(
+                    "failed to terminate exec-server stdio process group %s: %s",
+                    process.pid,
+                    e,
+                )
         try:
             process.terminate()
         except ProcessLookupError:
-            return
-        try:
-            await asyncio.wait_for(process.wait(), timeout=self._SHUTDOWN_GRACE)
-            return
-        except asyncio.TimeoutError:
             pass
+
+    @staticmethod
+    def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        """SIGKILL 到整个进程组兜底（对位 Rust kill_process_tree 的 unix 分支）"""
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+                return
+            except ProcessLookupError:
+                return
+            except OSError as e:
+                logger.warning(
+                    "failed to kill exec-server stdio process group %s: %s",
+                    process.pid,
+                    e,
+                )
         try:
             process.kill()
         except ProcessLookupError:
+            pass
+
+    def _abort_connection(self) -> None:
+        """收割旧子进程树（对位 Rust 连接退役即 transport.terminate()）——
+        恢复层只造新候选不重连旧传输：stdout EOF 但进程存活、stdin 写失败等
+        路径下，旧进程及其沙箱 helper 孙进程必须由本层组杀，不得残留"""
+        process = self._process
+        if process is None or self._reap_task is not None:
             return
-        await process.wait()
+        self._reap_task = asyncio.create_task(self._reap_abandoned(process))
+
+    async def _reap_abandoned(self, process: asyncio.subprocess.Process) -> None:
+        """后台收割被遗弃的子进程（与 disconnect 同一升级序列；失败仅留痕——
+        断线收尾不依赖收割结果）"""
+        try:
+            self._close_stdin(process)
+            await self._reap_process_tree(process)
+        except Exception:
+            logger.warning(
+                "reaping abandoned exec-server process failed", exc_info=True
+            )
 
     async def _send_message(self, message: dict) -> None:
         """写一条 NDJSON 消息到子进程 stdin（drain 提供背压）"""
@@ -539,21 +916,31 @@ class StdioTransport(_JsonRpcTransport):
                 if not line:
                     reason = "process closed stdout"
                     break  # EOF：进程退出或管道关闭
-                line = line.strip()
-                if not line:
+                if line.endswith(b"\n"):
+                    line = line[:-1]
+                    if line.endswith(b"\r"):
+                        line = line[:-1]
+                if len(line) > self.max_message_size:
+                    reason = (
+                        "JSON-RPC message from exec-server exceeds maximum "
+                        f"length of {self.max_message_size} bytes"
+                    )
+                    break
+                if not line.strip():
                     continue
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+                message, fatal = _gate_inbound_message(line)
+                if fatal is not None:
+                    reason = fatal
+                    break
 
                 if "method" in message:
                     if message.get("id") is not None:
-                        # 服务端反向请求（裁决等）：分发处理器并回写响应
-                        await self._handle_server_request(message)
+                        # 服务端反向请求（裁决等）：准入 + 并发执行，接收循环不堵
+                        self._dispatch_server_request(message)
+                        # 准入违规已标记断线时 while 条件即收尾退出
                     else:
                         await self._run_notification_handlers(message)
-                elif message.get("id") is not None:
+                else:
                     # 响应同步归 future（接收循环不被处理器阻塞）
                     self._resolve_response(message)
         except (ValueError, OSError) as e:
@@ -565,24 +952,46 @@ class StdioTransport(_JsonRpcTransport):
                 self._mark_disconnected(reason)
 
     async def _stderr_loop(self) -> None:
-        """持续消费子进程 stderr，防止缓冲填满死锁"""
+        """持续消费子进程 stderr，防止缓冲填满死锁（对位 Rust
+        client_transport.rs 的 take(8KiB) + read_until 分块读——行长无上限：
+        超长行攒满一块即先行分发，泵永不因行长停转）"""
         process = self._process
         assert process is not None and process.stderr is not None
+        pending = b""
         try:
             while True:
-                line = await process.stderr.readline()
-                if not line:
-                    break
-                text = line.decode(errors="replace").rstrip()
-                if self.stderr_handler is not None:
-                    try:
-                        self.stderr_handler(text)
-                    except Exception:
-                        logger.warning("stdio stderr handler raised", exc_info=True)
-                else:
-                    logger.debug("nova-exec-server stdio stderr: %s", text)
-        except (ValueError, OSError):
-            pass
+                chunk = await process.stderr.read(self._STDERR_READ_CHUNK)
+                if not chunk:
+                    break  # EOF：进程退出或管道关闭
+                pending += chunk
+                # 完整行逐条分发
+                while True:
+                    line, sep, rest = pending.partition(b"\n")
+                    if not sep:
+                        break
+                    self._emit_stderr_line(line)
+                    pending = rest
+                # 超长行：攒满一块即先行分发（对位 take 限长语义）
+                while len(pending) >= self._STDERR_READ_CHUNK:
+                    self._emit_stderr_line(pending[: self._STDERR_READ_CHUNK])
+                    pending = pending[self._STDERR_READ_CHUNK :]
+            if pending:
+                self._emit_stderr_line(pending)
+        except OSError as e:
+            logger.warning("failed to read exec-server stdio stderr: %s", e)
+
+    def _emit_stderr_line(self, raw: bytes) -> None:
+        """stderr 一行/一块的统一出口：lossy 解码后回调或打日志"""
+        text = raw.decode(errors="replace")
+        if text.endswith("\r"):
+            text = text[:-1]
+        if self.stderr_handler is not None:
+            try:
+                self.stderr_handler(text)
+            except Exception:
+                logger.warning("stdio stderr handler raised", exc_info=True)
+        else:
+            logger.debug("nova-exec-server stdio stderr: %s", text)
 
     async def _wait_loop(self) -> None:
         """进程退出传播为连接断开（receive 循环的 EOF 是主路径，这里兜底）"""

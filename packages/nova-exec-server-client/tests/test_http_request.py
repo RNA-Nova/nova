@@ -62,7 +62,7 @@ async def test_client_http_request_via_fake_server():
 async def test_router_collects_body_deltas_until_done():
     """http body delta 通知经路由器收集、done 终止拼装"""
     router = NotificationRouter()
-    queue = router.register_method("http/request/bodyDelta")
+    queue = router.register_http_body_stream("r")
     for payload in [
         {
             "requestId": "r",
@@ -92,7 +92,7 @@ async def test_router_collects_body_deltas_until_done():
 async def test_router_surfaces_error_delta():
     """error 终止帧照常进队列（SDK 层转 ProtocolError）"""
     router = NotificationRouter()
-    queue = router.register_method("http/request/bodyDelta")
+    queue = router.register_http_body_stream("r")
     await router.dispatch(
         {
             "method": "http/request/bodyDelta",

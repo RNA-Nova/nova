@@ -113,9 +113,7 @@ def test_environment_capabilities_full_wire_shape():
     assert defaults.windows_mxc is False
     assert defaults.linux_root_write_preserves_devices is False
     assert defaults.linux_approved_root_write_preserves_restrictions is False
-    assert defaults.model_dump(by_alias=True) == {
-        alias: False for alias in wire_full
-    }
+    assert defaults.model_dump(by_alias=True) == {alias: False for alias in wire_full}
 
     # v1.6 撤除的端点位不得再出现在线上形态
     assert "readStream" not in wire
@@ -467,13 +465,219 @@ def test_permission_profile_wire_shape_matches_codex_golden():
         "file_system": {
             "type": "restricted",
             "entries": [
-                {"path": {"type": "path", "path": "file:///C:/a%20b"}, "access": "read"},
-                {"path": {"type": "path", "path": "file://host/s/a%20b"}, "access": "read"},
+                {
+                    "path": {"type": "path", "path": "file:///C:/a%20b"},
+                    "access": "read",
+                },
+                {
+                    "path": {"type": "path", "path": "file://host/s/a%20b"},
+                    "access": "read",
+                },
             ],
         },
         "network": "restricted",
     }
     # 同一字面量 roundtrip 不丢字段
-    assert ExecPermissionProfile.model_validate(
-        profile.model_dump(by_alias=True, exclude_none=True)
-    ) == profile
+    assert (
+        ExecPermissionProfile.model_validate(
+            profile.model_dump(by_alias=True, exclude_none=True)
+        )
+        == profile
+    )
+
+
+def test_process_start_params_golden_wire_shape():
+    """`process/start` 线上形状金标（对位 Rust protocol.rs
+    `wire_exec_params_round_trips_golden_wire_shape`）：完整字面量（含
+    envPolicy 五键 / shellSnapshot / managedNetwork 四键 / networkProxy 全形状 /
+    sandbox→policyContext 承载策略目录）→ 反序列化 → 再序列化全等。
+
+    与 Rust 金标字面量的唯一差异（语义等价，逐键注出）：RS serde 对无 skip
+    标记的 Option 字段直出显式 null（networkProxy.proxy.domains/unixSockets、
+    auditMetadata.turnId）；py 出货路径（process.py 的 process/start dump）用
+    exclude_none 省略 None 键——服务端 serde default 把省略读回 None，双形态
+    互认。sandbox.sandboxOverride 两侧同样省略（RS skip_serializing_if =
+    "SandboxOverride::is_no_override"）。
+    """
+    expected = {
+        "processId": "proc-golden",
+        "metadata": {"threadId": "thread-1", "toolCallId": "call-1"},
+        "argv": ["zsh", "-lc", "echo hi"],
+        "cwd": "file:///workspace/app",
+        "envPolicy": {
+            "inherit": "core",
+            "ignoreDefaultExcludes": True,
+            "exclude": ["SECRET_*"],
+            "set": {"FOO": "bar"},
+            "includeOnly": ["PATH"],
+        },
+        "shellSnapshot": {
+            "scopeId": "scope-1",
+            "shell": {"name": "zsh", "path": "/bin/zsh"},
+        },
+        "env": {"A": "1"},
+        "tty": True,
+        "pipeStdin": True,
+        "arg0": "custom-arg0",
+        "sandbox": {
+            "permissions": {
+                "type": "managed",
+                "file_system": {
+                    "type": "restricted",
+                    "entries": [
+                        {
+                            "path": {"type": "path", "path": "file:///workspace/app"},
+                            "access": "write",
+                        },
+                        {
+                            "path": {"type": "glob_pattern", "pattern": "src/**"},
+                            "access": "read",
+                        },
+                        {
+                            "path": {
+                                "type": "special",
+                                "value": {"kind": "project_roots", "subpath": ".nova"},
+                            },
+                            "access": "read",
+                            "missing_path_behavior": "skip",
+                        },
+                    ],
+                    "glob_scan_max_depth": 2,
+                },
+                "network": "restricted",
+            },
+            # policyContext 是策略目录的唯一承载，线上形状为 file:// URI
+            # （原生路径会被服务端 PathUri 反序列化拒绝）
+            "policyContext": {
+                "cwd": "file:///workspace/app",
+                "workspaceRoots": ["file:///workspace/app", "file:///workspace/lib"],
+            },
+            "userHomeDir": "file:///home/user",
+            "temporaryDirectories": ["file:///tmp"],
+            "windowsSandboxLevel": "disabled",
+            "windowsSandboxProxySettingsMode": "preserve",
+            "useLegacyLandlock": False,
+        },
+        "enforceManagedNetwork": True,
+        "managedNetwork": {
+            "loopbackPorts": [43123, 48081],
+            "allowLocalBinding": False,
+            "allowUnixSockets": ["/tmp/allowed.sock"],
+            "dangerouslyAllowAllUnixSockets": True,
+        },
+        "networkProxy": {
+            "proxy": {
+                "enabled": False,
+                "enableSocks5": False,
+                "enableSocks5Udp": False,
+                "allowUpstreamProxy": False,
+                "dangerouslyAllowAllUnixSockets": False,
+                "mode": "none",
+                # RS 金标此处还有 "domains": null / "unixSockets": null
+                # （Option 直出）；py exclude_none 省略，语义等价
+                "allowLocalBinding": False,
+            },
+            # RS 金标此处还有 "turnId": null，同上省略
+            "auditMetadata": {"conversationId": "conversation-1"},
+            "environmentId": "remote",
+            "executionId": "execution-1",
+        },
+    }
+    params = ProcessStartParams.model_validate(expected)
+    assert params.model_dump(by_alias=True, exclude_none=True) == expected
+
+    # RS 直出形态（显式 null 键）py 兼容读入，dump 归一到同一省略形态
+    rust_form = {
+        **expected,
+        "networkProxy": {
+            "proxy": {
+                **expected["networkProxy"]["proxy"],
+                "domains": None,
+                "unixSockets": None,
+            },
+            "auditMetadata": {"conversationId": "conversation-1", "turnId": None},
+            "environmentId": "remote",
+            "executionId": "execution-1",
+        },
+    }
+    assert (
+        ProcessStartParams.model_validate(rust_form).model_dump(
+            by_alias=True, exclude_none=True
+        )
+        == expected
+    )
+
+
+def test_http_request_timeout_omitted_and_null_both_no_timeout():
+    """timeoutMs 省略与显式 null 同为无超时（对位 Rust protocol.rs
+    `http_request_timeout_treats_omitted_and_null_as_no_timeout`）"""
+    from nova_protocol import HttpRequestParams
+
+    omitted = HttpRequestParams.model_validate(
+        {"method": "GET", "url": "https://example.test", "requestId": "req-omitted"}
+    )
+    null_timeout = HttpRequestParams.model_validate(
+        {
+            "method": "GET",
+            "url": "https://example.test",
+            "requestId": "req-null",
+            "timeoutMs": None,
+        }
+    )
+    explicit = HttpRequestParams.model_validate(
+        {
+            "method": "GET",
+            "url": "https://example.test",
+            "requestId": "req-explicit",
+            "timeoutMs": 1234,
+        }
+    )
+    assert omitted.timeout_ms is None
+    assert null_timeout.timeout_ms is None
+    assert explicit.timeout_ms == 1234
+
+
+def test_process_exited_notification_accepts_legacy_payload_without_sandbox_denied():
+    """process/exited 通知兼容 legacy 载荷（无 sandboxDenied 键 → None 三态的
+    "未报告"档；对位 Rust protocol.rs
+    `exited_notification_accepts_legacy_payload_without_sandbox_denied`）"""
+    from nova_protocol import ProcessExitedNotification
+
+    legacy = ProcessExitedNotification.model_validate(
+        {"processId": "proc-1", "seq": 3, "exitCode": 1}
+    )
+    assert legacy.sandbox_denied is None
+    # 显式 null 同样容忍（RS 端为 Option<bool>——对端发 null 不炸）
+    explicit_null = ProcessExitedNotification.model_validate(
+        {"processId": "proc-1", "seq": 3, "exitCode": 1, "sandboxDenied": None}
+    )
+    assert explicit_null.sandbox_denied is None
+
+
+def test_native_absolute_paths_not_intercepted_client_side():
+    """原生绝对路径的拒绝边界在服务端，不在客户端词汇层（对位 Rust
+    protocol.rs `filesystem_protocol_rejects_native_absolute_paths` 的边界说明）。
+
+    py 的 PathUri 对位物是纯 str 字段（无新类型）——FsReadFileParams.path 与
+    policyContext.cwd 都照收原生绝对路径，由服务端 PathUri 反序列化拒绝。
+    本用例钉住"客户端不拦"一侧，防止误加客户端校验把职责搞反；生产路径
+    永不产原生路径（FileSystemSandboxContext 套餐与 SDK helper 统一经
+    `_file_url` 归一为 file:// URI）。
+    """
+    from nova_protocol import FileSystemSandboxContext, FsReadFileParams
+
+    params = FsReadFileParams.model_validate(
+        {"path": "/usr/local/native-file.txt", "sandbox": None}
+    )
+    assert params.path == "/usr/local/native-file.txt"
+
+    ctx = FileSystemSandboxContext.model_validate(
+        {
+            "policyContext": {
+                "cwd": "/usr/local/native",
+                "workspaceRoots": ["/usr/local/native"],
+            }
+        }
+    )
+    assert ctx.policy_context is not None
+    assert ctx.policy_context.cwd == "/usr/local/native"

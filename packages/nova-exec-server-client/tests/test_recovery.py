@@ -6,15 +6,17 @@ import asyncio
 
 import pytest
 from fake_transport import FakeTransport
+from nova_protocol import InitializeResponse
+
 from nova_exec_server_client import (
     ConnectionError,
     ExecutorClient,
     ProtocolError,
     ReconnectStrategy,
 )
-from nova_exec_server_client.errors import SESSION_ALREADY_ATTACHED
+from nova_exec_server_client.errors import SESSION_ALREADY_ATTACHED, AuthError
+from nova_exec_server_client.notifications import NotificationRouter
 from nova_exec_server_client.recovery import ManagedTransport
-from nova_protocol import InitializeResponse
 
 FAST = ReconnectStrategy(interval=0.01, timeout=2.0)
 
@@ -475,4 +477,316 @@ async def test_request_recovery_without_strategy_fails():
     assert not sink[0].connected
     with pytest.raises(ConnectionError, match="probe timed out"):
         await managed.send_request("echo")
+    await managed.disconnect()
+
+
+# =============================================================================
+# 恢复/清扫族语义（对位 Rust client_recovery.rs / client_refresh.rs /
+# client.rs finish_fs_read_stream）：恢复开始·失败·刷新退役三态清扫在途
+# 推送工作、探针身份守卫、disconnect 会话终结、恢复错误分类
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_recovery_start_fails_in_flight_streams():
+    """恢复开始即清扫该通道挂起推送工作（对位 Rust recover 起手
+    fail_all_http_body_streams）：fs 读流消费者立即收终态失败而非干等——
+    恢复成功后旧流也不会续（服务端断连即 close_all fs 句柄表，resume 只对
+    process 重挂通知通道）"""
+    sink: list[FakeTransport] = []
+    router = NotificationRouter()
+    managed = make_managed(
+        sink, on_failed=lambda msg: router.fail_channel("control", msg)
+    )
+    await managed.connect()
+    queue = router.register_stream("h-1", channel="control")
+
+    sink[0].drop("test drop")
+    # 恢复开始即收终态失败（不等恢复结果）
+    event = await asyncio.wait_for(queue.get(), 1)
+    assert event.kind == "failed" and "disconnected" in event.error
+    assert "h-1" not in router._streams
+
+    # 恢复本身照常完成（resume 成功也不续流）
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 2:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+    assert sink[1].requests[0][1]["resumeSessionId"] == "fake-session"
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_recovery_failure_fails_in_flight_streams():
+    """恢复失败（failed 终态）同样清扫挂起消费者（对位 Rust fail() →
+    fail_all_in_flight_work）——与恢复开始的清扫同路径、幂等"""
+    sink: list[FakeTransport] = []
+    router = NotificationRouter()
+    managed = make_managed(
+        sink,
+        strategy=None,
+        on_failed=lambda msg: router.fail_channel("control", msg),
+    )
+    await managed.connect()
+    queue = router.register_stream("h-1", channel="control")
+
+    sink[0].drop("test drop")
+    event = await asyncio.wait_for(queue.get(), 1)
+    assert event.kind == "failed" and "disconnected" in event.error
+    for _ in range(100):
+        if managed.state == "failed":
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "failed"
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_fail_channel_cleans_http_streams_and_method_queues():
+    """fail_channel 清扫扩展（对位 Rust fail_all_in_flight_work）：除 fs 读流外，
+    http 流式响应体收 done+error 合成终态、方法订阅队列收 error 终态事件——
+    挂起消费者全部唤醒，不干等"""
+    router = NotificationRouter()
+    fs_q = router.register_stream("h-1", channel="control")
+    http_q = router.register_http_body_stream("r-1")
+    method_q = router.register_method("network/policyDecision")
+
+    router.fail_channel("control", "exec-server transport disconnected")
+
+    event = await asyncio.wait_for(fs_q.get(), 1)
+    assert event.kind == "failed"
+    http_event = await asyncio.wait_for(http_q.get(), 1)
+    assert http_event["method"] == "http/request/bodyDelta"
+    assert http_event["params"]["done"] is True
+    assert "disconnected" in http_event["params"]["error"]
+    method_event = await asyncio.wait_for(method_q.get(), 1)
+    assert "disconnected" in method_event["error"]
+    # 注册表清空；再次清扫幂等无残留
+    assert router._http_streams == {} and router._method_queues == {}
+    router.fail_channel("control", "again")
+
+
+@pytest.mark.asyncio
+async def test_refresh_connection_fails_in_flight_work():
+    """刷新退役旧会话即清扫在途推送工作（对位 Rust retire() →
+    fail_all_in_flight_work）：挂起消费者收终态失败，新会话全新（不 resume）"""
+    sink: list[FakeTransport] = []
+    router = NotificationRouter()
+    managed = make_managed(
+        sink, on_failed=lambda msg: router.fail_channel("control", msg)
+    )
+    await managed.connect()
+    queue = router.register_stream("h-1", channel="control")
+
+    await managed.refresh_connection()
+
+    event = await asyncio.wait_for(queue.get(), 1)
+    assert event.kind == "failed" and "replaced" in event.error
+    assert managed.state == "connected"
+    # 全新连接：不携带 resumeSessionId
+    assert sink[1].requests[0][1].get("resumeSessionId") is None
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_clears_session_id_for_fresh_reconnect():
+    """disconnect 后会话终结：再次 connect 开全新会话，不把旧 session id 当
+    resumeSessionId 下发（对位 Rust 每次 connect 全新会话——stdio 旧进程已死
+    resume 必收 -32600 / WS 静默续旧会话的两种歧义都被根除）"""
+    sink: list[FakeTransport] = []
+    managed = make_managed(sink)
+    await managed.connect()
+    assert managed.session_id == "fake-session"
+    await managed.disconnect()
+    assert managed.session_id is None
+
+    await managed.connect()
+    inits = [p for m, p, _ in sink[0].requests if m == "initialize"]
+    assert len(inits) == 2
+    assert inits[0].get("resumeSessionId") is None  # 首连（无显式 resume）
+    assert inits[1].get("resumeSessionId") is None  # 重连全新会话
+    assert managed.state == "connected"
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_explicit_resume_session_id_survives_pre_connect_disconnect():
+    """显式 resume_session_id 是首连目标：从未连接时的 disconnect（幂等空操作）
+    不吞掉它；首连建立会话后 disconnect 再 connect 则开全新会话"""
+    sink: list[FakeTransport] = []
+
+    def factory() -> FakeTransport:
+        # 假服务端如实回到被 resume 的会话（对位服务端 resume 语义）
+        transport = FakeTransport(
+            {"initialize": {"sessionId": "s-9", "protocolVersion": "1.4"}}
+        )
+        sink.append(transport)
+        return transport
+
+    managed = ManagedTransport(
+        factory,
+        handshake=make_handshake_log(sink),
+        strategy=FAST,
+        resume_session_id="s-9",
+    )
+    await managed.disconnect()  # 状态本就 disconnected——保留首连 resume 目标
+    assert managed.session_id == "s-9"
+
+    await managed.connect()
+    assert sink[0].requests[0][1]["resumeSessionId"] == "s-9"
+    assert managed.session_id == "s-9"
+
+    await managed.disconnect()
+    assert managed.session_id is None  # 已建立会话随连接终结
+
+
+@pytest.mark.asyncio
+async def test_request_recovery_stale_transport_probe_ignored():
+    """传输身份守卫（对位 Rust request_recovery 的 Arc::ptr_eq 检查）：探针
+    超时往返期间断线回调已完成恢复时，迟到的陈旧探针忽略——不得误杀恢复
+    出的健康新连接；带当前传输身份的探针照常受理"""
+    sink: list[FakeTransport] = []
+    managed = make_managed(sink)
+    await managed.connect()
+    probed = managed.current_transport
+
+    # 探针超时往返期间：断线回调路径已完成恢复（换新传输）
+    sink[0].drop("test drop")
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 2:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+
+    # 陈旧探针迟到：带所探旧传输身份 → 忽略（不退役健康新连接）
+    await managed.request_recovery("stale probe", transport=probed)
+    assert managed.state == "connected"
+    assert len(sink) == 2  # 没有再起恢复
+    assert managed.current_transport is sink[1]
+    assert sink[1].connected
+
+    # 对照：带当前传输身份的探针受理
+    await managed.request_recovery("live probe", transport=managed.current_transport)
+    assert managed.state == "recovering"
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 3:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+    assert len(sink) == 3
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_ws_auth_error_retried_until_recovery_timeout():
+    """WS 握手 401（AuthError）属可重试恢复错误（对位 Rust
+    WebSocketConnect{..} 全量可重试）：重试到恢复总时限再 failed，不一次判死"""
+    sink: list[FakeTransport] = []
+    first = FakeTransport(
+        {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+    )
+    sink.append(first)
+    attempts = 0
+
+    class AuthRejectTransport(FakeTransport):
+        async def connect(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            raise AuthError("authentication failed: invalid or missing token")
+
+    def factory() -> FakeTransport:
+        return AuthRejectTransport()
+
+    managed = ManagedTransport(
+        factory,
+        instance=first,
+        handshake=make_handshake_log(sink),
+        strategy=ReconnectStrategy(interval=0.01, timeout=0.15),
+    )
+    await managed.connect()
+    first.drop("test drop")
+    for _ in range(200):
+        if managed.state == "failed":
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "failed"
+    assert attempts > 1  # 可重试：多次尝试直到恢复总时限
+    assert "invalid or missing token" in managed._failure_message
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_transport_closed_server_error_is_retryable():
+    """服务端 RPC 层传输关闭（-32000 "JSON-RPC transport closed"）属可重试
+    恢复错误（对位 Rust is_transport_closed_error）——重试后恢复成功"""
+    sink: list[FakeTransport] = []
+
+    def factory() -> FakeTransport:
+        # 第一次重连尝试报传输关闭，第二次成功
+        if len(sink) == 1:
+            response: dict | ProtocolError = ProtocolError(
+                "JSON-RPC error -32000: JSON-RPC transport closed", code=-32000
+            )
+        else:
+            response = {"sessionId": "fake-session", "protocolVersion": "1.4"}
+        transport = FakeTransport({"initialize": response})
+        sink.append(transport)
+        return transport
+
+    managed = ManagedTransport(
+        factory, handshake=make_handshake_log(sink), strategy=FAST
+    )
+    await managed.connect()
+    sink[0].drop("test drop")
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 3:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+    assert len(sink) == 3  # 首连 + 两次重连尝试（传输关闭错误被重试）
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_same_code_other_message_not_retryable():
+    """同为 -32000 码但非传输关闭消息：不属 is_transport_closed_error——
+    不可重试，一次尝试即 failed（消息甄别防止同码误重试）"""
+    sink: list[FakeTransport] = []
+
+    def factory() -> FakeTransport:
+        transport = FakeTransport(
+            {
+                "initialize": ProtocolError(
+                    "JSON-RPC error -32000: server exploded", code=-32000
+                )
+            }
+        )
+        sink.append(transport)
+        return transport
+
+    attempts = 0
+
+    async def handshake(transport, resume_session_id):
+        nonlocal attempts
+        attempts += 1
+        result = await transport.send_request("initialize", {})
+        return InitializeResponse.model_validate(result)
+
+    first = FakeTransport(
+        {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+    )
+    managed = ManagedTransport(
+        factory, instance=first, handshake=handshake, strategy=FAST
+    )
+    await managed.connect()
+    attempts = 0  # 只统计重连握手
+
+    first.drop("test drop")
+    for _ in range(100):
+        if managed.state == "failed":
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "failed"
+    assert attempts == 1  # 不可重试错误：无二次尝试
     await managed.disconnect()

@@ -29,7 +29,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from .errors import (
+    JSON_RPC_TRANSPORT_CLOSED,
     SESSION_ALREADY_ATTACHED,
+    AuthError,
     ConnectionError,
     ProtocolError,
     TimeoutError,
@@ -94,19 +96,36 @@ class ReconnectStrategy:
 State = Literal["disconnected", "connected", "recovering", "failed"]
 
 
+#: 服务端 RPC 层传输关闭消息文本（对位 Rust `is_transport_closed_error` 的
+#: `Server{code: -32000, message: "JSON-RPC transport closed"}` 臂——服务端在
+#: 传输关闭时给在途请求的统一收尾，恢复语义等同传输关闭，即可重试；错误码
+#: 常量取 errors.JSON_RPC_TRANSPORT_CLOSED）
+TRANSPORT_CLOSED_MESSAGE = "JSON-RPC transport closed"
+
+
 def _is_retryable_recovery_error(error: Exception) -> bool:
     """恢复错误分类（对位 Rust is_retryable_recovery_error）：
 
     - 传输/连接/超时类（ConnectionError、SDK/内置 TimeoutError——重连
       wait_for 超时抛的是内置 TimeoutError）：可重试
+    - 认证失败（AuthError——WS 握手 401；对位 Rust `WebSocketConnect{..}`
+      全量可重试）：可重试——重试到恢复总时限再转 failed，不一次判死
+    - 服务端 RPC 层传输关闭（-32000 "JSON-RPC transport closed"）：可重试
     - 会话仍附着（-32010，旧连接服务端侧尚未完全关闭）：可重试
     - 其余协议错误（含 -32600 unknown session id——会话不存在或已过
       保留窗）：不可重试，立即转 failed
     """
-    if isinstance(error, (ConnectionError, TimeoutError, asyncio.TimeoutError)):
+    if isinstance(
+        error, (ConnectionError, TimeoutError, asyncio.TimeoutError, AuthError)
+    ):
         return True
     if isinstance(error, ProtocolError):
-        return error.code == SESSION_ALREADY_ATTACHED
+        if error.code == SESSION_ALREADY_ATTACHED:
+            return True
+        return (
+            error.code == JSON_RPC_TRANSPORT_CLOSED
+            and TRANSPORT_CLOSED_MESSAGE in str(error)
+        )
     return False
 
 
@@ -121,7 +140,9 @@ class ManagedTransport:
     - `resume_session_id`：首连显式恢复既有会话（对位 Rust
       ExecServerClientConnectOptions.resume_session_id）；None = 开新会话
     - `on_initialized`：每次握手成功上抛响应（客户端填环境元数据缓存）
-    - `on_failed`：恢复失败上抛错误消息（客户端清扫该通道的通知注册表）
+    - `on_failed`：通道在途推送工作的清扫回调——恢复开始/恢复失败/刷新
+      退役三态触发（对位 Rust fail_all_in_flight_work 的触发面），客户端
+      据此清扫该通道的通知注册表（挂起消费者收终态失败而非干等）
     """
 
     def __init__(
@@ -215,7 +236,14 @@ class ManagedTransport:
         self._set_state("connected")
 
     async def disconnect(self) -> None:
-        """断开连接（主动关闭——取消进行中的恢复，不触发断线回调）"""
+        """断开连接（主动关闭——取消进行中的恢复，不触发断线回调）
+
+        会话随连接终结：清空 session_id——再次 connect() 开全新会话（对位
+        Rust 每次 connect 全新会话；resume 仅经显式 resume_session_id 首连
+        与恢复路径——refresh_connection 的刷新路径同此）。否则 stdio 会把
+        旧 id 当 resumeSessionId 下发给新进程（必收 -32600），WS 则静默续
+        上早已终结的旧会话。
+        """
         self._closing = True
         if self._recover_task is not None:
             self._recover_task.cancel()
@@ -231,15 +259,24 @@ class ManagedTransport:
                 pass
             self._retired_close_task = None
         await self._transport.disconnect()
+        if self._state != "disconnected":
+            # 仅在拆已建立/尝试过的会话时清空——未连接过的显式
+            # resume_session_id（首连目标）保留给首次 connect
+            self._session_id = None
         self._set_state("disconnected")
 
-    async def request_recovery(self, reason: str) -> None:
+    async def request_recovery(
+        self, reason: str, *, transport: Transport | None = None
+    ) -> None:
         """探针判死触发的主动恢复（对位 Rust close_transport + request_recovery 组合）。
 
         调用场景：客户端请求（如 environment/info 探活）超时——底层传输可能已
         卡死但断线回调尚未触发。仅 connected 且非主动关闭中受理（recovering /
-        failed / 断开期间到达的陈旧探针忽略，对位 Rust 的 ptr_eq 守卫）；传输
-        断线回调路径的恢复仍走 _on_transport_disconnect。
+        failed / 断开期间到达的陈旧探针忽略）。`transport` 传入探针所探的那条
+        底层传输时追加身份守卫（对位 Rust request_recovery 的
+        `Arc::ptr_eq(current, failed_rpc_client)`——只退役所探的那条）：探针
+        超时往返期间断线回调可能已完成恢复，陈旧探针不得误杀恢复出的健康新
+        连接。传输断线回调路径的恢复仍走 _on_transport_disconnect。
 
         立即进入 recovering 按策略重建——不等待旧传输关闭收尾（卡死传输的关闭
         握手可能耗时数秒，而服务端会话保留窗有限）；旧传输在后台关闭，其在途
@@ -247,6 +284,9 @@ class ManagedTransport:
         即转 failed，后续调用拿到明确断线错误。
         """
         if self._state != "connected" or self._closing:
+            return
+        if transport is not None and transport is not self._transport:
+            # 陈旧探针：所探传输已被更换（恢复/刷新已完成）——忽略
             return
         old = self._transport
         self._set_state("recovering")
@@ -283,7 +323,9 @@ class ManagedTransport:
                 except asyncio.CancelledError:
                     pass
                 self._recover_task = None
-            # 2. 退役旧传输（_closing 拦截其断线回调，不再触发恢复）
+            # 2. 退役旧传输（_closing 拦截其断线回调，不再触发恢复）并清扫
+            # 该通道在途推送工作（对位 Rust retire() → fail_all_in_flight_work）
+            # ——刷新开始/失败/成功三态下挂起消费者都收终态失败，不干等
             old = self._transport
             self._session_id = None
             self._set_state("disconnected")
@@ -291,6 +333,7 @@ class ManagedTransport:
                 await old.disconnect()
             except Exception:
                 pass
+            self._fail_in_flight_work("exec-server executor was replaced")
             # 3. 全新连接（不 resume）；失败不恢复旧会话
             candidate = self._factory()
             self._transport = candidate
@@ -427,7 +470,14 @@ class ManagedTransport:
         self._recover_task = asyncio.create_task(self._recover(message))
 
     async def _recover(self, disconnect_message: str) -> None:
-        """按策略重建传输 + resume 握手（对位 Rust Inner.recover）"""
+        """按策略重建传输 + resume 握手（对位 Rust Inner.recover）
+
+        恢复开始即清扫该通道在途推送工作（对位 Rust recover 起手
+        fail_all_http_body_streams）：fs 读流句柄服务端断连即 close_all、
+        http/policy 推送随旧连接死亡——恢复成功也不会续流（resume 只对
+        process 重挂通知通道），故消费者必须立即收终态失败而非干等。
+        """
+        self._fail_in_flight_work(disconnect_message)
         strategy = self._strategy
         if strategy is None or self._session_id is None:
             # 无恢复手段（实例直传 / 未配置策略 / 无会话可恢复）——断线即失败
@@ -498,6 +548,12 @@ class ManagedTransport:
         ConnectionError（对位 Rust Inner.fail + fail_all_in_flight_work）"""
         logger.warning("%s", message)
         self._set_state("failed", failure_message=message)
+        self._fail_in_flight_work(message)
+
+    def _fail_in_flight_work(self, message: str) -> None:
+        """清扫本通道在途推送工作（恢复开始/恢复失败/刷新退役三态共用——
+        对位 Rust fail_all_in_flight_work 与 recover 起手
+        fail_all_http_body_streams）；经 on_failed 回调抵达通知注册表"""
         if self._on_failed is not None:
             try:
                 self._on_failed(message)

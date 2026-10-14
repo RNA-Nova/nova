@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import pytest
+
 from nova_exec_server_client.notifications import (
     READ_STREAM_QUEUE_CAPACITY,
     NotificationRouter,
@@ -98,33 +100,41 @@ async def test_done_carries_total_bytes():
 
 @pytest.mark.asyncio
 async def test_backpressure_slow_consumer_breaks_stream():
-    """背压：队列满宁可断流（Failed 事件）也不阻塞连接级分发"""
+    """背压：队列满宁可断流（Failed 事件）也不阻塞连接级分发；断流终态
+    满员转异步投递排队等位——已排队数据块一个不丢（对位 Rust
+    finish_fs_read_stream 满员 spawn send）"""
     router = NotificationRouter()
     queue = router.register_stream("h-slow")
     # 填满队列（不消费）
     for seq in range(READ_STREAM_QUEUE_CAPACITY):
         await router.dispatch(chunk_msg("h-slow", seq, b"x"))
-    # 再来一块 → 断流：注册被移除，队列尾出现 Failed 事件
+    # 再来一块 → 断流：注册被移除；失败终态异步等位，不挤掉已排数据块
     await router.dispatch(chunk_msg("h-slow", READ_STREAM_QUEUE_CAPACITY, b"x"))
     events = [queue.get_nowait() for _ in range(READ_STREAM_QUEUE_CAPACITY)]
-    assert events[-1].kind == "failed"
-    assert "too slow" in events[-1].error
+    assert all(event.kind == "chunk" for event in events)
+    terminal = await asyncio.wait_for(queue.get(), 1)
+    assert terminal.kind == "failed"
+    assert "too slow" in terminal.error
     # 断流后该句柄通知一律丢弃
     await router.dispatch(done_msg("h-slow", 999))
 
 
 @pytest.mark.asyncio
 async def test_done_reaches_full_queue():
-    """终止事件必须可达：队列满时丢最老数据块腾位（字节校验兜底断流）"""
+    """终止事件必须可达且不丢数据块：队列满时转异步投递排队等位，慢消费者
+    收齐全部数据块后收到 done（total_bytes 校验可通过——对位 Rust
+    finish_fs_read_stream 满员 spawn send，不丢块不静默截断）"""
     router = NotificationRouter()
     queue = router.register_stream("h-full")
     for seq in range(READ_STREAM_QUEUE_CAPACITY):
         await router.dispatch(chunk_msg("h-full", seq, b"x"))
     await router.dispatch(done_msg("h-full", 999))
-    events = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
-    assert events[-1].kind == "done" and events[-1].total_bytes == 999
+    # 已排队的数据块一个不丢
+    events = [queue.get_nowait() for _ in range(READ_STREAM_QUEUE_CAPACITY)]
+    assert all(event.kind == "chunk" for event in events)
+    # 消费者腾出位置后终止事件异步送达
+    terminal = await asyncio.wait_for(queue.get(), 1)
+    assert terminal.kind == "done" and terminal.total_bytes == 999
 
 
 @pytest.mark.asyncio

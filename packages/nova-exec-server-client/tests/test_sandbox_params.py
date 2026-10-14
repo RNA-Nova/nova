@@ -30,8 +30,9 @@ def test_read_only_sandbox_serializes_wire_shape():
     assert "cwd" not in data
     assert "workspaceRoots" not in data
     assert data["policyContext"] == {
-        "cwd": "/tmp/proj",
-        "workspaceRoots": ["/tmp/proj"],
+        # 线上形状是 file:// URI（原生路径会被服务端 PathUri 拒绝）
+        "cwd": "file:///tmp/proj",
+        "workspaceRoots": ["file:///tmp/proj"],
     }
     assert data["windowsSandboxLevel"] == "disabled"
     assert data["useLegacyLandlock"] is False
@@ -143,13 +144,19 @@ def test_start_params_sandbox_passes_through_camel_case():
         argv=["bash", "-c", "true"],
         cwd="/tmp/proj",
         env={},
-        sandbox=ctx.model_dump(by_alias=True),
+        # exclude_none 对齐生产出货路径（process.py 的 process/start dump）：
+        # None 键不上线——尤其 sandboxOverride: null 会被 Rust 服务端拒
+        # （非 Option 兜底的 skip_serializing_if 字段不消化显式 null）
+        sandbox=ctx.model_dump(by_alias=True, exclude_none=True),
         enforceManagedNetwork=True,
         managedNetwork={"loopbackPorts": [8080], "allowLocalBinding": True},
         arg0="bash",
     )
     wire = params.model_dump(by_alias=True, exclude_none=True)
     assert wire["sandbox"]["permissions"]["type"] == "managed"
+    # 缺省 sandboxOverride（None ≡ RS NoOverride）不上线（对位 RS
+    # skip_serializing_if = "SandboxOverride::is_no_override"）
+    assert "sandboxOverride" not in wire["sandbox"]
     assert wire["enforceManagedNetwork"] is True
     assert wire["managedNetwork"]["loopbackPorts"] == [8080]
     assert wire["arg0"] == "bash"
@@ -170,7 +177,11 @@ def test_exec_permission_profile_external_variant():
     # external 变体带默认 file_system 字段（pydantic 含默认值字段照常序列化）
     assert wire == {
         "type": "external",
-        "file_system": {"type": "restricted", "entries": [], "glob_scan_max_depth": None},
+        "file_system": {
+            "type": "restricted",
+            "entries": [],
+            "glob_scan_max_depth": None,
+        },
         "network": "enabled",
     }
 

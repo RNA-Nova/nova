@@ -81,6 +81,14 @@ class PrefixPattern:
         return cmd[:pattern_length]
 
 
+def render_pattern_token(token: PatternToken) -> str:
+    """对位 codex `render_pattern_token`：单值原样；多选渲染为 `"[a|b]"`
+    单 token（前缀导出/展示场景不丢多选信息）"""
+    if len(token.alternatives) == 1:
+        return token.alternatives[0]
+    return f"[{'|'.join(token.alternatives)}]"
+
+
 # =============================================================================
 # 规则本体
 # =============================================================================
@@ -136,8 +144,16 @@ class NetworkRuleProtocol(Enum):
             return aliases[raw]
         except KeyError:
             raise ValueError(
-                "network_rule protocol must be one of http, https, socks5_tcp, socks5_udp"
+                "network_rule protocol must be one of http, https, socks5_tcp, "
+                f"socks5_udp (got {raw})"
             ) from None
+
+
+def _is_ascii_digits(text: str) -> bool:
+    """纯 ASCII 数字判定（对位 codex `chars().all(is_ascii_digit)`——
+    `str.isdigit()` 会收非 ASCII 数字（如阿拉伯-印度数字），端口判定必须
+    收紧，否则 py 剥落端口而 codex 保留整串为 host，双端归一结果分歧）"""
+    return bool(text) and all("0" <= c <= "9" for c in text)
 
 
 def normalize_network_rule_host(raw: str) -> str:
@@ -160,14 +176,18 @@ def normalize_network_rule_host(raw: str) -> str:
             raise ValueError("network_rule host has an invalid bracketed IPv6 literal")
         inside, rest = host[1:closing], host[closing + 1 :]
         if rest:
-            if not rest.startswith(":") or not rest[1:] or not rest[1:].isdigit():
+            if (
+                not rest.startswith(":")
+                or not rest[1:]
+                or not _is_ascii_digits(rest[1:])
+            ):
                 raise ValueError(
                     f"network_rule host contains an unsupported suffix: {raw}"
                 )
         host = inside
     elif host.count(":") == 1:
         candidate, _, port = host.rpartition(":")
-        if candidate and port and port.isdigit():
+        if candidate and port and _is_ascii_digits(port):
             host = candidate
 
     normalized = host.rstrip(".").strip().lower()
@@ -260,16 +280,18 @@ class Policy:
         self._rules_by_program.setdefault(rule.program, []).append(rule)
 
     def get_allowed_prefixes(self) -> list[tuple[str, ...]]:
-        """全部 allow 规则的前缀（对位 get_allowed_prefixes）"""
+        """全部 allow 规则的前缀（对位 get_allowed_prefixes）：多选 token 经
+        `render_pattern_token` 渲染为 `"[a|b]"` 单 token（不丢信息），输出
+        排序去重（codex 的 sort()+dedup()）"""
         out: list[tuple[str, ...]] = []
         for rules in self._rules_by_program.values():
             for rule in rules:
                 if rule.decision is Decision.ALLOW:
                     out.append(
                         (rule.pattern.first,)
-                        + tuple(t.alternatives[0] for t in rule.pattern.rest)
+                        + tuple(render_pattern_token(t) for t in rule.pattern.rest)
                     )
-        return out
+        return sorted(set(out))
 
     def check(
         self,
@@ -508,12 +530,23 @@ def format_network_rule(
     decision: Decision,
     justification: str | None = None,
 ) -> str:
-    """`network_rule(...)` 规则行"""
+    """`network_rule(...)` 规则行（对位 amend.rs `blocking_append_network_rule`
+    的文本形态）。
+
+    - decision 写盘文本对位 codex writer：Forbidden → `"deny"`（不是
+      `decision.value` 的 `"forbidden"`；解析侧 `parse_network_rule_decision`
+      把 "deny" 读回 Forbidden，写读互认）
+    - justification 空串/纯空白即拒（对位 amend.rs 守卫——写出的行
+      自己 parse 不回来：NetworkRule 校验拒绝空 justification）
+    """
     host = normalize_network_rule_host(host)
+    if justification is not None and not justification.strip():
+        raise ValueError("justification cannot be empty")
+    decision_text = "deny" if decision is Decision.FORBIDDEN else decision.value
     parts = [
         f"host={json.dumps(host, ensure_ascii=False)}",
         f"protocol={json.dumps(protocol.value)}",
-        f"decision={json.dumps(decision.value)}",
+        f"decision={json.dumps(decision_text)}",
     ]
     if justification is not None:
         parts.append(f"justification={json.dumps(justification, ensure_ascii=False)}")

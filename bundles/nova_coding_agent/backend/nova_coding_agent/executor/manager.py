@@ -128,7 +128,9 @@ class ExecutorClientManager:
                 self._ssh_handles.pop(key, None)
                 handle = None
             if url is None:
-                status = self._env_manager.status("__local__")
+                # status() 现为 async 实况探活（A16——探活失败即判
+                # DISCONNECTED 触发重新 spawn，不再信缓存的 CONNECTED）
+                status = await self._env_manager.status("__local__")
                 if status.state.value != "connected":
                     await self._register_local_spawn()
             elif is_ssh_url(url):

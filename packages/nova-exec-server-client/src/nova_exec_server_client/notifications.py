@@ -8,9 +8,13 @@
 （process/output|exited|closed）SDK 侧为轮询消费（process/read），不经推送，
 将来接入推送模型时同样注册到本层。
 
-断线语义：连接进入 Failed（恢复失败）时经 `fail_channel` 清扫该通道全部
-挂起流（消费者拿到 Failed 事件而非干等）；恢复成功（resumeSessionId 重握手）
-时注册表跨重连存活，服务端把推送重定向到新连接，流自然继续。
+断线语义：服务端断连即 `close_all` fs 句柄表（读流任务错误收尾、done 发往
+死连接被弃），resume 只对 process 重挂通知通道——恢复成功后 fs 读流也
+**不会继续**。故连接一开始恢复（recovering）即经 `fail_channel` 给该通道
+全部挂起消费者（fs 读流 / http 流式响应体 / 方法订阅队列）发终态失败
+（对位 Rust recover 起手 `fail_all_http_body_streams`、失败时
+`fail_all_in_flight_work`）；恢复失败与连接刷新退役同路径清扫。消费者收
+终态失败响亮收尾，绝不干等——不存在"流跨重连自然继续"。
 """
 
 from __future__ import annotations
@@ -58,20 +62,48 @@ class _StreamRegistration:
     channel: str | None = field(default=None)
 
 
+#: http 流式响应体的每流队列容量（对位 Rust `http_response_body_stream.rs`
+#: 的 256 格）；字节预算 16MB——超任一即终态失败（响亮错误进队列），
+#: 不静默丢帧（丢帧会把截断 body 当成功返回，曾是 S 级 bug）。
+HTTP_BODY_STREAM_QUEUE_CAPACITY = 256
+HTTP_BODY_STREAM_BYTE_BUDGET = 16 * 1024 * 1024
+
+
+@dataclass
+class _HttpStreamRegistration:
+    """一条已注册的 http 流式响应体通道：消费队列 + 已累积字节数（预算执法）"""
+
+    queue: asyncio.Queue[dict[str, Any]]
+    accumulated_bytes: int = 0
+
+
+class _HttpBodyStreamOverBudget(Exception):
+    """内部哨兵：http 流式响应体超字节预算（走与 QueueFull 同一终态路径）"""
+
+
 class NotificationRouter:
     """连接级通知统一分发器（注册表 + dispatch 入口）
 
     - `register_stream`：发 fs/readStream 请求**之前**注册（服务端响应后即开始
       推送，注册不能比推送晚到——对位 Rust register_fs_read_stream 的调用纪律）
+    - `register_http_body_stream`：发 `http/request`（stream_response）之前注册，
+      按 requestId 精确路由（对位 Rust http_response_body_stream：每请求一条
+      独立通道——广播到所有方法队列会让并发双流互串，曾是 S 级 bug）
     - `dispatch`：传输层 on_notification 的唯一入口（异常留痕不传播——
       通知分发不许炸掉接收循环）
-    - `fail_channel`：连接恢复失败时清扫该通道全部挂起流
+    - `fail_channel`：恢复开始/恢复失败/刷新退役时清扫通道在途推送工作
+      （fs 读流 + http 流式响应体 + 方法订阅队列）
     """
 
     def __init__(self) -> None:
         self._streams: dict[str, _StreamRegistration] = {}
-        #: 按方法名订阅的通用队列（http body delta、networkPolicyDecision 等）
+        #: 按方法名订阅的通用队列（networkPolicyDecision 等无请求 id 的通知）
         self._method_queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
+        #: http 流式响应体的按 requestId 键控队列（每请求一条，对位 Rust）
+        self._http_streams: dict[str, _HttpStreamRegistration] = {}
+        #: 满队列转异步投递的终止事件任务集（持引用防 GC 中途回收任务；
+        #: 完成即自弃——对位 Rust 满员 spawn send 的"任务不滞留"语义）
+        self._terminal_tasks: set[asyncio.Task] = set()
 
     def register_method(self, method: str) -> asyncio.Queue[dict[str, Any]]:
         """按方法名注册通用通知订阅（返回消费队列；重复注册追加新队列）"""
@@ -102,6 +134,22 @@ class NotificationRouter:
         """注销推送路由（流结束/放弃时调用，幂等）"""
         self._streams.pop(handle_id, None)
 
+    def register_http_body_stream(
+        self, request_id: str
+    ) -> asyncio.Queue[dict[str, Any]]:
+        """注册 http 流式响应体通道（按 requestId 键控），返回消费队列"""
+        if request_id in self._http_streams:
+            raise ValueError(f"http body stream already registered: {request_id}")
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=HTTP_BODY_STREAM_QUEUE_CAPACITY
+        )
+        self._http_streams[request_id] = _HttpStreamRegistration(queue=queue)
+        return queue
+
+    def unregister_http_body_stream(self, request_id: str) -> None:
+        """注销 http 流式通道（流结束/放弃时调用，幂等）"""
+        self._http_streams.pop(request_id, None)
+
     async def dispatch(self, message: dict[str, Any]) -> None:
         """传输层通知入口：按方法分流、按 handle_id 路由（对位 handle_server_notification）"""
         method = message.get("method")
@@ -120,10 +168,7 @@ class NotificationRouter:
                 params = HttpRequestBodyDeltaNotification.model_validate(
                     message.get("params") or {}
                 )
-                event = {"method": method, "params": params.model_dump(by_alias=True)}
-                for queues in self._method_queues.values():
-                    for q in queues:
-                        q.put_nowait(event)
+                self._deliver_http_body_delta(params)
             else:
                 queues = self._method_queues.get(method or "")
                 if queues:
@@ -140,7 +185,23 @@ class NotificationRouter:
             )
 
     def fail_channel(self, channel: str | None, message: str) -> None:
-        """清扫某通道全部挂起读流（连接恢复失败时调用；消费者收 Failed 事件）"""
+        """清扫通道在途推送工作（恢复开始/恢复失败/刷新退役时调用；消费者收
+        终态失败而非干等）。
+
+        对位 Rust `fail_all_in_flight_work`（`fail_all_fs_read_streams` +
+        `fail_all_http_body_streams`）：
+
+        - fs 读流：按注册时的通道标签精确清扫（双通道分离时数据面故障不
+          殃及控制面挂起流）
+        - http 流式响应体：逐流推 done+error 终态（对位 Rust
+          `fail_all_http_body_streams` 的合成 delta——seq 占位 1，消费者
+          先查 error 不受影响）
+        - 方法订阅队列：逐队列推终态事件（`error` 键携带原因；Rust 无对应
+          物——policy 审计订阅为 SDK 糖 API，断线响亮收尾优于干等）
+
+        http 流与方法队列注册入口不见池路由、不打通道标签，任一通道清扫时
+        一律随清（这些流量本就走控制面连接；保守全清好过漏清干等）。
+        """
         drained = [
             (handle_id, registration)
             for handle_id, registration in self._streams.items()
@@ -151,6 +212,103 @@ class NotificationRouter:
             self._push_terminal(
                 registration, ReadStreamEvent(kind="failed", error=message)
             )
+        for request_id, registration in list(self._http_streams.items()):
+            self._http_streams.pop(request_id, None)
+            self._push_http_terminal(
+                registration,
+                {
+                    "requestId": request_id,
+                    "seq": 1,
+                    "deltaBase64": "",
+                    "done": True,
+                    "error": message,
+                },
+            )
+        for method, queues in list(self._method_queues.items()):
+            self._method_queues.pop(method, None)
+            event = {"method": method, "params": {}, "error": message}
+            for queue in queues:
+                self._push_method_terminal(queue, event)
+
+    def _deliver_http_body_delta(
+        self, params: "HttpRequestBodyDeltaNotification"
+    ) -> None:
+        """按 requestId 精确路由 bodyDelta（对位 Rust http_response_body_stream）。
+
+        队列满或累积字节超预算 → 摘除路由 + 响亮终态（合成 error 事件进队列，
+        消费者经 delta.error 抛 ProtocolError）——绝不静默丢帧。
+        """
+        registration = self._http_streams.get(params.request_id)
+        if registration is None:
+            # 未知请求 id（流已结束/已放弃）——丢弃，不算错误
+            logger.debug(
+                "ignoring http body delta for unknown request %s", params.request_id
+            )
+            return
+        registration.accumulated_bytes += len(params.delta.data)
+        over_budget = registration.accumulated_bytes > HTTP_BODY_STREAM_BYTE_BUDGET
+        event = {
+            "method": HTTP_REQUEST_BODY_DELTA,
+            "params": params.model_dump(by_alias=True),
+        }
+        try:
+            if over_budget:
+                raise _HttpBodyStreamOverBudget
+            registration.queue.put_nowait(event)
+        except (asyncio.QueueFull, _HttpBodyStreamOverBudget):
+            reason = (
+                f"http body stream exceeded the {HTTP_BODY_STREAM_BYTE_BUDGET}-byte budget"
+                if over_budget
+                else "http body stream consumer too slow: queue is full"
+            )
+            self._http_streams.pop(params.request_id, None)
+            self._push_http_terminal(
+                registration,
+                {
+                    "requestId": params.request_id,
+                    "seq": params.seq,
+                    "deltaBase64": "",
+                    "done": False,
+                    "error": reason,
+                },
+            )
+
+    @staticmethod
+    def _push_http_terminal(
+        registration: _HttpStreamRegistration, params: dict[str, Any]
+    ) -> None:
+        """http 终态事件必须可达：队列满时丢弃最老增量腾位（随后跟的 error
+        事件会让消费者抛错——不静默截断）"""
+        event = {"method": HTTP_REQUEST_BODY_DELTA, "params": params}
+        try:
+            registration.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            try:
+                registration.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                registration.queue.put_nowait(event)
+            except asyncio.QueueFull:  # 理论不可达；防御
+                pass
+
+    @staticmethod
+    def _push_method_terminal(
+        queue: asyncio.Queue[dict[str, Any]], event: dict[str, Any]
+    ) -> None:
+        """方法订阅队列的终态事件必须可达：满队列丢最老事件腾位（审计事件
+        可丢——丢只影响完整性；终态唤醒不能丢，否则消费者干等）"""
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:  # 理论不可达；防御
+                pass
 
     def _deliver_chunk(self, params: FsReadStreamChunkNotification) -> None:
         registration = self._streams.get(params.handle_id)
@@ -188,20 +346,21 @@ class NotificationRouter:
             event = ReadStreamEvent(kind="done", total_bytes=params.total_bytes)
         self._push_terminal(registration, event)
 
-    @staticmethod
     def _push_terminal(
-        registration: _StreamRegistration, event: ReadStreamEvent
+        self, registration: _StreamRegistration, event: ReadStreamEvent
     ) -> None:
-        """终止事件必须可达：队列满时丢弃最老数据块腾位（断流语义已由
-        total_bytes 校验兜底——丢块即收不齐，消费者必报错，不静默截断）"""
+        """终止事件必须可达且**不丢数据块**（对位 Rust client.rs
+        `finish_fs_read_stream`）：每流恰好一个终止事件（路由已摘除，这是
+        该流的唯一残余推送）——满员时转异步 `put` 排队等位，慢消费者收尾
+        阶段可完整成全（收齐全部块后收到终止事件，total_bytes 校验通过）。
+
+        消费方已消失时任务挂起无害：asyncio.Queue 无对端关闭概念（Rust 侧
+        接收端消失 send 即败返回），挂起任务不耗资源，随事件循环终结连带
+        清理。任务记入 `_terminal_tasks` 持引用，防 GC 中途回收。
+        """
         try:
             registration.queue.put_nowait(event)
         except asyncio.QueueFull:
-            try:
-                registration.queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                registration.queue.put_nowait(event)
-            except asyncio.QueueFull:  # 理论不可达；防御
-                pass
+            task = asyncio.create_task(registration.queue.put(event))
+            self._terminal_tasks.add(task)
+            task.add_done_callback(self._terminal_tasks.discard)

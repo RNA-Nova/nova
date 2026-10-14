@@ -288,15 +288,19 @@ class ProcessStartParams(BaseModel):
     #: arg0 覆盖（真实 argv[0] 与可执行路径分离）
     arg0: str | None = Field(default=None, alias="arg0")
     #: 子进程环境策略（wire：ExecEnvPolicy）
-    env_policy: dict[str, Any] | None = Field(default=None, alias="envPolicy")
+    env_policy: ExecEnvPolicy | dict[str, Any] | None = Field(default=None, alias="envPolicy")
     #: shell 快照请求（wire：ShellSnapshotRequest {scopeId, shell}）
-    shell_snapshot: dict[str, Any] | None = Field(default=None, alias="shellSnapshot")
+    shell_snapshot: ShellSnapshotRequest | dict[str, Any] | None = Field(
+        default=None, alias="shellSnapshot"
+    )
     #: 文件系统沙箱上下文（wire：FileSystemSandboxContext，编译后权限档形态）
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | dict[str, Any] | None = None
     #: 托管网络强制（fail-closed：无 managedNetwork 细节时拒绝放行）
     enforce_managed_network: bool = Field(default=False, alias="enforceManagedNetwork")
     #: 托管网络细节（loopback 代理端口 + 本地绑定许可）
-    managed_network: dict[str, Any] | None = Field(default=None, alias="managedNetwork")
+    managed_network: ManagedNetworkSandboxContext | dict[str, Any] | None = Field(
+        default=None, alias="managedNetwork"
+    )
     #: executor 本地代理启动配置（wire：RemoteNetworkProxyLaunchConfig；
     #: 历史透传 dict 会被 pydantic 按模型校验——畸形配置尽早报错）
     network_proxy: RemoteNetworkProxyLaunchConfig | None = Field(
@@ -394,6 +398,35 @@ class ProcessExitedNotification(BaseModel):
     sandbox_denied: bool | None = Field(default=None, alias="sandboxDenied")
 
 
+class ProcessOutputDeltaNotification(BaseModel):
+    """process/output 通知（对位 protocol.rs:1173 ExecOutputDeltaNotification）。
+
+    SDK 侧经 process/read 轮询消费输出（有意），此模型备齐词汇不代表改推送。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    process_id: str = Field(..., alias="processId")
+    seq: int
+    # RS 端为 ExecOutputStream 枚举（值集 "stdout"/"stderr"/"pty" 已对拍一致）
+    stream: str
+    chunk: bytes
+
+    @field_validator("chunk", mode="before")
+    @classmethod
+    def decode_chunk(cls, v: Any) -> bytes:
+        if isinstance(v, str):
+            return base64.b64decode(v)
+        return v
+
+
+class ProcessClosedNotification(BaseModel):
+    """process/closed 通知（对位 protocol.rs:1192 ExecClosedNotification）。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    process_id: str = Field(..., alias="processId")
+    seq: int
+
+
 # =============================================================================
 # 文件系统
 # =============================================================================
@@ -472,6 +505,13 @@ class FsWriteBlockParams(BaseModel):
     offset: int
     #: 透明字节块——线上即裸 base64 字符串（同 ByteChunk）
     chunk: bytes
+
+    @field_validator("chunk", mode="before")
+    @classmethod
+    def decode_chunk(cls, v: Any) -> bytes:
+        if isinstance(v, str):
+            return base64.b64decode(v)
+        return v
 
     @field_serializer("chunk")
     def encode_chunk(self, v: bytes) -> str:
@@ -947,10 +987,13 @@ class FileSystemSandboxContext(BaseModel):
     @classmethod
     def _policy_context(cls, cwd: str | None) -> WireFileSystemPolicyContext | None:
         """RS `from_permission_profile` 对位：cwd 给定时 policyContext 承载
-        cwd 与 workspace_roots=[cwd]；cwd 缺省 = 省略（入口回退）。"""
+        cwd 与 workspace_roots=[cwd]；cwd 缺省 = 省略（入口回退）。
+        cwd 走 `_file_url` 归一化——线上形状是 file:// URI，原生路径会被
+        服务端 `PathUri` 反序列化拒绝（与 writable_roots 同一路径归一）。"""
         if cwd is None:
             return None
-        return WireFileSystemPolicyContext(cwd=cwd, workspaceRoots=[cwd])
+        cwd_url = _file_url(cwd)
+        return WireFileSystemPolicyContext(cwd=cwd_url, workspaceRoots=[cwd_url])
 
     @classmethod
     def read_only(cls, cwd: str | None = None) -> "FileSystemSandboxContext":

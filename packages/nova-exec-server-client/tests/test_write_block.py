@@ -106,6 +106,21 @@ async def test_replace_open_and_write_block_go_online_with_capability():
 
 
 @pytest.mark.asyncio
+async def test_close_channel_passthrough():
+    """公共 close() 暴露 channel 参数（句柄状态随连接存活——流式句柄须走
+    数据面通道，跨连接 close 得 -32004；与 write_stream 中止路径同纪律）"""
+    fs, transport = make_fs({"fs/close": {}})
+
+    # 默认 None：裸传输无通道概念（池化下由方法路由表兜底）
+    await fs.close("b-1")
+    assert transport.requests[-1] == ("fs/close", {"handleId": "b-1"}, None)
+
+    # 显式数据面：与 write_stream 内部 abort 同一落点
+    await fs.close("w-2", channel="data")
+    assert transport.requests[-1] == ("fs/close", {"handleId": "w-2"}, "data")
+
+
+@pytest.mark.asyncio
 async def test_capability_gate_uses_injected_environment_info_provider():
     """client 装配路径：能力查询走注入的 environment_info 提供方（initialize
     捎带缓存），不再发 environment/info 请求"""

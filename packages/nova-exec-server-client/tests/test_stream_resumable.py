@@ -11,7 +11,12 @@ from fake_transport import FakeTransport
 from nova_protocol import FileSystemSandboxContext
 
 from nova_exec_server_client import FileSystemError
-from nova_exec_server_client.errors import TransportError
+from nova_exec_server_client.errors import (
+    EXECUTOR_NOT_FOUND,
+    JSON_RPC_INVALID_REQUEST,
+    ProtocolError,
+    TransportError,
+)
 from nova_exec_server_client.fs import FileSystemManager
 
 
@@ -24,6 +29,11 @@ class FakeWriteStreamServer(FakeTransport):
     - `shrink_on_reconcile`：第 N 次 getMetadata 时清空文件（模拟服务端
       状态回退，触发对账缩水检测）
     - `fs/getMetadata` 如实回报当前文件大小（续传对账的 ground truth）
+    - 执法对齐真实服务端（file_handle.rs / PROTOCOL.md done 错误码表）：
+      越界 offset（隔洞写）开门即拒（-32600 ProtocolError——线上为
+      JSON-RPC error，不是 TransportError）；chunk 乱序记为流终态错误
+      （违规块不落盘），由 done 回报首个错误（-32600）；done 一次性——
+      重复 done / 已 close 句柄的 done 报 unknown handle（-32004）
     """
 
     def __init__(
@@ -40,6 +50,10 @@ class FakeWriteStreamServer(FakeTransport):
         # 每条流的开门 offset（验证续传起点用）
         self.open_offsets: list[int | None] = []
         self.stream_seqs: list[list[int]] = []
+        #: 每条流的首个 seq 违规（expected, got）；None = 未违规
+        self._stream_violations: list[tuple[int, int] | None] = []
+        #: 仍在开的句柄 → 流序号（done/close 摘除；句柄由客户端指定，对位协议）
+        self._open_handles: dict[str, int] = {}
         self._landed_in_stream = 0
 
     async def send_request(self, method, params=None, *, channel=None):
@@ -48,15 +62,44 @@ class FakeWriteStreamServer(FakeTransport):
             offset = params.get("offset")
             self.open_offsets.append(offset)
             self.stream_seqs.append([])
+            self._stream_violations.append(None)
             self._landed_in_stream = 0
             if offset is None:
                 self.file = bytearray()
             elif offset > len(self.file):
-                # 与服务端一致：越界 offset（隔洞写）拒绝
-                raise TransportError("offset beyond file length")
-            return {"handleId": f"w-{len(self.open_offsets)}"}
+                # 与服务端一致：越界 offset（隔洞写）拒绝——线上为 JSON-RPC
+                # error（invalid_request -32600，对位 file_system_handler.rs
+                # 的 offset 越界分支），经传输映射为 ProtocolError
+                raise ProtocolError(
+                    f"file write stream offset {offset} exceeds the current "
+                    f"file length {len(self.file)}",
+                    code=JSON_RPC_INVALID_REQUEST,
+                )
+            handle = params.get("handleId") or f"w-{len(self.open_offsets)}"
+            self._open_handles[handle] = len(self.open_offsets) - 1
+            return {"handleId": handle}
         if method == "fs/writeStream/done":
-            return {"handleId": params["handleId"], "totalBytes": len(self.file)}
+            handle = params["handleId"]
+            # done 一次性：done 后句柄摘除；重复 done / 未知句柄 → unknown
+            # handle（-32004，对位 PROTOCOL.md done 错误码表）
+            stream_index = self._open_handles.pop(handle, None)
+            if stream_index is None:
+                raise ProtocolError(
+                    f"unknown handle: {handle}", code=EXECUTOR_NOT_FOUND
+                )
+            violation = self._stream_violations[stream_index]
+            if violation is not None:
+                expected, got = violation
+                raise ProtocolError(
+                    f"file write stream `{handle}` expected seq {expected}, got {got}",
+                    code=JSON_RPC_INVALID_REQUEST,
+                )
+            return {"handleId": handle, "totalBytes": len(self.file)}
+        if method == "fs/close":
+            # 写流句柄的 close 即 abort（v1.12：半成品留盘）——句柄摘除后
+            # done 报 unknown handle（对位 file_system_handler.rs 的 close→done）
+            self._open_handles.pop(params.get("handleId", ""), None)
+            return {}
         if method == "fs/getMetadata":
             self.reconciles += 1
             if (
@@ -85,6 +128,13 @@ class FakeWriteStreamServer(FakeTransport):
         )
         if break_after is not None and self._landed_in_stream >= break_after:
             raise TransportError("injected disconnect")
+        # seq 严格序校验（对位 file_handle.rs：违规记为终态、块不落盘，
+        # 后续块静默忽略，首个错误留到 done 回报）
+        expected = len(self.stream_seqs[-1])
+        if self._stream_violations[-1] is None and params["seq"] != expected:
+            self._stream_violations[-1] = (expected, params["seq"])
+        if self._stream_violations[-1] is not None:
+            return
         # 落盘（chunk 已按 seq 严格序到达，定位写即顺序追加）
         self.file.extend(base64.b64decode(params["chunk"]))
         self.stream_seqs[-1].append(params["seq"])
@@ -153,6 +203,74 @@ async def test_write_stream_resumable_rejects_non_replayable_source():
 
     with pytest.raises(FileSystemError, match="无法重放"):
         await fs.write_stream_resumable("file:///tmp/out.bin", one_shot(), block_size=2)
+
+
+@pytest.mark.asyncio
+async def test_write_stream_offset_beyond_server_file_rejected():
+    """越界 offset（隔洞写）开门即拒——fake 走 ProtocolError(-32600)，对位
+    真实服务端的 JSON-RPC error（file_system_handler.rs 的 offset 越界分支；
+    PROTOCOL.md：n 不得超当前文件长度 → invalid_request）。
+
+    此前该分支是死代码且错用 TransportError（传输错误）——真实服务端回的是
+    协议错误响应，异常类型决定 write_stream_resumable 是否续传（TransportError
+    会触发对账续传，ProtocolError 原样上抛——类型错了语义就错了）。
+    """
+    server = FakeWriteStreamServer()
+    server.file = bytearray(b"ab")  # 服务端现状 2 字节
+    fs = FileSystemManager(server)
+
+    with pytest.raises(ProtocolError, match="exceeds the current file length") as exc:
+        await fs.write_stream("file:///tmp/out.bin", [b"zz"], block_size=2, offset=5)
+    assert exc.value.code == JSON_RPC_INVALID_REQUEST
+    # 拒绝不改动既有内容、不产生落盘
+    assert bytes(server.file) == b"ab"
+
+
+@pytest.mark.asyncio
+async def test_fake_write_stream_server_enforces_seq_order_and_done_once():
+    """fake 服务端写流执法钉住（对位 file_handle.rs / PROTOCOL.md done 错误码表）：
+    乱序 chunk 记为终态错误、违规块不落盘、done 回报 -32600；done 一次性——
+    重复 done 与已 close 句柄的 done 报 unknown handle（-32004）"""
+    server = FakeWriteStreamServer()
+    fs = FileSystemManager(server)
+
+    # 乱序：seq 1 抢先（期 0）→ 违规块不落盘；seq 0 随后到达也被忽略
+    # （终态已记），done 回报首个违规
+    await server.send_request(
+        "fs/writeStream", {"handleId": "w-oops", "path": "file:///tmp/x"}
+    )
+    await server.send_notification(
+        "fs/writeStream/chunk",
+        {"handleId": "w-oops", "seq": 1, "chunk": base64.b64encode(b"bb").decode()},
+    )
+    await server.send_notification(
+        "fs/writeStream/chunk",
+        {"handleId": "w-oops", "seq": 0, "chunk": base64.b64encode(b"aa").decode()},
+    )
+    with pytest.raises(ProtocolError, match="expected seq 0, got 1") as exc:
+        await server.send_request("fs/writeStream/done", {"handleId": "w-oops"})
+    assert exc.value.code == JSON_RPC_INVALID_REQUEST
+    assert bytes(server.file) == b""
+    # done 一次性：句柄已摘除，重复 done → unknown handle
+    with pytest.raises(ProtocolError, match="unknown handle") as exc:
+        await server.send_request("fs/writeStream/done", {"handleId": "w-oops"})
+    assert exc.value.code == EXECUTOR_NOT_FOUND
+
+    # close 即 abort：close 后 done 同样 unknown handle（半成品留盘）
+    # （先走一条正常流证明顺序块照常落盘收尾——不受新执法影响）
+    await fs.write_stream("file:///tmp/y", [b"aa"], block_size=2)
+    assert bytes(server.file) == b"aa"
+    await server.send_request(
+        "fs/writeStream", {"handleId": "w-abort", "path": "file:///tmp/z"}
+    )
+    await server.send_notification(
+        "fs/writeStream/chunk",
+        {"handleId": "w-abort", "seq": 0, "chunk": base64.b64encode(b"z").decode()},
+    )
+    await server.send_request("fs/close", {"handleId": "w-abort"})
+    with pytest.raises(ProtocolError, match="unknown handle") as exc:
+        await server.send_request("fs/writeStream/done", {"handleId": "w-abort"})
+    assert exc.value.code == EXECUTOR_NOT_FOUND
 
 
 class FakeReadStreamServer(FakeTransport):

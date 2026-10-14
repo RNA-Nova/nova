@@ -29,6 +29,7 @@ from nova_protocol import (
     DirEntry,
     EnvironmentInfo,
     FileMetadata,
+    FileSystemSandboxContext,
     FsCanonicalizeParams,
     FsCanonicalizeResponse,
     FsCloseParams,
@@ -73,6 +74,14 @@ def _new_handle_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:30]}"
 
 
+def _sandbox_wire(sandbox: FileSystemSandboxContext | None) -> dict | None:
+    """按请求沙箱上下文的上线形态（对位 Rust `sandbox.cloned()` 全方法透传；
+    None 项不上线，与 process/start 出货路径同纪律）"""
+    if sandbox is None:
+        return None
+    return sandbox.model_dump(by_alias=True, exclude_none=True)
+
+
 class FileSystemManager:
     """文件系统管理器
 
@@ -105,13 +114,23 @@ class FileSystemManager:
         resolve = getattr(self._transport, "resolve_channel", None)
         return resolve(method) if resolve is not None else None
 
-    async def read_file(self, path: str, follow_symlinks: bool | None = None) -> bytes:
+    async def read_file(
+        self,
+        path: str,
+        follow_symlinks: bool | None = None,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
+    ) -> bytes:
         """读取文件（小文件推荐）
 
         `follow_symlinks=False` 时逐组件拒绝穿越符号链接（no-follow 语义）；
         None 不下发该字段，服务端按默认 true（旧行为）处理。
+        `sandbox`：按请求沙箱上下文（对位 Rust RemoteFileSystem 全方法透传）；
+        None = 无上下文直开（现状语义）。
         """
-        params = FsReadFileParams(path=path, followSymlinks=follow_symlinks)
+        params = FsReadFileParams(
+            path=path, followSymlinks=follow_symlinks, sandbox=_sandbox_wire(sandbox)
+        )
         result = await self._transport.send_request(
             FS_READ_FILE, params.model_dump(by_alias=True, exclude_none=True)
         )
@@ -145,6 +164,12 @@ class FileSystemManager:
         背压：每流队列上限 READ_STREAM_QUEUE_CAPACITY 块——消费过慢宁可
         断流报错（FileSystemError），不阻塞连接级通知分发（对位 Rust 的
         try_send 断流语义）。
+
+        放弃收摊（对位 Rust `PushReadRegistration::drop`）：消费者中途放弃
+        （break/aclose/cancel——未收到 done/failed 终态）时 best-effort 经
+        数据面通道发 `fs/close`（句柄随数据面连接存活）；不补这一手，服务端
+        会把整个文件读完并推入无人接收的路由。done / failed 终态服务端已
+        自行收摊，不再发。
         """
         handle_id = _new_handle_id("s")
         queue = self._router.register_stream(
@@ -170,14 +195,17 @@ class FileSystemManager:
         FsReadStreamResponse.model_validate(result)
 
         received = 0
+        terminated = False  # 收到服务端终态（done/failed）= 服务端已自行收摊
         try:
             while True:
                 event: ReadStreamEvent = await queue.get()
                 if event.kind == "failed":
+                    terminated = True
                     raise FileSystemError(
                         f"read stream `{handle_id}` failed: {event.error}"
                     )
                 if event.kind == "done":
+                    terminated = True
                     if received != event.total_bytes:
                         raise FileSystemError(
                             f"read stream `{handle_id}` incomplete: received "
@@ -188,15 +216,36 @@ class FileSystemManager:
                 yield event.chunk
         finally:
             self._router.unregister_stream(handle_id)
+            if not terminated:
+                # 消费者中途放弃/连接断开：best-effort fs/close 收摊（对位 Rust
+                # PushReadRegistration::drop）——句柄随数据面连接，须走数据面
+                # 通道；连接已死时尽力而为
+                try:
+                    await self._transport.send_request(
+                        FS_CLOSE,
+                        FsCloseParams(handleId=handle_id).model_dump(by_alias=True),
+                        channel=CHANNEL_DATA,
+                    )
+                except Exception:
+                    pass
 
     async def write_file(
-        self, path: str, data: bytes, follow_symlinks: bool | None = None
+        self,
+        path: str,
+        data: bytes,
+        follow_symlinks: bool | None = None,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
     ) -> None:
-        """写入文件；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）"""
+        """写入文件；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
+
+        `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        """
         params = FsWriteFileParams(
             path=path,
             dataBase64=base64.b64encode(data).decode(),
             followSymlinks=follow_symlinks,
+            sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(
             FS_WRITE_FILE, params.model_dump(by_alias=True, exclude_none=True)
@@ -254,11 +303,11 @@ class FileSystemManager:
         seq = 0
         try:
             async for piece in _iterate_bytes(chunks):
-                for offset in range(0, len(piece), block_size):
+                for piece_offset in range(0, len(piece), block_size):
                     notification = FsWriteStreamChunkNotification(
                         handleId=handle_id,
                         seq=seq,
-                        chunk=piece[offset : offset + block_size],
+                        chunk=piece[piece_offset : piece_offset + block_size],
                         eof=False,
                     )
                     await self._transport.send_notification(
@@ -447,29 +496,51 @@ class FileSystemManager:
             ) from err
         return attempts
 
-    async def read_dir(self, path: str) -> list[DirEntry]:
-        """列出目录"""
-        params = FsReadDirectoryParams(path=path)
+    async def read_dir(
+        self, path: str, *, sandbox: FileSystemSandboxContext | None = None
+    ) -> list[DirEntry]:
+        """列出目录；`sandbox`：按请求沙箱上下文，语义同 `read_file`"""
+        params = FsReadDirectoryParams(path=path, sandbox=_sandbox_wire(sandbox))
         result = await self._transport.send_request(
             FS_READ_DIRECTORY, params.model_dump(by_alias=True)
         )
         response = FsReadDirectoryResponse.model_validate(result)
         return response.entries
 
-    async def walk(self, path: str, options: WalkOptions | None = None) -> WalkOutcome:
-        """目录遍历（界限经 WalkOptions——深度/目录数/条目数上限）"""
-        params = FsWalkParams(path=path, options=options or WalkOptions())
+    async def walk(
+        self,
+        path: str,
+        options: WalkOptions | None = None,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
+    ) -> WalkOutcome:
+        """目录遍历（界限经 WalkOptions——深度/目录数/条目数上限）；`sandbox`
+        语义同 `read_file`"""
+        params = FsWalkParams(
+            path=path, options=options or WalkOptions(), sandbox=_sandbox_wire(sandbox)
+        )
         result = await self._transport.send_request(
             FS_WALK, params.model_dump(by_alias=True)
         )
         return WalkOutcome.model_validate(result)
 
     async def create_dir(
-        self, path: str, recursive: bool = True, follow_symlinks: bool | None = None
+        self,
+        path: str,
+        recursive: bool = True,
+        follow_symlinks: bool | None = None,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
     ) -> None:
-        """创建目录；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）"""
+        """创建目录；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
+
+        `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        """
         params = FsCreateDirectoryParams(
-            path=path, recursive=recursive, followSymlinks=follow_symlinks
+            path=path,
+            recursive=recursive,
+            followSymlinks=follow_symlinks,
+            sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(
             FS_CREATE_DIRECTORY, params.model_dump(by_alias=True, exclude_none=True)
@@ -481,40 +552,66 @@ class FileSystemManager:
         recursive: bool = True,
         force: bool = False,
         follow_symlinks: bool | None = None,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
     ) -> None:
         """删除文件或目录；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
 
         注意：no-follow（False）不支持递归删除（服务端报 Unsupported）。
+        `sandbox`：按请求沙箱上下文，语义同 `read_file`。
         """
         params = FsRemoveParams(
-            path=path, recursive=recursive, force=force, followSymlinks=follow_symlinks
+            path=path,
+            recursive=recursive,
+            force=force,
+            followSymlinks=follow_symlinks,
+            sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(
             FS_REMOVE, params.model_dump(by_alias=True, exclude_none=True)
         )
 
-    async def copy(self, src: str, dst: str, recursive: bool = False) -> None:
-        """复制文件或目录"""
+    async def copy(
+        self,
+        src: str,
+        dst: str,
+        recursive: bool = False,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
+    ) -> None:
+        """复制文件或目录；`sandbox`：按请求沙箱上下文，语义同 `read_file`"""
         params = FsCopyParams(
             sourcePath=src,
             destinationPath=dst,
             recursive=recursive,
+            sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(FS_COPY, params.model_dump(by_alias=True))
 
     async def metadata(
-        self, path: str, follow_symlinks: bool | None = None
+        self,
+        path: str,
+        follow_symlinks: bool | None = None,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
     ) -> FileMetadata:
-        """获取文件元数据；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）"""
-        params = FsGetMetadataParams(path=path, followSymlinks=follow_symlinks)
+        """获取文件元数据；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
+
+        `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        """
+        params = FsGetMetadataParams(
+            path=path, followSymlinks=follow_symlinks, sandbox=_sandbox_wire(sandbox)
+        )
         result = await self._transport.send_request(
             FS_GET_METADATA, params.model_dump(by_alias=True, exclude_none=True)
         )
         return FileMetadata.model_validate(result)
 
-    async def canonicalize(self, path: str) -> str:
-        """规范化路径"""
-        params = FsCanonicalizeParams(path=path)
+    async def canonicalize(
+        self, path: str, *, sandbox: FileSystemSandboxContext | None = None
+    ) -> str:
+        """规范化路径；`sandbox`：按请求沙箱上下文，语义同 `read_file`"""
+        params = FsCanonicalizeParams(path=path, sandbox=_sandbox_wire(sandbox))
         result = await self._transport.send_request(
             FS_CANONICALIZE, params.model_dump(by_alias=True)
         )
@@ -575,10 +672,19 @@ class FileSystemManager:
         )
         FsWriteBlockResponse.model_validate(result)
 
-    async def close(self, handle_id: str) -> None:
-        """关闭随机访问句柄（读/写通用）"""
+    async def close(self, handle_id: str, *, channel: str | None = None) -> None:
+        """关闭随机访问句柄（读/写通用）
+
+        `channel`：池化传输下显式指定落点通道。句柄状态随连接存活——
+        readStream/writeStream 开出的句柄在数据面连接上，跨连接 close 得
+        -32004 未知句柄；关这类句柄须与 write_stream 中止路径同纪律传
+        `CHANNEL_DATA`。None（默认）走方法路由表兜底（fs/open 句柄同
+        连接——控制面；裸传输/单连接无通道概念）。
+        """
         params = FsCloseParams(handleId=handle_id)
-        await self._transport.send_request(FS_CLOSE, params.model_dump(by_alias=True))
+        await self._transport.send_request(
+            FS_CLOSE, params.model_dump(by_alias=True), channel=channel
+        )
 
     async def _file_write_streaming_supported(self) -> bool:
         """fileWriteStreaming 能力位（对位 codex e7798c9944 的客户端门）：

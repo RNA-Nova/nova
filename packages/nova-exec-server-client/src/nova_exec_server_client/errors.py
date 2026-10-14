@@ -18,6 +18,9 @@ JSON_RPC_INTERNAL_ERROR = -32603
 EXECUTOR_NOT_FOUND = -32004
 #: 会话仍附着在别的连接上（resume 竞争；恢复视之为可重试）
 SESSION_ALREADY_ATTACHED = -32010
+#: JSON-RPC 传输关闭（服务端发送的传输级错误；恢复按可重试传输关闭处理——
+#: 对位 Rust `is_transport_closed_error`，client.rs:1878-1889）
+JSON_RPC_TRANSPORT_CLOSED = -32000
 
 
 class ExecutorError(Exception):

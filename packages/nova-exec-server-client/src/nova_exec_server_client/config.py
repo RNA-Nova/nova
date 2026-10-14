@@ -57,8 +57,9 @@ PROJECT_CONFIG_DIR_NAME = ".nova"
 PROJECT_CONFIG_FILE_NAME = "settings.json"
 PROJECT_SECTION_KEY = "exec-server"
 
-#: 端点 id 最大长度（对位 codex MAX_ENVIRONMENT_ID_LEN）
-MAX_ENVIRONMENT_ID_LENGTH = 64
+#: 端点 id 最大长度（对位 codex MAX_ENVIRONMENT_ID_LEN）——常量本体在
+#: nova_protocol（上方导入），此处不再重定义（曾本地重赋同值，值漂移时会
+#: 静默分叉；审计范围C C2）
 
 
 def default_exec_server_home() -> Path:

@@ -1,7 +1,7 @@
 """stdio 集成测试：spawn 真实 nova-exec-server 二进制（--listen stdio）。
 
 二进制定位顺序：环境变量 NOVA_EXECUTOR_BIN → 仓库内 cargo debug 产物
-（packages/nova_exec_server_client/target/debug/nova-exec-server）→ PATH。
+（packages/nova-exec-server/target/debug/nova-exec-server）→ PATH。
 找不到即整模块 skip（可用 `cargo build -p nova-exec-server-cli` 构建）。
 """
 
@@ -14,11 +14,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from nova_exec_server_client import ExecutorClient, ProcessError
 
 _REPO_TARGET = (
     Path(__file__).resolve().parents[2]
-    / "nova_exec_server_client"
+    / "nova-exec-server"
     / "target"
     / "debug"
     / "nova-exec-server"
@@ -134,7 +135,12 @@ async def test_stdio_write_stream_zero_bytes():
 
 @pytest.mark.asyncio
 async def test_stdio_write_stream_out_of_order_surfaces_at_done():
-    """服务端 seq 校验：乱序错误在 done 回报且不留半截文件。
+    """服务端 seq 校验：乱序错误在 done 回报，且半成品留在盘上。
+
+    对位 Rust file_system_handler.rs `write_stream_out_of_order_chunk_fails_done_and_keeps_partial_file`
+    与 PROTOCOL.md 的 v1.12 中断语义翻转：中止/失败不再删半成品。乱序块本身
+    不落盘（file_handle.rs 违规即记终态、跳过写入），开句柄时创建的空文件
+    留在盘上（本例"半成品"即 0 字节文件）。
 
     客户端 write_stream 自身保证顺序，这里直接手发协议流量模拟乱序。
     """
@@ -142,17 +148,25 @@ async def test_stdio_write_stream_out_of_order_surfaces_at_done():
 
     async with make_client() as client:
         test_path = "file:///tmp/nova-exec-server-client-wstream-oops.bin"
+        native_path = Path("/tmp/nova-exec-server-client-wstream-oops.bin")
         transport = client.transport  # 单连接：控制面即全部
-        await transport.send_request(
-            "fs/writeStream", {"handleId": "oops", "path": test_path}
-        )
-        await transport.send_notification(
-            "fs/writeStream/chunk",
-            {"handleId": "oops", "seq": 1, "chunk": "YWI=", "eof": True},
-        )
-        with pytest.raises(ProtocolError, match="expected seq 0, got 1"):
-            await transport.send_request("fs/writeStream/done", {"handleId": "oops"})
-        assert not Path("/tmp/nova-exec-server-client-wstream-oops.bin").exists()
+        try:
+            await transport.send_request(
+                "fs/writeStream", {"handleId": "oops", "path": test_path}
+            )
+            await transport.send_notification(
+                "fs/writeStream/chunk",
+                {"handleId": "oops", "seq": 1, "chunk": "YWI=", "eof": True},
+            )
+            with pytest.raises(ProtocolError, match="expected seq 0, got 1"):
+                await transport.send_request(
+                    "fs/writeStream/done", {"handleId": "oops"}
+                )
+            # v1.12 翻转：失败不删半成品——文件留盘（乱序块未落盘，内容为空）
+            assert native_path.exists()
+            assert native_path.read_bytes() == b""
+        finally:
+            native_path.unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio

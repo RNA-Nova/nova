@@ -141,7 +141,10 @@ async def test_read_stream_open_failure_unregisters():
 
 @pytest.mark.asyncio
 async def test_read_stream_consumer_abandon_cleans_up():
-    """消费者中途放弃（break/aclose）：路由注销，后续通知按未知句柄丢弃"""
+    """消费者中途放弃（break/aclose）：路由注销，后续通知按未知句柄丢弃；
+    同时 best-effort 经数据面通道发 fs/close 收摊（对位 Rust
+    PushReadRegistration::drop——不补这一手，服务端会把整个文件读完并
+    推入无人接收的路由）"""
     fs, transport = make_fs()
     agen, handle_id, first = await start_stream(fs, transport)
 
@@ -149,9 +152,45 @@ async def test_read_stream_consumer_abandon_cleans_up():
     assert await first == b"x"
     await agen.aclose()
     assert handle_id not in fs._router._streams
+    # 收摊请求：fs/close 带句柄 id，走数据面通道（句柄随数据面连接存活）
+    close_requests = [r for r in transport.requests if r[0] == "fs/close"]
+    assert close_requests == [("fs/close", {"handleId": handle_id}, "data")]
     # 迟到的通知静默丢弃，不炸
     await transport.handlers[0](chunk_msg(handle_id, 1, b"y"))
     await transport.handlers[0](done_msg(handle_id, 2))
+
+
+@pytest.mark.asyncio
+async def test_read_stream_terminal_events_skip_close():
+    """done/failed 终态服务端已自行收摊——不再发 fs/close（对位 Rust 的
+    active=false 跳过：正常完成与服务端错误终态同纪律）"""
+    # 正常完成：done 收齐
+    fs, transport = make_fs()
+    agen, handle_id, first = await start_stream(fs, transport)
+    await transport.handlers[0](chunk_msg(handle_id, 0, b"x"))
+    assert await first == b"x"
+    await transport.handlers[0](done_msg(handle_id, 1))
+    with pytest.raises(StopAsyncIteration):
+        await agen.__anext__()
+    assert [r for r in transport.requests if r[0] == "fs/close"] == []
+
+    # 服务端错误终态：done 携带 error
+    fs, transport = make_fs()
+    agen, handle_id, first = await start_stream(fs, transport)
+    await transport.handlers[0](chunk_msg(handle_id, 0, b"x"))
+    assert await first == b"x"
+    await transport.handlers[0](done_msg(handle_id, 1, error="disk error"))
+    with pytest.raises(FileSystemError, match="disk error"):
+        await agen.__anext__()
+    assert [r for r in transport.requests if r[0] == "fs/close"] == []
+
+    # 连接恢复失败清扫（fail_channel 合成 failed 终态）：同样不再发
+    fs, transport = make_fs()
+    agen, handle_id, first = await start_stream(fs, transport)
+    fs._router.fail_channel(None, "exec-server transport disconnected")
+    with pytest.raises(FileSystemError, match="disconnected"):
+        await first
+    assert [r for r in transport.requests if r[0] == "fs/close"] == []
 
 
 @pytest.mark.asyncio
@@ -166,9 +205,16 @@ async def test_read_stream_connection_failed_fails_consumer():
 
 
 @pytest.mark.asyncio
-async def test_read_stream_via_client_survives_data_channel_reconnect():
-    """端到端：connections=2 客户端，数据面断线重连带 resumeSessionId，
-    注册表跨重连存活，重连后推送继续路由到同一消费队列"""
+async def test_read_stream_via_client_fails_after_data_channel_reconnect():
+    """端到端：connections=2 客户端，数据面断线重连带 resumeSessionId——
+    会话恢复成功（进程表/输出缓冲随会话存活），但 fs 推送不跨重连：
+    服务端 resume 不重定向推送、句柄表断连即清，恢复成功后挂起的读流
+    消费者必须收到终态失败（FileSystemError），而不是干等或"流继续"。
+
+    依赖 A 批 T1 的 src 清扫语义（recovery/notifications：恢复成功即
+    fail_channel 清扫该通道挂起流）；src 未落地前本用例以 wait_for 超时
+    响亮判红，不倒退回"手工补推伪造流继续"的撒谎形态。
+    """
     sink: list[FakeTransport] = []
 
     def factory() -> FakeTransport:
@@ -210,12 +256,12 @@ async def test_read_stream_via_client_survives_data_channel_reconnect():
         assert resumed.requests[0][0] == "initialize"
         assert resumed.requests[0][1]["resumeSessionId"] == "fake-session"
 
-        # 服务端 resume 后把推送重定向到新连接：同一消费队列继续收件
-        await resumed.handlers[0](chunk_msg(handle_id, 1, b"cd", eof=True))
-        assert await next_anext == b"cd"
-        await resumed.handlers[0](done_msg(handle_id, 4))
-        with pytest.raises(StopAsyncIteration):
-            await agen.__anext__()
+        # 恢复成功 ≠ 流继续：句柄随旧连接消亡，消费者收终态失败
+        # （真实服务端不会把旧句柄的推送重定向到新连接——不手工补推伪造）
+        with pytest.raises(FileSystemError, match="failed"):
+            await asyncio.wait_for(next_anext, 5)
+        # 挂起流已清扫，路由表不留残
+        assert handle_id not in client.notifications._streams
     finally:
         await client.disconnect()
 

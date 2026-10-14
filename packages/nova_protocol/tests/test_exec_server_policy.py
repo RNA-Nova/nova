@@ -108,6 +108,40 @@ def test_check_multiple_aggregates():
     assert evaluation.decision is Decision.PROMPT
 
 
+# ── get_allowed_prefixes（对位 policy.rs 同名 + render_pattern_token）──
+
+
+def test_get_allowed_prefixes_renders_multi_choice_tokens():
+    """多选 token 渲染为 "[a|b]" 单 token（render_pattern_token——不丢信息；
+    旧实现取 alternatives[0] 静默丢多选）"""
+    policy = parse_policy(
+        "t.rules",
+        'prefix_rule(pattern=["git", ["push", "fetch"], "--force"], decision="allow")',
+    )
+    assert policy.get_allowed_prefixes() == [("git", "[push|fetch]", "--force")]
+
+
+def test_get_allowed_prefixes_allow_only_sorted_deduped():
+    """只收 allow 规则；输出排序 + 去重（对位 codex 的 sort()+dedup()）"""
+    policy = parse_policy(
+        "t.rules",
+        'prefix_rule(pattern=["git", "status"], decision="allow")\n'
+        'prefix_rule(pattern=["git", "push"], decision="forbidden")\n'
+        'prefix_rule(pattern=["ls"], decision="prompt")\n'
+        'prefix_rule(pattern=["cargo", "build"], decision="allow")\n'
+        # 同前缀重复规则 → 去重
+        'prefix_rule(pattern=["git", "status"], decision="allow")\n',
+    )
+    assert policy.get_allowed_prefixes() == [
+        ("cargo", "build"),
+        ("git", "status"),
+    ]
+
+
+def test_get_allowed_prefixes_empty_policy():
+    assert Policy.empty().get_allowed_prefixes() == []
+
+
 # ── host 归一 ──
 
 
@@ -120,6 +154,27 @@ def test_normalize_host():
         normalize_network_rule_host("*.example.com")
     with pytest.raises(ValueError):
         normalize_network_rule_host("")
+
+
+def test_normalize_host_port_must_be_ascii_digits():
+    """端口判定只认 ASCII 数字（对位 codex `is_ascii_digit`——`str.isdigit()`
+    收非 ASCII 数字的旧行为会让 py 剥落端口、codex 保留整串，双端分歧）"""
+    # 阿拉伯-印度数字"٤٤٣"不是合法端口：host:port 整串保留为 host（不剥落）
+    assert normalize_network_rule_host("example.com:٤٤٣") == "example.com:٤٤٣"
+    # 上标数字同理不剥落
+    assert normalize_network_rule_host("example.com:⁴⁴³") == "example.com:⁴⁴³"
+    # bracket 形态的非 ASCII 端口 → unsupported suffix（与 codex 一致报错）
+    with pytest.raises(ValueError, match="unsupported suffix"):
+        normalize_network_rule_host("[::1]:٨٠٨٠")
+    # ASCII 端口照常剥落
+    assert normalize_network_rule_host("example.com:443") == "example.com"
+    assert normalize_network_rule_host("[::1]:8080") == "::1"
+
+
+def test_network_rule_protocol_parse_error_names_the_value():
+    """协议解析错误文案带原始值尾巴（对位 codex rule.rs 的 " (got {other})"）"""
+    with pytest.raises(ValueError, match=r"\(got gopher\)"):
+        NetworkRuleProtocol.parse("gopher")
 
 
 # ── amend 文本 ──
@@ -135,12 +190,28 @@ def test_format_prefix_rule():
 
 
 def test_format_network_rule():
+    """Forbidden 的写盘文本对位 codex amend.rs writer：`decision="deny"`
+    （不是 decision.value 的 "forbidden"；解析侧 "deny" 读回 Forbidden，
+    写读互认）"""
     assert (
         format_network_rule(
             "Example.com", NetworkRuleProtocol.HTTPS, Decision.FORBIDDEN
         )
-        == 'network_rule(host="example.com", protocol="https", decision="forbidden")'
+        == 'network_rule(host="example.com", protocol="https", decision="deny")'
     )
+
+
+def test_format_network_rule_rejects_empty_justification():
+    """justification 空串/纯空白即拒（对位 codex amend.rs 守卫——否则写出的
+    行自己 parse 不回来：NetworkRule 校验拒绝空 justification）"""
+    for blank in ("", "   "):
+        with pytest.raises(ValueError, match="justification cannot be empty"):
+            format_network_rule(
+                "example.com",
+                NetworkRuleProtocol.HTTPS,
+                Decision.ALLOW,
+                justification=blank,
+            )
 
 
 def test_amend_text_roundtrips_through_parser():
@@ -150,6 +221,18 @@ def test_amend_text_roundtrips_through_parser():
     line = format_network_rule("example.com", NetworkRuleProtocol.HTTP, Decision.ALLOW)
     policy = parse_policy("t.rules", line)
     assert policy.network_rules[0].host == "example.com"
+    # Forbidden → "deny" 写盘后 parse 回 Forbidden（对位 amend.rs 与
+    # parse_network_rule_decision 的写读互认）
+    line = format_network_rule(
+        "blocked.example.com",
+        NetworkRuleProtocol.HTTPS,
+        Decision.FORBIDDEN,
+        justification="known-bad",
+    )
+    policy = parse_policy("t.rules", line)
+    rule = policy.network_rules[0]
+    assert rule.decision is Decision.FORBIDDEN
+    assert rule.justification == "known-bad"
 
 
 # ── denial 启发式 ──

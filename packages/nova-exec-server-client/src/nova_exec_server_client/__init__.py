@@ -52,6 +52,10 @@ from nova_protocol import (
     WindowsSandboxProxySettingsMode,
 )
 
+# 线型（environment_status() 的返回类型）以别名入驻——包顶 `EnvironmentStatus`
+# 归连接状态型（environments.py），遮蔽修复（审计范围C C1）
+from nova_protocol import EnvironmentStatus as WireEnvironmentStatus
+
 from .client import ExecutorClient
 from .config import (
     NOVA_EXEC_SERVER_HOME_ENV,
@@ -138,6 +142,7 @@ __all__ = [
     "HttpRedirectPolicy",
     "EnvironmentInfo",
     "EnvironmentStatus",
+    "WireEnvironmentStatus",
     "EnvironmentCapabilities",
     "EnvironmentConfigReadParams",
     "EnvironmentConfigReadResponse",
@@ -178,6 +183,7 @@ __all__ = [
     "EnvironmentManager",
     "EnvironmentConnectionState",
     "EnvironmentStatus",
+    "WireEnvironmentStatus",
     "JSON_RPC_INVALID_REQUEST",
     "JSON_RPC_METHOD_NOT_FOUND",
     "JSON_RPC_INVALID_PARAMS",
