@@ -706,11 +706,13 @@ async def test_ws_auth_error_retried_until_recovery_timeout():
     )
     await managed.connect()
     first.drop("test drop")
-    for _ in range(200):
-        if managed.state == "failed":
-            break
+    # 等恢复撞总时限转 failed：死线轮询而非固定次数（Windows 的 asyncio
+    # 定时器粒度粗，固定 200×10ms 在慢调度下可能不够覆盖恢复窗口）
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while managed.state != "failed":
+        assert loop.time() < deadline, "recovery did not fail within 5s"
         await asyncio.sleep(0.01)
-    assert managed.state == "failed"
     assert attempts > 1  # 可重试：多次尝试直到恢复总时限
     assert "invalid or missing token" in managed._failure_message
     await managed.disconnect()
