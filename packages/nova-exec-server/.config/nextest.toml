@@ -17,6 +17,13 @@ inherits = "default"
 [test-groups.windows_sandbox_legacy_sessions]
 max-threads = 1
 
+# exec_process 的 remote_* 族（真 exec-server 子进程 + fake bwrap + 沙箱
+# helper 全链 spawn）：共享 runner 高负载 + 套件全量并行双重挤压下内部
+# 死线必爆（245 load ~22 实证，run 38634818965；隔离单跑 0.2s 绿）——
+# 序列化减少与套件自身的 CPU 争用（对位 windows_sandbox_accounts 组先例）。
+[test-groups.exec_process_remote_spawn]
+max-threads = 1
+
 # 对位 codex 9212b3eca8：共享 runner 提升沙箱账户的用例单线程排队
 [test-groups.windows_sandbox_accounts]
 max-threads = 1
@@ -95,9 +102,12 @@ filter = 'package(nova-exec-server) & test(exited_process_keeps_network_proxy_un
 retries = 3
 
 [[profile.default.overrides]]
-# 远程沙箱拉起族（fake bwrap + RPC server spawn，内部死线 ~2s）：共享
-# runner 高负载下挤压超时（245 load ~20 时两连红，run 38632367667 实证；
-# 低负载窗口同用例 flaky 自愈在案）。与快照族同类，retries 吸收。
+# 远程沙箱拉起族（exec_process 的 remote_*：真 exec-server 子进程 + fake
+# bwrap + 沙箱 helper 全链 spawn，内部死线 ~2s）：共享 runner 高负载 +
+# 套件全量并行双重挤压下连 retries=3 都救不回（245 load ~22 实证，run
+# 38634818965；隔离单跑 0.2s 绿）。序列化该族（不与套件自身并行争 CPU）+
+# retries 吸收残余波动——与 windows_sandbox_accounts 组同先例。
 platform = 'cfg(unix)'
-filter = 'package(nova-exec-server) & test(remote_process_keeps_sandbox_helper_visible_with_restricted_reads)'
+filter = 'package(nova-exec-server) & binary(exec_process) & test(/^remote_/)'
+test-group = 'exec_process_remote_spawn'
 retries = 3
