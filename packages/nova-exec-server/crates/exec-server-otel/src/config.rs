@@ -113,9 +113,10 @@ pub struct OtelFileConfig {
 pub fn load_otel_settings(executor_home: &std::path::Path) -> std::io::Result<OtelSettings> {
     let config = read_otel_file_config(executor_home)?;
     if config.exporter.is_some() || config.trace_exporter.is_some() {
-        tracing::warn!(
-            "[otel] 的 exporter/trace_exporter 字段本批未接（忽略——traces/logs 接线归后续批次）"
-        );
+        // 用 eprintln 而非 tracing::warn!：本函数的唯一生产调用方是 CLI 的
+        // assemble_otel_provider，运行在 install_stderr_logging 之前——
+        // 此间 tracing 会落进无 subscriber 真空被丢弃。
+        eprintln!("[otel] 的 exporter/trace_exporter 字段本批未接（忽略——traces/logs 接线归后续批次）");
     }
     Ok(OtelSettings {
         environment: config

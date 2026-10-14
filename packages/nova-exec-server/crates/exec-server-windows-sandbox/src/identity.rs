@@ -286,7 +286,7 @@ pub fn require_logon_sandbox_creds(
     let needed_write = write_roots_override
         .map(<[PathBuf]>::to_vec)
         .unwrap_or_else(|| gather_write_roots_for_permissions(permissions, command_cwd, env_map));
-    // Do not grant the capability token write access to NOVA_HOME/.sandbox; the setup helper
+    // Do not grant the capability token write access to NOVA_EXEC_SERVER_HOME/.sandbox; the setup helper
     // grants the sandbox group access separately through lock_sandbox_dir.
     let request = SandboxSetupRequest {
         permissions,

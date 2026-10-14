@@ -647,3 +647,138 @@ async fn read_stream_plain_close_still_finishes_with_unknown_handle_error() -> R
     );
     Ok(())
 }
+
+/// 写任务排空的代际守卫（五轮审计 A 级回归）：close→同名重开后，旧写任务的
+/// 剩余积压块属于旧流——继续写会把旧内容交错进新文件（同路径重开共享 inode）。
+/// 被取代（代际不符）即静默收尾：不落盘、不摘新句柄。
+#[tokio::test]
+async fn write_stream_task_stops_draining_after_supersede() -> Result<()> {
+    use std::sync::Arc;
+
+    use super::WriteStreamInput;
+
+    let manager = FileHandleManager::default();
+    // 同名新条目已在表（模拟 close→重开完成）
+    let (_id, new_generation) = manager
+        .open(
+            "w-sup".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
+    // 旧流任务携带上一代代际与旧文件（同路径重开场景的旧 fd 持有方）
+    let native = tempfile::NamedTempFile::new()?;
+    let path = native.path().to_path_buf();
+    let file = Arc::new(native.reopen()?);
+    let (tx, rx) = tokio::sync::mpsc::channel(WRITE_STREAM_QUEUE_CAPACITY);
+    let task = tokio::spawn(super::run_write_stream_task(
+        manager.clone(),
+        "w-sup".to_string(),
+        new_generation.wrapping_sub(1), // 旧代际（已被取代；代际从 0 起，wrapping 防下溢）
+        file,
+        rx,
+        Default::default(),
+        /*offset*/ 0,
+    ));
+    // 积压块到达时条目已被取代——不得落盘
+    tx.send(WriteStreamInput::Chunk {
+        seq: 0,
+        bytes: b"stale".to_vec(),
+        eof: false,
+    })
+    .await
+    .expect("chunk should send");
+    drop(tx);
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("stale writer task should stop")
+        .expect("write stream task should not panic");
+    assert_eq!(
+        std::fs::read(&path)?,
+        b"",
+        "stale chunk must not land after the handle id was reopened"
+    );
+    // 新条目未被旧任务的收尾误摘
+    assert_eq!(manager.handle_generation("w-sup"), Some(new_generation));
+    Ok(())
+}
+
+/// 对照组（钉住既有语义）：纯 close/断连（条目摘除、无重开）后排空继续——
+/// 队列里已收的块落定落盘（文件留盘供断点续传，v1.12 语义）。
+#[tokio::test]
+async fn write_stream_task_still_drains_after_plain_close() -> Result<()> {
+    use std::sync::Arc;
+
+    use super::WriteStreamInput;
+
+    let manager = FileHandleManager::default();
+    let native = tempfile::NamedTempFile::new()?;
+    let path = native.path().to_path_buf();
+    let file = Arc::new(native.reopen()?);
+    let (tx, rx) = tokio::sync::mpsc::channel(WRITE_STREAM_QUEUE_CAPACITY);
+    let task = tokio::spawn(super::run_write_stream_task(
+        manager.clone(),
+        "w-drain".to_string(),
+        /*generation*/ 0, // 无注册条目（模拟条目已被摘除）
+        file,
+        rx,
+        Default::default(),
+        /*offset*/ 0,
+    ));
+    tx.send(WriteStreamInput::Chunk {
+        seq: 0,
+        bytes: b"landed".to_vec(),
+        eof: false,
+    })
+    .await
+    .expect("chunk should send");
+    drop(tx);
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("writer task should drain and exit after plain close")
+        .expect("write stream task should not panic");
+    assert_eq!(
+        std::fs::read(&path)?,
+        b"landed",
+        "queued chunks must still land after plain close (drain semantics)"
+    );
+    Ok(())
+}
+
+/// 通用 Err 臂普通路径钉住：readStream 的读块以非 NotFound I/O 错误失败时
+///（offset=u64::MAX → pread EINVAL），done 必须带 error 到达（五轮审计 B 级——
+/// 该臂此前无任何测试覆盖）。
+#[tokio::test]
+async fn read_stream_non_not_found_read_error_reaches_done() -> Result<()> {
+    let manager = FileHandleManager::default();
+    let mut file = tempfile::tempfile()?;
+    file.write_all(b"data")?;
+    file.flush()?;
+    let (_id, generation) = manager
+        .open(
+            "r-err".to_string(),
+            ready(Ok(File::from_std(file.try_clone()?))),
+        )
+        .await?;
+
+    let (total_bytes, error, superseded) = super::stream_file_blocks(
+        &manager,
+        "r-err",
+        generation,
+        u64::MAX, // pread 立返 EINVAL（非 NotFound）
+        /*len*/ None,
+        /*block_size*/ 4 * 1024,
+        async |_seq, _bytes, _eof| true,
+    )
+    .await;
+
+    assert!(!superseded);
+    assert_eq!(total_bytes, 0);
+    let error = error.expect("read error must reach done");
+    assert!(
+        !error.contains("unknown file handle"),
+        "expected a read error, not a handle error: {error}"
+    );
+    // 读失败的关句柄语义保留（与本代一致）
+    assert_eq!(manager.handle_generation("r-err"), None);
+    Ok(())
+}

@@ -2480,6 +2480,7 @@ dependencies = [
  "nova-exec-server-otel",
  "nova-exec-server-protocol-core",
  "nova-exec-server-utils-absolute-path",
+ "nova-exec-server-utils-cargo-bin",
  "nova-exec-server-utils-pty",
  "nova-exec-server-utils-string",
  "pretty_assertions",

@@ -323,13 +323,13 @@ mod tests {
     fn detects_fd_backed_read_only_mount_support_in_system_bwrap_help() {
         let temp_dir = tempfile::tempdir().expect("temp directory");
         let fake_bwrap_path = temp_dir.path().join("bwrap");
-        std::fs::write(
+        // 对位 codex 39f4277087：经 write_executable 写入（Linux 上特意经
+        // 子进程写——防兄弟测试 fork 继承可写 fd 导致 exec 时 ETXTBSY）
+        nova_exec_server_utils_cargo_bin::write_executable(
             &fake_bwrap_path,
             "#!/bin/sh\nprintf '%s\\n' '--as-pid-1' '--perms' '--argv0' '--ro-bind-fd'\n",
         )
         .expect("write fake bubblewrap");
-        std::fs::set_permissions(&fake_bwrap_path, std::fs::Permissions::from_mode(0o755))
-            .expect("make fake bubblewrap executable");
 
         assert_eq!(
             system_bwrap_capabilities(&fake_bwrap_path),

@@ -66,7 +66,7 @@ pub(crate) enum RpcCallError {
 mod pending_request;
 use pending_request::PendingRequestGuard;
 
-type PendingRequest = oneshot::Sender<Result<Value, RpcCallError>>;
+type PendingRequest = oneshot::Sender<RpcCompletion>;
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 type RequestRoute<S> = Box<
     dyn Fn(Arc<S>, JSONRPCRequest) -> BoxFuture<Option<RpcServerOutboundMessage>> + Send + Sync,
@@ -571,9 +571,8 @@ impl RpcClient {
     }
 
     /// Send one request without creating the standard request span.
-    ///
-    /// Callers use this only when they install a more precise request span
-    /// around the same wire operation.
+    ///（对位 codex 39f4277087；锚点的具名调用方在 noise 分支（nova 已裁），
+    /// 本侧目前是 `call` 的内部委托 + 测试面）
     /// （对位 codex 39f4277087：入口即记调用方侧 RPC 计数——本地准入失败
     /// 与取消也算一次尝试；通知与响应不走这些路径）
     pub(crate) async fn call_untraced<P, T>(
@@ -712,9 +711,10 @@ impl RpcClient {
                 }
             },
         };
-        let completion = RpcCompletion::new(response.map_err(|_| RpcCallError::Closed)?);
-        // 对位 codex 39f4277087：响应接收即记 trace_safe 事件（reader→caller
-        // 纳秒时长随行；成功/服务端错误才记录）
+        let completion = response.map_err(|_| RpcCallError::Closed)?;
+        // 对位 codex 39f4277087：completed_at 由 reader 侧盖戳（响应到达时刻），
+        // caller 侧 record_receipt 的 elapsed 才是 reader→caller 交接延迟——
+        // 盖在 caller 侧会让 reader_to_caller_ns 恒为 ~0（本批曾接错侧）。
         completion.record_receipt(method);
         let response = completion.result?;
         serde_json::from_value(response).map_err(RpcCallError::Json)
@@ -854,7 +854,7 @@ async fn handle_server_message(
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(&id)
             {
-                let _ = pending.send(Ok(result));
+                let _ = pending.send(RpcCompletion::new(Ok(result)));
             }
         }
         JSONRPCMessage::Error(JSONRPCError { id, error }) => {
@@ -863,7 +863,7 @@ async fn handle_server_message(
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(&id)
             {
-                let _ = pending.send(Err(RpcCallError::Server(error)));
+                let _ = pending.send(RpcCompletion::new(Err(RpcCallError::Server(error))));
             }
         }
         JSONRPCMessage::Notification(notification) => {
@@ -896,7 +896,7 @@ fn drain_pending(pending: &StdMutex<HashMap<RequestId, PendingRequest>>) {
             .collect::<Vec<_>>()
     };
     for pending in pending {
-        let _ = pending.send(Err(RpcCallError::Closed));
+        let _ = pending.send(RpcCompletion::new(Err(RpcCallError::Closed)));
     }
 }
 

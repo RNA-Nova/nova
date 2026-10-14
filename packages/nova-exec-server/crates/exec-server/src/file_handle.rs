@@ -628,6 +628,17 @@ async fn run_write_stream_task(
     while let Some(input) = rx.recv().await {
         match input {
             WriteStreamInput::Chunk { seq, bytes, eof } => {
+                // 代际守卫（逐块，先于一切写入）：close→同名重开后本任务的
+                // 剩余积压块属于旧流——排空语义只覆盖"纯 close"（条目摘除后
+                // 把已收队列落定，文件留盘供续传）；条目被取代（代际不同）
+                // 时继续写会把旧流内容交错进新文件（同路径重开共享 inode），
+                // 故静默收尾——不落盘、不摘新句柄（收尾的代际守卫摘除在
+                // 循环外的尾 close）。
+                if let Some(current) = manager.handle_generation(&handle_id)
+                    && current != generation
+                {
+                    break;
+                }
                 // 背压 latch 汇入本地终态（本地错误时间上更早，先到先得）
                 if failed.is_none() {
                     failed = backpressure.get().cloned();

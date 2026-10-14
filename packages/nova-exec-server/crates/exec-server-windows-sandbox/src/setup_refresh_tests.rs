@@ -29,11 +29,13 @@ fn refresh_helper_has_no_console() -> Result<()> {
     // exercises the production refresh launch without provisioning sandbox users.
     let temporary = tempfile::tempdir()?;
     let executable = std::env::current_exe()?;
+    // 对位 codex 39f4277087：经 copy_executable 拷贝（不与兄弟 spawn 共享
+    // 可写描述符）
     let detached = temporary.path().join("detached.exe");
-    fs::copy(&executable, &detached)?;
-    fs::copy(
+    nova_exec_server_utils_cargo_bin::copy_executable(&executable, &detached)?;
+    nova_exec_server_utils_cargo_bin::copy_executable(
         &executable,
-        temporary.path().join("nova-windows-sandbox-setup.exe"),
+        &temporary.path().join("nova-windows-sandbox-setup.exe"),
     )?;
     let output = Command::new(detached)
         .args(["--exact", DETACHED_TEST, "--nocapture"])

@@ -119,6 +119,58 @@
   开关于 executor 存在（`with_allowed_symlinked_nova_home` setter），
   但无配置读取方、恒 None——seatbelt.rs:449 的文案与 CODEX_UPSTREAM.md
   本条互为指引；接入配置源（settings/config.toml 归上层）时恢复。
+- **`sandbox_home` 线上/落盘词汇更名**（对位 codex `codex_home`）：
+  provisioning 管道消息（`deny_unknown_fields`）与 InstallationRecord
+  注册表 JSON 的字段名同步更名——serde 字段级契约变更，全链自洽
+  （双端同仓共享单一定义，`PROVISIONING_PROTOCOL_VERSION=1` 预发布期，
+  错配对端硬报错而非静默）；alpha 无存量部署，旧注册表记录仅影响
+  alpha→alpha 升级。
+- **uds crate 不镜像**：daemon 目录函数并入 `seatbelt_daemon.rs`
+  （逐行对位锚点 `uds/src/daemon_directory.rs`，模块头注释在案）。
+- **pty 三处 nova 保留件**（R1 期）：unix 上 `arg0.is_some()` 改走
+  `spawn_process_preserving_fds` 第三分派臂（裸名 argv0 被 PATH 重解析的
+  劫持面，收紧方向）；windows_tests 的 `wait_for_output_contains("> ")`
+  替代固定 `sleep(200ms)`（Ctrl-C 后吞命令防护，增强方向）；home-dir
+  默认 `~/.nova/exec-server`（超出命名映射的 `/exec-server` 子层，全树
+  README/PROTOCOL/CLI/测试自洽）。
+- **linux-sandbox 别名目录位置收窄**：codex 落点 `<home>/tmp/arg0`
+  （0700 权限 + release 下拒绝系统临时目录守卫）；nova 落点为进程私有
+  系统临时目录（权限随 umask，Linux 常 0755）+ 守卫未随——长命服务下
+  别名暴露于 systemd-tmpfiles 按龄清理（/tmp 默认 10d），长跑后沙箱
+  spawn 会突然失败。恢复守卫与落点归 CLI 加固批（另行立项）。
+- **CLI 测试面两件不随迁**：`local_exec_server_ignores_invalid_config_
+  without_strict_config`（我方 eprintln 会回显 toml 错误原文片段——与
+  锚点"stderr 不含原文"的反向断言冲突，响亮策略系刻意，main.rs:205
+  注释在案）；`exec_server_telemetry_tests.rs`（信号监听失败注入例——
+  我方 `run_until_shutdown` 为 Immediate 单形态、未拆
+  `run_until_shutdown_with_signals` 接缝，无落点；正常路径已被
+  SIGTERM/stdin 两 e2e 覆盖）。
+- **trace 传播测试对 `#[ignore]`**（`rpc.rs` `rpc_client_propagates_current_
+  trace_context` + `client.rs` `process_start_propagates_caller_trace_context_
+  across_background_task`）：锚点正常运行；nova 侧因全局 subscriber 竞态
+  在 cargo test 进程内并行下 4/4 失败（2026-10-14 复评在案：竞态与遥测
+  面无关，是 callsite 兴趣缓存被并发用例写回禁用）——nextest 进程隔离
+  可过，但 ignore 使其哪儿都不跑（覆盖缺口自承在案）。修复路径：
+  先修 callsite 竞态或立 nextest 专属组。
+- **shell-command 族裁**：`command_safety`/`parse_command`/`powershell`
+  （含 `powershell_tree_sitter_tests.rs`）——审批/命令安全分析概念不属于
+  通用执行后端（src/lib.rs:3-4 就地注释）。
+- **bundled_bwrap bazel 件不随迁**：锚点 `tests/suite/bundled_bwrap.rs`
+  （BAZEL_PACKAGE 门控的篡改摘要测试）——nova 无 Bazel 面，cargo 通道
+  该守卫本就空转；bundled bwrap 摘要校验拒绝路径（exit code 8 已镜像）
+  两侧 cargo 通道均无覆盖。
+- **network-proxy 小件组**：`managed_proxy_routing()` getter 与
+  `is_non_public_ip` 再导出未随（消费方在未镜像的 codex core/rmcp-client）；
+  `mitm_ca`/`NetworkMitmCaConfig` 线上字段未保留（MITM 整面裁点的一部分，
+  `from_effective_config` 的无条件拒绝臂与对应用例连带缺席）；
+  `write_attribution_frame` 双实现（linux-sandbox `proxy_routing.rs` 本地
+  复制 network-proxy `attribution.rs` 的 pub 函数——魔数/上限两端同步
+  靠注释约定，无字节级对锁测试；单侧改动须双改）。
+- **http-client 计时器放宽族**（`outbound_proxy_redirect_coverage_tests.rs`
+  2s→10s ×6、`route_aware_client_pool_tests.rs` 2s→10s ×2、
+  `route_aware_tls_fallback_tests.rs` 5s→15s/120s 等）：3cc7170e/74970e96
+  负载竞态批的有意放宽（文件注释在案；120s 处为"等到条件即走、上限只
+  防悬挂"的非墙钟同步）。
 
 ## 同步节奏
 

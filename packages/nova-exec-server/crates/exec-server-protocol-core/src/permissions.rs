@@ -268,7 +268,8 @@ impl WritableRootPathResolution {
     fn resolve(self, path: AbsolutePathBuf) -> AbsolutePathBuf {
         match self {
             Self::Effective => normalize_effective_absolute_path(path),
-            Self::PreserveMutableComponents => normalize_trusted_top_level_alias(path),
+            // 对位 codex 39f4277087：normalize_system_aliases().unwrap_or(path)
+            Self::PreserveMutableComponents => path.normalize_system_aliases().unwrap_or(path),
         }
     }
 }
@@ -1261,38 +1262,6 @@ impl FileSystemSandboxPolicy {
             .collect()
     }
 
-    /// Replaces symbolic `:workspace_roots` entries with absolute paths resolved
-    /// against `cwd`.
-    ///
-    /// Use this when a durable permission profile must survive a cwd-only
-    /// update without rebinding its project-root authority to the new cwd.
-    pub fn materialize_project_roots_with_cwd(mut self, cwd: &Path) -> Self {
-        let cwd = AbsolutePathBuf::from_absolute_path(cwd).ok();
-        for entry in &mut self.entries {
-            match &entry.path {
-                FileSystemPath::Special {
-                    value: FileSystemSpecialPath::ProjectRoots { .. },
-                } => {
-                    if let Some(path) = resolve_file_system_path(&entry.path, cwd.as_ref()) {
-                        entry.path = path.into();
-                    }
-                }
-                FileSystemPath::GlobPattern { pattern } => {
-                    if let (Some(cwd), Some(subpath)) =
-                        (cwd.as_ref(), parse_project_roots_glob_pattern(pattern))
-                    {
-                        entry.path = FileSystemPath::GlobPattern {
-                            pattern: resolve_project_roots_glob_pattern(subpath, cwd),
-                        };
-                    }
-                }
-                FileSystemPath::Special { value: _ } => {}
-                FileSystemPath::Path { .. } => {}
-            }
-        }
-        self
-    }
-
     /// Replaces symbolic `:workspace_roots` entries with concrete entries for
     /// each workspace root.
     pub fn materialize_project_roots_with_workspace_roots(
@@ -2167,23 +2136,6 @@ fn resolve_entry_path(
     }
 }
 
-fn parse_project_roots_glob_pattern(pattern: &str) -> Option<&Path> {
-    pattern
-        .strip_prefix(PROJECT_ROOTS_GLOB_PATTERN_PREFIX)
-        .map(Path::new)
-}
-
-fn resolve_project_roots_glob_pattern(subpath: &Path, root: &AbsolutePathBuf) -> String {
-    // 潜伏边角记录（nova 自增的 cwd 变体；当前无生产调用方——唯一调用点
-    // materialize_project_roots_with_cwd 仅测试触及）：cwd 含非 UTF-8 字节时
-    // to_string_lossy 会产生 U+FFFD，合成的 deny glob 不再匹配真实路径
-    //（fail-open 方向）。上游走 URI 字符串无此面；将来有真实调用方时改
-    // fallible。
-    AbsolutePathBuf::resolve_path_against_base(subpath, root.as_path())
-        .to_string_lossy()
-        .into_owned()
-}
-
 fn resolve_candidate_path(path: &Path, cwd: &Path) -> Option<AbsolutePathBuf> {
     if path.is_absolute() {
         AbsolutePathBuf::from_absolute_path(path).ok()
@@ -2446,34 +2398,6 @@ fn normalize_effective_absolute_path(path: AbsolutePathBuf) -> AbsolutePathBuf {
 /// 只规范化受信任的顶层系统别名（如 `/tmp -> /private/tmp`），不深追更深层
 /// 的组件——深层组件可能被已在沙箱内运行的进程改写，这里跟随它们会把一次
 /// 路径检查变成新的授权。
-// 对位 codex 39f4277087 `AbsolutePathBuf::normalize_system_aliases`
-// （codex-rs/utils/absolute-path/src/system_aliases.rs，经 permissions.rs 的
-// PreserveMutableComponents 臂 `normalize_system_aliases().unwrap_or(path)`
-// 调用）。有意分歧：nova 内联为不可失败的本地函数——任何元数据/规范化失败
-// 一律回退原路径（与锚点调用点的 unwrap_or(path) 同语义），且用 std
-// canonicalize 而非 dunce（本 crate 不引入 dunce；POSIX 顶层别名场景两者
-// 等价，Windows verbatim 前缀差异不适用于此处的顶层符号链接判定）。
-fn normalize_trusted_top_level_alias(path: AbsolutePathBuf) -> AbsolutePathBuf {
-    let Some(top_level) = path.as_path().ancestors().find(|ancestor| {
-        ancestor.parent().is_some() && ancestor.parent().and_then(Path::parent).is_none()
-    }) else {
-        return path;
-    };
-    let Ok(metadata) = std::fs::symlink_metadata(top_level) else {
-        return path;
-    };
-    if !metadata.file_type().is_symlink() {
-        return path;
-    }
-    let Ok(canonical_top_level) = top_level.canonicalize() else {
-        return path;
-    };
-    let Ok(suffix) = path.as_path().strip_prefix(top_level) else {
-        return path;
-    };
-    AbsolutePathBuf::from_absolute_path(canonical_top_level.join(suffix)).unwrap_or(path)
-}
-
 pub(crate) fn default_read_only_subpaths_for_writable_root(
     writable_root: &AbsolutePathBuf,
     protect_missing_dot_nova: bool,
@@ -3412,8 +3336,14 @@ mod tests {
             AbsolutePathBuf::from_absolute_path(writable_root).expect("absolute writable root");
         let outside_root =
             AbsolutePathBuf::from_absolute_path(outside_root).expect("absolute outside root");
-        let expected_writable_root = normalize_trusted_top_level_alias(writable_root.clone());
-        let expected_outside_root = normalize_trusted_top_level_alias(outside_root);
+        // 对位锚点调用点形态：normalize_system_aliases().unwrap_or(path)
+        let expected_writable_root = writable_root
+            .normalize_system_aliases()
+            .unwrap_or(writable_root.clone());
+        let expected_outside_root = outside_root
+            .clone()
+            .normalize_system_aliases()
+            .unwrap_or(outside_root);
         let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
             writable_root.into(),
             FileSystemAccessMode::Write,
@@ -4521,34 +4451,6 @@ mod tests {
             ])
         );
     }
-
-    #[test]
-    fn materialize_project_roots_with_cwd_expands_symbolic_glob_entries() {
-        let cwd = TempDir::new().expect("tempdir");
-        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-            path: FileSystemPath::GlobPattern {
-                pattern: project_roots_glob_pattern(Path::new("**/*.env")),
-            },
-            access: FileSystemAccessMode::Deny,
-            missing_path_behavior: None,
-        }]);
-
-        let actual = policy.materialize_project_roots_with_cwd(cwd.path());
-
-        assert_eq!(
-            actual,
-            FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-                path: FileSystemPath::GlobPattern {
-                    pattern: AbsolutePathBuf::resolve_path_against_base("**/*.env", cwd.path())
-                        .to_string_lossy()
-                        .into_owned(),
-                },
-                access: FileSystemAccessMode::Deny,
-                missing_path_behavior: None,
-            }])
-        );
-    }
-
     #[test]
     fn with_additional_legacy_workspace_writable_roots_protects_metadata() {
         let temp_dir = TempDir::new().expect("tempdir");

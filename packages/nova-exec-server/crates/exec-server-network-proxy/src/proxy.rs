@@ -962,6 +962,11 @@ impl NetworkProxy {
             return Ok(proxy.addrs);
         }
 
+        // 对位 codex 39f4277087：fail-fast——非 tokio 上下文走到 listener
+        // spawn 会在 JoinSet::spawn 处 panic，此处先行报出带上下文的错误
+        tokio::runtime::Handle::try_current().with_context(|| {
+            format!("failed to create network proxy for environment `{environment_id}`")
+        })?;
         let listeners =
             reserve_loopback_ephemeral_listeners(self.socks_enabled).with_context(|| {
                 format!("failed to reserve network proxy for environment `{environment_id}`")

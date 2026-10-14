@@ -911,7 +911,7 @@ mod tests {
             .await
             .expect("done");
         assert_eq!(done.total_bytes, 2);
-        // 交账后写任务随即摘句柄退出（respond 先达、摘除在其后一拍）
+        // 写任务先摘句柄再交账退出（二轮批起：摘除先于 respond）
         wait_for_handle_removal(&handler).await;
 
         let err = handler
@@ -1647,7 +1647,7 @@ mod tests {
             assert_eq!(done.handle_id, "ws-ok");
             assert_eq!(done.total_bytes, data.len() as u64);
             assert_eq!(std::fs::read(&file_path).expect("read file"), data);
-            // 交账后写任务随即摘句柄退出（respond 先达、摘除在其后一拍）——
+            // 写任务先摘句柄再交账退出（二轮批起：摘除先于 respond）——
             // 有界轮询，不赌调度窗口
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 while handler.file_handles.open_handle_count() > 0 {

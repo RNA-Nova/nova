@@ -126,6 +126,9 @@ mode = "off"
 
 /// 空选择器拒绝（对位 codex environment_config_read_rejects_empty_selectors）：
 /// 空 configPaths 与空键段（`[[]]`）都必须过线回 -32602（不允许整文档读取）。
+/// 消息文本钉 nova 自家文案（src/environment_config.rs validate_params；锚点文案
+/// 为 "at least one config or requirements path is required" / "TOML paths must
+/// contain at least one key segment"，nova 语义有意不同）。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_server_environment_config_read_rejects_empty_selectors() -> anyhow::Result<()> {
     let mut server = exec_server().await?;
@@ -143,10 +146,19 @@ async fn exec_server_environment_config_read_rejects_empty_selectors() -> anyhow
     let cwd = nova_exec_server_utils_path_uri::PathUri::from_host_native_path(
         &std::env::temp_dir(),
     )?;
-    for config_paths in [
-        serde_json::json!([]),
-        serde_json::json!([[]]),
-        serde_json::json!([["sandbox"], []]),
+    for (config_paths, expected_message) in [
+        (
+            serde_json::json!([]),
+            "at least one config path is required",
+        ),
+        (
+            serde_json::json!([[]]),
+            "config paths must contain at least one key segment",
+        ),
+        (
+            serde_json::json!([["sandbox"], []]),
+            "config paths must contain at least one key segment",
+        ),
     ] {
         let request_id = server
             .send_request(
@@ -165,6 +177,7 @@ async fn exec_server_environment_config_read_rejects_empty_selectors() -> anyhow
         };
         assert_eq!(id, request_id);
         assert_eq!(error.code, -32602, "configPaths={config_paths}");
+        assert_eq!(error.message, expected_message, "configPaths={config_paths}");
     }
 
     server.shutdown().await?;

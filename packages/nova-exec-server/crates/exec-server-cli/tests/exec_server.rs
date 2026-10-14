@@ -72,7 +72,10 @@ fn local_exec_server_accepts_concurrent_requests_flag() -> Result<()> {
 fn local_exec_server_allows_disabled_parent_lifetime_environment_variable() -> Result<()> {
     let home = TempDir::new()?;
     let status = nova_command(home.path())?
-        .env("NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE", "false")
+        .env(
+            nova_exec_server::NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR,
+            "false",
+        )
         .args(["--listen", "stdio"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

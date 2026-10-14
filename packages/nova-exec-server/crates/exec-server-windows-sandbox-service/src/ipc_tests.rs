@@ -1,11 +1,22 @@
+// 对位 codex 39f4277087 `windows-sandbox-service/src/ipc_tests.rs`。
+// 瘦版说明（config_parse_errors_are_distinguished_from_policy_and_io_failures /
+// policy_event_excludes_real_parser_values_but_retains_safe_codes 两例）：锚点原版
+// 依赖 codex-core/codex-config 的错误类型链构造（nova 未镜像），此处以纯
+// toml::de::Error / std::io::Error 构造直驱 ipc.rs 的 is_config_parse_error /
+// policy_rejection_diagnostic（两者本体在案）。裁点：schema_error 的
+// deserialize_config_toml_with_base 构造链、RequirementsError /
+// CloudConfigLayersError 包装类型、CloudConfigBundleLoadError 的 cloud= 分类臂
+//（nova 无 cloud config 加载链，ipc.rs policy_rejection_diagnostic 注释在案）。
 use super::MAX_RESPONSE_MESSAGE_BYTES;
 use super::OwnedHandle;
 use super::PipeConnection;
 use super::ServiceRequest;
 use super::accept_pipe_connection;
 use super::home::prepare_sandbox_home;
+use super::is_config_parse_error;
 use super::pin_existing_ancestors;
 use super::pipe_security_descriptor;
+use super::policy_rejection_diagnostic;
 use super::refresh_session;
 use super::request::ProvisioningRequest;
 use super::response_error_message;
@@ -225,6 +236,84 @@ fn unavailable_response_round_trips_through_provisioning_frame() {
             },
         })
     ));
+}
+
+// 瘦版（对位 codex 39f4277087 ipc_tests.rs 同例，裁点见文件头）：正例以纯
+// toml::de::Error 覆盖 is_config_parse_error 的两条识别臂（直挂 / io 内嵌）；
+// 负例与锚点逐行一致。
+#[test]
+fn config_parse_errors_are_distinguished_from_policy_and_io_failures() {
+    let contents = "[";
+    // 直挂 toml::de::Error（对位锚点 schema_error 正例的识别语义）
+    let direct_parse = anyhow::Error::new(toml::from_str::<toml::Value>(contents).unwrap_err());
+    // io::Error 内嵌 toml::de::Error（对位锚点 syntax_error 正例的 io 包装形态）
+    let io_wrapped_parse = anyhow::Error::new(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        toml::from_str::<toml::Value>(contents).unwrap_err(),
+    ));
+    for error in [direct_parse, io_wrapped_parse] {
+        assert!(is_config_parse_error(
+            &error.context("load managed configuration"),
+        ));
+    }
+
+    for error in [
+        anyhow::anyhow!("managed policy does not permit the elevated Windows sandbox"),
+        anyhow::Error::new(std::io::Error::from_raw_os_error(
+            foundation::ERROR_ACCESS_DENIED as i32,
+        )),
+        anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid credentials",
+        )),
+    ] {
+        assert!(!is_config_parse_error(
+            &error.context("load managed configuration"),
+        ));
+    }
+}
+
+// 瘦版（对位 codex 39f4277087 ipc_tests.rs 同例，裁点见文件头）：以 io::Error
+// 内嵌 parser 渲染文本模拟"携带 parser 原文但非 parse 错误"的配置加载失败，
+// 守住 stage 标签表与"parser 原文不进持久事件"的 sanitize 语义。
+#[test]
+fn policy_event_excludes_real_parser_values_but_retains_safe_codes() {
+    let contents = "Authorization = \"Bearer synthetic-secret";
+    let parse_error = toml::from_str::<toml::Value>(contents).unwrap_err();
+    for error in [
+        // 对位锚点 RequirementsError→io::Error：原文直嵌
+        std::io::Error::new(std::io::ErrorKind::InvalidData, parse_error.to_string()),
+        // 对位锚点 CloudConfigLayersError→io::Error：加载器包装后再嵌
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("failed to load cloud config fragment: {parse_error}"),
+        ),
+    ] {
+        let error = anyhow::Error::new(error).context("load managed configuration");
+        assert!(format!("{error:#}").contains("synthetic-secret"));
+        assert!(!is_config_parse_error(&error));
+        assert_eq!(
+            policy_rejection_diagnostic(&error),
+            "Nova sandbox provisioning was rejected by administrator policy: stage=managed io=InvalidData win32=None"
+        );
+    }
+
+    for (error, expected) in [
+        (
+            anyhow::Error::new(std::io::Error::from_raw_os_error(5))
+                .context("load bootstrap configuration"),
+            "stage=bootstrap io=PermissionDenied win32=Some(5)",
+        ),
+        (
+            anyhow::anyhow!("{contents}"),
+            "stage=unknown cause=unavailable",
+        ),
+    ] {
+        assert_eq!(
+            policy_rejection_diagnostic(&error),
+            format!("Nova sandbox provisioning was rejected by administrator policy: {expected}")
+        );
+    }
 }
 
 #[test]

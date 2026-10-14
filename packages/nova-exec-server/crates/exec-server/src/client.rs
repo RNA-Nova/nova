@@ -726,7 +726,7 @@ impl ExecServerClient {
 
         timeout(initialize_timeout, async {
             let response: InitializeResponse = rpc_client
-                .call_untraced(
+                .call(
                     INITIALIZE_METHOD,
                     &InitializeParams {
                         client_name,

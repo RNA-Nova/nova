@@ -288,15 +288,6 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
   executor 仅作观测随行（沙箱完整性检查的跳过判定依据之一），不放宽权限、
   不改变沙箱命令（additive 增量，向后兼容）。
 
-- **v1.9**（可写文件流落地，对位 codex 10/2 启用三提交）：
-  - `fs/open` 支持 `mode="replace"`（创建/截断写打开，写权限档分流执法——
-    全盘整读不豁免写）；`fs/writeBlock` 显式 offset 定位写（非空块 ≤1MiB、
-    i64 偏移上限）；
-  - 句柄表 128 槽含在飞行打开（重复 ID/容量超限在碰文件前拒绝）；
-  - 能力位 `fileWriteStreaming` 翻 true；
-  - 地基：读侧 `has_full_disk_read_access_for_convention` 与
-    `should_read_from_sandbox`/`should_write_into_sandbox` 分流对（全量读写
-    路由归 v1.10）。
 - **v1.12**（writeStream 收编句柄族 + 上传断点续传——nova 自有通道）：
   - `fs/writeStream` 与 `fs/open` 共享开门链路与连接级句柄表，chunk 经与
     `fs/writeBlock` 共享的定位写核心落每流追加游标；长命沙箱 helper 写管道
@@ -333,6 +324,16 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
   - `EnvironmentCapabilities` 补 `linuxRootWritePreservesDevices`/
     `linuxApprovedRootWritePreservesRestrictions` 两位（opt-in，false 省略；
     Linux 恒 true）。
+
+- **v1.9**（可写文件流落地，对位 codex 10/2 启用三提交）：
+  - `fs/open` 支持 `mode="replace"`（创建/截断写打开，写权限档分流执法——
+    全盘整读不豁免写）；`fs/writeBlock` 显式 offset 定位写（非空块 ≤1MiB、
+    i64 偏移上限）；
+  - 句柄表 128 槽含在飞行打开（重复 ID/容量超限在碰文件前拒绝）；
+  - 能力位 `fileWriteStreaming` 翻 true；
+  - 地基：读侧 `has_full_disk_read_access_for_convention` 与
+    `should_read_from_sandbox`/`should_write_into_sandbox` 分流对（全量读写
+    路由归 v1.10）。
 
 ## 客户端
 

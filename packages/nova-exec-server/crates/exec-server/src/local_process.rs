@@ -1399,7 +1399,7 @@ mod tests {
         let exporter = InMemoryMetricExporter::default();
         let metrics = nova_exec_server_otel::MetricsClient::new(MetricsConfig::in_memory(
             "test",
-            "nova-exec-server-test",
+            "nova-exec-server",
             env!("CARGO_PKG_VERSION"),
             exporter.clone(),
         ))
