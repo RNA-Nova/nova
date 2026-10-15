@@ -4,8 +4,9 @@ client.from_environment 构造）
 校验规则与默认解析链逐条对位 codex environment_toml.rs。
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from nova_exec_server_client import (
     ConfigError,
@@ -375,9 +376,7 @@ class TestStdioCwd:
         # 在 Windows 非绝对，硬编码会让该用例平台依赖）
         abs_cwd = str(Path("/").resolve() / "var" / "work")
         (home / "config.toml").write_text(
-            "[[environments]]\n"
-            'id = "dev-box"\n'
-            'program = "ssh"\n'
+            "[[environments]]\n" 'id = "dev-box"\n' 'program = "ssh"\n'
             # TOML 字面串（单引号）——Windows 反斜杠不经转义
             f"cwd = '{abs_cwd}'\n",
             encoding="utf-8",
