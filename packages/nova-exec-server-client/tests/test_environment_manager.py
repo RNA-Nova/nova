@@ -293,8 +293,11 @@ class TestUpsertValidation:
                 ExecutorEnvironment(id="bad", program="ssh", cwd="relative/ws")
             )
         assert "bad" not in manager.environment_ids()
+        # 平台感知绝对路径（`/var/work` 无盘符在 Windows 非绝对）
         await manager.upsert_environment(
-            ExecutorEnvironment(id="ok", program="ssh", cwd="/var/work")
+            ExecutorEnvironment(
+                id="ok", program="ssh", cwd=str(Path("/").resolve() / "var" / "work")
+            )
         )
         assert "ok" in manager.environment_ids()
 

@@ -5,6 +5,7 @@ client.from_environment 构造）
 """
 
 import pytest
+from pathlib import Path
 
 from nova_exec_server_client import (
     ConfigError,
@@ -369,15 +370,20 @@ class TestStdioCwd:
     def test_absolute_cwd_passes_through(self, tmp_path):
         home = tmp_path / "home"
         home.mkdir()
+        # 平台感知绝对路径：POSIX `/var/work`，Windows 当前盘 `C:\var\work`
+        # （`Path("/").resolve()` 在 Windows 取当前盘根——`/var/work` 无盘符
+        # 在 Windows 非绝对，硬编码会让该用例平台依赖）
+        abs_cwd = str(Path("/").resolve() / "var" / "work")
         (home / "config.toml").write_text(
             "[[environments]]\n"
             'id = "dev-box"\n'
             'program = "ssh"\n'
-            'cwd = "/var/work"\n',
+            # TOML 字面串（单引号）——Windows 反斜杠不经转义
+            f"cwd = '{abs_cwd}'\n",
             encoding="utf-8",
         )
         cfg = load_executor_config(executor_home=home)
-        assert cfg.environments[0].cwd == "/var/work"
+        assert cfg.environments[0].cwd == abs_cwd
 
     def test_relative_cwd_without_config_dir_rejected(self):
         """无来源目录（运行时直构/_validate 直调）的相对 cwd → ConfigError
