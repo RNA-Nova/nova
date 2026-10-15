@@ -144,6 +144,17 @@ class TestConnectionLifecycle:
         status = await manager.status("dead")
         assert status.state is EnvironmentConnectionState.PENDING
 
+    async def test_initialize_timeout_wired_to_client(self):
+        """环境声明的握手预算经构造点传入（对位 codex 传输参数
+        initialize_timeout——与 connect_timeout 分账）"""
+        env = _fake_env("fake").model_copy(update={"initialize_timeout_sec": 7})
+        manager = EnvironmentManager(ExecutorConfig(environments=[env]))
+        client = await manager.get_client("fake")
+        try:
+            assert client._initialize_timeout == 7
+        finally:
+            await manager.close_all()
+
 
 class TestUpsertRemove:
     async def test_upsert_replaces_registry_entry(self):
@@ -196,3 +207,104 @@ class TestUpsertRemove:
         manager = EnvironmentManager(ExecutorConfig())
         await manager.close_all()
         await manager.close_all()
+
+
+class TestRefreshRace:
+    async def test_remove_waits_for_inflight_refresh(self, monkeypatch):
+        """refresh 与注册表变更同锁互斥（竞态僵尸修复）：refresh 持锁刷新
+        期间 remove 阻塞等待；刷新落地后由 remove 收走，不残留注册表外的
+        僵尸连接"""
+        manager = EnvironmentManager(ExecutorConfig(environments=[_fake_env("fake")]))
+        client = await manager.get_client("fake")
+        orig_refresh = ExecutorClient.refresh_connection
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_refresh(self):
+            started.set()
+            await release.wait()
+            await orig_refresh(self)
+
+        monkeypatch.setattr(ExecutorClient, "refresh_connection", slow_refresh)
+        refresher = asyncio.create_task(manager.refresh_environment("fake"))
+        await started.wait()
+        remover = asyncio.create_task(manager.remove_environment("fake"))
+        # remove 须阻塞在锁上（refresh 持锁刷新中），不得抢先弹出
+        await asyncio.sleep(0.05)
+        assert not remover.done()
+        release.set()
+        await refresher
+        assert await remover is True
+        assert manager._clients == {}
+        assert "fake" not in manager.environment_ids()
+        assert not client._control.is_connected
+
+    async def test_refresh_connects_pending_environment(self):
+        manager = EnvironmentManager(ExecutorConfig(environments=[_fake_env("fake")]))
+        await manager.refresh_environment("fake")  # 未连接 → 按注册表新建
+        try:
+            assert "fake" in manager._clients
+            status = await manager.status("fake")
+            assert status.state is EnvironmentConnectionState.CONNECTED
+        finally:
+            await manager.close_all()
+
+
+class TestUpsertValidation:
+    """upsert 复用装载期校验（对位 load 的 _validate_environments）——非法
+    条目 ConfigError 不落地（旧行为零校验，get_client 才以 assert 崩）"""
+
+    async def test_upsert_rejects_url_and_program_together(self):
+        manager = EnvironmentManager(ExecutorConfig())
+        with pytest.raises(ConfigError, match="只能设置 url 或 program 之一"):
+            await manager.upsert_environment(
+                ExecutorEnvironment(id="bad", url="ws://a", program="ssh")
+            )
+        assert "bad" not in manager.environment_ids()
+
+    async def test_upsert_rejects_reserved_id(self):
+        manager = EnvironmentManager(ExecutorConfig())
+        with pytest.raises(ConfigError, match="保留字"):
+            await manager.upsert_environment(
+                ExecutorEnvironment(id="local", url="ws://a")
+            )
+        with pytest.raises(ConfigError, match="保留字"):
+            await manager.upsert_environment(
+                ExecutorEnvironment(id="NONE", url="ws://a")
+            )
+
+    async def test_upsert_rejects_cross_field_violations(self):
+        manager = EnvironmentManager(ExecutorConfig())
+        with pytest.raises(ConfigError, match="需要设置 program"):
+            await manager.upsert_environment(
+                ExecutorEnvironment(id="bad", url="ws://a", args=["x"])
+            )
+        with pytest.raises(ConfigError, match="connect_timeout_sec 需要设置 url"):
+            await manager.upsert_environment(
+                ExecutorEnvironment(id="bad", program="ssh", connect_timeout_sec=5)
+            )
+
+    async def test_upsert_rejects_relative_cwd_without_config_dir(self):
+        """运行时无来源目录：stdio 相对 cwd 即 ConfigError（codex：cwd
+        must be absolute）；绝对 cwd 照常注册"""
+        manager = EnvironmentManager(ExecutorConfig())
+        with pytest.raises(ConfigError, match="必须是绝对路径"):
+            await manager.upsert_environment(
+                ExecutorEnvironment(id="bad", program="ssh", cwd="relative/ws")
+            )
+        assert "bad" not in manager.environment_ids()
+        await manager.upsert_environment(
+            ExecutorEnvironment(id="ok", program="ssh", cwd="/var/work")
+        )
+        assert "ok" in manager.environment_ids()
+
+    async def test_upsert_invalid_leaves_registry_usable(self):
+        """非法 upsert 不污染注册表——后续 get_client 正常解析不 assert 崩"""
+        manager = EnvironmentManager(ExecutorConfig(environments=[_fake_env("fake")]))
+        with pytest.raises(ConfigError):
+            await manager.upsert_environment(ExecutorEnvironment(id="bad"))
+        client = await manager.get_client("fake")
+        try:
+            assert client.session_id == "fake-session"
+        finally:
+            await manager.close_all()

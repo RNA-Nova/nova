@@ -116,9 +116,15 @@ class TransportPool:
         params: dict[str, Any] | None = None,
         *,
         channel: str | None = None,
+        for_cleanup: bool = False,
     ) -> Any:
-        """发送 JSON-RPC 请求并等待响应（按通道路由）"""
-        return await self._pick(method, channel).send_request(method, params)
+        """发送 JSON-RPC 请求并等待响应（按通道路由；for_cleanup 透传给落点
+        传输的在飞槽位裁决——对位 Rust call_for_cleanup 的保留槽语义）"""
+        transport = self._pick(method, channel)
+        if for_cleanup:
+            # 仅在收摊标记时透传：未声明该参数的传输实现保持兼容
+            return await transport.send_request(method, params, for_cleanup=True)
+        return await transport.send_request(method, params)
 
     async def send_notification(
         self,

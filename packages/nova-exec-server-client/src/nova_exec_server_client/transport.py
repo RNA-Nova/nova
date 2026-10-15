@@ -15,7 +15,28 @@ RpcClientEvent::Disconnected 驱动 request_recovery）。
 - stdio 子进程 spawn 时独立进程组（process_group=0，pgid == 子进程 pid），
   关闭逐级收割进程树：关 stdin 等 EOF 宽限 → terminate 进程组 → kill
   进程组（对位 Rust connection.rs 的 terminate_process_tree /
-  kill_process_tree——沙箱 helper 等孙进程随组一并收割，不得漏杀）
+  kill_process_tree——沙箱 helper 等孙进程随组一并收割，不得漏杀；
+  Windows 对位 kill_windows_process_tree：taskkill /PID <pid> /T /F
+  杀整树，失败落直接子兜底；Windows spawn 经 CREATE_NO_WINDOW 不分配
+  控制台窗口，对位 Rust background_command）
+- stdio spawn 的合成 env（继承 + 显式叠加双侧）经
+  scrub_non_inheritable_env_vars 剔除启动上下文敏感变量（对位 codex
+  protocol shell_environment.rs 的 NON_INHERITABLE_ENV_VARS 名单，
+  大小写不敏感比较）
+- 客户端 outbound 在飞槽位（对位 Rust rpc.rs 的双信号量）：常规调用
+  1024 共享槽、满员立即报错（PendingRequestLimitExceeded）；收摊调用
+  （send_request 的 for_cleanup=True——process/terminate、fs/close 等
+  收摊路径）先抢共享槽、再抢 1 个收摊保留槽，双无即判连接死亡
+  （对位 call_for_cleanup 的 close_transport 熔断）；槽位在响应
+  落定/取消/异常时归还（对位 SemaphorePermit drop）
+- 出站防线：NaN/Infinity 本地拒发（json allow_nan=False——serde_json
+  把非有限浮点序列化为 null，py 的 json 默认印裸 NaN，服务端词法层
+  拒收会判连接级致命）；stdio 出站超 64MB 同样本地拒发（有意偏差：
+  基准照发由服务端杀连接，py 选择本地拒发保连接）
+- WS 单消息上限 64MiB（对位 tungstenite 默认 max_message_size）；
+  客户端不发 keepalive ping、不靠 pong 看门狗（对位 Rust connection.rs
+  from_websocket 的 ping_interval None——pong watchdog 只接在 nova
+  未镜像的 relay 面）
 - 意外断线即收割底层承载（对位 Rust RpcClient::drop / 连接退役即
   transport.terminate()）：stdio 后台组杀旧进程树、WS 后台关 socket——
   恢复层只造新候选，旧承载（含 stdout EOF 但进程存活、stdin 写失败等
@@ -23,7 +44,10 @@ RpcClientEvent::Disconnected 驱动 request_recovery）。
 - stdio 子进程 stderr 由独立任务按 8KiB 分块持续消费（对位 Rust
   client_transport.rs 的 take() 分块读——行长无上限，超长行分块分发，
   泵永不停），防缓冲填满死锁
-- stdio 单条 NDJSON 消息 64MB 上限（对齐服务端 MAX_STDIO_JSONRPC_MESSAGE_LEN）
+- stdio 单条 NDJSON 消息 64MB 上限（对齐服务端 MAX_STDIO_JSONRPC_MESSAGE_LEN；
+  StreamReader 行限 +2 为 CRLF 前瞻余量——对位 Rust connection.rs 的
+  max+1+CRLF 前瞻：恰好上限的消息带 CRLF 终止也收得下，超限由读回后的
+  长度检查拒）
 - 客户端入站限流三档（PROTOCOL v1.7，对位 Rust
   client_inbound_request_limit.rs，WS/stdio 双侧生效）：反向请求/未知
   通知/畸形消息 8KiB；数据面通知（process/output|exited|closed、
@@ -45,6 +69,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, Protocol
@@ -74,6 +99,26 @@ from .errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: spawn stdio 子进程时须从合成 env（继承 + 显式覆盖双侧）剔除的变量名单
+#: （对位 codex protocol shell_environment.rs 的 NON_INHERITABLE_ENV_VARS，
+#: 逐字照抄；大小写不敏感比较——对位 eq_ignore_ascii_case）：防止
+#: model 可达的子进程继承 Codex 启动上下文
+_NON_INHERITABLE_ENV_VARS = frozenset(
+    {
+        "CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN",
+        "NODE_REPL_AUTH_TOKEN",
+        "CODEX_GUARDIAN_DECISIONS_API_KEY",
+        "OPENAI_FEDERATION_RULE_ID",
+        "OPENAI_IDENTITY_TOKEN_FILE",
+        "OPENAI_WORKLOAD_IDENTITY_CONTEXT",
+    }
+)
+
+#: Windows 后台进程不分配控制台窗口的标志（对位 Rust background_command 的
+#: CREATE_NO_WINDOW）；非 Windows 平台的 subprocess 无此常量——该值只在
+#: nt 分支使用，取 0 占位（等同不传标志）
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 #: 通知处理器 / 断线回调 / stderr 回调的签名
 NotificationHandler = Callable[[dict], Awaitable[None]]
@@ -176,6 +221,8 @@ def _is_malformed_message(message: Any) -> bool:
         and isinstance(error, dict)
         and isinstance(code, int)
         and not isinstance(code, bool)
+        # serde i64 derive 溢出即畸形（与 _is_valid_request_id 同纪律）
+        and -(2**63) <= code < 2**63
         and isinstance(error.get("message"), str)
     )
 
@@ -249,6 +296,10 @@ class Transport(Protocol):
     `channel` 参数只在连接池（TransportPool）上有路由意义；单传输实现
     接收但忽略它，保持接口统一。
 
+    `for_cleanup` 标记收摊调用（process/terminate、fs/close 等收摊路径）：
+    在飞槽位裁决时先抢共享槽、再抢收摊保留槽（对位 Rust rpc.rs
+    call_for_cleanup 的保留槽语义）。
+
     `on_disconnect` 注册意外断线回调（主动 disconnect 不触发）——恢复层
     （recovery.ManagedTransport）据此发起重连；不参与恢复的调用方可忽略。
     """
@@ -263,6 +314,7 @@ class Transport(Protocol):
         params: dict[str, Any] | None = None,
         *,
         channel: str | None = None,
+        for_cleanup: bool = False,
     ) -> Any: ...
 
     async def send_notification(
@@ -299,10 +351,23 @@ class _JsonRpcTransport:
     #: 满员即时 fail-closed 拒决，裁决排队不得堵死接收循环
     MAX_INBOUND_SERVER_CALLS = 256
 
+    #: 常规 outbound 调用的在飞共享槽上限（对位 Rust rpc.rs
+    #: MAX_IN_FLIGHT_REGULAR_CALLS）：满员立即报错，不排队
+    MAX_IN_FLIGHT_REGULAR_CALLS = 1024
+    #: 收摊调用（for_cleanup）的保留槽数（对位 Rust rpc.rs
+    #: RESERVED_CLEANUP_CALLS）：共享槽满员时收摊调用仍有最后一格——
+    #: 收摊是连接退役前的善后，不得被常规流量饿死
+    RESERVED_CLEANUP_CALLS = 1
+
     def __init__(self, request_timeout: float):
         self.request_timeout = request_timeout
         self._request_id = 0
         self._pending: dict[int, asyncio.Future] = {}
+        #: 在飞 outbound 调用槽位计数（对位 Rust 双信号量的不可用格数——
+        #: py 不需要等待语义，整数计数即 try_acquire；响应落定/取消/异常
+        #: 即归还，对位 SemaphorePermit drop）
+        self._in_flight_regular = 0
+        self._in_flight_cleanup = 0
         self._notification_handlers: list[NotificationHandler] = []
         self._disconnect_handlers: list[DisconnectHandler] = []
         self._request_handlers: dict[str, RequestHandler] = {}
@@ -326,8 +391,37 @@ class _JsonRpcTransport:
         params: dict[str, Any] | None = None,
         *,
         channel: str | None = None,
+        for_cleanup: bool = False,
     ) -> Any:
-        """发送 JSON-RPC 请求并等待响应（单传输忽略 channel——连接池路由参数）"""
+        """发送 JSON-RPC 请求并等待响应（单传输忽略 channel——连接池路由参数）
+
+        在飞槽位裁决（对位 Rust rpc.rs 的双信号量）：常规调用占
+        MAX_IN_FLIGHT_REGULAR_CALLS 共享槽，满员立即报错（对位
+        PendingRequestLimitExceeded）；收摊调用（for_cleanup=True——
+        process/terminate、fs/close 等收摊路径）先抢共享槽、再抢
+        RESERVED_CLEANUP_CALLS 保留槽，双无即判连接死亡（对位
+        call_for_cleanup 的 close_transport 熔断 + RpcCallError::Closed）。
+        """
+        cleanup_reserved = False
+        if self._in_flight_regular < self.MAX_IN_FLIGHT_REGULAR_CALLS:
+            self._in_flight_regular += 1
+        elif for_cleanup and self._in_flight_cleanup < self.RESERVED_CLEANUP_CALLS:
+            self._in_flight_cleanup += 1
+            cleanup_reserved = True
+        elif for_cleanup:
+            # 收摊双无：判连接死亡（对位 Rust close_transport 熔断）——
+            # 保留槽也耗尽说明连接已堆积上千在飞调用，收摊都排不进
+            self._mark_disconnected(
+                "exec-server has reached its limit of pending requests "
+                "(including the reserved cleanup slot)"
+            )
+            raise ConnectionError("connection closed")
+        else:
+            raise ProtocolError(
+                "exec-server has reached its limit of "
+                f"{self.MAX_IN_FLIGHT_REGULAR_CALLS} pending requests"
+            )
+
         self._request_id += 1
         request_id = self._request_id
 
@@ -353,7 +447,12 @@ class _JsonRpcTransport:
             raise ConnectionError(f"failed to send request {method}: {e}") from e
         finally:
             # 对位 Rust PendingRequestGuard：完成/失败/被取消（CancelledError）
-            # 一律即从 pending 表移除——取消残留会等到后续流量或断线才清
+            # 一律即从 pending 表移除——取消残留会等到后续流量或断线才清；
+            # 在飞槽位一并归还（对位 SemaphorePermit drop）
+            if cleanup_reserved:
+                self._in_flight_cleanup -= 1
+            else:
+                self._in_flight_regular -= 1
             self._pending.pop(request_id, None)
 
     async def send_notification(
@@ -385,7 +484,12 @@ class _JsonRpcTransport:
         future = self._pending.pop(request_id, None)
         if future is None or future.done():
             return
-        if "error" in message:
+        if "result" in message:
+            # result 键优先（对位 serde 反序列化的 contains_key("result") 优先：
+            # result+error 并存时 error 键被忽略——与 _is_malformed_message
+            # 的归类一致，并存消息按 Response 归）
+            future.set_result(message["result"])
+        elif "error" in message:
             error = message["error"]
             code = error.get("code")
             future.set_exception(
@@ -397,8 +501,6 @@ class _JsonRpcTransport:
                     server_message=error.get("message"),
                 )
             )
-        else:
-            future.set_result(message.get("result"))
 
     async def _run_notification_handlers(self, message: dict) -> None:
         """通知按序分发给全部处理器（异常逐条 logger.warning 留痕——
@@ -620,14 +722,15 @@ class WebSocketTransport(_JsonRpcTransport):
         self,
         url: str,
         token: str | None = None,
-        max_payload: int = 100 * 1024 * 1024,
+        max_payload: int = 64 * 1024 * 1024,
         request_timeout: float = 30.0,
     ):
         super().__init__(request_timeout)
         self.url = url
         self.token = token
-        #: 传输层单消息上限（websockets max_size；类别限流见
-        #: `_gate_inbound_message`——两道口子语义不同，这里只兜底帧尺寸）
+        #: 传输层单消息上限（websockets max_size；默认对位 tungstenite 的
+        #: max_message_size=64MiB；类别限流见 `_gate_inbound_message`——
+        #: 两道口子语义不同，这里只兜底帧尺寸）
         self.max_payload = max_payload
         self._ws: websockets.asyncio.client.ClientConnection | None = None
         self._receive_task: asyncio.Task | None = None
@@ -644,6 +747,11 @@ class WebSocketTransport(_JsonRpcTransport):
                 self.url,
                 additional_headers=headers,
                 max_size=self.max_payload,
+                # 客户端不发 keepalive ping、不靠 pong 看门狗（对位 Rust
+                # connection.rs from_websocket 的 ping_interval None——
+                # websockets 库默认 20s 一发，须显式关掉；pong watchdog
+                # 只接在 nova 未镜像的 relay 面）
+                ping_interval=None,
             )
         except websockets.exceptions.InvalidStatus as e:
             if e.response.status_code == 401:
@@ -683,7 +791,10 @@ class WebSocketTransport(_JsonRpcTransport):
     async def _send_message(self, message: dict) -> None:
         if self._ws is None or self._closed:
             raise ConnectionError("not connected")
-        await self._ws.send(json.dumps(message))
+        # allow_nan=False：NaN/Infinity 非合法 JSON（serde_json 序列化非有限
+        # 浮点为 null；py 的 json 默认印裸 NaN，服务端词法拒收判连接级致命）
+        # ——本地抛错不上线
+        await self._ws.send(json.dumps(message, allow_nan=False))
 
     async def _receive_loop(self) -> None:
         """接收消息循环；循环意外结束（对端关闭/读失败/限流/畸形）即断线"""
@@ -737,6 +848,28 @@ class WebSocketTransport(_JsonRpcTransport):
         return self._ws is not None and not self._closed
 
 
+def _kill_windows_process_tree(pid: int) -> bool:
+    """taskkill 杀整棵进程树（对位 Rust connection.rs 的
+    kill_windows_process_tree：/T 整棵子树、/F 强制；stdin/stdout/stderr
+    全置 null）。返回 False 时调用方落直接子兜底（对位 kill_direct_child）"""
+    try:
+        result = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+    except OSError as e:
+        logger.warning(
+            "failed to run taskkill for exec-server stdio process tree %s: %s",
+            pid,
+            e,
+        )
+        return False
+    return result.returncode == 0
+
+
 class StdioTransport(_JsonRpcTransport):
     """stdio 传输层：spawn 子进程，stdin/stdout 承载 NDJSON JSON-RPC（一行一条消息）。
 
@@ -749,7 +882,8 @@ class StdioTransport(_JsonRpcTransport):
     注意：stderr 由独立任务持续消费（打日志或回调），防止子进程 stderr
     缓冲填满死锁；进程退出传播为连接断开（pending 请求以 ConnectionError 收尾，
     并触发 on_disconnect——恢复层据此重 spawn）。子进程 spawn 时入独立进程组
-    （POSIX），关闭/意外断线逐级组杀整个进程树。
+    （POSIX；Windows 经 CREATE_NO_WINDOW 不分配控制台），关闭/意外断线逐级
+    收割整个进程树（POSIX 组杀；Windows taskkill /T /F 杀整树）。
     """
 
     #: 默认命令：本地 nova-exec-server 的 stdio 监听模式
@@ -788,13 +922,24 @@ class StdioTransport(_JsonRpcTransport):
 
     async def connect(self) -> None:
         """spawn 子进程并启动收发循环"""
-        # 对齐 Rust stdio_command_process：env 叠加在继承环境之上，而非整体替换
-        env = {**os.environ, **self.env} if self.env else None
+        # 对齐 Rust stdio_command_process：env 叠加在继承环境之上，而非整体
+        # 替换；合成 env（继承 + 显式覆盖双侧）再经
+        # scrub_non_inheritable_env_vars 剔除启动上下文敏感变量（大小写不敏感，
+        # 对位 eq_ignore_ascii_case）
+        env = {
+            name: value
+            for name, value in {**os.environ, **(self.env or {})}.items()
+            if name.upper() not in _NON_INHERITABLE_ENV_VARS
+        }
         spawn_kwargs: dict[str, Any] = {}
         if os.name == "posix":
             # 独立进程组（pgid == 子进程 pid；对位 Rust client_transport.rs 的
             # process_group(0)）——关闭/断线时 os.killpg 组杀依赖此前提
             spawn_kwargs["process_group"] = 0
+        elif os.name == "nt":
+            # 后台子进程不分配控制台窗口（对位 Rust client_transport.rs 经
+            # background_command 构造的 CREATE_NO_WINDOW）
+            spawn_kwargs["creationflags"] = _CREATE_NO_WINDOW
         try:
             self._process = await asyncio.create_subprocess_exec(
                 self.program,
@@ -804,8 +949,10 @@ class StdioTransport(_JsonRpcTransport):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd,
                 env=env,
-                # StreamReader 行缓冲上限：服务端单条消息可达 64MB
-                limit=self.max_message_size,
+                # StreamReader 行缓冲上限：服务端单条消息可达 64MB；+2 为 CRLF
+                # 前瞻余量（对位 Rust connection.rs 的 max+1+CRLF 前瞻——恰好
+                # 上限的消息带 CRLF 终止也收得下，超限由读回后的 len 检查拒）
+                limit=self.max_message_size + 2,
                 **spawn_kwargs,
             )
         except OSError as e:
@@ -889,7 +1036,8 @@ class StdioTransport(_JsonRpcTransport):
     @staticmethod
     def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
         """SIGTERM 到整个进程组（对位 Rust terminate_process_tree 的 unix
-        分支）；非 POSIX 或组杀失败回退直接子（对位 kill_direct_child 兜底）"""
+        分支）；Windows 走 taskkill 杀整树（对位 kill_windows_process_tree），
+        组杀/taskkill 失败回退直接子（对位 kill_direct_child 兜底）"""
         if os.name == "posix":
             try:
                 # pgid == 直接子 pid（spawn 时 process_group=0）
@@ -903,6 +1051,9 @@ class StdioTransport(_JsonRpcTransport):
                     process.pid,
                     e,
                 )
+        elif os.name == "nt":
+            if _kill_windows_process_tree(process.pid):
+                return
         try:
             process.terminate()
         except ProcessLookupError:
@@ -910,7 +1061,8 @@ class StdioTransport(_JsonRpcTransport):
 
     @staticmethod
     def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
-        """SIGKILL 到整个进程组兜底（对位 Rust kill_process_tree 的 unix 分支）"""
+        """SIGKILL 到整个进程组兜底（对位 Rust kill_process_tree 的 unix
+        分支）；Windows 走 taskkill 杀整树，失败回退直接子"""
         if os.name == "posix":
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -923,6 +1075,9 @@ class StdioTransport(_JsonRpcTransport):
                     process.pid,
                     e,
                 )
+        elif os.name == "nt":
+            if _kill_windows_process_tree(process.pid):
+                return
         try:
             process.kill()
         except ProcessLookupError:
@@ -959,9 +1114,17 @@ class StdioTransport(_JsonRpcTransport):
         ):
             raise ConnectionError("not connected")
         line = (
-            json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
+            # allow_nan=False：NaN/Infinity 非合法 JSON（serde_json 序列化非
+            # 有限浮点为 null；py 的 json 默认印裸 NaN，服务端词法拒收判连接
+            # 级致命）——序列化失败本地抛错不上线
+            json.dumps(
+                message, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            )
+            + "\n"
         ).encode()
         if len(line) > self.max_message_size:
+            # 有意偏差声明：基准（Rust 客户端）超限照发、由服务端杀连接；
+            # py 选择本地拒发保连接——调用方收到明确错误，连接可继续服务
             raise ProtocolError(
                 f"message exceeds maximum stdio length of {self.max_message_size} bytes"
             )

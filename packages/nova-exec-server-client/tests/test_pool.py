@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 from fake_transport import FakeTransport
+
 from nova_exec_server_client import (
     ExecutorClient,
     StdioTransport,
@@ -262,7 +263,9 @@ async def test_control_request_completes_while_data_request_in_flight():
     class _LongReadTransport(FakeTransport):
         """数据面请求挂起直到放行（模拟长读占用数据面连接）"""
 
-        async def send_request(self, method, params=None, *, channel=None):
+        async def send_request(
+            self, method, params=None, *, channel=None, for_cleanup=False
+        ):
             await super().send_request(method, params, channel=channel)
             if method == "fs/readStream":
                 await release.wait()
@@ -287,3 +290,33 @@ async def test_control_request_completes_while_data_request_in_flight():
 
     release.set()
     assert await asyncio.wait_for(read_task, 2) == {}
+
+
+# ---------------------------------------------------------------------------
+# A3 for_cleanup 透传（对位 Rust call_for_cleanup 的收摊保留槽语义）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_for_cleanup_passed_through_to_channel_transport():
+    """for_cleanup 标记透传到落点传输（收摊调用先抢共享槽、再抢保留槽的
+    裁决在传输层）；未标记时按兼容路径不传该参数"""
+
+    class _CleanupRecordingTransport(FakeTransport):
+        def __init__(self):
+            super().__init__()
+            self.cleanup_flags: list[bool] = []
+
+        async def send_request(
+            self, method, params=None, *, channel=None, for_cleanup=False
+        ):
+            self.cleanup_flags.append(for_cleanup)
+            return await super().send_request(method, params, channel=channel)
+
+    control = _CleanupRecordingTransport()
+    pool = TransportPool({CHANNEL_CONTROL: control})
+
+    await pool.send_request("process/terminate", {"processId": "p"}, for_cleanup=True)
+    await pool.send_request("environment/info")
+
+    assert control.cleanup_flags == [True, False]

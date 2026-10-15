@@ -98,8 +98,18 @@ def test_check_heuristics_fallback_only_when_no_rule():
     assert evaluation.is_match() is False
 
 
-def test_check_empty_policy_allows():
-    assert Policy.empty().check(("anything",)).decision is Decision.ALLOW
+def test_check_without_match_or_fallback_has_no_decision():
+    """无命中且无兜底 → decision=None（对位 codex from_matches 非空不变式：
+    codex 的 check 强制携带兜底，永不空命中；无兜底调用方只读
+    matched_rules——不凭空造 ALLOW 架空裁决）"""
+    evaluation = Policy.empty().check(("anything",))
+    assert evaluation.decision is None
+    assert evaluation.matched_rules == ()
+    assert evaluation.is_match() is False
+    # check_multiple 同纪律：全部段无命中且无兜底 → None
+    assert Policy.empty().check_multiple([("ls",), ("rm",)]).decision is None
+    # 兜底返回 None 视为无兜底命中 → None
+    assert Policy.empty().check(("ls",), lambda cmd: None).decision is None
 
 
 def test_check_multiple_aggregates():
@@ -169,6 +179,29 @@ def test_normalize_host_port_must_be_ascii_digits():
     # ASCII 端口照常剥落
     assert normalize_network_rule_host("example.com:443") == "example.com"
     assert normalize_network_rule_host("[::1]:8080") == "::1"
+
+
+def test_normalize_host_lowercases_ascii_only():
+    """小写化对位 codex `to_ascii_lowercase`（只折 A–Z）——`str.lower()` 的
+    Unicode 全量小写化会把 İ 折成 "i̇" 两码点，双端归一结果分叉"""
+    # 土耳其大写 İ（U+0130）：codex 原样保留，不折
+    assert normalize_network_rule_host("İExample.COM") == "İexample.com"
+    # 全角等非 ASCII 大写同样不折
+    assert normalize_network_rule_host("ＡＢＣ.com") == "ＡＢＣ.com"
+
+
+def test_normalize_host_whitespace_uses_rust_char_table():
+    """空白判定对位 Rust `char::is_whitespace`（Unicode White_Space 属性）——
+    `str.isspace()` 是其超集（多收 U+001C–U+001F），旧行为把 codex 收的
+    host 拒掉、还把 codex 不裁的尾部分隔符裁掉，双端分歧"""
+    # U+001F 不是 White_Space：codex 不收不裁、整串保留为合法 host
+    assert normalize_network_rule_host("exa\x1fmple.com") == "exa\x1fmple.com"
+    assert normalize_network_rule_host("example.com\x1f") == "example.com\x1f"
+    # White_Space 表内字符（如 NBSP U+00A0）：两端一致拒绝
+    with pytest.raises(ValueError, match="whitespace"):
+        normalize_network_rule_host("exa example.com")
+    # 表内字符在首尾照常裁剪（TAB 属 White_Space）
+    assert normalize_network_rule_host("\texample.com\n") == "example.com"
 
 
 def test_network_rule_protocol_parse_error_names_the_value():

@@ -1149,7 +1149,8 @@ class ExecServerNetworkPolicyRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     protocol: ExecServerNetworkProtocol
     host: str
-    port: int
+    #: 对位 network_policy.rs 的 u16——越界即线上载荷解析失败（-32602 分支）
+    port: int = Field(ge=0, le=65535)
 
 
 class NetworkPolicyRequestParams(BaseModel):

@@ -52,6 +52,12 @@ class ReadStreamEvent:
     total_bytes: int | None = None
     #: kind == "failed" 时的错误描述（done 携带 error，或连接失败时客户端合成）
     error: str | None = None
+    #: kind == "failed" 时标识服务端句柄是否已收摊/消亡：True = 服务端终态
+    #: （done 携带 error）或连接清扫（句柄随连接消亡）——消费者不得再补
+    #: fs/close；False = 客户端本地断流（背压队列满/畸形推送兜底），服务端
+    #: 读句柄仍活着，消费者须按未收摊路径补发 fs/close（对位 Rust
+    #: PushReadRegistration::drop 的 active 语义）
+    server_settled: bool = False
 
 
 @dataclass
@@ -68,43 +74,74 @@ class _StreamRegistration:
 HTTP_BODY_STREAM_QUEUE_CAPACITY = 256
 HTTP_BODY_STREAM_BYTE_BUDGET = 16 * 1024 * 1024
 
+#: 单条 bodyDelta 的解码后上限（对位 Rust `MAX_HTTP_BODY_DELTA_BYTES`）与
+#: base64 编码串上限（对位 `MAX_ENCODED_HTTP_BODY_DELTA_BYTES`）——双检，
+#: 超即协议错误（SDK 从宽为 fail 对应流，不炸接收循环）
+MAX_HTTP_BODY_DELTA_BYTES = 1024 * 1024
+MAX_ENCODED_HTTP_BODY_DELTA_BYTES = -(-MAX_HTTP_BODY_DELTA_BYTES // 3) * 4
+
+
+@dataclass
+class _HttpByteBudget:
+    """连接级 http 在队字节预算（对位 Rust `Inner.http_body_stream_byte_budget`
+    单一信号量：全部并发流共享 16MB——超限时只杀抢不到预算的那条流，其余流
+    不受影响）。在队字节随取扣账：排空够快任意大 body 都能流完。"""
+
+    in_flight_bytes: int = 0
+
 
 @dataclass
 class _HttpStreamRegistration:
-    """一条已注册的 http 流式响应体通道：消费队列 + 在队未消费字节数
-    （预算执法——对位 Rust 连接级"在队字节"信号量：消费即释放，排空够快
-    任意大 body 都能流完；此前按流累计封顶会把 >16MB 的快流误杀）"""
+    """一条已注册的 http 流式响应体通道：消费队列 + 连接级共享预算的引用
+    （预算记账在路由器级——对位 Rust 连接级"在队字节"信号量：消费即释放）"""
 
-    in_flight_bytes: int = 0
+    budget: _HttpByteBudget
     queue: "_HttpBodyQueue" = field(init=False)
 
     def __post_init__(self) -> None:
-        # 队列与注册项互相引用（队列出队即扣注册项的在队字节），故队列由
+        # 队列与预算互相引用（队列出队即扣连接级预算的在队字节），故队列由
         # 注册项自建
-        self.queue = _HttpBodyQueue(HTTP_BODY_STREAM_QUEUE_CAPACITY, self)
+        self.queue = _HttpBodyQueue(HTTP_BODY_STREAM_QUEUE_CAPACITY, self.budget)
 
 
 class _HttpBodyQueue(asyncio.Queue[dict[str, Any]]):
     """按在队字节记账的队列：投递加、消费减（对位 Rust 的 Semaphore 语义）。
-    块大小记在事件包封的 `_n` 键（内部包封，不上线）。"""
+    块大小记在事件包封的 `_n` 键（内部包封，不上线）。
 
-    def __init__(self, maxsize: int, registration: _HttpStreamRegistration) -> None:
+    只覆写 `get_nowait`：asyncio.Queue.get() 的收尾就是 `self.get_nowait()`
+    （空队等待被唤醒后同路径），两处都覆写会每条事件双重扣账。"""
+
+    def __init__(self, maxsize: int, budget: _HttpByteBudget) -> None:
         super().__init__(maxsize=maxsize)
-        self._registration = registration
-
-    async def get(self) -> dict[str, Any]:
-        event = await super().get()
-        self._registration.in_flight_bytes -= event.get("_n", 0)
-        return event
+        self._budget = budget
 
     def get_nowait(self) -> dict[str, Any]:
         event = super().get_nowait()
-        self._registration.in_flight_bytes -= event.get("_n", 0)
+        self._budget.in_flight_bytes -= event.get("_n", 0)
         return event
 
+    def release_queued_bytes(self) -> None:
+        """路由注销时释放仍压队的在队字节：消费者已走，残留事件的占账必须
+        归还连接级预算——否则幽灵字节耗尽预算、误杀无关流（按流各自记账时
+        该泄漏随注册项一起被丢弃，连接级共享后必须显式清账）"""
+        while True:
+            try:
+                self.get_nowait()
+            except asyncio.QueueEmpty:
+                return
 
-class _HttpBodyStreamOverBudget(Exception):
-    """内部哨兵：http 流式响应体超字节预算（走与 QueueFull 同一终态路径）"""
+
+def _http_error_event(request_id: str, reason: str) -> dict[str, Any]:
+    """http 流式响应体的合成错误终态事件（done+error——消费者先查 error 转
+    ProtocolError；seq 占位 1，对位 Rust fail_all_http_body_streams 的合成
+    delta）"""
+    return {
+        "requestId": request_id,
+        "seq": 1,
+        "deltaBase64": "",
+        "done": True,
+        "error": reason,
+    }
 
 
 class NotificationRouter:
@@ -127,6 +164,9 @@ class NotificationRouter:
         self._method_queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         #: http 流式响应体的按 requestId 键控队列（每请求一条，对位 Rust）
         self._http_streams: dict[str, _HttpStreamRegistration] = {}
+        #: http 在队字节的连接级共享预算（跨全部并发 http 流——对位 Rust
+        #: `Inner.http_body_stream_byte_budget` 单一信号量）
+        self._http_byte_budget = _HttpByteBudget()
         #: 满队列转异步投递的终止事件任务集（持引用防 GC 中途回收任务；
         #: 完成即自弃——对位 Rust 满员 spawn send 的"任务不滞留"语义）
         self._terminal_tasks: set[asyncio.Task] = set()
@@ -166,13 +206,16 @@ class NotificationRouter:
         """注册 http 流式响应体通道（按 requestId 键控），返回消费队列"""
         if request_id in self._http_streams:
             raise ValueError(f"http body stream already registered: {request_id}")
-        registration = _HttpStreamRegistration()
+        registration = _HttpStreamRegistration(self._http_byte_budget)
         self._http_streams[request_id] = registration
         return registration.queue
 
     def unregister_http_body_stream(self, request_id: str) -> None:
-        """注销 http 流式通道（流结束/放弃时调用，幂等）"""
-        self._http_streams.pop(request_id, None)
+        """注销 http 流式通道（流结束/放弃时调用，幂等）；仍压队的在队字节
+        归还连接级预算（消费者已走，残留占账不得漏成幽灵字节）"""
+        registration = self._http_streams.pop(request_id, None)
+        if registration is not None:
+            registration.queue.release_queued_bytes()
 
     async def dispatch(self, message: dict[str, Any]) -> None:
         """传输层通知入口：按方法分流、按 handle_id 路由（对位 handle_server_notification）"""
@@ -189,9 +232,31 @@ class NotificationRouter:
                 )
                 self._finish_stream(params)
             elif method == HTTP_REQUEST_BODY_DELTA:
-                params = HttpRequestBodyDeltaNotification.model_validate(
-                    message.get("params") or {}
+                raw_params = message.get("params") or {}
+                # per-delta 双检之一：编码串长帽（对位 Rust
+                # handle_http_body_delta_notification 的 MAX_ENCODED 预检——
+                # 先量串长再解码，超大载荷不付解码代价）
+                encoded = (
+                    raw_params.get("deltaBase64")
+                    if isinstance(raw_params, dict)
+                    else None
                 )
+                if (
+                    isinstance(encoded, str)
+                    and len(encoded) > MAX_ENCODED_HTTP_BODY_DELTA_BYTES
+                ):
+                    raise ValueError(
+                        f"http response body delta exceeds "
+                        f"{MAX_HTTP_BODY_DELTA_BYTES} bytes"
+                    )
+                params = HttpRequestBodyDeltaNotification.model_validate(raw_params)
+                # per-delta 双检之二：解码后 1MB 帽（编码帽取等放行的边界载荷
+                # 由此兜底，对位 Rust 的 MAX_HTTP_BODY_DELTA_BYTES 复检）
+                if len(params.delta.data) > MAX_HTTP_BODY_DELTA_BYTES:
+                    raise ValueError(
+                        f"http response body delta exceeds "
+                        f"{MAX_HTTP_BODY_DELTA_BYTES} bytes"
+                    )
                 self._deliver_http_body_delta(params)
             else:
                 queues = self._method_queues.get(method or "")
@@ -202,11 +267,63 @@ class NotificationRouter:
                 else:
                     logger.debug("ignoring unknown executor notification: %s", method)
         except Exception:
-            # 通知载荷畸形不许炸掉传输接收循环——留痕后丢弃（对位 Rust
-            # handle_server_notification 出错即断开连接的严格姿态，SDK 侧从宽）
+            # 通知载荷畸形不许炸掉传输接收循环——留痕后按可提取的句柄/请求 id
+            # 合成终态 fail 对应流（不再整条静默丢弃——旧行为下路由永不摘除、
+            # 消费者干等）；对位 Rust 分发失败即断开连接的严格姿态，SDK 从宽
             logger.warning(
                 "failed to dispatch executor notification %s", method, exc_info=True
             )
+            if method in (FS_READ_STREAM_CHUNK, FS_READ_STREAM_DONE):
+                self._fail_fs_streams_after_malformed(message, method)
+            elif method == HTTP_REQUEST_BODY_DELTA:
+                self._fail_http_streams_after_malformed(message)
+
+    def _fail_fs_streams_after_malformed(
+        self, message: dict[str, Any], method: str
+    ) -> None:
+        """畸形 fs 推送的兜底终态：能提出 handleId 只 fail 该流，提不出则 fail
+        全表（向 Rust 严格姿态靠拢的兜底——Rust 分发失败即断连、全部流终态；
+        SDK 从宽为单流/全表终态，但不许静默丢弃让消费者干等）。
+
+        合成的 failed 为本地终态（server_settled=False）——服务端读句柄很可能
+        仍活着（只是它的推送我们没解析动），消费者按未收摊路径补发 fs/close。
+        """
+        reason = f"malformed {method} notification"
+        params = message.get("params")
+        handle_id = params.get("handleId") if isinstance(params, dict) else None
+        if isinstance(handle_id, str):
+            registration = self._streams.pop(handle_id, None)
+            if registration is not None:
+                self._push_terminal(
+                    registration, ReadStreamEvent(kind="failed", error=reason)
+                )
+            return
+        drained = list(self._streams.items())
+        self._streams.clear()
+        for _handle_id, registration in drained:
+            self._push_terminal(
+                registration, ReadStreamEvent(kind="failed", error=reason)
+            )
+
+    def _fail_http_streams_after_malformed(self, message: dict[str, Any]) -> None:
+        """畸形/超限 bodyDelta 的兜底终态（含 per-delta 帽触发的协议错误——
+        对位 Rust 判连接级致命的同一路径，SDK 从宽为 fail 对应流）：能提出
+        requestId 只 fail 该流，提不出则 fail 全表。终态经 error 事件进队列，
+        消费者转 ProtocolError，绝不静默丢帧让消费者干等或收截断 body。"""
+        reason = "malformed http/request/bodyDelta notification"
+        params = message.get("params")
+        request_id = params.get("requestId") if isinstance(params, dict) else None
+        if isinstance(request_id, str):
+            registration = self._http_streams.pop(request_id, None)
+            if registration is not None:
+                self._push_http_terminal(
+                    registration,
+                    _http_error_event(request_id, reason),
+                )
+            return
+        for rid, registration in list(self._http_streams.items()):
+            self._http_streams.pop(rid, None)
+            self._push_http_terminal(registration, _http_error_event(rid, reason))
 
     def fail_channel(self, channel: str | None, message: str) -> None:
         """清扫通道在途推送工作（恢复开始/恢复失败/刷新退役时调用；消费者收
@@ -233,20 +350,17 @@ class NotificationRouter:
         ]
         for handle_id, registration in drained:
             self._streams.pop(handle_id, None)
+            # 连接清扫合成的 failed 标记 server_settled=True：句柄随连接消亡
+            # （服务端断连即 close_all 句柄表），消费者不得再补 fs/close
             self._push_terminal(
-                registration, ReadStreamEvent(kind="failed", error=message)
+                registration,
+                ReadStreamEvent(kind="failed", error=message, server_settled=True),
             )
         for request_id, registration in list(self._http_streams.items()):
             self._http_streams.pop(request_id, None)
             self._push_http_terminal(
                 registration,
-                {
-                    "requestId": request_id,
-                    "seq": 1,
-                    "deltaBase64": "",
-                    "done": True,
-                    "error": message,
-                },
+                _http_error_event(request_id, message),
             )
         for method, queues in list(self._method_queues.items()):
             self._method_queues.pop(method, None)
@@ -259,9 +373,10 @@ class NotificationRouter:
     ) -> None:
         """按 requestId 精确路由 bodyDelta（对位 Rust http_response_body_stream）。
 
-        队列满或在队字节超预算 → 摘除路由 + 响亮终态（合成 error 事件进队列，
-        消费者经 delta.error 抛 ProtocolError）——绝不静默丢帧。预算是"在队
-        字节"（消费即释放，对位 Rust 的连接级信号量），不是流累计总量。
+        队列满或连接级在队字节抢不到预算 → 摘除路由 + 响亮终态（合成 error
+        事件进队列，消费者经 delta.error 抛 ProtocolError）——绝不静默丢帧。
+        预算是**连接级共享**的"在队字节"（跨全部并发 http 流，消费即释放，
+        对位 Rust 的单一信号量）：超限只杀抢不到预算的这一条流。
         """
         registration = self._http_streams.get(params.request_id)
         if registration is None:
@@ -270,34 +385,42 @@ class NotificationRouter:
                 "ignoring http body delta for unknown request %s", params.request_id
             )
             return
-        chunk_len = len(params.delta.data)
-        registration.in_flight_bytes += chunk_len
-        over_budget = registration.in_flight_bytes > HTTP_BODY_STREAM_BYTE_BUDGET
+        budget = registration.budget
+        # 在队字节计解码块长 + error 串长（对位 Rust `queued_bytes` 口径）
+        queued_bytes = len(params.delta.data) + len(params.error or "")
+        over_budget = (
+            budget.in_flight_bytes + queued_bytes > HTTP_BODY_STREAM_BYTE_BUDGET
+        )
         event = {
             "method": HTTP_REQUEST_BODY_DELTA,
             "params": params.model_dump(by_alias=True),
-            "_n": chunk_len,
+            "_n": queued_bytes,
         }
-        try:
-            if over_budget:
-                raise _HttpBodyStreamOverBudget
-            registration.queue.put_nowait(event)
-        except (asyncio.QueueFull, _HttpBodyStreamOverBudget):
-            reason = (
-                f"http body stream exceeded the {HTTP_BODY_STREAM_BYTE_BUDGET}-byte budget"
-                if over_budget
-                else "http body stream consumer too slow: queue is full"
-            )
+        if over_budget:
+            # 未入队不占账；只杀抢不到预算的这一条流（其余流不受影响）
             self._http_streams.pop(params.request_id, None)
             self._push_http_terminal(
                 registration,
-                {
-                    "requestId": params.request_id,
-                    "seq": params.seq,
-                    "deltaBase64": "",
-                    "done": False,
-                    "error": reason,
-                },
+                _http_error_event(
+                    params.request_id,
+                    f"http body stream exceeded the "
+                    f"{HTTP_BODY_STREAM_BYTE_BUDGET}-byte budget",
+                ),
+            )
+            return
+        budget.in_flight_bytes += queued_bytes
+        try:
+            registration.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            # 未入队即还账，再按 QueueFull 终态路径杀流
+            budget.in_flight_bytes -= queued_bytes
+            self._http_streams.pop(params.request_id, None)
+            self._push_http_terminal(
+                registration,
+                _http_error_event(
+                    params.request_id,
+                    "http body stream consumer too slow: queue is full",
+                ),
             )
 
     @staticmethod
@@ -350,7 +473,10 @@ class NotificationRouter:
             registration.queue.put_nowait(event)
         except asyncio.QueueFull:
             # try_send 背压：消费过慢宁可断流也不阻塞连接级通知分发；
-            # 断流表现为消费者收到 Failed（对位 Rust 的 channel 关闭 → UnexpectedEof）
+            # 断流表现为消费者收到 Failed（对位 Rust 的 channel 关闭 →
+            # UnexpectedEof）。本地合成终态（server_settled=False）——服务端
+            # 读句柄仍活着，消费者须按未收摊路径补发 fs/close（对位 Rust
+            # PushReadRegistration::drop 的 active=true 分支）
             self._streams.pop(params.handle_id, None)
             self._push_terminal(
                 registration,
@@ -368,7 +494,10 @@ class NotificationRouter:
             )
             return
         if params.error is not None:
-            event = ReadStreamEvent(kind="failed", error=params.error)
+            # 服务端错误终态（done 携带 error）：服务端已自行收摊
+            event = ReadStreamEvent(
+                kind="failed", error=params.error, server_settled=True
+            )
         else:
             event = ReadStreamEvent(kind="done", total_bytes=params.total_bytes)
         self._push_terminal(registration, event)
@@ -390,4 +519,14 @@ class NotificationRouter:
         except asyncio.QueueFull:
             task = asyncio.create_task(registration.queue.put(event))
             self._terminal_tasks.add(task)
-            task.add_done_callback(self._terminal_tasks.discard)
+            task.add_done_callback(self._discard_terminal_task)
+
+    def _discard_terminal_task(self, task: "asyncio.Task[None]") -> None:
+        """终态投递任务完成即自弃；异常取回留痕（不打 "Task exception was
+        never retrieved" 循环告警）"""
+        self._terminal_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.debug("terminal event delivery task failed", exc_info=exc)

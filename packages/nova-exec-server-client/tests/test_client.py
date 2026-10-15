@@ -6,9 +6,12 @@ import pytest
 from fake_transport import FakeTransport
 
 from nova_exec_server_client import (
+    NETWORK_POLICY_DECISION,
     ExecutorClient,
+    ProtocolError,
     ReconnectStrategy,
     TimeoutError,
+    TransportError,
 )
 from nova_exec_server_client import client as client_module
 
@@ -250,7 +253,9 @@ async def test_force_environment_info_bypasses_cache():
 class HangingEnvironmentInfoTransport(FakeTransport):
     """environment/info 永不应答的假传输（探活超时触发恢复测试用）"""
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "environment/info":
             await asyncio.sleep(60)
         return await super().send_request(method, params, channel=channel)
@@ -331,4 +336,282 @@ async def test_environment_info_cache_miss_timeout_also_recovers(monkeypatch):
     assert info.platform_os == "macos"
     again = await client.environment_info()
     assert again is info  # 恢复后读缓存，不重复请求
+    await client.disconnect()
+
+
+# =============================================================================
+# 二轮审计修复族：双通道 resume 隔离 / 刷新原子性与缓存 / 握手会话校验 /
+# 探针实发同钉 / 裁决订阅畸形容忍 / 准入存活检查 / cwd 归一 / http 终态真值
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_connections_two_resume_only_control_plane():
+    """connections=2 + resume_session_id：resume 只落控制面首连（服务端
+    session_registry 拒绝同一会话的重复附着 -32010）；数据面开新会话"""
+    sink: list[FakeTransport] = []
+
+    def factory() -> FakeTransport:
+        # 控制面如实回到被 resume 的会话；数据面新会话
+        session_id = "s-9" if not sink else f"session-{len(sink)}"
+        transport = FakeTransport(
+            {"initialize": {"sessionId": session_id, "protocolVersion": "1.4"}}
+        )
+        sink.append(transport)
+        return transport
+
+    client = ExecutorClient(
+        transport_factory=factory, connections=2, resume_session_id="s-9"
+    )
+    await client.connect()
+
+    control_init = [p for m, p, _ in sink[0].requests if m == "initialize"][0]
+    data_init = [p for m, p, _ in sink[1].requests if m == "initialize"][0]
+    assert control_init["resumeSessionId"] == "s-9"
+    assert "resumeSessionId" not in data_init
+    assert client.session_id == "s-9"
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_clears_environment_info_cache():
+    """刷新起手即清元数据缓存（域2-A3）：首通道即失败时不留旧会话缓存值"""
+    made: list[FakeTransport] = []
+
+    class FailingTransport(FakeTransport):
+        async def connect(self) -> None:
+            raise ConnectionError("dial refused")
+
+    def factory() -> FakeTransport:
+        idx = len(made)
+        transport: FakeTransport = (
+            FailingTransport({})
+            if idx == 2  # 控制面刷新候选连接失败
+            else FakeTransport(
+                {
+                    "initialize": {
+                        "sessionId": f"session-{idx}",
+                        "protocolVersion": "1.0",
+                        "environmentInfo": ENVIRONMENT_INFO_PAYLOAD,
+                    },
+                    "environment/status": {"status": "ready"},
+                }
+            )
+        )
+        made.append(transport)
+        return transport
+
+    client = ExecutorClient(transport_factory=factory, connections=2)
+    await client.connect()
+    assert client._environment_info is not None  # initialize 捎带填充
+
+    with pytest.raises(Exception):
+        await client.refresh_connection()
+    assert client._environment_info is None  # 旧会话缓存不留
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_retires_already_refreshed_channels():
+    """双通道刷新非原子收口（域5-B2）：数据面失败时把已刷新的控制面一并
+    退役——不留"控制面新会话 + 数据面断连"的分裂态"""
+    made: list[FakeTransport] = []
+
+    class FailingTransport(FakeTransport):
+        async def connect(self) -> None:
+            raise ConnectionError("dial refused")
+
+    def factory() -> FakeTransport:
+        idx = len(made)
+        transport: FakeTransport = (
+            FailingTransport({})
+            if idx == 3  # 数据面刷新候选（控制面 2 / 数据面 3）连接失败
+            else FakeTransport(
+                {
+                    "initialize": {
+                        "sessionId": f"session-{idx}",
+                        "protocolVersion": "1.0",
+                    },
+                    "environment/status": {"status": "ready"},
+                }
+            )
+        )
+        made.append(transport)
+        return transport
+
+    client = ExecutorClient(transport_factory=factory, connections=2)
+    await client.connect()
+    assert client._control.state == "connected"
+
+    with pytest.raises(Exception, match="dial refused"):
+        await client.refresh_connection()
+
+    # 已刷新的控制面一并退役，整体落回 disconnected（后续 connect 全新拉起）
+    assert client._control.state == "disconnected"
+    assert not made[2].is_connected
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_handshake_resume_mismatch_rejected_before_initialized():
+    """resume 会话一致性在 INITIALIZED 之前校验（对位 Rust initialize_rpc：
+    session 检查先于 notify）——违约即拒，不发 initialized 通知；
+    recovery._install 的同款检查保留兜底"""
+    transport = FakeTransport(
+        {"initialize": {"sessionId": "other-session", "protocolVersion": "1.4"}}
+    )
+    client = ExecutorClient(transport=transport, resume_session_id="s-9")
+    with pytest.raises(ProtocolError, match="unexpected session"):
+        await client.connect()
+    assert not any(m == "initialized" for m, _, _ in transport.notifications)
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_force_environment_info_sends_on_pinned_transport():
+    """探针钉与实发同一条传输（域3-B1，对位 Rust
+    timeout(ENVIRONMENT_INFO_TIMEOUT, rpc_client.call(...))）——不经
+    连接池二次解析，恒落控制面对映代连接"""
+    transport = FakeTransport(
+        {
+            "initialize": {"sessionId": "fake-session", "protocolVersion": "1.0"},
+            "environment/info": ENVIRONMENT_INFO_PAYLOAD,
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    async def forbidden(method, params=None, *, channel=None, for_cleanup=False):
+        raise AssertionError("probe must not re-resolve through the pool")
+
+    client._pool.send_request = forbidden  # type: ignore[method-assign]
+    info = await client.force_environment_info()
+    assert info.platform_os == "macos"
+    assert any(m == "environment/info" for m, _, _ in transport.requests)
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_policy_decision_subscription_skips_malformed_and_fails_on_channel():
+    """裁决审计订阅（域3-B5）：畸形通知丢弃不杀订阅（对位 Rust
+    let Ok(params) = ... else 丢弃分支）；fail_channel 合成终态事件
+    （{"error": message} 形态）→ TransportError 终止迭代而非干等"""
+    transport = FakeTransport(
+        {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    valid = {
+        "processId": "p1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "scope": "process",
+        "decision": "allow",
+        "source": "proxy",
+        "reason": "",
+        "protocol": "https_connect",
+        "host": "pypi.org",
+        "port": 443,
+    }
+    gen = client.on_policy_decision()
+    pending = asyncio.create_task(gen.__anext__())
+    await asyncio.sleep(0)  # 生成体起跑注册订阅队列后再分发
+    await client._router.dispatch(
+        {"method": NETWORK_POLICY_DECISION, "params": {"garbage": True}}
+    )
+    await client._router.dispatch({"method": NETWORK_POLICY_DECISION, "params": valid})
+    first = await asyncio.wait_for(pending, 1)
+    assert first.host == "pypi.org"  # 畸形被跳过，订阅存活
+
+    client._router.fail_channel("control", "exec-server transport disconnected")
+    with pytest.raises(TransportError, match="disconnected"):
+        await gen.__anext__()
+    await gen.aclose()
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_try_begin_rejects_dead_transport():
+    """准入查 is_connected（域3-B6，对位 begin_process_start 的
+    expected.is_disconnected()）：底层已死而断线回调未至的窗口不予准入"""
+    transport = FakeTransport(
+        {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    assert client._process_start_gate.try_begin(client.transport)
+    client._process_start_gate.finish()
+
+    transport.connected = False  # 底层已死、断线回调未至的窗口
+    assert not client._process_start_gate.try_begin(client.transport)
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_read_environment_config_normalizes_cwd_to_file_url():
+    """cwd 上线前归一 PathUri（域5-B1）：原生绝对路径转 file:// scheme
+    （保留集外字符百分号编码）；已是 file:// 前缀的原样透传"""
+    transport = FakeTransport(
+        {
+            "initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"},
+            "environmentConfig/read": {
+                "userHomeDir": "file:///home/u",
+                "executorHomeDir": "file:///home/u/.nova/exec-server",
+                "hostname": "devbox",
+                "config": {"layers": [], "cloudInsertionIndex": 0},
+            },
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    await client.read_environment_config("/repo dir/配置", [["sandbox"]])
+    await client.read_environment_config("file:///already", [["sandbox"]])
+    params = [p for m, p, _ in transport.requests if m == "environmentConfig/read"]
+    assert params[0]["cwd"] == "file:///repo%20dir/%E9%85%8D%E7%BD%AE"
+    assert params[1]["cwd"] == "file:///already"
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_http_stream_empty_error_string_is_terminal():
+    """http body delta 终态真值判定（域5-C3）：error 字段在场即终态
+    （is not None——空串也判错，与 fs 侧同形）"""
+    transport = FakeTransport(
+        {
+            "initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"},
+            "http/request": {"status": 200, "headers": [], "bodyBase64": ""},
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    task = asyncio.create_task(
+        client.http_request(
+            "GET",
+            "http://example.com",
+            stream_response=True,
+            request_id="r-1",
+        )
+    )
+    for _ in range(100):
+        if "r-1" in client._router._http_streams:
+            break
+        await asyncio.sleep(0.01)
+    queue = client._router._http_streams["r-1"].queue
+    queue.put_nowait(
+        {
+            "method": "http/request/bodyDelta",
+            "params": {
+                "requestId": "r-1",
+                "seq": 1,
+                "deltaBase64": "aGk=",
+                "done": False,
+                "error": "",
+            },
+        }
+    )
+    with pytest.raises(ProtocolError, match="http body stream error"):
+        await asyncio.wait_for(task, 1)
     await client.disconnect()

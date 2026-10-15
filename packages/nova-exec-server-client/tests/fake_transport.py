@@ -18,7 +18,9 @@ class FakeTransport:
     async def disconnect(self) -> None:
         self.connected = False
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         self.requests.append((method, params or {}, channel))
         resp = self.responses.get(method, {})
         if isinstance(resp, Exception):

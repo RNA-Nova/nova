@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from nova_exec_server_client import (
     NETWORK_POLICY_REQUEST,
     ExecutorClient,
@@ -59,6 +60,9 @@ async def test_client_network_policy_callback_gets_typed_params():
     client = ExecutorClient(transport=transport, network_policy=policy)
     await client.connect()
     try:
+        # 活进程登记表（对位 Rust Inner.sessions 会话表）：未知 processId
+        # 的裁决请求不调回调直接 deny——fake 服务端探针用 "p1"，先登记
+        client.process.live_processes["p1"] = None
         result = await client.transport.send_request("policy/probe", {})
         assert result[PROBE_SAW] == {"type": "allow"}
         assert captured == {

@@ -64,7 +64,8 @@ async def test_unknown_method_is_ignored():
 
 @pytest.mark.asyncio
 async def test_malformed_notification_warns_not_raises(caplog):
-    """畸形载荷留痕不炸分发（接收循环保护）"""
+    """畸形载荷留痕不炸分发（接收循环保护）；提不出 handleId 时 fail 全表
+    （向 Rust 严格姿态靠拢的兜底——不许静默丢弃让消费者干等）"""
     router = NotificationRouter()
     qa = router.register_stream("h-a")
     with caplog.at_level("WARNING", logger="nova_exec_server_client.notifications"):
@@ -72,18 +73,63 @@ async def test_malformed_notification_warns_not_raises(caplog):
             {"method": "fs/readStream/chunk", "params": {"handleId": 123}}
         )
     assert "failed to dispatch" in caplog.text
-    assert qa.empty()
+    # handleId 非字符串提不出 → 全表合成 failed 终态（本地断流，server_settled=False）
+    event = await asyncio.wait_for(qa.get(), 1)
+    assert event.kind == "failed"
+    assert "malformed" in (event.error or "")
+    assert event.server_settled is False
+    assert "h-a" not in router._streams
+
+
+@pytest.mark.asyncio
+async def test_malformed_chunk_with_extractable_handle_fails_only_that_stream():
+    """畸形 chunk 能提出 handleId：只 fail 该流（路由摘除 + 合成 failed 终态），
+    其余流不受影响（对位 Rust 严格姿态的 SDK 从宽形态）"""
+    router = NotificationRouter()
+    qa = router.register_stream("h-a")
+    qb = router.register_stream("h-b")
+
+    # seq/chunk/eof 缺失 → 校验失败，但 handleId 可提取
+    await router.dispatch(
+        {"method": "fs/readStream/chunk", "params": {"handleId": "h-a"}}
+    )
+
+    event = await asyncio.wait_for(qa.get(), 1)
+    assert event.kind == "failed"
+    assert "malformed" in (event.error or "")
+    assert event.server_settled is False
+    assert "h-a" not in router._streams
+    # 其余流不受影响：路由在、可正常收件
+    assert "h-b" in router._streams
+    await router.dispatch(chunk_msg("h-b", 0, b"ok"))
+    assert (await asyncio.wait_for(qb.get(), 1)).chunk == b"ok"
+
+
+@pytest.mark.asyncio
+async def test_malformed_done_with_extractable_handle_fails_stream():
+    """畸形 done（totalBytes 缺失）同样按 handleId fail 该流——消费者收终态
+    而非干等（路由注册不再永不摘除）"""
+    router = NotificationRouter()
+    queue = router.register_stream("h-d")
+    await router.dispatch(
+        {"method": "fs/readStream/done", "params": {"handleId": "h-d"}}
+    )
+    event = await asyncio.wait_for(queue.get(), 1)
+    assert event.kind == "failed" and "malformed" in (event.error or "")
+    assert "h-d" not in router._streams
 
 
 @pytest.mark.asyncio
 async def test_done_with_error_becomes_failed_event():
-    """done 携带 error → Failed 事件（旧版静默吞掉的缺陷已修）"""
+    """done 携带 error → Failed 事件（旧版静默吞掉的缺陷已修）；服务端终态
+    server_settled=True（服务端已自行收摊，消费者不得再补 fs/close）"""
     router = NotificationRouter()
     queue = router.register_stream("h-e")
     await router.dispatch(done_msg("h-e", 3, error="disk error"))
     event = await queue.get()
     assert event.kind == "failed"
     assert event.error == "disk error"
+    assert event.server_settled is True
 
 
 @pytest.mark.asyncio
@@ -115,6 +161,9 @@ async def test_backpressure_slow_consumer_breaks_stream():
     terminal = await asyncio.wait_for(queue.get(), 1)
     assert terminal.kind == "failed"
     assert "too slow" in terminal.error
+    # 背压断流是本地合成终态（server_settled=False）——服务端读句柄仍活，
+    # 消费者须按未收摊路径补发 fs/close（对位 Rust PushReadRegistration::drop）
+    assert terminal.server_settled is False
     # 断流后该句柄通知一律丢弃
     await router.dispatch(done_msg("h-slow", 999))
 
@@ -148,6 +197,8 @@ async def test_fail_channel_only_drains_matching_streams():
 
     event = await data_q.get()
     assert event.kind == "failed" and "data connection lost" in event.error
+    # 连接清扫：句柄随连接消亡（server_settled=True），消费者不得再补 fs/close
+    assert event.server_settled is True
     assert control_q.empty()  # 控制面流不受影响
     # 幂等：再次清扫无残留可扫
     router.fail_channel("data", "again")

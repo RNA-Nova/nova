@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import pytest
@@ -10,7 +11,6 @@ from nova_protocol import MAX_WRITE_STREAM_CHUNK_BYTES, FileSystemSandboxContext
 
 from nova_exec_server_client import FileSystemError, ProtocolError
 from nova_exec_server_client.fs import FileSystemManager
-from nova_exec_server_client.pool import CHANNEL_DATA
 
 
 def make_fs(responses: dict | None = None) -> tuple[FileSystemManager, FakeTransport]:
@@ -24,6 +24,19 @@ def ok_responses(total: int) -> dict:
         "fs/writeStream/done": {"handleId": "any", "totalBytes": total},
         "fs/close": {},
     }
+
+
+async def wait_close_requests(transport: FakeTransport) -> list:
+    """死线轮询即发即忘的 fs/close 中止任务落地（对位 Rust runtime.spawn——
+    inline await 会把异常/取消路径挂在半死连接上，故中止不随行内等待）"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    close_requests = [r for r in transport.requests if r[0] == "fs/close"]
+    while not close_requests:
+        assert loop.time() < deadline, "fs/close 中止任务 5s 内未落地"
+        await asyncio.sleep(0.01)
+        close_requests = [r for r in transport.requests if r[0] == "fs/close"]
+    return close_requests
 
 
 @pytest.mark.asyncio
@@ -140,8 +153,10 @@ async def test_write_stream_done_error_becomes_filesystem_error():
 
 
 @pytest.mark.asyncio
-async def test_write_stream_local_abort_sends_close_on_data_channel():
-    """字节源中途抛错：发 fs/close 中止（数据面通道），原异常传播"""
+async def test_write_stream_local_abort_sends_close_on_stream_channel():
+    """字节源中途抛错：发 fs/close 中止（落点与开流同一通道解析——裸传输
+    无通道概念归 None；连接池自定义路由见读侧对应用例），原异常传播。
+    中止为即发即忘形态（与 read_stream 收摊同纪律）"""
     fs, transport = make_fs(ok_responses(total=0))
 
     async def broken_source():
@@ -151,16 +166,45 @@ async def test_write_stream_local_abort_sends_close_on_data_channel():
     with pytest.raises(RuntimeError, match="source exploded"):
         await fs.write_stream("file:///tmp/out.bin", broken_source())
 
-    # close 中止请求落在数据面通道（句柄状态随连接），且没有 done
-    close_calls = [(m, p, c) for m, p, c in transport.requests if m == "fs/close"]
+    close_calls = await wait_close_requests(transport)
     assert len(close_calls) == 1
-    assert close_calls[0][2] == CHANNEL_DATA
+    assert close_calls[0][2] is None
     assert "fs/writeStream/done" not in [m for m, _, _ in transport.requests]
 
 
 @pytest.mark.asyncio
-async def test_write_stream_abort_failure_is_best_effort():
-    """中止时连接已死：close 失败被吞掉，原异常照常传播"""
+async def test_write_stream_cancellation_aborts_handle():
+    """上传中途取消（CancelledError 非 Exception 子类——except 形态漏捕会把
+    写句柄连同 fd/槽泄漏在服务端干等）：取消照样发 fs/close 中止"""
+    fs, transport = make_fs(ok_responses(total=0))
+    gate = asyncio.Event()
+
+    async def stalled_source():
+        yield b"partial"
+        await gate.wait()  # 永不放行——等待取消
+        yield b"more"
+
+    task = asyncio.create_task(fs.write_stream("file:///tmp/out.bin", stalled_source()))
+    # 等首块 chunk 通知落地（写流确已开句柄并开推）
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while not transport.notifications:
+        assert loop.time() < deadline, "首块 chunk 通知 5s 内未落地"
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    close_calls = await wait_close_requests(transport)
+    assert len(close_calls) == 1
+    assert close_calls[0][1]["handleId"].startswith("w-")
+    assert "fs/writeStream/done" not in [m for m, _, _ in transport.requests]
+
+
+@pytest.mark.asyncio
+async def test_write_stream_abort_failure_is_best_effort(caplog):
+    """中止时连接已死：close 失败被吞掉（即发即忘任务的异常取回留痕，不打
+    "Task exception was never retrieved" 循环告警），原异常照常传播"""
     responses = ok_responses(total=0)
     responses["fs/close"] = ConnectionErrorStub("connection closed")
     fs, transport = make_fs(responses)
@@ -169,9 +213,17 @@ async def test_write_stream_abort_failure_is_best_effort():
         yield b"partial"
         raise RuntimeError("boom")
 
-    with pytest.raises(RuntimeError, match="boom"):
-        await fs.write_stream("file:///tmp/out.bin", broken_source())
-    assert any(m == "fs/close" for m, _, _ in transport.requests)
+    with caplog.at_level("DEBUG", logger="nova_exec_server_client.fs"):
+        with pytest.raises(RuntimeError, match="boom"):
+            await fs.write_stream("file:///tmp/out.bin", broken_source())
+        close_calls = await wait_close_requests(transport)
+        # 等即发即忘任务完成（异常在 done_callback 取回留痕）
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while fs._pending_closes:
+            assert asyncio.get_running_loop().time() < deadline
+            await asyncio.sleep(0.01)
+    assert close_calls
+    assert "fs/close 收摊任务失败" in caplog.text
 
 
 class ConnectionErrorStub(Exception):

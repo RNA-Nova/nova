@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -655,9 +657,7 @@ async def test_stderr_pump_delivers_partial_line_without_newline():
     try:
         line_len = 100 * 1024
         delivered_floor = (line_len // 8192) * 8192
-        await transport.send_request(
-            "stderr_spam", {"len": line_len, "newline": False}
-        )
+        await transport.send_request("stderr_spam", {"len": line_len, "newline": False})
         for _ in range(200):
             if sum(len(c) for c in chunks) >= delivered_floor:
                 break
@@ -723,5 +723,383 @@ async def test_stdout_eof_with_living_process_reaps_process_tree():
                 break
             await asyncio.sleep(0.05)
         assert process.returncode is not None
+    finally:
+        await transport.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# A1 spawn 环境变量清洗（对位 Rust client_transport.rs 的
+# scrub_non_inheritable_env_vars）
+# ---------------------------------------------------------------------------
+
+#: 回声环境名单的最小 JSON-RPC 服务端：result 回报各变量是否存在于子进程环境
+_ENV_PROBE_SERVER = r"""
+import json, os, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    names = msg.get("params", {}).get("names", [])
+    print(
+        json.dumps({"id": msg["id"], "result": {n: n in os.environ for n in names}}),
+        flush=True,
+    )
+"""
+
+
+@pytest.mark.asyncio
+async def test_spawn_env_scrubs_non_inheritable_vars(monkeypatch):
+    """合成 env 双侧清洗（对位 Rust scrub_non_inheritable_env_vars）：继承侧与
+    显式覆盖侧的非继承变量都不到达子进程（大小写不敏感比较），普通变量照常传递"""
+    monkeypatch.setenv("CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN", "inherited-secret")
+    monkeypatch.setenv("KEEP_ME", "kept")
+    transport = StdioTransport(
+        program=sys.executable,
+        args=["-c", _ENV_PROBE_SERVER],
+        env={
+            "NODE_REPL_AUTH_TOKEN": "explicit-secret",
+            # 大小写不敏感：小写形态同样剔除（对位 eq_ignore_ascii_case）
+            "openai_identity_token_file": "lower-secret",
+        },
+        request_timeout=5.0,
+    )
+    await transport.connect()
+    try:
+        result = await transport.send_request(
+            "probe",
+            {
+                "names": [
+                    "CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN",
+                    "NODE_REPL_AUTH_TOKEN",
+                    "openai_identity_token_file",
+                    "KEEP_ME",
+                ]
+            },
+        )
+        assert result == {
+            "CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN": False,
+            "NODE_REPL_AUTH_TOKEN": False,
+            "openai_identity_token_file": False,
+            "KEEP_ME": True,
+        }
+    finally:
+        await transport.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# A2 出站 NaN/Infinity 防线（json allow_nan=False——serde_json 序列化非有限
+# 浮点为 null；py 默认印裸 NaN，服务端词法拒收判连接级致命）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_outbound_nan_rejected_before_write():
+    """NaN/Infinity 不出站：序列化失败本地抛错；线上未污染，连接照常服务"""
+    transport = make_transport()
+    await transport.connect()
+    try:
+        with pytest.raises(ConnectionError, match="Out of range float values"):
+            await transport.send_request("echo", {"v": float("nan")})
+        with pytest.raises(ValueError, match="Out of range float values"):
+            await transport.send_notification("initialized", {"v": float("inf")})
+        # 防线未影响连接：后续正常流量照常服务
+        assert transport.is_connected
+        assert await transport.send_request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        await transport.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# A3 客户端 outbound 在飞槽位（对位 Rust rpc.rs 的 1024 共享槽 + 1 收摊
+# 保留槽双信号量）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_regular_in_flight_limit_exceeded_raises(monkeypatch):
+    """共享槽满员的常规调用立即报错（对位 PendingRequestLimitExceeded），
+    不入队不上线；在飞请求落定后槽位归还，后续调用照常"""
+    from nova_exec_server_client.transport import _JsonRpcTransport
+
+    monkeypatch.setattr(_JsonRpcTransport, "MAX_IN_FLIGHT_REGULAR_CALLS", 1)
+    transport = make_transport()
+    await transport.connect()
+    try:
+        slow = asyncio.create_task(transport.send_request("sleep", {"ms": 400}))
+        for _ in range(100):
+            if transport._pending:
+                break
+            await asyncio.sleep(0.01)
+        assert len(transport._pending) == 1
+
+        with pytest.raises(ProtocolError, match="limit of 1 pending requests"):
+            await transport.send_request("echo")
+        # 满员报错不影响连接与在飞请求
+        assert transport.is_connected
+        assert await slow == {"slept": True}
+        # 槽位已归还：后续调用照常
+        assert await transport.send_request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_call_uses_reserved_slot(monkeypatch):
+    """收摊调用（for_cleanup=True）在共享槽满员时占收摊保留槽照常完成
+    （对位 Rust call_for_cleanup 先抢共享槽、再抢保留槽）"""
+    from nova_exec_server_client.transport import _JsonRpcTransport
+
+    monkeypatch.setattr(_JsonRpcTransport, "MAX_IN_FLIGHT_REGULAR_CALLS", 1)
+    transport = make_transport()
+    await transport.connect()
+    try:
+        slow = asyncio.create_task(transport.send_request("sleep", {"ms": 300}))
+        for _ in range(100):
+            if transport._pending:
+                break
+            await asyncio.sleep(0.01)
+        assert len(transport._pending) == 1
+
+        result = await transport.send_request(
+            "echo", {"cleanup": True}, for_cleanup=True
+        )
+        assert result == {"cleanup": True}
+        assert await slow == {"slept": True}
+    finally:
+        await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_double_full_marks_connection_dead(monkeypatch):
+    """收摊双无（共享槽 + 保留槽均满）即判连接死亡熔断（对位 Rust
+    call_for_cleanup 双无 → close_transport + RpcCallError::Closed）：
+    调用报 ConnectionError、在飞请求以连接关闭收尾、断线回调触发"""
+    from nova_exec_server_client.transport import _JsonRpcTransport
+
+    monkeypatch.setattr(_JsonRpcTransport, "MAX_IN_FLIGHT_REGULAR_CALLS", 1)
+    transport = make_transport()
+    reasons: list[str | None] = []
+    transport.on_disconnect(reasons.append)
+    await transport.connect()
+    try:
+        slow = asyncio.create_task(transport.send_request("sleep", {"ms": 300}))
+        cleanup = asyncio.create_task(
+            transport.send_request("sleep", {"ms": 300}, for_cleanup=True)
+        )
+        for _ in range(100):
+            if len(transport._pending) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert len(transport._pending) == 2
+
+        with pytest.raises(ConnectionError, match="connection closed"):
+            await transport.send_request("echo", for_cleanup=True)
+        assert not transport.is_connected
+        assert reasons and "reserved cleanup slot" in (reasons[0] or "")
+        # 连接死亡传播：在飞请求以 ConnectionError 收尾
+        with pytest.raises(ConnectionError):
+            await slow
+        with pytest.raises(ConnectionError):
+            await cleanup
+    finally:
+        await transport.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# A7 result+error 并存时 result 优先（对位 serde contains_key("result")）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_result_wins_when_error_also_present():
+    """并存消息按 Response 归（与 _is_malformed_message 的归类一致）：
+    result 落定、error 键被忽略；闸门同样放行"""
+    from nova_exec_server_client.transport import _gate_inbound_message
+
+    wire = {
+        "id": 7,
+        "result": {"winner": "result"},
+        "error": {"code": -32603, "message": "ignored"},
+    }
+    message, fatal = _gate_inbound_message(json.dumps(wire).encode())
+    assert fatal is None and message == wire
+
+    transport = make_transport()
+    future = asyncio.get_running_loop().create_future()
+    transport._pending[7] = future
+    transport._resolve_response(message)
+    assert future.result() == {"winner": "result"}
+
+
+# ---------------------------------------------------------------------------
+# A8 error.code i64 范围（对位 serde i64 derive 溢出即畸形）
+# ---------------------------------------------------------------------------
+
+
+def test_error_code_outside_i64_is_malformed():
+    """error.code 超 i64 即畸形拒收（与 _is_valid_request_id 同纪律）；
+    边界值 ±(2^63-1)/-2^63 照常放行"""
+    from nova_exec_server_client.transport import _gate_inbound_message
+
+    def gate(code):
+        return _gate_inbound_message(
+            json.dumps({"id": 1, "error": {"code": code, "message": "x"}}).encode()
+        )
+
+    message, fatal = gate(2**63 - 1)
+    assert fatal is None and message["error"]["code"] == 2**63 - 1
+    message, fatal = gate(-(2**63))
+    assert fatal is None and message["error"]["code"] == -(2**63)
+    _, fatal = gate(2**63)
+    assert fatal == "malformed JSON-RPC message from exec-server"
+    _, fatal = gate(-(2**63) - 1)
+    assert fatal == "malformed JSON-RPC message from exec-server"
+
+
+# ---------------------------------------------------------------------------
+# B1 Windows 进程树收割（对位 Rust connection.rs 的 kill_windows_process_tree）
+# ---------------------------------------------------------------------------
+
+
+def test_windows_taskkill_command_shape(monkeypatch):
+    """taskkill 命令形态对位 Rust：/PID <pid> /T /F，stdio 全置 null；
+    退出码成功返回 True，失败/OSError 返回 False（调用方落直接子兜底）"""
+    import nova_exec_server_client.transport as transport_module
+
+    recorded = {}
+
+    def fake_run(cmd, **kwargs):
+        recorded["cmd"] = cmd
+        recorded["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert transport_module._kill_windows_process_tree(4242) is True
+    assert recorded["cmd"] == ["taskkill", "/PID", "4242", "/T", "/F"]
+    assert recorded["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert recorded["kwargs"]["stdout"] is subprocess.DEVNULL
+    assert recorded["kwargs"]["stderr"] is subprocess.DEVNULL
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1),
+    )
+    assert transport_module._kill_windows_process_tree(4242) is False
+
+    def raising_run(cmd, **kwargs):
+        raise OSError("taskkill missing")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+    assert transport_module._kill_windows_process_tree(4242) is False
+
+
+def test_process_tree_reap_prefers_taskkill_on_windows(monkeypatch):
+    """Windows 分支：taskkill 成功即整树收割、不落直接子；失败才落直接子
+    （terminate/kill 两方法同路径——对位 Rust 两个 cfg(windows) 分支）"""
+    import nova_exec_server_client.transport as transport_module
+
+    class _Proc:
+        pid = 4242
+        terminated = False
+        killed = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(
+        transport_module, "_kill_windows_process_tree", lambda pid: True
+    )
+    proc = _Proc()
+    StdioTransport._terminate_process_tree(proc)
+    assert not proc.terminated  # taskkill 已收整树，不补直接子
+    StdioTransport._kill_process_tree(proc)
+    assert not proc.killed
+
+    monkeypatch.setattr(
+        transport_module, "_kill_windows_process_tree", lambda pid: False
+    )
+    proc = _Proc()
+    StdioTransport._terminate_process_tree(proc)
+    assert proc.terminated  # taskkill 失败落直接子兜底
+    proc = _Proc()
+    StdioTransport._kill_process_tree(proc)
+    assert proc.killed
+
+
+# ---------------------------------------------------------------------------
+# B2 stdio 64MiB + CRLF 边界（StreamReader 行限 max+2，对位 Rust
+# connection.rs 的 max+1+CRLF 前瞻）
+# ---------------------------------------------------------------------------
+
+#: 定长响应服务端：回一行恰好 params.size 字节的 JSON 响应 + CRLF 终止
+_PAD_RESPONSE_SERVER = r"""
+import json, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    size = int(msg.get("params", {}).get("size", 0))
+    prefix = json.dumps({"id": msg["id"], "result": {"pad": ""}}).encode()[:-3]
+    sys.stdout.buffer.write(
+        prefix + b"x" * (size - len(prefix) - 3) + b'"}}' + b"\r\n"
+    )
+    sys.stdout.buffer.flush()
+"""
+
+
+def _expected_pad_len(size: int) -> int:
+    """与服务端同式：size 字节行内填充长度（钉死凑长算术）"""
+    prefix = json.dumps({"id": 1, "result": {"pad": ""}}).encode()[:-3]
+    return size - len(prefix) - 3
+
+
+@pytest.mark.asyncio
+async def test_max_size_message_with_crlf_accepted():
+    """恰好 64MiB 的消息带 CRLF 终止照常收下（行限 +2 的 CRLF 前瞻余量；
+    旧 max+0 行限会在分隔符前 LimitOverrun 误杀边界消息）"""
+    transport = StdioTransport(
+        program=sys.executable,
+        args=["-c", _PAD_RESPONSE_SERVER],
+        request_timeout=15.0,
+    )
+    await transport.connect()
+    try:
+        result = await transport.send_request(
+            "pad", {"size": transport.max_message_size}
+        )
+        assert result["pad"] == "x" * _expected_pad_len(transport.max_message_size)
+        assert transport.is_connected
+    finally:
+        await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_over_max_size_message_rejected():
+    """上限 +1 字节即拒（读回后的 len 检查不变）——断开带长度原因"""
+    transport = StdioTransport(
+        program=sys.executable,
+        args=["-c", _PAD_RESPONSE_SERVER],
+        request_timeout=5.0,
+        max_message_size=16 * 1024,
+    )
+    reasons: list[str | None] = []
+    transport.on_disconnect(reasons.append)
+    await transport.connect()
+    try:
+        with pytest.raises(ConnectionError, match="connection closed"):
+            await transport.send_request("pad", {"size": 16 * 1024 + 1})
+        for _ in range(50):
+            if not transport.is_connected:
+                break
+            await asyncio.sleep(0.02)
+        assert not transport.is_connected
+        assert reasons and "exceeds maximum length of 16384 bytes" in (reasons[0] or "")
     finally:
         await transport.disconnect()

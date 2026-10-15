@@ -103,33 +103,40 @@ State = Literal["disconnected", "connected", "recovering", "failed"]
 TRANSPORT_CLOSED_MESSAGE = "JSON-RPC transport closed"
 
 
+def is_transport_class_error(error: Exception) -> bool:
+    """传输类错误判别（恢复编排 / process 门控清理 / 读写重试共用）：
+
+    - 传输/连接/超时类（ConnectionError、SDK/内置 TimeoutError——wait_for
+      超时抛的是内置 TimeoutError）
+    - 服务端 RPC 层传输关闭（-32000 "JSON-RPC transport closed"；对位
+      Rust is_transport_closed_error 的 Server 臂）：码 -32000 且线上裸
+      消息全等（异常 str 带 `JSON-RPC error <code>:` 前缀，不能拿来比；
+      子串匹配会把 "… transport closed unexpectedly" 之类误纳入）
+    """
+    if isinstance(error, (ConnectionError, TimeoutError, asyncio.TimeoutError)):
+        return True
+    return (
+        isinstance(error, ProtocolError)
+        and error.code == JSON_RPC_TRANSPORT_CLOSED
+        and error.server_message == TRANSPORT_CLOSED_MESSAGE
+    )
+
+
 def _is_retryable_recovery_error(error: Exception) -> bool:
     """恢复错误分类（对位 Rust is_retryable_recovery_error）：
 
-    - 传输/连接/超时类（ConnectionError、SDK/内置 TimeoutError——重连
-      wait_for 超时抛的是内置 TimeoutError）：可重试
+    - 传输类（见 is_transport_class_error）：可重试
     - 认证失败（AuthError——WS 握手 401；对位 Rust `WebSocketConnect{..}`
       全量可重试）：可重试——重试到恢复总时限再转 failed，不一次判死
-    - 服务端 RPC 层传输关闭（-32000 "JSON-RPC transport closed"）：可重试
     - 会话仍附着（-32010，旧连接服务端侧尚未完全关闭）：可重试
     - 其余协议错误（含 -32600 unknown session id——会话不存在或已过
       保留窗）：不可重试，立即转 failed
     """
-    if isinstance(
-        error, (ConnectionError, TimeoutError, asyncio.TimeoutError, AuthError)
-    ):
+    if isinstance(error, AuthError):
         return True
-    if isinstance(error, ProtocolError):
-        if error.code == SESSION_ALREADY_ATTACHED:
-            return True
-        # 对位 Rust is_transport_closed_error：码 -32000 且线上裸消息全等
-        # （异常 str 带 `JSON-RPC error <code>:` 前缀，不能拿来比；子串匹配
-        # 会把 "… transport closed unexpectedly" 之类误纳入可重试）
-        return (
-            error.code == JSON_RPC_TRANSPORT_CLOSED
-            and error.server_message == TRANSPORT_CLOSED_MESSAGE
-        )
-    return False
+    if is_transport_class_error(error):
+        return True
+    return isinstance(error, ProtocolError) and error.code == SESSION_ALREADY_ATTACHED
 
 
 class ManagedTransport:
@@ -179,8 +186,10 @@ class ManagedTransport:
         self._state: State = "disconnected"
         self._failure_message: str | None = None
         self._recover_task: asyncio.Task | None = None
-        #: request_recovery 退役传输的后台关闭任务（disconnect 时一并收尾）
-        self._retired_close_task: asyncio.Task | None = None
+        #: request_recovery 退役传输的后台关闭任务跟踪集（持引用防 GC——
+        #: 对齐 _ProcessStartGate._cleanup_tasks 模式；连续多次恢复各自
+        #: 跟踪，disconnect 时 gather 全量收尾）
+        self._retired_close_tasks: set[asyncio.Task] = set()
         self._closing = False
         #: 显式刷新串行化（普通连接/恢复工作可并发；对位 Rust refresh_lock）
         self._refresh_lock = asyncio.Lock()
@@ -236,11 +245,12 @@ class ManagedTransport:
         await transport.connect()
         try:
             response = await self._handshake(transport, self._session_id)
+            self._install(transport, response)
         except Exception:
-            # 握手失败即断开底层，避免半连接状态
+            # 握手失败或 _install 校验失败（resume 会话一致性违约）即断开
+            # 底层，避免半连接状态与泄漏
             await transport.disconnect()
             raise
-        self._install(transport, response)
         self._set_state("connected")
 
     async def disconnect(self) -> None:
@@ -260,12 +270,10 @@ class ManagedTransport:
             except asyncio.CancelledError:
                 pass
             self._recover_task = None
-        if self._retired_close_task is not None:
-            try:
-                await self._retired_close_task
-            except Exception:
-                pass
-            self._retired_close_task = None
+        if self._retired_close_tasks:
+            # 退役传输的后台关闭任务全量收尾（连续多次恢复各自跟踪）
+            await asyncio.gather(*self._retired_close_tasks, return_exceptions=True)
+            self._retired_close_tasks.clear()
         await self._transport.disconnect()
         if self._state != "disconnected":
             # 仅在拆已建立/尝试过的会话时清空——未连接过的显式
@@ -287,9 +295,10 @@ class ManagedTransport:
         连接。传输断线回调路径的恢复仍走 _on_transport_disconnect。
 
         立即进入 recovering 按策略重建——不等待旧传输关闭收尾（卡死传输的关闭
-        握手可能耗时数秒，而服务端会话保留窗有限）；旧传输在后台关闭，其在途
-        请求以 ConnectionError 收尾。无恢复手段（无策略/无会话）时 _recover
-        即转 failed，后续调用拿到明确断线错误。
+        握手可能耗时数秒，而服务端会话保留窗有限）；旧传输的在途请求先同步
+        判死（对位 Rust close_transport 的即时 drain_pending——不等优雅
+        disconnect 走完 WS close_timeout），优雅关闭留后台收尾。无恢复手段
+        （无策略/无会话）时 _recover 即转 failed，后续调用拿到明确断线错误。
         """
         if self._state != "connected" or self._closing:
             return
@@ -298,8 +307,20 @@ class ManagedTransport:
             return
         old = self._transport
         self._set_state("recovering")
+        # 退役传输在途请求同步判死 + 中止底层承载（对位 Rust close_transport
+        # 的 drain_pending + transport.terminate——对位 _mark_disconnected
+        # 后半段；不触发其断线回调，恢复编排归本路径）。快速判死后在途调用
+        # 立即以 ConnectionError 收尾，不等后台优雅关闭
+        fail_pending = getattr(old, "_fail_pending", None)
+        if fail_pending is not None:
+            fail_pending()
+        abort_connection = getattr(old, "_abort_connection", None)
+        if abort_connection is not None:
+            abort_connection()
         self._recover_task = asyncio.create_task(self._recover(reason))
-        self._retired_close_task = asyncio.create_task(self._close_retired(old))
+        close_task = asyncio.create_task(self._close_retired(old))
+        self._retired_close_tasks.add(close_task)
+        close_task.add_done_callback(self._retired_close_tasks.discard)
 
     async def _close_retired(self, transport: Transport) -> None:
         """退役传输的后台关闭（request_recovery 专用）：主动关闭不触发断线
@@ -367,9 +388,13 @@ class ManagedTransport:
         params: dict[str, Any] | None = None,
         *,
         channel: str | None = None,
+        for_cleanup: bool = False,
     ) -> Any:
-        """发送请求（恢复期间等待恢复结果——对位 RecoveryPolicy::Wait）"""
+        """发送请求（恢复期间等待恢复结果——对位 RecoveryPolicy::Wait）；
+        for_cleanup 透传底层传输的在飞槽位裁决（对位 Rust call_for_cleanup）"""
         transport = await self._await_transport()
+        if for_cleanup:
+            return await transport.send_request(method, params, for_cleanup=True)
         return await transport.send_request(method, params)
 
     async def send_notification(
@@ -458,17 +483,19 @@ class ManagedTransport:
     ) -> None:
         """底层意外断线入口（对位 Rust request_recovery 的 ptr_eq 守卫：
         仅当断的是当前传输且仍处于 connected 才发起恢复，避免陈旧回调竞态）"""
-        for handler in self._external_disconnect_handlers:
-            try:
-                handler(reason)
-            except Exception:
-                logger.warning("disconnect handler raised", exc_info=True)
         if (
             transport is not self._transport
             or self._state != "connected"
             or self._closing
         ):
             return
+        # 身份守卫通过后再扇出外部观察口——陈旧回调（旧传输的迟到断线、
+        # 主动关闭期间到达的事件）不得惊动外部订阅者
+        for handler in self._external_disconnect_handlers:
+            try:
+                handler(reason)
+            except Exception:
+                logger.warning("disconnect handler raised", exc_info=True)
         message = (
             f"exec-server transport disconnected: {reason}"
             if reason
@@ -509,6 +536,10 @@ class ManagedTransport:
                     "in-flight process starts did not settle before the recovery deadline"
                 )
                 return
+            except Exception as e:
+                # 钩子自身异常同样判死恢复——不得卡死 recovering
+                self._fail(f"pre-recovery hook failed: {e}")
+                return
         delays = strategy.delays()
         attempts = 0
         last_error = f"recovery timed out after {strategy.timeout}s"
@@ -546,7 +577,12 @@ class ManagedTransport:
                 if not _is_retryable_recovery_error(e):
                     last_error = str(e)
                     break
+                # wait_for 超时抛的裸 asyncio.TimeoutError str 为空——回填
+                # 对位 Rust Err(_) 臂的 "recovery timed out after ..."，
+                # 否则失败消息冒号后无原因
                 last_error = str(e)
+                if not last_error and isinstance(e, asyncio.TimeoutError):
+                    last_error = f"recovery timed out after {strategy.timeout}s"
                 logger.debug("exec-server resume attempt %d failed: %s", attempts, e)
             else:
                 logger.info(

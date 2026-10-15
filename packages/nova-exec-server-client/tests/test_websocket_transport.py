@@ -11,9 +11,14 @@ import asyncio
 import json
 
 import pytest
+import websockets.asyncio.client
 import websockets.asyncio.server
 
-from nova_exec_server_client import NETWORK_POLICY_REQUEST, WebSocketTransport
+from nova_exec_server_client import (
+    NETWORK_POLICY_REQUEST,
+    ConnectionError,
+    WebSocketTransport,
+)
 
 
 async def start_server(handler) -> tuple:
@@ -245,6 +250,103 @@ async def test_ws_server_requests_adjudicated_concurrently():
         assert replies[0]["result"] == {"decision": {"type": "allow"}}
         assert replies[1]["id"] == 1
         assert replies[1]["result"] == {"decision": {"type": "deny", "reason": "first"}}
+    finally:
+        await transport.disconnect()
+        server.close()
+
+
+# ---------------------------------------------------------------------------
+# A4/A5 WS 连接参数（对位 tungstenite max_message_size=64MiB 与 Rust
+# connection.rs from_websocket 的 ping_interval None）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ws_connect_defaults_64mib_and_disables_ping(monkeypatch):
+    """max_payload 默认 64MiB（对位 tungstenite 默认 max_message_size）；
+    显式 ping_interval=None——客户端不发 keepalive ping、不靠 pong 看门狗
+    （websockets 库默认 20s 一发，须显式关掉）"""
+    captured = {}
+
+    class _FakeWS:
+        async def close(self):
+            pass
+
+        def __aiter__(self):
+            async def _gen():
+                await asyncio.Event().wait()  # 永不产出——等 disconnect 取消
+                yield
+
+            return _gen()
+
+    async def fake_connect(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return _FakeWS()
+
+    monkeypatch.setattr(websockets.asyncio.client, "connect", fake_connect)
+    transport = WebSocketTransport("ws://127.0.0.1:1")
+    await transport.connect()
+    try:
+        assert captured["ping_interval"] is None
+        assert captured["max_size"] == 64 * 1024 * 1024
+        assert transport.is_connected
+    finally:
+        await transport.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# A2 出站 NaN/Infinity 防线（json allow_nan=False）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ws_outbound_nan_rejected_before_write():
+    """WS 出站 NaN 同样本地拒发（服务端词法拒收会判连接级致命）；
+    线上未污染，连接照常服务"""
+    server, url = await start_server(make_push_server())
+    transport = WebSocketTransport(url)
+    try:
+        await transport.connect()
+        with pytest.raises(ConnectionError, match="Out of range float values"):
+            await transport.send_request("echo", {"v": float("nan")})
+        assert transport.is_connected
+        assert await transport.send_request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        await transport.disconnect()
+        server.close()
+
+
+# ---------------------------------------------------------------------------
+# A7 result+error 并存时 result 优先（对位 serde contains_key("result")）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ws_result_wins_when_error_also_present():
+    """并存消息按 Response 归：result 落定、error 键被忽略——线上端到端
+    （闸门归类与 _resolve_response 同纪律）"""
+
+    async def both_keys_server(ws) -> None:
+        async for raw in ws:
+            msg = json.loads(raw)
+            await ws.send(
+                json.dumps(
+                    {
+                        "id": msg["id"],
+                        "result": {"winner": "result"},
+                        "error": {"code": -32603, "message": "ignored"},
+                    }
+                )
+            )
+
+    server, url = await start_server(both_keys_server)
+    transport = WebSocketTransport(url)
+    try:
+        await transport.connect()
+        result = await transport.send_request("doctor")
+        assert result == {"winner": "result"}
+        assert transport.is_connected
     finally:
         await transport.disconnect()
         server.close()

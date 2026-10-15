@@ -10,6 +10,8 @@ import logging
 import re
 
 import pytest
+from nova_protocol import NetworkMode
+
 from nova_exec_server_client import (
     ApprovalPolicy,
     ConfigError,
@@ -18,7 +20,6 @@ from nova_exec_server_client import (
     load_executor_config,
 )
 from nova_exec_server_client.config import NOVA_EXEC_SERVER_HOME_ENV
-from nova_protocol import NetworkMode
 
 
 @pytest.fixture
@@ -77,6 +78,14 @@ class TestUserLayer:
         with pytest.raises(ConfigError, match=re.escape(str(bad))):
             load_executor_config(executor_home=home)
 
+    def test_invalid_utf8_raises_config_error_with_path(self, home):
+        """坏编码不抛裸 UnicodeDecodeError——与坏 TOML 同纪律包成
+        ConfigError 并带路径（配置是用户资产，响亮报错）"""
+        bad = home / "config.toml"
+        bad.write_bytes(b'sandbox_mode = "\xff\xfe"\n')
+        with pytest.raises(ConfigError, match=re.escape(str(bad))):
+            load_executor_config(executor_home=home)
+
     def test_env_override(self, home, monkeypatch):
         (home / "config.toml").write_text('sandbox_mode = "read-only"\n')
         monkeypatch.setenv(NOVA_EXEC_SERVER_HOME_ENV, str(home))
@@ -112,6 +121,11 @@ class TestProjectLayerTrustGate:
 
     def test_malformed_project_json_raises(self, home, project):
         (project / ".nova" / "settings.json").write_text("{bad", encoding="utf-8")
+        with pytest.raises(ConfigError):
+            load_executor_config(project, project_trusted=True, executor_home=home)
+
+    def test_invalid_utf8_project_layer_raises_config_error(self, home, project):
+        (project / ".nova" / "settings.json").write_bytes(b'{"exec-server": "\xff"}')
         with pytest.raises(ConfigError):
             load_executor_config(project, project_trusted=True, executor_home=home)
 
@@ -178,6 +192,19 @@ class TestUnknownKeys:
         # 拼错的键被忽略（不进入物化），并有警告
         assert cfg.sandbox_workspace_write.writable_roots == []
         assert any("writable_rooots" in r.message for r in caplog.records)
+
+    def test_unknown_key_inside_environments_entry_warns(self, home, caplog):
+        """list[Model] 字段（environments）逐元素递归——条目内未知键不静默吞"""
+        (home / "config.toml").write_text(
+            "[[environments]]\n"
+            'id = "dev-box"\n'
+            'program = "ssh"\n'
+            "bogus_knob = true\n"
+        )
+        with caplog.at_level(logging.WARNING):
+            cfg = load_executor_config(executor_home=home)
+        assert [e.id for e in cfg.environments] == ["dev-box"]
+        assert any("environments[0].bogus_knob" in r.message for r in caplog.records)
 
 
 class TestValidation:

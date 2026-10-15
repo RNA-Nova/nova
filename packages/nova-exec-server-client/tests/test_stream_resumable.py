@@ -28,6 +28,8 @@ class FakeWriteStreamServer(FakeTransport):
       recovery 基建重连成功）；None = 不断开
     - `shrink_on_reconcile`：第 N 次 getMetadata 时清空文件（模拟服务端
       状态回退，触发对账缩水检测）
+    - `grow_on_reconcile`：第 N 次 getMetadata 时在文件尾追加外来字节
+      （模拟断线窗口内被其他写入者追加，触发对账外来增长检测）
     - `fs/getMetadata` 如实回报当前文件大小（续传对账的 ground truth）
     - 执法对齐真实服务端（file_handle.rs / PROTOCOL.md done 错误码表）：
       越界 offset（隔洞写）开门即拒（-32600 ProtocolError——线上为
@@ -41,12 +43,16 @@ class FakeWriteStreamServer(FakeTransport):
         *,
         break_plan: list[int | None] | None = None,
         shrink_on_reconcile: int | None = None,
+        grow_on_reconcile: tuple[int, bytes] | None = None,
     ):
         super().__init__()
         self.file = bytearray()
         self.break_plan = break_plan or []
         self.shrink_on_reconcile = shrink_on_reconcile
+        self.grow_on_reconcile = grow_on_reconcile
         self.reconciles = 0
+        #: getMetadata 收到的参数（sandbox 透传断言用）
+        self.metadata_params: list[dict] = []
         # 每条流的开门 offset（验证续传起点用）
         self.open_offsets: list[int | None] = []
         self.stream_seqs: list[list[int]] = []
@@ -56,7 +62,9 @@ class FakeWriteStreamServer(FakeTransport):
         self._open_handles: dict[str, int] = {}
         self._landed_in_stream = 0
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         params = params or {}
         if method == "fs/writeStream":
             offset = params.get("offset")
@@ -102,11 +110,18 @@ class FakeWriteStreamServer(FakeTransport):
             return {}
         if method == "fs/getMetadata":
             self.reconciles += 1
+            self.metadata_params.append(dict(params))
             if (
                 self.shrink_on_reconcile is not None
                 and self.reconciles == self.shrink_on_reconcile
             ):
                 self.file = bytearray()
+            if (
+                self.grow_on_reconcile is not None
+                and self.reconciles == self.grow_on_reconcile[0]
+            ):
+                # 断线窗口内的外来追加（其他写入者）——对账不得收养外来字节
+                self.file.extend(self.grow_on_reconcile[1])
             return {
                 "isDirectory": False,
                 "isFile": True,
@@ -168,10 +183,10 @@ async def test_write_stream_resumable_done_reconciliation_mismatch_fails():
     # 服务端谎报 totalBytes（模拟对账失败面）
     original = server.send_request
 
-    async def lying_done(method, params=None, *, channel=None):
+    async def lying_done(method, params=None, *, channel=None, for_cleanup=False):
         if method == "fs/writeStream/done":
             return {"handleId": params["handleId"], "totalBytes": 999}
-        return await original(method, params, channel=channel)
+        return await original(method, params, channel=channel, for_cleanup=for_cleanup)
 
     server.send_request = lying_done  # type: ignore[method-assign]
 
@@ -189,6 +204,65 @@ async def test_write_stream_resumable_server_shrink_fails():
 
     with pytest.raises(FileSystemError, match="shrank"):
         await fs.write_stream_resumable("file:///tmp/out.bin", b"aabbcc", block_size=2)
+
+
+@pytest.mark.asyncio
+async def test_write_stream_resumable_foreign_growth_fails():
+    """断线窗口内文件被外部追加（对账 size 超 confirmed + 本轮已推）→ 对账
+    失败抛错：外来字节不得收养为"已确认"。上界取等不误杀——done 响应丢失
+    场景服务端恰好收齐全轮推送（size == confirmed + pushed 放行）"""
+    # 首轮收 2 块（4 字节）断开，本轮已拉取 6 字节；对账时外来追加 8 字节
+    # → size=12 > 0 confirmed + 6 pushed → 外来增长
+    server = FakeWriteStreamServer(break_plan=[2], grow_on_reconcile=(1, b"x" * 8))
+    fs = FileSystemManager(server)
+
+    with pytest.raises(FileSystemError, match="grew"):
+        await fs.write_stream_resumable("file:///tmp/out.bin", b"aabbcc", block_size=2)
+
+
+@pytest.mark.asyncio
+async def test_write_stream_resumable_zero_block_foreign_file_not_adopted():
+    """零块上传 + 断线窗口外来内容：size > 0 confirmed + 0 pushed → 对账失败
+    （旧行为把外来字节收养为 confirmed，空上传会误判成自己的完成态）"""
+    server = FakeWriteStreamServer(break_plan=[0], grow_on_reconcile=(1, b"xyz"))
+    fs = FileSystemManager(server)
+
+    with pytest.raises(FileSystemError, match="grew"):
+        await fs.write_stream_resumable("file:///tmp/out.bin", b"", block_size=2)
+
+
+@pytest.mark.asyncio
+async def test_write_stream_resumable_done_loss_boundary_not_killed():
+    """对账上界取等不误杀：断线发生在全轮推送落地之后（done 响应丢失形态）——
+    size == confirmed + 本轮已推，续传照常拼接"""
+    # 首轮 3 块全部落地后才断（eof 通知撞上断点——服务端已收齐全轮数据），
+    # 对账 size=6 == 0 + 6 → 放行；续传从 6 起推空源，done 对账通过
+    server = FakeWriteStreamServer(break_plan=[3, None])
+    fs = FileSystemManager(server)
+
+    total = await fs.write_stream_resumable(
+        "file:///tmp/out.bin", b"aabbcc", block_size=2
+    )
+    assert total == 6
+    assert bytes(server.file) == b"aabbcc"
+    assert server.open_offsets == [None, 6]
+
+
+@pytest.mark.asyncio
+async def test_write_stream_resumable_reconcile_sandbox_passes_through():
+    """断线对账的 getMetadata 同样透传沙箱载荷（与开门同一上下文——句柄族
+    方法全透传纪律，docstring 自承"重开时同样透传"）"""
+    sandbox = _read_only_sandbox()
+    server = FakeWriteStreamServer(break_plan=[1, None])
+    fs = FileSystemManager(server)
+
+    total = await fs.write_stream_resumable(
+        "file:///tmp/out.bin", b"aabb", block_size=2, sandbox=sandbox
+    )
+
+    assert total == 4
+    assert len(server.metadata_params) == 1
+    assert server.metadata_params[0]["sandbox"] == sandbox
 
 
 @pytest.mark.asyncio
@@ -286,7 +360,9 @@ class FakeReadStreamServer(FakeTransport):
         # 每条流的（handleId, offset）参数
         self.stream_params: list[tuple[str, int]] = []
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         params = params or {}
         if method == "fs/readStream":
             offset = params.get("offset", 0)
@@ -416,10 +492,12 @@ async def test_write_stream_resumable_sandbox_passes_through_on_reopen():
     opens: list[dict] = []
     original = server.send_request
 
-    async def recording_send_request(method, params=None, *, channel=None):
+    async def recording_send_request(
+        method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "fs/writeStream":
             opens.append(params or {})
-        return await original(method, params, channel=channel)
+        return await original(method, params, channel=channel, for_cleanup=for_cleanup)
 
     server.send_request = recording_send_request  # type: ignore[method-assign]
 
@@ -444,10 +522,12 @@ async def test_read_stream_resumable_sandbox_passes_through_on_reopen():
     opens: list[dict] = []
     original = server.send_request
 
-    async def recording_send_request(method, params=None, *, channel=None):
+    async def recording_send_request(
+        method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "fs/readStream":
             opens.append(params or {})
-        return await original(method, params, channel=channel)
+        return await original(method, params, channel=channel, for_cleanup=for_cleanup)
 
     server.send_request = recording_send_request  # type: ignore[method-assign]
 

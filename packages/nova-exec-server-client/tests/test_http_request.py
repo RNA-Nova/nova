@@ -8,11 +8,15 @@ import sys
 from pathlib import Path
 
 import pytest
+from nova_protocol import HttpRequestBodyDeltaNotification
+
 from nova_exec_server_client import StdioTransport
 from nova_exec_server_client.client import ExecutorClient
 from nova_exec_server_client.errors import ProtocolError
-from nova_exec_server_client.notifications import NotificationRouter
-from nova_protocol import HttpRequestBodyDeltaNotification
+from nova_exec_server_client.notifications import (
+    MAX_ENCODED_HTTP_BODY_DELTA_BYTES,
+    NotificationRouter,
+)
 
 FAKE_SERVER = str(Path(__file__).parent / "fake_executor_server.py")
 
@@ -247,3 +251,188 @@ async def test_http_body_streams_isolated_by_request_id():
     assert base64.b64decode(e1["params"]["deltaBase64"]) == b"one"
     assert base64.b64decode(e2["params"]["deltaBase64"]) == b"two"
     assert q1.empty() and q2.empty()
+
+
+async def _push_delta(
+    router: NotificationRouter, rid: str, seq: int, size: int
+) -> None:
+    """推一条指定解码字节数的 bodyDelta（预算测试用）"""
+    await router.dispatch(
+        {
+            "method": "http/request/bodyDelta",
+            "params": {
+                "requestId": rid,
+                "seq": seq,
+                "deltaBase64": base64.b64encode(b"x" * size).decode(),
+                "done": False,
+            },
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_http_body_byte_budget_is_connection_level_shared():
+    """字节预算是连接级共享（对位 Rust Inner.http_body_stream_byte_budget 单一
+    信号量）：并发双流合计超 16MB 时只杀抢不到预算的那条，其余流不受影响；
+    在队字节随取扣账（排空后预算归还可继续推流）"""
+    router = NotificationRouter()
+    q1 = router.register_http_body_stream("r1")
+    q2 = router.register_http_body_stream("r2")
+    mib = 1024 * 1024
+
+    # r1 慢消费：12MB 压队（在队 12MB，未超 16MB 预算，流正常）
+    for seq in range(1, 13):
+        await _push_delta(router, "r1", seq, mib)
+    assert "r1" in router._http_streams
+
+    # r2 再推：前 4MB 把在队总量顶到恰好 16MB（取等不杀），第 5MB 超限
+    # → 只杀 r2（摘除路由 + 响亮终态）
+    for seq in range(1, 6):
+        await _push_delta(router, "r2", seq, mib)
+    assert "r1" in router._http_streams  # 其余流不受影响
+    assert "r2" not in router._http_streams
+    events = []
+    while not q2.empty():
+        events.append(await q2.get())
+    terminal = events[-1]
+    assert terminal["params"]["error"] is not None
+    assert "budget" in terminal["params"]["error"]
+    # r2 前 4 条增量一个不少（终态不丢数据纪律）
+    assert len(events) == 5
+
+    # r1 完整流完 12MB（在队字节随取扣账，排空后预算归还）
+    drained = 0
+    while not q1.empty():
+        event = await q1.get()
+        drained += len(base64.b64decode(event["params"]["deltaBase64"]))
+    assert drained == 12 * mib
+    assert router._http_byte_budget.in_flight_bytes == 0
+
+    # 预算归还后新流照常推进（排空够快任意大 body 都能流完——20MB 分两批
+    # 过 16MB 预算；单条 delta 受 per-delta 1MB 帽约束，按 1MiB 粒度推）
+    q3 = router.register_http_body_stream("r3")
+    for batch in range(2):
+        for seq in range(1, 11):
+            await _push_delta(router, "r3", batch * 10 + seq, mib)
+        for _ in range(10):
+            assert (await q3.get())["params"]["error"] is None
+    assert router._http_byte_budget.in_flight_bytes == 0
+    assert "r3" in router._http_streams
+
+
+@pytest.mark.asyncio
+async def test_http_body_unregister_releases_queued_bytes():
+    """注销时仍压队的在队字节归还连接级预算（消费者已走，残留占账不得漏成
+    幽灵字节耗尽预算误杀后续流）"""
+    router = NotificationRouter()
+    queue = router.register_http_body_stream("r")
+    for seq in range(1, 13):
+        await _push_delta(router, "r", seq, 1024 * 1024)
+    assert router._http_byte_budget.in_flight_bytes == 12 * 1024 * 1024
+    router.unregister_http_body_stream("r")
+    assert router._http_byte_budget.in_flight_bytes == 0
+    # 后续流预算充足照常推进（15MB > 旧按流累计帽也不会误杀——预算是
+    # 在队字节不是流累计；单条 delta 受 per-delta 1MB 帽约束按 1MiB 粒度推）
+    q2 = router.register_http_body_stream("r2")
+    for seq in range(1, 16):
+        await _push_delta(router, "r2", seq, 1024 * 1024)
+    for _ in range(15):
+        assert (await q2.get())["params"]["error"] is None
+    assert "r2" in router._http_streams
+    assert router._http_byte_budget.in_flight_bytes == 0
+    assert queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_http_body_delta_over_encoded_cap_fails_stream():
+    """per-delta 帽之一：deltaBase64 编码串超长（对位 Rust MAX_ENCODED 预检）
+    → 协议错误走畸形同路径：fail 对应流（响亮终态 + 摘路由），其余流不受影响"""
+    router = NotificationRouter()
+    q1 = router.register_http_body_stream("r1")
+    q2 = router.register_http_body_stream("r2")
+    oversized = base64.b64encode(b"x" * (3 * 1024 * 1024)).decode()  # 4MB 编码串
+
+    await router.dispatch(
+        {
+            "method": "http/request/bodyDelta",
+            "params": {
+                "requestId": "r1",
+                "seq": 1,
+                "deltaBase64": oversized,
+                "done": False,
+            },
+        }
+    )
+
+    assert "r1" not in router._http_streams
+    event = await asyncio.wait_for(q1.get(), 1)
+    assert event["params"]["error"] is not None
+    assert "malformed" in event["params"]["error"]
+    # 其余流不受影响；超限流的后续增量按未知请求丢弃
+    assert "r2" in router._http_streams
+    await router.dispatch(
+        {
+            "method": "http/request/bodyDelta",
+            "params": {
+                "requestId": "r1",
+                "seq": 2,
+                "deltaBase64": base64.b64encode(b"y").decode(),
+                "done": True,
+            },
+        }
+    )
+    await _push_delta(router, "r2", 1, 3)
+    assert base64.b64decode((await q2.get())["params"]["deltaBase64"]) == b"x" * 3
+
+
+@pytest.mark.asyncio
+async def test_http_body_delta_over_decoded_cap_fails_stream():
+    """per-delta 帽之二：解码后超 1MB（编码帽取等放行的边界载荷由解码帽兜底，
+    对位 Rust MAX_HTTP_BODY_DELTA_BYTES 复检）→ 同畸形路径 fail 对应流"""
+    router = NotificationRouter()
+    queue = router.register_http_body_stream("r")
+    # 1MiB+1 字节：编码串长恰为帽值（1398104，取等放行），解码后超限
+    payload = b"x" * (1024 * 1024 + 1)
+    encoded = base64.b64encode(payload).decode()
+    assert len(encoded) <= MAX_ENCODED_HTTP_BODY_DELTA_BYTES
+
+    await router.dispatch(
+        {
+            "method": "http/request/bodyDelta",
+            "params": {
+                "requestId": "r",
+                "seq": 1,
+                "deltaBase64": encoded,
+                "done": False,
+            },
+        }
+    )
+
+    assert "r" not in router._http_streams
+    event = await asyncio.wait_for(queue.get(), 1)
+    assert event["params"]["error"] is not None
+    # 连接级预算未被幽灵字节占用（超限载荷从未入队占账）
+    assert router._http_byte_budget.in_flight_bytes == 0
+
+
+@pytest.mark.asyncio
+async def test_http_body_delta_at_caps_passes():
+    """帽值取等放行：解码恰好 1MiB 的 delta 正常入队（预算口径独立——单流
+    1MiB 远低于 16MB 连接级预算）"""
+    router = NotificationRouter()
+    queue = router.register_http_body_stream("r")
+    payload = b"x" * (1024 * 1024)
+    await router.dispatch(
+        {
+            "method": "http/request/bodyDelta",
+            "params": {
+                "requestId": "r",
+                "seq": 1,
+                "deltaBase64": base64.b64encode(payload).decode(),
+                "done": True,
+            },
+        }
+    )
+    event = await asyncio.wait_for(queue.get(), 1)
+    assert base64.b64decode(event["params"]["deltaBase64"]) == payload
+    assert event["params"]["done"] is True

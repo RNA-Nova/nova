@@ -681,3 +681,22 @@ def test_native_absolute_paths_not_intercepted_client_side():
     )
     assert ctx.policy_context is not None
     assert ctx.policy_context.cwd == "/usr/local/native"
+
+
+def test_network_policy_request_port_is_u16():
+    """裁决请求 port 对位 network_policy.rs 的 u16——越界即线上载荷校验
+    失败（客户端 -32602 入站闸门分支）；边界 0/65535 合法"""
+    import pytest
+    from nova_protocol import ExecServerNetworkPolicyRequest
+    from pydantic import ValidationError
+
+    for port in (0, 443, 65535):
+        request = ExecServerNetworkPolicyRequest.model_validate(
+            {"protocol": "https_connect", "host": "example.com", "port": port}
+        )
+        assert request.port == port
+    for port in (-1, 65536, 100000):
+        with pytest.raises(ValidationError):
+            ExecServerNetworkPolicyRequest.model_validate(
+                {"protocol": "https_connect", "host": "example.com", "port": port}
+            )

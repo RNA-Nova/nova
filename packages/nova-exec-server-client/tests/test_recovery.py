@@ -857,3 +857,234 @@ async def test_pre_recovery_hook_timeout_fails_recovery():
     assert "process starts" in (managed.failure_message or "")
     assert len(sink) == 1  # 从未发起重连
     await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_pre_recovery_hook_exception_fails_recovery():
+    """pre_recovery 钩子自身异常：恢复转 failed（不卡死 recovering——
+    与钩子超时同归宿）"""
+    sink: list[FakeTransport] = []
+
+    async def broken_hook() -> None:
+        raise RuntimeError("hook boom")
+
+    managed = make_managed(sink, pre_recovery=broken_hook)
+    await managed.connect()
+    sink[0].drop("test drop")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while managed.state != "failed":
+        assert loop.time() < deadline, "recovery did not fail within 5s"
+        await asyncio.sleep(0.01)
+    assert "hook boom" in (managed.failure_message or "")
+    assert len(sink) == 1  # 从未发起重连
+    await managed.disconnect()
+
+
+# =============================================================================
+# request_recovery 快速判死 / 退役任务跟踪 / 连接安装兜底 / 恢复超时消息 /
+# 外部断线观察口身份守卫
+# =============================================================================
+
+
+class PendingAwareTransport(FakeTransport):
+    """带 _fail_pending/_abort_connection 桩的假传输（快速判死测试用——
+    对位真实传输 _JsonRpcTransport._mark_disconnected 的后半段）"""
+
+    def __init__(self, responses=None):
+        super().__init__(responses)
+        self.pending_failed = 0
+        self.aborted = 0
+
+    def _fail_pending(self) -> None:
+        self.pending_failed += 1
+
+    def _abort_connection(self) -> None:
+        self.aborted += 1
+
+
+@pytest.mark.asyncio
+async def test_request_recovery_fails_pending_synchronously():
+    """request_recovery 退役传输的在途请求同步判死 + 中止底层承载（对位
+    Rust close_transport 的即时 drain_pending）——不等后台优雅关闭走完"""
+    sink: list[PendingAwareTransport] = []
+
+    def factory() -> PendingAwareTransport:
+        transport = PendingAwareTransport(
+            {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+        )
+        sink.append(transport)
+        return transport
+
+    managed = ManagedTransport(
+        factory, handshake=make_handshake_log(sink), strategy=FAST
+    )
+    await managed.connect()
+    first = sink[0]
+
+    await managed.request_recovery("probe timed out")
+    # 同步快速判死（request_recovery 返回即已生效，不经事件循环等待）
+    assert first.pending_failed == 1
+    assert first.aborted == 1
+    assert managed.state == "recovering"
+
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 2:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+    await managed.disconnect()
+
+
+class SlowCloseTransport(FakeTransport):
+    """disconnect 挂起直到测试放行的假传输（退役关闭任务跟踪测试用）"""
+
+    def __init__(self, responses=None):
+        super().__init__(responses)
+        self.release_close = asyncio.Event()
+        self.close_done = False
+
+    async def disconnect(self) -> None:
+        await self.release_close.wait()
+        self.close_done = True
+        await super().disconnect()
+
+
+@pytest.mark.asyncio
+async def test_retired_close_tasks_tracked_and_gathered_on_disconnect():
+    """退役传输的后台关闭任务跟踪集（对齐 _cleanup_tasks 模式）：连续多次
+    恢复各自跟踪不被覆盖；disconnect 时 gather 全量收尾"""
+    sink: list[FakeTransport] = []
+    made = 0
+
+    def factory() -> FakeTransport:
+        nonlocal made
+        responses = {
+            "initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}
+        }
+        # 前两条（将被退役）慢关；后续正常
+        transport: FakeTransport = (
+            SlowCloseTransport(responses) if made < 2 else FakeTransport(responses)
+        )
+        made += 1
+        sink.append(transport)
+        return transport
+
+    managed = ManagedTransport(
+        factory, handshake=make_handshake_log(sink), strategy=FAST
+    )
+    await managed.connect()
+
+    await managed.request_recovery("probe 1")
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 2:
+            break
+        await asyncio.sleep(0.01)
+    await managed.request_recovery("probe 2")
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 3:
+            break
+        await asyncio.sleep(0.01)
+
+    # 两条退役传输的关闭都未完成——任务全量跟踪，不被单槽覆盖
+    assert len(managed._retired_close_tasks) == 2
+    first, second = sink[0], sink[1]
+    assert isinstance(first, SlowCloseTransport) and isinstance(
+        second, SlowCloseTransport
+    )
+
+    first.release_close.set()
+    second.release_close.set()
+    await managed.disconnect()
+    assert first.close_done and second.close_done  # gather 全量收尾
+    assert managed._retired_close_tasks == set()
+
+
+class HangingConnectTransport(FakeTransport):
+    """connect 永不返回的假传输（恢复裸超时消息测试用）"""
+
+    async def connect(self) -> None:
+        await asyncio.sleep(60)
+
+
+@pytest.mark.asyncio
+async def test_recovery_timeout_failure_message_backfilled():
+    """wait_for 超时抛的裸 asyncio.TimeoutError str 为空——失败消息回填
+    "recovery timed out after {timeout}s"（对位 Rust Err(_) 臂），
+    冒号后不留空原因"""
+    sink: list[FakeTransport] = []
+    first = FakeTransport(
+        {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+    )
+    sink.append(first)
+
+    def factory() -> FakeTransport:
+        return HangingConnectTransport(
+            {"initialize": {"sessionId": "fake-session", "protocolVersion": "1.4"}}
+        )
+
+    managed = ManagedTransport(
+        factory,
+        instance=first,
+        handshake=make_handshake_log(sink),
+        strategy=ReconnectStrategy(interval=0.01, timeout=0.15),
+    )
+    await managed.connect()
+    first.drop("test drop")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while managed.state != "failed":
+        assert loop.time() < deadline, "recovery did not fail within 5s"
+        await asyncio.sleep(0.01)
+    message = managed.failure_message or ""
+    assert "recovery timed out after 0.15s" in message
+    assert not message.rstrip().endswith(":")
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_connect_install_failure_disconnects_transport():
+    """connect() 的 _install 校验失败（resume 会话一致性违约）同样断开
+    底层传输——与握手失败同路径收尾，不留半连接泄漏"""
+    transport = FakeTransport(
+        {"initialize": {"sessionId": "other-session", "protocolVersion": "1.4"}}
+    )
+    sink: list[FakeTransport] = []
+    managed = ManagedTransport(
+        None,
+        instance=transport,
+        handshake=make_handshake_log(sink),
+        strategy=FAST,
+        resume_session_id="s-1",
+    )
+    with pytest.raises(ProtocolError, match="unexpected session"):
+        await managed.connect()
+    assert not transport.connected  # _install 失败即断开，不泄漏
+    assert managed.state == "disconnected"
+
+
+@pytest.mark.asyncio
+async def test_external_disconnect_handler_fires_only_after_identity_guard():
+    """外部断线观察口在身份守卫之后扇出：陈旧回调（非当前传输）不惊动
+    订阅者；当前传输断线照常扇出并发起恢复"""
+    sink: list[FakeTransport] = []
+    managed = make_managed(sink)
+    await managed.connect()
+    seen: list[str | None] = []
+    managed.on_disconnect(lambda reason: seen.append(reason))
+
+    # 陈旧回调：断的不是当前传输——不扇出、不起恢复
+    stale = FakeTransport({})
+    managed._on_transport_disconnect(stale, "stale drop")
+    assert seen == []
+    assert managed.state == "connected"
+
+    # 当前传输断线：扇出 + 恢复照常
+    sink[0].drop("real drop")
+    assert seen == ["real drop"]
+    for _ in range(100):
+        if managed.state == "connected" and len(sink) == 2:
+            break
+        await asyncio.sleep(0.01)
+    assert managed.state == "connected"
+    await managed.disconnect()

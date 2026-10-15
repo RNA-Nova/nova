@@ -87,7 +87,9 @@ async def test_explicit_request_timeout_still_applies():
 class HangingInitializeTransport(FakeTransport):
     """initialize 永不应答的假传输（握手专用时限测试用）"""
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "initialize":
             await asyncio.sleep(60)
         return await super().send_request(method, params, channel=channel)
@@ -102,6 +104,44 @@ async def test_initialize_handshake_has_dedicated_timeout(monkeypatch):
     with pytest.raises(TimeoutError, match="initialize handshake timed out"):
         await client.connect()
     await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_initialize_timeout_overridable_per_client():
+    """构造器 initialize_timeout 覆盖包级默认（环境声明的握手预算注入点，
+    environments 侧经 from_environment 传入）"""
+    client = ExecutorClient(
+        transport=HangingInitializeTransport({}), initialize_timeout=0.05
+    )
+    with pytest.raises(TimeoutError, match="after 0.05s"):
+        await client.connect()
+    await client.disconnect()
+
+
+def test_initialize_timeout_must_be_positive():
+    with pytest.raises(ValueError, match="initialize_timeout"):
+        ExecutorClient(transport=FakeTransport({}), initialize_timeout=0)
+
+
+@pytest.mark.asyncio
+async def test_from_environment_threads_initialize_timeout():
+    """from_environment 透传 initialize_timeout 到构造点（environments
+    侧 EnvironmentManager.get_client 的注入路径）"""
+    from nova_protocol import ResolvedEnvironment
+
+    environment = ResolvedEnvironment(
+        id="ws-1",
+        kind="ws",
+        url="ws://localhost:8080",
+        initialize_timeout_sec=3.5,
+    )
+    client = ExecutorClient.from_environment(environment)
+    assert client._initialize_timeout == 3.5
+    # None（环境未声明）→ 包级默认
+    client2 = ExecutorClient.from_environment(
+        ResolvedEnvironment(id="ws-2", kind="ws", url="ws://localhost:8080")
+    )
+    assert client2._initialize_timeout == client_module.INITIALIZE_TIMEOUT
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +252,9 @@ async def test_environment_status_fail_fast_while_recovering():
 class HangingStatusTransport(FakeTransport):
     """environment/status 永不应答的假传输（status 专用时限测试用）"""
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "environment/status":
             await asyncio.sleep(60)
         return await super().send_request(method, params, channel=channel)
@@ -269,7 +311,9 @@ class DropOnStartTransport(FakeTransport):
     """process/start 模拟断线窗口失败：触发断线回调后以传输错误收尾
     （请求是否落地不可知——孤儿清理测试用）"""
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "process/start":
             self.requests.append((method, params or {}, channel))
             self.drop("start dropped")
@@ -357,7 +401,9 @@ class HangableStartTransport(FakeTransport):
         super().__init__(responses)
         self.release = asyncio.Event()
 
-    async def send_request(self, method, params=None, *, channel=None):
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
         if method == "process/start":
             self.requests.append((method, params or {}, channel))
             await self.release.wait()
@@ -402,8 +448,9 @@ async def test_in_flight_start_blocks_wait_for_process_starts():
 
 @pytest.mark.asyncio
 async def test_cancelled_start_schedules_cleanup():
-    """调用方在响应落地前取消 start（对位 Rust caller receipt 失败分支）：
-    后台 terminate 清理可能已落地的进程"""
+    """调用方在响应落地前取消 start（对位 Rust 调用方丢 result_rx 分支）：
+    取消只是丢回执——线上 RPC 在后台落定后才调度 terminate 清理
+    （杜绝 terminate 抢在 start 处理器落地前到达的孤儿竞态）"""
     transport = HangableStartTransport(
         {
             "initialize": INIT_OK,
@@ -423,6 +470,12 @@ async def test_cancelled_start_schedules_cleanup():
     with pytest.raises(asyncio.CancelledError):
         await start_task
 
+    # 取消不打断线上 RPC：在飞计数未归还，terminate 清理尚未调度
+    assert client._process_start_gate._active == 1
+    assert not any(m == "process/terminate" for m, _, _ in transport.requests)
+
+    # RPC 落定（响应到达但回执已失）后才调度 terminate 清理、归还计数
+    transport.release.set()
     start_params = [p for m, p, _ in transport.requests if m == "process/start"][0]
     for _ in range(100):
         terminate_params = [
@@ -433,6 +486,124 @@ async def test_cancelled_start_schedules_cleanup():
         await asyncio.sleep(0.01)
     assert terminate_params == [{"processId": start_params["processId"]}]
     assert client._process_start_gate._active == 0
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_start_settles_into_transport_failure_still_cleans_up():
+    """取消后 RPC 以传输类失败落定（对位 Rust Err 分支的 cleanup——无论
+    调用方回执在与否都调度）：请求是否落地不可知，terminate 清理照发"""
+    transport = HangableStartTransport(
+        {
+            "initialize": INIT_OK,
+            "process/start": ConnectionError("connection closed"),
+            "process/terminate": {"running": False},
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    start_task = asyncio.create_task(client.process.start(["sleep", "5"], "/tmp"))
+    for _ in range(100):
+        if any(m == "process/start" for m, _, _ in transport.requests):
+            break
+        await asyncio.sleep(0.01)
+    start_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+
+    transport.release.set()  # 落定失败：传输类错误 → 清理照发
+    start_params = [p for m, p, _ in transport.requests if m == "process/start"][0]
+    for _ in range(100):
+        terminate_params = [
+            p for m, p, _ in transport.requests if m == "process/terminate"
+        ]
+        if terminate_params:
+            break
+        await asyncio.sleep(0.01)
+    assert terminate_params == [{"processId": start_params["processId"]}]
+    assert client._process_start_gate._active == 0
+    await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_start_transport_closed_server_error_cleaned_up():
+    """start 以服务端 RPC 层传输关闭（-32000 "JSON-RPC transport closed"）
+    落定：同传输类失败调度 terminate 清理（判别同恢复层
+    is_transport_class_error——中继预备 + 包内一致性）"""
+    transport = FakeTransport(
+        {
+            "initialize": INIT_OK,
+            "process/start": ProtocolError(
+                "JSON-RPC error -32000: JSON-RPC transport closed",
+                code=-32000,
+                server_message="JSON-RPC transport closed",
+            ),
+            "process/terminate": {"running": False},
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    with pytest.raises(ProtocolError, match="transport closed"):
+        await client.process.start(["sleep", "5"], "/tmp")
+
+    start_params = [p for m, p, _ in transport.requests if m == "process/start"][0]
+    for _ in range(100):
+        terminate_params = [
+            p for m, p, _ in transport.requests if m == "process/terminate"
+        ]
+        if terminate_params:
+            break
+        await asyncio.sleep(0.01)
+    assert terminate_params == [{"processId": start_params["processId"]}]
+    assert client._process_start_gate._active == 0
+    await client.disconnect()
+
+
+class FlakyTerminateTransport(FakeTransport):
+    """process/terminate 首发以服务端 -32000 传输关闭失败（清理重试臂测试用）"""
+
+    def __init__(self, responses=None):
+        super().__init__(responses)
+        self.terminate_calls = 0
+
+    async def send_request(
+        self, method, params=None, *, channel=None, for_cleanup=False
+    ):
+        if method == "process/terminate":
+            self.terminate_calls += 1
+            if self.terminate_calls == 1:
+                raise ProtocolError(
+                    "JSON-RPC error -32000: JSON-RPC transport closed",
+                    code=-32000,
+                    server_message="JSON-RPC transport closed",
+                )
+        return await super().send_request(method, params, channel=channel)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retries_transport_closed_server_error():
+    """cleanup 重试臂把 -32000 传输关闭当传输类（对位 Rust
+    cleanup_process_start 的 is_transport_closed_error 臂）：连接未到
+    终态时重试 terminate——不被一次 -32000 吓退"""
+    transport = FlakyTerminateTransport(
+        {
+            "initialize": INIT_OK,
+            "process/start": ConnectionError("connection closed"),
+            "process/terminate": {"running": False},
+        }
+    )
+    client = ExecutorClient(transport=transport)
+    await client.connect()
+
+    with pytest.raises(ConnectionError):
+        await client.process.start(["sleep", "5"], "/tmp")
+    for _ in range(100):
+        if transport.terminate_calls >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert transport.terminate_calls == 2  # -32000 重试后成功收尾
     await client.disconnect()
 
 
@@ -449,11 +620,15 @@ def policy_params(process_id: str = "p1", host: str = "api.example.com") -> dict
 
 
 def make_policy_client(callback, **kwargs) -> ExecutorClient:
-    return ExecutorClient(
+    client = ExecutorClient(
         transport=FakeTransport({"initialize": INIT_OK}),
         network_policy=callback,
         **kwargs,
     )
+    # 活进程登记表（对位 Rust Inner.sessions 会话表）：未知 processId 的
+    # 裁决请求不调回调直接 deny——默认登记测试常用进程
+    client.process.live_processes["p1"] = None
+    return client
 
 
 @pytest.mark.asyncio
@@ -473,7 +648,8 @@ async def test_policy_invalid_process_id_denies_without_callback():
         assert reply == {"decision": {"type": "deny", "reason": "not_allowed"}}
     assert not called
 
-    # 边界：恰好 256 字节放行到回调
+    # 边界：恰好 256 字节放行到回调（先登记——未知进程不调回调）
+    client.process.live_processes["p" * 256] = None
     reply = await client._answer_network_policy(policy_params(process_id="p" * 256))
     assert reply == {"decision": {"type": "allow"}}
     assert called
@@ -550,3 +726,53 @@ def test_policy_timeout_must_be_positive():
     """回调时限须为正（对位 Rust 对 0ms 的 Protocol 报错）"""
     with pytest.raises(ValueError, match="network_policy_timeout"):
         make_policy_client(None, network_policy_timeout=0)
+
+
+@pytest.mark.asyncio
+async def test_policy_unknown_process_denies_without_callback():
+    """活进程登记表查无此 processId（对位 client_recovery.rs 的
+    get_session → None → controller None 分支）：不调回调直接 deny"""
+    called = False
+
+    async def callback(params):
+        nonlocal called
+        called = True
+        return NetworkPolicyDecision.allow()
+
+    client = make_policy_client(callback)
+    client.process.live_processes.clear()  # 无任何活进程
+    reply = await client._answer_network_policy(policy_params())
+    assert reply == {"decision": {"type": "deny", "reason": "not_allowed"}}
+    assert not called
+
+
+@pytest.mark.asyncio
+async def test_policy_callback_timeout_per_process_from_start_params():
+    """回调时限逐进程取登记表里的 policyDecisionTimeoutMs 覆盖（对位 Rust
+    controller.timeout 从 start params.network_proxy 取）；登记表 None
+    回退全局 network_policy_timeout"""
+
+    async def hanging(params):
+        await asyncio.sleep(60)
+        return NetworkPolicyDecision.allow()
+
+    client = make_policy_client(hanging, network_policy_timeout=30.0)
+    # 逐进程覆盖 50ms：远小于全局 30s——按覆盖值超时拒决
+    client.process.live_processes["p1"] = 0.05
+    start = asyncio.get_running_loop().time()
+    reply = await client._answer_network_policy(policy_params())
+    assert reply == {"decision": {"type": "deny", "reason": "not_allowed"}}
+    assert asyncio.get_running_loop().time() - start < 5
+
+
+@pytest.mark.asyncio
+async def test_policy_allow_strips_reason():
+    """allow 剥离 reason（Rust Allow 变体无 reason 字段）——回调误带
+    不回线上"""
+
+    async def allow_with_reason(params):
+        return NetworkPolicyDecision(type="allow", reason="should not go online")
+
+    client = make_policy_client(allow_with_reason)
+    reply = await client._answer_network_policy(policy_params())
+    assert reply == {"decision": {"type": "allow"}}

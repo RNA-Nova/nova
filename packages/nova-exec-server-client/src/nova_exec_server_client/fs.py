@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import uuid
+from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable
+from urllib.parse import quote
 
 from nova_protocol import (
     ENVIRONMENT_INFO,
@@ -58,14 +61,31 @@ from nova_protocol import (
     FsWriteStreamDoneResponse,
     FsWriteStreamParams,
     FsWriteStreamResponse,
+    WalkEntry,
+    WalkError,
     WalkOptions,
     WalkOutcome,
 )
 
-from .errors import FileSystemError, ProtocolError, TimeoutError, TransportError
+from .errors import (
+    JSON_RPC_METHOD_NOT_FOUND,
+    FileSystemError,
+    ProtocolError,
+    TimeoutError,
+    TransportError,
+)
 from .notifications import NotificationRouter, ReadStreamEvent
-from .pool import CHANNEL_DATA
 from .transport import Transport
+
+logger = logging.getLogger(__name__)
+
+#: walk 上限（对位 Rust exec-server-file-system 的 MAX_WALK_* 族与响应字节
+#: 预算）——直连 fs/walk 时由服务端执法；-32601 回退原语合成路径本地执法
+MAX_WALK_DEPTH = 64
+MAX_WALK_DIRECTORIES = 10_000
+MAX_WALK_ENTRIES = 50_000
+MAX_WALK_RESPONSE_BYTES = 4 * 1024 * 1024
+WALK_RESPONSE_ITEM_OVERHEAD_BYTES = 64
 
 
 def _new_handle_id(prefix: str) -> str:
@@ -81,6 +101,16 @@ def _sandbox_wire(sandbox: FileSystemSandboxContext | None) -> dict | None:
     if sandbox is None:
         return None
     return sandbox.model_dump(by_alias=True, exclude_none=True)
+
+
+def _walk_join(directory: str, file_name: str) -> str:
+    """walk 回退的路径拼接（对位 Rust `PathUri::join` 的单组件形态）：fileName
+    作为单个不透明段 percent-encode 后追加到目录 URI；含 NUL 拒（对位 join 的
+    InvalidFileUriPath——walk 回退收编为 WalkError）"""
+    if "\x00" in file_name:
+        raise ValueError(f"invalid file name containing NUL: {file_name!r}")
+    base = directory if directory.endswith("/") else directory + "/"
+    return base + quote(file_name, safe="")
 
 
 class FileSystemManager:
@@ -116,6 +146,33 @@ class FileSystemManager:
         """解析流式方法的落点通道名（池化传输打标签用；裸传输无此概念归 None）"""
         resolve = getattr(self._transport, "resolve_channel", None)
         return resolve(method) if resolve is not None else None
+
+    def _spawn_close(self, handle_id: str, stream_method: str) -> None:
+        """即发即忘的 fs/close 收摊（对位 Rust `runtime.spawn`——inline await
+        会把消费者的 aclose()/取消路径挂在"连接活着但服务端不答 fs/close"的
+        半死窗口上）。落点通道与流注册同一解析（自定义 method_routes 时 close
+        不错落连接；裸传输无通道概念归 None）。任务持引用防 GC 中途回收。"""
+        task = asyncio.create_task(
+            self._transport.send_request(
+                FS_CLOSE,
+                FsCloseParams(handleId=handle_id).model_dump(by_alias=True),
+                channel=self._stream_channel(stream_method),
+                # 收摊调用（对位 Rust call_for_cleanup 的保留槽语义）
+                for_cleanup=True,
+            )
+        )
+        self._pending_closes.add(task)
+        task.add_done_callback(self._discard_close_task)
+
+    def _discard_close_task(self, task: asyncio.Task) -> None:
+        """收摊任务完成即自弃；异常取回留痕（best-effort 语义不变——连接已死
+        时尽力而为，但不打 "Task exception was never retrieved" 循环告警）"""
+        self._pending_closes.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.debug("fs/close 收摊任务失败（best-effort 忽略）", exc_info=exc)
 
     async def read_file(
         self,
@@ -169,10 +226,11 @@ class FileSystemManager:
         try_send 断流语义）。
 
         放弃收摊（对位 Rust `PushReadRegistration::drop`）：消费者中途放弃
-        （break/aclose/cancel——未收到 done/failed 终态）时 best-effort 经
-        数据面通道发 `fs/close`（句柄随数据面连接存活）；不补这一手，服务端
-        会把整个文件读完并推入无人接收的路由。done / failed 终态服务端已
-        自行收摊，不再发。
+        （break/aclose/cancel——未收到 done/failed 终态）或客户端本地断流
+        （背压队列满/畸形推送兜底合成的 failed）时 best-effort 经注册同通道发
+        `fs/close`（句柄随连接存活）；不补这一手，服务端会把整个文件读完并
+        推入无人接收的路由。done / 服务端 failed 终态服务端已自行收摊，
+        连接清扫（fail_channel）句柄随连接消亡，均不再发。
         """
         handle_id = _new_handle_id("s")
         queue = self._router.register_stream(
@@ -198,12 +256,14 @@ class FileSystemManager:
         FsReadStreamResponse.model_validate(result)
 
         received = 0
-        terminated = False  # 收到服务端终态（done/failed）= 服务端已自行收摊
+        terminated = False  # 服务端句柄已收摊/消亡 = 不再补 fs/close
         try:
             while True:
                 event: ReadStreamEvent = await queue.get()
                 if event.kind == "failed":
-                    terminated = True
+                    # 服务端终态/连接清扫（server_settled=True）句柄已消亡；
+                    # 本地断流（背压/畸形兜底）服务端句柄仍活——走未收摊路径
+                    terminated = event.server_settled
                     raise FileSystemError(
                         f"read stream `{handle_id}` failed: {event.error}"
                     )
@@ -220,20 +280,9 @@ class FileSystemManager:
         finally:
             self._router.unregister_stream(handle_id)
             if not terminated:
-                # 消费者中途放弃/连接断开：best-effort fs/close 收摊（对位 Rust
-                # PushReadRegistration::drop——`runtime.spawn` 即发即忘）。
-                # 即发即忘而非 inline await：无隐含超时后，遇上"连接活着但
-                # 服务端不答 fs/close"的半死窗口，inline await 会让消费者的
-                # aclose() 无限期挂死。任务持引用防 GC 中途回收。
-                task = asyncio.create_task(
-                    self._transport.send_request(
-                        FS_CLOSE,
-                        FsCloseParams(handleId=handle_id).model_dump(by_alias=True),
-                        channel=CHANNEL_DATA,
-                    )
-                )
-                self._pending_closes.add(task)
-                task.add_done_callback(self._pending_closes.discard)
+                # 消费者中途放弃/连接断开/本地断流：best-effort fs/close 收摊
+                # （对位 Rust PushReadRegistration::drop 的 active=true 分支）
+                self._spawn_close(handle_id, FS_READ_STREAM)
 
     async def write_file(
         self,
@@ -285,8 +334,10 @@ class FileSystemManager:
           不再拖慢发送方；队列满（客户端持续领先落盘 16 块）流终态失败，
           done 回报 -32600 "queue full"（语义=降速后重试）
         - 中断语义（v1.12 翻转）：服务端中止/断连不再删半成品——文件留在
-          盘上可续传；本地异常时客户端发 `fs/close` 主动中止（须走数据面
-          通道——句柄状态随连接）；chunk 通知无回执，服务端业务错误
+          盘上可续传；本地异常**或取消**（CancelledError 非 Exception 子类，
+          except 形态会漏捕——写句柄连同 fd/槽在服务端干等泄漏）时客户端发
+          `fs/close` 主动中止（与 read_stream 收摊同纪律：即发即忘、落点与
+          注册同通道——句柄状态随连接）；chunk 通知无回执，服务端业务错误
           （乱序/超限/队列满/写盘失败）留到 done 回报，这里转为 FileSystemError
         """
         if isinstance(chunks, (bytes, bytearray, memoryview)):
@@ -307,6 +358,7 @@ class FileSystemManager:
         FsWriteStreamResponse.model_validate(result)
 
         seq = 0
+        completed = False
         try:
             async for piece in _iterate_bytes(chunks):
                 for piece_offset in range(0, len(piece), block_size):
@@ -328,18 +380,13 @@ class FileSystemManager:
                     handleId=handle_id, seq=seq, chunk=b"", eof=True
                 ).model_dump(by_alias=True),
             )
-        except Exception:
-            # 中止：服务端对写流句柄的 fs/close 即 abort（v1.12 起不再删半成品——
-            # 文件留在盘上可续传）；连接已死时尽力而为
-            try:
-                await self._transport.send_request(
-                    FS_CLOSE,
-                    FsCloseParams(handleId=handle_id).model_dump(by_alias=True),
-                    channel=CHANNEL_DATA,
-                )
-            except Exception:
-                pass
-            raise
+            completed = True
+        finally:
+            if not completed:
+                # 中止（字节源异常/断线/取消）：服务端对写流句柄的 fs/close 即
+                # abort（v1.12 起不再删半成品——文件留在盘上可续传）；即发即忘
+                # 同 read_stream 收摊纪律，连接已死时尽力而为
+                self._spawn_close(handle_id, FS_WRITE_STREAM)
 
         try:
             result = await self._transport.send_request(
@@ -376,9 +423,10 @@ class FileSystemManager:
         - `offset`：初始续传起点（0 = 新上传，创建/截断）
         - `max_resume_attempts`：断线后续传的最大重试次数（传输层恢复基建
           （ManagedTransport）兜不住时的兜底轮次）
-        - `sandbox`：语义同 `write_stream`；续传重开时同样透传
-        - 返回服务端确认的全量字节数；done 对账不符或服务端文件缩水即
-          FileSystemError
+        - `sandbox`：语义同 `write_stream`；续传重开与断线对账（getMetadata）
+          同样透传
+        - 返回服务端确认的全量字节数；done 对账不符、服务端文件缩水或断线
+          窗口内文件被外部追加（外来增长）即 FileSystemError
         """
         confirmed = offset
         attempts = 0
@@ -401,8 +449,11 @@ class FileSystemManager:
                 # 续传要重放源——一次性迭代器/生成器无法重放，明确报错而非
                 # 静默产出错数据
                 _ensure_replayable(data_source)
-                # getMetadata 对账服务端文件大小（断线窗口内推送丢失由此兜底）
-                confirmed = await self._reconcile_write_offset(path, confirmed)
+                # getMetadata 对账服务端文件大小（断线窗口内推送丢失由此兜底；
+                # 传入本轮已推字节数——外来增长检测的上界口径）
+                confirmed = await self._reconcile_write_offset(
+                    path, confirmed, chunks.count, sandbox=sandbox
+                )
                 continue
             # done 对账：全量字节数 = 本轮起点 + 本轮推送
             if total != confirmed + chunks.count:
@@ -469,10 +520,31 @@ class FileSystemManager:
                     path, attempts, max_resume_attempts, err
                 )
 
-    async def _reconcile_write_offset(self, path: str, confirmed: int) -> int:
-        """断线后对账服务端文件大小：文件缩水（服务端状态回退）即对账失败。"""
+    async def _reconcile_write_offset(
+        self,
+        path: str,
+        confirmed: int,
+        pushed: int,
+        *,
+        sandbox: dict | None = None,
+    ) -> int:
+        """断线后对账服务端文件大小：
+
+        - 文件缩水（服务端状态回退）即对账失败；
+        - 文件超过 `confirmed + pushed`（本轮已拉取=已推字节数）即外来增长
+          （断线窗口内被外部追加）——外来字节不得收养为"已确认"（零块上传
+          会把外来内容误判成自己的完成态）。上界取等不误杀：done 响应丢失
+          场景服务端恰好收齐全轮推送，size == confirmed + pushed。
+        `sandbox`：与 write_stream 开门同一载荷（线上 dict），对账
+        getMetadata 同样透传（句柄族方法全透传纪律）。
+        """
         try:
-            metadata = await self.metadata(path)
+            result = await self._transport.send_request(
+                FS_GET_METADATA,
+                FsGetMetadataParams(path=path, sandbox=sandbox).model_dump(
+                    by_alias=True, exclude_none=True
+                ),
+            )
         except ProtocolError as err:
             if err.code == -32004:
                 # NotFound：开门都没成功——从头再来
@@ -483,11 +555,17 @@ class FileSystemManager:
                     f"vanished (client had {confirmed} confirmed bytes)"
                 ) from err
             raise
-        size = int(metadata.size)
+        size = int(FileMetadata.model_validate(result).size)
         if size < confirmed:
             raise FileSystemError(
                 f"write stream reconciliation failed: server file `{path}` shrank "
                 f"from {confirmed} to {size} bytes"
+            )
+        if size > confirmed + pushed:
+            raise FileSystemError(
+                f"write stream reconciliation failed: server file `{path}` grew "
+                f"to {size} bytes beyond {confirmed} confirmed + {pushed} pushed "
+                f"(foreign write during the disconnect window)"
             )
         return size
 
@@ -521,14 +599,151 @@ class FileSystemManager:
         sandbox: FileSystemSandboxContext | None = None,
     ) -> WalkOutcome:
         """目录遍历（界限经 WalkOptions——深度/目录数/条目数上限）；`sandbox`
-        语义同 `read_file`"""
+        语义同 `read_file`。
+
+        旧服务端无 fs/walk 端点（-32601 MethodNotFound）时回退
+        getMetadata/canonicalize/readDirectory 原语合成遍历（对位 Rust
+        `RemoteFileSystem::walk` 的 `walk_via_directory_reads` 回退）。
+        """
         params = FsWalkParams(
             path=path, options=options or WalkOptions(), sandbox=_sandbox_wire(sandbox)
         )
-        result = await self._transport.send_request(
-            FS_WALK, params.model_dump(by_alias=True)
-        )
+        try:
+            result = await self._transport.send_request(
+                FS_WALK, params.model_dump(by_alias=True)
+            )
+        except ProtocolError as err:
+            if err.code != JSON_RPC_METHOD_NOT_FOUND:
+                raise
+            return await self._walk_via_directory_reads(path, params.options, sandbox)
         return WalkOutcome.model_validate(result)
+
+    async def _walk_via_directory_reads(
+        self,
+        root: str,
+        options: WalkOptions,
+        sandbox: FileSystemSandboxContext | None,
+    ) -> WalkOutcome:
+        """fs/walk 的原语合成回退（对位 Rust exec-server-file-system 的
+        `walk_via_directory_reads` 默认实现）：BFS 按 fileName 排序逐目录展开，
+        深度/目录数/条目数/响应字节四帽截断（truncated=True），单目录失败
+        收编进 WalkOutcome.errors 而非整请求失败。"""
+        if options.max_directories == 0 or options.max_entries == 0:
+            raise FileSystemError("filesystem walk limits must be greater than zero")
+        if (
+            options.max_depth > MAX_WALK_DEPTH
+            or options.max_directories > MAX_WALK_DIRECTORIES
+            or options.max_entries > MAX_WALK_ENTRIES
+        ):
+            raise FileSystemError(
+                f"filesystem walk limits exceed maximums: depth={MAX_WALK_DEPTH}, "
+                f"directories={MAX_WALK_DIRECTORIES}, entries={MAX_WALK_ENTRIES}"
+            )
+
+        root_metadata = await self.metadata(root, sandbox=sandbox)
+        if not root_metadata.is_directory or (
+            root_metadata.is_symlink and not options.follow_directory_symlinks
+        ):
+            return WalkOutcome()
+
+        root_identity = (
+            await self.canonicalize(root, sandbox=sandbox)
+            if options.follow_directory_symlinks
+            else root
+        )
+        outcome = WalkOutcome()
+        response_bytes = 0
+
+        def reserve(content_bytes: int) -> bool:
+            """响应字节预算（对位 reserve_walk_response_bytes）：超帽截断不报错"""
+            nonlocal response_bytes
+            item_bytes = content_bytes + WALK_RESPONSE_ITEM_OVERHEAD_BYTES
+            if response_bytes + item_bytes > MAX_WALK_RESPONSE_BYTES:
+                outcome.truncated = True
+                return False
+            response_bytes += item_bytes
+            return True
+
+        def push_error(err_path: str, message: str) -> bool:
+            """单点失败收编为 WalkError（对位 push_walk_error）；预算尽即截断"""
+            if not reserve(len(err_path) + len(message)):
+                return False
+            outcome.errors.append(WalkError(path=err_path, message=message))
+            return True
+
+        queue: deque[tuple[str, int]] = deque([(root, 0)])
+        visited = {root_identity}
+        directory_count = 1
+        entry_count = 0
+        while queue:
+            directory, depth = queue.popleft()
+            try:
+                entries = await self.read_dir(directory, sandbox=sandbox)
+            except Exception as err:
+                if not push_error(directory, str(err)):
+                    return outcome
+                continue
+            entries = sorted(entries, key=lambda entry: entry.file_name)
+
+            for entry in entries:
+                if entry_count == options.max_entries:
+                    outcome.truncated = True
+                    return outcome
+                entry_count += 1
+
+                try:
+                    entry_path = _walk_join(directory, entry.file_name)
+                except ValueError as err:
+                    if not push_error(directory, str(err)):
+                        return outcome
+                    continue
+                try:
+                    metadata = await self.metadata(entry_path, sandbox=sandbox)
+                except Exception as err:
+                    if not push_error(entry_path, str(err)):
+                        return outcome
+                    continue
+                if metadata.is_symlink and (
+                    not options.follow_directory_symlinks or not metadata.is_directory
+                ):
+                    continue
+
+                if metadata.is_directory:
+                    kind = "directory"
+                elif metadata.is_file:
+                    kind = "file"
+                else:
+                    continue
+                if not reserve(len(entry_path)):
+                    return outcome
+                outcome.entries.append(WalkEntry(path=entry_path, kind=kind))
+
+                if kind == "directory" and depth < options.max_depth:
+                    if options.prune_hidden_directories and entry.file_name.startswith(
+                        "."
+                    ):
+                        continue
+                    if options.follow_directory_symlinks:
+                        try:
+                            directory_identity = await self.canonicalize(
+                                entry_path, sandbox=sandbox
+                            )
+                        except Exception as err:
+                            if not push_error(entry_path, str(err)):
+                                return outcome
+                            continue
+                    else:
+                        directory_identity = entry_path
+                    if directory_identity in visited:
+                        continue
+                    visited.add(directory_identity)
+                    if directory_count == options.max_directories:
+                        outcome.truncated = True
+                    else:
+                        directory_count += 1
+                        queue.append((entry_path, depth + 1))
+
+        return outcome
 
     async def create_dir(
         self,
@@ -682,14 +897,21 @@ class FileSystemManager:
         """关闭随机访问句柄（读/写通用）
 
         `channel`：池化传输下显式指定落点通道。句柄状态随连接存活——
-        readStream/writeStream 开出的句柄在数据面连接上，跨连接 close 得
-        -32004 未知句柄；关这类句柄须与 write_stream 中止路径同纪律传
-        `CHANNEL_DATA`。None（默认）走方法路由表兜底（fs/open 句柄同
-        连接——控制面；裸传输/单连接无通道概念）。
+        readStream/writeStream 开出的句柄在数据面连接上；跨连接 close **不会
+        报错**（服务端 fs/close 对未知句柄静默成功，对位
+        file_system_handler.rs 的 close 恒 Ok），但句柄仍在数据面连接上泄漏
+        （fd/槽一直占到流自然结束）——关流式句柄必须与开流同通道
+        （read_stream/write_stream 收摊路径经 `_spawn_close` 按注册同一解析
+        落点）。None（默认）走方法路由表兜底（fs/open 句柄同连接——控制面；
+        裸传输/单连接无通道概念）。
         """
         params = FsCloseParams(handleId=handle_id)
         await self._transport.send_request(
-            FS_CLOSE, params.model_dump(by_alias=True), channel=channel
+            FS_CLOSE,
+            params.model_dump(by_alias=True),
+            channel=channel,
+            # 对位 Rust fs_close 恒走 call_for_cleanup（收摊保留槽语义）
+            for_cleanup=True,
         )
 
     async def _file_write_streaming_supported(self) -> bool:

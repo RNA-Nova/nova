@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Literal
 
 from nova_protocol import ExecutorConfig, ExecutorEnvironment, ResolvedEnvironment
 
+from .config import validate_runtime_environment
 from .errors import ConfigError
 
 if TYPE_CHECKING:
@@ -42,13 +43,22 @@ def resolve_environment(
     """
     if name is None:
         default = config.default_environment
-        if default is not None and default.strip().lower() == "none":
-            raise ConfigError(
-                '默认环境已禁用（default_environment = "none"）——请显式指定'
-            )
-        name = default or LOCAL_ENVIRONMENT_ID
-        if default is None and not config.include_local:
-            raise ConfigError("未配置默认环境且 include_local=false——请显式指定")
+        if default is not None:
+            # 解析对位 codex normalize_default_environment_id：trim 后判定
+            # （装载期校验同样按 trim 后成员资格——两侧口径一致，否则带
+            # 首尾空白的 default 校验过了却解析不到）
+            stripped = default.strip()
+            if not stripped:
+                raise ConfigError("default_environment 不能为空串")
+            if stripped.lower() == "none":
+                raise ConfigError(
+                    '默认环境已禁用（default_environment = "none"）——请显式指定'
+                )
+            name = stripped
+        else:
+            if not config.include_local:
+                raise ConfigError("未配置默认环境且 include_local=false——请显式指定")
+            name = LOCAL_ENVIRONMENT_ID
 
     if name == LOCAL_ENVIRONMENT_ID:
         if not config.include_local:
@@ -72,6 +82,7 @@ def _to_resolved(environment: ExecutorEnvironment) -> ResolvedEnvironment:
             kind="ws",
             url=environment.url.strip(),
             connect_timeout_sec=environment.connect_timeout_sec,
+            initialize_timeout_sec=environment.initialize_timeout_sec,
         )
     assert environment.program is not None  # load 期已校验 url/program 二选一
     return ResolvedEnvironment(
@@ -81,7 +92,10 @@ def _to_resolved(environment: ExecutorEnvironment) -> ResolvedEnvironment:
         args=tuple(environment.args),
         env=dict(environment.env),
         cwd=environment.cwd,
+        # stdio 无连接预算（校验期 connect_timeout_sec requires url——恒 None）；
+        # initialize 握手预算两种传输都带（对位 codex）
         connect_timeout_sec=environment.connect_timeout_sec,
+        initialize_timeout_sec=environment.initialize_timeout_sec,
     )
 
 
@@ -174,7 +188,11 @@ class EnvironmentManager:
             if cached is not None:
                 return cached
             client = ExecutorClient.from_environment(
-                environment, network_policy=self._network_policy
+                environment,
+                network_policy=self._network_policy,
+                # 环境声明的握手预算传到构造点（与 connect_timeout 分账——
+                # 对位 codex 传输参数 initialize_timeout）
+                initialize_timeout=environment.initialize_timeout_sec,
             )
             await client.connect()
             self._clients[environment.id] = client
@@ -224,20 +242,28 @@ class EnvironmentManager:
         `token`：WS 鉴权 token 的侧表登记（运行时产物，不落配置条目）；
         None 时清除该环境的 token 登记。
 
+        新条目先过运行时校验（`config.validate_runtime_environment`——结构
+        不变量 + 保留字防撞 + stdio 相对 cwd 拒绝；**不做**装载期的字符集/
+        字节长命名仪式：那是配置文件纪律（codex validate_environment_id 只
+        管配置文件条目），运行时动态注册（如 executor manager 以
+        canonical_url 作环境键）不应用——非法条目 ConfigError 不落地（此前
+        零校验，非法注册表留到 get_client 才以 assert 崩——审计范围B B5）。
+
         增删与懒创建（get_client）经同一把锁互斥——否则竞态窗口里
         懒创建可能把按旧注册表建出的连接留在缓存里。连接退役清扫在锁外
         进行（与 close_all 同纪律：锁内只做注册表/缓存变更）。
         """
+        normalized = validate_runtime_environment(environment)
         async with self._lock:
+            environments = [
+                e for e in self._config.environments if e.id != environment.id
+            ]
+            environments.append(normalized)
             existing = self._clients.pop(environment.id, None)
             if token is not None:
                 self._tokens[environment.id] = token
             else:
                 self._tokens.pop(environment.id, None)
-            environments = [
-                e for e in self._config.environments if e.id != environment.id
-            ]
-            environments.append(environment)
             self._config = self._config.model_copy(
                 update={"environments": environments}
             )
@@ -249,13 +275,19 @@ class EnvironmentManager:
 
         环境尚未建立连接时按当前注册表新建连接；已有连接则退役旧会话、
         全新重连（不 resume）。
+
+        取连接与刷新在同一把锁内完成（与 remove/upsert/close_all 的注册表
+        变更互斥——否则刷新途中被移除/收摊的连接会被 refresh 全新连回，
+        留下注册表外的僵尸连接；审计范围B B3）。退役清扫（disconnect）
+        仍在各变更方的锁外进行。
         """
         environment = resolve_environment(self._config, name)
-        client = self._clients.get(environment.id)
-        if client is None:
-            await self.get_client(environment.id)
-            return
-        await client.refresh_connection()
+        async with self._lock:
+            client = self._clients.get(environment.id)
+            if client is not None:
+                await client.refresh_connection()
+                return
+        await self.get_client(environment.id)
 
     async def remove_environment(self, name: str) -> bool:
         """移除环境（断开并丢弃缓存连接）；返回是否真的存在过。

@@ -27,8 +27,14 @@ class ResolvedEnvironment:
     args: tuple[str, ...] = ()
     env: dict[str, str] | None = None
     cwd: str | None = None
-    #: 连接总时限（秒；None = 不限制）
+    #: 连接总时限（秒；None = 不限制）——仅 WS 环境合法（校验期
+    #: connect_timeout_sec requires url）；与 initialize_timeout_sec 是
+    #: 两笔独立预算（对位 codex：connect 管传输连接，缺省 10s）
     connect_timeout_sec: float | None = None
+    #: initialize 握手时限（秒；None = 客户端缺省）——url/stdio 均合法
+    #: （对位 codex：两种传输都带 initialize_timeout，缺省 10s，与连接
+    #: 预算分账互不挤占）
+    initialize_timeout_sec: float | None = None
     #: WS 鉴权 token（运行时解析产物——本地 spawn 的随机 bearer / SSH 隧道
     #: 的临时 token；不落盘、不进配置条目）
     token: str | None = None

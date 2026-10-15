@@ -29,7 +29,9 @@ from .exec_server_wire import (
     RemoteNetworkProxyLaunchConfig,
 )
 
-#: 端点 id 最大长度（对位 codex MAX_ENVIRONMENT_ID_LEN）
+#: 端点 id 最大长度（对位 codex MAX_ENVIRONMENT_ID_LEN）——按 **UTF-8 字节**
+#: 计量（对位 Rust `str::len()`；合法 id 字符集纯 ASCII，字节数恒等于字符数，
+#: 字节口径只在同含非 ASCII 字符时影响先报哪条错）
 MAX_ENVIRONMENT_ID_LENGTH = 64
 
 
@@ -87,8 +89,13 @@ class ExecutorEnvironment(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     cwd: str | None = None
-    #: 连接超时（秒；from_environment 接线为 connect 总时限）
+    #: 连接超时（秒；from_environment 接线为 connect 总时限）——仅 url
+    #: 环境合法（校验期 `connect_timeout_sec requires url`，对位 codex
+    #: environment_toml.rs）；与 initialize_timeout_sec 是两笔独立预算
+    #: （codex：connect 管传输连接、initialize 管握手，缺省各 10s 互不挤占）
     connect_timeout_sec: float | None = None
+    #: initialize 握手时限（秒；url/stdio 均合法——对位 codex 两种传输都
+    #: 携带 initialize_timeout；经 ResolvedEnvironment 接线为握手预算）
     initialize_timeout_sec: float | None = None
 
 
@@ -107,7 +114,7 @@ class ExecutorConfig(BaseModel):
     词汇平铺对位 codex config.toml：`sandbox_mode` / `[sandbox_workspace_write]`
     / `approval_policy`（+ nova 自有的 `[network_proxy]`）；`[[environments]]`
     注册表对位 codex environments.toml（我们合并在同一 config.toml——层栈
-    已定单文件）。project 层（`.nova/settings.json` 的 `executor` 段）内为
+    已定单文件）。project 层（`.nova/settings.json` 的 `exec-server` 段）内为
     同一词汇的 JSON 形态。
     """
 

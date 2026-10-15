@@ -49,13 +49,14 @@ from .errors import (
     ProtocolError,
     RequestHandlerError,
     TimeoutError,
+    TransportError,
 )
 from .fs import FileSystemManager
 from .notifications import NotificationRouter
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, TransportPool
 from .process import ProcessManager
 from .pty import PtyManager
-from .recovery import ManagedTransport, ReconnectStrategy
+from .recovery import ManagedTransport, ReconnectStrategy, is_transport_class_error
 from .transport import StdioTransport, Transport, WebSocketTransport
 
 logger = logging.getLogger(__name__)
@@ -114,15 +115,36 @@ def _policy_host_valid(host: str) -> bool:
     )
 
 
+def _file_url(path: str) -> str:
+    """本地绝对路径 → file:// URL（服务端 PathUri 线形）。
+
+    纪律参照 nova_protocol exec_server_wire._file_url：纯字符串构造，
+    仅对 URL path 保留集之外的字符做百分号编码；已是 file:// 前缀的
+    原样透传。
+    """
+    if path.startswith("file://"):
+        return path
+    if not path.startswith("/"):
+        raise ValueError(f"路径须为绝对路径：{path}")
+    safe = "/:@-._~!$&'()*+,;="
+    encoded = "".join(
+        ch if (ch.isascii() and (ch.isalnum() or ch in safe)) else f"%{b:02X}"
+        for ch in path
+        for b in ch.encode("utf-8")
+    )
+    return "file://" + encoded
+
+
 def _clamp_policy_decision(decision: NetworkPolicyDecision) -> NetworkPolicyDecision:
     """裁决 reason 回夹（对位 client_recovery.rs 的 decision 收口匹配）：
 
-    - allow 原样放行（wire 无 reason 字段）
+    - allow 剥离 reason（Rust Allow 变体无 reason 字段，wire 不带——
+      回调误带不回线上）
     - deny/ask 的 reason 缺省、超长或含控制符 → 整体回夹为
       deny("not_allowed")（fail-closed，不把违规文本送回服务端）
     """
     if decision.type == "allow":
-        return decision
+        return NetworkPolicyDecision.allow()
     reason = decision.reason
     if (
         reason is None
@@ -153,15 +175,23 @@ class _ProcessStartGate:
         # 归零事件（计数 0 时置位；恢复编排等待它——事件常置不换代）
         self._idle = asyncio.Event()
         self._idle.set()
-        # 后台清理任务跟踪集（持引用防 GC——对位 transport.py
-        # _spawn_inbound_task 的跟踪集模式）
+        # 后台任务跟踪集（terminate 清理 / start 线 RPC——持引用防 GC，
+        # 对位 transport.py _spawn_inbound_task 的跟踪集模式）
         self._cleanup_tasks: set[asyncio.Task] = set()
+
+    def _track_task(self, task: asyncio.Task) -> None:
+        """后台任务入跟踪集持引用（防 GC 提前回收悬挂任务）"""
+        self._cleanup_tasks.add(task)
+        task.add_done_callback(self._cleanup_tasks.discard)
 
     def try_begin(self, transport: Transport) -> bool:
         """原子准入（同步无 await，对位 begin_process_start 的锁内检查+计数）"""
         if (
             self._control.state != "connected"
             or self._control.current_transport is not transport
+            # 对位 begin_process_start 的 expected.is_disconnected() 检查：
+            # 底层传输已死而断线回调未至的窗口内不予准入
+            or not transport.is_connected
         ):
             return False
         self._active += 1
@@ -179,17 +209,16 @@ class _ProcessStartGate:
         await self._idle.wait()
 
     def schedule_cleanup(self, process_id: str | None) -> None:
-        """调度后台 terminate 清理（processId 缺失即请求未成形，无需清理）；
-        任务入跟踪集持引用——防 GC 提前回收悬挂任务"""
+        """调度后台 terminate 清理（processId 缺失即请求未成形，无需清理）"""
         if process_id:
-            task = asyncio.create_task(self._cleanup(process_id))
-            self._cleanup_tasks.add(task)
-            task.add_done_callback(self._cleanup_tasks.discard)
+            self._track_task(asyncio.create_task(self._cleanup(process_id)))
 
     async def _cleanup(self, process_id: str) -> None:
         """对位 Rust cleanup_process_start 的 loop：terminate 经连接池走
-        Wait 策略（恢复期间挂起，恢复成功后落到同一会话）；传输类失败且
-        连接未到终态时重试，业务结果（进程不存在/终止异步未生效）收尾"""
+        Wait 策略（恢复期间挂起，恢复成功后落到同一会话）；传输类失败
+        （连接/超时/服务端 -32000 传输关闭——判别同 recovery
+        is_transport_class_error）且连接未到终态时重试，业务结果
+        （进程不存在/终止异步未生效）收尾"""
         while True:
             try:
                 await self._pool.send_request(
@@ -197,18 +226,22 @@ class _ProcessStartGate:
                     ProcessTerminateParams(processId=process_id).model_dump(
                         by_alias=True
                     ),
+                    # 孤儿收摊调用——对位 Rust call_for_cleanup：挤占共享槽失败
+                    # 时还有收摊保留槽可用（常规调用挤兑不致收不了摊）
+                    for_cleanup=True,
                 )
                 return
-            except ConnectionError:
+            except Exception as e:
+                if not is_transport_class_error(e):
+                    if not isinstance(e, ExecutorError):
+                        logger.exception(
+                            "process start cleanup failed for %s", process_id
+                        )
+                    return
                 # failed/disconnected 终态放弃；其余（恢复竞态）重试——
                 # 重试的 send_request 在恢复期间挂起，不会忙转
                 if self._control.state in ("failed", "disconnected"):
                     return
-            except ExecutorError:
-                return
-            except Exception:
-                logger.exception("process start cleanup failed for %s", process_id)
-                return
 
 
 class _ProcessStartGatedTransport:
@@ -235,23 +268,72 @@ class _ProcessStartGatedTransport:
         control = gate._control
         while True:
             # 对位 Rust start_process 的 loop：Wait 策略取当前连接（恢复期间
-            # 等待），取到后原子准入；准入失败说明连接已换代，重取对映代
+            # 等待），取到后原子准入；准入失败说明连接已换代（或底层已死、
+            # 断线回调未至——让出事件循环等恢复推进），重取对映代
             transport = await control._await_transport()
             if gate.try_begin(transport):
                 break
+            await asyncio.sleep(0)
+        # 对位 Rust start_process 的 result_tx/result_received_rx 结构：
+        # 线 RPC 挪进后台任务，调用方等待回执——取消/超时只是丢回执，不打断
+        # 线上 RPC；gate.finish 与 cleanup 调度都推迟到 RPC 落定（响应/传输
+        # 关闭）。否则取消即调度 terminate 可能抢在 start 处理器落地前到达
+        # （服务端进程表尚无此 id，terminate 返回成功），start 随后落地
+        # Running 成孤儿
+        settled: asyncio.Future = asyncio.get_running_loop().create_future()
+        gate._track_task(
+            asyncio.create_task(self._run_start_rpc(transport, method, params, settled))
+        )
         try:
-            return await transport.send_request(method, params)
+            return await settled
         except asyncio.CancelledError:
-            # 调用方在响应落地前取消（对位 Rust caller receipt 失败分支）：
-            # 进程可能已在服务端运行——后台 terminate 清理后传播取消
-            gate.schedule_cleanup((params or {}).get("processId"))
+            # 调用方取消/超时的回执丢失两态（对位 Rust 两处分支）：
+            # - RPC 仍在飞：settled 随取消关闭，后台任务落定后自行调度清理
+            # - RPC 已成功落定但取消仍被投递（future 已完成、取消标记在途）：
+            #   进程已在服务端运行而调用方拿不到句柄——此处补调度清理
+            if settled.done() and not settled.cancelled():
+                try:
+                    settled.result()
+                except Exception:
+                    pass  # 失败落定：清理已在后台任务的失败臂调度
+                else:
+                    gate.schedule_cleanup((params or {}).get("processId"))
             raise
-        except (ConnectionError, TimeoutError):
-            # 传输类失败（含显式超时的本地判死）：请求是否落地不可知——
-            # 恢复后 terminate 清理孤儿
-            gate.schedule_cleanup((params or {}).get("processId"))
-            raise
+
+    async def _run_start_rpc(
+        self,
+        transport: Transport,
+        method: str,
+        params: dict[str, Any] | None,
+        settled: asyncio.Future,
+    ) -> None:
+        """后台执行 start 线 RPC（对位 Rust start_process spawn 的任务体）：
+        RPC 落定后归还门控计数并交付结果；回执已失（调用方取消/超时）的
+        落定成功按取消分支调度 terminate 清理；传输类失败无论回执在与否
+        都调度清理（请求是否落地不可知，进程可能已在服务端运行）"""
+        gate = self._gate
+        try:
+            try:
+                result = await transport.send_request(method, params)
+            except Exception as e:
+                # RPC 落定失败：传输类（连接/超时/服务端 -32000 传输关闭，
+                # 判别同 recovery is_transport_class_error）→ 清理孤儿；
+                # 业务错误（参数拒绝等）原样上抛——对位 Rust Err 分支的
+                # is_transport_closed_error 分流
+                if is_transport_class_error(e):
+                    gate.schedule_cleanup((params or {}).get("processId"))
+                if not settled.cancelled():
+                    settled.set_exception(e)
+                return
+            if settled.cancelled():
+                # 调用方已丢回执（对位 Rust result_tx.send 失败分支）：
+                # 进程已在服务端运行——后台 terminate 清理
+                gate.schedule_cleanup((params or {}).get("processId"))
+            else:
+                settled.set_result(result)
         finally:
+            # 计数归还推迟到 RPC 落定（对位 ActiveProcessStart 守卫持到
+            # spawn 任务内）——恢复编排在飞等待因此覆盖整个线 RPC
             gate.finish()
 
     def __getattr__(self, name: str) -> Any:
@@ -289,6 +371,11 @@ class ExecutorClient:
 
     `resume_session_id`：首连显式恢复既有会话（对位 Rust
     ExecServerClientConnectOptions.resume_session_id）；None = 开新会话。
+    `connections=2` 时只落控制面首连（服务端拒绝同一会话的重复附着），
+    数据面开新会话。
+
+    `initialize_timeout`：initialize 握手时限（秒）。None（默认）用包级
+    INITIALIZE_TIMEOUT（10s）；环境声明的握手时限经此注入。
 
     `network_policy`：网络沙箱裁决回调（托管网络进程触碰 "ask" 域名时，
     服务端反向请求 `network/policyRequest`，本回调收
@@ -296,19 +383,21 @@ class ExecutorClient:
     None（默认）不注册处理器——服务端收到 METHOD_NOT_FOUND 并按
     fail-closed 拒绝该访问（安全缺省）。入站请求先经
     processId/host 校验（对位 Rust client_recovery.rs：非空/限长/无控制符
-    空白），违规不调回调直接 deny("not_allowed")；回调耗时受
-    `network_policy_timeout` 限制（默认 30s，对位 Rust
-    `timeout(controller.timeout, ...)`——超时即 deny("not_allowed")）；
-    回调返回的 deny/ask reason 超限（1024 字节）或含控制符时整体回夹为
-    deny("not_allowed")；回调异常由传输层转内部错误，服务端同样
-    fail-closed。注册挂在控制面连接上，断线重连自动重挂。
+    空白），违规不调回调直接 deny("not_allowed")；processId 不在本客户端
+    活进程登记表（ProcessManager 维护，对位 Rust Inner.sessions 会话表）
+    同样不调回调直接 deny。回调耗时逐进程取 start 的
+    networkProxy.policyDecisionTimeoutMs（对位 Rust controller.timeout），
+    未声明回退 `network_policy_timeout`（默认 30s——超时即
+    deny("not_allowed")）；回调返回的 deny/ask reason 超限（1024 字节）
+    或含控制符时整体回夹为 deny("not_allowed")；回调异常由传输层转内部
+    错误，服务端同样 fail-closed。注册挂在控制面连接上，断线重连自动重挂。
     """
 
     def __init__(
         self,
         url: str | None = None,
         token: str | None = None,
-        max_payload: int = 100 * 1024 * 1024,
+        max_payload: int = 64 * 1024 * 1024,
         request_timeout: float | None = None,
         *,
         transport: Transport | None = None,
@@ -317,6 +406,7 @@ class ExecutorClient:
         reconnect: ReconnectStrategy | None = ReconnectStrategy(),
         resume_session_id: str | None = None,
         client_name: str = DEFAULT_CLIENT_NAME,
+        initialize_timeout: float | None = None,
         network_policy: (
             Callable[[NetworkPolicyRequestParams], Awaitable[NetworkPolicyDecision]]
             | None
@@ -327,6 +417,8 @@ class ExecutorClient:
             raise ValueError(
                 f"network_policy_timeout 须为正数，收到 {network_policy_timeout}"
             )
+        if initialize_timeout is not None and initialize_timeout <= 0:
+            raise ValueError(f"initialize_timeout 须为正数，收到 {initialize_timeout}")
         if transport is None and transport_factory is None:
             if url is None:
                 raise ValueError("url / transport / transport_factory 至少提供一个")
@@ -355,6 +447,11 @@ class ExecutorClient:
             )
 
         self._client_name = client_name
+        #: initialize 握手时限（秒；None → 包级 INITIALIZE_TIMEOUT——读取
+        #: 构造时刻的模块常量，monkeypatch 调短后装配的客户端随之生效）
+        self._initialize_timeout = (
+            INITIALIZE_TIMEOUT if initialize_timeout is None else initialize_timeout
+        )
         # 环境元数据缓存：initialize 捎带即填充；旧服务端未捎带时首个
         # environment_info() 调用回退单次 environment/info 拉取填充
         self._environment_info: EnvironmentInfo | None = None
@@ -373,7 +470,12 @@ class ExecutorClient:
                 # 实例直传无重建手段——断线即失败（对位 Rust 无 strategy 的
                 # connect() 路径）
                 strategy=None if factory is None else reconnect,
-                resume_session_id=resume_session_id,
+                # 显式 resume 只落控制面：服务端 session_registry 拒绝同一
+                # 会话的重复附着（-32010），双通道都带同一 resume id 必败；
+                # 数据面首连开新会话（服务端句柄状态随连接，跨通道本不共享）
+                resume_session_id=(
+                    resume_session_id if channel == CHANNEL_CONTROL else None
+                ),
                 handshake=self._handshake,
                 on_initialized=self._on_initialized,
                 on_failed=lambda message, ch=channel: self._router.fail_channel(
@@ -382,7 +484,9 @@ class ExecutorClient:
                 # 对位 Rust recover() 起手的 wait_for_process_starts：控制面
                 # 恢复前等在飞 start 归零（数据面无 start，不传）
                 pre_recovery=(
-                    self._wait_for_process_starts if channel == CHANNEL_CONTROL else None
+                    self._wait_for_process_starts
+                    if channel == CHANNEL_CONTROL
+                    else None
                 ),
             )
 
@@ -406,10 +510,12 @@ class ExecutorClient:
         # process/start 在飞门控（对位 Rust begin/finish_process_start +
         # cleanup_process_start）：准入钉住控制面对映代连接；传输类失败/
         # 被取消的 start 调度后台 terminate 清理；恢复编排重建传输前经
-        # _wait_for_process_starts 等在飞归零
+        # _wait_for_process_starts 等在飞归零。control 注入供 read/write
+        # 传输关闭重试臂判终态（对位 Rust client.inner.is_failed() 检查）
         self._process_start_gate = _ProcessStartGate(self._control, self._pool)
         self.process = ProcessManager(
-            _ProcessStartGatedTransport(self._pool, self._process_start_gate)
+            _ProcessStartGatedTransport(self._pool, self._process_start_gate),
+            control=self._control,
         )
         # 写流能力门（fileWriteStreaming）与环境元数据缓存同源：initialize 捎带
         # 即填充、旧服务端惰性拉取（对位 codex e7798c9944 的 environment_info()）
@@ -431,8 +537,9 @@ class ExecutorClient:
 
     async def _answer_network_policy(self, params: dict[str, Any]) -> dict[str, Any]:
         """裁决适配（对位 Rust client_recovery.rs 的 network/policyRequest 应答
-        编排）：线上载荷解析 → 入站校验 → 用户回调（带时限）→ reason 回夹 →
-        回线上形态。回调异常由传输层转内部错误（服务端 fail-closed 拒决）。"""
+        编排）：线上载荷解析 → 入站校验 → 会话表查找 → 用户回调（带逐进程
+        时限）→ reason 回夹 → 回线上形态。回调异常由传输层转内部错误
+        （服务端 fail-closed 拒决）。"""
         assert self._network_policy is not None
         try:
             request = NetworkPolicyRequestParams.model_validate(params)
@@ -449,10 +556,19 @@ class ExecutorClient:
             # 入站校验违规：不调用户回调，直接 deny（对位 Rust process_id_valid /
             # host_valid 不满足即跳过 controller 走 fail-closed 分支）
             decision = NetworkPolicyDecision.deny(NETWORK_POLICY_DENIAL_REASON)
+        elif request.process_id not in self.process.live_processes:
+            # 活进程登记表查无此 processId（对位 Rust get_session → None →
+            # controller None 的 fail-closed 分支）：不调用户回调直接 deny
+            decision = NetworkPolicyDecision.deny(NETWORK_POLICY_DENIAL_REASON)
         else:
+            # 回调时限逐进程取 start 的 networkProxy.policyDecisionTimeoutMs
+            # （对位 Rust controller.timeout——start_process 从 params 取
+            # policy_decision_timeout_ms）；未声明回退全局时限
+            timeout = self.process.live_processes.get(request.process_id)
             try:
                 decision = await asyncio.wait_for(
-                    self._network_policy(request), self._network_policy_timeout
+                    self._network_policy(request),
+                    timeout if timeout is not None else self._network_policy_timeout,
                 )
             except asyncio.TimeoutError:
                 # 回调超时即 deny（对位 Rust timeout(controller.timeout, ...)
@@ -475,6 +591,7 @@ class ExecutorClient:
         stderr_handler: Callable[[str], None] | None = None,
         reconnect: ReconnectStrategy | None = ReconnectStrategy(),
         resume_session_id: str | None = None,
+        initialize_timeout: float | None = None,
         network_policy: (
             Callable[[NetworkPolicyRequestParams], Awaitable[NetworkPolicyDecision]]
             | None
@@ -508,6 +625,7 @@ class ExecutorClient:
             connections=connections,
             reconnect=reconnect,
             resume_session_id=resume_session_id,
+            initialize_timeout=initialize_timeout,
             network_policy=network_policy,
             network_policy_timeout=network_policy_timeout,
         )
@@ -520,6 +638,7 @@ class ExecutorClient:
         connections: int = 1,
         reconnect: ReconnectStrategy | None = ReconnectStrategy(),
         resume_session_id: str | None = None,
+        initialize_timeout: float | None = None,
         network_policy: (
             Callable[[NetworkPolicyRequestParams], Awaitable[NetworkPolicyDecision]]
             | None
@@ -527,9 +646,14 @@ class ExecutorClient:
     ) -> ExecutorClient:
         """按解析后的环境创建客户端（对位 codex EnvironmentToml → 传输参数）。
 
-        `environment.connect_timeout_sec` 接线为 connect 总时限；其余语义与
-        构造器/from_stdio 一致（未连接状态返回，`async with`/`connect()` 连）。
+        `environment.connect_timeout_sec` 接线为 connect 总时限；
+        `initialize_timeout` 接线 initialize 握手时限（缺省回退环境声明的
+        `initialize_timeout_sec`，再缺省用包级默认）；其余语义与构造器/
+        from_stdio 一致（未连接状态返回，`async with`/`connect()` 连）。
         """
+        if initialize_timeout is None:
+            # 环境声明的握手预算（与 connect_timeout 分账）——显式 kwarg 优先
+            initialize_timeout = environment.initialize_timeout_sec
         if environment.kind == "ws":
             assert environment.url is not None
             client = cls(
@@ -538,6 +662,7 @@ class ExecutorClient:
                 connections=connections,
                 reconnect=reconnect,
                 resume_session_id=resume_session_id,
+                initialize_timeout=initialize_timeout,
                 network_policy=network_policy,
             )
         elif environment.kind == "stdio":
@@ -549,6 +674,7 @@ class ExecutorClient:
                 connections=connections,
                 reconnect=reconnect,
                 resume_session_id=resume_session_id,
+                initialize_timeout=initialize_timeout,
                 network_policy=network_policy,
             )
         else:  # local：内建环境 = 本机 stdio 缺省 spawn
@@ -556,6 +682,7 @@ class ExecutorClient:
                 connections=connections,
                 reconnect=reconnect,
                 resume_session_id=resume_session_id,
+                initialize_timeout=initialize_timeout,
                 network_policy=network_policy,
             )
         client._connect_timeout = environment.connect_timeout_sec
@@ -598,9 +725,23 @@ class ExecutorClient:
         try:
             while True:
                 message = await queue.get()
-                notification = NetworkPolicyDecisionNotification.model_validate(
-                    message.get("params") or {}
-                )
+                error = message.get("error")
+                if error is not None:
+                    # fail_channel 合成的终态事件（连接清扫——挂起消费者响亮
+                    # 收尾而非干等下一条）
+                    raise TransportError(error)
+                try:
+                    notification = NetworkPolicyDecisionNotification.model_validate(
+                        message.get("params") or {}
+                    )
+                except ValidationError:
+                    # 畸形通知丢弃不杀订阅（对位 Rust client.rs 的
+                    # let Ok(params) = ... else debug + return Ok 分支）
+                    logger.warning(
+                        "ignoring malformed network policy decision notification",
+                        exc_info=True,
+                    )
+                    continue
                 if process_id is not None and notification.process_id != process_id:
                     continue
                 yield notification
@@ -610,13 +751,14 @@ class ExecutorClient:
     async def _handshake(
         self, transport: Transport, resume_session_id: str | None
     ) -> InitializeResponse:
-        """initialize 握手：版本 major 检查 + initialized 通知（首连与断线
-        重连同路径——对位 Rust initialize_rpc 被 connect/resume_once 共用）。
+        """initialize 握手：版本 major 检查 + resume 会话一致性检查 +
+        initialized 通知（首连与断线重连同路径——对位 Rust initialize_rpc
+        被 connect/resume_once 共用）。
 
-        整段握手（initialize 请求 → 版本检查 → initialized 通知）受专用
-        INITIALIZE_TIMEOUT（10s）约束（对位 Rust
-        `timeout(initialize_timeout, ...)`）——常规请求无隐含超时，唯握手
-        带 deadline：卡死传输上的首连/重连不能无限干等。
+        整段握手（initialize 请求 → 版本/会话检查 → initialized 通知）受专用
+        时限约束（默认 INITIALIZE_TIMEOUT 10s，构造器 initialize_timeout
+        可覆盖；对位 Rust `timeout(initialize_timeout, ...)`）——常规请求
+        无隐含超时，唯握手带 deadline：卡死传输上的首连/重连不能无限干等。
         """
         params = InitializeParams(
             clientName=self._client_name, resumeSessionId=resume_session_id
@@ -628,14 +770,25 @@ class ExecutorClient:
             )
             response = InitializeResponse.model_validate(result)
             self._check_protocol_version(response.protocol_version)
+            if (
+                resume_session_id is not None
+                and response.session_id != resume_session_id
+            ):
+                # resume 路径：服务端必须回到同一会话——先于 INITIALIZED 判
+                # 违约（对位 Rust initialize_rpc：session 校验在 notify
+                # 之前）；recovery._install 的同款检查保留兜底
+                raise ProtocolError(
+                    f"exec-server initialized an unexpected session "
+                    f"{response.session_id}（期望恢复 {resume_session_id}）"
+                )
             await transport.send_notification(INITIALIZED, {})
             return response
 
         try:
-            return await asyncio.wait_for(do_handshake(), INITIALIZE_TIMEOUT)
+            return await asyncio.wait_for(do_handshake(), self._initialize_timeout)
         except asyncio.TimeoutError:
             raise TimeoutError(
-                f"initialize handshake timed out after {INITIALIZE_TIMEOUT}s"
+                f"initialize handshake timed out after {self._initialize_timeout}s"
             ) from None
 
     def _on_initialized(self, response: InitializeResponse) -> None:
@@ -681,11 +834,11 @@ class ExecutorClient:
         对映代传输的失败（并调度 terminate 清理）收尾后恢复才继续，进程
         绝不会在 resume 后的会话里运行而客户端不知其存在。
 
-        接线协调点：ManagedTransport._recover 顶部（首次重连尝试前，对位
+        接线：构造期经 make_managed 的 pre_recovery 注入控制面
+        ManagedTransport，由其 _recover 顶部（首次重连尝试前，对位
         client_recovery.rs recover() 里的
-        `timeout_at(deadline, self.wait_for_process_starts())`）应 await 本
-        钩子；总时限由恢复编排的策略 timeout 兜底。recovery.py 归并行任务
-        T1——钩子形状已移交主审计协调。
+        `timeout_at(deadline, self.wait_for_process_starts())`）await 本
+        钩子；总时限由恢复编排的策略 timeout 兜底。
         """
         await self._process_start_gate.wait_idle()
 
@@ -694,17 +847,31 @@ class ExecutorClient:
 
         取消全部通道的在途恢复 → 退役旧会话 → 全新连接（不 resume）→
         探活。调用场景：executor 已更换（重供给/端点变更），需要全新会话而
-        非等待旧会话恢复放弃。刷新失败不恢复旧会话；后续 connect() 重试。
+        非等待旧会话恢复放弃。刷新失败不恢复旧会话——任一通道失败时把
+        已刷新的通道一并退役，不留"控制面新会话 + 数据面旧/断连"的分裂态；
+        整体落回 disconnected，后续 connect() 重试全新连接。
         """
-        for channel in self._pool._channels.values():
-            if isinstance(channel, ManagedTransport):
-                await channel.refresh_connection()
-            else:
-                raise ConnectionError(
-                    "connection refresh requires factory-backed managed transports"
-                )
-        # 元数据缓存属于旧会话：清空让下次访问重新拉取
+        # 元数据缓存属于旧会话：刷新起手即清空——中途失败不留旧会话的
+        # 缓存值，下次访问经新会话重新拉取
         self._environment_info = None
+        refreshed: list[ManagedTransport] = []
+        try:
+            for channel in self._pool._channels.values():
+                if not isinstance(channel, ManagedTransport):
+                    raise ConnectionError(
+                        "connection refresh requires factory-backed managed transports"
+                    )
+                await channel.refresh_connection()
+                refreshed.append(channel)
+        except Exception:
+            # 双通道刷新非原子的收口：已刷新通道一并退役（对位单通道失败
+            # 不恢复旧会话的语义扩展到多通道），整体落回 disconnected
+            for channel in refreshed:
+                try:
+                    await channel.disconnect()
+                except Exception:
+                    pass
+            raise
         # 探活（对位 Rust 刷新末尾的 environment_status 实况检查）
         await self.environment_status()
 
@@ -725,11 +892,14 @@ class ExecutorClient:
         """
         # 先等恢复落定再钉所探传输（对位 Rust 先 `rpc_client().await` 取到
         # 实际服役的 client 再探）——恢复窗内钉住旧死传输，黑洞新连接会因
-        # 身份守卫（ptr_eq）被正确忽略而无人退役
+        # 身份守卫（ptr_eq）被正确忽略而无人退役；实发直走钉住的传输
+        # （对位 Rust timeout(ENVIRONMENT_INFO_TIMEOUT, rpc_client.call(...))
+        # ——不经连接池二次解析，恒落控制面对映代连接）
         probe_transport = await self._control._await_transport()
         try:
             result = await asyncio.wait_for(
-                self._pool.send_request(ENVIRONMENT_INFO), ENVIRONMENT_INFO_TIMEOUT
+                probe_transport.send_request(ENVIRONMENT_INFO),
+                ENVIRONMENT_INFO_TIMEOUT,
             )
         except asyncio.TimeoutError:
             error = TimeoutError(f"request {ENVIRONMENT_INFO} timed out")
@@ -776,8 +946,14 @@ class ExecutorClient:
         键路径投影后如实回传——不合并不裁决（层合并与 trust 裁决归客户端）。
         调用前先经 environment_info() 的 capabilities.environment_config_read
         门控（旧服务端无此端点）。
+
+        `cwd` 上线前归一为 PathUri（file:// scheme——服务端按 PathUri
+        反序列化，原生绝对路径会被拒绝；已是 file:// 前缀的原样透传，
+        归一纪律同 nova_protocol exec_server_wire._file_url）。
         """
-        params = EnvironmentConfigReadParams(cwd=cwd, configPaths=config_paths)
+        params = EnvironmentConfigReadParams(
+            cwd=_file_url(cwd), configPaths=config_paths
+        )
         result = await self._pool.send_request(
             ENVIRONMENT_CONFIG_READ, params.model_dump(by_alias=True)
         )
@@ -846,7 +1022,7 @@ class ExecutorClient:
                     delta = HttpRequestBodyDeltaNotification.model_validate(
                         event["params"]
                     )
-                    if delta.error:
+                    if delta.error is not None:
                         raise ProtocolError(f"http body stream error: {delta.error}")
                     if delta.seq != expected_seq:
                         raise ProtocolError(

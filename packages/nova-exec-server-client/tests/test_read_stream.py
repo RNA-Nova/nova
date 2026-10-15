@@ -142,9 +142,8 @@ async def test_read_stream_open_failure_unregisters():
 @pytest.mark.asyncio
 async def test_read_stream_consumer_abandon_cleans_up():
     """消费者中途放弃（break/aclose）：路由注销，后续通知按未知句柄丢弃；
-    同时 best-effort 经数据面通道发 fs/close 收摊（对位 Rust
-    PushReadRegistration::drop——不补这一手，服务端会把整个文件读完并
-    推入无人接收的路由）"""
+    同时 best-effort 发 fs/close 收摊（对位 Rust PushReadRegistration::drop——
+    不补这一手，服务端会把整个文件读完并推入无人接收的路由）"""
     fs, transport = make_fs()
     agen, handle_id, first = await start_stream(fs, transport)
 
@@ -152,9 +151,10 @@ async def test_read_stream_consumer_abandon_cleans_up():
     assert await first == b"x"
     await agen.aclose()
     assert handle_id not in fs._router._streams
-    # 收摊请求：fs/close 带句柄 id，走数据面通道（句柄随数据面连接存活）。
-    # 即发即忘任务（对位 Rust runtime.spawn——inline await 会把消费者的
-    # aclose() 挂在半死连接上）——死线轮询其落地而非固定 sleep
+    # 收摊请求：fs/close 带句柄 id，落点与流注册同一通道解析（裸传输无通道
+    # 概念归 None——连接池场景见下方自定义路由用例）。即发即忘任务（对位
+    # Rust runtime.spawn——inline await 会把消费者的 aclose() 挂在半死连接
+    # 上）——死线轮询其落地而非固定 sleep
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 5.0
     close_requests = [r for r in transport.requests if r[0] == "fs/close"]
@@ -162,10 +162,81 @@ async def test_read_stream_consumer_abandon_cleans_up():
         assert loop.time() < deadline, "fs/close 收摊任务 5s 内未落地"
         await asyncio.sleep(0.01)
         close_requests = [r for r in transport.requests if r[0] == "fs/close"]
-    assert close_requests == [("fs/close", {"handleId": handle_id}, "data")]
+    assert close_requests == [("fs/close", {"handleId": handle_id}, None)]
     # 迟到的通知静默丢弃，不炸
     await transport.handlers[0](chunk_msg(handle_id, 1, b"y"))
     await transport.handlers[0](done_msg(handle_id, 2))
+
+
+@pytest.mark.asyncio
+async def test_read_stream_queue_full_break_sends_close():
+    """背压断流（消费过慢队列满）：本地合成 failed 终态，消费者报错后仍须
+    补发 fs/close——服务端读句柄并没有随断流收摊（对位 Rust：队列满摘路由
+    → 消费者 UnexpectedEof → registration active=true → drop 补 fs/close；
+    不补服务端会把全文件读进死路由，句柄/fd/槽占至读完）"""
+    from nova_exec_server_client.notifications import READ_STREAM_QUEUE_CAPACITY
+
+    fs, transport = make_fs()
+    agen, handle_id, first = await start_stream(fs, transport)
+
+    # 不消费，灌满队列后再来一块 → 断流
+    for seq in range(READ_STREAM_QUEUE_CAPACITY + 1):
+        await transport.handlers[0](chunk_msg(handle_id, seq, b"x"))
+    # 收齐全部数据块后收到本地断流终态
+    assert await first == b"x"
+    for _ in range(READ_STREAM_QUEUE_CAPACITY - 1):
+        assert await agen.__anext__() == b"x"
+    with pytest.raises(FileSystemError, match="too slow"):
+        await agen.__anext__()
+
+    # 本地断流 ≠ 服务端收摊：fs/close 必发（即发即忘——死线轮询落地）
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    close_requests = [r for r in transport.requests if r[0] == "fs/close"]
+    while not close_requests:
+        assert loop.time() < deadline, "队列满断流后 fs/close 5s 内未落地"
+        await asyncio.sleep(0.01)
+        close_requests = [r for r in transport.requests if r[0] == "fs/close"]
+    assert close_requests == [("fs/close", {"handleId": handle_id}, None)]
+
+
+@pytest.mark.asyncio
+async def test_read_stream_close_follows_custom_method_route():
+    """收摊 close 的落点通道与流注册同一解析：自定义 method_routes 把
+    fs/readStream 路由到 "bulk" 通道时，close 也落 "bulk"（硬编码 data 会
+    错落连接——fs/close 对未知句柄静默成功，无信号可查）"""
+    from nova_exec_server_client.pool import CHANNEL_CONTROL, TransportPool
+
+    control = FakeTransport({"fs/readStream": {"handleId": "any", "totalSize": 1}})
+    bulk = FakeTransport({"fs/readStream": {"handleId": "any", "totalSize": 1}})
+    pool = TransportPool(
+        {CHANNEL_CONTROL: control, "bulk": bulk},
+        method_routes={"fs/readStream": "bulk"},
+    )
+    fs = FileSystemManager(pool)
+
+    agen = fs.read_stream("file:///tmp/x")
+    first = asyncio.create_task(agen.__anext__())
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while not bulk.requests:
+        assert loop.time() < deadline, "fs/readStream 未落到 bulk 通道"
+        await asyncio.sleep(0.01)
+    handle_id = bulk.requests[0][1]["handleId"]
+
+    await bulk.handlers[0](chunk_msg(handle_id, 0, b"x"))
+    assert await first == b"x"
+    await agen.aclose()
+
+    deadline = loop.time() + 5.0
+    close_requests = [r for r in bulk.requests if r[0] == "fs/close"]
+    while not close_requests:
+        assert loop.time() < deadline, "fs/close 未落到 bulk 通道"
+        await asyncio.sleep(0.01)
+        close_requests = [r for r in bulk.requests if r[0] == "fs/close"]
+    assert close_requests[0][1] == {"handleId": handle_id}
+    # 控制面连接没有收到任何流量
+    assert control.requests == []
 
 
 @pytest.mark.asyncio

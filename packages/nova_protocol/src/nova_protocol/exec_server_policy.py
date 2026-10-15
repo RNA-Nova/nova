@@ -11,7 +11,10 @@
   validate_match_examples）。
 - 求值（`policy.rs`）：`Policy.check(cmd, heuristics_fallback)` →
   `Evaluation{decision: max(matched), matched_rules}`——多命中取最严格档；
-  无规则命中交 heuristics_fallback（危险初判）。
+  无规则命中交 heuristics_fallback（危险初判）。**无命中且无兜底时
+  decision=None**（对位 codex：`check` 的 fallback 是必传参数，
+  `Evaluation::from_matches` 有非空不变式——绝不凭空造 ALLOW；只看
+  `matched_rules` 的无兜底调用方对位 codex `matches_for_command` 用法）。
 - 写回文本（`amend.rs` 的文本形态）：`format_prefix_rule`/`format_network_rule`
   产规则行；落盘 I/O 归消费方（规则写门）。
 - `is_likely_sandbox_denied`（sandboxing `denial.rs`）：沙箱拒绝启发式——
@@ -156,13 +159,35 @@ def _is_ascii_digits(text: str) -> bool:
     return bool(text) and all("0" <= c <= "9" for c in text)
 
 
+#: Rust `char::is_whitespace` 的码表（Unicode White_Space 属性全集 25 码点）。
+#: Python `str.isspace()` 是它的超集——多收 U+001C–U+001F 四个分隔符；
+#: 空白判定与裁剪都必须用同一张表，否则双端 accept/reject 与归一结果分歧
+_RUST_WHITESPACE_CHARS = (
+    "\t\n\x0b\x0c\r \x85\xa0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
+_RUST_WHITESPACE = frozenset(_RUST_WHITESPACE_CHARS)
+
+
+def _trim_whitespace(text: str) -> str:
+    """White_Space 码表裁剪（对位 Rust `str::trim`）"""
+    return text.strip(_RUST_WHITESPACE_CHARS)
+
+
+def _to_ascii_lowercase(text: str) -> str:
+    """ASCII-only 小写化（对位 Rust `to_ascii_lowercase`）——`str.lower()`
+    是 Unicode 全量小写化（如 İ → "i̇" 两码点），双端归一结果会分叉"""
+    return "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in text)
+
+
 def normalize_network_rule_host(raw: str) -> str:
     """网络规则主机归一（对位 normalize_network_rule_host 逐条）：
 
     去空白/尾点/小写；剥 host:port 与 [v6]:port；拒绝空、含 scheme/path、
     通配符、空白字符。
     """
-    host = raw.strip()
+    host = _trim_whitespace(raw)
     if not host:
         raise ValueError("network_rule host cannot be empty")
     if "://" in host or "/" in host or "?" in host or "#" in host:
@@ -190,14 +215,14 @@ def normalize_network_rule_host(raw: str) -> str:
         if candidate and port and _is_ascii_digits(port):
             host = candidate
 
-    normalized = host.rstrip(".").strip().lower()
+    normalized = _to_ascii_lowercase(_trim_whitespace(host.rstrip(".")))
     if not normalized:
         raise ValueError("network_rule host cannot be empty")
     if "*" in normalized:
         raise ValueError(
             "network_rule host must be a specific host; wildcards are not allowed"
         )
-    if any(c.isspace() for c in normalized):
+    if any(c in _RUST_WHITESPACE for c in normalized):
         raise ValueError("network_rule host cannot contain whitespace")
     return normalized
 
@@ -243,9 +268,15 @@ class HeuristicsRuleMatch:
 
 @dataclass(frozen=True)
 class Evaluation:
-    """求值结果：决策 = 全部命中的最严格档（max）"""
+    """求值结果：决策 = 全部命中的最严格档（max）。
 
-    decision: Decision
+    `decision=None` 表示无规则命中且未咨询兜底（对位 codex
+    `Evaluation::from_matches` 的非空不变式——codex 的 `check` 强制携带
+    兜底，永不落到空命中；本移植允许省兜底，但空命中只给 None，不凭空
+    造 ALLOW 架空裁决）。有兜底或任一命中时恒非 None。
+    """
+
+    decision: Decision | None
     matched_rules: tuple[PrefixRuleMatch | HeuristicsRuleMatch, ...]
 
     def is_match(self) -> bool:
@@ -303,6 +334,10 @@ class Policy:
         查找键为**字面 ``cmd[0]``**（对位 Rust 默认 check 语义）：规则按
         pattern 首 token 字面分组，路径/裸名互不认——可执行名归一归
         ``host_executable`` 声明族（挂账，见 golden 测试 D3/D4 xfail）。
+
+        无命中且未给兜底（或兜底返回 None）时 ``decision=None``（对位 codex
+        的非空命中不变式——无兜底调用方应只读 ``matched_rules``，对位
+        codex `matches_for_command` 用法），不凭空造 ALLOW。
         """
         cmd = tuple(cmd)
         matched: list[PrefixRuleMatch | HeuristicsRuleMatch] = []
@@ -319,20 +354,21 @@ class Policy:
             if decision is not None:
                 matched.append(HeuristicsRuleMatch(decision=decision, command=cmd))
         if not matched:
-            return Evaluation(decision=Decision.ALLOW, matched_rules=())
+            return Evaluation(decision=None, matched_rules=())
         decision = max((m.decision for m in matched), key=lambda d: _decision_rank(d))
         return Evaluation(decision=decision, matched_rules=tuple(matched))
 
     def check_multiple(
         self, commands: list[tuple[str, ...]], heuristics_fallback=None
     ) -> Evaluation:
-        """多命令聚合求值（复合命令逐段——对位 check_multiple）"""
+        """多命令聚合求值（复合命令逐段——对位 check_multiple）；全部段都无
+        命中且无兜底时 ``decision=None``（同 check 的无兜底纪律）"""
         all_matched: list[PrefixRuleMatch | HeuristicsRuleMatch] = []
         for cmd in commands:
             evaluation = self.check(cmd, heuristics_fallback)
             all_matched.extend(evaluation.matched_rules)
         if not all_matched:
-            return Evaluation(decision=Decision.ALLOW, matched_rules=())
+            return Evaluation(decision=None, matched_rules=())
         decision = max(
             (m.decision for m in all_matched), key=lambda d: _decision_rank(d)
         )
