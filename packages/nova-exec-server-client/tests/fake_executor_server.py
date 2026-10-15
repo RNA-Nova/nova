@@ -289,7 +289,10 @@ def main() -> None:
         elif method == "stderr_spam":
             # stderr 泵测试：向 stderr 写一行 params.len 长的内容后正常回包
             line_len = int((msg.get("params") or {}).get("len", 100))
-            sys.stderr.write("s" * line_len + "\n")
+            # newline=False 时不带换行——旧 readline 路径等不到 \n/EOF 停摆，
+            # 新 8KiB 分块读照常分发（分块泵的判别性覆盖）
+            newline = bool((msg.get("params") or {}).get("newline", True))
+            sys.stderr.write("s" * line_len + ("\n" if newline else ""))
             sys.stderr.flush()
             result = {}
         elif method == "close_stdout":

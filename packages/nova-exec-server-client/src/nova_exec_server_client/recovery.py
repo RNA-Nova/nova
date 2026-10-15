@@ -122,9 +122,12 @@ def _is_retryable_recovery_error(error: Exception) -> bool:
     if isinstance(error, ProtocolError):
         if error.code == SESSION_ALREADY_ATTACHED:
             return True
+        # 对位 Rust is_transport_closed_error：码 -32000 且线上裸消息全等
+        # （异常 str 带 `JSON-RPC error <code>:` 前缀，不能拿来比；子串匹配
+        # 会把 "… transport closed unexpectedly" 之类误纳入可重试）
         return (
             error.code == JSON_RPC_TRANSPORT_CLOSED
-            and TRANSPORT_CLOSED_MESSAGE in str(error)
+            and error.server_message == TRANSPORT_CLOSED_MESSAGE
         )
     return False
 
@@ -155,6 +158,7 @@ class ManagedTransport:
         instance: Transport | None = None,
         on_initialized: Callable[[InitializeResponse], None] | None = None,
         on_failed: Callable[[str], None] | None = None,
+        pre_recovery: Callable[[], Any] | None = None,
     ):
         if factory is None and instance is None:
             raise ValueError("factory / instance 至少提供一个")
@@ -162,6 +166,10 @@ class ManagedTransport:
         self._handshake = handshake
         self._strategy = strategy
         self._on_initialized = on_initialized
+        #: 恢复起手钩子（对位 Rust recover() 的 timeout_at(deadline,
+        #: wait_for_process_starts())——恢复重建传输前等在飞 process/start
+        #: 归零；None = 无此约束）
+        self._pre_recovery = pre_recovery
         self._on_failed = on_failed
         #: 首连显式 resume 目标；首连成功后即被服务端下发的 session_id 取代
         self._session_id = resume_session_id
@@ -486,6 +494,21 @@ class ManagedTransport:
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + strategy.timeout
+        # 对位 Rust recover() 起手：清扫在途推送（上面 _fail_in_flight_work）
+        # 之后、重建传输之前，等在飞 process/start 归零（timeout_at(deadline,
+        # wait_for_process_starts())）——start 不落地就不许 resume；超时整个
+        # 恢复转 failed
+        if self._pre_recovery is not None:
+            try:
+                await asyncio.wait_for(
+                    self._pre_recovery(),
+                    timeout=max(deadline - loop.time(), 0.0),
+                )
+            except asyncio.TimeoutError:
+                self._fail(
+                    "in-flight process starts did not settle before the recovery deadline"
+                )
+                return
         delays = strategy.delays()
         attempts = 0
         last_error = f"recovery timed out after {strategy.timeout}s"

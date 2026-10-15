@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 from nova_exec_server_client import StdioTransport
 from nova_exec_server_client.client import ExecutorClient
+from nova_exec_server_client.errors import ProtocolError
 from nova_exec_server_client.notifications import NotificationRouter
+from nova_protocol import HttpRequestBodyDeltaNotification
 
 FAKE_SERVER = str(Path(__file__).parent / "fake_executor_server.py")
 
@@ -159,3 +161,89 @@ def test_http_header_value_env_var_wire_shape():
         "valueEnvVar"
         not in plain.model_dump(by_alias=True, exclude_none=True)["headers"][0]
     )
+
+
+@pytest.mark.asyncio
+async def test_http_body_stream_seq_gap_is_protocol_error():
+    """bodyDelta seq 缺口即协议错误（对位 Rust recv() 的严格序校验）——
+    S 级断言：缺段不得当成功拼装"""
+    router = NotificationRouter()
+    queue = router.register_http_body_stream("r")
+    for seq, payload in [(1, b"a"), (3, b"c")]:  # 跳过 seq=2
+        await router.dispatch(
+            {
+                "method": "http/request/bodyDelta",
+                "params": {
+                    "requestId": "r",
+                    "seq": seq,
+                    "deltaBase64": base64.b64encode(payload).decode(),
+                    "done": False,
+                },
+            }
+        )
+    # 消费端（client.py http_request 同款逻辑）：seq 2 缺失即协议错误
+    expected_seq = 1
+    with pytest.raises(ProtocolError, match="seq gap"):
+        while True:
+            event = await queue.get()
+            delta = HttpRequestBodyDeltaNotification.model_validate(event["params"])
+            if delta.seq != expected_seq:
+                raise ProtocolError(
+                    f"http body stream seq gap: expected {expected_seq}, got {delta.seq}"
+                )
+            expected_seq += 1
+            if delta.done:
+                break
+
+
+@pytest.mark.asyncio
+async def test_http_body_stream_queue_full_fails_loudly():
+    """bodyDelta 队列满 → 摘除路由 + 响亮终态（S 级断言：不静默丢帧截断）"""
+    router = NotificationRouter()
+    queue = router.register_http_body_stream("r")
+    # 灌满队列（256 格，不消费）
+    for seq in range(1, 260):
+        await router.dispatch(
+            {
+                "method": "http/request/bodyDelta",
+                "params": {
+                    "requestId": "r",
+                    "seq": seq,
+                    "deltaBase64": base64.b64encode(b"x").decode(),
+                    "done": False,
+                },
+            }
+        )
+    # 路由已摘除（再来的增量被丢弃）+ 队列里有响亮终态
+    assert "r" not in router._http_streams
+    events = []
+    while not queue.empty():
+        events.append(await queue.get())
+    terminal = events[-1]
+    assert terminal["params"]["error"] is not None
+    assert "queue is full" in terminal["params"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_http_body_streams_isolated_by_request_id():
+    """并发双流按 requestId 隔离（S 级断言：r1 的增量绝不进 r2）"""
+    router = NotificationRouter()
+    q1 = router.register_http_body_stream("r1")
+    q2 = router.register_http_body_stream("r2")
+    for rid, seq, payload in [("r1", 1, b"one"), ("r2", 1, b"two")]:
+        await router.dispatch(
+            {
+                "method": "http/request/bodyDelta",
+                "params": {
+                    "requestId": rid,
+                    "seq": seq,
+                    "deltaBase64": base64.b64encode(payload).decode(),
+                    "done": True,
+                },
+            }
+        )
+    e1 = await q1.get()
+    e2 = await q2.get()
+    assert base64.b64decode(e1["params"]["deltaBase64"]) == b"one"
+    assert base64.b64decode(e2["params"]["deltaBase64"]) == b"two"
+    assert q1.empty() and q2.empty()

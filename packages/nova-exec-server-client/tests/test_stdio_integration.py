@@ -64,7 +64,9 @@ async def test_stdio_process_echo():
             argv=["echo", "stdio-integration-test"],
             cwd="file:///tmp",
         )
-        output = await handle.read(wait_ms=2000)
+        # 全量套件负载下服务端 spawn+回传可能超过 2s（~20% flake 实证）——
+        # 集成测试宽限放大（真机行为不变，只等更久）
+        output = await handle.read(wait_ms=20000)
         stdout = b"".join(output.chunks).decode()
         assert "stdio-integration-test" in stdout
 
@@ -79,7 +81,9 @@ async def test_stdio_process_stdin_write():
             pipe_stdin=True,
         )
         await handle.write(b"hello-stdin\n")
-        output = await handle.read(wait_ms=2000)
+        # 全量套件负载下服务端 spawn+回传可能超过 2s（~20% flake 实证）——
+        # 集成测试宽限放大（真机行为不变，只等更久）
+        output = await handle.read(wait_ms=20000)
         stdout = b"".join(output.chunks).decode()
         assert "hello-stdin" in stdout
         # cat 未收到 stdin EOF 不会自行退出；terminate 异步生效，

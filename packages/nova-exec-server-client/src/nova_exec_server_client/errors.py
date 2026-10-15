@@ -60,6 +60,11 @@ class ProtocolError(ExecutorError):
     """协议错误（JSON-RPC error 响应 / 协议违约）
 
     `code` 结构化携带线上 error.code（响应无 code 或本地协议违约时为 None），
+    `server_message` 原样携带线上 error.message（本地协议违约时为 None）——
+    恢复层需对线上裸消息做全等甄别（对位 Rust is_transport_closed_error 的
+    `message == "JSON-RPC transport closed"`）：本异常的 str 是加了
+    `JSON-RPC error <code>: ` 前缀的展示形态，不能拿来比。
+
     调用方可按码分流——码表见本模块顶部常量（对位 Rust rpc.rs）：
 
     - `JSON_RPC_INVALID_REQUEST`（-32600）：无效请求；resume 未知/过期会话
@@ -71,7 +76,27 @@ class ProtocolError(ExecutorError):
     """
 
     code: int | None
+    #: 线上 error.message 原样（仅服务端错误响应构造时携带）
+    server_message: str | None
 
-    def __init__(self, message: str, code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        code: int | None = None,
+        server_message: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.server_message = server_message
+
+
+class RequestHandlerError(ExecutorError):
+    """反向请求处理器声明的线上错误回包（code+message 原样回给服务端——
+    对位 Rust respond_error：裁决参数解析失败等需按 JSON-RPC 码表回错的
+    场景；处理器抛其他异常一律由传输层兜底为 -32603 内部错误）"""
+
+    code: int
+
+    def __init__(self, code: int, message: str) -> None:
         super().__init__(message)
         self.code = code

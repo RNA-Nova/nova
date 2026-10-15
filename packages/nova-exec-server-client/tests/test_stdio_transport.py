@@ -645,6 +645,31 @@ async def test_stderr_pump_survives_overlong_line():
         await transport.disconnect()
 
 
+@pytest.mark.asyncio
+async def test_stderr_pump_delivers_partial_line_without_newline():
+    """超长行不带换行：旧 readline 路径等不到 \\n/EOF 停摆（必红），新 8KiB
+    分块读照常分发已收部分（8KiB 整倍数段即时送达，尾巴等换行/EOF）"""
+    chunks: list[str] = []
+    transport = make_transport(stderr_handler=chunks.append)
+    await transport.connect()
+    try:
+        line_len = 100 * 1024
+        delivered_floor = (line_len // 8192) * 8192
+        await transport.send_request(
+            "stderr_spam", {"len": line_len, "newline": False}
+        )
+        for _ in range(200):
+            if sum(len(c) for c in chunks) >= delivered_floor:
+                break
+            await asyncio.sleep(0.02)
+        # 分块读把已满 8KiB 段都送到了（旧路径一块都出不来）
+        assert sum(len(c) for c in chunks) == delivered_floor
+        # 泵还活着：连接照常服务
+        assert await transport.send_request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        await transport.disconnect()
+
+
 # ---------------------------------------------------------------------------
 # A10 stdio 进程组（对位 Rust client_transport.rs process_group(0) +
 # connection.rs terminate/kill_process_group）

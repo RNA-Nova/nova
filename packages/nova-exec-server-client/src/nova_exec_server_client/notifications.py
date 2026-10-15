@@ -71,10 +71,36 @@ HTTP_BODY_STREAM_BYTE_BUDGET = 16 * 1024 * 1024
 
 @dataclass
 class _HttpStreamRegistration:
-    """一条已注册的 http 流式响应体通道：消费队列 + 已累积字节数（预算执法）"""
+    """一条已注册的 http 流式响应体通道：消费队列 + 在队未消费字节数
+    （预算执法——对位 Rust 连接级"在队字节"信号量：消费即释放，排空够快
+    任意大 body 都能流完；此前按流累计封顶会把 >16MB 的快流误杀）"""
 
-    queue: asyncio.Queue[dict[str, Any]]
-    accumulated_bytes: int = 0
+    in_flight_bytes: int = 0
+    queue: "_HttpBodyQueue" = field(init=False)
+
+    def __post_init__(self) -> None:
+        # 队列与注册项互相引用（队列出队即扣注册项的在队字节），故队列由
+        # 注册项自建
+        self.queue = _HttpBodyQueue(HTTP_BODY_STREAM_QUEUE_CAPACITY, self)
+
+
+class _HttpBodyQueue(asyncio.Queue[dict[str, Any]]):
+    """按在队字节记账的队列：投递加、消费减（对位 Rust 的 Semaphore 语义）。
+    块大小记在事件包封的 `_n` 键（内部包封，不上线）。"""
+
+    def __init__(self, maxsize: int, registration: _HttpStreamRegistration) -> None:
+        super().__init__(maxsize=maxsize)
+        self._registration = registration
+
+    async def get(self) -> dict[str, Any]:
+        event = await super().get()
+        self._registration.in_flight_bytes -= event.get("_n", 0)
+        return event
+
+    def get_nowait(self) -> dict[str, Any]:
+        event = super().get_nowait()
+        self._registration.in_flight_bytes -= event.get("_n", 0)
+        return event
 
 
 class _HttpBodyStreamOverBudget(Exception):
@@ -140,11 +166,9 @@ class NotificationRouter:
         """注册 http 流式响应体通道（按 requestId 键控），返回消费队列"""
         if request_id in self._http_streams:
             raise ValueError(f"http body stream already registered: {request_id}")
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
-            maxsize=HTTP_BODY_STREAM_QUEUE_CAPACITY
-        )
-        self._http_streams[request_id] = _HttpStreamRegistration(queue=queue)
-        return queue
+        registration = _HttpStreamRegistration()
+        self._http_streams[request_id] = registration
+        return registration.queue
 
     def unregister_http_body_stream(self, request_id: str) -> None:
         """注销 http 流式通道（流结束/放弃时调用，幂等）"""
@@ -235,8 +259,9 @@ class NotificationRouter:
     ) -> None:
         """按 requestId 精确路由 bodyDelta（对位 Rust http_response_body_stream）。
 
-        队列满或累积字节超预算 → 摘除路由 + 响亮终态（合成 error 事件进队列，
-        消费者经 delta.error 抛 ProtocolError）——绝不静默丢帧。
+        队列满或在队字节超预算 → 摘除路由 + 响亮终态（合成 error 事件进队列，
+        消费者经 delta.error 抛 ProtocolError）——绝不静默丢帧。预算是"在队
+        字节"（消费即释放，对位 Rust 的连接级信号量），不是流累计总量。
         """
         registration = self._http_streams.get(params.request_id)
         if registration is None:
@@ -245,11 +270,13 @@ class NotificationRouter:
                 "ignoring http body delta for unknown request %s", params.request_id
             )
             return
-        registration.accumulated_bytes += len(params.delta.data)
-        over_budget = registration.accumulated_bytes > HTTP_BODY_STREAM_BYTE_BUDGET
+        chunk_len = len(params.delta.data)
+        registration.in_flight_bytes += chunk_len
+        over_budget = registration.in_flight_bytes > HTTP_BODY_STREAM_BYTE_BUDGET
         event = {
             "method": HTTP_REQUEST_BODY_DELTA,
             "params": params.model_dump(by_alias=True),
+            "_n": chunk_len,
         }
         try:
             if over_budget:

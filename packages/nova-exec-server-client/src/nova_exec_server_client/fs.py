@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable
@@ -108,6 +109,8 @@ class FileSystemManager:
         self._router = router
         self._environment_info_provider = environment_info
         self._environment_info_cached: EnvironmentInfo | None = None
+        #: 即发即忘的 fs/close 收摊任务集（持引用防 GC 中途回收，完成自弃）
+        self._pending_closes: set[asyncio.Task] = set()
 
     def _stream_channel(self, method: str) -> str | None:
         """解析流式方法的落点通道名（池化传输打标签用；裸传输无此概念归 None）"""
@@ -218,16 +221,19 @@ class FileSystemManager:
             self._router.unregister_stream(handle_id)
             if not terminated:
                 # 消费者中途放弃/连接断开：best-effort fs/close 收摊（对位 Rust
-                # PushReadRegistration::drop）——句柄随数据面连接，须走数据面
-                # 通道；连接已死时尽力而为
-                try:
-                    await self._transport.send_request(
+                # PushReadRegistration::drop——`runtime.spawn` 即发即忘）。
+                # 即发即忘而非 inline await：无隐含超时后，遇上"连接活着但
+                # 服务端不答 fs/close"的半死窗口，inline await 会让消费者的
+                # aclose() 无限期挂死。任务持引用防 GC 中途回收。
+                task = asyncio.create_task(
+                    self._transport.send_request(
                         FS_CLOSE,
                         FsCloseParams(handleId=handle_id).model_dump(by_alias=True),
                         channel=CHANNEL_DATA,
                     )
-                except Exception:
-                    pass
+                )
+                self._pending_closes.add(task)
+                task.add_done_callback(self._pending_closes.discard)
 
     async def write_file(
         self,

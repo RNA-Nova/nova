@@ -69,6 +69,7 @@ from .errors import (
     ConnectionError,
     ExecutorError,
     ProtocolError,
+    RequestHandlerError,
     TimeoutError,
 )
 
@@ -99,6 +100,46 @@ _DATA_PLANE_NOTIFICATION_METHODS = frozenset(
 
 #: 反向请求满员等路径的 fail-closed 拒决原因（对位 Rust NETWORK_POLICY_DENIAL_REASON）
 NETWORK_POLICY_DENIAL_REASON = "not_allowed"
+
+#: 入站消息 JSON 值节点预算（对位 Rust MAX_JSONRPC_VALUE_NODES，
+#: exec-server-protocol rpc.rs）：根 + 每个数组元素/对象值各记一（键不计）。
+#: 满档 fs/walk 响应（5 万条目）约需 15 万节点——256K 留足头部，又挡住
+#: "紧凑字节膨胀成百万堆值"的放大攻击。Rust 在解析途中计费；py 在解析后
+#: 显式栈遍历计费——消息字节已先受传输层单帧上限约束，瞬时内存有界
+MAX_JSONRPC_VALUE_NODES = 256 * 1024
+
+
+def _reject_json_constant(value: str) -> None:
+    """json.loads parse_constant 钩子：NaN/Infinity/-Infinity 非合法 JSON
+    （serde_json 词法层即拒收；py 的 json 默认放行，对位拒掉）"""
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _object_pairs_reject_duplicates(pairs: list) -> dict:
+    """json.loads object_pairs_hook：对位 Rust BoundedValueVisitor::visit_map
+    的重复键拒收（任意嵌套层；py 的 json 默认 last-wins 静默吞掉）"""
+    obj: dict = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON object key `{key}`")
+        obj[key] = value
+    return obj
+
+
+def _json_nodes_within_budget(value: Any) -> bool:
+    """节点预算检查（显式栈遍历——不递归，深嵌套不触 Python 递归上限）"""
+    remaining = MAX_JSONRPC_VALUE_NODES
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        remaining -= 1
+        if remaining < 0:
+            return False
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return True
 
 
 def _is_valid_request_id(value: Any) -> bool:
@@ -166,12 +207,24 @@ def _gate_inbound_message(
     fail-closed），再畸形判定。
     """
     encoded_len = len(payload)
-    parse_error: json.JSONDecodeError | None = None
+    parse_error: Exception | None = None
     try:
-        message: Any = json.loads(payload)
-    except json.JSONDecodeError as e:
+        message: Any = json.loads(
+            payload,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_object_pairs_reject_duplicates,
+        )
+    except (json.JSONDecodeError, ValueError, RecursionError) as e:
+        # JSONDecodeError = 语法层；ValueError = 重复键/非法常量钩子拒收；
+        # RecursionError = 超深嵌套（serde_json 自带递归上限；py 靠 json
+        # 扫描器的递归保护兜底）——同为连接级致命
         message = None
         parse_error = e
+    if message is not None and not _json_nodes_within_budget(message):
+        return None, (
+            "JSON-RPC message from exec-server exceeds the limit of "
+            f"{MAX_JSONRPC_VALUE_NODES} JSON values"
+        )
     malformed = message is None or _is_malformed_message(message)
     limit = (
         MAX_CLIENT_INBOUND_REQUEST_LEN if malformed else _inbound_message_limit(message)
@@ -339,6 +392,9 @@ class _JsonRpcTransport:
                 ProtocolError(
                     f"JSON-RPC error {code}: {error.get('message')}",
                     code=code,
+                    # 线上裸消息原样携带（恢复层全等甄别用——对位 Rust
+                    # is_transport_closed_error 比较的是 wire message）
+                    server_message=error.get("message"),
                 )
             )
         else:
@@ -439,6 +495,12 @@ class _JsonRpcTransport:
                 result = await handler(message.get("params") or {})
             except asyncio.CancelledError:
                 raise
+            except RequestHandlerError as e:
+                # 处理器声明的线上错误（对位 Rust respond_error——如裁决参数
+                # 解析失败回 -32602）：按码表原样回包，不兜成内部错误
+                await self._reply_to_server_request(
+                    message_id, error={"code": e.code, "message": str(e)}
+                )
             except Exception as e:
                 logger.warning(
                     "server request handler %s failed: %s", method, e, exc_info=True
@@ -483,7 +545,10 @@ class _JsonRpcTransport:
         result: Any = None,
         error: dict | None = None,
     ) -> None:
-        """回写反向请求响应（写线失败仅留痕——连接收尾由各传输的断线路径负责）"""
+        """回写反向请求响应（写线失败即判连接死亡——对位 Rust respond /
+        respond_error 失败后 request_recovery，client_recovery.rs:584-590
+        等处：连接已死才让写失败；经断线收尾触发恢复层重建，而非仅留痕
+        让服务端干等响应）"""
         reply: dict = {"id": message_id}
         if error is not None:
             reply["error"] = error
@@ -492,7 +557,9 @@ class _JsonRpcTransport:
         try:
             await self._send_message(reply)
         except Exception as e:
-            logger.warning("failed to reply server request id=%s: %s", message_id, e)
+            self._mark_disconnected(
+                f"failed to reply to exec-server request id={message_id}: {e}"
+            )
 
     def _cancel_inbound_tasks(self) -> None:
         """取消在飞反向请求任务（断线/关闭收尾；幂等）"""

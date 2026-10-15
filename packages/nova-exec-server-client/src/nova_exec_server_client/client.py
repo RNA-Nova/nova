@@ -40,8 +40,16 @@ from nova_protocol import (
     ProcessTerminateParams,
     ResolvedEnvironment,
 )
+from pydantic import ValidationError
 
-from .errors import ConnectionError, ExecutorError, ProtocolError, TimeoutError
+from .errors import (
+    JSON_RPC_INVALID_PARAMS,
+    ConnectionError,
+    ExecutorError,
+    ProtocolError,
+    RequestHandlerError,
+    TimeoutError,
+)
 from .fs import FileSystemManager
 from .notifications import NotificationRouter
 from .pool import CHANNEL_CONTROL, CHANNEL_DATA, TransportPool
@@ -145,6 +153,9 @@ class _ProcessStartGate:
         # 归零事件（计数 0 时置位；恢复编排等待它——事件常置不换代）
         self._idle = asyncio.Event()
         self._idle.set()
+        # 后台清理任务跟踪集（持引用防 GC——对位 transport.py
+        # _spawn_inbound_task 的跟踪集模式）
+        self._cleanup_tasks: set[asyncio.Task] = set()
 
     def try_begin(self, transport: Transport) -> bool:
         """原子准入（同步无 await，对位 begin_process_start 的锁内检查+计数）"""
@@ -168,9 +179,12 @@ class _ProcessStartGate:
         await self._idle.wait()
 
     def schedule_cleanup(self, process_id: str | None) -> None:
-        """调度后台 terminate 清理（processId 缺失即请求未成形，无需清理）"""
+        """调度后台 terminate 清理（processId 缺失即请求未成形，无需清理）；
+        任务入跟踪集持引用——防 GC 提前回收悬挂任务"""
         if process_id:
-            asyncio.create_task(self._cleanup(process_id))
+            task = asyncio.create_task(self._cleanup(process_id))
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_tasks.discard)
 
     async def _cleanup(self, process_id: str) -> None:
         """对位 Rust cleanup_process_start 的 loop：terminate 经连接池走
@@ -365,6 +379,11 @@ class ExecutorClient:
                 on_failed=lambda message, ch=channel: self._router.fail_channel(
                     ch, message
                 ),
+                # 对位 Rust recover() 起手的 wait_for_process_starts：控制面
+                # 恢复前等在飞 start 归零（数据面无 start，不传）
+                pre_recovery=(
+                    self._wait_for_process_starts if channel == CHANNEL_CONTROL else None
+                ),
             )
 
         if connections == 1:
@@ -415,7 +434,15 @@ class ExecutorClient:
         编排）：线上载荷解析 → 入站校验 → 用户回调（带时限）→ reason 回夹 →
         回线上形态。回调异常由传输层转内部错误（服务端 fail-closed 拒决）。"""
         assert self._network_policy is not None
-        request = NetworkPolicyRequestParams.model_validate(params)
+        try:
+            request = NetworkPolicyRequestParams.model_validate(params)
+        except ValidationError as e:
+            # 线上载荷解析失败：回 -32602 不调用户回调（对位 Rust
+            # client_recovery.rs 的 invalid_params 分支——"invalid network
+            # policy request params"）
+            raise RequestHandlerError(
+                JSON_RPC_INVALID_PARAMS, "invalid network policy request params"
+            ) from e
         if not _policy_process_id_valid(request.process_id) or not _policy_host_valid(
             request.request.host
         ):
@@ -696,10 +723,10 @@ class ExecutorClient:
         连接（控制面）并触发会话恢复，调用方拿到超时错误——不重试失败请求
         （对位 Rust：close_transport + request_recovery 后返回 TimedOut）。
         """
-        # 探针开探即钉住所探传输——超时退役的是它；若恢复已在开探后换过
-        # 连接，身份守卫（request_recovery 的 transport 对位 Rust
-        # `Arc::ptr_eq`）会忽略这个陈旧探针，健康新连接不被误杀
-        probe_transport = self._control.current_transport
+        # 先等恢复落定再钉所探传输（对位 Rust 先 `rpc_client().await` 取到
+        # 实际服役的 client 再探）——恢复窗内钉住旧死传输，黑洞新连接会因
+        # 身份守卫（ptr_eq）被正确忽略而无人退役
+        probe_transport = await self._control._await_transport()
         try:
             result = await asyncio.wait_for(
                 self._pool.send_request(ENVIRONMENT_INFO), ENVIRONMENT_INFO_TIMEOUT
@@ -796,10 +823,18 @@ class ExecutorClient:
             requestId=rid,
             streamResponse=stream_response,
         )
-        result = await self._pool.send_request(
-            HTTP_REQUEST, params.model_dump(by_alias=True, exclude_none=True)
-        )
-        response = HttpRequestResponse.model_validate(result)
+        try:
+            result = await self._pool.send_request(
+                HTTP_REQUEST, params.model_dump(by_alias=True, exclude_none=True)
+            )
+            response = HttpRequestResponse.model_validate(result)
+        except BaseException:
+            # 请求失败（服务端 error/参数拒绝/断线）或响应畸形时摘掉刚注册的
+            # 流式路由（对位 Rust HttpBodyStreamRegistration::drop 守卫——
+            # 否则路由残留到下次清扫）
+            if stream_response:
+                self._router.unregister_http_body_stream(rid)
+            raise
         if stream_response:
             # bodyDelta 推送收集：done 或 error 终止，拼装完整响应体；
             # seq 严格序校验（对位 Rust recv()：缺口即协议错误）

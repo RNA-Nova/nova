@@ -728,7 +728,11 @@ async def test_transport_closed_server_error_is_retryable():
         # 第一次重连尝试报传输关闭，第二次成功
         if len(sink) == 1:
             response: dict | ProtocolError = ProtocolError(
-                "JSON-RPC error -32000: JSON-RPC transport closed", code=-32000
+                "JSON-RPC error -32000: JSON-RPC transport closed",
+                code=-32000,
+                # 对位真实构造（传输层错误响应落地处）——线上裸消息原样
+                # 携带，恢复甄别按它全等比较
+                server_message="JSON-RPC transport closed",
             )
         else:
             response = {"sessionId": "fake-session", "protocolVersion": "1.4"}
@@ -760,7 +764,9 @@ async def test_same_code_other_message_not_retryable():
         transport = FakeTransport(
             {
                 "initialize": ProtocolError(
-                    "JSON-RPC error -32000: server exploded", code=-32000
+                    "JSON-RPC error -32000: server exploded",
+                    code=-32000,
+                    server_message="server exploded",
                 )
             }
         )
@@ -791,4 +797,63 @@ async def test_same_code_other_message_not_retryable():
         await asyncio.sleep(0.01)
     assert managed.state == "failed"
     assert attempts == 1  # 不可重试错误：无二次尝试
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_recovery_waits_for_pre_recovery_hook_before_reconnect():
+    """pre_recovery 钩子接线（对位 Rust recover 起手的 timeout_at(deadline,
+    wait_for_process_starts())——恢复清扫在途推送后、重建传输前等在飞
+    process/start 归零）：钩子未了结绝不发起重连"""
+    sink: list[FakeTransport] = []
+    hook_started = asyncio.Event()
+    hook_release = asyncio.Event()
+
+    async def pre_recovery() -> None:
+        hook_started.set()
+        await hook_release.wait()
+
+    managed = make_managed(sink, pre_recovery=pre_recovery)
+    await managed.connect()
+    sink[0].drop("test drop")
+    # 恢复开始并进入钩子等待
+    await asyncio.wait_for(hook_started.wait(), timeout=2.0)
+    await asyncio.sleep(0.1)  # 给重连循环留窗——它不该动
+    assert managed.state == "recovering"
+    assert len(sink) == 1  # factory 未被调第二次：重连未发起
+    hook_release.set()
+    # 钩子了结后重连推进至恢复成功
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while managed.state != "connected":
+        assert loop.time() < deadline, "recovery did not complete within 5s"
+        await asyncio.sleep(0.01)
+    assert len(sink) == 2  # 首连 + 一次重连
+    await managed.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_pre_recovery_hook_timeout_fails_recovery():
+    """pre_recovery 钩子在恢复总时限内未了结（在飞 start 悬置不归零）——
+    整个恢复转 failed（对位 Rust timeout_at(deadline, ...) 超时分支）"""
+    sink: list[FakeTransport] = []
+    never = asyncio.Event()  # 永不置位
+
+    async def pre_recovery() -> None:
+        await never.wait()
+
+    managed = make_managed(
+        sink,
+        strategy=ReconnectStrategy(interval=0.01, timeout=0.15),
+        pre_recovery=pre_recovery,
+    )
+    await managed.connect()
+    sink[0].drop("test drop")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while managed.state != "failed":
+        assert loop.time() < deadline, "recovery did not fail within 5s"
+        await asyncio.sleep(0.01)
+    assert "process starts" in (managed.failure_message or "")
+    assert len(sink) == 1  # 从未发起重连
     await managed.disconnect()

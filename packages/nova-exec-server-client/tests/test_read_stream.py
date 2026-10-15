@@ -152,8 +152,16 @@ async def test_read_stream_consumer_abandon_cleans_up():
     assert await first == b"x"
     await agen.aclose()
     assert handle_id not in fs._router._streams
-    # 收摊请求：fs/close 带句柄 id，走数据面通道（句柄随数据面连接存活）
+    # 收摊请求：fs/close 带句柄 id，走数据面通道（句柄随数据面连接存活）。
+    # 即发即忘任务（对位 Rust runtime.spawn——inline await 会把消费者的
+    # aclose() 挂在半死连接上）——死线轮询其落地而非固定 sleep
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
     close_requests = [r for r in transport.requests if r[0] == "fs/close"]
+    while not close_requests:
+        assert loop.time() < deadline, "fs/close 收摊任务 5s 内未落地"
+        await asyncio.sleep(0.01)
+        close_requests = [r for r in transport.requests if r[0] == "fs/close"]
     assert close_requests == [("fs/close", {"handleId": handle_id}, "data")]
     # 迟到的通知静默丢弃，不炸
     await transport.handlers[0](chunk_msg(handle_id, 1, b"y"))
@@ -172,6 +180,8 @@ async def test_read_stream_terminal_events_skip_close():
     await transport.handlers[0](done_msg(handle_id, 1))
     with pytest.raises(StopAsyncIteration):
         await agen.__anext__()
+    # 即发即忘语义下：给（本不应存在的）收摊任务一个落地窗口再断言缺席
+    await asyncio.sleep(0.05)
     assert [r for r in transport.requests if r[0] == "fs/close"] == []
 
     # 服务端错误终态：done 携带 error
@@ -182,6 +192,8 @@ async def test_read_stream_terminal_events_skip_close():
     await transport.handlers[0](done_msg(handle_id, 1, error="disk error"))
     with pytest.raises(FileSystemError, match="disk error"):
         await agen.__anext__()
+    # 即发即忘语义下：给（本不应存在的）收摊任务一个落地窗口再断言缺席
+    await asyncio.sleep(0.05)
     assert [r for r in transport.requests if r[0] == "fs/close"] == []
 
     # 连接恢复失败清扫（fail_channel 合成 failed 终态）：同样不再发
@@ -190,6 +202,8 @@ async def test_read_stream_terminal_events_skip_close():
     fs._router.fail_channel(None, "exec-server transport disconnected")
     with pytest.raises(FileSystemError, match="disconnected"):
         await first
+    # 即发即忘语义下：给（本不应存在的）收摊任务一个落地窗口再断言缺席
+    await asyncio.sleep(0.05)
     assert [r for r in transport.requests if r[0] == "fs/close"] == []
 
 
