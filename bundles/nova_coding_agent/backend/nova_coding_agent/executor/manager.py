@@ -20,11 +20,20 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import hashlib
 import os
 import secrets
 import subprocess
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+
+from nova_exec_server_client import (
+    EnvironmentManager,
+    ExecutorClient,
+    ExecutorConfig,
+    ExecutorEnvironment,
+)
+from nova_harness.config.defaults import get_agent_dir
 
 from nova_coding_agent.executor.provision import (
     BootstrapFn,
@@ -35,13 +44,6 @@ from nova_coding_agent.executor.provision import (
     parse_ssh_target,
     provision,
 )
-from nova_exec_server_client import (
-    EnvironmentManager,
-    ExecutorClient,
-    ExecutorConfig,
-    ExecutorEnvironment,
-)
-from nova_harness.config.defaults import get_agent_dir
 
 # 等待本地 executor 打印监听地址的超时
 _SPAWN_READY_TIMEOUT_S = 10.0
@@ -205,15 +207,21 @@ class ExecutorClientManager:
                 "/ 仓库 target 构建 / PATH 均未命中）"
             )
         token = secrets.token_hex(16)
+        # 服务端只存 token 的 SHA-256（capability-token 模式——对位
+        # websocket-auth 的 TokenSha256 凭据源；原 token 只发客户端
+        # （Authorization: Bearer），不经服务端配置落盘）。旗标对位
+        # exec-server-cli 的 --ws-auth 族——旧 `--auth bearer/--auth-token`
+        # 拼写在 CLI 不存在（clap 直接拒绝，spawn 必死）。
+        token_sha256 = hashlib.sha256(token.encode("utf-8")).hexdigest()
         proc = subprocess.Popen(
             [
                 binary,
                 "--listen",
                 "ws://127.0.0.1:0",
-                "--auth",
-                "bearer",
-                "--auth-token",
-                token,
+                "--ws-auth",
+                "capability-token",
+                "--ws-token-sha256",
+                token_sha256,
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
