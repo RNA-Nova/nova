@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Annotated, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
 
+from .base_model import NovaBaseModel
 from .exec_server_wire import (
     ExecFileSystemPath,
     FileSystemSandboxContext,
@@ -67,11 +69,113 @@ class NetworkProxySettings(BaseModel):
 
 
 class ApprovalPolicy(str, Enum):
-    """审批档（对位 codex AskForApproval；untrusted 已被上游废弃，不收）"""
+    """审批档字符串档（对位 codex AskForApproval 的 unit 变体）。
+
+    granular 变体不是本枚举成员——见 `GranularApprovalConfig` 与
+    `ApprovalPolicySetting` 联合（对位 codex AskForApproval::Granular）。
+    untrusted 已被上游废弃不收（对位 codex config mod.rs:229 拒收语义，
+    解析入口 `_parse_approval_policy` 给响亮报错）。
+    """
 
     ON_REQUEST = "on-request"
+    #: on-failure 是 codex OnRequest 的 serde alias（上游无独立变体）；
+    #: 本成员为存量消费侧源码兼容保留，**配置解析不再产出**——原始字符串
+    #: "on-failure" 一律落 ON_REQUEST（对位 serde alias 语义）
     ON_FAILURE = "on-failure"
     NEVER = "never"
+
+
+class GranularApprovalConfig(NovaBaseModel):
+    """granular 五开关审批负载（逐字段对位 codex protocol.rs:1054-1068
+    `GranularApprovalConfig`）。
+
+    某开关为 true = 该类审批请求放行（弹给用户）；false = 该类请求**自动
+    拒绝**，不再上弹（对位 codex AskForApproval::Granular 文档注释）。
+    """
+
+    #: 是否放行 shell 命令审批请求（含 inline `with_additional_permissions`
+    #: 与 `require_escalated` 请求）——必填（对位 codex sandbox_approval）
+    sandbox_approval: bool
+    #: 是否放行 execpolicy `prompt` 规则触发的审批——必填（对位 codex rules）
+    rules: bool
+    #: 是否放行 skill 脚本执行触发的审批——serde default=false（对位 codex
+    #: skill_approval 的 #[serde(default)]）
+    skill_approval: bool = False
+    #: 是否放行 `request_permissions` 工具触发的审批——serde default=false
+    #: （对位 codex request_permissions 的 #[serde(default)]）
+    request_permissions: bool = False
+    #: 是否放行 MCP elicitation 审批——必填（对位 codex mcp_elicitations）
+    mcp_elicitations: bool
+
+    # ── 访问器（逐一对位 codex protocol.rs:1070-1087 的 allows_* 方法）──
+
+    def allows_sandbox_approval(self) -> bool:
+        return self.sandbox_approval
+
+    def allows_rules_approval(self) -> bool:
+        return self.rules
+
+    def allows_skill_approval(self) -> bool:
+        return self.skill_approval
+
+    def allows_request_permissions(self) -> bool:
+        return self.request_permissions
+
+    def allows_mcp_elicitations(self) -> bool:
+        return self.mcp_elicitations
+
+
+def _parse_approval_policy(value: object) -> object:
+    """审批档反序列化预处理（对位 codex AskForApproval 的 serde 外部标签
+    反序列化 + config mod.rs:3762-3767 的 untrusted 拒收）。
+
+    - `ApprovalPolicy` 枚举成员原样透传（存量 Python 构造路径——含
+      ON_FAILURE 直构，比对 `is`/`==` 的语义不变）；
+    - 原始字符串 `"on-failure"` → ON_REQUEST（对位 serde
+      `#[serde(alias = "on-failure")]`：alias 只影响反序列化方向）；
+    - 原始字符串 `"untrusted"` → 响亮报错（文案对位 codex
+      UnsupportedUntrustedApprovalPolicyError，config mod.rs:229）；
+    - dict `{"granular": {...}}` → 解 serde 外部标签外壳，内层负载交
+      GranularApprovalConfig 校验；裸负载 dict（无外壳）一并透传，由联合
+      校验自然落 GranularApprovalConfig（Python 构造便利，serde 超集）。
+    """
+    if isinstance(value, ApprovalPolicy):
+        return value
+    if isinstance(value, str):
+        if value == "untrusted":
+            raise ValueError(
+                'approval_policy = "untrusted" is no longer supported; '
+                "remove this setting"
+            )
+        if value == ApprovalPolicy.ON_FAILURE.value:
+            return ApprovalPolicy.ON_REQUEST
+        return value
+    if isinstance(value, dict) and set(value) == {"granular"}:
+        return value["granular"]
+    return value
+
+
+def _dump_approval_policy(
+    value: ApprovalPolicy | GranularApprovalConfig,
+) -> object:
+    """审批档序列化（逐字节对位 serde 外部标签）：unit 变体 → kebab-case
+    字符串；granular → `{"granular": {...}}` 外壳，负载内字段 snake_case
+    （codex 侧无 rename 属性，不用枢纽 camelCase 别名——不经 dump_wire）。"""
+    if isinstance(value, ApprovalPolicy):
+        return value.value
+    return {"granular": value.model_dump()}
+
+
+#: 审批档配置联合（对位 codex AskForApproval 全枚举——unit 三档 + granular
+#: 负载）。判别按仓规 `union_mode="left_to_right"`：str→枚举、dict→
+#: GranularApprovalConfig（serde 外部标签无显式判别键，str/dict 类型分野即
+#: 判别，无 smart-union 猜测空间）。
+ApprovalPolicySetting = Annotated[
+    Union[ApprovalPolicy, GranularApprovalConfig],
+    Field(union_mode="left_to_right"),
+    BeforeValidator(_parse_approval_policy),
+    PlainSerializer(_dump_approval_policy, return_type=object),
+]
 
 
 class ExecutorEnvironment(BaseModel):
@@ -105,7 +209,8 @@ class ResolvedExecutionPolicy:
 
     sandbox: FileSystemSandboxContext | None
     network_proxy: RemoteNetworkProxyLaunchConfig | None
-    approval_policy: ApprovalPolicy
+    #: 透传配置档（字符串档或 granular 五开关——消费语义归消费侧批次）
+    approval_policy: ApprovalPolicySetting
 
 
 class ExecutorConfig(BaseModel):
@@ -126,7 +231,11 @@ class ExecutorConfig(BaseModel):
         default_factory=SandboxWorkspaceWriteConfig
     )
     network_proxy: NetworkProxySettings | None = None
-    approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
+    #: 审批档（对位 codex config mod.rs:328 `approval_policy`——不收
+    #: Constrained 托管约束包装，收裸 AskForApproval 语义）。字符串档三档 +
+    #: granular 五开关负载（`{"granular": {...}}` 外壳对位 serde 外部标签）；
+    #: 缺省 on-request（对位 codex AskForApproval 的 #[default] OnRequest）
+    approval_policy: ApprovalPolicySetting = ApprovalPolicy.ON_REQUEST
     #: 默认环境 id（对位 codex default；"none"（大小写不敏感）= 禁用默认；
     #: 缺席时按 include_local 落 local）
     default_environment: str | None = None
