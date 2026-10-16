@@ -31,8 +31,9 @@ RpcClientEvent::Disconnected 驱动 request_recovery）。
   落定/取消/异常时归还（对位 SemaphorePermit drop）
 - 出站防线：NaN/Infinity 本地拒发（json allow_nan=False——serde_json
   把非有限浮点序列化为 null，py 的 json 默认印裸 NaN，服务端词法层
-  拒收会判连接级致命）；stdio 出站超 64MB 同样本地拒发（有意偏差：
-  基准照发由服务端杀连接，py 选择本地拒发保连接）
+  拒收会判连接级致命）；超大消息出站不做本地限长（对位基准
+  connection.rs 直发——上限执法归服务端单点（版本演进免漂移），
+  超限由服务端杀连接、恢复兜底）
 - WS 单消息上限 64MiB（对位 tungstenite 默认 max_message_size）；
   客户端不发 keepalive ping、不靠 pong 看门狗（对位 Rust connection.rs
   from_websocket 的 ping_interval None——pong watchdog 只接在 nova
@@ -1122,12 +1123,8 @@ class StdioTransport(_JsonRpcTransport):
             )
             + "\n"
         ).encode()
-        if len(line) > self.max_message_size:
-            # 有意偏差声明：基准（Rust 客户端）超限照发、由服务端杀连接；
-            # py 选择本地拒发保连接——调用方收到明确错误，连接可继续服务
-            raise ProtocolError(
-                f"message exceeds maximum stdio length of {self.max_message_size} bytes"
-            )
+        # 出站不做本地限长（对位基准 connection.rs 直发）——上限执法归
+        # 服务端单点，超限由服务端杀连接、恢复兜底
         try:
             process.stdin.write(line)
             await process.stdin.drain()
