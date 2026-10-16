@@ -19,6 +19,7 @@ from typing import Annotated, Union
 from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
 
 from .base_model import NovaBaseModel
+from .exec_server_permissions import PermissionsToml
 from .exec_server_wire import (
     ExecFileSystemPath,
     FileSystemSandboxContext,
@@ -236,6 +237,16 @@ class ExecutorConfig(BaseModel):
     #: granular 五开关负载（`{"granular": {...}}` 外壳对位 serde 外部标签）；
     #: 缺省 on-request（对位 codex AskForApproval 的 #[default] OnRequest）
     approval_policy: ApprovalPolicySetting = ApprovalPolicy.ON_REQUEST
+    #: 默认权限套餐（A2b；逐字对位 codex ConfigToml `default_permissions`，
+    #: config/src/config_toml.rs:236-239——`:` 前缀名指内置套餐
+    #: （`:read-only`/`:workspace`/`:danger-full-access`），其余名字解析自
+    #: `permissions` 表）
+    default_permissions: str | None = None
+    #: 命名权限套餐表（A2b；对位 codex ConfigToml `permissions`，
+    #: config_toml.rs:241-243 的 `Option<PermissionsToml>`——flatten 的
+    #: name→profile 映射，校验时收裸 dict）。解析/编译函数在
+    #: `exec_server_permissions` 包（纯计算）；loader 接线归后续批次
+    permissions: PermissionsToml | None = None
     #: 默认环境 id（对位 codex default；"none"（大小写不敏感）= 禁用默认；
     #: 缺席时按 include_local 落 local）
     default_environment: str | None = None
