@@ -1013,7 +1013,7 @@ def test_process_tree_reap_prefers_taskkill_on_windows(monkeypatch):
 
     monkeypatch.setattr(os, "name", "nt")
     monkeypatch.setattr(
-        transport_module, "_kill_windows_process_tree", lambda pid: True
+        transport_module.stdio, "_kill_windows_process_tree", lambda pid: True
     )
     proc = _Proc()
     StdioTransport._terminate_process_tree(proc)
@@ -1022,7 +1022,7 @@ def test_process_tree_reap_prefers_taskkill_on_windows(monkeypatch):
     assert not proc.killed
 
     monkeypatch.setattr(
-        transport_module, "_kill_windows_process_tree", lambda pid: False
+        transport_module.stdio, "_kill_windows_process_tree", lambda pid: False
     )
     proc = _Proc()
     StdioTransport._terminate_process_tree(proc)

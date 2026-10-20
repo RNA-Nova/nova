@@ -176,7 +176,7 @@ class _ProcessStartGate:
         self._idle = asyncio.Event()
         self._idle.set()
         # 后台任务跟踪集（terminate 清理 / start 线 RPC——持引用防 GC，
-        # 对位 transport.py _spawn_inbound_task 的跟踪集模式）
+        # 对位 transport/base.py _spawn_inbound_task 的跟踪集模式）
         self._cleanup_tasks: set[asyncio.Task] = set()
 
     def _track_task(self, task: asyncio.Task) -> None:
