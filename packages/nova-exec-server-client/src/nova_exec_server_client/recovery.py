@@ -28,6 +28,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from nova_protocol.signal import await_with_signal
+
 from .errors import (
     JSON_RPC_TRANSPORT_CLOSED,
     SESSION_ALREADY_ATTACHED,
@@ -36,9 +38,10 @@ from .errors import (
     ProtocolError,
     TimeoutError,
 )
+from .transport import _signal_kwarg
 
 if TYPE_CHECKING:
-    from nova_protocol import InitializeResponse
+    from nova_protocol import AbortSignal, InitializeResponse
 
     from .transport import Transport
 
@@ -389,13 +392,22 @@ class ManagedTransport:
         *,
         channel: str | None = None,
         for_cleanup: bool = False,
+        signal: AbortSignal | None = None,
     ) -> Any:
         """发送请求（恢复期间等待恢复结果——对位 RecoveryPolicy::Wait）；
-        for_cleanup 透传底层传输的在飞槽位裁决（对位 Rust call_for_cleanup）"""
-        transport = await self._await_transport()
+        for_cleanup 透传底层传输的在飞槽位裁决（对位 Rust call_for_cleanup）。
+
+        `signal`：取消词汇——恢复等待（`_await_transport`）与恢复落定后的
+        发送两段都可被 signal 打断（竞速原语 `await_with_signal`：预触发快
+        失败、胜出抛 AbortedError、完成优先，对位 concurrency.md §六）。
+        恢复编排自身（`_recover` 状态机）不经 signal——取消的是调用方的
+        等待，不是恢复过程。
+        """
+        transport = await await_with_signal(self._await_transport(), signal)
+        extra = _signal_kwarg(signal)
         if for_cleanup:
-            return await transport.send_request(method, params, for_cleanup=True)
-        return await transport.send_request(method, params)
+            extra["for_cleanup"] = True
+        return await transport.send_request(method, params, **extra)
 
     async def send_notification(
         self,

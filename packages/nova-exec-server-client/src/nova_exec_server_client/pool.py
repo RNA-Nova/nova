@@ -25,9 +25,10 @@ from nova_protocol import (
     FS_WRITE_STREAM,
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
+    AbortSignal,
 )
 
-from .transport import Transport
+from .transport import Transport, _signal_kwarg
 
 #: 控制面通道（默认通道）：生命周期/环境/进程/小文件等低开销方法
 CHANNEL_CONTROL = "control"
@@ -117,14 +118,20 @@ class TransportPool:
         *,
         channel: str | None = None,
         for_cleanup: bool = False,
+        signal: AbortSignal | None = None,
     ) -> Any:
-        """发送 JSON-RPC 请求并等待响应（按通道路由；for_cleanup 透传给落点
-        传输的在飞槽位裁决——对位 Rust call_for_cleanup 的保留槽语义）"""
+        """发送 JSON-RPC 请求并等待响应（按通道路由）
+
+        for_cleanup 与 signal 均**仅在声明时透传**（for_cleanup 透传落点传输
+        的在飞槽位裁决——对位 Rust call_for_cleanup 的保留槽语义；signal 是
+        取消词汇，触发即取消响应等待抛 AbortedError）：未声明对应参数的传输
+        实现保持兼容。
+        """
         transport = self._pick(method, channel)
+        extra = _signal_kwarg(signal)
         if for_cleanup:
-            # 仅在收摊标记时透传：未声明该参数的传输实现保持兼容
-            return await transport.send_request(method, params, for_cleanup=True)
-        return await transport.send_request(method, params)
+            extra["for_cleanup"] = True
+        return await transport.send_request(method, params, **extra)
 
     async def send_notification(
         self,

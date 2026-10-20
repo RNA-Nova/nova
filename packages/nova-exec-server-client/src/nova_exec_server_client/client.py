@@ -21,6 +21,8 @@ from nova_protocol import (
     PROCESS_START,
     PROCESS_TERMINATE,
     PROTOCOL_VERSION,
+    AbortedError,
+    AbortSignal,
     ByteChunk,
     EnvironmentConfigReadParams,
     EnvironmentConfigReadResponse,
@@ -40,6 +42,7 @@ from nova_protocol import (
     ProcessTerminateParams,
     ResolvedEnvironment,
 )
+from nova_protocol.signal import await_with_signal
 from pydantic import ValidationError
 
 from .errors import (
@@ -57,7 +60,7 @@ from .pool import CHANNEL_CONTROL, CHANNEL_DATA, TransportPool
 from .process import ProcessManager
 from .pty import PtyManager
 from .recovery import ManagedTransport, ReconnectStrategy, is_transport_class_error
-from .transport import StdioTransport, Transport, WebSocketTransport
+from .transport import StdioTransport, Transport, WebSocketTransport, _signal_kwarg
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +252,11 @@ class _ProcessStartGatedTransport:
     （对位 Rust start_process 的 begin/finish/cleanup 编排），其余方法原样
     透传连接池。process/start 恒走控制面（池路由缺省），门控钉住控制面
     当前底层传输直接发送——恢复期间不把 start 静默改投到对映代连接上。
+
+    取消词汇：调用方取消语义从裸 CancelledError 扩展到 AbortedError
+    （signal 触发经 `await_with_signal` 竞速）——两词汇同语义：signal
+    触发只丢回执（AbortedError 上抛调用方），后台线 RPC 不受影响
+    （二轮语义：RPC 落定后按取消分支调度 terminate 清理）。
     """
 
     def __init__(self, pool: TransportPool, gate: _ProcessStartGate):
@@ -261,16 +269,21 @@ class _ProcessStartGatedTransport:
         params: dict[str, Any] | None = None,
         *,
         channel: str | None = None,
+        signal: AbortSignal | None = None,
     ) -> Any:
         if method != PROCESS_START:
-            return await self._pool.send_request(method, params, channel=channel)
+            return await self._pool.send_request(
+                method, params, channel=channel, signal=signal
+            )
         gate = self._gate
         control = gate._control
         while True:
             # 对位 Rust start_process 的 loop：Wait 策略取当前连接（恢复期间
             # 等待），取到后原子准入；准入失败说明连接已换代（或底层已死、
-            # 断线回调未至——让出事件循环等恢复推进），重取对映代
-            transport = await control._await_transport()
+            # 断线回调未至——让出事件循环等恢复推进），重取对映代。
+            # 恢复等待同样可被 signal 打断（竞速挂 _await_transport；预触发
+            # 快失败——门控不发请求）
+            transport = await await_with_signal(control._await_transport(), signal)
             if gate.try_begin(transport):
                 break
             await asyncio.sleep(0)
@@ -285,9 +298,13 @@ class _ProcessStartGatedTransport:
             asyncio.create_task(self._run_start_rpc(transport, method, params, settled))
         )
         try:
-            return await settled
-        except asyncio.CancelledError:
-            # 调用方取消/超时的回执丢失两态（对位 Rust 两处分支）：
+            # 回执等待经竞速包装：signal 触发即取消等待（settled 随取消关闭）、
+            # 抛 AbortedError；signal 为 None 时直通（与裸 await settled 同构）
+            return await await_with_signal(settled, signal)
+        except (asyncio.CancelledError, AbortedError):
+            # 调用方取消/超时（CancelledError 基础设施收尾）与用户取消
+            # （AbortedError——signal 触发的取消词汇）的同语义臂；回执丢失两态
+            # （对位 Rust 两处分支）：
             # - RPC 仍在飞：settled 随取消关闭，后台任务落定后自行调度清理
             # - RPC 已成功落定但取消仍被投递（future 已完成、取消标记在途）：
             #   进程已在服务端运行而调用方拿不到句柄——此处补调度清理
@@ -308,9 +325,11 @@ class _ProcessStartGatedTransport:
         settled: asyncio.Future,
     ) -> None:
         """后台执行 start 线 RPC（对位 Rust start_process spawn 的任务体）：
-        RPC 落定后归还门控计数并交付结果；回执已失（调用方取消/超时）的
-        落定成功按取消分支调度 terminate 清理；传输类失败无论回执在与否
-        都调度清理（请求是否落地不可知，进程可能已在服务端运行）"""
+        RPC 落定后归还门控计数并交付结果；回执已失（调用方取消/超时/signal
+        触发）的落定成功按取消分支调度 terminate 清理；传输类失败无论回执
+        在与否都调度清理（请求是否落地不可知，进程可能已在服务端运行）。
+
+        有意不接调用方 signal：取消只丢回执，线上 RPC 跑到落定（二轮语义）。"""
         gate = self._gate
         try:
             try:
@@ -875,30 +894,43 @@ class ExecutorClient:
         # 探活（对位 Rust 刷新末尾的 environment_status 实况检查）
         await self.environment_status()
 
-    async def environment_info(self) -> EnvironmentInfo:
-        """获取环境信息（initialize 捎带/首次拉取后缓存，连接生命周期内不重复请求）"""
+    async def environment_info(
+        self, *, signal: AbortSignal | None = None
+    ) -> EnvironmentInfo:
+        """获取环境信息（initialize 捎带/首次拉取后缓存，连接生命周期内不重复请求）
+
+        `signal`：取消词汇——缓存未命中的拉取可被 signal 打断（透传
+        force_environment_info）。
+        """
         if self._environment_info is None:
             # 对位 Rust get_or_try_init(force_environment_info)：缓存未命中走
             # 同一探活路径，超时同样触发连接退役与会话恢复
-            self._environment_info = await self.force_environment_info()
+            self._environment_info = await self.force_environment_info(signal=signal)
         return self._environment_info
 
-    async def force_environment_info(self) -> EnvironmentInfo:
+    async def force_environment_info(
+        self, *, signal: AbortSignal | None = None
+    ) -> EnvironmentInfo:
         """强制拉取环境信息——不读缓存、不写缓存（对位 rust force_environment_info）
 
         ENVIRONMENT_INFO_TIMEOUT（30s）覆盖发送与等待全程；超时即关闭所探
         连接（控制面）并触发会话恢复，调用方拿到超时错误——不重试失败请求
         （对位 Rust：close_transport + request_recovery 后返回 TimedOut）。
+
+        `signal`：取消词汇——钉传输的恢复等待与探活在飞两段都可被打断；
+        AbortedError 直通（不触发连接退役——取消是用户语义，非连接死因）。
         """
         # 先等恢复落定再钉所探传输（对位 Rust 先 `rpc_client().await` 取到
         # 实际服役的 client 再探）——恢复窗内钉住旧死传输，黑洞新连接会因
         # 身份守卫（ptr_eq）被正确忽略而无人退役；实发直走钉住的传输
         # （对位 Rust timeout(ENVIRONMENT_INFO_TIMEOUT, rpc_client.call(...))
         # ——不经连接池二次解析，恒落控制面对映代连接）
-        probe_transport = await self._control._await_transport()
+        probe_transport = await await_with_signal(
+            self._control._await_transport(), signal
+        )
         try:
             result = await asyncio.wait_for(
-                probe_transport.send_request(ENVIRONMENT_INFO),
+                probe_transport.send_request(ENVIRONMENT_INFO, **_signal_kwarg(signal)),
                 ENVIRONMENT_INFO_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -908,7 +940,9 @@ class ExecutorClient:
             raise error from None
         return EnvironmentInfo.model_validate(result)
 
-    async def environment_status(self) -> EnvironmentStatus:
+    async def environment_status(
+        self, *, signal: AbortSignal | None = None
+    ) -> EnvironmentStatus:
         """获取环境状态（对位 Rust environment_status：fail-fast 健康检查）
 
         只复用既有连接、绝不等待/触发恢复（对位
@@ -916,6 +950,8 @@ class ExecutorClient:
         RPC connection and never initiate recovery"）：恢复中/未连接即败；
         专用 ENVIRONMENT_STATUS_TIMEOUT（10s）时限，超时只回超时错误——
         不退役连接（与 Rust 一致：连接生死判定归 environment/info 探活路径）。
+
+        `signal`：取消词汇——探活在飞可被打断，AbortedError 直通。
         """
         control = self._control
         if control.is_connected:
@@ -929,7 +965,7 @@ class ExecutorClient:
             raise ConnectionError("exec-server environment is recovering")
         try:
             result = await asyncio.wait_for(
-                transport.send_request(ENVIRONMENT_STATUS),
+                transport.send_request(ENVIRONMENT_STATUS, **_signal_kwarg(signal)),
                 ENVIRONMENT_STATUS_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -970,6 +1006,7 @@ class ExecutorClient:
         redirect_policy: str = "follow",
         stream_response: bool = False,
         request_id: str | None = None,
+        signal: AbortSignal | None = None,
     ) -> HttpRequestResponse:
         """经执行器代发 HTTP 请求（http/request）
 
@@ -980,6 +1017,8 @@ class ExecutorClient:
         - headers 元组为字面量头；需执行端环境变量填值（凭据不跨线委派）
           时传 HttpHeader(name=..., value="前缀", valueEnvVar="变量名")——
           执行端敏感变量有保护名单拦截（nova 自家 token/云凭据/供应商 key）
+        - `signal`：取消词汇——请求在飞与流式消费（bodyDelta 的 queue 等待）
+          两段都可被打断；AbortedError 直通且路由注销（收摊纪律不破）
         """
         import uuid as _uuid
 
@@ -1001,24 +1040,28 @@ class ExecutorClient:
         )
         try:
             result = await self._pool.send_request(
-                HTTP_REQUEST, params.model_dump(by_alias=True, exclude_none=True)
+                HTTP_REQUEST,
+                params.model_dump(by_alias=True, exclude_none=True),
+                signal=signal,
             )
             response = HttpRequestResponse.model_validate(result)
         except BaseException:
-            # 请求失败（服务端 error/参数拒绝/断线）或响应畸形时摘掉刚注册的
-            # 流式路由（对位 Rust HttpBodyStreamRegistration::drop 守卫——
-            # 否则路由残留到下次清扫）
+            # 请求失败（服务端 error/参数拒绝/断线/取消——AbortedError 取消词汇
+            # 同走这里）或响应畸形时摘掉刚注册的流式路由（对位 Rust
+            # HttpBodyStreamRegistration::drop 守卫——否则路由残留到下次清扫）
             if stream_response:
                 self._router.unregister_http_body_stream(rid)
             raise
         if stream_response:
             # bodyDelta 推送收集：done 或 error 终止，拼装完整响应体；
-            # seq 严格序校验（对位 Rust recv()：缺口即协议错误）
+            # seq 严格序校验（对位 Rust recv()：缺口即协议错误）。
+            # queue 等待经竞速包装：signal 触发即抛 AbortedError，finally
+            # 注销路由（收摊纪律与断线清扫同）
             chunks: list[bytes] = []
             expected_seq = 1
             try:
                 while True:
-                    event = await queue.get()
+                    event = await await_with_signal(queue.get(), signal)
                     delta = HttpRequestBodyDeltaNotification.model_validate(
                         event["params"]
                     )

@@ -19,7 +19,7 @@ class FakeTransport:
         self.connected = False
 
     async def send_request(
-        self, method, params=None, *, channel=None, for_cleanup=False
+        self, method, params=None, *, channel=None, for_cleanup=False, signal=None
     ):
         self.requests.append((method, params or {}, channel))
         resp = self.responses.get(method, {})

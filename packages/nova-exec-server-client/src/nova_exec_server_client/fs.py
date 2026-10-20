@@ -30,6 +30,8 @@ from nova_protocol import (
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
     MAX_WRITE_STREAM_CHUNK_BYTES,
+    AbortedError,
+    AbortSignal,
     DirEntry,
     EnvironmentInfo,
     FileMetadata,
@@ -66,6 +68,7 @@ from nova_protocol import (
     WalkOptions,
     WalkOutcome,
 )
+from nova_protocol.signal import await_with_signal
 
 from .errors import (
     JSON_RPC_METHOD_NOT_FOUND,
@@ -75,7 +78,7 @@ from .errors import (
     TransportError,
 )
 from .notifications import NotificationRouter, ReadStreamEvent
-from .transport import Transport
+from .transport import Transport, _signal_kwarg
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +183,7 @@ class FileSystemManager:
         follow_symlinks: bool | None = None,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> bytes:
         """读取文件（小文件推荐）
 
@@ -187,12 +191,15 @@ class FileSystemManager:
         None 不下发该字段，服务端按默认 true（旧行为）处理。
         `sandbox`：按请求沙箱上下文（对位 Rust RemoteFileSystem 全方法透传）；
         None = 无上下文直开（现状语义）。
+        `signal`：取消词汇——响应等待可被打断，AbortedError 直通。
         """
         params = FsReadFileParams(
             path=path, followSymlinks=follow_symlinks, sandbox=_sandbox_wire(sandbox)
         )
         result = await self._transport.send_request(
-            FS_READ_FILE, params.model_dump(by_alias=True, exclude_none=True)
+            FS_READ_FILE,
+            params.model_dump(by_alias=True, exclude_none=True),
+            **_signal_kwarg(signal),
         )
         response = FsReadFileResponse.model_validate(result)
         return response.data
@@ -205,12 +212,16 @@ class FileSystemManager:
         length: int | None = None,
         *,
         sandbox: dict | None = None,
+        signal: AbortSignal | None = None,
     ) -> AsyncIterator[bytes]:
         """流式读取文件（大文件推荐）
 
         `sandbox`（v1.10 起服务端按请求沙箱开门，能力位
         sandboxedFileStreaming）：FileSystemSandboxContext 的线上 dict，
         语义同 `open()`；None = 无上下文直开（现状语义）。
+        `signal`：取消词汇——开门请求与逐块消费（queue 等待）两段竞速，
+        AbortedError 直通；收摊纪律不破（finally 注销路由 + 未收摊补
+        fs/close，同消费者中途放弃路径）。
 
         协议序列：先注册推送路由再发 `fs/readStream` 请求（服务端响应后即开始
         推送，注册不能比推送晚到）→ 逐块收 `fs/readStream/chunk` →
@@ -247,10 +258,13 @@ class FileSystemManager:
         )
         try:
             result = await self._transport.send_request(
-                FS_READ_STREAM, params.model_dump(by_alias=True)
+                FS_READ_STREAM,
+                params.model_dump(by_alias=True),
+                **_signal_kwarg(signal),
             )
         except Exception:
-            # 开流失败即注销路由（对位 Rust open_push 的失败清理）
+            # 开流失败即注销路由（对位 Rust open_push 的失败清理——含
+            # AbortedError 取消词汇：signal 触发同走这里）
             self._router.unregister_stream(handle_id)
             raise
         FsReadStreamResponse.model_validate(result)
@@ -259,7 +273,9 @@ class FileSystemManager:
         terminated = False  # 服务端句柄已收摊/消亡 = 不再补 fs/close
         try:
             while True:
-                event: ReadStreamEvent = await queue.get()
+                # queue 等待经竞速包装（signal 为 None 时零开销直通）：
+                # signal 触发即抛 AbortedError，收摊归 finally
+                event: ReadStreamEvent = await await_with_signal(queue.get(), signal)
                 if event.kind == "failed":
                     # 服务端终态/连接清扫（server_settled=True）句柄已消亡；
                     # 本地断流（背压/畸形兜底）服务端句柄仍活——走未收摊路径
@@ -291,10 +307,12 @@ class FileSystemManager:
         follow_symlinks: bool | None = None,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> None:
         """写入文件；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
 
         `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        `signal`：取消词汇——响应等待可被打断，AbortedError 直通。
         """
         params = FsWriteFileParams(
             path=path,
@@ -303,7 +321,9 @@ class FileSystemManager:
             sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(
-            FS_WRITE_FILE, params.model_dump(by_alias=True, exclude_none=True)
+            FS_WRITE_FILE,
+            params.model_dump(by_alias=True, exclude_none=True),
+            **_signal_kwarg(signal),
         )
 
     async def write_stream(
@@ -314,6 +334,7 @@ class FileSystemManager:
         offset: int | None = None,
         *,
         sandbox: dict | None = None,
+        signal: AbortSignal | None = None,
     ) -> int:
         """流式写入文件（大文件推荐），返回实际落盘总字节数。
 
@@ -339,6 +360,10 @@ class FileSystemManager:
           `fs/close` 主动中止（与 read_stream 收摊同纪律：即发即忘、落点与
           注册同通道——句柄状态随连接）；chunk 通知无回执，服务端业务错误
           （乱序/超限/队列满/写盘失败）留到 done 回报，这里转为 FileSystemError
+        - `signal`（取消词汇）：开门与 done 落定两段竞速，AbortedError 直通；
+          chunk 推送段为即发即忘通知（无等待点）——推送途中的 signal 触发
+          经 done 段的举旗点快失败收口，done 段取消（回执丢失，落地不可知）
+          同样补 `fs/close` 收摊（已落地则静默无效，未落地则中止写流）
         """
         if isinstance(chunks, (bytes, bytearray, memoryview)):
             raise TypeError("chunks 需为字节迭代器；整块字节请用 write_file")
@@ -353,7 +378,7 @@ class FileSystemManager:
             handleId=handle_id, path=path, offset=offset, sandbox=sandbox
         )
         result = await self._transport.send_request(
-            FS_WRITE_STREAM, params.model_dump(by_alias=True)
+            FS_WRITE_STREAM, params.model_dump(by_alias=True), **_signal_kwarg(signal)
         )
         FsWriteStreamResponse.model_validate(result)
 
@@ -392,7 +417,15 @@ class FileSystemManager:
             result = await self._transport.send_request(
                 FS_WRITE_STREAM_DONE,
                 FsWriteStreamDoneParams(handleId=handle_id).model_dump(by_alias=True),
+                **_signal_kwarg(signal),
             )
+        except AbortedError:
+            # done 回执丢失（signal 触发——预触发则 done 未发、在飞取消则落地
+            # 不可知）：同收摊纪律 best-effort fs/close——done 已落地则 close
+            # 静默无效（服务端 fs/close 恒 Ok），未落地则中止写流（v1.12 起
+            # 半成品留盘可续传）
+            self._spawn_close(handle_id, FS_WRITE_STREAM)
+            raise
         except ProtocolError as e:
             # 服务端把流业务错误留到 done 回报（v1.12 起半成品留在盘上）
             raise FileSystemError(f"write stream `{handle_id}` failed: {e}") from e
@@ -410,6 +443,7 @@ class FileSystemManager:
         offset: int = 0,
         max_resume_attempts: int = 3,
         sandbox: dict | None = None,
+        signal: AbortSignal | None = None,
     ) -> int:
         """断点续传的流式写入（v1.12，nova 自有通道）：断线后重连续传。
 
@@ -425,6 +459,8 @@ class FileSystemManager:
           （ManagedTransport）兜不住时的兜底轮次）
         - `sandbox`：语义同 `write_stream`；续传重开与断线对账（getMetadata）
           同样透传
+        - `signal`：取消词汇——透传每轮 write_stream 与对账 getMetadata；
+          AbortedError 直通（不是传输类错误，不进续传重试）
         - 返回服务端确认的全量字节数；done 对账不符、服务端文件缩水或断线
           窗口内文件被外部追加（外来增长）即 FileSystemError
         """
@@ -439,6 +475,7 @@ class FileSystemManager:
                     block_size=block_size,
                     offset=confirmed if confirmed > 0 else None,
                     sandbox=sandbox,
+                    signal=signal,
                 )
             except (TransportError, TimeoutError) as err:
                 attempts += 1
@@ -452,7 +489,7 @@ class FileSystemManager:
                 # getMetadata 对账服务端文件大小（断线窗口内推送丢失由此兜底；
                 # 传入本轮已推字节数——外来增长检测的上界口径）
                 confirmed = await self._reconcile_write_offset(
-                    path, confirmed, chunks.count, sandbox=sandbox
+                    path, confirmed, chunks.count, sandbox=sandbox, signal=signal
                 )
                 continue
             # done 对账：全量字节数 = 本轮起点 + 本轮推送
@@ -473,6 +510,7 @@ class FileSystemManager:
         max_resume_attempts: int = 3,
         *,
         sandbox: dict | None = None,
+        signal: AbortSignal | None = None,
     ) -> AsyncIterator[bytes]:
         """断点续传的流式读取（v1.12，nova 自有通道）：断线后重连续读。
 
@@ -482,6 +520,7 @@ class FileSystemManager:
         （done 携带 error，如权限拒绝）原样抛出不重试。
 
         `sandbox`：语义同 `read_stream`；重开 readStream 续读时同样透传。
+        `signal`：取消词汇——透传每轮 read_stream；AbortedError 直通不重试。
         """
         produced = 0
         attempts = 0
@@ -496,6 +535,7 @@ class FileSystemManager:
                     offset=offset + produced,
                     length=remaining,
                     sandbox=sandbox,
+                    signal=signal,
                 ):
                     produced += len(chunk)
                     yield chunk
@@ -527,6 +567,7 @@ class FileSystemManager:
         pushed: int,
         *,
         sandbox: dict | None = None,
+        signal: AbortSignal | None = None,
     ) -> int:
         """断线后对账服务端文件大小：
 
@@ -537,6 +578,7 @@ class FileSystemManager:
           场景服务端恰好收齐全轮推送，size == confirmed + pushed。
         `sandbox`：与 write_stream 开门同一载荷（线上 dict），对账
         getMetadata 同样透传（句柄族方法全透传纪律）。
+        `signal`：取消词汇——对账请求可被打断，AbortedError 直通。
         """
         try:
             result = await self._transport.send_request(
@@ -544,6 +586,7 @@ class FileSystemManager:
                 FsGetMetadataParams(path=path, sandbox=sandbox).model_dump(
                     by_alias=True, exclude_none=True
                 ),
+                **_signal_kwarg(signal),
             )
         except ProtocolError as err:
             if err.code == -32004:
@@ -581,12 +624,17 @@ class FileSystemManager:
         return attempts
 
     async def read_dir(
-        self, path: str, *, sandbox: FileSystemSandboxContext | None = None
+        self,
+        path: str,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> list[DirEntry]:
-        """列出目录；`sandbox`：按请求沙箱上下文，语义同 `read_file`"""
+        """列出目录；`sandbox`：按请求沙箱上下文，语义同 `read_file`；
+        `signal`：取消词汇"""
         params = FsReadDirectoryParams(path=path, sandbox=_sandbox_wire(sandbox))
         result = await self._transport.send_request(
-            FS_READ_DIRECTORY, params.model_dump(by_alias=True)
+            FS_READ_DIRECTORY, params.model_dump(by_alias=True), **_signal_kwarg(signal)
         )
         response = FsReadDirectoryResponse.model_validate(result)
         return response.entries
@@ -597,9 +645,10 @@ class FileSystemManager:
         options: WalkOptions | None = None,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> WalkOutcome:
         """目录遍历（界限经 WalkOptions——深度/目录数/条目数上限）；`sandbox`
-        语义同 `read_file`。
+        语义同 `read_file`；`signal`：取消词汇（含回退路径逐原语透传）。
 
         旧服务端无 fs/walk 端点（-32601 MethodNotFound）时回退
         getMetadata/canonicalize/readDirectory 原语合成遍历（对位 Rust
@@ -610,12 +659,14 @@ class FileSystemManager:
         )
         try:
             result = await self._transport.send_request(
-                FS_WALK, params.model_dump(by_alias=True)
+                FS_WALK, params.model_dump(by_alias=True), **_signal_kwarg(signal)
             )
         except ProtocolError as err:
             if err.code != JSON_RPC_METHOD_NOT_FOUND:
                 raise
-            return await self._walk_via_directory_reads(path, params.options, sandbox)
+            return await self._walk_via_directory_reads(
+                path, params.options, sandbox, signal=signal
+            )
         return WalkOutcome.model_validate(result)
 
     async def _walk_via_directory_reads(
@@ -623,6 +674,8 @@ class FileSystemManager:
         root: str,
         options: WalkOptions,
         sandbox: FileSystemSandboxContext | None,
+        *,
+        signal: AbortSignal | None = None,
     ) -> WalkOutcome:
         """fs/walk 的原语合成回退（对位 Rust exec-server-file-system 的
         `walk_via_directory_reads` 默认实现）：BFS 按 fileName 排序逐目录展开，
@@ -640,14 +693,14 @@ class FileSystemManager:
                 f"directories={MAX_WALK_DIRECTORIES}, entries={MAX_WALK_ENTRIES}"
             )
 
-        root_metadata = await self.metadata(root, sandbox=sandbox)
+        root_metadata = await self.metadata(root, sandbox=sandbox, signal=signal)
         if not root_metadata.is_directory or (
             root_metadata.is_symlink and not options.follow_directory_symlinks
         ):
             return WalkOutcome()
 
         root_identity = (
-            await self.canonicalize(root, sandbox=sandbox)
+            await self.canonicalize(root, sandbox=sandbox, signal=signal)
             if options.follow_directory_symlinks
             else root
         )
@@ -678,7 +731,11 @@ class FileSystemManager:
         while queue:
             directory, depth = queue.popleft()
             try:
-                entries = await self.read_dir(directory, sandbox=sandbox)
+                entries = await self.read_dir(directory, sandbox=sandbox, signal=signal)
+            except AbortedError:
+                # 取消词汇直通（对位 data-modeling.md §七领域层纪律）——不得
+                # 收编成 WalkError 把用户取消误报成单目录失败
+                raise
             except Exception as err:
                 if not push_error(directory, str(err)):
                     return outcome
@@ -698,7 +755,11 @@ class FileSystemManager:
                         return outcome
                     continue
                 try:
-                    metadata = await self.metadata(entry_path, sandbox=sandbox)
+                    metadata = await self.metadata(
+                        entry_path, sandbox=sandbox, signal=signal
+                    )
+                except AbortedError:
+                    raise  # 取消词汇直通（同上——不收编成 WalkError）
                 except Exception as err:
                     if not push_error(entry_path, str(err)):
                         return outcome
@@ -726,8 +787,10 @@ class FileSystemManager:
                     if options.follow_directory_symlinks:
                         try:
                             directory_identity = await self.canonicalize(
-                                entry_path, sandbox=sandbox
+                                entry_path, sandbox=sandbox, signal=signal
                             )
+                        except AbortedError:
+                            raise  # 取消词汇直通（同上——不收编成 WalkError）
                         except Exception as err:
                             if not push_error(entry_path, str(err)):
                                 return outcome
@@ -752,10 +815,12 @@ class FileSystemManager:
         follow_symlinks: bool | None = None,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> None:
         """创建目录；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
 
         `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        `signal`：取消词汇——响应等待可被打断，AbortedError 直通。
         """
         params = FsCreateDirectoryParams(
             path=path,
@@ -764,7 +829,9 @@ class FileSystemManager:
             sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(
-            FS_CREATE_DIRECTORY, params.model_dump(by_alias=True, exclude_none=True)
+            FS_CREATE_DIRECTORY,
+            params.model_dump(by_alias=True, exclude_none=True),
+            **_signal_kwarg(signal),
         )
 
     async def remove(
@@ -775,11 +842,13 @@ class FileSystemManager:
         follow_symlinks: bool | None = None,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> None:
         """删除文件或目录；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
 
         注意：no-follow（False）不支持递归删除（服务端报 Unsupported）。
         `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        `signal`：取消词汇——响应等待可被打断，AbortedError 直通。
         """
         params = FsRemoveParams(
             path=path,
@@ -789,7 +858,9 @@ class FileSystemManager:
             sandbox=_sandbox_wire(sandbox),
         )
         await self._transport.send_request(
-            FS_REMOVE, params.model_dump(by_alias=True, exclude_none=True)
+            FS_REMOVE,
+            params.model_dump(by_alias=True, exclude_none=True),
+            **_signal_kwarg(signal),
         )
 
     async def copy(
@@ -799,15 +870,19 @@ class FileSystemManager:
         recursive: bool = False,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> None:
-        """复制文件或目录；`sandbox`：按请求沙箱上下文，语义同 `read_file`"""
+        """复制文件或目录；`sandbox`：按请求沙箱上下文，语义同 `read_file`；
+        `signal`：取消词汇"""
         params = FsCopyParams(
             sourcePath=src,
             destinationPath=dst,
             recursive=recursive,
             sandbox=_sandbox_wire(sandbox),
         )
-        await self._transport.send_request(FS_COPY, params.model_dump(by_alias=True))
+        await self._transport.send_request(
+            FS_COPY, params.model_dump(by_alias=True), **_signal_kwarg(signal)
+        )
 
     async def metadata(
         self,
@@ -815,26 +890,35 @@ class FileSystemManager:
         follow_symlinks: bool | None = None,
         *,
         sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> FileMetadata:
         """获取文件元数据；`follow_symlinks` 语义同 `read_file`（None=服务端默认 true）。
 
         `sandbox`：按请求沙箱上下文，语义同 `read_file`。
+        `signal`：取消词汇——响应等待可被打断，AbortedError 直通。
         """
         params = FsGetMetadataParams(
             path=path, followSymlinks=follow_symlinks, sandbox=_sandbox_wire(sandbox)
         )
         result = await self._transport.send_request(
-            FS_GET_METADATA, params.model_dump(by_alias=True, exclude_none=True)
+            FS_GET_METADATA,
+            params.model_dump(by_alias=True, exclude_none=True),
+            **_signal_kwarg(signal),
         )
         return FileMetadata.model_validate(result)
 
     async def canonicalize(
-        self, path: str, *, sandbox: FileSystemSandboxContext | None = None
+        self,
+        path: str,
+        *,
+        sandbox: FileSystemSandboxContext | None = None,
+        signal: AbortSignal | None = None,
     ) -> str:
-        """规范化路径；`sandbox`：按请求沙箱上下文，语义同 `read_file`"""
+        """规范化路径；`sandbox`：按请求沙箱上下文，语义同 `read_file`；
+        `signal`：取消词汇"""
         params = FsCanonicalizeParams(path=path, sandbox=_sandbox_wire(sandbox))
         result = await self._transport.send_request(
-            FS_CANONICALIZE, params.model_dump(by_alias=True)
+            FS_CANONICALIZE, params.model_dump(by_alias=True), **_signal_kwarg(signal)
         )
         response = FsCanonicalizeResponse.model_validate(result)
         return response.path
@@ -847,6 +931,7 @@ class FileSystemManager:
         *,
         mode: FsOpenMode = FsOpenMode.READ,
         sandbox: dict | None = None,
+        signal: AbortSignal | None = None,
     ) -> str:
         """打开文件句柄用于分块读/写
 
@@ -854,46 +939,66 @@ class FileSystemManager:
         随后用 `write_block` 按显式 offset 定位写。旧 executor 会把 replace
         静默降级为只读句柄——能力门（对位 codex e7798c9944）在
         fileWriteStreaming=false 时本地报错，不发线上请求。
+        `signal`：取消词汇——能力门探查与开门请求都可被打断。
         """
         if (
             mode is FsOpenMode.REPLACE
-            and not await self._file_write_streaming_supported()
+            and not await self._file_write_streaming_supported(signal=signal)
         ):
             raise ProtocolError("exec-server does not support writable file streams")
         handle_id = handle_id or _new_handle_id("b")
         params = FsOpenParams(handleId=handle_id, path=path, mode=mode, sandbox=sandbox)
         result = await self._transport.send_request(
-            FS_OPEN, params.model_dump(by_alias=True)
+            FS_OPEN, params.model_dump(by_alias=True), **_signal_kwarg(signal)
         )
         response = FsOpenResponse.model_validate(result)
         return response.handle_id
 
     async def read_block(
-        self, handle_id: str, offset: int, length: int
+        self,
+        handle_id: str,
+        offset: int,
+        length: int,
+        *,
+        signal: AbortSignal | None = None,
     ) -> tuple[bytes, bool]:
-        """分块读取"""
+        """分块读取；`signal`：取消词汇"""
         params = FsReadBlockParams(handleId=handle_id, offset=offset, len=length)
         result = await self._transport.send_request(
-            FS_READ_BLOCK, params.model_dump(by_alias=True)
+            FS_READ_BLOCK, params.model_dump(by_alias=True), **_signal_kwarg(signal)
         )
         response = FsReadBlockResponse.model_validate(result)
         return response.chunk, response.eof
 
-    async def write_block(self, handle_id: str, offset: int, chunk: bytes) -> None:
+    async def write_block(
+        self,
+        handle_id: str,
+        offset: int,
+        chunk: bytes,
+        *,
+        signal: AbortSignal | None = None,
+    ) -> None:
         """定位写块（对位 RS `fs_write_block`）：非空块、解码后 ≤1MiB，显式 offset。
 
         成功返回即确认全部字节落盘；能力门同上（fileWriteStreaming=false 时
-        本地报错，不发线上请求）。
+        本地报错，不发线上请求）。`signal`：取消词汇——能力门探查与写块
+        请求都可被打断。
         """
-        if not await self._file_write_streaming_supported():
+        if not await self._file_write_streaming_supported(signal=signal):
             raise ProtocolError("exec-server does not support writable file streams")
         params = FsWriteBlockParams(handleId=handle_id, offset=offset, chunk=chunk)
         result = await self._transport.send_request(
-            FS_WRITE_BLOCK, params.model_dump(by_alias=True)
+            FS_WRITE_BLOCK, params.model_dump(by_alias=True), **_signal_kwarg(signal)
         )
         FsWriteBlockResponse.model_validate(result)
 
-    async def close(self, handle_id: str, *, channel: str | None = None) -> None:
+    async def close(
+        self,
+        handle_id: str,
+        *,
+        channel: str | None = None,
+        signal: AbortSignal | None = None,
+    ) -> None:
         """关闭随机访问句柄（读/写通用）
 
         `channel`：池化传输下显式指定落点通道。句柄状态随连接存活——
@@ -903,7 +1008,7 @@ class FileSystemManager:
         （fd/槽一直占到流自然结束）——关流式句柄必须与开流同通道
         （read_stream/write_stream 收摊路径经 `_spawn_close` 按注册同一解析
         落点）。None（默认）走方法路由表兜底（fs/open 句柄同连接——控制面；
-        裸传输/单连接无通道概念）。
+        裸传输/单连接无通道概念）。`signal`：取消词汇。
         """
         params = FsCloseParams(handleId=handle_id)
         await self._transport.send_request(
@@ -912,17 +1017,28 @@ class FileSystemManager:
             channel=channel,
             # 对位 Rust fs_close 恒走 call_for_cleanup（收摊保留槽语义）
             for_cleanup=True,
+            **_signal_kwarg(signal),
         )
 
-    async def _file_write_streaming_supported(self) -> bool:
+    async def _file_write_streaming_supported(
+        self, *, signal: AbortSignal | None = None
+    ) -> bool:
         """fileWriteStreaming 能力位（对位 codex e7798c9944 的客户端门）：
         优先走注入的环境元数据缓存；独立使用时惰性拉取一次并本地缓存。
         capabilities 缺失（旧服务端）按 false 处理。"""
         if self._environment_info_provider is not None:
-            info = await self._environment_info_provider()
+            # 取消词汇仅在声明时透传给提供方（client 装配注入的
+            # ExecutorClient.environment_info 已支持 signal 形参；第三方
+            # Callable 保持旧签名兼容——对位 for_cleanup 的声明时透传纪律）
+            if signal is None:
+                info = await self._environment_info_provider()
+            else:
+                info = await self._environment_info_provider(signal=signal)
         else:
             if self._environment_info_cached is None:
-                result = await self._transport.send_request(ENVIRONMENT_INFO)
+                result = await self._transport.send_request(
+                    ENVIRONMENT_INFO, **_signal_kwarg(signal)
+                )
                 self._environment_info_cached = EnvironmentInfo.model_validate(result)
             info = self._environment_info_cached
         capabilities = info.capabilities

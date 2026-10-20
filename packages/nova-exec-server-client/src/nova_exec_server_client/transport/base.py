@@ -17,9 +17,12 @@ from typing import Any, Protocol
 
 from nova_protocol import (
     NETWORK_POLICY_REQUEST,
+    AbortedError,
+    AbortSignal,
     NetworkPolicyDecision,
     NetworkPolicyRequestResponse,
 )
+from nova_protocol.signal import await_with_signal
 
 from ..errors import (
     JSON_RPC_INTERNAL_ERROR,
@@ -41,6 +44,12 @@ DisconnectHandler = Callable[[str | None], None]
 RequestHandler = Callable[[dict], Awaitable[Any]]
 
 
+def _signal_kwarg(signal: AbortSignal | None) -> dict[str, Any]:
+    """signal 仅在非 None 时透传（对位 pool.send_request 的 for_cleanup 纪律：
+    声明时透传——未声明该参数的传输实现保持兼容）"""
+    return {} if signal is None else {"signal": signal}
+
+
 class Transport(Protocol):
     """传输层接口协议（结构化类型——实现类无需显式继承）。
 
@@ -50,6 +59,10 @@ class Transport(Protocol):
     `for_cleanup` 标记收摊调用（process/terminate、fs/close 等收摊路径）：
     在飞槽位裁决时先抢共享槽、再抢收摊保留槽（对位 Rust rpc.rs
     call_for_cleanup 的保留槽语义）。
+
+    `signal`：取消词汇（nova_protocol AbortSignal）——响应等待经竞速原语
+    `await_with_signal` 包装：signal 触发即取消等待、抛 AbortedError（预
+    触发快失败不发请求；竞速完成优先，对位 concurrency.md §六）。
 
     `on_disconnect` 注册意外断线回调（主动 disconnect 不触发）——恢复层
     （recovery.ManagedTransport）据此发起重连；不参与恢复的调用方可忽略。
@@ -66,6 +79,7 @@ class Transport(Protocol):
         *,
         channel: str | None = None,
         for_cleanup: bool = False,
+        signal: AbortSignal | None = None,
     ) -> Any: ...
 
     async def send_notification(
@@ -143,6 +157,7 @@ class _JsonRpcTransport:
         *,
         channel: str | None = None,
         for_cleanup: bool = False,
+        signal: AbortSignal | None = None,
     ) -> Any:
         """发送 JSON-RPC 请求并等待响应（单传输忽略 channel——连接池路由参数）
 
@@ -152,7 +167,15 @@ class _JsonRpcTransport:
         process/terminate、fs/close 等收摊路径）先抢共享槽、再抢
         RESERVED_CLEANUP_CALLS 保留槽，双无即判连接死亡（对位
         call_for_cleanup 的 close_transport 熔断 + RpcCallError::Closed）。
+
+        `signal`：取消词汇——预触发快失败（举旗点：不占槽、不发请求）；
+        响应等待经 `await_with_signal` 竞速，signal 胜出即取消等待抛
+        AbortedError（pending 表清理与在飞槽归还由 finally 覆盖）。
         """
+        if signal is not None:
+            # 举旗点：预触发信号快失败——不发请求（对位 concurrency.md §八
+            # abort 语义"pre-aborted 不发请求"）
+            signal.throw_if_aborted()
         cleanup_reserved = False
         if self._in_flight_regular < self.MAX_IN_FLIGHT_REGULAR_CALLS:
             self._in_flight_regular += 1
@@ -187,9 +210,16 @@ class _JsonRpcTransport:
 
         try:
             await self._send_message(message)
-            return await asyncio.wait_for(future, timeout=self.request_timeout)
+            return await await_with_signal(
+                asyncio.wait_for(future, timeout=self.request_timeout), signal
+            )
         except asyncio.TimeoutError:
             raise TimeoutError(f"request {method} timed out") from None
+        except AbortedError:
+            # 取消词汇直通（对位 data-modeling.md §七领域层纪律：except 先直通
+            # 取消词汇，再进泛型兜底——包装成 ConnectionError 就是把用户取消
+            # 误报成故障）
+            raise
         except Exception as e:
             # 业务错误（JSON-RPC error 响应的 ProtocolError、连接已断）原样透传，
             # 只把传输层发送失败包装为 ConnectionError
@@ -197,8 +227,9 @@ class _JsonRpcTransport:
                 raise
             raise ConnectionError(f"failed to send request {method}: {e}") from e
         finally:
-            # 对位 Rust PendingRequestGuard：完成/失败/被取消（CancelledError）
-            # 一律即从 pending 表移除——取消残留会等到后续流量或断线才清；
+            # 对位 Rust PendingRequestGuard：完成/失败/被取消（CancelledError
+            # 基础设施收尾 / AbortedError 用户取消词汇）一律即从 pending 表
+            # 移除——取消残留会等到后续流量或断线才清；
             # 在飞槽位一并归还（对位 SemaphorePermit drop）
             if cleanup_reserved:
                 self._in_flight_cleanup -= 1

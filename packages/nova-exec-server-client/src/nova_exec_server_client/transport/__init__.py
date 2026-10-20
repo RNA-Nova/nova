@@ -69,6 +69,7 @@ from .base import (
     RequestHandler,
     Transport,
     _JsonRpcTransport,
+    _signal_kwarg,
 )
 from .gate import (
     _DATA_PLANE_NOTIFICATION_METHODS,
@@ -100,6 +101,7 @@ __all__ = [
     "DisconnectHandler",
     "RequestHandler",
     "_JsonRpcTransport",
+    "_signal_kwarg",
     # 入站闸门与限流常量（gate.py）
     "MAX_CLIENT_INBOUND_REQUEST_LEN",
     "MAX_CLIENT_INBOUND_NOTIFICATION_LEN",

@@ -14,6 +14,7 @@ from nova_protocol import (
     PROCESS_START,
     PROCESS_TERMINATE,
     PROCESS_WRITE,
+    AbortSignal,
     ExecEnvPolicy,
     ExecMetadata,
     FileSystemSandboxContext,
@@ -32,7 +33,7 @@ from nova_protocol import (
 
 from .errors import ProcessError
 from .recovery import is_transport_class_error
-from .transport import Transport
+from .transport import Transport, _signal_kwarg
 
 if TYPE_CHECKING:
     from .recovery import ManagedTransport
@@ -71,53 +72,67 @@ def _policy_decision_timeout(network_proxy: Any) -> float | None:
 
 @dataclass
 class ProcessHandle:
-    """进程句柄"""
+    """进程句柄（各方法的 `signal` 为取消词汇：透传到底层 RPC 的响应等待，
+    触发即抛 AbortedError）"""
 
     process_id: str
     client: ProcessManager
 
     async def read(
-        self, wait_ms: int = 1000, max_bytes: int | None = None
+        self,
+        wait_ms: int = 1000,
+        max_bytes: int | None = None,
+        *,
+        signal: AbortSignal | None = None,
     ) -> ProcessOutput:
         """读取进程输出"""
         return await self.client.read(
-            self.process_id, wait_ms=wait_ms, max_bytes=max_bytes
+            self.process_id, wait_ms=wait_ms, max_bytes=max_bytes, signal=signal
         )
 
-    async def write(self, data: bytes) -> None:
+    async def write(self, data: bytes, *, signal: AbortSignal | None = None) -> None:
         """写入进程 stdin"""
-        await self.client.write(self.process_id, data)
+        await self.client.write(self.process_id, data, signal=signal)
 
-    async def terminate(self) -> None:
+    async def terminate(self, *, signal: AbortSignal | None = None) -> None:
         """终止进程"""
-        await self.client.terminate(self.process_id)
+        await self.client.terminate(self.process_id, signal=signal)
 
-    async def signal(self, signal: str) -> None:
-        """发送信号"""
-        await self.client.signal(self.process_id, signal)
+    async def signal(self, sig: str, *, signal: AbortSignal | None = None) -> None:
+        """发送信号（`sig` 为 POSIX 信号名——取消词汇占用 `signal` 形参名）"""
+        await self.client.signal(self.process_id, sig, signal=signal)
 
-    async def wait(self, timeout: float | None = None) -> int:
+    async def wait(
+        self, timeout: float | None = None, *, signal: AbortSignal | None = None
+    ) -> int:
         """等待进程退出，返回退出码
 
         轮询粒度自适应单次 read 的阻塞时长（read 最多等 wait_ms 毫秒），
-        timeout 计时含阻塞期；None（默认）无限等。"""
+        timeout 计时含阻塞期；None（默认）无限等。`signal` 透传每轮 read
+        的响应等待——触发即抛 AbortedError。"""
         start = time.monotonic()
         while True:
-            output = await self.read(wait_ms=1000)
+            output = await self.read(wait_ms=1000, signal=signal)
             if output.exited and output.exit_code is not None:
                 return output.exit_code
             elapsed = time.monotonic() - start
             if timeout is not None and elapsed > timeout:
                 raise ProcessError(f"process {self.process_id} wait timed out")
 
-    async def output(self) -> AsyncIterator[bytes]:
+    async def output(
+        self, *, signal: AbortSignal | None = None
+    ) -> AsyncIterator[bytes]:
         """流式读取进程输出"""
-        async for chunk in self.client.iter_output(self.process_id):
+        async for chunk in self.client.iter_output(self.process_id, signal=signal):
             yield chunk
 
-    async def output_with_stream(self) -> AsyncIterator[tuple[str, bytes]]:
+    async def output_with_stream(
+        self, *, signal: AbortSignal | None = None
+    ) -> AsyncIterator[tuple[str, bytes]]:
         """流式读取进程输出（带流标签——stdout/stderr 分离消费用）"""
-        async for item in self.client.iter_output_with_stream(self.process_id):
+        async for item in self.client.iter_output_with_stream(
+            self.process_id, signal=signal
+        ):
             yield item
 
 
@@ -163,6 +178,7 @@ class ProcessManager:
         enforce_managed_network: bool = False,
         managed_network: ManagedNetworkSandboxContext | dict[str, Any] | None = None,
         network_proxy: dict[str, Any] | None = None,
+        signal: AbortSignal | None = None,
     ) -> ProcessHandle:
         """启动进程（pipe_stdin=True 才可用 write 写 stdin，否则服务端 stdinClosed）
 
@@ -174,6 +190,9 @@ class ProcessManager:
         - env_policy/shell_snapshot/arg0：环境策略、shell 快照、argv[0] 覆盖
         - metadata：可选归因元数据（threadId/toolCallId，executor 遥测归因用，
           非授权依据——v1.7 起；旧客户端省略、旧 executor 忽略）
+        - signal：取消词汇——start 等待（含恢复等待与回执等待）可被打断；
+          signal 触发抛 AbortedError，后台线 RPC 不受影响（RPC 落定后按
+          取消分支调度 terminate 清理——client 装配的门控路径语义）
         """
         if not argv:
             raise ProcessError("argv cannot be empty")
@@ -195,7 +214,9 @@ class ProcessManager:
             networkProxy=network_proxy,
         )
         result = await self._transport.send_request(
-            PROCESS_START, params.model_dump(by_alias=True, exclude_none=True)
+            PROCESS_START,
+            params.model_dump(by_alias=True, exclude_none=True),
+            **_signal_kwarg(signal),
         )
         response = ProcessStartResponse.model_validate(result)
         self._live_processes[response.process_id] = _policy_decision_timeout(
@@ -228,6 +249,7 @@ class ProcessManager:
         after_seq: int | None,
         max_bytes: int | None = None,
         wait_ms: int,
+        signal: AbortSignal | None = None,
     ) -> ProcessReadResponse:
         """单次 process/read（含传输关闭重试臂——重试带原 afterSeq，恢复
         成功后续拉不丢输出：服务端输出缓冲随会话存活，seq 由客户端跟踪）"""
@@ -240,7 +262,9 @@ class ProcessManager:
 
         async def send() -> ProcessReadResponse:
             result = await self._transport.send_request(
-                PROCESS_READ, params.model_dump(by_alias=True)
+                PROCESS_READ,
+                params.model_dump(by_alias=True),
+                **_signal_kwarg(signal),
             )
             return ProcessReadResponse.model_validate(result)
 
@@ -252,10 +276,17 @@ class ProcessManager:
         wait_ms: int = 1000,
         max_bytes: int | None = None,
         after_seq: int | None = None,
+        *,
+        signal: AbortSignal | None = None,
     ) -> ProcessOutput:
-        """读取进程输出（断线瞬间的传输关闭带原 afterSeq 重试，恢复成功不丢输出）"""
+        """读取进程输出（断线瞬间的传输关闭带原 afterSeq 重试，恢复成功不丢输出；
+        `signal` 为取消词汇——响应等待可被打断，AbortedError 直通不重试）"""
         response = await self._read_raw(
-            process_id, after_seq=after_seq, max_bytes=max_bytes, wait_ms=wait_ms
+            process_id,
+            after_seq=after_seq,
+            max_bytes=max_bytes,
+            wait_ms=wait_ms,
+            signal=signal,
         )
         if response.exited:
             # 终态即移出活进程登记表（对位 Rust finish_process_event
@@ -271,7 +302,11 @@ class ProcessManager:
         )
 
     async def iter_output(
-        self, process_id: str, wait_ms: int = 1000
+        self,
+        process_id: str,
+        wait_ms: int = 1000,
+        *,
+        signal: AbortSignal | None = None,
     ) -> AsyncIterator[bytes]:
         """流式读取进程输出（afterSeq 逐块跟踪，exited 收尾）
 
@@ -279,11 +314,14 @@ class ProcessManager:
         的 Wait 策略）；断线瞬间在飞 read 被判死时带原 afterSeq 重试，
         resume 成功后续拉不丢输出（服务端输出缓冲随会话存活，afterSeq 由
         客户端跟踪）；恢复失败才向上抛 ConnectionError。
+
+        `signal` 为取消词汇——逐轮 read 的响应等待（含恢复等待）都可被打断，
+        AbortedError 直通。
         """
         after_seq = None
         while True:
             response = await self._read_raw(
-                process_id, after_seq=after_seq, wait_ms=wait_ms
+                process_id, after_seq=after_seq, wait_ms=wait_ms, signal=signal
             )
             for chunk in response.chunks:
                 yield chunk.chunk
@@ -293,14 +331,18 @@ class ProcessManager:
                 break
 
     async def iter_output_with_stream(
-        self, process_id: str, wait_ms: int = 1000
+        self,
+        process_id: str,
+        wait_ms: int = 1000,
+        *,
+        signal: AbortSignal | None = None,
     ) -> AsyncIterator[tuple[str, bytes]]:
         """流式读取进程输出（带流标签——stdout/stderr 分离消费用；
-        断线重试语义同 iter_output）"""
+        断线重试与取消语义同 iter_output）"""
         after_seq = None
         while True:
             response = await self._read_raw(
-                process_id, after_seq=after_seq, wait_ms=wait_ms
+                process_id, after_seq=after_seq, wait_ms=wait_ms, signal=signal
             )
             for chunk in response.chunks:
                 yield chunk.stream, chunk.chunk
@@ -309,10 +351,13 @@ class ProcessManager:
                 self._live_processes.pop(process_id, None)
                 break
 
-    async def write(self, process_id: str, data: bytes) -> None:
+    async def write(
+        self, process_id: str, data: bytes, *, signal: AbortSignal | None = None
+    ) -> None:
         """写入进程 stdin（断线瞬间的传输关闭带同一 writeId 重试——单次
         逻辑写内 writeId 固定，服务端 writeId 去重保证重试不双写；
-        对位 Rust Session::write 的 next_write_id + 重试循环）"""
+        对位 Rust Session::write 的 next_write_id + 重试循环）。
+        `signal` 为取消词汇——AbortedError 直通不重试。"""
         params = ProcessWriteParams(
             processId=process_id,
             chunk=data,
@@ -321,7 +366,9 @@ class ProcessManager:
 
         async def send() -> ProcessWriteResponse:
             result = await self._transport.send_request(
-                PROCESS_WRITE, params.model_dump(by_alias=True)
+                PROCESS_WRITE,
+                params.model_dump(by_alias=True),
+                **_signal_kwarg(signal),
             )
             return ProcessWriteResponse.model_validate(result)
 
@@ -331,19 +378,23 @@ class ProcessManager:
                 f"write to process {process_id} failed: {response.status}"
             )
 
-    async def terminate(self, process_id: str) -> None:
+    async def terminate(
+        self, process_id: str, *, signal: AbortSignal | None = None
+    ) -> None:
         """终止进程
 
         语义说明（既有行为，有意保持）：terminate 是请求-确认式——服务端
         响应瞬间进程仍 running 即视为"终止未生效"抛 ProcessError。对长驻
         进程（cat / 交互 shell）终止异步生效，响应时大概率仍 running，调用
         方需容忍该错误（或先 signal 再轮询 read）；短进程与已退出进程不受
-        影响。会话随连接断开时服务端兜底清理进程。
+        影响。会话随连接断开时服务端兜底清理进程。`signal` 为取消词汇。
         """
         params = ProcessTerminateParams(processId=process_id)
         try:
             result = await self._transport.send_request(
-                PROCESS_TERMINATE, params.model_dump(by_alias=True)
+                PROCESS_TERMINATE,
+                params.model_dump(by_alias=True),
+                **_signal_kwarg(signal),
             )
             response = ProcessTerminateResponse.model_validate(result)
             if response.running:
@@ -353,9 +404,14 @@ class ProcessManager:
             # cancel_network_policy_decisions——后续裁决请求 fail-closed）
             self._live_processes.pop(process_id, None)
 
-    async def signal(self, process_id: str, signal: str) -> None:
-        """发送信号"""
-        params = ProcessSignalParams(processId=process_id, signal=signal)
+    async def signal(
+        self, process_id: str, sig: str, *, signal: AbortSignal | None = None
+    ) -> None:
+        """发送信号（`sig` 为 POSIX 信号名，线上字段仍是 `signal`——取消
+        词汇占用本方法的 `signal` 形参名，与全 SDK 取消面一致）"""
+        params = ProcessSignalParams(processId=process_id, signal=sig)
         await self._transport.send_request(
-            PROCESS_SIGNAL, params.model_dump(by_alias=True)
+            PROCESS_SIGNAL,
+            params.model_dump(by_alias=True),
+            **_signal_kwarg(signal),
         )

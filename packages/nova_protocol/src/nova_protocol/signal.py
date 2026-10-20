@@ -2,12 +2,28 @@
 
 提供 ``AbortController`` 作为唯一中断源，``AbortSignal`` 作为只读、可订阅、可等待的
 中断信号。signal 只能被观察，触发中断的唯一方式是调用 ``AbortController.abort()``。
+
+登记纪律（对位 docs/crosscutting/data-modeling.md §八 行为登记制）：本模块是
+枢纽的**登记制基础原语**（取消原语族，asyncio 白名单在册——纯洁性审计见
+tests/test_purity.py 的 IMPORT_WHITELIST）。取消原语族成员：
+
+- ``AbortedError`` / ``AbortSignal`` / ``AbortController`` / ``is_aborted``：
+  取消词汇本体（TS 对齐）；
+- ``await_with_signal``：**竞速型**可中断等待（asyncio 原生，signal 与
+  operation 赛跑、败者取消并等落定）。与 nova_ai ``utils/abort.py`` 的
+  ``await_with_abort``/``AbortScope``（anyio CancelScope 桥的 **scope 真杀型**）
+  是不同海拔——命名有意区分：竞速 ``await_with_signal`` vs scope
+  ``await_with_abort``；依赖方向铁律下本包不得 import nova_ai，竞速族在此以
+  asyncio 原生实现（对位 docs/crosscutting/concurrency.md §二 取消原语族）。
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Callable, Iterable, List, Optional
+import inspect
+from typing import Awaitable, Callable, Iterable, List, Optional, TypeVar
+
+T = TypeVar("T")
 
 
 class AbortedError(Exception):
@@ -158,4 +174,78 @@ def is_aborted(signal: Optional[AbortSignal]) -> bool:
     return signal is not None and signal.aborted
 
 
-__all__ = ["AbortController", "AbortedError", "AbortSignal", "is_aborted"]
+async def await_with_signal(
+    operation: Awaitable[T], signal: Optional[AbortSignal]
+) -> T:
+    """竞速等待（取消原语族成员）：``signal`` 触发即取消 ``operation`` 的等待并抛
+    :class:`AbortedError`；正常完成返回结果。
+
+    - ``signal`` 为 ``None`` → 直通（零开销：不建竞速任务，就地 await）；
+    - 预触发信号：先 ``throw_if_aborted`` 快失败（举旗点语义——未启动的协程
+      显式关闭，不留 "coroutine was never awaited" 告警；已就位的 Future 归
+      调用方处置）；
+    - 竞速裁决**完成优先**（completion-wins——同刻就绪时已完成的工作不丢弃，
+      对位 docs/crosscutting/concurrency.md §六）；
+    - signal 胜出：取消 operation 任务并 ``await`` 其取消落定（防悬挂任务泄漏），
+      抛 :class:`AbortedError`；operation 落定中自带失败的归因取消词汇
+      （signal 已胜出，不冒名也不放活）。
+
+    海拔区分：本原语是 asyncio 原生**竞速型**等待；nova_ai 的
+    ``await_with_abort``/``AbortScope`` 是 anyio CancelScope 桥的 **scope
+    真杀型**（块内一切等待真死）——不同海拔不撞名。
+    """
+    if signal is None:
+        return await operation
+    if signal.aborted:
+        # 举旗点快失败（对位 concurrency.md §八"举旗点：pre-aborted 不发请求"）
+        if inspect.iscoroutine(operation):
+            operation.close()
+        signal.throw_if_aborted()
+    op_task = asyncio.ensure_future(operation)
+    abort_task = asyncio.create_task(signal.wait())
+    try:
+        try:
+            done, _pending = await asyncio.wait(
+                (op_task, abort_task), return_when=asyncio.FIRST_COMPLETED
+            )
+        except asyncio.CancelledError:
+            # 本任务被外部取消（基础设施收尾语义，非 signal）：两路一并取消
+            # 等落定后照常传播——两词汇永不混用，也不留悬挂任务
+            op_task.cancel()
+            abort_task.cancel()
+            await asyncio.gather(op_task, abort_task, return_exceptions=True)
+            raise
+        if op_task in done:
+            # 完成优先：同刻就绪时已完成的工作不丢弃（operation 自身异常同样
+            # 原样归属——result() 会把它重新抛出）
+            return op_task.result()
+        # signal 胜出：取消 operation 并等其取消落定
+        op_task.cancel()
+        try:
+            await op_task
+        except asyncio.CancelledError:
+            if not op_task.cancelled():
+                raise  # 落定等待期本任务被外部取消——取消照常传播
+        except Exception:
+            # operation 以自身失败落定——signal 已胜出，归因取消词汇
+            pass
+        # 胜出分支信号必已触发——throw_if_aborted 恒抛 AbortedError
+        signal.throw_if_aborted()
+        raise AssertionError("await_with_signal: 胜出分支 throw_if_aborted 未抛")
+    finally:
+        # abort 等待任务收尾：完成/异常路径即取消落定，不悬挂
+        if not abort_task.done():
+            abort_task.cancel()
+            try:
+                await abort_task
+            except asyncio.CancelledError:
+                pass
+
+
+__all__ = [
+    "AbortController",
+    "AbortedError",
+    "AbortSignal",
+    "await_with_signal",
+    "is_aborted",
+]
