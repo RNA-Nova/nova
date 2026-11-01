@@ -160,3 +160,54 @@ class ThinkingLevelMap(TypedDict, total=False):
 ThinkingTokenBudgetField = Literal[
     "thinking_token_budget", "thinking_budget", "thinking_budget_tokens"
 ]
+
+
+class NovaErrorKind(str, Enum):
+    """用户面错误分类学（线上词汇；对位 codex ``CodexErrorInfo``）。
+
+    终态错误的唯一分类词汇：分类在边界归一点完成一次（nova_ai
+    ``normalize_error``），下游只查本枚举，不再匹配消息文案
+    （``docs/crosscutting/diagnostics-modeling.md`` 铁律二）。取消永远不是成员——
+    aborted 走 ``StopReason.ABORTED`` 自己的通道（铁律三）。
+    """
+
+    HTTP_CONNECTION_FAILED = "httpConnectionFailed"  # 连接失败（DNS/拒绝/TLS）
+    STREAM_DISCONNECTED = "streamDisconnected"  # 流中途断开
+    REQUEST_TIMEOUT = "requestTimeout"  # 408
+    OVERLOADED = "overloaded"  # 409 / 529 / overloaded 词
+    RATE_LIMITED = "rateLimited"  # 429 / SSE rate_limit
+    UPSTREAM_ERROR = "upstreamError"  # 其余 5xx
+    UNAUTHORIZED = "unauthorized"  # 401/403 凭据失效
+    LOGIN_REQUIRED = "loginRequired"  # 无凭据需登录
+    USAGE_LIMIT_EXCEEDED = "usageLimitExceeded"  # 额度/订阅上限
+    BAD_REQUEST = "badRequest"  # 400 schema/参数
+    CONTEXT_OVERFLOW = "contextOverflow"  # 上下文超长
+    MODEL_NOT_FOUND = "modelNotFound"  # 404 未开通/不存在
+    SANDBOX_DENIED = "sandboxDenied"  # executor 沙箱拒绝
+    EXECUTOR_UNAVAILABLE = "executorUnavailable"  # 执行后端不可达
+    INTERNAL = "internal"  # 兜底（含 bug）
+
+
+RETRYABLE_ERROR_KINDS = frozenset(
+    {
+        NovaErrorKind.HTTP_CONNECTION_FAILED,
+        NovaErrorKind.STREAM_DISCONNECTED,
+        NovaErrorKind.REQUEST_TIMEOUT,
+        NovaErrorKind.OVERLOADED,
+        NovaErrorKind.RATE_LIMITED,
+        NovaErrorKind.UPSTREAM_ERROR,
+    }
+)
+"""可重试错误类集合（覆盖 SDK 重试状态码全集：408/409/429/5xx/连接层）。
+
+可重试性从 kind 推导的唯一依据——各层不独立判定（铁律二）。
+"""
+
+
+class WarningKind(str, Enum):
+    """用户面警告分类（codex v2 四种警告通知的合并版）。"""
+
+    GENERAL = "general"  # 运行警告（传输降级等）
+    CONFIG = "config"  # 配置缺失/迁移/校验
+    CAPABILITY = "capability"  # 能力降级（二进制缺失/无站刷新/fallback 模型）
+    DEPRECATION = "deprecation"  # 弃用通知

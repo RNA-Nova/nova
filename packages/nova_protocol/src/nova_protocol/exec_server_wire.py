@@ -288,7 +288,9 @@ class ProcessStartParams(BaseModel):
     #: arg0 覆盖（真实 argv[0] 与可执行路径分离）
     arg0: str | None = Field(default=None, alias="arg0")
     #: 子进程环境策略（wire：ExecEnvPolicy）
-    env_policy: ExecEnvPolicy | dict[str, Any] | None = Field(default=None, alias="envPolicy")
+    env_policy: ExecEnvPolicy | dict[str, Any] | None = Field(
+        default=None, alias="envPolicy"
+    )
     #: shell 快照请求（wire：ShellSnapshotRequest {scopeId, shell}）
     shell_snapshot: ShellSnapshotRequest | dict[str, Any] | None = Field(
         default=None, alias="shellSnapshot"

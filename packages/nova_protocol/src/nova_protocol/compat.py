@@ -11,7 +11,6 @@ from .base_model import NovaBaseModel
 from .enums import ThinkingFormat, ThinkingTokenBudgetField
 
 SessionAffinityFormat = Literal["openai", "openai-nosession", "openrouter"]
-DeferredToolsMode = Literal["kimi"]
 
 
 class OpenRouterRouting(NovaBaseModel):
@@ -118,8 +117,14 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # Z.ai 提供商是否使用 tool_stream 参数
     zai_tool_stream: Optional[bool] = None
 
-    # 延迟工具注册模式（当前仅 Kimi）
-    deferred_tools_mode: Optional[DeferredToolsMode] = None
+    # 是否接受会话开始后的 system 文本消息（对位 pi
+    # supportsMidConvoSystemMessages；pi.dev 数据携带同名 camelCase 键）
+    supports_mid_convo_system_messages: Optional[bool] = None
+
+    # 是否接受会话中途 system 消息引入新工具（对位 pi
+    # supportsMidConvoToolAdditions——Kimi K3 的 deferred tool loading；
+    # 需 supports_mid_convo_system_messages 同时为真）
+    supports_mid_convo_tool_additions: Optional[bool] = None
 
     # 缓存控制格式（例如 "anthropic"）。默认：None
     cache_control_format: Optional[str] = None
@@ -180,3 +185,11 @@ class AnthropicMessagesCompat(NovaBaseModel):
 
     # 是否支持 deferred tools 的 tool_reference。默认：按模型判断
     supports_tool_references: Optional[bool] = None
+
+    # 是否支持 Anthropic strict 工具 schema。默认：false
+    supports_strict_tools: Optional[bool] = None
+
+    # 有意缺席：pi 的 allowedFallbackModels（服务端 fallback 许可名单）未
+    # 收录——其 cost 子模型（ModelCost 住 model.py）会让 compat↔model 成环，
+    # 且当前零消费方。出现首个真实 fallback 用户时再补（加 optional 字段
+    # 是 minor 演化，回来之门常开）。

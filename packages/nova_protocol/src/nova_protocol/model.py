@@ -3,7 +3,7 @@
 包含模型定义、模型成本、用量统计
 """
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 from pydantic import Field, model_validator
 
@@ -21,6 +21,42 @@ _COMPAT_CLASS_BY_API = {
     KnownApi.ANTHROPIC_MESSAGES.value: AnthropicMessagesCompat,
 }
 """api → compat 类的显式判别映射（与 ``Model._set_default_compat`` 的默认选择一致）。"""
+
+
+class ModelCostFields(TypedDict, total=False):
+    """模型目录字段包的 cost 形状（规则 10：声明不校验——``ModelCost``
+    构造时验收）。"""
+
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+
+
+class ModelFields(TypedDict, total=False):
+    """模型目录字段包形状（``Model`` 的构造字段——规则 10：声明不校验）。
+
+    跨"构建管线（``catalog/``）↔ 运行期（finalize 引擎）"边界的共享词汇
+    ——两处都从本枢纽引用（单一正典源）；``Model(**fields)`` 在目录边界
+    一次性校验。
+    """
+
+    id: str
+    name: str
+    reasoning: bool
+    input_types: List[str]
+    cost: ModelCostFields
+    context_window: int
+    max_tokens: int
+    thinking_level_map: ThinkingLevelMap
+    headers: Dict[str, str]
+    base_url: str
+    api: str
+    provider: str
+    # compat patch——合并进 compat 类的开放子集（键集合由
+    # ``OpenAICompletionsCompat``/``OpenAIResponsesCompat``/``AnthropicMessagesCompat``
+    # 三个 compat 类各自定义）
+    compat: Dict[str, Any]
 
 
 class ModelCostRates(NovaBaseModel):

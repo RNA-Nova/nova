@@ -5,7 +5,7 @@
 不再等到运行期。
 
 纯语义包装，**不做构造校验**（id 自产自销，校验只给不可信输入——
-见 docs/data-modeling.md「表示选型」规则 3）。边界处（JSONL 读入、
+见 docs/crosscutting/data-modeling.md「表示选型」规则 3）。边界处（JSONL 读入、
 RPC 参数校验后）一次性贴标：``SessionId(raw["sessionId"])``。
 """
 

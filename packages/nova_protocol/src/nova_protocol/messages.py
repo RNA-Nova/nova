@@ -8,7 +8,7 @@ from pydantic import ConfigDict, Field
 
 from .base_model import NovaBaseModel
 from .content import ImageContent, TextContent, ThinkingContent, ToolCall
-from .enums import Api, ProviderId, StopReason
+from .enums import Api, NovaErrorKind, ProviderId, StopReason
 from .model import Usage
 
 
@@ -57,6 +57,12 @@ class AssistantMessage(NovaBaseModel):
     deferred: Optional[bool] = None
     # 错误详情（stop_reason == error 时填充）；None = 无错误
     error_message: Optional[str] = None
+    # 错误分类（stop_reason == error 时由归一单点填充，docs/crosscutting/diagnostics-modeling.md）；
+    # None = 无错误或未分类（旧数据）
+    error_kind: Optional[NovaErrorKind] = None
+    # 服务端要求的退避毫秒数（429 的 Retry-After 族，归一单点填充）；
+    # None = 服务端未给指引——消费方（自动重试）回退本地指数退避
+    retry_after_ms: Optional[int] = None
     # 提供商响应级 id / 实际服务模型（与请求 model 不同说明被网关改写）；None = 未上报
     response_id: Optional[str] = None
     response_model: Optional[str] = None

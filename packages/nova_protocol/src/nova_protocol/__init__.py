@@ -22,6 +22,7 @@ from .agent_events import (
     ToolExecutionUpdateEvent,
     TurnEndEvent,
     TurnStartEvent,
+    WarningEvent,
     dump_agent_message,
 )
 from .aliases import ProviderEnv, ProviderHeaders
@@ -47,11 +48,11 @@ from .auth import (
     OAuthAuth,
     OAuthCredential,
     ProviderAuth,
+    RedactedString,
 )
 from .base_model import NovaBaseModel
 from .compat import (
     AnthropicMessagesCompat,
-    DeferredToolsMode,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     OpenRouterRouting,
@@ -59,12 +60,15 @@ from .compat import (
     VercelGatewayRouting,
 )
 from .content import ContentUnion, ImageContent, TextContent, ThinkingContent, ToolCall
+from .diagnostics import NovaDiagnostic
 from .enums import (
+    RETRYABLE_ERROR_KINDS,
     Api,
     CacheRetention,
     KnownApi,
     KnownProvider,
     ModelThinkingLevel,
+    NovaErrorKind,
     ProviderId,
     StopReason,
     ThinkingFormat,
@@ -72,6 +76,7 @@ from .enums import (
     ThinkingLevelMap,
     ThinkingTokenBudgetField,
     Transport,
+    WarningKind,
 )
 from .events import (
     AssistantMessageEvent,
@@ -101,11 +106,14 @@ from .model import (
     Cost,
     Model,
     ModelCost,
+    ModelCostFields,
     ModelCostRates,
     ModelCostTier,
+    ModelFields,
     ModelsStoreEntry,
     Usage,
 )
+from .sanitize import REDACTED_SECRET, redact_secrets
 from .signal import AbortController, AbortedError, AbortSignal, is_aborted
 
 __all__ = [
@@ -134,6 +142,12 @@ __all__ = [
     "ThinkingFormat",
     "ThinkingLevelMap",
     "ThinkingTokenBudgetField",
+    # 诊断词汇（docs/crosscutting/diagnostics-modeling.md）
+    "NovaErrorKind",
+    "RETRYABLE_ERROR_KINDS",
+    "WarningKind",
+    "WarningEvent",
+    "NovaDiagnostic",
     # 内容类型
     "TextContent",
     "ThinkingContent",
@@ -146,7 +160,9 @@ __all__ = [
     # 模型类型
     "Model",
     "ModelCost",
+    "ModelCostFields",
     "ModelCostRates",
+    "ModelFields",
     "ModelCostTier",
     "ModelsStoreEntry",
     # 消息类型
@@ -194,7 +210,6 @@ __all__ = [
     "OpenRouterRouting",
     "VercelGatewayRouting",
     "SessionAffinityFormat",
-    "DeferredToolsMode",
     # 共享别名
     "ProviderEnv",
     "ProviderHeaders",
@@ -220,54 +235,11 @@ __all__ = [
     "OAuthAuth",
     "OAuthCredential",
     "ProviderAuth",
+    "RedactedString",
+    # 清洗（codex redact_secrets 对位——出口统一件）
+    "redact_secrets",
+    "REDACTED_SECRET",
 ]
-
-
-# ── exec 前置管线词汇（①分析/②裁决——批次 C） ──
-from .exec_server_intent import (
-    Intent,
-    intent_from_argv,
-    intent_from_shell,
-    extract_bash_command,
-    parse_shell_lc_literal_commands,
-    parse_shell_lc_plain_commands,
-    parse_shell_script_into_commands,
-    DangerousCommandMatch,
-    MAX_DANGEROUS_COMMAND_WRAPPER_DEPTH,
-    dangerous_command_match,
-    executable_name_lookup_key,
-    is_dangerous_command,
-)
-
-from .exec_server_verdict import (
-    Decision,
-    ExecPolicyAmendment,
-    NetworkPolicyRuleAction,
-    NetworkPolicyAmendment,
-    ExecApprovalRequirement,
-    ReviewDecision,
-    ReviewDecisionPayload,
-    ToolDecisionSource,
-)
-
-from .exec_server_policy import (
-    PolicyParseError,
-    PatternToken,
-    PrefixPattern,
-    PrefixRule,
-    NetworkRuleProtocol,
-    normalize_network_rule_host,
-    NetworkRule,
-    PrefixRuleMatch,
-    HeuristicsRuleMatch,
-    Evaluation,
-    Policy,
-    parse_policy,
-    format_prefix_rule,
-    format_network_rule,
-    is_likely_executor_managed_sandbox_denied,
-    is_likely_sandbox_denied,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -283,15 +255,55 @@ from .exec_server_config import (
     SandboxMode,
     SandboxWorkspaceWriteConfig,
 )
-from .exec_server_environment import (
-    LOCAL_ENVIRONMENT_ID,
-    ResolvedEnvironment,
+from .exec_server_environment import LOCAL_ENVIRONMENT_ID, ResolvedEnvironment
+
+# ── exec 前置管线词汇（①分析/②裁决——批次 C） ──
+from .exec_server_intent import (
+    MAX_DANGEROUS_COMMAND_WRAPPER_DEPTH,
+    DangerousCommandMatch,
+    Intent,
+    dangerous_command_match,
+    executable_name_lookup_key,
+    extract_bash_command,
+    intent_from_argv,
+    intent_from_shell,
+    is_dangerous_command,
+    parse_shell_lc_literal_commands,
+    parse_shell_lc_plain_commands,
+    parse_shell_script_into_commands,
+)
+from .exec_server_policy import (
+    Evaluation,
+    HeuristicsRuleMatch,
+    NetworkRule,
+    NetworkRuleProtocol,
+    PatternToken,
+    Policy,
+    PolicyParseError,
+    PrefixPattern,
+    PrefixRule,
+    PrefixRuleMatch,
+    format_network_rule,
+    format_prefix_rule,
+    is_likely_executor_managed_sandbox_denied,
+    is_likely_sandbox_denied,
+    normalize_network_rule_host,
+    parse_policy,
+)
+from .exec_server_verdict import (
+    Decision,
+    ExecApprovalRequirement,
+    ExecPolicyAmendment,
+    NetworkPolicyAmendment,
+    NetworkPolicyRuleAction,
+    ReviewDecision,
+    ReviewDecisionPayload,
+    ToolDecisionSource,
 )
 from .exec_server_wire import (
     ENVIRONMENT_CONFIG_READ,
     ENVIRONMENT_INFO,
     ENVIRONMENT_STATUS,
-    ExecMetadata,
     FS_CANONICALIZE,
     FS_CLOSE,
     FS_COPY,
@@ -311,7 +323,6 @@ from .exec_server_wire import (
     FS_WRITE_STREAM,
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
-    FsOpenMode,
     HTTP_REQUEST,
     HTTP_REQUEST_BODY_DELTA,
     INITIALIZE,
@@ -342,6 +353,7 @@ from .exec_server_wire import (
     ExecFileSystemSandboxEntry,
     ExecFileSystemSpecialPath,
     ExecManagedFileSystemPermissions,
+    ExecMetadata,
     ExecPermissionProfile,
     ExecServerNetworkPolicyRequest,
     ExecServerNetworkProtocol,
@@ -354,6 +366,7 @@ from .exec_server_wire import (
     FsCopyParams,
     FsCreateDirectoryParams,
     FsGetMetadataParams,
+    FsOpenMode,
     FsOpenParams,
     FsOpenResponse,
     FsReadBlockParams,

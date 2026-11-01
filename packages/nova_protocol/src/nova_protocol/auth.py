@@ -13,9 +13,10 @@ AuthContext、AuthInteraction、ApiKeyAuth、OAuthAuth、ProviderAuth 等。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Annotated,
+    Any,
     Awaitable,
     Callable,
     List,
@@ -23,11 +24,13 @@ from typing import (
     NotRequired,
     Optional,
     Protocol,
+    Tuple,
     TypedDict,
     Union,
 )
 
 from pydantic import ConfigDict, Field
+from pydantic_core import core_schema
 
 from .aliases import ProviderEnv, ProviderHeaders
 from .base_model import NovaBaseModel
@@ -36,6 +39,28 @@ from .signal import AbortSignal
 # ---------------------------------------------------------------------------
 # 基础类型
 # ---------------------------------------------------------------------------
+
+
+class RedactedString(str):
+    """repr 脱敏的 str 子类（codex ``RedactedString`` 对位——值层脱敏）。
+
+    **repr（调试通道）恒为 ``<redacted>``**；**str（使用通道）即原值**——
+    拼 header / 序列化 / 落盘照常，使用点零改动。防的是"顺手打印模型 /
+    dump 产物 / 异常栈捕获"这类 repr 路径；``print(裸值)`` 是有意取值的
+    使用通道，不设防（codex 的 Debug/Display 同构）。
+    """
+
+    def __repr__(self) -> str:
+        return "<redacted>"
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: object, handler: object
+    ) -> core_schema.CoreSchema:
+        """pydantic 接入：校验时把输入 str 包装为本类型（其余按 str 处理）。"""
+        return core_schema.no_info_after_validator_function(
+            cls, core_schema.str_schema()
+        )
 
 
 class ModelAuth(TypedDict, total=False):
@@ -58,7 +83,9 @@ class AuthResult:
       等，用于 UI 展示与日志）；``None`` = 来源未知。
     """
 
-    auth: ModelAuth
+    # auth 含 api_key——不进 dataclass 默认 repr（security 纪律：含密结构
+    # 白名单 repr；env/source 可显示）
+    auth: ModelAuth = field(repr=False)
     env: Optional[ProviderEnv] = None
     source: Optional[str] = None
 
@@ -82,13 +109,14 @@ class AuthCheck:
 class ApiKeyCredential(NovaBaseModel):
     """存储的 API key 凭证。
 
-    - ``key``：API key；``None`` = 未设置（仅有 env 覆盖的条目）；
-    - ``env``：随凭证持久化的 provider 级环境变量；``None`` = 无。
+    - ``key``：API key（``RedactedString``——repr 脱敏）；``None`` = 未设置
+      （仅有 env 覆盖的条目）；
+    - ``env``：随凭证持久化的 provider 级环境变量（值可能含密——repr 隐藏）。
     """
 
     type: Literal["api_key"] = "api_key"
-    key: Optional[str] = None
-    env: Optional[ProviderEnv] = None
+    key: Optional[RedactedString] = None
+    env: Optional[ProviderEnv] = Field(default=None, repr=False)
 
 
 class OAuthCredential(NovaBaseModel):
@@ -98,7 +126,8 @@ class OAuthCredential(NovaBaseModel):
     ``[key: string]: unknown``：token 响应中的扩展字段（如 accountId
     之外的 provider 专有字段）在往返序列化中保留。
 
-    - ``access`` / ``refresh``：访问/刷新令牌；空串 = 未持有；
+    - ``access`` / ``refresh``：访问/刷新令牌（``RedactedString``——repr
+      脱敏）；空串 = 未持有；
     - ``expires``：访问令牌过期的 Unix 毫秒时间戳；``0`` = 未知（按已过期处理）；
     - ``accountId``：provider 账号 id。落盘词汇沿用 TS auth.json 的
       camelCase 键名——持久化格式一个字节不变优先于 Python 命名风格
@@ -108,10 +137,23 @@ class OAuthCredential(NovaBaseModel):
     model_config = ConfigDict(extra="allow")
 
     type: Literal["oauth"] = "oauth"
-    access: str = ""
-    refresh: str = ""
+    access: RedactedString = RedactedString("")
+    refresh: RedactedString = RedactedString("")
     expires: int = 0
     accountId: Optional[str] = None
+
+    def __repr_args__(self) -> List[Tuple[Optional[str], Any]]:
+        """repr 白名单（``extra="allow"`` 的扩展字段可能藏第二个 token——
+        只露三个安全字段，其余一律不显示）。
+
+        返回 pydantic ``ReprArgs`` 形状：``(字段名, 值)`` 对列表——
+        tuple 里的 ``Any`` 是诚实的（repr 参数值可任意），容器形状收窄声明。
+        """
+        return [
+            ("type", self.type),
+            ("expires", self.expires),
+            ("accountId", self.accountId),
+        ]
 
 
 # 判别键 ``type``（规则 6：auth.json 读入走 model_validate，显式判别）
@@ -152,35 +194,28 @@ class AuthContext(Protocol):
 
 
 class CredentialStore(Protocol):
-    """凭证持久化抽象。
+    """凭证持久化抽象（**同步引擎**——codex ``storage.rs`` 形状）。
 
-    与 TS ``CredentialStore`` 对齐：按 ``provider_id`` 存储一个 credential，
-    ``modify`` 是唯一的写路径，且按 provider id 串行化。
+    按 ``provider_id`` 存储一个 credential。四件套全部**同步、瞬时、无
+    signal 参数**——实现内不得含网络/长操作（编排：OAuth 刷新去重、复查、
+    重试，永远住调用方的 manager 层；锁拓扑与判别测试见
+    ``docs/crosscutting/concurrency.md``）。同步无 await 点 ⇒ 取消在结构
+    上打不断写入，store 整体不在取消面内。
     """
 
-    async def read(self, provider_id: str) -> Optional[Credential]:
+    def read(self, provider_id: str) -> Optional[Credential]:
         """读取已存储的 credential。"""
         ...
 
-    async def list(self) -> List[CredentialInfo]:
+    def list(self) -> List[CredentialInfo]:
         """列出所有 credential 元信息。"""
         ...
 
-    async def modify(
-        self,
-        provider_id: str,
-        fn: Callable[[Optional[Credential]], Awaitable[Optional[Credential]]],
-    ) -> Optional[Credential]:
-        """串行化读写 mutation。
-
-        承重契约（resolve 的双重检查锁依赖）：``fn`` 返回 ``None`` 表示
-        **不改写**存储，此时 ``modify`` 必须返回**当前值**（而非 None）——
-        调用方据此区分"期间已登出"（当前值本来就是 None）与"另一请求刚
-        刷新过"（当前值是新凭据，直接复用）。
-        """
+    def write(self, provider_id: str, credential: Credential) -> None:
+        """写入（新增/替换）provider 的 credential。"""
         ...
 
-    async def delete(self, provider_id: str) -> None:
+    def delete(self, provider_id: str) -> None:
         """删除 credential。"""
         ...
 
@@ -281,7 +316,7 @@ class LoginCancelledError(Exception):
     """登录流程被取消（用户 Esc / 宿主取消 / 会话中止）。
 
     共享取消词汇：交互实现抛出，流程与 RPC 层据此优雅收尾
-    （停轮询、关监听、清框）。统一取消语义见 docs/data-modeling.md 第七节。
+    （停轮询、关监听、清框）。统一取消语义见 docs/crosscutting/data-modeling.md 第七节。
     """
 
 

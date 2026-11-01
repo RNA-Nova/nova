@@ -18,6 +18,7 @@ from pydantic import ConfigDict, Field, field_serializer
 
 from .base_model import NovaBaseModel
 from .content import ImageContent, TextContent
+from .enums import WarningKind
 from .events import AssistantMessageEvent
 from .messages import Message, ToolResultMessage
 
@@ -192,6 +193,21 @@ class ToolExecutionEndEvent(_AgentEventBase):
     is_error: bool
 
 
+class WarningEvent(_AgentEventBase):
+    """用户面警告（``docs/crosscutting/diagnostics-modeling.md`` 诊断家族）。
+
+    流模式成员：运行时即发（批模式收集器 ``DiagnosticsCollector`` 的实时
+    槽由组合根桥接到本事件）。事件总线瞬态——禁止 append_entry 落盘
+    （铁律五）。
+    """
+
+    type: Literal["warning"] = "warning"
+    # 警告分类；缺省 GENERAL（一般运行警告）
+    kind: WarningKind = WarningKind.GENERAL
+    # 用户可读文案（可行动纪律：须告知下一步怎么办）
+    message: str
+
+
 # 全部 agent 事件的联合（判别键 ``type``——规则 6：随 RPC/会话回放走
 # model_validate，显式判别）
 AgentEvent = Annotated[
@@ -206,6 +222,7 @@ AgentEvent = Annotated[
         ToolExecutionStartEvent,
         ToolExecutionUpdateEvent,
         ToolExecutionEndEvent,
+        WarningEvent,
     ],
     Field(discriminator="type"),
 ]
@@ -229,4 +246,5 @@ __all__ = [
     "ToolExecutionUpdateEvent",
     "TurnEndEvent",
     "TurnStartEvent",
+    "WarningEvent",
 ]

@@ -37,8 +37,10 @@ BEHAVIOR_BAN = {
     "pathlib",
 }
 
-# 白名单：signal.py 是全仓签名通用的取消原语（例外清单唯一成员，
-# 见包 README）——其实现需要 asyncio，除此之外任何模块不得破例。
+# 白名单（登记制基础原语，见包 README 与 docs/crosscutting/structure-modeling.md
+# §二第 1 层——两处同步）：
+# - signal.py：取消原语，实现需要 asyncio。
+# （task_tracker.py 已迁出归 nova_async——取消/等待机制族叶子包。）
 IMPORT_WHITELIST = {
     "signal.py": {"asyncio"},
 }
