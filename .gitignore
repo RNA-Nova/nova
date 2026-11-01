@@ -157,3 +157,6 @@ pnpm-lock.yaml
 # 依赖 vendor 化（离线打包用，不进库）
 vendor/
 .kimi/
+
+# 本地下载的工具链（zig 等编译器二进制，470M+，不进库）
+.tooling/
