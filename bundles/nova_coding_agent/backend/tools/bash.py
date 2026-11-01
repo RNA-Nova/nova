@@ -7,22 +7,19 @@ AgentToolResult 格式化（对齐 TypeScript ``core/tools/bash.ts``）。
 """
 
 import asyncio
-import inspect
 import math
 import os
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from nova_coding_agent.bash.engine import (
-    BashOperations,
-    create_local_bash_operations,
-)
-from nova_coding_agent.orchestration import get_adjudication_engine, new_orchestrator
+from nova_async import any_signal
+from nova_coding_agent.bash.engine import BashOperations, create_local_bash_operations
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
     get_backend_selection,
     get_executor_manager,
 )
+from nova_coding_agent.orchestration import get_adjudication_engine, new_orchestrator
 from nova_coding_agent.tools_common.output_accumulator import (
     OutputAccumulator,
     OutputAccumulatorOptions,
@@ -45,12 +42,7 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import (
-    AbortSignal,
-    AgentToolResult,
-    ApprovalPolicy,
-    TextContent,
-)
+from nova_protocol import AbortSignal, AgentToolResult, ApprovalPolicy, TextContent
 
 # 对齐 pi bash.ts：timeout 上限（毫秒）。超过即参数非法，显式报错反馈给 LLM。
 MAX_TIMEOUT_MS = 2_147_483_647
@@ -104,23 +96,6 @@ class _PolicySentinel:
 
 
 _KEEP_POLICY = _PolicySentinel()
-
-
-class _CombinedAbortSignal:
-    """合并"调用方 signal"与"超时"的中止信号（对齐引擎的 signal 协议）。"""
-
-    def __init__(self) -> None:
-        self._event = asyncio.Event()
-
-    @property
-    def aborted(self) -> bool:
-        return self._event.is_set()
-
-    async def wait(self) -> None:
-        await self._event.wait()
-
-    def fire(self) -> None:
-        self._event.set()
 
 
 class Tool:
@@ -417,36 +392,13 @@ class Tool:
             )
 
         # 组合 signal：调用方 abort 或超时，任一触发即中止引擎（引擎负责
-        # SIGTERM→SIGKILL 升级杀整个进程组）。
-        combined = _CombinedAbortSignal()
-        timed_out = False
-        watchers = []
-
-        if signal is not None:
-
-            async def _watch_caller() -> None:
-                if getattr(signal, "aborted", False):
-                    combined.fire()
-                    return
-                wait_fn = getattr(signal, "wait", None)
-                if callable(wait_fn):
-                    result = wait_fn()
-                    if inspect.isawaitable(result):
-                        await result
-                combined.fire()
-
-            watchers.append(asyncio.create_task(_watch_caller()))
-
+        # SIGTERM→SIGKILL 升级杀整个进程组）。组合走取消原语族现成词汇
+        # （AbortSignal.timeout + any_signal——禁第三份实现）。
         # timeout 缺省（None）即不限时（对齐 pi：无默认超时，避免误杀长构建命令）
-        if timeout is not None:
-
-            async def _watch_timeout() -> None:
-                nonlocal timed_out
-                await asyncio.sleep(timeout)
-                timed_out = True
-                combined.fire()
-
-            watchers.append(asyncio.create_task(_watch_timeout()))
+        timeout_signal = (
+            AbortSignal.timeout(int(timeout * 1000)) if timeout is not None else None
+        )
+        combined = any_signal((signal, timeout_signal))
 
         started_at = asyncio.get_event_loop().time()
         try:
@@ -462,6 +414,9 @@ class Tool:
                     "shell": shell,
                 },
             )
+            # 与 execute 返回之间无 await（事件循环原子读）——超时归因直读
+            # timeout 信号自身旗标
+            timed_out = timeout_signal is not None and timeout_signal.aborted
         except Exception as e:
             finished = True
             try:
@@ -478,14 +433,6 @@ class Tool:
                 ],
                 details={"error": str(e), "command": command},
             )
-        finally:
-            for watcher in watchers:
-                watcher.cancel()
-            for watcher in watchers:
-                try:
-                    await watcher
-                except asyncio.CancelledError:
-                    pass
 
         elapsed_ms = int((asyncio.get_event_loop().time() - started_at) * 1000)
 

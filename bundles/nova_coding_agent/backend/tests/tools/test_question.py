@@ -22,10 +22,7 @@ def _load_question_tool():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    from nova_harness.types.resources.tools import (
-        NULL_TOOL_SETTINGS,
-        ToolContext,
-    )
+    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=NULL_TOOL_SETTINGS)
     return module, module.Tool(context)

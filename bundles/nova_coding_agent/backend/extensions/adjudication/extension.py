@@ -17,19 +17,20 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from nova_coding_agent.adjudication.approval import ApprovalFlow
+from nova_coding_agent.adjudication.delegation import DelegationGate
+from nova_coding_agent.adjudication.engine import AdjudicationEngine
+from nova_coding_agent.adjudication.session_gate import on_before_fork, on_before_switch
+from nova_coding_agent.orchestration import (
+    AdjudicationAssembly,
+    register_adjudication_assembly,
+)
 from nova_exec_server_client import default_exec_server_home, load_executor_config
 from nova_harness.core.agent_session.controllers.orchestrator import Orchestrator
 from nova_harness.core.harness.environments import RulesStore
 from nova_harness.events.results import ToolCallEventResult
 from nova_harness.extensions.api import NovaExtensionAPI
 from nova_protocol.exec_server_policy import Policy
-
-from nova_coding_agent.orchestration import AdjudicationAssembly, register_adjudication_assembly
-
-from nova_coding_agent.adjudication.approval import ApprovalFlow
-from nova_coding_agent.adjudication.delegation import DelegationGate
-from nova_coding_agent.adjudication.engine import AdjudicationEngine
-from nova_coding_agent.adjudication.session_gate import on_before_fork, on_before_switch
 
 _ENTRY_TYPE = "permission_decision"
 
@@ -43,7 +44,9 @@ def extension(nova: NovaExtensionAPI) -> None:
         # 规则文件损坏：响亮报出并 fail-closed（空 Policy 全过审批——更严）
         import logging
 
-        logging.getLogger(__name__).exception("rules.lark 解析失败，按空规则集 fail-closed 运行")
+        logging.getLogger(__name__).exception(
+            "rules.lark 解析失败，按空规则集 fail-closed 运行"
+        )
         policy = Policy.empty()
 
     engine = AdjudicationEngine(policy, config.approval_policy)
@@ -68,7 +71,9 @@ def extension(nova: NovaExtensionAPI) -> None:
             return None
         requirement = engine.adjudicate(event.tool_name, {"path": path}, ctx)
         if requirement.kind == "forbidden":
-            flow._record(ctx, event.tool_name, path, "blocked", requirement.reason or "")
+            flow._record(
+                ctx, event.tool_name, path, "blocked", requirement.reason or ""
+            )
             return ToolCallEventResult(block=True, reason=requirement.reason)
         return None
 

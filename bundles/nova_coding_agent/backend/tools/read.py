@@ -21,12 +21,7 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import (
-    AbortSignal,
-    AgentToolResult,
-    ImageContent,
-    TextContent,
-)
+from nova_protocol import AbortSignal, AgentToolResult, ImageContent, TextContent
 
 
 class Tool:

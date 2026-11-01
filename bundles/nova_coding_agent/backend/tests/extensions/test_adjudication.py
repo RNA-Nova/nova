@@ -8,21 +8,16 @@ write/edit 保护路径、ApprovalFlow 四结局（never 档/无 UI fail-closed�
 import asyncio
 
 import pytest
-from nova_protocol import (
-    ApprovalPolicy,
-    ExecPolicyAmendment,
-    ReviewDecision,
-)
-from nova_protocol.exec_server_policy import Policy, PrefixPattern, PrefixRule, Decision
-
 from nova_coding_agent.adjudication.approval import (
-    ApprovalFlow,
     _CHOICE_FOREVER,
     _CHOICE_NO,
     _CHOICE_ONCE,
     _CHOICE_SESSION,
+    ApprovalFlow,
 )
 from nova_coding_agent.adjudication.engine import AdjudicationEngine
+from nova_protocol import ApprovalPolicy, ExecPolicyAmendment, ReviewDecision
+from nova_protocol.exec_server_policy import Decision, Policy, PrefixPattern, PrefixRule
 
 
 def _run(coro):
@@ -87,7 +82,10 @@ def test_engine_rule_forbidden():
         PrefixRule(pattern=PrefixPattern(first="rm"), decision=Decision.FORBIDDEN)
     )
     engine = AdjudicationEngine(policy, ApprovalPolicy.ON_REQUEST)
-    assert engine.adjudicate("bash", {"command": "rm -rf /tmp/x"}, None).kind == "forbidden"
+    assert (
+        engine.adjudicate("bash", {"command": "rm -rf /tmp/x"}, None).kind
+        == "forbidden"
+    )
 
 
 def test_engine_rule_allow_beats_heuristic():
@@ -102,7 +100,9 @@ def test_engine_rule_allow_beats_heuristic():
 
 def test_engine_opaque_needs_approval():
     engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
-    requirement = engine.adjudicate("bash", {"command": "echo $HOME && rm -rf /x"}, None)
+    requirement = engine.adjudicate(
+        "bash", {"command": "echo $HOME && rm -rf /x"}, None
+    )
     assert requirement.kind == "needs_approval"
     assert "无法静态判定" in (requirement.reason or "")
 
@@ -110,7 +110,9 @@ def test_engine_opaque_needs_approval():
 def test_engine_write_path_protection():
     engine = AdjudicationEngine(Policy.empty(), ApprovalPolicy.ON_REQUEST)
     assert engine.adjudicate("write", {"path": "/x/.env"}, None).kind == "forbidden"
-    assert engine.adjudicate("edit", {"path": "/x/.git/config"}, None).kind == "forbidden"
+    assert (
+        engine.adjudicate("edit", {"path": "/x/.git/config"}, None).kind == "forbidden"
+    )
     assert engine.adjudicate("write", {"path": "/x/main.py"}, None).kind == "skip"
 
 
@@ -363,7 +365,9 @@ def test_shell_gate_rule_allows_interpreter():
     """规则显式 allow 解释器路径 → 免问（政策授信是唯一通道）。"""
     policy = Policy()
     policy.add_prefix_rule(
-        PrefixRule(pattern=PrefixPattern(first="/opt/custom-sh"), decision=Decision.ALLOW)
+        PrefixRule(
+            pattern=PrefixPattern(first="/opt/custom-sh"), decision=Decision.ALLOW
+        )
     )
     engine = AdjudicationEngine(policy, ApprovalPolicy.ON_REQUEST)
     requirement = engine.adjudicate(

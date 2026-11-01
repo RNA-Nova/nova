@@ -25,11 +25,7 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_coding_agent.subagent.types import (
-    SubagentCall,
-    SubagentResult,
-    SubagentUsage,
-)
+from nova_coding_agent.subagent.types import SubagentCall, SubagentResult, SubagentUsage
 from nova_protocol import AbortSignal
 
 # on_update 聚合回调：始终携带**全量结果列表**（parallel 含 exit_code=-1

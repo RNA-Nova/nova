@@ -1,7 +1,6 @@
 """endpoints_store 测试：config.toml [[environments]] 读写手术。"""
 
 import pytest
-
 from nova_coding_agent.executor import endpoints_store
 
 
@@ -9,9 +8,7 @@ from nova_coding_agent.executor import endpoints_store
 def store_home(tmp_path, monkeypatch):
     """假 exec-server home：endpoints_store 的全部 I/O 落临时目录。"""
     home = tmp_path / "home"
-    monkeypatch.setattr(
-        endpoints_store, "default_exec_server_home", lambda: str(home)
-    )
+    monkeypatch.setattr(endpoints_store, "default_exec_server_home", lambda: str(home))
     # load 走 SDK loader——SDK 的 home 解析也要指向同一临时目录
     monkeypatch.setattr(
         "nova_exec_server_client.config.default_exec_server_home", lambda: home

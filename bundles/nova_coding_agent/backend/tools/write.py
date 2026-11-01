@@ -13,11 +13,7 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import (
-    AbortSignal,
-    AgentToolResult,
-    TextContent,
-)
+from nova_protocol import AbortSignal, AgentToolResult, TextContent
 
 
 class Tool:

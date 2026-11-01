@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from nova_coding_agent.executor.policy import SpawnPolicy
-from nova_exec_server_client import load_executor_config
 from nova_coding_agent.tools_common.path_utils import normalize_input, resolve_path
+from nova_exec_server_client import load_executor_config
 
 
 @dataclass

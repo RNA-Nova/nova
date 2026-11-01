@@ -6,8 +6,6 @@ import asyncio
 from typing import Any, Dict, Optional
 
 import pytest
-from nova_exec_server_client import load_executor_config
-
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
@@ -16,6 +14,7 @@ from nova_coding_agent.executor import (
     reset_backend_selection,
     set_backend_selection,
 )
+from nova_exec_server_client import load_executor_config
 
 
 class _Ctx:

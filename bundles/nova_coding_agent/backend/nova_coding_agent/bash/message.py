@@ -11,9 +11,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from nova_coding_agent.bash.item import BashExecutionItem
-from nova_protocol import (
-    CustomAgentMessage,
-)
+from nova_protocol import CustomAgentMessage
 from nova_server.types.items import ItemStatus
 
 

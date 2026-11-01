@@ -34,9 +34,7 @@ async def _confirm_leave(ctx: Any, action: str) -> bool:
     )
 
 
-async def on_before_switch(
-    event: Any, ctx: Any
-) -> Optional[SessionBeforeSwitchResult]:
+async def on_before_switch(event: Any, ctx: Any) -> Optional[SessionBeforeSwitchResult]:
     action = _ACTION_LABELS.get(getattr(event, "reason", ""), "切换会话")
     if await _confirm_leave(ctx, action):
         return None

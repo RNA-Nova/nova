@@ -26,12 +26,10 @@ tools:
   - question
 extensions:
   - session_commands
-  - permission_gate
+  - adjudication
   - plan_mode
   - tools_panel
   - interactive_shell
-  - confirm_destructive
-  - subagent_gate
   - executor_switch
 user_tools:
   - bash

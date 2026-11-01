@@ -11,10 +11,7 @@
 import asyncio
 
 from nova_coding_agent.subagent import runner
-from nova_coding_agent.subagent.types import (
-    SubagentCall,
-    SubagentResult,
-)
+from nova_coding_agent.subagent.types import SubagentCall, SubagentResult
 
 # ---------------------------------------------------------------------------
 # runner 执行：stderr 独立记录进 details

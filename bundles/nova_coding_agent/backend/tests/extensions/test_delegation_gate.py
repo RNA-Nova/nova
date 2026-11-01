@@ -2,7 +2,10 @@
 
 import asyncio
 
-from nova_coding_agent.adjudication.delegation import DelegationGate, extract_agent_names
+from nova_coding_agent.adjudication.delegation import (
+    DelegationGate,
+    extract_agent_names,
+)
 from nova_harness.events.results import ToolCallEventResult
 
 
@@ -49,9 +52,10 @@ def test_extract_agent_names():
     assert extract_agent_names(
         {"tasks": [{"agent": "a"}, {"agent": "b"}, {"agent": "a"}]}
     ) == ["a", "b"]
-    assert extract_agent_names(
-        {"chain": [{"agent": "x"}, {"agent": "y"}]}
-    ) == ["x", "y"]
+    assert extract_agent_names({"chain": [{"agent": "x"}, {"agent": "y"}]}) == [
+        "x",
+        "y",
+    ]
     assert extract_agent_names({}) == []
 
 
@@ -78,26 +82,44 @@ def test_allow_session_caches_and_restores():
     # 会话条目落盘（subagent_allow，累计全集）
     assert ("subagent_allow", {"agents": ["worker"]}) in ctx.entries
     # 同一 gate 内后续不再问
-    assert _run(gate.on_tool_call(_FakeEvent("subagent", {"agent": "worker"}), _FakeCtx(script=[]))) is None
+    assert (
+        _run(
+            gate.on_tool_call(
+                _FakeEvent("subagent", {"agent": "worker"}), _FakeCtx(script=[])
+            )
+        )
+        is None
+    )
 
     # 新 gate（模拟重启）经 restore 恢复
     gate2 = DelegationGate()
+
     class _FakeSM:
         def __init__(self, entries):
             self._entries = entries
+
         def get_branch(self):
             class E:
                 type = "custom"
                 custom_type = "subagent_allow"
                 data = None
+
             out = []
             for data in self._entries:
-                e = E(); e.data = data; out.append(e)
+                e = E()
+                e.data = data
+                out.append(e)
             return out
+
     ctx2 = _FakeCtx()
     ctx2.session_manager = _FakeSM([{"agents": ["worker"]}])
     gate2.restore(ctx2)
-    assert _run(gate2.on_tool_call(_FakeEvent("subagent", {"agent": "worker"}), _FakeCtx())) is None
+    assert (
+        _run(
+            gate2.on_tool_call(_FakeEvent("subagent", {"agent": "worker"}), _FakeCtx())
+        )
+        is None
+    )
 
 
 def test_cancel_blocks():

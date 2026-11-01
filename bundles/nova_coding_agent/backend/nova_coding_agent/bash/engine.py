@@ -32,10 +32,7 @@ from nova_harness.core.utils.child_process import (
     track_detached_child_pid,
     untrack_detached_child_pid,
 )
-from nova_harness.types.extensions.process import (
-    SpawnContext,
-    SpawnHook,
-)
+from nova_harness.types.extensions.process import SpawnContext, SpawnHook
 
 
 @dataclass
@@ -294,17 +291,15 @@ class LocalBashOperations:
         if aborted:
             _kill_process_group(proc, signal_module.SIGTERM)
             try:
-                await asyncio.wait_for(
-                    _wait_process_exit(proc), timeout=_ABORT_TERM_GRACE_S
-                )
-            except asyncio.TimeoutError:
+                async with asyncio.timeout(_ABORT_TERM_GRACE_S):
+                    await _wait_process_exit(proc)
+            except TimeoutError:
                 # SIGTERM 被无视（如 trap），升级 SIGKILL，不留僵尸
                 _kill_process_group(proc, signal_module.SIGKILL)
                 try:
-                    await asyncio.wait_for(
-                        _wait_process_exit(proc), timeout=_ABORT_KILL_GRACE_S
-                    )
-                except asyncio.TimeoutError:
+                    async with asyncio.timeout(_ABORT_KILL_GRACE_S):
+                        await _wait_process_exit(proc)
+                except TimeoutError:
                     pass
 
         # 读循环收尾：正常情况管道 EOF 结束；若后台孙进程继承了管道

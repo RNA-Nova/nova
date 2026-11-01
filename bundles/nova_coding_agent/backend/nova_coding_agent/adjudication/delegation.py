@@ -102,9 +102,7 @@ class DelegationGate:
             if choice == _CHOICE_ALWAYS:
                 self._allowed.add(name)
                 # 累计全集落盘（合并去重）——恢复取最新一条即全量
-                ctx.append_entry(
-                    _ENTRY_TYPE, {"agents": sorted(self._allowed)}
-                )
+                ctx.append_entry(_ENTRY_TYPE, {"agents": sorted(self._allowed)})
                 continue
             # 取消（含选择器被 Esc）——拦截本次调用
             return ToolCallEventResult(

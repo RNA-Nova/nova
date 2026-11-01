@@ -13,10 +13,7 @@ from nova_coding_agent.executor.manager import (
     get_executor_manager,
     resolve_executor_binary,
 )
-from nova_coding_agent.executor.policy import (
-    SpawnPolicy,
-
-)
+from nova_coding_agent.executor.policy import SpawnPolicy
 from nova_coding_agent.executor.provision import (
     ProvisionError,
     SshTarget,
@@ -49,6 +46,5 @@ __all__ = [
     "reset_backend_selection",
     "resolve_backend_path",
     "resolve_executor_binary",
-
     "set_backend_selection",
 ]

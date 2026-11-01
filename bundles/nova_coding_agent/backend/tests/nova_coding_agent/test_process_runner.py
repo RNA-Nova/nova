@@ -14,10 +14,7 @@ from nova_coding_agent.executor.process_runner import (
     LocalProcessRunner,
 )
 from nova_coding_agent.tools_common.fs_layer import FsStat, WalkItem, WalkResult
-from nova_coding_agent.tools_common.operations import (
-    GrepOptions,
-    LocalGrepOperations,
-)
+from nova_coding_agent.tools_common.operations import GrepOptions, LocalGrepOperations
 
 
 def _run(coro):

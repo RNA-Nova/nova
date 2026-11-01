@@ -14,10 +14,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 # 这是一个 Nova bundle，同时也是一个可 import 的 Python 包。
@@ -25,7 +22,7 @@ classifiers = [
 # 复用 bundle 内部共享辅助模块。安装时 nova-pkg 会执行 ``pip install -e .``。
 
 [tool.poetry.dependencies]
-python = ">=3.12,<3.14"
+python = ">=3.13,<3.14"
 # 兄弟包（nova-ai/nova-agent/nova-harness）不在此处声明 path 依赖——
 # 各包独立管理第三方依赖；安装部署由脚本统一完成（见根 pyproject 的
 # pixi workspace 清单），发布时再恢复互依声明。
@@ -44,7 +41,7 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.black]
-target-version = ['py312']
+target-version = ['py313']
 
 [tool.isort]
 profile = "black"
@@ -77,7 +74,7 @@ personas = [
     "./backend/personas/"
 ]
 extensions = [
-    "./backend/extensions/adjudication/extension.py",
+    "./backend/extensions/adjudication/",
     "./backend/extensions/executor_switch.py",
     "./backend/extensions/interactive_shell.py",
     "./backend/extensions/plan_mode.py",

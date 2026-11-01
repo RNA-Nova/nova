@@ -16,10 +16,7 @@ def _load_executor(settings=None):
     spec = importlib.util.spec_from_file_location("_test_tool_write", executor_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    from nova_harness.types.resources.tools import (
-        NULL_TOOL_SETTINGS,
-        ToolContext,
-    )
+    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=settings or NULL_TOOL_SETTINGS)
     return module.Tool(context)

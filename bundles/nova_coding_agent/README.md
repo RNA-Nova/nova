@@ -10,7 +10,7 @@ Nova 官方编程 Agent bundle，提供本地文件系统操作与命令执行�
 nova-pkg install /path/to/nova_coding_agent
 ```
 
-安装时会自动读取 `pyproject.toml` 并安装本地 path 依赖（`nova-ai`、`nova-agent`、`nova-harness`），同时把 bundle 自身作为 Python 包装入环境（`--no-deps` 自安装），使 tools 可以 `import nova_coding_agent.tools_common`。
+安装时读取 `pyproject.toml` 把 bundle 自身作为 Python 包装入环境（`--no-deps` 自安装），使 tools 可以 `import nova_coding_agent.tools_common`；前端半区存在 `frontend/package.json` 时装配 npm 依赖。**兄弟包（nova-ai/nova-agent/nova-harness）不在本包 pyproject 声明 path 依赖**——开发环境由根 pixi workspace 统一求解（见根 `pyproject.toml`），发布时再恢复互依声明。
 
 ## 目录结构（三段式：backend/ + frontend/ + agents/ 组合层）
 
@@ -26,28 +26,35 @@ nova_coding_agent/
 │
 ├── backend/                 # 后端半区（harness/Python 宿主加载）
 │   ├── nova_coding_agent/   # 可导入 Python 包（tools_common/ 工具基建、bash/ 引擎、
-│   │                        #   subagent/ 执行引擎、ui_primitives.py 原语糖库）
+│   │                        #   subagent/ 执行引擎、executor/ 执行后端接入、
+│   │                        #   ui_primitives.py 原语糖库）
 │   ├── tools/               # 10 个 LLM 工具（单文件形态：
 │   │                        #   bash/edit/find/grep/ls/question/read/subagent/todo/write）
 │   ├── user_tools/          # bash 用户工具
-│   ├── extensions/          # 6 个扩展（单文件形态）：
-│   │                        #   session_commands（19 个 slash 命令）/ permission_gate（危险拦截）
-│   │                        #   plan_mode（只读规划模式）/ tools_panel（/tools 开关面板）
-│   │                        #   interactive_shell（交互命令终端让位）/ confirm_destructive（切换确认）
+│   ├── extensions/          # 6 个扩展：
+│   │                        #   adjudication/（目录形态——裁决子系统：execpolicy 裁决 +
+│   │                        #     审批流 + 写保护路径拦截，permission_gate 的终态收编）
+│   │                        #   session_commands.py（21 个 slash 命令）
+│   │                        #   plan_mode.py（只读规划模式）
+│   │                        #   tools_panel.py（/tools 开关面板）
+│   │                        #   interactive_shell.py（交互命令终端让位）
+│   │                        #   executor_switch.py（/executor 执行后端切换）
 │   ├── personas/            # 人格文本素材（coding/core.md + subagents/ 四件套）
 │   ├── prompts/             # prompt 模板（debug/refactor + implement 等工作流三件套）
 │   └── tests/               # pytest（镜像 backend/ 目录）
 │
 └── frontend/                # 前端半区（Node 宿主加载，自含 TS 子包）
-    ├── package.json         # npm 清单（nova-pkg 安装第 4 阶段触发点）
+    ├── package.json         # npm 清单（nova-pkg 安装 npm 阶段触发点）
     ├── tsconfig.json
     ├── tui/                 # TUI 宿主段（镜像后端资源类型目录）
-    │   ├── index.ts         # 扩展入口（ExtensionUIAPI 工厂：6 个 slash 命令 UI + 3 个 dialog 注册）
+    │   ├── index.ts         # 扩展入口（ExtensionUIAPI 工厂：6 个 slash 命令 UI + 4 个 dialog 注册）
     │   ├── tools/           # 工具渲染器（10 件——返回活 pi-tui 组件，文件名即工具名）
-    │   ├── dialogs/         # 包侧自定义对话框（dialog:* slot：question / tools / interactive-shell）
+    │   ├── dialogs/         # 包侧自定义对话框（dialog:* slot：
+    │   │                    #   question / tools / interactive-shell / adjudication）
     │   ├── extensions/session_commands/slash/{tree,todos,model,scoped-models,resume,fork}/
     │   │                    # 命令 UI（镜像后端扩展归属）
-    │   └── lib/             # 跨模块共享件（edit-preview 匹配引擎）
+    │   └── lib/             # 跨模块共享件（edit-preview 匹配引擎 / bash-execution /
+    │                        #   permission-decision）
     └── tests/               # TS 测试（tsx --test，镜像 tui/ 目录）
 ```
 

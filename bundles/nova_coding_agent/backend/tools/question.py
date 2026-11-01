@@ -33,11 +33,7 @@ from nova_harness.types.resources.tools import (
     ToolExecContext,
 )
 from nova_harness.types.ui import UIContext
-from nova_protocol import (
-    AbortSignal,
-    AgentToolResult,
-    TextContent,
-)
+from nova_protocol import AbortSignal, AgentToolResult, TextContent
 
 # "Type something." 自由输入项的 value 哨兵（label 与 pi 一致）。
 _OTHER_VALUE = "__type_something__"

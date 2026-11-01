@@ -72,10 +72,7 @@ class TestBashToolBackendResolution:
         import importlib.util
         import os
 
-        from nova_harness.types.resources.tools import (
-            NULL_TOOL_SETTINGS,
-            ToolContext,
-        )
+        from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
         tool_path = os.path.join(
             os.path.dirname(__file__), "..", "..", "tools", "bash.py"

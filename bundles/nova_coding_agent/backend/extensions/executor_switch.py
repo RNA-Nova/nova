@@ -31,21 +31,17 @@ from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
     ProvisionError,
+    SpawnPolicy,
     get_backend_selection,
     get_executor_manager,
     is_ssh_url,
     parse_ssh_target,
-    SpawnPolicy,
     set_backend_selection,
 )
 from nova_coding_agent.ui_primitives import input as input_dialog
-from nova_coding_agent.ui_primitives import (
-    notify_message,
-    select_items,
-    set_status,
-)
-from nova_harness.extensions.api import NovaExtensionAPI
+from nova_coding_agent.ui_primitives import notify_message, select_items, set_status
 from nova_exec_server_client import load_executor_config
+from nova_harness.extensions.api import NovaExtensionAPI
 
 _ENTRY_TYPE = "executor_backend"
 # 供给进度的 footer 状态位（同 key 幂等覆盖，结束清除）

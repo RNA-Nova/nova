@@ -19,7 +19,6 @@ client = ExecutorClient(url, network_policy=gate.decide)
 ```
 """
 
-
 from __future__ import annotations
 
 from enum import Enum

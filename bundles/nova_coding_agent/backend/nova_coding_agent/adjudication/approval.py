@@ -20,6 +20,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from nova_coding_agent.ui_primitives import notify_message, select
+from nova_harness.core.agent_session.controllers.orchestrator import ApprovalAction
+from nova_harness.core.harness.environments import RulesStore
 from nova_protocol import (
     ApprovalPolicy,
     Decision,
@@ -34,11 +37,6 @@ from nova_protocol.exec_server_policy import (
     PrefixRule,
     PrefixRuleMatch,
 )
-
-from nova_harness.core.agent_session.controllers.orchestrator import ApprovalAction
-from nova_harness.core.harness.environments import RulesStore
-
-from nova_coding_agent.ui_primitives import notify_message, select
 
 _CHOICE_ONCE = "允许一次"
 _CHOICE_SESSION = "本会话都允许"
@@ -83,7 +81,12 @@ class ApprovalFlow:
         if append is not None:
             append(
                 "permission_decision",
-                {"tool": tool, "target": target, "decision": decision, "reason": reason},
+                {
+                    "tool": tool,
+                    "target": target,
+                    "decision": decision,
+                    "reason": reason,
+                },
             )
 
     async def _ask_choice(self, action: ApprovalAction, ctx: Any) -> str | None:
@@ -147,7 +150,9 @@ class ApprovalFlow:
 
         # 1) fail-closed：never 档 / 无 UI
         if self._approval_policy is ApprovalPolicy.NEVER or not ctx.has_ui:
-            self._record(ctx, tool_label, target, "blocked", "never 档或无 UI（fail-closed）")
+            self._record(
+                ctx, tool_label, target, "blocked", "never 档或无 UI（fail-closed）"
+            )
             return ReviewDecisionPayload(
                 decision=ReviewDecision.DENIED,
                 rejection="审批不可用（approval_policy=never 或无 UI）",
@@ -168,9 +173,7 @@ class ApprovalFlow:
         if choice == _CHOICE_SESSION:
             self._session_allowed.add(key)
             self._record(ctx, tool_label, target, "always", "本会话内不再询问")
-            return ReviewDecisionPayload(
-                decision=ReviewDecision.APPROVED_FOR_SESSION
-            )
+            return ReviewDecisionPayload(decision=ReviewDecision.APPROVED_FOR_SESSION)
 
         if choice == _CHOICE_FOREVER:
             amendment = ExecPolicyAmendment(

@@ -126,10 +126,7 @@ def _make_tool(name, layer):
     module.backend_file_layer = lambda: layer
     # 便携引擎路径：runner 恒 None（远程 rg 链另有专项测试）
     module.backend_process_runner = lambda: None
-    from nova_harness.types.resources.tools import (
-        NULL_TOOL_SETTINGS,
-        ToolContext,
-    )
+    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     return module.Tool(ToolContext(cwd="/local/cwd", settings=NULL_TOOL_SETTINGS))
 
