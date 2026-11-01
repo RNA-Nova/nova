@@ -28,11 +28,15 @@ from nova_agent import (
     ShouldStopAfterTurnContext,
     set_default_stream_fn,
 )
+from nova_ai import ProviderResponse, builtin_models
+from nova_ai.providers.volcengine import get_volcengine_model
 from nova_protocol import (
     AbortSignal,
     AgentMessage,
     AgentToolResult,
     AssistantMessage,
+    KnownApi,
+    KnownProvider,
     Model,
     ModelCost,
     TextContent,
@@ -40,10 +44,6 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
-from nova_protocol.enums import KnownApi, KnownProvider
-
-from nova_ai import ProviderResponse, builtin_models
-from nova_ai.providers.volcengine import get_volcengine_model
 
 pytestmark = pytest.mark.integration
 

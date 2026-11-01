@@ -7,7 +7,9 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
+from nova_async import await_with_signal
 from nova_protocol import (
+    AbortedError,
     AbortSignal,
     AgentToolResult,
     AssistantMessage,
@@ -265,39 +267,20 @@ async def _acquire_gate_or_aborted(
 ) -> bool:
     """等门或等 abort，先到先赢。
 
-    返回 ``True`` = 已持门（调用方负责 release）；``False`` = 等门期间
-    被 abort——门的取消安全逻辑已自摘，调用方不得起跑、无需 release。
+    竞速归 ``nova_async.await_with_signal``（完成优先裁决，取消原语族单点
+    ——本函数只做"抛异常 → bool"的翻译，不手写第三份竞速）。返回
+    ``True`` = 已持门（调用方负责 release）；``False`` = 等门期间被
+    abort——门的取消安全逻辑已自摘，调用方不得起跑、无需 release。
     """
-    if is_aborted(signal):
-        return False
     if signal is None:
         await gate.acquire(write)
         return True
-
-    acquire_task = asyncio.create_task(gate.acquire(write))
-    abort_task = asyncio.create_task(signal.wait())
     try:
-        done, _pending = await asyncio.wait(
-            {acquire_task, abort_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if acquire_task in done:
-            abort_task.cancel()
-            try:
-                await abort_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            await acquire_task  # 传播门的异常（正常路径：已持门）
-            return True
-        # abort 先到：取消等门（acquire 的取消安全逻辑自摘），不起跑
-        acquire_task.cancel()
-        try:
-            await acquire_task
-        except asyncio.CancelledError:
-            pass
+        await await_with_signal(gate.acquire(write), signal)
+    except AbortedError:
+        # signal 胜出（含预触发举旗点）：等门协程已被取消落定、门侧自摘
         return False
-    finally:
-        if not abort_task.done():
-            abort_task.cancel()
+    return True
 
 
 async def _async_resolve(value: FinalizedToolCallOutcome) -> FinalizedToolCallOutcome:

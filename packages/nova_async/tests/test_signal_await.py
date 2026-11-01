@@ -3,15 +3,15 @@
 竞速/中断一律 Event 受控完成序（testing-modeling §七——禁 sleep 表达
 等待完成；sleep(0) 仅作事件循环出让点，不作时序依据）。
 
-`await_with_signal` 走 `nova_protocol.signal` 模块路径导入——hub 门面
-（nova_protocol/__init__.py）的导出待词汇批次捎上。
+`await_with_signal` 自 `nova_protocol/signal.py` 迁出归 nova_async（竞速件
+是机制不是词汇），从 nova_async 门面直引。
 """
 
 import asyncio
 
 import pytest
+from nova_async import await_with_signal
 from nova_protocol import AbortController, AbortedError, AbortSignal
-from nova_protocol.signal import await_with_signal
 
 
 class TestAwaitWithSignal:

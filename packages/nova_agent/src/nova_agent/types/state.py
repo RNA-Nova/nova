@@ -5,7 +5,7 @@ AgentState 是运行时可变状态容器，不是 JSON 边界类型，因此不
 而是用普通 class + property setter 实现 TS 侧 MutableAgentState 的拷贝语义。
 """
 
-from typing import List, Optional, Set
+from typing import List, Optional, Set, TypedDict
 
 from nova_protocol import AgentMessage, Model, ModelCost, ModelThinkingLevel
 
@@ -13,6 +13,22 @@ from .tool import AgentTool
 
 _PLACEHOLDER_MODEL_ID = "unknown"
 """占位模型的 id，用于识别"未显式配置模型"的状态。"""
+
+
+class AgentStateKwargs(TypedDict, total=False):
+    """``Agent(initial_state=...)`` 的部分状态参数包。
+
+    对齐 pi ``Partial<Omit<AgentState, "pendingToolCalls" | "isStreaming"
+    | "streamingMessage" | "errorMessage">>``——只接受五个配置字段，
+    运行时字段由 Agent 构造时统一重置（规则 10：声明不校验的构造输入
+    形状；未知键在 Agent 构造边界仍以 TypeError 拒绝）。
+    """
+
+    system_prompt: Optional[str]
+    model: Optional[Model]
+    thinking_level: Optional[ModelThinkingLevel]
+    tools: Optional[List[AgentTool]]
+    messages: Optional[List[AgentMessage]]
 
 
 def _default_placeholder_model() -> Model:
@@ -106,4 +122,4 @@ class AgentState:
         )
 
 
-__all__ = ["AgentState"]
+__all__ = ["AgentState", "AgentStateKwargs"]

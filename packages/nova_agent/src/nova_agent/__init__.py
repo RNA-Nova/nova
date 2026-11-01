@@ -23,6 +23,7 @@ from .types import (
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentState,
+    AgentStateKwargs,
     AgentTool,
     AgentToolCall,
     AgentToolUpdateCallback,
@@ -54,6 +55,7 @@ __all__ = [
     # 核心类型（组件内部：运行时容器与行为契约）
     "AgentContext",
     "AgentState",
+    "AgentStateKwargs",
     "AgentLoopConfig",
     "AgentTool",
     "AgentToolCall",

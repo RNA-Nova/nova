@@ -8,6 +8,7 @@ from typing import Any, List, Literal, Union
 from nova_protocol import AgentToolResult, ToolResultMessage
 
 from .base import AgentToolCall
+from .tool import AgentTool
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class PreparedToolCallModel:
     """A tool call that has been prepared and is ready for execution."""
 
     tool_call: AgentToolCall
-    tool: Any
+    tool: AgentTool[Any, Any]
     args: Any
     kind: Literal["prepared"] = field(default="prepared", init=False)
 

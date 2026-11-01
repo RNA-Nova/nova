@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 import pytest
-from nova_protocol import TaskTracker
+from nova_async import TaskTracker
 
 
 @pytest.mark.asyncio
@@ -163,3 +163,90 @@ async def test_one_failure_does_not_affect_others(caplog):
     assert finished.is_set()
     assert len(tracker) == 0
     assert any("one bad apple" in str(rec.exc_info[1]) for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_teardown_on_normal_exit():
+    """async CM 正常退出即三段式收摊：落闸 + 集内任务被取消 + 排水完毕。"""
+    tracker = TaskTracker(name="cm")
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hanging():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async with tracker:
+        task = tracker.spawn(hanging())
+        assert task is not None
+        await started.wait()
+        assert len(tracker) == 1
+    assert tracker.closed
+    assert cancelled.is_set()
+    assert task.cancelled()
+    assert len(tracker) == 0
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_teardown_on_exception_exit():
+    """CM 异常退出同样收摊，且不压制原异常（__aexit__ 返回 None）。"""
+    tracker = TaskTracker(name="cm-boom")
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hanging():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    with pytest.raises(RuntimeError, match="body blew up"):
+        async with tracker:
+            tracker.spawn(hanging())
+            await started.wait()
+            raise RuntimeError("body blew up")
+    assert tracker.closed
+    assert cancelled.is_set()
+    assert len(tracker) == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_all_and_wait_from_tracked_task_no_deadlock_no_suicide():
+    """从台账内任务发起 cancel_all + wait：不死锁、不自杀（跳过当前任务），
+    兄弟任务照常取消并排水。受控完成序全程 asyncio.Event，无 sleep 等待。"""
+    tracker = TaskTracker(name="self-tear")
+    sibling_started = asyncio.Event()
+    sibling_cancelled = asyncio.Event()
+    inner_done = asyncio.Event()
+
+    async def sibling():
+        sibling_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            sibling_cancelled.set()
+            raise
+
+    async def inner():
+        # 等兄弟任务真起跑再收摊（否则举旗抢在兄弟首步前，started 永不到达）
+        await sibling_started.wait()
+        # 台账内任务发起收摊：不杀自己（cancel_all 跳过当前任务）、
+        # 不等自己（wait 跳过当前任务——等自己 = 死锁）
+        tracker.close()
+        tracker.cancel_all()
+        await tracker.wait()
+        inner_done.set()
+
+    inner_task = tracker.spawn(inner())
+    tracker.spawn(sibling())
+    await sibling_started.wait()
+    await asyncio.wait_for(inner_task, timeout=1.0)  # 死锁则此处超时判红
+    assert inner_done.is_set()
+    assert sibling_cancelled.is_set()
+    assert len(tracker) == 0

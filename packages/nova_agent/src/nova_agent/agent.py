@@ -9,6 +9,7 @@ import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from nova_ai import (
+    ModelIdentity,
     ProviderResponse,
     SimpleStreamOptions,
     ThinkingBudgets,
@@ -48,6 +49,7 @@ from .types import (
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentState,
+    AgentStateKwargs,
     AgentTool,
     BeforeToolCallContext,
     BeforeToolCallResult,
@@ -101,7 +103,7 @@ class Agent:
     def __init__(
         self,
         *,
-        initial_state: Optional[Union[AgentState, Dict[str, Any]]] = None,
+        initial_state: Optional[Union[AgentState, AgentStateKwargs]] = None,
         convert_to_llm: Optional[
             Callable[
                 [List[AgentMessage]], Union[List[Message], Awaitable[List[Message]]]
@@ -125,8 +127,11 @@ class Agent:
         max_retry_delay_ms: Optional[int] = None,
         timeout: Optional[float] = None,
         tool_execution: ToolExecutionMode = "parallel",
-        on_payload: Optional[Callable[[Any, Model], Any]] = None,
-        on_response: Optional[Callable[[ProviderResponse, Any], Any]] = None,
+        # on_payload 第一参为自由负载（逐 provider 请求体形状，pi unknown 对位）；
+        # 第二参为 ModelIdentity 归因摘要（整 Model 不出钩子面，防 headers 泄漏）；
+        # 返回值 Any = 可同步返回或返回 awaitable
+        on_payload: Optional[Callable[[Any, ModelIdentity], Any]] = None,
+        on_response: Optional[Callable[[ProviderResponse, ModelIdentity], Any]] = None,
         before_tool_call: Optional[
             Callable[
                 [BeforeToolCallContext, Optional[AbortSignal]],
@@ -164,8 +169,7 @@ class Agent:
                 messages=initial_state.messages,
             )
         elif initial_state:
-            kwargs = dict(initial_state)
-            unknown_keys = set(kwargs) - {
+            unknown_keys = set(initial_state) - {
                 "system_prompt",
                 "model",
                 "thinking_level",
@@ -177,15 +181,16 @@ class Agent:
                     f"Unknown initial_state keys: {sorted(unknown_keys)}. "
                     "Allowed keys: system_prompt, model, thinking_level, tools, messages."
                 )
-            model_value = kwargs.get("model")
+            model_value = initial_state.get("model")
             if isinstance(model_value, dict):
-                kwargs["model"] = Model.model_validate(model_value)
+                # 边界校验：散装 dict 形态的 model 在入闸处一次性 validate
+                model_value = Model.model_validate(model_value)
             self._state = AgentState(
-                system_prompt=kwargs.get("system_prompt"),
-                model=kwargs.get("model"),
-                thinking_level=kwargs.get("thinking_level"),
-                tools=kwargs.get("tools"),
-                messages=kwargs.get("messages"),
+                system_prompt=initial_state.get("system_prompt"),
+                model=model_value,
+                thinking_level=initial_state.get("thinking_level"),
+                tools=initial_state.get("tools"),
+                messages=initial_state.get("messages"),
             )
         else:
             self._state = AgentState()

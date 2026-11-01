@@ -28,7 +28,7 @@ class AgentContext:
     运行时快照，不由 Pydantic 校验；构造后会被循环原地 mutate（如 messages.append）。
     """
 
-    system_prompt: Optional[str] = ""
+    system_prompt: str = ""
     messages: List[AgentMessage] = field(default_factory=list)
     tools: Optional[List[AgentTool]] = None
 

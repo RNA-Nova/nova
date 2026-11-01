@@ -217,9 +217,8 @@ async def test_abort_while_waiting_on_gate_never_executes(dummy_model) -> None:
     """sequential 等门期间 abort：永不起跑，结果含 aborted 且批正常收尾。"""
     from nova_agent import AgentContext, AgentLoopConfig
     from nova_agent.agent_loop import run_agent_loop
-    from nova_protocol import AbortController
-
     from nova_ai.stream_options import SimpleStreamOptions
+    from nova_protocol import AbortController
 
     ran: List[str] = []
 

@@ -1,4 +1,4 @@
-"""可中断等待原语测试（``nova_ai/utils/abort.py``）。
+"""可中断等待原语测试（``nova_async/abort.py``）。
 
 竞速编排一律同步原语（Event 受控完成序），sleep 仅作 ≤0.05s 引导——
 见 ``docs/crosscutting/testing-modeling.md`` §七。
@@ -7,9 +7,8 @@
 import asyncio
 
 import pytest
+from nova_async import AbortScope, await_with_abort
 from nova_protocol import AbortController, AbortedError
-
-from nova_ai.utils.abort import AbortScope, await_with_abort
 
 pytestmark = pytest.mark.asyncio
 

@@ -1,9 +1,9 @@
 """TaskTracker —— 属主级在途任务台账（对齐 codex/tokio-util 的 TaskTracker）。
 
-归属：登记制基础原语（``docs/crosscutting/structure-modeling.md`` §二第
-1 层——与 signal.py 同族的异步生命周期原语；全仓签名通用、零业务语义、
-仅 stdlib）。此前住 nova_ai/utils 时被 nova_harness / nova_server 经模块
-路径跨包 import（6 处），按升格入口迁入枢纽。
+归属：nova_async 叶子包（``docs/crosscutting/structure-modeling.md``
+§二升格出口——取消/等待词汇（AbortSignal 等）锚定 nova_protocol
+枢纽不动，机制件全在 nova_async）。全仓签名通用、零业务语义、仅
+stdlib。
 
 回答"这个属主名下现在活着哪些任务、收摊时它们怎么办"。一属主一实例
 （会话/连接/runner 各自持有），账簿与属主同生共死；子部件需要往属主
@@ -56,6 +56,28 @@ class TaskTracker:
         """是否已落闸。"""
         return self._closed
 
+    async def __aenter__(self) -> TaskTracker:
+        """进入台账作用域（收摊语义见 ``__aexit__``）。"""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Any,
+    ) -> None:
+        """退出作用域即三段式收摊：``close()`` 落闸 → ``cancel_all()``
+        举旗 → ``await wait()`` 排水。
+
+        对位 codex/tokio-util ``AbortOnDropHandle`` 的"所有权即生命周期"
+        ——属主退出作用域即收摊；Rust 靠 Drop 析构触发，Python 无析构
+        语义，``async with`` 是唯一结构化对位。不压制异常（返回 None——
+        with 体或收摊期间的异常照常传播）。
+        """
+        self.close()
+        self.cancel_all()
+        await self.wait()
+
     def spawn(
         self, coro: Coroutine[Any, Any, Any], *, name: str = ""
     ) -> Optional[asyncio.Task[Any]]:
@@ -82,9 +104,20 @@ class TaskTracker:
         属主收尾的两段式（codex token.cancel + tracker.wait 对位）：
         先 ``cancel_all()`` 同步举旗（可在同步关停路径调用），
         需要等任务真正收完时再 ``await wait()``。
+
+        **跳过当前任务**：收摊可能从台账内任务发起（实证：
+        nova-exec-server-client transport 的反向请求任务内部 reply
+        失败会触发全连接收摊）——不杀自己；外部路径发起时当前任务
+        本不在集内，跳过是无害恒等。
         """
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            # 无运行中事件循环（同步关停路径）：本无"当前任务"可跳
+            current = None
         for task in list(self._tasks):
-            task.cancel()
+            if task is not current:
+                task.cancel()
 
     async def wait(self) -> None:
         """排水：等当前在途任务全部跑完。
@@ -92,11 +125,17 @@ class TaskTracker:
         仅在 close 后调用才有意义——未落闸时新任务可随时流入，
         本调用可能永不返回。
 
-        纪律（codex 同款）：关停从外部发起——**禁止从本台账内的任务
-        调用 wait()**（等自己 = 死锁）。
+        **跳过当前任务**：收摊可能从台账内任务发起（实证同
+        ``cancel_all()``——反向请求任务内部触发全连接收摊后的排水）
+        ——等自己 = 死锁，由实现消除而非靠自觉；外部路径发起时当前
+        任务本不在集内，跳过是无害恒等。
         """
-        while self._tasks:
-            await asyncio.wait(list(self._tasks))
+        current = asyncio.current_task()
+        while True:
+            tasks = [task for task in self._tasks if task is not current]
+            if not tasks:
+                return
+            await asyncio.wait(tasks)
 
     def _on_done(self, task: asyncio.Task[Any]) -> None:
         self._tasks.discard(task)

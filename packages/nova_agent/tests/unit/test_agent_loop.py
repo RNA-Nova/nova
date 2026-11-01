@@ -47,6 +47,10 @@ from nova_agent import (
     ShouldStopAfterTurnContext,
 )
 from nova_agent.agent_loop import run_agent_loop, run_agent_loop_continue
+from nova_ai import (
+    EventStream,
+    SimpleStreamOptions,
+)
 from nova_protocol import (
     AbortController,
     AgentToolResult,
@@ -63,11 +67,6 @@ from nova_protocol import (
     ToolExecutionUpdateEvent,
     ToolResultMessage,
     UserMessage,
-)
-
-from nova_ai import (
-    EventStream,
-    SimpleStreamOptions,
 )
 
 # ----------------------------------------------------------------------

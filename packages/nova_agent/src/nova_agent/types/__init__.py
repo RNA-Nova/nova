@@ -17,7 +17,7 @@ from .hooks import (
     PrepareNextTurnContext,
     ShouldStopAfterTurnContext,
 )
-from .state import AgentState
+from .state import AgentState, AgentStateKwargs
 from .tool import AgentTool, AgentToolUpdateCallback
 from .tool_execution import (
     ExecutedToolCallBatch,
@@ -48,6 +48,7 @@ __all__ = [
     "AgentLoopTurnUpdate",
     # state
     "AgentState",
+    "AgentStateKwargs",
     # tool
     "AgentTool",
     "AgentToolUpdateCallback",

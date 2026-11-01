@@ -21,7 +21,7 @@ AgentToolCall = ToolCall
 
 class StreamFn(Protocol):
     """
-    Stream function signature — 与 ``Models.stream_simple`` 保持一致，
+    Stream function signature — 与 ``ModelsManager.stream_simple`` 保持一致，
     允许同步或异步返回 ``AssistantMessageEventStream``。
     """
 
