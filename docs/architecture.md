@@ -1,22 +1,26 @@
 # Nova 架构与 Monorepo 结构
 
-> 本文档描述仓库的包结构与各子包内部组织（「系统长什么样」）。工作规则见根 AGENTS.md，数据建模见 docs/data-modeling.md，命令见 docs/development.md。
+> 本文档描述仓库的包结构与各子包内部组织（「系统长什么样」）。工作规则见根 AGENTS.md，数据建模见 docs/crosscutting/data-modeling.md，命令见 docs/development.md。
 
 ## Monorepo 结构与包依赖关系
 
 ```
 nova/
 ├── packages/
+│   ├── nova_protocol/      # 词汇枢纽（纯形状零行为——全仓类型的单一正典源）
+│   ├── nova_async/         # 取消/等待机制族叶子包（真杀 scope/竞速等待/信号组合/任务台账；词汇锚定 nova_protocol）
 │   ├── nova_ai/            # 统一的 LLM 提供商抽象层
 │   ├── nova_agent/         # 事件驱动的异步 Agent 框架
 │   ├── nova_harness/       # 高阶 Agent SDK（会话、压缩、工具链、包管理、RuntimeManager）
 │   ├── nova_server/        # JSON-RPC 协议服务层（protocol/transport/reduction/client 家族/exec）
 │   ├── nova_client/        # 前端运行时（TS 厚应用层 + 内置 TUI 宿主；npm 包）
-│   ├── nova_executor/      # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over stdio/WS）
-│   └── nova-exec-server-client/   # executor 的 Python 薄客户端（连接 + 配置发现 + 物化）
+│   ├── nova-exec-server/   # 通用执行后端（Rust：进程/文件/PTY/三平台沙箱，JSON-RPC over stdio/WS）
+│   ├── nova-exec-server-client/   # executor 的 Python 薄客户端（连接 + 配置发现 + 物化）
+│   └── nova-agent-rs/      # Rust 协议线端口（线上事件/错误词汇的 Rust 镜像）
 ├── bundles/
 │   └── nova_coding_agent/  # 官方编程 Agent bundle 与本地文件系统工具（官方包住 bundles/，框架住 packages/）
-├── docs/                   # 专题文档（本文件、data-modeling.md、development.md、security.md）
+├── docs/                   # 专题文档（本文件、data-modeling、protocol-modeling、
+│                           #   diagnostics-modeling、testing-modeling、development、security）
 ├── AGENTS.md               # 索引与随身规则
 ├── README.md
 ├── CHANGELOG.md
@@ -25,19 +29,21 @@ nova/
 
 ### 运行时依赖层次（自下而上）
 
-1. **`nova_ai`** —— 最底层。提供多厂商（OpenAI、Anthropic、Google、Volcengine、GitHub Copilot 等）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层。当前仅有 `api_impls/openai_completions/` 包一个完整实现。
-2. **`nova_agent`** —— 核心框架。基于 `nova_ai` 的模型能力，提供 `Agent` 类、事件订阅/发布、`agent_loop` 异步循环、生命周期管理、工具校验与执行。
-3. **`nova_harness`** —— 高阶 SDK。基于 `nova_ai` + `nova_agent`，封装 `AgentSession`、会话树（分支/fork/导航）、上下文压缩（Compaction）、资源加载、设置持久化、模型注册表覆盖、内置工具链、包管理器 CLI、Project Trust 门控与 `ExtensionUIContext` UI 桥接。
+1. **`nova_protocol`** —— 词汇枢纽（最底层）。全仓类型的单一正典源：LLM 消息/内容/模型/流式事件/枚举/compat/auth 词汇、agent 循环事件与消息、取消原语词汇（`signal.py`）、报告词汇（错误分类/警告事件/装配诊断）、secret 清洗——纯形状零行为，纯洁性审计机械执法。
+2. **`nova_async`** —— 取消/等待机制族叶子包（structure-modeling §二升格出口的落地）。消费枢纽词汇：`AbortScope`/`await_with_abort`（真杀）、`await_with_signal`（竞速）、`abortable_sleep`/`any_signal`/`operation_signal`、`TaskTracker`——禁第三份实现。
+3. **`nova_ai`** —— LLM 抽象层。提供多厂商（OpenAI、Anthropic、Google、Volcengine、GitHub Copilot 等）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层；OpenAI Completions 与 Anthropic Messages 双协议实现。
+4. **`nova_agent`** —— 核心框架。基于 `nova_ai` 的模型能力，提供 `Agent` 类、事件订阅/发布、`agent_loop` 异步循环、生命周期管理、工具校验与执行。
+5. **`nova_harness`** —— 高阶 SDK。基于 `nova_ai` + `nova_agent`，封装 `AgentSession`、会话树（分支/fork/导航）、上下文压缩（Compaction）、资源加载、设置持久化、模型注册表覆盖、内置工具链、包管理器 CLI、Project Trust 门控与 `ExtensionUIContext` UI 桥接。
    manager 层（读自由写独占、互不调用、编排在 AgentSession）：`AgentManager`（agents 注册表视图 + 当前角色旋钮 + 默认解析链 + CapabilitySelection 汇集 + yaml 写回——`/agent save` 落地，包来源影子写 user 级）、`ToolsManager`（工具裁决单点）、`PersonaManager`（persona 装配 + override）、`SystemPromptManager`（纯渲染，激活工具含 `subagent` 时注入 `# Available Agents` 委派菜单）、`SettingsManager`（settings 唯一写门）。
-4. **`nova_server`** —— 协议服务层。基于 `nova_harness`，提供 JSON-RPC 服务器（8 域方法表 + 签名推导形状 + schema 导出）、传输（stdio/WS/memory）、归约层（事件 → wire 条目）、client 家族（in_process/remote）与 headless exec。
-5. **`nova_coding_agent`** —— 官方 bundle。同时是一个可 import 的 Python 包，提供 `coding_agent` 等 5 个 Agent 组合声明（含 scout/planner/reviewer/worker 子代理）、八个扩展（`session_commands`/`permission_gate`/`plan_mode`/`tools_panel`/`interactive_shell`/`confirm_destructive`/`subagent_gate`/`executor_switch`）、10 个本地工具（bash、edit、find、grep、ls、question、read、subagent、todo、write）以及 `bash` 用户工具（`user_tools/`，LLM 工具与会话 bash 共享同一引擎）。
+6. **`nova_server`** —— 协议服务层。基于 `nova_harness`，提供 JSON-RPC 服务器（9 域方法表 + 签名推导形状 + schema 导出）、传输（stdio/WS/memory）、归约层（事件 → wire 条目）、client 家族（in_process/remote）与 headless exec。
+7. **`nova_coding_agent`** —— 官方 bundle。同时是一个可 import 的 Python 包，提供 `coding_agent` 等 5 个 Agent 组合声明（含 scout/planner/reviewer/worker 子代理）、六个扩展（`session_commands`/`adjudication`（裁决子系统——permission_gate/confirm_destructive/subagent_gate 三门收编）/`plan_mode`/`tools_panel`/`interactive_shell`/`executor_switch`）、10 个本地工具（bash、edit、find、grep、ls、question、read、subagent、todo、write）以及 `bash` 用户工具（`user_tools/`，LLM 工具与会话 bash 共享同一引擎）。
    **bash 与六个 fs 工具（read/write/edit/ls/find/grep）均可随后端切换**（执行期读 `BackendSelection` 模式格；question/todo/subagent 不触碰执行环境不在切换面）——进程走 ExecutorBashOperations，文件系统走 FileSystemLayer 双实现（本地/远程同一实现类），详见 `packages/nova_harness/examples/executor-integration.md`。
-6. **`nova_client`** —— 前端运行时。TypeScript 厚应用层，TUI 是包内的一种宿主形态；与将来的 Web 宿主共享运行时主体。纯 npm 包（无 Python 源码；运行时需 Python 环境中可导入 `nova_harness`，`NOVA_PYTHON` 可指定后端解释器）。
-7. **`nova_executor` + `nova-exec-server-client`** —— 通用执行后端与其 Python 客户端（见下文专节）。
+8. **`nova_client`** —— 前端运行时。TypeScript 厚应用层，TUI 是包内的一种宿主形态；与将来的 Web 宿主共享运行时主体。纯 npm 包（无 Python 源码；运行时需 Python 环境中可导入 `nova_harness`，`NOVA_PYTHON` 可指定后端解释器）。
+9. **`nova-exec-server` + `nova-exec-server-client`** —— 通用执行后端与其 Python 客户端（见下文专节）。
 
 > **依赖声明现状**：
 > - 各 Python 子包的 `[tool.poetry.dependencies]` **只声明各自的第三方依赖**，不再声明兄弟包的 path 依赖（pip 对"同一包同时被 editable 与非 editable path 依赖引用"会报 ResolutionImpossible；互依关系到发布时再恢复）。
-> - 统一安装的单一事实源是根 `pyproject.toml` 的 `[tool.pixi.pypi-dependencies]`（六个 editable path 包 + 第三方依赖并集，`pixi install -e dev` 一把求解）；服务器部署脚本同理按此清单安装。
+> - 统一安装的单一事实源是根 `pyproject.toml` 的 `[tool.pixi.pypi-dependencies]`（八个 editable path 包 + 第三方依赖并集，`pixi install -e dev` 一把求解）；服务器部署脚本同理按此清单安装。
 
 ---
 
@@ -47,15 +53,15 @@ nova/
 
 位于 `packages/nova_ai/src/nova_ai/`：
 
-- `gateway/` —— `Models` 集合（`models.py`）、`Provider` 运行时单元与 `create_provider`（`provider.py`）、`ModelsStore`（`store.py`）；鉴权解析在请求时完成（runtime override → stored credential → 环境变量链 → OAuth 刷新）
-- `providers/` —— 内置厂商定义（`volcengine`、`moonshotai`、`moonshotai_cn`、`kimi_coding`），各含静态模型数据与 provider 工厂；`all.py` 提供 `builtin_models()`
+- `gateway/` —— `ModelsManager` 集合（`models.py`）、`Provider` 运行时单元与 `create_provider`（`provider.py`）、`ModelsStore`（`store.py`）；鉴权解析在请求时完成（runtime override → stored credential → 环境变量链 → OAuth 刷新）
+- `providers/` —— 内置厂商定义（`anthropic`、`volcengine`、`moonshotai`、`moonshotai_cn`、`kimi_coding`），各含静态模型数据与 provider 工厂；`all.py` 提供 `builtin_models()`
 - `auth/` —— `AuthContext`、credential store 协议、`resolve_provider_auth`、`env_api_key_auth` 等辅助，以及 `oauth/`（OpenAI Codex、Kimi 的 OAuth 流程与登录页）
-- `api_impls/` —— API 协议实现：`openai_completions/` 包（当前唯一完整实现）
+- `api_impls/` —— API 协议实现：`openai_completions/` 与 `anthropic_messages/` 两个完整实现
 - `streaming.py` —— `AssistantMessageEventStream` 与流式调用入口
 - `stream_options.py` —— AI 调用面参数包（`StreamOptions`/`SimpleStreamOptions`/`ThinkingBudgets` 等，dataclass）
 - `utils/` —— 环境变量、JSON 解析、消息转换、流选项、Unicode 代理项清理、上下文溢出检测、模型工具函数等
 
-> 类型词汇（messages/content/model/events/auth 等）已迁 `nova_protocol` 词汇枢纽——本包只剩行为。见 docs/data-modeling.md「住所」。
+> 类型词汇（messages/content/model/events/auth 等）已迁 `nova_protocol` 词汇枢纽——本包只剩行为。见 docs/crosscutting/data-modeling.md「住所」。
 
 **Auth 层三层治理（终态）**：流程层（本包 `auth/`）只管状态机与密钥（PKCE/state/换 token/轮询），收货需求经 `AuthInteraction.acquire_authorization_code` 声明；接线层（`nova_harness/config/auth/`）装配收货通道（宿主监听 `host:listenOnce` / 本地一次性监听 / 手动粘贴框）与竞速仲裁；渲染与用户本机执行（开浏览器 `host:openUrl`、收货、输码）归前端。开浏览器永远不后端代开。
 
@@ -120,18 +126,16 @@ nova/
 - `backend/tools/` —— 10 个本地工具，**单文件形态**（`bash.py` 即工具，元数据为 `Tool` 类属性）：
   - `bash.py` / `edit.py` / `find.py` / `grep.py` / `ls.py` / `question.py` / `read.py` / `subagent.py` / `todo.py` / `write.py`
   - `question.py`：交互式询问工具（`ToolExecContext.ui` 首个消费者——能力门控双路径：`dialog:question` 已注册走包侧单框（选项+内联自由输入，组件在 `frontend/tui/dialogs/question.ts`），否则基线两步降级（select_items→input）；支持单问 `question`+`options` 或多问 `questions`（1~4 问——多问经 tab 条分页一次提交 `{answers}`，降级路径逐问串行）；`execution_mode="sequential"`）
-  - `subagent.py`：三模式（single/parallel/chain）子代理委派——**消费会话 agents 注册表**（`ToolExecContext.agents` 快照按名查表，工具侧零发现管线；未知名报错列可用名含 source 标签）；on_update 聚合回调携带全量结果列表（parallel 含 `exit_code=-1` 运行中占位），执行引擎在 `backend/nova_coding_agent/subagent/`；执行前确认归 `subagent_gate` 扩展，激活时系统提示词注入 `# Available Agents` 菜单（AgentManager 供数）
+  - `subagent.py`：三模式（single/parallel/chain）子代理委派——**消费会话 agents 注册表**（`ToolExecContext.agents` 快照按名查表，工具侧零发现管线；未知名报错列可用名含 source 标签）；on_update 聚合回调携带全量结果列表（parallel 含 `exit_code=-1` 运行中占位），执行引擎在 `backend/nova_coding_agent/subagent/`；执行前确认归 adjudication 扩展的委派门（DelegationGate），激活时系统提示词注入 `# Available Agents` 菜单（AgentManager 供数）
   - `todo.py`：全量替换语义的清单工具（零服务端状态——状态单一事实源是会话里最新工具结果的 details，分支安全天然成立）
 - `backend/prompts/` —— 用户模板：`debug.md` / `refactor.md` + subagent 工作流三件套（`implement.md` = scout→planner→worker、`scout-and-plan.md`、`implement-and-review.md`，`$@` 占位）
 - `backend/user_tools/bash.py` —— `bash` 用户工具（单文件，暴露 `UserTool` 类）
-- `backend/extensions/` —— 八个扩展：
+- `backend/extensions/` —— 六个扩展（单文件五 + 目录形态一）：
+  - `adjudication/`（目录形态——**裁决子系统**：permission_gate/confirm_destructive/subagent_gate 三门收编。装配：RulesStore 读 `rules.lark` → Policy，AdjudicationEngine（intent 分析 + execpolicy 求值），ApprovalFlow（弹窗 + 会话缓存 + 永远允许写回）；write/edit 保护路径经 tool_call 事件裁决，bash 危险命令经 bash 工具内 Orchestrator（模块级装配）裁决；DelegationGate 管 subagent 委派自治权检查点（允许一次/本会话始终允许——`subagent_allow` 条目持久化、分支恢复/取消拦截；headless 直接放行）；会话切换/分叉确认门（`session_before_switch`/`session_before_fork`——有 UI 且当前会话非空时 confirm，选否取消切换）；`permission_decision` 条目回放做分支恢复）
   - `session_commands.py`（21 个 slash 命令，含 `/help` 命令清单、`/todos` 清单查看、`/scoped-models` 池列出、`/persona` 人格切换与 `/agent` 角色切换/保存——选择器/直切 + `persona_override`/`agent` 条目持久化 + session_start/session_tree 分支恢复；`/agent save`/`save-as <name>` 把当前生效状态物化回组合声明 yaml——包来源影子写 user 级）
-  - `permission_gate.py`（tool_call 拦截：bash 危险命令询问、写保护路径拦截）
   - `plan_mode.py`（只读规划模式——`/plan` 切换 + ctrl+alt+p + `--plan` 旗标，edit/write 从激活集移除、bash 限只读白名单（tool_call 拦截），"Plan:" 编号计划提取与 [DONE:n] 进度跟踪，footer 状态条（`set_status` 命名通知：⏸ plan / 📋 n/m），状态经 append_entry 持久化）
   - `tools_panel.py`（`/tools` 工具开关面板——`dialog:tools` 复选面板或文本回退，`set_active_tools` 绝对集应用 + `tool-panel` 条目持久化，session_start/session_tree 从分支最新条目恢复）
   - `interactive_shell.py`（user_bash 拦截：vim/htop/less/ssh 等 14 程序集或 `i ` 前缀强制——`dialog:interactive-shell` 终端让位执行，无能力回 `(interactive commands require TUI)`）
-  - `confirm_destructive.py`（`session_before_switch`/`session_before_fork` 确认门——有 UI 且当前会话非空时 confirm，选否经类型化结果 `cancel=True` 取消切换）
-  - `subagent_gate.py`（subagent 委派自治权检查点——tool_call 拦截逐名裁决：允许一次/本会话始终允许（`subagent_allow` 条目持久化、分支恢复）/取消拦截；headless 直接放行）
   - `executor_switch.py`（`/executor` 执行后端切换——选择器/直切 local/远程端点/SSH 主机（`remote user@host [远程目录]` 裸目标直输、选择器"＋ 添加远程主机"入口），三通道分离：`executor_backend` 会话条目管记忆（分支恢复，含 `remote_cwd`/`remote_shell`）+ bundle runtime 格管执行（bash 引擎执行期直读）+ notice 管用户回执 + `refresh_system_prompt` 触发环境段重建（`<cwd>` 渲染执行 cwd）；SSH 供给归 `nova_coding_agent/executor/provision.py`——密钥优先 + 首连终端让位输一次密码装管理密钥、二进制按平台缓存 scp 上传、`-tt`+`exec` 单 ssh 进程承载隧道（连接断即 SIGHUP 回收远程，零孤儿）、token 现生成不落盘、远程执行 cwd 缺省为会话隔离工作区（`<远程家目录>/.nova/agent/executor/workspaces/<session-id>`，显式目录 `test -d` 校验并随端点记忆）、供给成功自动登记 exec-server 配置根 ``[[environments]]``（``endpoints_store.register_endpoint`` 写门）、`/executor forget` 移除、隧道死亡懒重供给；**策略面**：默认执行姿态与沙箱套餐唯一事实源在 exec-server 配置根（``sandbox_mode``——经 ``config.resolve_execution(cwd)`` 物化后由 ``executor/policy.py`` 的 SpawnPolicy 挂上模式格、随 `process/start` 下发（策略归配置组装、执行归 executor，作用目录三态见 `packages/nova_harness/examples/executor-integration.md` §八），networkProxy 键等网络沙箱批次再定）
 - `frontend/tui/dialogs/` —— **包侧自定义对话框**（`dialog:*` slot）：`question.ts`（question 工具单框——选项 + 内联自由输入；多问形态 `questions`：tab 条分页 + 全答完提交 `{answers}`；注册即触发 system/capabilities 重宣告，后端 `has_capability("dialog:question")` 放行）/ `tools.ts`（工具开关面板——`[x]` 复选行 + `{active: [name...]}` 提交）/ `interactive-shell.ts`（终端让位——setImmediate 异步挂起 TUI、spawnSync 交互命令、恢复后 `{exitCode}` 回执）
 - `frontend/tui/tools/` —— **TS 渲染器（组件形态）**：`bash.ts`（终端风）/ `edit.ts`（diff 风，消费引擎预生成的 patch）/ `read.ts`（文件风）/ `write.ts` / `find.ts` / `grep.ts` / `ls.ts` / `todo.ts`（清单卡片）/ `subagent.ts`（三模式：流式占位 ⏳、usage 行、工具调用格式化、展开态 Markdown 终输出）——**返回活 pi-tui 组件**（渲染器契约双形态：`NovaBlock[] | Component`，判别在消费点；组件经 `input.env` 取色/取主题；**输入即线上归约成品 `input.item`**（ToolCallItem——服务器归约，前端无中间卡片模型））；
@@ -148,7 +152,7 @@ nova/
 该 bundle 的 `pyproject.toml` 中 `[tool.nova]` 段声明：
 - `agents = ["./agents/"]`（组合层目录——扫描其下 `*.yaml`）
 - `tools = ["./backend/tools/bash.py", "./backend/tools/edit.py", "./backend/tools/find.py", "./backend/tools/grep.py", "./backend/tools/ls.py", "./backend/tools/question.py", "./backend/tools/read.py", "./backend/tools/subagent.py", "./backend/tools/todo.py", "./backend/tools/write.py"]`
-- `extensions = ["./backend/extensions/confirm_destructive.py", "./backend/extensions/executor_switch.py", "./backend/extensions/interactive_shell.py", "./backend/extensions/permission_gate.py", "./backend/extensions/plan_mode.py", "./backend/extensions/session_commands.py", "./backend/extensions/subagent_gate.py", "./backend/extensions/tools_panel.py"]`
+- `extensions = ["./backend/extensions/adjudication/", "./backend/extensions/executor_switch.py", "./backend/extensions/interactive_shell.py", "./backend/extensions/plan_mode.py", "./backend/extensions/session_commands.py", "./backend/extensions/tools_panel.py"]`
 - `user_tools = ["./backend/user_tools/bash.py"]`
 - `personas = ["./backend/personas/"]`（persona 资源类目——目录条目，loader 递归收 .md 命名）
 - `auto_install_dependencies = true`
@@ -163,6 +167,8 @@ nova/
 > - `tools/<name>.py`（单文件，推荐）或 `tools/<name>/executor.py`（目录形态，需同目录资产时使用）：暴露 `Tool` 类——元数据为类属性（`name` / `description` / `parameters` 必需，可选 `label` / `execution_mode` / `prepare_arguments` / `prompt_snippet` / `prompt_guidelines`），`__init__(context)` 注入 `ToolContext`（cwd / settings 只读视图——构造期不变量），执行为 `execute(tool_call_id, params, signal, on_update, ctx)`——`ctx` 为 `ToolExecContext`（当前模型 + `ui`/`has_ui` 执行期 UI 句柄：弹窗经反向原语到前端渲染，工具逻辑不出 Python；注入点经 `ScopedUIContext` 织入作用域归属（run/session——仲裁按归属清扫）与并行弹窗串行锁，headless 时 `has_ui=False` 安全降级。每次调用由框架经 `context_provider` 现取注入）；
 > - `user_tools/<name>.py` 或 `user_tools/<name>/executor.py`：暴露 `UserTool` 类——元数据同为类属性（import 即可读，白名单/碰撞检测无需会话），`__init__(session)` 注入会话上下文，可选 `MESSAGE_TYPES` 类属性（加载时注册进消息回载注册表，包缺席时旧会话中该类型消息降级为不透明消息，数据不丢）。
 > 两者与 tools 同一纪律：只来自已安装包，不走顶层自动发现/settings 条目。
+>
+> `parameters` 书写约定（provider 方言安全）：手写 JSON Schema dict 原样上线（同时是 `jsonschema` 的参数校验规则——一物两用）——**联合类型的 `type` 一律下压进 `anyOf`/`oneOf` 各分支，根部不得与联合关键字共存**（Moonshot 系服务端校验私规：根部共存即 400 `invalid_request_error`，别家静默接受、只有它在会话中途才炸；实证病例 `bundles/nova_coding_agent/backend/tools/question.py` 多问版，回归测试钉住）。装包期方言 lint 卡口暂缓建设——触发线：第一个第三方工具包出现，或同类 400 重现（设计已定稿：`nova_ai/utils/schema_portability.py` 规则库纯函数 + `nova-pkg validate` 硬闸 + 工具加载软警告）。
 >
 > 扩展形态与 tools 同一纪律：**单文件优先、目录按需**。`extensions/<name>.py`（单文件，推荐——无资产纯逻辑扩展）；目录形态（`<name>/extension.py` 或 `<name>/__init__.py`）仅在需要同目录子模块/资产时使用——发现机制收集根级全部 `.py` 但不递归扩展目录，目录内部 helper 不会被误当扩展加载。
 >
@@ -193,7 +199,7 @@ npm start       # node 运行编译产物（dist/modes/tui/main.js）
 npm link        # 全局注册 `nova` 命令
 ```
 
-### `nova_executor`（Rust 通用执行后端）与 `nova-exec-server-client`（Python SDK）
+### `nova-exec-server`（Rust 通用执行后端）与 `nova-exec-server-client`（Python SDK）
 
 - **定位**：编程无绑定的通用执行后端——进程/文件系统/PTY + 三平台沙箱（macOS Seatbelt、Linux bwrap+landlock、Windows restricted token）+ managed network sandbox，JSON-RPC over stdio / WebSocket（stdio 为主：CLI/桌面/SSH 隧道场景；WS 用于回环与将来服务器托管）。fs 含大文件流式端点 `fs/readStream`（服务端推送，支持平台沙箱）/ `fs/writeStream`（客户端分片推）。**协议即产品**：线上契约在 `packages/nova-exec-server/PROTOCOL.md`，任何语言照文档可实现客户端。
 - **边界（重要）**：executor 不知道 agent/模型/工具/会话概念。已移除：模型 API 层、agent 配置体系、Rust 侧工具注册处、`capabilityRoots/discoverV1` 端点。**不要在 executor 里重新引入这些概念**——工具契约在 Nova 包体系（Python），正确接法是在 `nova_coding_agent` 的 bash 引擎后面挂 executor 实现（本地 subprocess ↔ executor 同缝切换）。
@@ -201,7 +207,7 @@ npm link        # 全局注册 `nova` 命令
   连接面：`ExecutorClient`（process/fs/pty + errors），initialize 时做 `protocolVersion` major 匹配；
   传输双形态 `WebSocketTransport` + `StdioTransport`（spawn 子进程 NDJSON，command 参数化——本地/SSH 同一实现）；
   `TransportPool` 多连接按通道路由（控制面/数据面分离，大文件流不阻塞工具调用）。
-  **发现/物化面（config.py/policy.py）**：执行策略词汇（沙箱套餐/网络代理/审批档）归 executor 栈自持——读 executor 配置根（user 层 `~/.nova/executor/config.toml` TOML + project 层 `<cwd>/.nova/settings.json` 的 `executor` 段，**project 层仅在 trust 布尔为真时读**；合并语义：表深合并、列表/标量整体覆盖），物化展开成线上协议对象（`resolve_execution_policy`——套餐名永不上线）。
+  **发现/物化面（config.py/policy.py）**：执行策略词汇（沙箱套餐/网络代理/审批档）归 executor 栈自持——读 executor 配置根（user 层 `~/.nova/exec-server/config.toml` TOML + project 层 `<cwd>/.nova/settings.json` 的 `executor` 段，**project 层仅在 trust 布尔为真时读**；合并语义：表深合并、列表/标量整体覆盖），物化展开成线上协议对象（`resolve_execution_policy`——套餐名永不上线）。
   harness settings 不携带执行词汇（存量 `executor.*` 键迁移属后续批次）。
   **多 executor 环境注册表（config.py/environments.py）**：`[[environments]]` 词汇 + 校验 + 默认解析链（`resolve_environment`）+ `ExecutorClient.from_environment` 构造（含 local 内建环境、"none" 禁用默认；选择/切换编排归调用方，将来归 bundle 扩展）。
   已删除其自带的 Tool/Plugin/ExecutorBackend 三件套（与 Nova 契约冲突），不要恢复。

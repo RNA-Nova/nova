@@ -1,5 +1,7 @@
 # Nova 数据建模标准
 
+> 坐标：横切·形状（体系总图与状态三档约定见 `docs/README.md`）。
+
 > 类型定义的住所、选型、序列化、演化、开放集、测试全套约定。速览见根 AGENTS.md「数据建模速览」。
 
 > 总纲：**终点拓扑——一个词汇枢纽包 + 按边界的协议包 + 组件内部类型各自为政**。
@@ -7,6 +9,8 @@
 > 配套两原则：**单一正典源**（每个类型全仓只有一个定义点，消费方一律 `from nova_protocol import X`）；**门面再导出**（枢纽 `__init__.py` 全量再导出，内部文件布局自由——边界包不得再导出枢纽类型充当中转站）。
 
 ## 一、住所（placement）
+
+> 本节只管**类型**的住所；模块/包的住所、依赖方向与结构核对归 `docs/crosscutting/structure-modeling.md`。
 
 **总规则一句话：跨组件边界的纯数据词汇，进 `nova_protocol`；其余一切留在原地。**
 
@@ -22,13 +26,13 @@
 
 | 层 | 内容 | 纪律 |
 |---|---|---|
-| **`nova_protocol` 枢纽** | 已入住：LLM 消息/内容/模型/用量/流式事件/枚举/compat/auth 词汇（原 `nova_ai/types`）、模型目录存储条目（`ModelsStoreEntry`，原 `nova_ai/gateway/store.py`）、agent 循环事件与 agent 消息词汇（`agent_events.py`：AgentEvent 家族 + AgentMessage 开放集 + CustomAgentMessage 基座 + AgentToolResult，原 `nova_agent/types`）、`signal.py`（取消原语，有名例外）、`ids.py`。待迁入：`session` 落盘 entries（原 `nova_harness/types/session`）、`items` 呈现形正典（原 `nova_server/types/items`）、共享 config/permissions/trust 形状 | 三纪律：依赖仅 pydantic；零行为零 I/O；收录只看"是否跨组件序列化"。**纯洁性审计测试机械执法**（`tests/test_purity.py`：无兄弟 import + 无行为 IO + 依赖最小） |
-| **边界协议包**（一条边界一个） | `nova_server/protocol`：方法表 + 信封 + 握手 + 错误码（对外契约的版本面）；`nova_executor/PROTOCOL.md`：执行器线（Rust 宇宙独立演进） | 线上唯一海关；枢纽形状可经 `reduction`/`shapes` 引用上线，组件内部类型永不直接上线 |
+| **`nova_protocol` 枢纽** | 已入住：LLM 消息/内容/模型/用量/流式事件/枚举/compat/auth 词汇（原 `nova_ai/types`，含 `RedactedString` 脱敏类型）、模型目录存储条目（`ModelsStoreEntry`，原 `nova_ai/gateway/store.py`）、模型目录字段包形状（`ModelFields`/`ModelCostFields`，原 `nova_ai/gateway/catalog.py`——跨"构建管线（`catalog/`）↔ 运行期"边界）、agent 循环事件与 agent 消息词汇（`agent_events.py`：AgentEvent 家族 + AgentMessage 开放集 + CustomAgentMessage 基座 + AgentToolResult，原 `nova_agent/types`）、诊断家族词汇（`NovaErrorKind`/`WarningKind`/`WarningEvent`/`error_kind`/`NovaDiagnostic`）、exec-server 词汇域六模块（`exec_server_config`/`environment`/`intent`/`policy`/`verdict`/`wire`）、出口清洗器（`sanitize.py`）、`signal.py`（取消原语）、`ids.py`、`aliases.py`。待迁入：`session` 落盘 entries（原 `nova_harness/types/session`）、`items` 呈现形正典（原 `nova_server/types/items`）、共享 config/permissions/trust 形状 | 三纪律：依赖仅 pydantic；零 I/O、行为登记制（第八节）；收录只看"是否跨组件序列化"。**纯洁性审计测试机械执法**（`tests/test_purity.py`：无兄弟 import + 无行为 IO + 依赖最小） |
+| **边界协议包**（一条边界一个） | `nova_server/protocol`：方法表 + 信封 + 握手 + 错误码（对外契约的版本面）；`nova-exec-server/PROTOCOL.md`：执行器线（Rust 宇宙独立演进） | 线上唯一海关；枢纽形状可经 `reduction`/`shapes` 引用上线，组件内部类型永不直接上线 |
 | **组件内部类型** | `nova_ai`：provider 内部形状 + `stream_options`（AI 调用面参数包）；`nova_agent`：`AgentState`/`AgentContext`/hook 上下文（可变容器，规则 1/4）；`nova_harness`：services/manager 中间态；UI：`UIContext` transport | 留在组件内绝不外溢；出了边界就搬家，不留副本 |
 
 **两种正典形态并列（终点，非过渡）**：消息形（LLM 上下文 + 落盘）与 item 形（呈现 + 线上通信）是并列的两种正典表示，都住枢纽；`reduction` 是翻译**行为**，住 `nova_server`——两种正典形状都住枢纽，翻译集中一处。
 
-**迁移路线（原子批次，无 shim——主分支未发布，零兼容包袱）**：每批 = 挪文件（`git mv` 保历史）+ 全仓 import 一次改完 + 五套件全绿。不留 re-export 过渡产物，历史无 shim 遗址。批次序：① LLM 词汇（已完成）→ ② agent 事件（已完成——含 AgentMessage 开放集升格：框架判别联合 + `CustomAgentMessage` 兜底 + `union_mode="left_to_right"`，基座补 `role: str = "custom"` 与 `extra="allow"`；`AgentToolResult` 同迁；nova_agent 门面不再中转枢纽类型）→ ③ session entries + 事件联合 → ④ harness 其余类型 → ⑤ items + notifications（bundle 开放集基座换挂枢纽，放最后）。
+**迁移路线（原子批次，无 shim——主分支未发布，零兼容包袱）**：每批 = 挪文件（`git mv` 保历史）+ 全仓 import 一次改完 + 五套件全绿。不留 re-export 过渡产物，历史无 shim 遗址。批次序：① LLM 词汇（已完成）→ ② agent 事件（已完成——含 AgentMessage 开放集升格：框架判别联合 + `CustomAgentMessage` 兜底 + `union_mode="left_to_right"`，基座补 `role: str = "custom"` 与 `extra="allow"`；`AgentToolResult` 同迁；nova_agent 门面不再中转枢纽类型）→ ③ session entries + 事件联合 → ④ harness 其余类型 → ⑤ items + notifications（bundle 开放集基座换挂枢纽，放最后）。【待补】每批的完成验收判定（除"五套件全绿"外的批次特有断言）需在动工时成文。
 
 ## 二、表示选型
 
@@ -40,6 +44,8 @@
      - **低频契约对象**（settings、auth.json、models.json、包 manifest、RPC envelope、API 消息——数量少、边界单次校验、schema 收益主导）→ **Pydantic（`NovaBaseModel`）**，序列化与 schema 一体化，使用原生 `model_dump()` / `model_validate()`。例：`Model` / `Usage` / messages / Agent 事件。
      - **高频重放流**（会话 JSONL 逐行恢复、批量事件回放——一次几千行）→ 边界只做结构校验（JSON 可序列化级）+ 语义校验（reducer），内存工作表示用 dict + `TypedDict` 窄签名；**逐行 `model_validate` 是已量出的加载瓶颈**（novaharness 会话加载先例）。将来 codec 需要强 schema 时，在 codec 单点用 `TypeAdapter(TypedDict)`（pydantic 原生支持）或 `msgspec`（decode 快 6–15x），不进库层工作表示。（现状注记：高频重放的性能终态答案是 `model_construct()`——单一表示、跳过校验（见「序列化与线上形态」校验两制），**TypedDict 双表示不引入**；TypedDict 仅保留给规则 7 哑容器与将来 codec 的静态形状声明。）
   3. **校验只给不可信输入**：第三方产出的数据（工具返回值、用户配置、前端 payload）即使不直接序列化也可用 Pydantic，换取构造时尽早报错；框架内部自产自销的对象不做构造时校验。例：`AgentToolResult` 用 Pydantic 不是因为要序列化，而是工具作者是第三方。
+     - **第三方对象的形状读取 = 边界归一**（防腐层纪律）：第三方对象（SDK 错误/chunk/响应——**未担保形状**：extra 残余、错误对象、跨 SDK 分叉处）的读取必经归一函数，中途禁 duck-read；归一函数住"对象族的既有边界家"（错误族归 `utils/errors.py`、chunk 族归各协议 `_stream.py`、HTTP 归 `utils/http.py`——无既有家才新建模块且须登记住所审计），注释必须带实证出处（SDK 源码/实测）。SDK 已声明字段（其模型定义担保的部分）直读不过层；归一只为未担保残余服务。
+     - **永真式假设快死，环境变化才许防御**：形状/结构假设读不到 = bug——响亮失败或归一，禁静默降级；`getattr(第三方对象, field, 默认值)` 只许发生在边界归一函数内（F1 病例：三处 `error.headers` 读取对 SDK 错误恒盲——SDK 的头在 `.response.headers`，getattr 默认值让错误雪藏；真假件迁移实证照出）。
   4. **`Callable` / 服务实例 / 异常永远不进 Pydantic**：依赖容器、hook 上下文、运行时中间态一律 `dataclass` 或普通 class。例：`AgentLoopConfig`、`StreamOptions` 家族、`Provider`、`AgentSessionConfig`。
   5. **不可变值对象优先 `frozen=True`**：纯数据、无序列化需求的值对象用 `dataclass(frozen=True)` 在类型层面锁死不可变性，不靠自觉；多字段的查询/选项类再加 `kw_only=True` 防位置参数耦合。
   6. **union 必须可判别**：存在反序列化路径的 union 用 `Field(discriminator=...)` 显式判别，不依赖 smart-union 猜测。开放集（框架变体 + 包级兜底）用判别联合 + 兜底成员 + `union_mode="left_to_right"`（例：`nova_server/types/items.py` 的 `WireItem`——`SerializeAsAny` 只管序列化方向，校验方向必须显式可判别，否则 `model_validate` 按基类重建剥掉子类字段）。TypedDict 文档路径的判别联合不引 Pydantic——判别键（`type`）保持 Literal 字面量稳定即可，与 Pydantic 路径共享同一词汇，为将来任何 codec 校验留位。
@@ -47,6 +53,13 @@
   8. **单道序列化**：生产侧（RPC handler 等）返回模型**实例**，dump 归传输/分派层单点出货；不在中间环节"先 dump 再 validate 再 dump"（双道打包会在重建时剥多态字段）。dispatch 出参对实例直通 dump_wire；声明了 result_model 却返回散装 dict → 契约违约报错（router.py 先例）。出货只走 `model_dump` / `dump_wire`（`NovaBaseModel.model_dump` 默认 `mode="json"`，Enum→value、datetime→ISO 已单点处理）——**禁止旁路** `json.dumps(model.__dict__)` 式手工打包，旁路会丢掉 json mode 语义。
   9. **RPC handler 签名即契约**：handler 签名必须类型化（`async def x(params: XxxParams) -> XxxResult`），体内一律属性访问（不散装取键）；注册表形状从签名注解自动推导（`register("x", x, domain=...)`——不重复声明 params_model/result_model）。形状模型集中在 `server/protocol/methods/shapes.py`；引用经 `shapes.` 模块前缀或模块级逐个 import，**禁止在函数内局部 import shapes**（`get_type_hints` 只查模块 globals——局部 import 会让推导静默失败）。shapes 需要引用 handler 侧类型时用 `if TYPE_CHECKING:` 块 + 字符串注解破环——不要为杜绝循环依赖而退回局部 import（future annotations 下运行时求值仍查模块 globals，局部 import 禁令与延迟求值互补、不冲突）。自由负载方法（无固定形状）注解保持 `Dict[str, Any]`，即不声明形状的语义。
   10. **声明 ≠ 校验（第四种表示：TypedDict）**：形状表示按成本选（规则 1/5/7），校验强度按信任边界选（规则 2/3）——两者正交。"有声明、零开销、不校验"的形状用 `typing.TypedDict` + 窄签名，**禁止拿 `Dict[str, Any]` 冒充已声明形状**（`Dict[str, Any]` 只保留给规则 9"无固定形状"的语义）；同一份 TypedDict 可以"库内零校验 + 边界 `TypeAdapter` 校验"两头用。行业锚点：openai-python 请求参数（[#1074](https://github.com/openai/openai-python/issues/1074) 显式拒绝 pydantic）、anthropic SDK `MessageParam`、LangGraph state 全部 TypedDict，解析产物/契约对象才 Pydantic。
+  11. **回调/钩子签名同为契约（`Any` 纪律）**：`Callable` 的参数与返回值标注与数据形状同纪律——签名面的 `Any` 是"不声明形状"的语义声明，不是兼容性工具，更不是破环器。
+     - **具体类型可得必标**：pi 对位 `onResponse: (response, model: TModel)`（payload 位才 `unknown`，model 位两个钩子都类型化）；codex 对位——回调参数全具体类型（全 workspace `dyn Any` 仅 8 处、自由负载 `Value` 作回调参数 0 处，编译器执法）。**同一对象在相邻签名间不得一处具体一处 `Any`**（本仓病例：`on_payload`/`on_response` 的第二参数同为 `Model` 对象却一标 `Model` 一标 `Any`——`Any` 让"钩子拿整对象"对类型系统隐形，安全面由此藏身）；
+     - **破环禁拿 `Any`**：参数类型真实存在但直接 import 成环的，用 `if TYPE_CHECKING:` + 字符串注解（规则 9 先例）——环是模块组织问题，不许翻译成契约面的模糊；
+     - **自由负载（规则 7 语义）才许 `Dict[str, Any]`/`Any`**，且须行内注释标注"自由负载"（pi 纪律的量化锚点：ai 包 `: any` 仅 2 处 vs `: unknown` 121 处——自由负载标记少而准）；
+     - **返回值 `Any`** 仅许表达"可同步返回或返回 awaitable"双形态（pi `void | Promise<void>` 对位），并在注释里点明该语义；
+     - **回调契约宜命名别名**：跨模块复用的回调签名定义 `TypeAlias`（codex `pub type Observer = Arc<dyn Fn(...)>` 对位；本仓先例 `KeyedLockFactory` / `UserToolFactory`）——签名一改全仓可见，不散落成匿名 `Callable`；
+     - **执法**：评审按本条打回；机械执法归结构审计族（`structure-modeling.md` §五 fitness function）——公开签名面新增 `Callable[[…Any…]]` 须有上述型号之一的行内注释。
 
 ## 三、序列化与线上形态
 
@@ -73,7 +86,7 @@
 - **纯语义档（默认）**：`typing.NewType`——零运行时成本（线上 JSON、JSONL 落盘形态不变），靠 pyright 棘轮执法（`entry_id` 传给 `session_id` 形参在静态检查期爆炸）。**不加构造校验**（规则 3：id 自产自销）；
 - **校验档（仅不可信来源）**：来自外部输入的路径/URL/id（用户粘贴的 git 地址、包源字符串）用 `NovaBaseModel` RootModel 或构造校验函数——在边界把非法值炸掉。可信内部流转一律走纯语义档。
 
-推进走渐进棘轮：新代码签名必须用语义 id；存量按调用密度（`sessions/manager.py` → `core/agent_session` → shapes.py）逐目录清；边界处（JSONL 读入、RPC 校验后）一次性贴标。
+推进走渐进棘轮：新代码签名必须用语义 id；存量按调用密度（`sessions/manager.py` → `core/agent_session` → shapes.py）逐目录清；边界处（JSONL 读入、RPC 校验后）一次性贴标。【待补】棘轮进度台账（哪些目录已清、哪批在飞）随推进成文，挂在 `docs/README.md` 矩阵的备注或本节。
 
 ## 六、开放集扩展（第三方词汇的合法进路）
 
@@ -90,21 +103,26 @@
 
 **取消的三海拔模型**（对齐 codex `CancelErr` / `CodexErrorDetails` / `EventMsg::TurnAborted` 的分层）：
 
-1. **原语层**：signal 中断一律抛 `AbortedError`（Exception 子类——可精确匹配、可带消息）。禁用两种假冒：裸 `asyncio.CancelledError`（那是"任务自身被取消"的 asyncio 内部语义，混用会干扰 Task/TaskGroup 的取消判定）与 `RuntimeError("...cancelled")` 式字符串假冒（会被泛型兜底误报成故障）。可中断等待原语单点归 `nova_ai/utils/abort.py`（`race_with_abort` / `abortable_sleep` / `any_signal` / `operation_signal`），不复制第三份实现。
+1. **原语层**：signal 中断一律抛 `AbortedError`（Exception 子类——可精确匹配、可带消息）。禁用两种假冒：裸 `asyncio.CancelledError`（那是"任务自身被取消"的 asyncio 内部语义，混用会干扰 Task/TaskGroup 的取消判定）与 `RuntimeError("...cancelled")` 式字符串假冒（会被泛型兜底误报成故障）。可中断等待原语单点归 `nova_async/abort.py`（`AbortScope` / `await_with_abort` / `await_with_signal` / `abortable_sleep` / `any_signal` / `operation_signal`），不复制第三份实现。
 2. **领域层**：`except` 包装点必须先显式直通取消词汇，再进泛型兜底（`if isinstance(error, AbortedError): raise`——`auth/resolve.py` 先例）。取消落进 `ModelsError` 这类领域错误包装，就是把用户取消误报成故障。登录交互的"用户主动取消"用 `LoginCancelledError`（交互层词汇：宿主 Esc/关框/任务取消 → 流程优雅收尾），与传输层 abort 是两回事。
 3. **线上层**：取消以事件/终态出网（`StopReason.ABORTED` + `AgentEndEvent`；codex 的 `EventMsg::TurnAborted` 同构），不在错误载荷里夹带字符串供下游嗅探。
 
 现状注记：`AuthPrompt.signal` 死字段已删除——它在 TS 侧承载浏览器登录的 manual_code 竞速取消（JS 无结构化任务取消，只能给 prompt 挂 token）；nova 移植时竞速改走 `prompt_task.cancel()`（asyncio 原生取消），字段随之失效。**回来之门常开**：将来若需要"取消某个在飞 prompt 而不杀整个流程"的跨边界 per-prompt 取消，把它加回来是干净的 minor 演化（加 optional 字段）。`AuthInteraction.signal` 保留——它是 OAuth 设备码轮询的真实取消通道，属行为契约而非数据形状。`signal.py` 作为**基础原语**登记住枢纽（见第八节登记制）。新增控制流交互时先按本节原则设计（能否建模为事件/方法/任务取消），token 字段是存量兼容手段不是新代码默认。
 
+> 诊断与观测家族的完整建模（错误/警告/通知/诊断/日志/遥测的分类学、通道与持久化）见 `docs/crosscutting/diagnostics-modeling.md`——本节只管控制面与取消；**取消永远不是诊断分类学的成员**（该文铁律三）。
+
 ## 八、行为名分
 
 `types/` 与枢纽只放**形状 + 平凡不变量**（field validator / computed property / `to_*`·`from_*` 纯转换）——住户的方法加起来不改变任何外部状态。带 I/O、状态、编排的行为住消费模块，类型需要行为时以**消费方扩展函数**安置（行为函数写在消费方模块，不进 types/枢纽）。
 
-**基础原语登记制**（行为味但全仓签名通用的极小机制，三处同步登记：此处 + 审计测试白名单 + 包 README；攒到 ≥2 个即升格为独立叶子包，枢纽恢复绝对纯形状）：
+**行为登记制**（枢纽主体零行为；缓冲带三处同步登记：此处 + 审计测试白名单 + 包 README；登记成员持续增多时升格为独立叶子包，枢纽恢复绝对纯形状）。两类成员：
 
-1. `nova_protocol/signal.py`——取消原语（全仓 47+ 文件签名通用；asyncio 白名单唯一成员）。
+1. **基础原语**——全仓签名通用、零业务语义、只依赖 stdlib 的极小机制：`signal.py`（取消原语词汇，允许 import asyncio）；
+2. **纯函数算法件**——零 I/O、仅 stdlib、输入输出都是枢纽词汇的随行算法：`exec_server_intent.py`（shell 解析/危险命令判定）、`exec_server_policy.py`（策略规则求值）、`sanitize.py`（`redact_secrets` 出口清洗）。
 
 `types/protocols.py`（nova_harness）是防循环导入的反向依赖契约（typing.Protocol），随枢纽迁移逐个评估消解；`types/ui/` 的 UIContext 家族是历史选址，归位到行为区，新代码勿效仿。
+
+> 升格实例：取消/等待机制族（`abort.py` 六件 + `TaskTracker` 任务台账 + `keyed_lock.py` 编排锁三件 + `backoff.py` 退避序列 + `deadline.py` 预算值对象）已按 structure-modeling §二升格出口迁出归 `nova_async` 叶子包——词汇（`signal.py` 四件）锚定枢纽不动，机制件不在本登记册。
 
 ## 九、文档纪律
 
