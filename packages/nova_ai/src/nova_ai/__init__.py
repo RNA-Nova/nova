@@ -1,6 +1,6 @@
 """nova_ai —— 统一的 LLM 提供商抽象层
 
-以 ``Models`` 集合 + ``Provider`` 运行时单元 + API 协议实现三层组织，
+以 ``ModelsManager`` 集合 + ``Provider`` 运行时单元 + API 协议实现三层组织，
 对外暴露一致的 ``stream`` / ``complete`` / ``stream_simple`` /
 ``complete_simple`` API。架构对齐 TypeScript ``pi/packages/ai``。
 """
@@ -9,13 +9,12 @@
 from .api_impls._shared import (
     build_base_options,
     build_copilot_dynamic_headers,
-    build_copilot_headers_from_messages,
     has_copilot_vision_input,
     infer_copilot_initiator,
     transform_messages,
 )
 
-# auth 行为层（类型词汇住 nova_protocol，本包不再再导出枢纽类型）
+# auth 行为层（类型词汇住 nova_protocol，本包不再导出枢纽类型）
 from .auth import (
     AuthResolutionOverrides,
     DefaultAuthContext,
@@ -38,26 +37,29 @@ from .auth import (
     resolve_provider_auth,
 )
 
-# Models 集合 / Provider 运行时单元 / 模型目录存储
+# ModelsManager 集合 / Provider 运行时单元 / 模型目录存储
 from .gateway import (
     InMemoryModelsStore,
-    Models,
+    ModelsManager,
     ModelsStore,
     Provider,
     ProviderStreams,
     RefreshModelsContext,
-    create_models,
+    create_models_manager,
     create_provider,
 )
 
 # 重新导出 providers 模块（内置 provider 工厂 + 模型数据）
 from .providers import (
+    ANTHROPIC_MODELS,
     KIMI_CODING_MODELS,
     MOONSHOTAI_CN_MODELS,
     MOONSHOTAI_MODELS,
     VOLCENGINE_MODELS,
+    anthropic_provider,
     builtin_models,
     builtin_providers,
+    get_anthropic_model,
     get_builtin_model,
     get_builtin_models,
     get_kimi_coding_model,
@@ -65,6 +67,7 @@ from .providers import (
     get_moonshotai_model,
     get_volcengine_model,
     kimi_coding_provider,
+    list_anthropic_models,
     list_kimi_coding_models,
     list_moonshotai_cn_models,
     list_moonshotai_models,
@@ -76,6 +79,7 @@ from .providers import (
 
 # 重新导出 stream_options（AI 调用面参数包；类型词汇已迁 nova_protocol）
 from .stream_options import (
+    ModelIdentity,
     ProviderResponse,
     SimpleStreamOptions,
     StreamOptions,
@@ -89,9 +93,9 @@ from .streaming import (
     create_assistant_message_event_stream,
 )
 
-# 重新导出utils模块（跨层通用件；实现层共享件从 api_impls._shared 再导出）
-from .utils import calculate_cost  # 环境变量; JSON解析; 字符串处理; 溢出检测
+# 重新导出 utils 模块（跨层通用件；实现层共享件从 api_impls._shared 再导出）
 from .utils import (
+    calculate_cost,
     clamp_thinking_level,
     get_env_api_key,
     get_supported_thinking_levels,
@@ -124,38 +128,39 @@ __all__ = [
     "openai_codex_oauth",
     "poll_oauth_device_code_flow",
     "resolve_provider_auth",
-    # streaming.event_stream
+    # streaming（streaming.py）
     "EventStream",
     "AssistantMessageEventStream",
     "create_assistant_message_event_stream",
-    # nova_ai.models
-    "Models",
-    "create_models",
-    # nova_ai.models_store
+    # gateway.models
+    "ModelsManager",
+    "create_models_manager",
+    # gateway.store
     "InMemoryModelsStore",
     "ModelsStore",
     # apis（API 协议实现）
     "OpenAICompletionsOptions",
+    "AnthropicOptions",
     "ProviderStreamOptions",
     # utils.env
     "get_env_api_key",
-    # utils.copilot
+    # api_impls._shared.copilot_headers
     "infer_copilot_initiator",
     "has_copilot_vision_input",
     "build_copilot_dynamic_headers",
-    "build_copilot_headers_from_messages",
     # utils.json_parser
     "parse_streaming_json",
     # utils.surrogate
     "sanitize_surrogates",
-    # types.stream_options
+    # stream_options
     "ThinkingBudgets",
     "StreamOptions",
     "SimpleStreamOptions",
     "ProviderResponse",
-    # utils.simple_options
+    "ModelIdentity",
+    # api_impls._shared.simple_options
     "build_base_options",
-    # utils.message_transformer
+    # api_impls._shared.transform_messages
     "transform_messages",
     # utils.overflow
     "is_context_overflow",
@@ -167,6 +172,10 @@ __all__ = [
     "has_api",
     "models_are_equal",
     # providers
+    "ANTHROPIC_MODELS",
+    "anthropic_provider",
+    "get_anthropic_model",
+    "list_anthropic_models",
     "Provider",
     "ProviderStreams",
     "RefreshModelsContext",
@@ -201,7 +210,11 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    if name in ("OpenAICompletionsOptions", "ProviderStreamOptions"):
+    if name in (
+        "OpenAICompletionsOptions",
+        "AnthropicOptions",
+        "ProviderStreamOptions",
+    ):
         from . import api_impls as _api_impls
 
         value = getattr(_api_impls, name)
@@ -212,5 +225,6 @@ def __getattr__(name: str):
 
 def __dir__() -> "list[str]":
     return sorted(
-        set(globals()) | {"OpenAICompletionsOptions", "ProviderStreamOptions"}
+        set(globals())
+        | {"OpenAICompletionsOptions", "AnthropicOptions", "ProviderStreamOptions"}
     )

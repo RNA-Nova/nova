@@ -13,33 +13,43 @@
 仅实现 device code flow，不接入 managed config / usage / feedback 等 Kimi SDK 能力。
 """
 
-import asyncio
 import math
 import os
-import platform
 import time
-import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
+from nova_async import abortable_sleep, backoff_delay_ms
 from nova_protocol import (
+    AbortedError,
     AbortSignal,
     AuthEvent,
     AuthInteraction,
     ModelAuth,
+    NovaBaseModel,
+    NovaErrorKind,
     OAuthAuth,
     OAuthCredential,
+    RedactedString,
     is_aborted,
+    redact_secrets,
 )
+from pydantic import ConfigDict, Field, ValidationError, field_validator
 
+from ...utils.http import request_with_abort
 from .device_code import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
     poll_oauth_device_code_flow,
 )
-from .http import post_with_abort
+from .errors import (
+    OAuthFlowError,
+    oauth_http_kind,
+    response_error_detail,
+    validation_error,
+)
 
 _DEFAULT_OAUTH_HOST = "https://auth.kimi.com"
 _CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
@@ -48,10 +58,6 @@ _TOKEN_PATH = "/api/oauth/token"
 _DEVICE_CODE_TIMEOUT_SECONDS = 15 * 60
 _DEFAULT_POLL_INTERVAL_SECONDS = 5
 _REQUEST_TIMEOUT_SECONDS = 30
-
-# 进程内稳定的 device id。持久化到磁盘需要上层传入 homeDir，目前先用环境变量 +
-# 模块级缓存兜底；跨进程重启会重新生成，不影响功能正确性，仅影响 Kimi 侧设备归因。
-_DEVICE_ID: Optional[str] = None
 
 
 def _trusted_http_url(value: Any) -> Optional[str]:
@@ -81,62 +87,41 @@ def _get_oauth_host() -> str:
     ).rstrip("/")
 
 
-def _get_device_id() -> str:
-    """获取设备标识，优先环境变量，其次进程内缓存。"""
-    global _DEVICE_ID
-    env_id = os.environ.get("NOVA_DEVICE_ID")
-    if env_id:
-        return env_id
-    if _DEVICE_ID is None:
-        _DEVICE_ID = str(uuid.uuid4())
-    return _DEVICE_ID
+class _TokenResponse(NovaBaseModel):
+    """Kimi token 端点响应的边界校验模型（第三方不可信输入——数据建模规则 3）。
 
+    消息安全：校验失败经 ``validation_error`` 只报字段名，响应体（可能含
+    活凭据）永不进错误消息。
+    """
 
-def _default_device_headers() -> Dict[str, str]:
-    """构造 Kimi 设备标识头（可选，与 TS createKimiDeviceHeaders 对齐）。"""
-    return {
-        "User-Agent": "nova/0.1.0",
-        "X-Msh-Platform": "nova",
-        "X-Msh-Version": "0.1.0",
-        "X-Msh-Device-Name": _ascii_header(platform.node() or "unknown"),
-        "X-Msh-Device-Model": _ascii_header(platform.system() or "unknown"),
-        "X-Msh-Os-Version": _ascii_header(platform.release() or "unknown"),
-        "X-Msh-Device-Id": _get_device_id(),
-    }
+    access_token: str = Field(min_length=1)
+    refresh_token: str = Field(min_length=1)
+    expires_in: float  # lax 强转保留"kimi 容忍字符串数字"的既有语义
 
+    # 厂商边界模型按厂商 casing（snake）——关掉枢纽基类的 camel alias
+    model_config = ConfigDict(alias_generator=None)
 
-def _ascii_header(value: str, fallback: str = "unknown") -> str:
-    cleaned = "".join(ch for ch in value if "\u0020" <= ch <= "\u007e").strip()
-    return cleaned or fallback
+    @field_validator("expires_in")
+    @classmethod
+    def _expires_in_positive_finite(cls, value: float) -> float:
+        if value <= 0 or not math.isfinite(value):
+            raise ValueError("expires_in must be a positive finite number")
+        return value
 
 
 def _token_from_response(data: Dict[str, Any]) -> OAuthCredential:
-    """从 token endpoint 响应解析并构造 OAuth credential（边界校验后直达正典形状）。"""
-    access_token = data.get("access_token")
-    refresh_token = data.get("refresh_token")
-    expires_in = data.get("expires_in")
-    if (
-        not isinstance(access_token, str)
-        or not access_token
-        or not isinstance(refresh_token, str)
-        or not refresh_token
-    ):
-        raise RuntimeError(f"OAuth response missing access/refresh token: {data}")
-
+    """从 token endpoint 响应解析并构造 OAuth credential（边界模型校验后直达正典形状）。"""
+    # from None：ValidationError 的 str 会回显输入值——隐式链（__context__）
+    # 一并压掉，不让它出现在任何 traceback/日志面
     try:
-        expires_in_seconds = float(expires_in)  # type: ignore[arg-type]
-    except (TypeError, ValueError) as error:
-        raise RuntimeError(
-            f"OAuth response missing invalid expires_in: {data}"
-        ) from error
+        resp = _TokenResponse.model_validate(data)
+    except ValidationError as error:
+        raise validation_error("Kimi OAuth token", error) from None
 
-    if expires_in_seconds <= 0 or not math.isfinite(expires_in_seconds):
-        raise RuntimeError(f"OAuth response invalid expires_in: {expires_in}")
-
-    expires_at_ms = int(time.time() * 1000) + int(expires_in_seconds) * 1000
+    expires_at_ms = int(time.time() * 1000) + int(resp.expires_in) * 1000
     return OAuthCredential(
-        access=access_token,
-        refresh=refresh_token,
+        access=RedactedString(resp.access_token),
+        refresh=RedactedString(resp.refresh_token),
         expires=expires_at_ms,
     )
 
@@ -148,13 +133,14 @@ async def _post_form(
 ) -> httpx.Response:
     """向 Kimi OAuth endpoint 发送 form-encoded POST。
 
-    走共享的可取消 POST 原语（watchdog 竞速，举旗即取消在飞请求）；
-    本层只叠加 Kimi 的 Accept 约定与设备标识头。
+    走共享的可取消 POST 原语（``request_with_abort``——scope 真杀，举旗即
+    杀断在飞请求）；本层只叠加 Kimi 的 Accept 约定与设备标识头。
     """
-    return await post_with_abort(
+    return await request_with_abort(
+        "POST",
         url,
         data=params,
-        headers={"Accept": "application/json", **_default_device_headers()},
+        headers={"Accept": "application/json"},
         timeout=_REQUEST_TIMEOUT_SECONDS,
         signal=signal,
     )
@@ -162,14 +148,47 @@ async def _post_form(
 
 @dataclass(frozen=True, kw_only=True)
 class _DeviceAuthorization:
-    """设备码授权响应的已校验形态（模块内值对象——规则 5）。"""
+    """设备码授权响应的已校验形态（模块内值对象——规则 5）。
+
+    ``verification_uri``：``None`` = 服务器未提供（absent 卫生——
+    下游 ``AuthEvent.verification_uri`` 以 None 表"本事件不携带"）。
+    """
 
     user_code: str
     device_code: str
-    verification_uri: str
+    verification_uri: Optional[str]
     verification_uri_complete: str
     expires_in: float
     interval: float
+
+
+class _DeviceAuthorizationResponse(NovaBaseModel):
+    """Kimi device_authorization 端点响应的边界校验模型（严格字段部分）。
+
+    ``interval``/``expires_in`` 不在模型内——它们是"非法值回落默认"的宽松
+    路径（无拒绝、无消息），留在调用点手工处理。
+    """
+
+    user_code: str = Field(min_length=1)
+    device_code: str = Field(min_length=1)
+    verification_uri_complete: str
+    verification_uri: Optional[str] = None
+
+    model_config = ConfigDict(alias_generator=None)  # 厂商 casing（snake）
+
+    @field_validator("verification_uri_complete")
+    @classmethod
+    def _complete_trusted(cls, value: str) -> str:
+        if _trusted_http_url(value) is None:
+            raise ValueError("verification_uri_complete must be http/https URL")
+        return value
+
+    @field_validator("verification_uri")
+    @classmethod
+    def _uri_trusted(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and _trusted_http_url(value) is None:
+            raise ValueError("verification_uri must be http/https URL")
+        return value
 
 
 async def _request_device_authorization(
@@ -184,27 +203,18 @@ async def _request_device_authorization(
     )
 
     if response.status_code >= 400:
-        text = response.text or response.reason_phrase
-        raise RuntimeError(
-            f"Kimi device authorization failed ({response.status_code}): {text}"
+        raise OAuthFlowError(
+            f"Kimi device authorization failed ({response.status_code}): "
+            f"{response_error_detail(response)}",
+            kind=oauth_http_kind(response.status_code),
+            status_code=response.status_code,
         )
 
     data = response.json()
-    user_code = data.get("user_code")
-    device_code = data.get("device_code")
-    verification_uri_complete = data.get("verification_uri_complete")
-    verification_uri = data.get("verification_uri")
-    if (
-        not isinstance(user_code, str)
-        or not user_code
-        or not isinstance(device_code, str)
-        or not device_code
-        or _trusted_http_url(verification_uri_complete) is None
-        or (
-            verification_uri is not None and _trusted_http_url(verification_uri) is None
-        )
-    ):
-        raise RuntimeError(f"Invalid Kimi device authorization response: {data}")
+    try:
+        resp = _DeviceAuthorizationResponse.model_validate(data)
+    except ValidationError as error:
+        raise validation_error("Kimi device authorization", error) from None
 
     interval = data.get("interval")
     if (
@@ -222,10 +232,10 @@ async def _request_device_authorization(
         expires_in = _DEVICE_CODE_TIMEOUT_SECONDS
 
     return _DeviceAuthorization(
-        user_code=user_code,
-        device_code=device_code,
-        verification_uri=verification_uri if isinstance(verification_uri, str) else "",
-        verification_uri_complete=verification_uri_complete,
+        user_code=resp.user_code,
+        device_code=resp.device_code,
+        verification_uri=resp.verification_uri,
+        verification_uri_complete=resp.verification_uri_complete,
         expires_in=expires_in,
         interval=interval,
     )
@@ -246,23 +256,30 @@ async def _poll_once(
         signal=signal,
     )
 
-    if response.status_code == 200 and isinstance(
-        response.json().get("access_token"), str
-    ):
-        credential = _token_from_response(response.json())
+    # 响应体只解析一次；非 JSON/非对象载荷（WAF、网关 HTML 等）按无载荷
+    # 处理，由状态码与错误码逻辑裁决——不得让 JSONDecodeError 逃逸出轮询。
+    data: Dict[str, Any] = {}
+    try:
+        parsed = response.json()
+        if isinstance(parsed, dict):
+            data = parsed
+    except Exception:
+        pass
+
+    if response.status_code == 200 and isinstance(data.get("access_token"), str):
+        credential = _token_from_response(data)
         return DeviceCodePollResult(
             status="complete",
             value=credential,
         )
 
     if response.status_code >= 500:
-        text = response.text or response.reason_phrase
         return DeviceCodePollResult(
             status="failed",
-            message=f"Kimi token polling server error ({response.status_code}): {text}",
+            message=f"Kimi token polling server error ({response.status_code}): "
+            f"{response_error_detail(response)}",
         )
 
-    data = response.json()
     error_code = (
         data.get("error") if isinstance(data.get("error"), str) else "unknown_error"
     )
@@ -293,10 +310,10 @@ async def _poll_once(
             message="Kimi device authorization expired",
         )
     if error_code == "access_denied":
-        detail = description or "authorization denied"
+        detail = redact_secrets(description) if description else "authorization denied"
         return DeviceCodePollResult(status="failed", message=detail)
 
-    detail = description or f"{error_code}"
+    detail = redact_secrets(description) if description else f"{error_code}"
     return DeviceCodePollResult(
         status="failed",
         message=f"Kimi token polling failed ({response.status_code}): {detail}",
@@ -315,7 +332,7 @@ async def _login_device_code(
     轮询复用 ``poll_oauth_device_code_flow``，slow_down / 超时有统一处理。
     """
     if is_aborted(signal):
-        raise asyncio.CancelledError("Login cancelled")
+        raise AbortedError("Login cancelled")
 
     oauth_host = _get_oauth_host()
     device = await _request_device_authorization(oauth_host, signal=signal)
@@ -358,7 +375,7 @@ async def _refresh(
     last_error: Optional[Exception] = None
     for attempt in range(max_retries):
         if is_aborted(signal):
-            raise RuntimeError("Refresh cancelled")
+            raise AbortedError("Kimi token refresh aborted")
 
         try:
             response = await _post_form(
@@ -375,40 +392,74 @@ async def _refresh(
             # 可重试；状态码类失败走下方响应处理，不进本分支
             last_error = error
             if attempt < max_retries - 1:
-                await asyncio.sleep(2**attempt)
+                # 退避序列走 nova_async 单点；cap 取自然上界（末次退避值），
+                # 与原无 cap 手写公式逐字等价（jitter=0 保持无抖动）
+                await abortable_sleep(
+                    backoff_delay_ms(
+                        attempt + 1,
+                        base_ms=1000,
+                        cap_ms=1000 * 2 ** (max_retries - 2),
+                        jitter=0,
+                    ),
+                    signal,
+                )
                 continue
             raise
 
-        if response.status_code == 200 and isinstance(
-            response.json().get("access_token"), str
-        ):
-            return _token_from_response(response.json())
+        # 响应体只解析一次；非 JSON/非对象错误体（网关 HTML/空体）按无错误码
+        # 处理，让状态码重试逻辑先行——不得让 JSONDecodeError 逃逸出本流程。
+        data: Dict[str, Any] = {}
+        try:
+            parsed = response.json()
+            if isinstance(parsed, dict):
+                data = parsed
+        except Exception:
+            pass
 
-        data = response.json()
+        if response.status_code == 200 and isinstance(data.get("access_token"), str):
+            return _token_from_response(data)
+
         error_code = data.get("error") if isinstance(data.get("error"), str) else ""
         if response.status_code in (401, 403) or error_code == "invalid_grant":
             error_description = data.get("error_description")
-            detail = error_description if isinstance(error_description, str) else ""
-            raise RuntimeError(
-                f"Kimi token refresh unauthorized: {detail or 're-login required'}"
+            detail = (
+                redact_secrets(error_description)
+                if isinstance(error_description, str)
+                else ""
+            )
+            raise OAuthFlowError(
+                f"Kimi token refresh unauthorized: {detail or 're-login required'}",
+                kind=NovaErrorKind.UNAUTHORIZED,
+                status_code=response.status_code,
             )
 
-        text = response.text or response.reason_phrase
-        last_error = RuntimeError(
-            f"Kimi token refresh failed ({response.status_code}): {text}"
+        # 429/5xx 重试耗尽：不传 kind——归一按 status_code 标准映射判定
+        last_error = OAuthFlowError(
+            f"Kimi token refresh failed ({response.status_code}): "
+            f"{response_error_detail(response)}",
+            status_code=response.status_code,
         )
         if (
             response.status_code in (429, 500, 502, 503, 504)
             and attempt < max_retries - 1
         ):
-            await asyncio.sleep(2**attempt)
+            # 退避序列走 nova_async 单点；cap 取自然上界，jitter=0 保持原行为
+            await abortable_sleep(
+                backoff_delay_ms(
+                    attempt + 1,
+                    base_ms=1000,
+                    cap_ms=1000 * 2 ** (max_retries - 2),
+                    jitter=0,
+                ),
+                signal,
+            )
             continue
         raise last_error
 
     raise (
         last_error
         if last_error is not None
-        else RuntimeError("Kimi token refresh failed after retries")
+        else OAuthFlowError("Kimi token refresh failed after retries")
     )
 
 

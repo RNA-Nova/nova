@@ -11,7 +11,6 @@ Copilot 动态头部、prompt cache（``prompt_cache``）。
 
 from .copilot_headers import (
     build_copilot_dynamic_headers,
-    build_copilot_headers_from_messages,
     has_copilot_vision_input,
     infer_copilot_initiator,
 )
@@ -33,7 +32,6 @@ __all__ = [
     "infer_copilot_initiator",
     "has_copilot_vision_input",
     "build_copilot_dynamic_headers",
-    "build_copilot_headers_from_messages",
     # prompt_cache
     "resolve_cache_retention",
     "clamp_openai_prompt_cache_key",

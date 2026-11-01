@@ -1,6 +1,6 @@
 """04 - Auth 解析链
 
-`Models` 的 auth 解析优先级（与 TS 对齐）：
+`ModelsManager` 的 auth 解析优先级（与 TS 对齐）：
     1. 调用方 options.api_key 显式覆盖
     2. credential store 里已存储的 credential（OAuth 过期时在锁内刷新）
     3. 环境变量（每个 provider 对应固定的环境变量名）

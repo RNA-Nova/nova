@@ -145,7 +145,8 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         ),
         cache_control_format=cache_control_format,
         send_session_affinity_headers=False,
-        deferred_tools_mode=None,
+        supports_mid_convo_system_messages=False,
+        supports_mid_convo_tool_additions=False,
         session_affinity_format="openrouter" if is_openrouter else "openai",
         supports_long_cache_retention=not (
             is_together
@@ -238,7 +239,12 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             compat.supports_long_cache_retention,
             detected.supports_long_cache_retention,
         ),
-        deferred_tools_mode=_pick(
-            compat.deferred_tools_mode, detected.deferred_tools_mode
+        supports_mid_convo_system_messages=_pick(
+            compat.supports_mid_convo_system_messages,
+            detected.supports_mid_convo_system_messages,
+        ),
+        supports_mid_convo_tool_additions=_pick(
+            compat.supports_mid_convo_tool_additions,
+            detected.supports_mid_convo_tool_additions,
         ),
     )

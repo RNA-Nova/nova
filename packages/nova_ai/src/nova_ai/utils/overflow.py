@@ -1,83 +1,39 @@
 """上下文溢出错误检测。
 
-对齐 TS：各 provider 在输入超出模型上下文窗口时返回的错误文案模式库，
-以及非溢出错误（限流/服务器错误）的排除模式。
+对齐 TS：各 provider 在输入超出模型上下文窗口时返回的错误文案模式库
+（**词表正典归 ``errors.py``——归一枢纽的单一正典源，本模块 import
+复用**），以及非溢出错误（限流/服务器错误）的排除模式。
 """
 
-import re
-from typing import List, Optional
+from typing import Optional
 
-from nova_protocol import AssistantMessage, StopReason
+from nova_protocol import AssistantMessage, NovaErrorKind, StopReason
 
-# 溢出错误模式：匹配输入超出模型上下文窗口时的错误消息
-OVERFLOW_PATTERNS: List[re.Pattern] = [
-    re.compile(r"prompt is too long", re.IGNORECASE),  # Anthropic
-    re.compile(r"request_too_large", re.IGNORECASE),  # Anthropic HTTP 413
-    re.compile(r"input is too long for requested model", re.IGNORECASE),  # Bedrock
-    re.compile(r"exceeds the context window", re.IGNORECASE),  # OpenAI
-    re.compile(
-        r"exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))",
-        re.IGNORECASE,
-    ),  # OpenAI-compatible proxies
-    re.compile(r"input token count.*exceeds the maximum", re.IGNORECASE),  # Google
-    re.compile(r"maximum prompt length is \d+", re.IGNORECASE),  # xAI
-    re.compile(r"reduce the length of the messages", re.IGNORECASE),  # Groq
-    re.compile(r"maximum context length is \d+ tokens", re.IGNORECASE),  # OpenRouter
-    re.compile(
-        r"exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?",
-        re.IGNORECASE,
-    ),  # OpenRouter/Poolside
-    re.compile(
-        r"input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)",
-        re.IGNORECASE,
-    ),  # Together AI
-    re.compile(r"exceeds the limit of \d+", re.IGNORECASE),  # GitHub Copilot
-    re.compile(r"exceeds the available context size", re.IGNORECASE),  # llama.cpp
-    re.compile(r"greater than the context length", re.IGNORECASE),  # LM Studio
-    re.compile(r"context window exceeds limit", re.IGNORECASE),  # MiniMax
-    re.compile(r"exceeded model token limit", re.IGNORECASE),  # Kimi For Coding
-    re.compile(
-        r"too large for model with \d+ maximum context length", re.IGNORECASE
-    ),  # Mistral
-    re.compile(
-        r"prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?",
-        re.IGNORECASE,
-    ),  # DS4
-    re.compile(
-        r"model_context_window_exceeded", re.IGNORECASE
-    ),  # z.ai non-standard finish_reason
-    re.compile(
-        r"prompt too long; exceeded (?:max )?context length", re.IGNORECASE
-    ),  # Ollama
-    re.compile(r"context[_ ]length[_ ]exceeded", re.IGNORECASE),  # Generic
-    re.compile(r"too many tokens", re.IGNORECASE),  # Generic
-    re.compile(r"token limit exceeded", re.IGNORECASE),  # Generic
-    re.compile(
-        r"^4(?:00|13)\s*(?:status code)?\s*\(no body\)", re.IGNORECASE
-    ),  # Cerebras
-]
-
-# 非溢出错误模式（限流、服务器错误等）
-NON_OVERFLOW_PATTERNS: List[re.Pattern] = [
-    re.compile(r"^(Throttling error|Service unavailable):", re.IGNORECASE),  # Bedrock
-    re.compile(r"rate limit", re.IGNORECASE),  # Generic rate limiting
-    re.compile(r"too many requests", re.IGNORECASE),  # Generic HTTP 429
-]
+from .errors import NON_OVERFLOW_PATTERNS, OVERFLOW_PATTERNS
 
 
 def is_context_overflow(
     message: AssistantMessage, context_window: Optional[int] = None
 ) -> bool:
-    """
-    Check if an assistant message represents a context overflow error.
+    """判断 assistant 消息是否为上下文溢出错误。
+
+    **kind 优先**（``error_kind`` 非 None 时信任归一单点的分类，不再做文本
+    判定——铁律二）；``error_kind`` 缺席（旧数据）时回退文本模式匹配。
     """
     # Case 1: Error message patterns
-    if message.stop_reason == StopReason.ERROR and message.error_message:
-        is_non_overflow = any(
-            pattern.search(message.error_message) for pattern in NON_OVERFLOW_PATTERNS
-        )
-        if not is_non_overflow and any(
-            pattern.search(message.error_message) for pattern in OVERFLOW_PATTERNS
+    if message.stop_reason == StopReason.ERROR:
+        if message.error_kind is NovaErrorKind.CONTEXT_OVERFLOW:
+            return True
+        if (
+            message.error_kind is None
+            and message.error_message
+            and not any(
+                pattern.search(message.error_message)
+                for pattern in NON_OVERFLOW_PATTERNS
+            )
+            and any(
+                pattern.search(message.error_message) for pattern in OVERFLOW_PATTERNS
+            )
         ):
             return True
 

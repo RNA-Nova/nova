@@ -5,11 +5,12 @@ abort；真正的重试由 ``_shared/retry.py`` 的 ``retry_provider_request``
 在请求层接管（可被 signal 打断）。
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from nova_protocol import Context, Model, OpenAICompletionsCompat, ProviderHeaders
 from openai import AsyncOpenAI
 
+from ...utils.errors import LoginRequiredError
 from .._shared.copilot_headers import (
     build_copilot_dynamic_headers,
     has_copilot_vision_input,
@@ -19,15 +20,20 @@ from .compat import get_compat
 from .options import api
 
 
-def _has_header(headers: Optional[ProviderHeaders], name: str) -> bool:
-    """检查 headers 中是否已存在非空指定头部（对齐 TS hasHeader）。"""
+def _get_header_value(headers: Optional[ProviderHeaders], name: str) -> Optional[str]:
+    """大小写不敏感地取头部值（值缺失/空串视为不存在）。"""
     if not headers:
-        return False
+        return None
     expected = name.lower()
     for key, value in headers.items():
         if key.lower() == expected and value is not None and value.strip():
-            return True
-    return False
+            return value
+    return None
+
+
+def _has_header(headers: Optional[ProviderHeaders], name: str) -> bool:
+    """检查 headers 中是否已存在非空指定头部（对齐 TS hasHeader）。"""
+    return _get_header_value(headers, name) is not None
 
 
 def create_client(
@@ -73,26 +79,27 @@ def create_client(
         and not _has_header(headers, "cf-aig-authorization")
     ):
         # 对齐 TS getClientApiKey：协议层不读环境变量，api key 必须由上游
-        # （Models.applyAuth / 调用方 options）注入；headers 自带 auth 时经
+        # （ModelsManager.applyAuth / 调用方 options）注入；headers 自带 auth 时经
         # client_kwargs 的 "unused" 占位放行。
-        raise ValueError(f"No API key for provider: {model.provider}")
+        raise LoginRequiredError(model.provider)
 
-    # Cloudflare AI Gateway 特殊鉴权头部
-    if model.provider == "cloudflare-ai-gateway":
+    # Cloudflare AI Gateway 特殊鉴权头部（对齐 TS getClientApiKey）：
+    # 双头形态——Authorization 置空占位，真实 key 走 cf-aig-authorization。
+    # 仅在 api_key 非空时构造；为空说明调用方自带鉴权头（上方放行路径已
+    # 保证存在），原样保留，不得覆盖。
+    if model.provider == "cloudflare-ai-gateway" and api_key:
         default_headers: ProviderHeaders = {
             **headers,
-            "Authorization": headers.get("Authorization") or "",
+            "Authorization": _get_header_value(headers, "authorization") or "",
             "cf-aig-authorization": f"Bearer {api_key}",
         }
     else:
         default_headers = headers
 
-    client_kwargs: Dict[str, Any] = {
-        "api_key": api_key or "unused",
-        "base_url": model.base_url,
-        "default_headers": {k: v for k, v in default_headers.items() if v is not None},
+    return AsyncOpenAI(
+        api_key=api_key or "unused",
+        base_url=model.base_url,
+        default_headers={k: v for k, v in default_headers.items() if v is not None},
         # 恒为 0：SDK 内建重试不可被 abort 打断，重试归 retry_provider_request
-        "max_retries": 0,
-    }
-
-    return AsyncOpenAI(**client_kwargs)
+        max_retries=0,
+    )

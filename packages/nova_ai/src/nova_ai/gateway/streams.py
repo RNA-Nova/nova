@@ -9,7 +9,7 @@
    一律编码为 ``ErrorEvent`` 终止流——调用方永远不需要 try/except。
 
 凡是产出 ``ProviderStreams`` 契约流的路径，只允许经由本原语；
-不得在 ``lazy_stream`` 之外同步抛错（见 ``Models.stream`` 的 setup 闭包纪律）。
+不得在 ``lazy_stream`` 之外同步抛错（见 ``ModelsManager.stream`` 的 setup 闭包纪律）。
 """
 
 from __future__ import annotations
@@ -21,10 +21,16 @@ from typing import Awaitable, Callable
 from nova_protocol import AssistantMessage, ErrorEvent, Model, StopReason, Usage
 
 from ..streaming import AssistantMessageEventStream
+from ..utils.errors import normalize_error
 
 
 def create_setup_error_message(model: Model, error: BaseException) -> AssistantMessage:
-    """构造装配阶段失败的终态消息（对齐 TS createSetupErrorMessage）。"""
+    """构造装配阶段失败的终态消息（对齐 TS createSetupErrorMessage）。
+
+    异常经归一单点分类（``error_kind``/``retry_after_ms`` 上消息，下游按
+    kind 分派）。
+    """
+    normalized = normalize_error(error, domain="setup")
     return AssistantMessage(
         role="assistant",
         content=[],
@@ -33,7 +39,13 @@ def create_setup_error_message(model: Model, error: BaseException) -> AssistantM
         model=model.id,
         usage=Usage(),
         stop_reason=StopReason.ERROR,
-        error_message=str(error),
+        error_message=normalized.message,
+        error_kind=normalized.kind,
+        retry_after_ms=(
+            int(normalized.retry_after_ms)
+            if normalized.retry_after_ms is not None
+            else None
+        ),
         timestamp=int(time.time() * 1000),
     )
 

@@ -1,15 +1,18 @@
 """Device Code 轮询。
 
 对齐 TypeScript ``src/auth/oauth/device-code.ts``：按 interval 轮询 token，
-支持 slow_down、超时、signal 取消。
+支持 slow_down、超时、signal 取消（中断以 ``AbortedError`` 收场——
+取消词汇纪律见 ``nova_async/abort.py``）。
 """
 
-import asyncio
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Literal, Optional, TypeVar
 
-from nova_protocol import AbortSignal, is_aborted
+from nova_async import abortable_sleep
+from nova_protocol import AbortedError, AbortSignal, NovaErrorKind, is_aborted
+
+from .errors import OAuthFlowError
 
 T = TypeVar("T")
 
@@ -40,7 +43,7 @@ class DeviceCodePollOptions(Generic[T]):
     - ``interval_seconds``：初始轮询间隔（秒）；``None`` = 默认 5 秒；
     - ``expires_in_seconds``：整个流程的超时（秒）；``None`` = 不超时；
     - ``wait_before_first_poll``：首次轮询前先等一个间隔；
-    - ``signal``：取消信号；中断以 ``asyncio.CancelledError`` 收场。
+    - ``signal``：取消信号；中断以 ``AbortedError`` 收场。
     """
 
     poll: Callable[[], Awaitable[DeviceCodePollResult[T]]]
@@ -60,31 +63,6 @@ _SLOW_DOWN_TIMEOUT_MESSAGE = (
     "This is often caused by clock drift in WSL or VM environments. "
     "Please sync or restart the VM clock and try again."
 )
-
-
-async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
-    if is_aborted(signal):
-        raise asyncio.CancelledError(_CANCEL_MESSAGE)
-
-    done_event = asyncio.Event()
-
-    def _on_abort(_signal: AbortSignal) -> None:
-        done_event.set()
-
-    if signal is not None:
-        signal.add_event_listener(_on_abort)
-
-    try:
-        try:
-            async with asyncio.timeout(ms / 1000):
-                await done_event.wait()
-        except TimeoutError:
-            pass
-        if is_aborted(signal):
-            raise asyncio.CancelledError(_CANCEL_MESSAGE)
-    finally:
-        if signal is not None:
-            signal.remove_event_listener(_on_abort)
 
 
 async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
@@ -107,19 +85,25 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
     if options.wait_before_first_poll:
         remaining_ms = deadline - _now_ms()
         if remaining_ms > 0:
-            await _abortable_sleep(min(interval_ms, remaining_ms), options.signal)
+            await abortable_sleep(min(interval_ms, remaining_ms), options.signal)
 
     while _now_ms() < deadline:
         if is_aborted(options.signal):
-            raise asyncio.CancelledError(_CANCEL_MESSAGE)
+            raise AbortedError(_CANCEL_MESSAGE)
 
         result = await options.poll()
         if result.status == "complete":
             if result.value is None:
-                raise RuntimeError("Device code poll returned complete without value")
+                raise OAuthFlowError(
+                    "Device code poll returned complete without value",
+                    kind=NovaErrorKind.INTERNAL,
+                )
             return result.value
         if result.status == "failed":
-            raise RuntimeError(result.message or "Device code flow failed")
+            raise OAuthFlowError(
+                result.message or "Device code flow failed",
+                kind=NovaErrorKind.UNAUTHORIZED,
+            )
         if result.status == "slow_down":
             slow_down_count += 1
             if result.interval_seconds is not None and result.interval_seconds > 0:
@@ -130,7 +114,7 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
         remaining_ms = deadline - _now_ms()
         if remaining_ms <= 0:
             break
-        await _abortable_sleep(min(interval_ms, remaining_ms), options.signal)
+        await abortable_sleep(min(interval_ms, remaining_ms), options.signal)
 
     raise TimeoutError(
         _SLOW_DOWN_TIMEOUT_MESSAGE if slow_down_count > 0 else _TIMEOUT_MESSAGE

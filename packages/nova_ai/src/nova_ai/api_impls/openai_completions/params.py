@@ -1,21 +1,31 @@
 """请求体参数构建（对齐 TS ``buildParams``，2026-08 终态）。
 
-extra_body 纪律：openai-python 拒绝未知 kwarg——所有非标准字段
-（``prompt_cache_key`` / ``tool_stream`` / ``thinking.*`` /
-``chat_template_*`` / 思考预算字段 / ``reasoning_details``）统一经
-``extra_body`` 汇入线上 JSON 顶层。禁止散落 ``params["x"] = ...``。
+形状纪律（对齐 pi 的"SDK 类型打底 + as any 逃逸"）：
+
+- 标准字段集中在 ``_ParamsBag`` TypedDict 声明——键名拼写在静态检查期
+  就炸（SDK 官方 TypedDict 与 dict 形态的消息构造链摩擦大，故用自有
+  声明，保护等级一致）；
+- 非标准字段（``prompt_cache_key`` / ``tool_stream`` / ``thinking.*`` /
+  ``chat_template_*`` / 思考预算字段 / ``reasoning_details`` 等）统一经
+  ``extra_body`` 汇入线上 JSON 顶层——散键禁止直写 ``params["x"]``；
+- ``sampling_params``（模型级自由负载）在出货边界才合入。
 """
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union, cast
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
 from nova_protocol import (
     CacheRetention,
     Context,
     Model,
     OpenAICompletionsCompat,
+    ThinkingFormat,
     ThinkingLevelMap,
 )
 
+from ...stream_options import StreamOptions
 from .._shared.prompt_cache import (
     _apply_anthropic_cache_control,
     _get_compat_cache_control,
@@ -33,9 +43,36 @@ from .messages import (
     get_deferred_tool_names,
     has_tool_history,
 )
-from .options import OpenAICompletionsOptions
+from .options import ToolChoiceFunction
 
 _OMIT = object()
+
+
+class _ParamsBag(TypedDict, total=False):
+    """``build_params`` 标准字段的声明形状（规则 10：声明不校验——键名
+    拼写由静态检查执法；值在边界经 SDK 校验）。
+
+    方言字段不进本袋，一律走 ``extra_body``（模块 docstring 纪律）。
+    """
+
+    model: str
+    messages: List["ChatCompletionMessageParam"]  # convert_messages 产出
+    stream: bool
+    stream_options: Dict[str, Any]
+    store: bool
+    max_tokens: int
+    max_completion_tokens: int
+    temperature: float
+    metadata: Dict[
+        str, Any
+    ]  # 比 SDK 的 Dict[str, str] 宽——与 StreamOptions.metadata 同形
+    tools: List["ChatCompletionToolParam"]  # convert_tools 产出
+    parallel_tool_calls: bool
+    tool_choice: Union[str, ToolChoiceFunction]
+    reasoning_effort: str
+    # 比 SDK 的 ReasoningEffort Literal 宽：level_map 可映射出 "max" 等
+    # SDK 尚未收录的级别（SDK 类型滞后于线，线上是自由字符串）
+    extra_body: Dict[str, Any]
 
 
 def _resolve_thinking_token_budget_field(
@@ -50,7 +87,7 @@ def _resolve_thinking_token_budget_field(
 
 
 def _map_level(level_map: ThinkingLevelMap, level: str) -> Optional[str]:
-    """映射思考级别；键缺失或显式 ``None``（该级别不受支持）→ ``None``。
+    """映射思考级别。
 
     两种"不映射"必须区分——键缺失回落原值；显式 ``None``（该级别不受支持）
     返回 ``None``，由调用方省略字段（绝不能把 ``null`` 发上线）。
@@ -62,11 +99,11 @@ def _map_level(level_map: ThinkingLevelMap, level: str) -> Optional[str]:
 
 def _resolve_clamped_thinking_budget(
     model: Model,
-    options: Optional[OpenAICompletionsOptions],
-    params: Dict[str, Any],
+    options: Optional[StreamOptions],
+    params: "_ParamsBag",
 ) -> Optional[int]:
     """按答案余量钳制思考预算（对齐 TS resolveClampedThinkingBudget）。"""
-    # 专属字段经 getattr 防御（TS ?. 的 Python 对位）：Models 高层路径
+    # 专属字段经 getattr 防御（TS ?. 的 Python 对位）：ModelsManager 高层路径
     # 传的可能是 SimpleStreamOptions 等通用基类，不带协议专属字段。
     effort = getattr(options, "reasoning_effort", None) if options else None
     # "off" 是显式关闭：调用方已归一为不携带 reasoning_effort，
@@ -90,7 +127,7 @@ def _resolve_clamped_thinking_budget(
 
 def _build_chat_template_values(
     model: Model,
-    options: Optional[OpenAICompletionsOptions],
+    options: Optional[StreamOptions],
     values: Dict[str, Any],
     thinking_budget: Optional[int],
     reasoning_effort: Optional[str],
@@ -108,7 +145,7 @@ def _build_chat_template_values(
 
 def _resolve_chat_template_kwarg_value(
     model: Model,
-    options: Optional[OpenAICompletionsOptions],
+    options: Optional[StreamOptions],
     value: Any,
     thinking_budget: Optional[int],
     reasoning_effort: Optional[str],
@@ -133,7 +170,7 @@ def _resolve_chat_template_kwarg_value(
 def build_params(
     model: Model,
     context: Context,
-    options: Optional[OpenAICompletionsOptions] = None,
+    options: Optional[StreamOptions] = None,
     compat: Optional[OpenAICompletionsCompat] = None,
     cache_retention: Optional[CacheRetention] = None,
 ) -> Dict[str, Any]:
@@ -141,6 +178,10 @@ def build_params(
 
     返回的是厂商线上形状的开放 dict（自由负载语义）——标准字段 +
     ``extra_body`` 累积的非标准字段，直交 openai SDK。
+
+    ``options`` 的实测契约是 ``StreamOptions`` 任意子类：ModelsManager 高层路径
+    经 applyAuth 后传的是通用基类（不带 reasoning_effort 等协议专属字段），
+    专属字段一律经 getattr 防御读取（TS ``?.`` 的 Python 对位）。
     """
     compat = compat or get_compat(model)
     cache_retention = cache_retention or resolve_cache_retention(
@@ -151,7 +192,7 @@ def build_params(
     messages = convert_messages(model, context, compat)
     cache_control = _get_compat_cache_control(compat, cache_retention)
 
-    params: Dict[str, Any] = {
+    params: _ParamsBag = {
         "model": model.id,
         "messages": messages,
         "stream": True,
@@ -172,13 +213,20 @@ def build_params(
     if options and options.temperature is not None:
         params["temperature"] = options.temperature
 
-    if options and getattr(options, "metadata", None):
+    metadata = getattr(options, "metadata", None) if options else None
+    if metadata:
         # 旧单体遗漏修复：OpenAI store:true 场景的轨迹追踪 metadata
-        params["metadata"] = options.metadata
+        params["metadata"] = metadata
 
     deferred_tool_names = set()
-    if compat.deferred_tools_mode == "kimi":
+    if (
+        compat.supports_mid_convo_system_messages
+        and compat.supports_mid_convo_tool_additions
+    ):
         deferred_tool_names = get_deferred_tool_names(context.messages)
+
+    # extra_body 单点累积：非标准字段统一从这里上线
+    extra_body: Dict[str, Any] = {}
 
     active_tools = None
     if context.tools:
@@ -189,20 +237,28 @@ def build_params(
     if active_tools:
         params["tools"] = convert_tools(active_tools, compat)
         if compat.zai_tool_stream:
-            params["tool_stream"] = True
-        if options and getattr(options, "parallel_tool_calls", None) is not None:
-            params["parallel_tool_calls"] = options.parallel_tool_calls
+            extra_body["tool_stream"] = True
+        parallel_tool_calls = getattr(options, "parallel_tool_calls", None)
+        if parallel_tool_calls is not None:
+            params["parallel_tool_calls"] = parallel_tool_calls
     elif has_tool_history(context.messages):
         # Anthropic（经 LiteLLM/代理）要求对话含工具调用/结果时必须带 tools 参数
         params["tools"] = []
 
     if cache_control:
-        _apply_anthropic_cache_control(messages, params.get("tools"), cache_control)
+        # cache_control 要往工具 dict 里写 SDK 未声明的键——本文件明文的
+        # "SDK 类型打底 + 逃逸"哲学：此处即逃逸点，cast 到可变映射形状
+        _apply_anthropic_cache_control(
+            messages,
+            cast(Optional[List[Dict[str, Any]]], params.get("tools")),
+            cache_control,
+        )
 
     # 双条件（对齐 TS）：tools 非空才发 tool_choice——严格端点对
     # "有 choice 无 tools" 直接 400。
-    if options and getattr(options, "tool_choice", None) and params.get("tools"):
-        params["tool_choice"] = options.tool_choice
+    tool_choice = getattr(options, "tool_choice", None)
+    if tool_choice and params.get("tools"):
+        params["tool_choice"] = tool_choice
 
     # ---- 思考参数（按 thinking_format 分派；对齐 TS 分支序）----
     # "off" 入口归一为 None：pi 的 reasoningEffort 类型层不含 off
@@ -211,11 +267,7 @@ def build_params(
     reasoning_effort = getattr(options, "reasoning_effort", None) if options else None
     if reasoning_effort == "off":
         reasoning_effort = None
-    enabled = bool(reasoning_effort)
     thinking_budget = _resolve_clamped_thinking_budget(model, options, params)
-
-    # extra_body 单点累积：非标准字段统一从这里上线
-    extra_body: Dict[str, Any] = {}
 
     # prompt cache（对齐 TS 顶层 prompt_cache_key/retention——Python 侧经 extra_body 上线）
     session_id = options.session_id if options else None
@@ -241,7 +293,7 @@ def build_params(
         return "off" in level_map and level_map["off"] is None
 
     if model.reasoning:
-        if compat.thinking_format == "zai":
+        if compat.thinking_format == ThinkingFormat.ZAI:
             extra_body["thinking"] = (
                 {"type": "enabled", "clear_thinking": False}
                 if reasoning_effort
@@ -251,18 +303,18 @@ def build_params(
                 effort = _map_level(level_map, reasoning_effort)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
-        elif compat.thinking_format == "qwen":
+        elif compat.thinking_format == ThinkingFormat.QWEN:
             extra_body["enable_thinking"] = bool(reasoning_effort)
             if reasoning_effort and compat.supports_reasoning_effort:
                 effort = _map_level(level_map, reasoning_effort)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
-        elif compat.thinking_format == "qwen-chat-template":
+        elif compat.thinking_format == ThinkingFormat.QWEN_CHAT_TEMPLATE:
             extra_body["chat_template_kwargs"] = {
                 "enable_thinking": bool(reasoning_effort),
                 "preserve_thinking": True,
             }
-        elif compat.thinking_format == "chat-template":
+        elif compat.thinking_format == ThinkingFormat.CHAT_TEMPLATE:
             chat_kwargs = _build_chat_template_values(
                 model,
                 options,
@@ -272,7 +324,7 @@ def build_params(
             )
             if chat_kwargs:
                 extra_body["chat_template_kwargs"] = chat_kwargs
-        elif compat.thinking_format == "baseten":
+        elif compat.thinking_format == ThinkingFormat.BASETEN:
             chat_args = _build_chat_template_values(
                 model,
                 options,
@@ -291,7 +343,7 @@ def build_params(
                 )
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
-        elif compat.thinking_format == "deepseek":
+        elif compat.thinking_format == ThinkingFormat.DEEPSEEK:
             if reasoning_effort:
                 extra_body["thinking"] = {"type": "enabled"}
             elif not _off_is_explicitly_null():
@@ -300,7 +352,7 @@ def build_params(
                 effort = _map_level(level_map, reasoning_effort)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
-        elif compat.thinking_format == "openrouter":
+        elif compat.thinking_format == ThinkingFormat.OPENROUTER:
             # OpenRouter 用嵌套 reasoning 对象跨 provider 归一
             if reasoning_effort:
                 effort = _map_level(level_map, reasoning_effort)
@@ -308,18 +360,18 @@ def build_params(
                     extra_body["reasoning"] = {"effort": effort}
             elif not _off_is_explicitly_null():
                 extra_body["reasoning"] = {"effort": _off_value() or "none"}
-        elif compat.thinking_format == "ant-ling":
+        elif compat.thinking_format == ThinkingFormat.ANT_LING:
             if reasoning_effort and model.thinking_level_map:
                 effort = model.thinking_level_map.get(reasoning_effort)
                 if isinstance(effort, str):
                     extra_body["reasoning"] = {"effort": effort}
-        elif compat.thinking_format == "together":
+        elif compat.thinking_format == ThinkingFormat.TOGETHER:
             extra_body["reasoning"] = {"enabled": bool(reasoning_effort)}
             if reasoning_effort and compat.supports_reasoning_effort:
                 effort = _map_level(level_map, reasoning_effort)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
-        elif compat.thinking_format == "string-thinking":
+        elif compat.thinking_format == ThinkingFormat.STRING_THINKING:
             if reasoning_effort:
                 effort = _map_level(level_map, reasoning_effort)
                 if isinstance(effort, str):
@@ -328,7 +380,9 @@ def build_params(
                 extra_body["thinking"] = _off_value() or "none"
         elif reasoning_effort and compat.supports_reasoning_effort:
             # OpenAI 风格 reasoning_effort
-            params["reasoning_effort"] = _map_level(level_map, reasoning_effort)
+            effort = _map_level(level_map, reasoning_effort)
+            if isinstance(effort, str):
+                params["reasoning_effort"] = effort
         elif not reasoning_effort and compat.supports_reasoning_effort:
             off_value = _off_value()
             if off_value is not None:
@@ -359,12 +413,13 @@ def build_params(
                 gateway_options["order"] = routing.order
             extra_body["providerOptions"] = {"gateway": gateway_options}
 
-    params = {k: v for k, v in params.items() if v is not None}
     if extra_body:
         params["extra_body"] = extra_body
 
-    # 最后合并 sampling_params，让自定义键覆盖命名请求字段（对齐 TS）
+    # 出货边界：TypedDict 袋转自由 dict，再合并 sampling_params
+    # （模型级自由负载——自定义键可覆盖命名请求字段，对齐 TS）
+    final: Dict[str, Any] = dict(params)
     if options and options.sampling_params:
-        params.update(options.sampling_params)
+        final.update(options.sampling_params)
 
-    return params
+    return final

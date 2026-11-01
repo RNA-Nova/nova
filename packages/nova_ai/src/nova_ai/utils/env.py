@@ -9,9 +9,8 @@ from typing import Optional
 
 def get_env_api_key(provider: str) -> Optional[str]:
     """
-    从已知的环境变量获取提供商的API密钥
-
-    对于需要OAuth令牌的提供商不会返回API密钥
+    从已知的环境变量获取提供商的 API 密钥（含 OAuth 类 token 环境变量——
+    如 ``ANTHROPIC_OAUTH_TOKEN``、Copilot 的 GH_TOKEN 系列也经此读取）。
 
     Args:
         provider: 提供商名称

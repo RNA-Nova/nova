@@ -74,9 +74,6 @@ def build_base_options(
         on_response=options.on_response if options else None,
         metadata=options.metadata if options else None,
         timeout=options.timeout if options else None,
-        websocket_connect_timeout_ms=(
-            options.websocket_connect_timeout_ms if options else None
-        ),
         max_retries=options.max_retries if options else None,
         max_retry_delay_ms=options.max_retry_delay_ms if options else None,
         sampling_params=sampling_params,
@@ -105,10 +102,8 @@ def clamp_reasoning(
     effort: Union[ThinkingLevel, str, None],
 ) -> Union[ThinkingLevel, str, None]:
     """把 xhigh/max 降为 high（预算表只到 high；对齐 TS clampReasoning）。"""
-    if effort in (ThinkingLevel.XHIGH, ThinkingLevel.MAX) or effort in (
-        "xhigh",
-        "max",
-    ):
+    # ThinkingLevel 是 str 枚举：成员比较对裸字符串输入同样命中
+    if effort in (ThinkingLevel.XHIGH, ThinkingLevel.MAX):
         return "high"
     return effort
 
@@ -144,3 +139,28 @@ def thinking_budget_for_level(
 def clamp_thinking_budget_to_answer_room(thinking_budget: int, ceiling: int) -> int:
     """钳制思考预算，保证共享上限下至少留 MIN_ANSWER_TOKENS 给答案。"""
     return min(int(thinking_budget), max(0, int(ceiling) - MIN_ANSWER_TOKENS))
+
+
+def adjust_max_tokens_for_thinking(
+    base_max_tokens: Optional[int],
+    model_max_tokens: int,
+    reasoning_level,
+    custom_budgets: Optional[ThinkingBudgets] = None,
+) -> "tuple[int, int]":
+    """思考开启时的 (max_tokens, thinking_budget) 联合调整（对齐 TS
+    ``adjustMaxTokensForThinking``）。
+
+    调用方未设上限时用模型上限、思考预算装进上限内；设了上限则给思考
+    预留预算空间（base + budget，不超模型上限）；预算再按答案余量钳制。
+    """
+    thinking_budget = thinking_budget_for_level(reasoning_level, custom_budgets)
+    max_tokens = (
+        model_max_tokens
+        if base_max_tokens is None
+        else min(base_max_tokens + thinking_budget, model_max_tokens)
+    )
+    if max_tokens <= thinking_budget:
+        thinking_budget = clamp_thinking_budget_to_answer_room(
+            thinking_budget, max_tokens
+        )
+    return max_tokens, thinking_budget

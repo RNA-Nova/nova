@@ -79,19 +79,3 @@ def build_copilot_dynamic_headers(
         headers["Copilot-Vision-Request"] = "true"
 
     return headers
-
-
-# 备用：直接检查消息中的图像而不需要外部参数
-def build_copilot_headers_from_messages(messages: List[Message]) -> Dict[str, str]:
-    """
-    直接从消息构建 Copilot 请求头部
-
-    Args:
-        messages: 消息列表
-
-    Returns:
-        Copilot 请求头部字典
-    """
-    return build_copilot_dynamic_headers(
-        messages=messages, has_images=has_copilot_vision_input(messages)
-    )

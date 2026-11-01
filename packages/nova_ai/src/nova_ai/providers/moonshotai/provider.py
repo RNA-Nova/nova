@@ -10,7 +10,8 @@ from .models import MOONSHOTAI_MODELS
 
 
 def moonshotai_provider() -> "Provider":
-    """构造 Moonshot AI provider 实例。"""
+    """构造 Moonshot AI provider 实例（nova_ai 静态出厂；
+    ``catalog_source="pi.dev"`` 供 harness 组合时六件套包装刷新）。"""
     from ...api_impls import openai_completions
 
     return create_provider(
@@ -23,4 +24,5 @@ def moonshotai_provider() -> "Provider":
         auth=ProviderAuth(
             api_key=env_api_key_auth("Moonshot AI API key", ["MOONSHOT_API_KEY"])
         ),
+        catalog_source="pi.dev",
     )

@@ -1,4 +1,4 @@
-"""Models 持久化存储。
+"""ModelsManager 持久化存储。
 
 对齐 TS ``src/models-store.ts``：按 provider id 持久化动态模型目录。
 落盘 schema ``ModelsStoreEntry`` 住 ``nova_protocol``（跨组件序列化词汇）；
@@ -26,22 +26,6 @@ class ModelsStore(Protocol):
         ...
 
 
-class ProviderModelsStore(Protocol):
-    """限定到单个 provider 的模型目录存储。"""
-
-    async def read(self) -> Optional[ModelsStoreEntry]:
-        """读取当前 provider 的模型目录。"""
-        ...
-
-    async def write(self, entry: ModelsStoreEntry) -> None:
-        """写入当前 provider 的模型目录。"""
-        ...
-
-    async def delete(self) -> None:
-        """删除当前 provider 的模型目录。"""
-        ...
-
-
 class InMemoryModelsStore:
     """内存 ModelsStore 实现。"""
 
@@ -64,5 +48,4 @@ class InMemoryModelsStore:
 __all__ = [
     "InMemoryModelsStore",
     "ModelsStore",
-    "ProviderModelsStore",
 ]

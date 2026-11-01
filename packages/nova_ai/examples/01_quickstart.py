@@ -3,7 +3,7 @@
 演示两条路径：
 1. 离线 mock：手写一个"协议模块"（两个函数即满足 ProviderStreams 协议），
    不依赖任何 API Key，可直接运行。
-2. 真实调用：`builtin_models()` 拿到内置 Models，用环境变量里的 key 发请求。
+2. 真实调用：`builtin_models()` 拿到内置 ModelsManager，用环境变量里的 key 发请求。
 
 运行：
     python examples/01_quickstart.py
@@ -12,15 +12,17 @@
 import asyncio
 import os
 
-from nova_ai import EventStream
 from nova_protocol import (
     AssistantMessage,
     Context,
     DoneEvent,
     StartEvent,
+    StopReason,
     TextContent,
     UserMessage,
 )
+
+from nova_ai import EventStream
 
 
 # ----------------------------------------------------------------------
@@ -63,10 +65,13 @@ async def real_demo():
         return
 
     models = builtin_models()
-    model = get_volcengine_model("deepseek-v4-flash-260425")
+    model = get_volcengine_model("doubao-seed-2-0-mini-260428")
     context = Context(messages=[UserMessage(role="user", content="用一句话介绍你自己")])
     message = await models.stream_simple(model, context).result()
-    print("[real]", message.content[0].text)
+    if message.stop_reason != StopReason.STOP or not message.content:
+        print("[real] 调用失败:", message.error_message)
+        return
+    print("[real]", next(c.text for c in message.content if c.type == "text"))
 
 
 if __name__ == "__main__":

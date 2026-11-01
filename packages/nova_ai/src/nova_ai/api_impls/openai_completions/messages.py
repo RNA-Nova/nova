@@ -34,12 +34,15 @@ class _AssistantMessageParam(ChatCompletionAssistantMessageParam, total=False):
     """SDK 助手消息形状 + 厂商扩展键（非标准但会被端点消费的回放字段）。
 
     ``reasoning_details``（OpenRouter 系结构化推理回放）与
-    ``reasoning_content``（DeepSeek/llama.cpp 系推理回放）不在
-    openai SDK 的 TypedDict 里，但 SDK 对未知键原样透传上线。
+    ``reasoning_content`` / ``reasoning`` / ``reasoning_text``
+    （DeepSeek/llama.cpp 系推理回放，白名单见 ``is_reasoning_field``）
+    不在 openai SDK 的 TypedDict 里，但 SDK 对未知键原样透传上线。
     """
 
     reasoning_details: List[Dict[str, Any]]
     reasoning_content: str
+    reasoning: str
+    reasoning_text: str
 
 
 def has_tool_history(messages: List[Message]) -> bool:
@@ -228,8 +231,8 @@ def convert_messages(
                         if model.provider == "opencode-go" and signature == "reasoning":
                             signature = "reasoning_content"
                         if signature and is_reasoning_field(signature):
-                            assistant_param[signature] = "\n".join(
-                                b.thinking for b in non_empty_thinking
+                            assistant_param[signature] = sanitize_surrogates(
+                                "\n".join(b.thinking for b in non_empty_thinking)
                             )
             elif assistant_text:
                 assistant_param["content"] = assistant_text
@@ -285,7 +288,9 @@ def convert_messages(
                 )
                 has_images = any(c.type == "image" for c in curr.content)
 
-                has_text = len(text_result) > 0
+                has_text = bool(
+                    text_result.strip()
+                )  # 白空白（如 bash 纯 "\r\n"）视同无输出——provider 对纯空白工具内容 400 且会话内每轮复现（pi #8720 实证）
                 if has_text:
                     tool_result_text = text_result
                 elif has_images:
@@ -301,7 +306,10 @@ def convert_messages(
                     tool_result_param["name"] = curr.tool_name  # type: ignore[typeddict-unknown-key]
                 params.append(tool_result_param)
 
-                if compat.deferred_tools_mode == "kimi":
+                if (
+                    compat.supports_mid_convo_system_messages
+                    and compat.supports_mid_convo_tool_additions
+                ):
                     for name in curr.added_tool_names or []:
                         deferred_tool_names.add(name)
 
@@ -344,7 +352,10 @@ def convert_messages(
             else:
                 last_role = "toolResult"
 
-            if compat.deferred_tools_mode == "kimi" and deferred_tool_names:
+            if (
+                compat.supports_mid_convo_system_messages
+                and compat.supports_mid_convo_tool_additions
+            ) and deferred_tool_names:
                 deferred_tools = get_tools_by_name(context.tools, deferred_tool_names)
                 if deferred_tools:
                     # Kimi deferred tools 的 system+tools 形状是端点专有扩展，

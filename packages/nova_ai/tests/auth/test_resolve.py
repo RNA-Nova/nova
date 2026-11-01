@@ -1,12 +1,16 @@
 """Auth 解析测试。"""
 
+import asyncio
 import time
 
 import pytest
 from nova_protocol import (
+    AbortController,
+    AbortedError,
     ApiKeyCredential,
     AuthResult,
     ModelAuth,
+    NovaErrorKind,
     OAuthAuth,
     OAuthCredential,
     ProviderAuth,
@@ -20,6 +24,7 @@ from nova_ai.auth.resolve import (
     ModelsError,
     resolve_provider_auth,
 )
+from nova_ai.utils.errors import RequestTimeoutError
 
 
 @pytest.mark.asyncio
@@ -52,9 +57,7 @@ async def test_resolve_override_api_key_takes_priority(monkeypatch):
 @pytest.mark.asyncio
 async def test_resolve_stored_api_key_takes_priority_over_env():
     store = InMemoryCredentialStore()
-    await store.modify(
-        "test", lambda _current: _just(ApiKeyCredential(key="stored-key"))
-    )
+    store.write("test", ApiKeyCredential(key="stored-key"))
 
     auth = ProviderAuth(api_key=env_api_key_auth("test", ["TEST_RESOLVE_API_KEY"]))
     result = await resolve_provider_auth(
@@ -74,7 +77,7 @@ async def test_resolve_stored_oauth_when_not_expired():
         refresh="refresh-token",
         expires=int(time.time() * 1000) + 10 * 60 * 1000,
     )
-    await store.modify("test", lambda _current: _just(cred))
+    store.write("test", cred)
 
     async def to_auth(credential: OAuthCredential) -> ModelAuth:
         return ModelAuth(api_key=credential.access)
@@ -98,7 +101,7 @@ async def test_resolve_stored_oauth_refreshes_when_expired():
         refresh="refresh-token",
         expires=int(time.time() * 1000) - 1000,
     )
-    await store.modify("test", lambda _current: _just(expired))
+    store.write("test", expired)
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
         return OAuthCredential(
@@ -119,9 +122,109 @@ async def test_resolve_stored_oauth_refreshes_when_expired():
     assert result is not None
     assert result.auth["api_key"] == "new-access"
 
-    updated = await store.read("test")
+    updated = store.read("test")
     assert updated is not None
     assert updated.access == "new-access"
+
+
+@pytest.mark.asyncio
+async def test_refresh_aborted_inside_refresh_lock_propagates_aborted_error():
+    """刷新在 per-provider 刷新锁内因 signal 抛 AbortedError：直通，不得包成 ModelsError
+    （取消不落泛型兜底——否则 abort 会被误报成"OAuth 刷新失败"）。"""
+    store = InMemoryCredentialStore()
+    expired = OAuthCredential(
+        access="old-access",
+        refresh="refresh-token",
+        expires=int(time.time() * 1000) - 1000,
+    )
+    store.write("test", expired)
+
+    async def refresh(_credential: OAuthCredential, _signal=None) -> OAuthCredential:
+        raise AbortedError("refresh aborted")
+
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
+        return ModelAuth(api_key=credential.access)
+
+    auth = ProviderAuth(
+        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+    )
+    with pytest.raises(AbortedError):
+        await resolve_provider_auth(
+            "test", auth, store, default_provider_auth_context()
+        )
+
+
+@pytest.mark.asyncio
+async def test_refresh_timeout_raises_request_timeout_not_aborted(monkeypatch):
+    """刷新端点挂死：超时帽经 asyncio.timeout 独立通道触发——死因
+    RequestTimeoutError（REQUEST_TIMEOUT 自声明），绝不伪装成用户取消
+    （对照：AbortSignal.timeout 时代它与 AbortedError 逐字节相同）。"""
+    import nova_ai.auth.resolve as resolve_module
+
+    monkeypatch.setattr(resolve_module, "DEFAULT_OAUTH_REFRESH_TIMEOUT_MS", 50)
+    store = InMemoryCredentialStore()
+    expired = OAuthCredential(
+        access="old-access",
+        refresh="refresh-token",
+        expires=int(time.time() * 1000) - 1000,
+    )
+    store.write("test", expired)
+
+    never = asyncio.Event()
+
+    async def refresh(_credential: OAuthCredential, _signal=None) -> OAuthCredential:
+        await never.wait()
+        raise AssertionError("超时帽生效时不会走到")
+
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
+        return ModelAuth(api_key=credential.access)
+
+    auth = ProviderAuth(
+        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+    )
+    with pytest.raises(RequestTimeoutError) as exc_info:
+        await resolve_provider_auth(
+            "test", auth, store, default_provider_auth_context()
+        )
+    assert exc_info.value.nova_error_kind is NovaErrorKind.REQUEST_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_refresh_receives_user_signal_unmodified():
+    """刷新拿到调用方 signal 本体（不再与 timeout-signal 合并）。"""
+    store = InMemoryCredentialStore()
+    expired = OAuthCredential(
+        access="old-access",
+        refresh="refresh-token",
+        expires=int(time.time() * 1000) - 1000,
+    )
+    store.write("test", expired)
+
+    controller = AbortController()
+    seen = []
+
+    async def refresh(credential: OAuthCredential, signal=None) -> OAuthCredential:
+        seen.append(signal)
+        return OAuthCredential(
+            access="new-access",
+            refresh=credential.refresh,
+            expires=int(time.time() * 1000) + 60000,
+        )
+
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
+        return ModelAuth(api_key=credential.access)
+
+    auth = ProviderAuth(
+        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+    )
+    await resolve_provider_auth(
+        "test",
+        auth,
+        store,
+        default_provider_auth_context(),
+        overrides=AuthResolutionOverrides(signal=controller.signal),
+    )
+    assert seen == [controller.signal]
 
 
 @pytest.mark.asyncio
@@ -164,10 +267,6 @@ async def test_resolve_api_key_failure_raises_models_error():
     assert exc_info.value.code == "auth"
 
 
-async def _just(value):
-    return value
-
-
 @pytest.mark.asyncio
 async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
     """剩余有效期不足 5 分钟即提前刷新（对齐 TS 默认窗口，不再等到过期）。"""
@@ -177,7 +276,7 @@ async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
         refresh="refresh-token",
         expires=int(time.time() * 1000) + 60 * 1000,  # 1 分钟后过期
     )
-    await store.modify("test", lambda _current: _just(soon))
+    store.write("test", soon)
     refreshed = []
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
@@ -218,14 +317,20 @@ async def test_resolve_stored_oauth_reuses_concurrent_refresh():
     )
 
     class _StaleReadStore(InMemoryCredentialStore):
-        """模拟请求 B 在 A 刷新之前读到的旧快照（读 soon，锁内见 fresh）。"""
+        """模拟请求 B 在 A 刷新之前读到的旧快照：仅**首次**读返回陈旧值
+        （外层快照读），锁内复查读到真实新值。"""
 
-        async def read(self, provider_id):
-            return soon
+        _served_stale = False
+
+        def read(self, provider_id):
+            if not self._served_stale:
+                self._served_stale = True
+                return soon
+            return super().read(provider_id)
 
     stale_store = _StaleReadStore()
     # store 里已是并发请求 A 刚写入的新凭据
-    await stale_store.modify("test", lambda _current: _just(fresh))
+    stale_store.write("test", fresh)
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
         raise AssertionError("锁内复查判定仍新鲜，不应触发刷新")

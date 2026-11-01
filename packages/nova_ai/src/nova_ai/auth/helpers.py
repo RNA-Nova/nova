@@ -5,6 +5,7 @@
 - ``lazy_oauth``：延迟加载 OAuth 实现
 """
 
+import asyncio
 from typing import Awaitable, Callable, List, Optional
 
 from nova_protocol import (
@@ -19,6 +20,7 @@ from nova_protocol import (
     ModelAuth,
     OAuthAuth,
     OAuthCredential,
+    RedactedString,
 )
 
 
@@ -47,7 +49,7 @@ def env_api_key_auth(name: str, env_vars: List[str]) -> ApiKeyAuth:
         key = await interaction.prompt(
             AuthPrompt(type="secret", message=f"Enter {name}")
         )
-        return ApiKeyCredential(key=key)
+        return ApiKeyCredential(key=RedactedString(key))
 
     async def check(input: ApiKeyAuthInput) -> Optional[AuthCheck]:
         result = await resolve(input)
@@ -63,14 +65,30 @@ def lazy_oauth(
     load: Callable[[], Awaitable[OAuthAuth]],
     login_label: Optional[str] = None,
 ) -> OAuthAuth:
-    """延迟加载 OAuth 实现（首次使用时才加载完整流程代码）。"""
-    promise: Optional[Awaitable[OAuthAuth]] = None
+    """延迟加载 OAuth 实现（首次使用时才加载完整流程代码）。
+
+    对齐 pi ``helpers.ts`` 的 ``lazyOAuth``（``promise ??= load()``）：
+    JS Promise 可重复 await；Python 侧必须缓存 **Task**——裸协程只能
+    await 一次，第二次起抛 ``RuntimeError: cannot reuse already awaited
+    coroutine``（并发首访同病）。
+    """
+    task: "Optional[asyncio.Task[OAuthAuth]]" = None
 
     async def loaded() -> OAuthAuth:
-        nonlocal promise
-        if promise is None:
-            promise = load()
-        return await promise
+        nonlocal task
+        if (
+            task is not None
+            and task.done()
+            and (task.cancelled() or task.exception() is not None)
+        ):
+            # 死 task 出缓存：加载失败/被取消的 task 留在缓存会永久毒化
+            # 后续所有调用（await 它恒抛）
+            task = None
+        if task is None:
+            task = asyncio.ensure_future(load())
+        # shield：等待方被取消不得传染共享的加载任务（传染取消 + 缓存 =
+        # 永久毒化——一个等待者的 abort 杀死所有未来调用）
+        return await asyncio.shield(task)
 
     async def login(interaction: AuthInteraction) -> OAuthCredential:
         return await (await loaded()).login(interaction)

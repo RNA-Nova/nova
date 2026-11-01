@@ -5,18 +5,27 @@
 
 OAuth 刷新语义（对齐 TS ``resolveStoredOAuth`` 的双重检查锁）：
 
-- **提前刷新窗口**：剩余有效期不足 5 分钟（默认，``min_oauth_validity_ms``
-  可加大）即触发刷新——请求不再携带几秒后过期的 token；
-- **锁内复查**：乐观检查判定需刷新后，权威检查在 store 锁内进行——
+- **提前刷新窗口**：剩余有效期不足 5 分钟即触发刷新——请求不再携带
+  几秒后过期的 token；
+- **锁内复查**：乐观检查判定需刷新后，权威检查在 per-provider 刷新锁内进行——
   另一请求刚刷新过的凭据直接复用，全局只刷一次；
-- **刷新超时**：刷新网络调用有 15 秒硬超时，与调用方 signal 取并集；
+- **刷新超时**：刷新网络调用有 15 秒硬超时——走 ``asyncio.timeout`` 独立
+  通道抛 ``RequestTimeoutError``（死因分型：超时≠取消，codex
+  ``ExecExpiration`` 对位），不借 timeout-signal 伪装成用户取消；
 - **无静默回落**：刷新失败不回落环境变量；期间登出（凭据消失）返回 None。
 """
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Literal, Optional
 
+from nova_async import (
+    KeyedLockFactory,
+    await_with_abort,
+    default_keyed_locks,
+    operation_signal,
+)
 from nova_protocol import (
     AbortedError,
     AbortSignal,
@@ -26,13 +35,15 @@ from nova_protocol import (
     AuthResult,
     Credential,
     CredentialStore,
+    NovaErrorKind,
     OAuthAuth,
     OAuthCredential,
     ProviderAuth,
     ProviderEnv,
+    RedactedString,
 )
 
-from ..utils.abort import operation_signal, race_with_abort
+from ..utils.errors import RequestTimeoutError
 
 ModelsErrorCode = Literal[
     "model_source", "model_validation", "provider", "stream", "auth", "oauth"
@@ -49,14 +60,14 @@ class AuthResolutionOverrides:
     - ``api_key``：调用方显式 key（最高优先级）；``None`` = 不覆盖；
     - ``env``：provider 级环境变量覆盖；``None`` = 用进程环境；
     - ``signal``：取消信号；``None`` = 不取消；
-    - ``min_oauth_validity_ms``：要求 OAuth token 至少剩余这么多有效期；
-      ``None`` = 用 5 分钟默认窗。
+    - ``refresh_locks``：per-provider 刷新锁工厂（编排去重）；
+      ``None`` = 用进程内缺省锁（多进程部署由 harness 注入文件锁）。
     """
 
     api_key: Optional[str] = None
     env: Optional[ProviderEnv] = None
     signal: Optional[AbortSignal] = None
-    min_oauth_validity_ms: Optional[int] = None
+    refresh_locks: Optional[KeyedLockFactory] = None
 
 
 def _with_cause_detail(message: str, cause: Optional[BaseException]) -> str:
@@ -70,16 +81,25 @@ def _with_cause_detail(message: str, cause: Optional[BaseException]) -> str:
 
 
 class ModelsError(Exception):
-    """Models 集合运行时的错误。"""
+    """ModelsManager 集合运行时的错误。
+
+    ``code`` 是子系统归属（排查/遥测用）；``kind`` 是可选的用户面分类
+    （``nova_error_kind`` 自声明——归一阶梯第 1 级消费）。多数包装点不传
+    kind：底层 cause 的分类沿 ``__cause__`` 链上浮，包装不掩盖。
+    """
 
     def __init__(
         self,
         code: ModelsErrorCode,
         message: str,
         cause: Optional[BaseException] = None,
+        *,
+        kind: Optional[NovaErrorKind] = None,
     ):
         super().__init__(_with_cause_detail(message, cause))
         self.code = code
+        if kind is not None:
+            self.nova_error_kind = kind
         if cause is not None:
             self.__cause__ = cause
 
@@ -99,7 +119,7 @@ async def resolve_provider_auth(
     3. 环境变量等 ambient 来源
     """
     signal = operation_signal(overrides.signal if overrides else None)
-    return await race_with_abort(
+    return await await_with_abort(
         _resolve_provider_auth_inner(
             provider_id, auth, credentials, auth_context, overrides, signal
         ),
@@ -127,11 +147,11 @@ async def _resolve_provider_auth_inner(
             request_ctx,
             auth.api_key,
             provider_id,
-            ApiKeyCredential(key=overrides.api_key, env=overrides.env),
+            ApiKeyCredential(key=RedactedString(overrides.api_key), env=overrides.env),
             signal,
         )
 
-    stored = await _read_credential(credentials, provider_id, signal)
+    stored = _read_credential(credentials, provider_id)
     if stored:
         if stored.type == "oauth" and auth.oauth:
             return await _resolve_stored_oauth(
@@ -140,7 +160,11 @@ async def _resolve_provider_auth_inner(
                 auth.oauth,
                 stored,
                 signal,
-                overrides.min_oauth_validity_ms if overrides else None,
+                (
+                    overrides.refresh_locks
+                    if overrides and overrides.refresh_locks
+                    else default_keyed_locks
+                ),
             )
         if stored.type == "api_key" and auth.api_key:
             credential = stored
@@ -186,10 +210,15 @@ async def _resolve_stored_oauth(
     oauth: OAuthAuth,
     stored: OAuthCredential,
     signal: AbortSignal,
-    min_validity_ms: Optional[int] = None,
+    refresh_locks: KeyedLockFactory = default_keyed_locks,
 ) -> Optional[AuthResult]:
-    """解析存储的 OAuth credential，必要时刷新（双重检查锁，见模块 docstring）。"""
-    minimum_validity_ms = max(DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, min_validity_ms or 0)
+    """解析存储的 OAuth credential，必要时刷新（per-provider 锁编排，见模块 docstring）。
+
+    刷新序列（复查 → 网络 → 写）在 per-provider 锁内原子执行——网络已挪出
+    store（store 同步化），去重锁只挡同 provider；锁等待与网络都可被外层
+    AbortScope 真杀。
+    """
+    minimum_validity_ms = DEFAULT_OAUTH_MINIMUM_VALIDITY_MS
 
     def _expires_soon(credential: OAuthCredential) -> bool:
         return int(time.time() * 1000) + minimum_validity_ms >= credential.expires
@@ -197,49 +226,51 @@ async def _resolve_stored_oauth(
     credential: Credential = stored
 
     if _expires_soon(credential):
-        # 乐观检查判定需刷新；权威检查在 store 锁内进行
-        async def _modify(current: Optional[Credential]) -> Optional[Credential]:
+        # 乐观检查判定需刷新；权威检查在 per-provider 锁内复查
+        async with refresh_locks(provider_id):
+            try:
+                current = credentials.read(provider_id)
+            except Exception as error:
+                raise ModelsError(
+                    "auth", f"Credential store read failed for {provider_id}", error
+                )
             if current is None or current.type != "oauth":
                 return None  # 期间已登出
             if not _expires_soon(current):
-                return None  # 另一请求/进程刚刷新过——直接复用
-            refresh_signal = AbortSignal.any(
-                [
-                    signal,
-                    AbortSignal.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS),
-                ]
-            )
-            try:
-                return await oauth.refresh(current, refresh_signal)
-            except Exception as error:
-                raise ModelsError(
-                    "oauth", f"OAuth refresh failed for {provider_id}", error
-                )
-
-        try:
-            post = await credentials.modify(provider_id, _modify)
-        except ModelsError:
-            raise
-        except Exception as error:
-            raise ModelsError(
-                "auth", f"Credential store modify failed for {provider_id}", error
-            )
-
-        if post is None or post.type != "oauth":
-            return None  # 期间已登出
-        credential = post
-        # 常规 5 分钟窗触发刷新但不强制 provider 契约；显式调用方
-        # （如 bearer-token 导出）才要求刷新后满足请求的最小有效期。
-        if min_validity_ms is not None and _expires_soon(credential):
-            raise ModelsError(
-                "oauth",
-                f"OAuth refresh returned a token that expires too soon for {provider_id}",
-            )
-
+                credential = current  # 另一请求/进程刚刷新过——复用（落到 to_auth）
+            else:
+                try:
+                    # 15s 硬超时走 asyncio.timeout 独立通道（RequestTimeoutError），
+                    # 不再借 timeout-signal 伪装成用户取消；用户 signal 原样透传
+                    async with asyncio.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS / 1000):
+                        refreshed = await oauth.refresh(current, signal)
+                except TimeoutError as error:
+                    raise RequestTimeoutError(
+                        f"OAuth refresh timed out for {provider_id}"
+                    ) from error
+                except Exception as error:
+                    # 取消不落泛型兜底（codex 纪律：每层显式匹配取消分支）——
+                    # AbortedError 直通，不包装成 ModelsError 误报
+                    if isinstance(error, AbortedError):
+                        raise
+                    raise ModelsError(
+                        "oauth", f"OAuth refresh failed for {provider_id}", error
+                    )
+                try:
+                    credentials.write(provider_id, refreshed)
+                except Exception as error:
+                    raise ModelsError(
+                        "auth",
+                        f"Credential store write failed for {provider_id}",
+                        error,
+                    )
+                credential = refreshed
     try:
         auth_result = await oauth.to_auth(credential)
         return AuthResult(auth=auth_result, source="OAuth")
     except Exception as error:
+        if isinstance(error, AbortedError):
+            raise
         raise ModelsError(
             "oauth", f"OAuth auth derivation failed for {provider_id}", error
         )
@@ -257,21 +288,20 @@ async def _resolve_api_key(
             {"ctx": auth_context, "credential": credential, "signal": signal}
         )
     except Exception as error:
+        if isinstance(error, AbortedError):
+            raise
         raise ModelsError(
             "auth", f"API key auth failed for provider {provider_id}", error
         )
 
 
-async def _read_credential(
+def _read_credential(
     credentials: CredentialStore,
     provider_id: str,
-    signal: AbortSignal,
 ) -> Optional[Credential]:
     try:
-        return await race_with_abort(credentials.read(provider_id), signal)
+        return credentials.read(provider_id)
     except Exception as error:
-        if isinstance(error, AbortedError):
-            raise
         raise ModelsError(
             "auth", f"Credential store read failed for {provider_id}", error
         )

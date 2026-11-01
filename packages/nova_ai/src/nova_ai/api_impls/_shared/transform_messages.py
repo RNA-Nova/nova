@@ -100,7 +100,9 @@ def transform_messages(
     # 构建原始工具调用ID到规范化ID的映射
     tool_call_id_map: Dict[str, str] = {}
 
-    # 对齐 TS：先处理 null content 和 image 降级
+    # null-content 归一：model_construct 跳校验的脏数据（会话重放等路径）
+    # 可能带 content=None——归一为 [] 再继续；类型层防不住 construct，
+    # 测试（TestNullContent）锁定此语义
     normalized_messages = [
         msg if msg.content is not None else msg.model_copy(update={"content": []})
         for msg in messages
@@ -178,15 +180,9 @@ def transform_messages(
                     if is_same_model:
                         transformed_content.append(text_block)
                     else:
-                        # 保留文本内容
+                        # 跨模型：签名只对同模型重放有意义，不带出
                         transformed_content.append(
-                            TextContent(
-                                type="text",
-                                text=text_block.text,
-                                text_signature=(
-                                    text_block.text_signature if is_same_model else None
-                                ),
-                            )
+                            TextContent(type="text", text=text_block.text)
                         )
 
                 elif block.type == "toolCall":

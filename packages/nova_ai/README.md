@@ -1,11 +1,11 @@
 # nova-ai
 
-统一的多厂商 LLM 抽象层。以 **Models 集合 + Provider 运行时单元 + API 协议实现**三层组织，对外暴露一致的 `stream` / `complete` / `stream_simple` / `complete_simple` 异步 API。
+统一的多厂商 LLM 抽象层。以 **ModelsManager 集合 + Provider 运行时单元 + API 协议实现**三层组织，对外暴露一致的 `stream` / `complete` / `stream_simple` / `complete_simple` 异步 API。
 
 ## 特性
 
 - **统一流式接口**：所有调用返回同一个 `AssistantMessageEventStream`，文本、思考、工具调用以增量事件产出；`stream()` 同步返回事件流，鉴权解析在后台进行，失败编码为错误事件而非抛出。
-- **内置 4 家 provider**：Volcengine（火山方舟）、Moonshot AI（国际/国内双端点）、Kimi Coding，均走 OpenAI Completions 协议；任意 OpenAI 兼容端点可经 `create_provider()` 接入。
+- **内置 5 家 provider**：Anthropic、Volcengine（火山方舟）、Moonshot AI（国际/国内双端点）、Kimi Coding——OpenAI Completions 与 Anthropic Messages 双协议实现；任意 OpenAI 兼容端点可经 `create_provider()` 接入。
 - **鉴权解析链**：调用方 `api_key` 覆盖 → 已存储 credential（OAuth 过期自动刷新）→ 环境变量；内置 Kimi device code 与 OpenAI Codex（浏览器 + device code）OAuth 登录流程。
 - **完整流式事件体系**：`text_*` / `thinking_*` / `toolcall_*` 增量事件，工具参数带部分 JSON 增量解析快照。
 - **思考级别统一抽象**：一套 `ThinkingLevel` 级别，按厂商参数格式自动分派（`reasoning_effort`、`thinking`、`reasoning` 对象等）。
@@ -36,12 +36,13 @@
 
 | Provider | id | 端点 | 鉴权 |
 |----------|----|------|------|
+| Anthropic | `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` 或 `ANTHROPIC_OAUTH_TOKEN` |
 | Volcengine（火山方舟） | `volcengine` | `https://ark.cn-beijing.volces.com/api/v3/` | `VOLCENGINE_API_KEY` |
 | Moonshot AI（国际） | `moonshotai` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` |
 | Moonshot AI（国内） | `moonshotai-cn` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | Kimi Coding | `kimi-coding` | `https://api.kimi.com/coding/v1` | `KIMI_API_KEY` 或 OAuth 登录 |
 
-四家内置 provider 全部使用 `api_impls/openai_completions`（当前唯一的协议实现，基于官方 `openai` Python SDK）。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
+内置 provider 使用两个协议实现：`api_impls/anthropic_messages`（Anthropic 与 kimi-coding，基于官方 `anthropic` SDK）与 `api_impls/openai_completions`（其余三家，基于官方 `openai` SDK）。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
 
 内置模型目录是构建期生成的静态数据（模型 id、上下文窗口、费率、思考级别表等），随包发布、离线可用。
 
@@ -51,7 +52,7 @@
 pip install nova-ai
 ```
 
-要求 Python `>=3.12,<3.14`。运行时依赖：`openai>=2.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`。
+要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0`、`anthropic>=0.69`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。
 
 在 monorepo 仓库内开发时，使用根目录的 pixi 统一环境（editable 安装全部子包）：
 
@@ -71,7 +72,8 @@ export VOLCENGINE_API_KEY="your-api-key"
 
 ```python
 import asyncio
-from nova_ai import Context, UserMessage, builtin_models
+from nova_ai import builtin_models
+from nova_protocol import Context, UserMessage
 
 models = builtin_models()  # 注册全部内置 provider 的 Models 集合
 model = models.get_model("volcengine", "doubao-seed-2-0-mini-260428")
@@ -99,13 +101,13 @@ asyncio.run(main())
 
 ```python
 message = await models.complete_simple(model, context)
-print(message.content[0].text)
+print(next(c.text for c in message.content if c.type == "text"))
 ```
 
 带工具调用的一个完整回合：
 
 ```python
-from nova_ai import StopReason, TextContent, Tool, ToolResultMessage
+from nova_protocol import StopReason, TextContent, Tool, ToolResultMessage
 
 context = Context(
     messages=[UserMessage(content="北京今天天气怎么样？")],
@@ -148,14 +150,14 @@ async def tool_round():
 每个内置 provider 有独立工厂函数，按需注册可避免携带用不到的目录：
 
 ```python
-from nova_ai import create_models, volcengine_provider, kimi_coding_provider
+from nova_ai import create_models_manager, volcengine_provider, kimi_coding_provider
 
-models = create_models()
+models = create_models_manager()
 models.set_provider(volcengine_provider())
 models.set_provider(kimi_coding_provider())
 ```
 
-`builtin_providers()` 返回四家工厂实例的列表；`builtin_models()` 等价于 `create_models()` 后注册全部内置 provider。
+`builtin_providers()` 返回五家工厂实例的列表；`builtin_models()` 等价于 `create_models_manager()` 后注册全部内置 provider。
 
 ### 查询
 
@@ -179,7 +181,7 @@ for model_id, m in list_volcengine_models().items():
     print(model_id, m.name)
 ```
 
-其余三家同形：`MOONSHOTAI_MODELS` / `MOONSHOTAI_CN_MODELS` / `KIMI_CODING_MODELS` 与对应的 `get_*_model` / `list_*_models`；跨 provider 的便捷函数是 `get_builtin_models(provider_id=None)` 与 `get_builtin_model(provider_id, model_id)`。
+其余四家同形：`ANTHROPIC_MODELS` / `MOONSHOTAI_MODELS` / `MOONSHOTAI_CN_MODELS` / `KIMI_CODING_MODELS` 与对应的 `get_*_model` / `list_*_models`；跨 provider 的便捷函数是 `get_builtin_models(provider_id=None)` 与 `get_builtin_model(provider_id, model_id)`。
 
 ### 动态模型目录
 
@@ -187,10 +189,12 @@ for model_id, m in list_volcengine_models().items():
 
 ```python
 result = await models.refresh(providers=["volcengine"], force=True)
-# result == {"aborted": False, "errors": {provider_id: exception, ...}}  —— 错误按 provider 收集，不抛出
+# result == {"aborted": False, "errors": {provider_id: exception, ...},
+#            "diagnostics": {provider_id: [NovaDiagnostic, ...]}}
+# —— 错误与非致命降级诊断（如无公开站回退基线）按 provider 收集，不抛出
 ```
 
-`ModelsStore` 是持久化抽象（`read` / `write` / `delete`，条目为 `ModelsStoreEntry`），默认 `InMemoryModelsStore` 只存进程内存；需要跨进程缓存时注入自己的实现（`create_models(models_store=...)`）。
+`ModelsStore` 是持久化抽象（`read` / `write` / `delete`，条目为 `ModelsStoreEntry`），默认 `InMemoryModelsStore` 只存进程内存；需要跨进程缓存时注入自己的实现（`create_models_manager(models_store=...)`）。
 
 ## 鉴权
 
@@ -227,7 +231,7 @@ if result:
 `kimi-coding` 除 API key 外内置 OAuth（device code）登录；`openai_codex_oauth`（浏览器回调 + device code 双模式）可用于自建 OpenAI Codex provider：
 
 ```python
-from nova_ai import AuthEvent, AuthPrompt
+from nova_protocol import AuthEvent, AuthPrompt
 
 
 class CliInteraction:
@@ -247,20 +251,20 @@ await models.logout("kimi-coding")  # 删除已存储 credential
 
 ### CredentialStore 注入
 
-credential 的持久化由调用方注入的 `CredentialStore` 负责，默认 `InMemoryCredentialStore` 只存进程内存（`nova-ai` 自身不落盘任何密钥）。协议四个方法：
+credential 的持久化由调用方注入的 `CredentialStore` 负责，默认 `InMemoryCredentialStore` 只存进程内存（`nova-ai` 自身不落盘任何密钥）。协议为**同步**四件套——实现内不得含网络/长操作（编排归调用方 manager 层，见 `docs/crosscutting/concurrency.md` §四）：
 
 ```python
 class CredentialStore(Protocol):
-    async def read(self, provider_id: str) -> Optional[Credential]: ...
-    async def list(self) -> List[CredentialInfo]: ...
-    async def modify(self, provider_id: str, fn) -> Optional[Credential]: ...  # 唯一写路径，按 provider 串行化
-    async def delete(self, provider_id: str) -> None: ...
+    def read(self, provider_id: str) -> Optional[Credential]: ...
+    def list(self) -> List[CredentialInfo]: ...
+    def write(self, provider_id: str, credential: Credential) -> None: ...
+    def delete(self, provider_id: str) -> None: ...
 
 
-models = create_models(credential_store=MyFileCredentialStore("~/.myapp/auth.json"))
+models = create_models_manager(credential_store=MyFileCredentialStore("~/.myapp/auth.json"))
 ```
 
-`modify(provider_id, fn)` 是串行化的读-改-写：`fn` 收到当前 credential（可能为 `None`），返回新 credential（返回 `None` 表示不变更）。OAuth 刷新与登录写入都走这一条路径，应用实现文件存储时只需保证这四个字法语义。
+同 provider 的 OAuth 刷新/登录/登出的串行去重由编排层的 per-provider 锁负责（`refresh_locks` 参数注入，多进程部署用文件锁实现）；应用实现文件存储时只需保证四个同步方法的语义。
 
 credential 两种形态：`ApiKeyCredential(key, env)` 与 `OAuthCredential(access, refresh, expires, ...)`（扩展字段在序列化往返中保留）。
 
@@ -286,7 +290,7 @@ credential 两种形态：`ApiKeyCredential(key, env)` 与 `OAuthCredential(acce
 工具即 JSON Schema 描述，`Context.tools` 传入 `Tool` 列表：
 
 ```python
-from nova_ai import Tool
+from nova_protocol import Tool
 
 tool = Tool(
     name="get_weather",
@@ -319,7 +323,7 @@ async for event in models.stream_simple(model, context):
 
 ```python
 import base64
-from nova_ai import ImageContent, TextContent
+from nova_protocol import ImageContent, TextContent
 
 if "image" not in model.input_types:
     raise ValueError(f"{model.id} 不支持图片输入")
@@ -346,7 +350,8 @@ context = Context(
 `stream_simple` / `complete_simple` 接受统一的思考级别，协议实现按厂商分派为具体参数：
 
 ```python
-from nova_ai import SimpleStreamOptions, ThinkingLevel
+from nova_ai import SimpleStreamOptions
+from nova_protocol import ThinkingLevel
 
 options = SimpleStreamOptions(reasoning=ThinkingLevel.HIGH)
 # minimal | low | medium | high | xhigh | max；不传（None）= 关闭思考，不发送任何 reasoning 参数
@@ -397,7 +402,8 @@ if message.stop_reason == StopReason.ERROR:
 ### 中止请求
 
 ```python
-from nova_ai import AbortController, SimpleStreamOptions
+from nova_ai import SimpleStreamOptions
+from nova_protocol import AbortController
 
 controller = AbortController()
 options = SimpleStreamOptions(signal=controller.signal)
@@ -409,8 +415,10 @@ controller.abort()  # 主动关闭底层 HTTP 流；已收到的内容块正常�
 
 ### 调试钩子与重试
 
-- `StreamOptions.on_payload(params, model)`：请求体构建完成后、发送前调用；返回新 dict（或 awaitable）可替换请求体，返回 `None` 表示不修改。
-- `StreamOptions.on_response(ProviderResponse, model)`：拿到原始 HTTP 状态码与响应头。
+- `StreamOptions.on_payload(params, model_identity)`：请求体构建完成后、发送前调用；返回新 dict（或 awaitable）可替换请求体，返回 `None` 表示不修改。
+- `StreamOptions.on_response(ProviderResponse, model_identity)`：拿到原始 HTTP 状态码与响应头。
+
+  两钩子的第二参为 `ModelIdentity`（归因白名单摘要：provider/id/base_url 三字段）——整 `Model` 不出钩子面（`headers` 等敏感字段防泄）。
 - 重试在请求层执行（`StreamOptions.max_retries`，默认 `0` 不重试），退避等待可被 abort 打断；`max_retry_delay_ms` 封顶服务器 `Retry-After` 要求的等待（默认 60000ms，`0` 为不封顶）。SDK 内建重试恒为关闭——它无法被中止打断。
 - `StreamOptions.timeout`（秒）设置单次请求超时。
 
@@ -419,7 +427,8 @@ controller.abort()  # 主动关闭底层 HTTP 流；已收到的内容块正常�
 任意 OpenAI 兼容端点经 `create_provider()` 接入：
 
 ```python
-from nova_ai import Model, ModelCost, ProviderAuth, create_models, create_provider, env_api_key_auth
+from nova_ai import create_models_manager, create_provider, env_api_key_auth
+from nova_protocol import Model, ModelCost, ProviderAuth
 from nova_ai.api_impls import openai_completions
 
 model = Model(
@@ -444,7 +453,7 @@ provider = create_provider(
     auth=ProviderAuth(api_key=env_api_key_auth("My API Key", ["MY_PROVIDER_API_KEY"])),
 )
 
-models = create_models()
+models = create_models_manager()
 models.set_provider(provider)
 message = await models.complete_simple(model, Context(messages=[UserMessage(content="你好")]))
 ```
@@ -454,7 +463,7 @@ message = await models.complete_simple(model, Context(messages=[UserMessage(cont
 `openai_completions` 按 provider id 与 base_url 自动检测端点兼容性（识别 DeepSeek、Z.ai、Together、Moonshot、OpenRouter、NVIDIA、xAI、Cerebras、Cloudflare、Volcengine 等；未知端点按 OpenAI 标准行为处理）。`Model.compat`（`OpenAICompletionsCompat`）的非 `None` 字段逐字段覆盖检测结果：
 
 ```python
-from nova_ai import OpenAICompletionsCompat, ThinkingFormat
+from nova_protocol import OpenAICompletionsCompat, ThinkingFormat
 
 model = Model(
     # ...其余字段...

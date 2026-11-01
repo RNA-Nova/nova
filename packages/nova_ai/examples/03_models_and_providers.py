@@ -1,8 +1,8 @@
-"""03 - Models 注册表与 Provider 体系
+"""03 - ModelsManager 注册表与 Provider 体系
 
 演示：
 - `builtin_models()`：内置 provider（volcengine / moonshotai / kimi-coding）开箱即用；
-- `create_models()` + `create_provider()`：自建注册表，注册自定义 provider；
+- `create_models_manager()` + `create_provider()`：自建注册表，注册自定义 provider；
 - 动态模型目录：`fetch_models` 回调让 provider 的模型列表可刷新。
 
 运行：
@@ -13,12 +13,6 @@ import asyncio
 import os
 from types import SimpleNamespace
 
-from nova_ai import (
-    EventStream,
-    builtin_models,
-    create_models,
-    create_provider,
-)
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -30,6 +24,13 @@ from nova_protocol import (
     StartEvent,
     TextContent,
     UserMessage,
+)
+
+from nova_ai import (
+    EventStream,
+    builtin_models,
+    create_models_manager,
+    create_provider,
 )
 
 
@@ -66,7 +67,7 @@ def demo_builtin():
 
 
 async def demo_custom():
-    # 示例环境临时注入 demo key：Models 的 auth 链要求 provider 可解析出凭证
+    # 示例环境临时注入 demo key：ModelsManager 的 auth 链要求 provider 可解析出凭证
     os.environ.setdefault("DEMO_API_KEY", "demo-key")
 
     my_model = Model(
@@ -81,8 +82,9 @@ async def demo_custom():
         context_window=8192,
         max_tokens=4096,
     )
-    from nova_ai.auth.helpers import env_api_key_auth
     from nova_protocol import ProviderAuth
+
+    from nova_ai.auth.helpers import env_api_key_auth
 
     provider = create_provider(
         id="my-provider",
@@ -91,7 +93,7 @@ async def demo_custom():
         api=make_echo_api(),
         auth=ProviderAuth(api_key=env_api_key_auth("Demo API key", ["DEMO_API_KEY"])),
     )
-    models = create_models()
+    models = create_models_manager()
     models.set_provider(provider)
 
     found = models.get_model("my-provider", "echo-1")
@@ -133,7 +135,7 @@ def demo_dynamic():
     from nova_ai import RefreshModelsContext
 
     async def publish(publication):
-        """演示用发布口：直接应用内存更新（真实场景由 Models 做世代校验与持久化）。"""
+        """演示用发布口：直接应用内存更新（真实场景由 ModelsManager 做世代校验与持久化）。"""
         if publication.update is not None:
             publication.update()
         return True

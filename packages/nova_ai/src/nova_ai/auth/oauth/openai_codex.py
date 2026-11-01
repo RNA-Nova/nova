@@ -7,6 +7,7 @@
 
 import base64
 import json
+import math
 import secrets
 import time
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from nova_protocol import (
+    AbortedError,
     AbortSignal,
     AuthEvent,
     AuthInteraction,
@@ -22,18 +24,29 @@ from nova_protocol import (
     AuthPrompt,
     AuthPromptOption,
     ModelAuth,
+    NovaBaseModel,
+    NovaErrorKind,
     OAuthAuth,
     OAuthCredential,
+    RedactedString,
     is_aborted,
 )
+from pydantic import ConfigDict, Field, ValidationError, field_validator
 
-from ..oauth_page import oauth_error_html, oauth_success_html
+from ...utils.http import request_with_abort
 from .device_code import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
     poll_oauth_device_code_flow,
 )
-from .http import post_with_abort
+from .errors import (
+    OAuthFlowError,
+    oauth_http_kind,
+    response_error_detail,
+    validation_error,
+    validation_message,
+)
+from .oauth_page import oauth_error_html, oauth_success_html
 from .pkce import generate_pkce
 
 _CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -84,33 +97,55 @@ def _get_account_id(access_token: str) -> Optional[str]:
     return None
 
 
+class _TokenResponse(NovaBaseModel):
+    """OpenAI Codex token 端点响应的边界校验模型（第三方不可信输入——规则 3）。
+
+    消息安全：校验失败经 ``validation_error`` 只报字段名，响应体（可能含
+    活凭据）永不进错误消息。
+    """
+
+    access_token: str = Field(min_length=1)
+    refresh_token: str = Field(min_length=1)
+    expires_in: float
+
+    # 厂商边界模型按厂商 casing（snake）——关掉枢纽基类的 camel alias
+    model_config = ConfigDict(alias_generator=None)
+
+    @field_validator("expires_in", mode="before")
+    @classmethod
+    def _expires_in_strict_number(cls, value: Any) -> Any:
+        # 现状语义逐字保留：拒 bool、拒非数值、拒 <=0、拒非有限
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or value <= 0
+            or not math.isfinite(value)
+        ):
+            raise ValueError("expires_in must be a positive finite number")
+        return value
+
+
 def _read_token_response(response: httpx.Response, operation: str) -> OAuthCredential:
-    """解析 token endpoint 响应为 credential 基底（边界校验后直达正典形状）。"""
+    """解析 token endpoint 响应为 credential 基底（边界模型校验后直达正典形状）。"""
     if response.status_code >= 400:
-        text = response.text or response.reason_phrase
-        raise RuntimeError(
-            f"OpenAI Codex token {operation} failed ({response.status_code}): {text}"
+        raise OAuthFlowError(
+            f"OpenAI Codex token {operation} failed ({response.status_code}): "
+            f"{response_error_detail(response)}",
+            kind=oauth_http_kind(response.status_code),
+            status_code=response.status_code,
         )
 
     data = response.json()
-    access_token = data.get("access_token")
-    refresh_token = data.get("refresh_token")
-    expires_in = data.get("expires_in")
-    if (
-        not isinstance(access_token, str)
-        or not access_token
-        or not isinstance(refresh_token, str)
-        or not refresh_token
-        or not isinstance(expires_in, (int, float))
-    ):
-        raise RuntimeError(
-            f"OpenAI Codex token {operation} response missing fields: {data}"
-        )
+    try:
+        resp = _TokenResponse.model_validate(data)
+    except ValidationError as error:
+        # from None：ValidationError 的 str 会回显输入值——隐式链一并压掉
+        raise validation_error(f"OpenAI Codex token {operation}", error) from None
 
     return OAuthCredential(
-        access=access_token,
-        refresh=refresh_token,
-        expires=int(time.time() * 1000) + int(expires_in) * 1000,
+        access=RedactedString(resp.access_token),
+        refresh=RedactedString(resp.refresh_token),
+        expires=int(time.time() * 1000) + int(resp.expires_in) * 1000,
     )
 
 
@@ -118,7 +153,9 @@ def _credentials_from_token(token: OAuthCredential) -> OAuthCredential:
     """补上从 access token JWT 提取的 accountId，产出完整 credential。"""
     account_id = _get_account_id(token.access)
     if not account_id:
-        raise RuntimeError("Failed to extract accountId from token")
+        raise OAuthFlowError(
+            "Failed to extract accountId from token", kind=NovaErrorKind.INTERNAL
+        )
     return token.model_copy(update={"accountId": account_id})
 
 
@@ -128,7 +165,8 @@ async def _exchange_authorization_code(
     redirect_uri: str = _REDIRECT_URI,
     signal: Optional[AbortSignal] = None,
 ) -> OAuthCredential:
-    response = await post_with_abort(
+    response = await request_with_abort(
+        "POST",
         _TOKEN_URL,
         data={
             "grant_type": "authorization_code",
@@ -145,7 +183,8 @@ async def _exchange_authorization_code(
 async def _refresh_access_token(
     refresh_token: str, signal: Optional[AbortSignal] = None
 ) -> OAuthCredential:
-    response = await post_with_abort(
+    response = await request_with_abort(
+        "POST",
         _TOKEN_URL,
         data={
             "grant_type": "refresh_token",
@@ -166,10 +205,32 @@ class _DeviceCodeStart:
     interval_seconds: float
 
 
+class _DeviceCodeStartResponse(NovaBaseModel):
+    """OpenAI Codex deviceauth/usercode 端点响应的边界校验模型。"""
+
+    device_auth_id: str = Field(min_length=1)
+    user_code: str = Field(min_length=1)
+    interval: float = Field(ge=0)  # 0 合法（与现状一致——仅负数拒绝）
+
+    model_config = ConfigDict(alias_generator=None)  # 厂商 casing（snake）
+
+    @field_validator("interval", mode="before")
+    @classmethod
+    def _interval_coerce(cls, value: Any) -> Any:
+        # 现状语义：字符串数字经 strip 强转；脏字符串落 None 走统一校验报错
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return value
+
+
 async def _start_openai_codex_device_auth(
     signal: Optional[AbortSignal] = None,
 ) -> _DeviceCodeStart:
-    response = await post_with_abort(
+    response = await request_with_abort(
+        "POST",
         _DEVICE_USER_CODE_URL,
         json_body={"client_id": _CLIENT_ID},
         signal=signal,
@@ -177,37 +238,29 @@ async def _start_openai_codex_device_auth(
 
     if response.status_code >= 400:
         if response.status_code == 404:
-            raise RuntimeError(
+            raise OAuthFlowError(
                 "OpenAI Codex device code login is not enabled for this server. "
-                "Use browser login or verify the server URL."
+                "Use browser login or verify the server URL.",
+                kind=NovaErrorKind.BAD_REQUEST,
+                status_code=response.status_code,
             )
-        body = response.text
-        raise RuntimeError(
-            f"OpenAI Codex device code request failed with status {response.status_code}"
-            f"{body and f': {body}'}"
+        raise OAuthFlowError(
+            f"OpenAI Codex device code request failed with status "
+            f"{response.status_code}: {response_error_detail(response)}",
+            kind=oauth_http_kind(response.status_code),
+            status_code=response.status_code,
         )
 
     data = response.json()
-    interval = data.get("interval")
-    interval_seconds = (
-        float(interval.strip()) if isinstance(interval, str) else interval
-    )
-    device_auth_id = data.get("device_auth_id")
-    user_code = data.get("user_code")
-    if (
-        not isinstance(device_auth_id, str)
-        or not device_auth_id
-        or not isinstance(user_code, str)
-        or not user_code
-        or not isinstance(interval_seconds, (int, float))
-        or interval_seconds < 0
-    ):
-        raise RuntimeError(f"Invalid OpenAI Codex device code response: {data}")
+    try:
+        resp = _DeviceCodeStartResponse.model_validate(data)
+    except ValidationError as error:
+        raise validation_error("OpenAI Codex device code", error) from None
 
     return _DeviceCodeStart(
-        device_auth_id=device_auth_id,
-        user_code=user_code,
-        interval_seconds=interval_seconds,
+        device_auth_id=resp.device_auth_id,
+        user_code=resp.user_code,
+        interval_seconds=resp.interval,
     )
 
 
@@ -219,11 +272,25 @@ class _DeviceCodeGrant:
     code_verifier: str
 
 
+class _DevicePollResponse(NovaBaseModel):
+    """deviceauth/token 轮询成功响应的边界校验模型（授权码 + PKCE verifier）。
+
+    注：现状对非 str 的真值曾静默容忍（``if not auth_code`` 只挡空值）——
+    模型化为 str 是**有意的微收紧**（端点契约本就是字符串，宽松无收益）。
+    """
+
+    authorization_code: str = Field(min_length=1)
+    code_verifier: str = Field(min_length=1)
+
+    model_config = ConfigDict(alias_generator=None)  # 厂商 casing（snake）
+
+
 async def _poll_openai_codex_device_auth(
     device: _DeviceCodeStart, signal: Optional[AbortSignal] = None
 ) -> _DeviceCodeGrant:
     async def _poll() -> DeviceCodePollResult[_DeviceCodeGrant]:
-        response = await post_with_abort(
+        response = await request_with_abort(
+            "POST",
             _DEVICE_TOKEN_URL,
             json_body={
                 "device_auth_id": device.device_auth_id,
@@ -234,24 +301,24 @@ async def _poll_openai_codex_device_auth(
 
         if response.status_code < 400:
             data = response.json()
-            auth_code = data.get("authorization_code")
-            verifier = data.get("code_verifier")
-            if not auth_code or not verifier:
+            try:
+                resp = _DevicePollResponse.model_validate(data)
+            except ValidationError as error:
                 return DeviceCodePollResult(
                     status="failed",
-                    message=f"Invalid OpenAI Codex device auth token response: {data}",
+                    message=validation_message("OpenAI Codex device auth token", error),
                 )
             return DeviceCodePollResult(
                 status="complete",
                 value=_DeviceCodeGrant(
-                    authorization_code=auth_code, code_verifier=verifier
+                    authorization_code=resp.authorization_code,
+                    code_verifier=resp.code_verifier,
                 ),
             )
 
         if response.status_code in (403, 404):
             return DeviceCodePollResult(status="pending")
 
-        body = response.text
         error_code = None
         try:
             err_data = response.json()
@@ -271,8 +338,8 @@ async def _poll_openai_codex_device_auth(
         return DeviceCodePollResult(
             status="failed",
             message=(
-                f"OpenAI Codex device auth failed with status {response.status_code}"
-                f"{body and f': {body}'}"
+                f"OpenAI Codex device auth failed with status "
+                f"{response.status_code}: {response_error_detail(response)}"
             ),
         )
 
@@ -287,15 +354,15 @@ async def _poll_openai_codex_device_auth(
 
 
 @dataclass(frozen=True, kw_only=True)
-class _AuthorizationFlow:
-    """浏览器授权流的初始参数（模块内值对象）。"""
+class AuthorizationFlow:
+    """浏览器授权流的初始参数（不可变值对象——规则 5）。"""
 
     verifier: str
     state: str
     url: str
 
 
-async def _create_authorization_flow(originator: str = "nova") -> _AuthorizationFlow:
+async def create_authorization_flow(originator: str = "nova") -> AuthorizationFlow:
     pkce = generate_pkce()
     state = _create_state()
     params = {
@@ -311,7 +378,7 @@ async def _create_authorization_flow(originator: str = "nova") -> _Authorization
         "originator": originator,
     }
     url = f"{_AUTHORIZE_URL}?{urlencode(params, quote_via=quote)}"
-    return _AuthorizationFlow(verifier=pkce.verifier, state=state, url=url)
+    return AuthorizationFlow(verifier=pkce.verifier, state=state, url=url)
 
 
 _CALLBACK_PORT = 1455
@@ -341,7 +408,7 @@ async def _login_openai_codex_device_code(
 
 
 async def _login_openai_codex_browser(interaction: AuthInteraction) -> OAuthCredential:
-    flow = await _create_authorization_flow()
+    flow = await create_authorization_flow()
 
     interaction.notify(
         AuthEvent(
@@ -401,7 +468,10 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     if method == _OPENAI_CODEX_DEVICE_CODE_LOGIN_METHOD:
         return await _login_openai_codex_device_code(interaction)
     if method != _OPENAI_CODEX_BROWSER_LOGIN_METHOD:
-        raise RuntimeError(f"Unknown OpenAI Codex login method: {method}")
+        raise OAuthFlowError(
+            f"Unknown OpenAI Codex login method: {method}",
+            kind=NovaErrorKind.INTERNAL,
+        )
     return await _login_openai_codex_browser(interaction)
 
 
@@ -409,7 +479,7 @@ async def _refresh(
     credential: OAuthCredential, signal: Optional[AbortSignal] = None
 ) -> OAuthCredential:
     if is_aborted(signal):
-        raise RuntimeError("Refresh cancelled")
+        raise AbortedError("OpenAI Codex token refresh aborted")
     token = await _refresh_access_token(credential.refresh, signal)
     return _credentials_from_token(token)
 

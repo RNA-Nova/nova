@@ -12,7 +12,6 @@
 
 import asyncio
 
-from nova_ai import EventStream
 from nova_protocol import (
     AssistantMessage,
     DoneEvent,
@@ -28,6 +27,8 @@ from nova_protocol import (
     ToolCall,
     ToolCallEndEvent,
 )
+
+from nova_ai import EventStream
 
 
 def build_demo_stream(model: Model) -> EventStream:

@@ -5,17 +5,28 @@
 AbortSignal。因此调用方必须以 ``max_retries=0`` 构造客户端，并把请求
 包进 :func:`retry_provider_request`。服务端要求的退避超过
 ``max_retry_delay_ms`` 时直接失败（默认 60 秒；置 0 关闭上限）。
+
+取消的执行层归 ``AbortScope``（``nova_async``——调用方把
+retry 段整个包进 scope：退避与在飞尝试在 signal 触发时真死），本层只管
+重试策略与可中断退避。
 """
 
 from __future__ import annotations
 
-import asyncio
-import random
-import time
-from email.utils import parsedate_to_datetime
-from typing import Any, Awaitable, Callable, Optional, TypedDict, TypeVar
+from typing import Awaitable, Callable, Optional, TypedDict, TypeVar
 
+import httpx
+import httpx2
+from nova_async import abortable_sleep, backoff_delay_ms
 from nova_protocol import AbortedError, AbortSignal, is_aborted
+
+from ...utils.errors import (
+    extract_retry_after_ms,
+    get_header,
+    headers_of,
+    iter_cause_chain,
+    status_code_of,
+)
 
 T = TypeVar("T")
 
@@ -28,40 +39,36 @@ def _abort_error() -> AbortedError:
     return AbortedError("Request aborted")
 
 
-def _header(headers: Any, name: str) -> Optional[str]:
-    """从 openai SDK 的 httpx Headers / dict 形态里取头（大小写不敏感）。"""
-    if headers is None:
-        return None
-    try:
-        value = headers.get(name)
-    except AttributeError:
-        return None
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
 def _is_retryable_provider_error(error: Exception) -> bool:
     """镜像 OpenAI/Anthropic SDK 的固定重试判定；SDK 升级时需同步复核。"""
-    should_retry = _header(getattr(error, "headers", None), "x-should-retry")
+    should_retry = get_header(headers_of(error), "x-should-retry")
     if should_retry == "true":
         return True
     if should_retry == "false":
         return False
 
-    status = getattr(error, "status_code", None)
+    status = status_code_of(error)
     if status is not None:
         return status == 408 or status == 409 or status == 429 or status >= 500
     # 无状态码：仅连接层/超时错误可重试——编程错误（TypeError 等）
     # 也无状态码，一律重试会把失败掩盖成慢失败
-    return isinstance(error, (ConnectionError, TimeoutError, asyncio.TimeoutError))
+    if isinstance(error, (ConnectionError, TimeoutError)):
+        return True
+    # 两个 SDK 的连接错误都不继承内建 ConnectionError（openai/anthropic 的
+    # APIConnectionError 把 httpx/httpx2 传输错误包进 __cause__ 链）——沿链找
+    # （iter_cause_chain 带环保护：respx SideEffectError 会造 A↔B 循环链）
+    for cause in iter_cause_chain(error):
+        if cause is error:
+            continue
+        if isinstance(cause, (httpx.TransportError, httpx2.TransportError)):
+            return True
+    return False
 
 
 def _validate_server_retry_delay_ms(
     delay_ms: float,
     max_retry_delay_ms: Optional[float],
-    provider_error_message: str,
+    error: Exception,
 ) -> float:
     max_delay = (
         max_retry_delay_ms
@@ -71,58 +78,22 @@ def _validate_server_retry_delay_ms(
     if max_delay > 0 and delay_ms > max_delay:
         raise RuntimeError(
             f"Server requested {int(-(-delay_ms // 1000))}s retry delay "
-            f"(max: {int(-(-max_delay // 1000))}s). {provider_error_message}"
-        )
+            f"(max: {int(-(-max_delay // 1000))}s). {error}"
+        ) from error  # 补链：原始 429（含 headers/kind）沿 __cause__ 可捞
     return delay_ms
 
 
 def _get_retry_delay_ms(
     error: Exception, retry_index: int, max_retry_delay_ms: Optional[float]
 ) -> float:
-    retry_after_ms = _header(getattr(error, "headers", None), "retry-after-ms")
-    if retry_after_ms:
-        try:
-            return _validate_server_retry_delay_ms(
-                float(retry_after_ms), max_retry_delay_ms, str(error)
-            )
-        except ValueError:
-            pass
+    # 服务端要求的退避（retry-after 家族头）优先；无法解析时落指数退避
+    # （nova_async backoff 机制件——retry_index 0-based 转正 1-indexed；
+    # 默认 jitter=0.25 正等价旧 ``* (1 - random()*0.25)`` 下抖）
+    delay_ms = extract_retry_after_ms(headers_of(error))
+    if delay_ms is not None:
+        return _validate_server_retry_delay_ms(delay_ms, max_retry_delay_ms, error)
 
-    retry_after = _header(getattr(error, "headers", None), "retry-after")
-    if retry_after:
-        try:
-            delay_ms = float(retry_after) * 1000
-        except ValueError:
-            try:
-                delay_ms = (
-                    parsedate_to_datetime(retry_after).timestamp() - time.time()
-                ) * 1000
-            except Exception:
-                delay_ms = 0.0
-        return _validate_server_retry_delay_ms(delay_ms, max_retry_delay_ms, str(error))
-
-    exponential_delay = min(0.5 * 2**retry_index, 8) * 1000
-    return exponential_delay * (1 - random.random() * 0.25)
-
-
-async def _abortable_sleep(ms: float, signal: Optional[AbortSignal]) -> None:
-    """至多睡 ``ms`` 毫秒；期间 signal 中断则抛 AbortedError（asyncio.timeout 惯用法）。"""
-    if is_aborted(signal):
-        raise _abort_error()
-    seconds = max(0.0, ms / 1000)
-    if signal is None:
-        await asyncio.sleep(seconds)
-        return
-    try:
-        async with asyncio.timeout(seconds):
-            await signal.wait()
-    except TimeoutError:
-        return  # 睡满正常返回
-    except asyncio.CancelledError:
-        # asyncio.timeout 以取消实现超时；仅在非超时取消时外传
-        if signal.aborted:
-            raise _abort_error()
-        raise
+    return backoff_delay_ms(retry_index + 1, base_ms=500, cap_ms=8000)
 
 
 class RetryOptions(TypedDict, total=False):
@@ -160,7 +131,7 @@ async def retry_provider_request(
 
             retry_index = max_retries - retries_remaining
             retries_remaining -= 1
-            await _abortable_sleep(
+            await abortable_sleep(
                 _get_retry_delay_ms(error, retry_index, opts.get("max_retry_delay_ms")),
                 signal,
             )

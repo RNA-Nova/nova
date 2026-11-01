@@ -1,88 +1,34 @@
-"""CredentialStore 实现。
+"""CredentialStore 内存实现（同步引擎——默认与测试路径）。
 
-对齐 TypeScript ``src/auth/credential-store.ts``：
-默认提供内存实现；应用可注入持久化存储。
+同步字典操作，无锁无链：写互斥与刷新去重是调用方（编排层）的职责，
+锁拓扑见 ``docs/crosscutting/concurrency.md``。
 """
 
-import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
+from typing import Dict, List, Optional
 
 from nova_protocol import Credential, CredentialInfo, CredentialStore
 
-T = TypeVar("T")
-
 
 class InMemoryCredentialStore(CredentialStore):
-    """内存凭证存储。
-
-    按 ``provider_id`` 串行化写操作，与 TS ``InMemoryCredentialStore`` 对齐。
-    """
+    """内存凭证存储（同步三件套）。"""
 
     def __init__(self) -> None:
         self._credentials: Dict[str, Credential] = {}
-        # 链上节点的值类型异质（modify 产 Credential / delete 产 None），
-        # 链条只依赖可等待性，不关心值
-        self._chains: Dict[str, "asyncio.Future[Any]"] = {}
 
-    def _enqueue(
-        self,
-        provider_id: str,
-        task: Callable[[], Awaitable[T]],
-    ) -> "asyncio.Task[T]":
-        previous = self._chains.get(provider_id)
-        if previous is None:
-            previous = _resolved_future()
-
-        async def _run() -> T:
-            try:
-                await previous
-            except Exception:
-                pass
-            return await task()
-
-        # 链上必须存可重复 await 的 Task：裸协程只能 await 一次，
-        # 后续调用者 await 同一协程会 RuntimeError（被静默吞掉），
-        # 串行化随之失效（对齐 TS 链上存 next.catch(() => {})）。
-        next_task = asyncio.ensure_future(_run())
-        self._chains[provider_id] = next_task
-        return next_task
-
-    async def read(self, provider_id: str) -> Optional[Credential]:
+    def read(self, provider_id: str) -> Optional[Credential]:
         return self._credentials.get(provider_id)
 
-    async def list(self) -> List[CredentialInfo]:
+    def list(self) -> List[CredentialInfo]:
         return [
             CredentialInfo(provider_id=provider_id, type=credential.type)
             for provider_id, credential in self._credentials.items()
         ]
 
-    async def modify(
-        self,
-        provider_id: str,
-        fn: Callable[[Optional[Credential]], Awaitable[Optional[Credential]]],
-    ) -> Optional[Credential]:
-        async def _task() -> Optional[Credential]:
-            current = self._credentials.get(provider_id)
-            next_credential = await fn(current)
-            if next_credential is not None:
-                self._credentials[provider_id] = next_credential
-                return next_credential
-            return current
+    def write(self, provider_id: str, credential: Credential) -> None:
+        self._credentials[provider_id] = credential
 
-        return await self._enqueue(provider_id, _task)
-
-    async def delete(self, provider_id: str) -> None:
-        async def _task() -> None:
-            self._credentials.pop(provider_id, None)
-
-        await self._enqueue(provider_id, _task)
-
-
-def _resolved_future() -> "asyncio.Future[Any]":
-    """返回一个已经 resolve 的 future。"""
-    future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-    future.set_result(None)
-    return future
+    def delete(self, provider_id: str) -> None:
+        self._credentials.pop(provider_id, None)
 
 
 __all__ = ["InMemoryCredentialStore"]

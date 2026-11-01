@@ -101,7 +101,7 @@ def parse_openai_reasoning_details(
         return None
     try:
         parsed = json.loads(signature)
-    except Exception:
+    except json.JSONDecodeError:
         return None
     if (
         isinstance(parsed, list)
@@ -120,7 +120,7 @@ def parse_legacy_encrypted_reasoning_detail(
         return None
     try:
         parsed = json.loads(signature)
-    except Exception:
+    except json.JSONDecodeError:
         return None
     if (
         is_openai_reasoning_detail(parsed)
@@ -176,6 +176,10 @@ def append_openai_reasoning_detail(
 
 __all__ = [
     "OPENAI_COMPLETIONS_REASONING_FIELDS",
+    "ReasoningDetail",
+    "ReasoningEncryptedDetail",
+    "ReasoningSummaryDetail",
+    "ReasoningTextDetail",
     "append_openai_reasoning_detail",
     "is_openai_reasoning_detail",
     "is_reasoning_field",

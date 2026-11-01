@@ -1,7 +1,10 @@
 """快速确定性哈希（对齐 TS ``src/utils/hash.ts`` 的 ``shortHash``）。
 
 用于截断超长字符串（如 Responses API 的 ``{call_id}|{item_id}`` 工具调用 id）。
-32 位 imul 语义逐位复刻 JS ``Math.imul``，保证与 TS 侧同输入同输出。
+32 位 imul 语义逐位复刻 JS ``Math.imul``。**注意**：JS 按 UTF-16 code unit
+迭代（``charCodeAt``），Python 按码点迭代——BMP 内字符（ASCII/CJK 常用
+平面）与 TS 同输入同输出；非 BMP 字符（emoji 等）两侧结果分叉。实际
+消费面（工具调用 id）为 ASCII，不受影响。
 """
 
 _CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"

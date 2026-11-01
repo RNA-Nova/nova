@@ -18,7 +18,7 @@ from .oauth import (
     openai_codex_oauth,
     poll_oauth_device_code_flow,
 )
-from .oauth_page import oauth_error_html, oauth_success_html
+from .oauth.oauth_page import oauth_error_html, oauth_success_html
 from .resolve import (
     AuthResolutionOverrides,
     ModelsError,
