@@ -16,6 +16,7 @@ updates:
   # dependabot 不识别——根目录依赖更新靠手工（pixi 统一求解）。
   - package-ecosystem: pip
     directories:
+      - packages/nova_protocol
       - packages/nova_ai
       - packages/nova_agent
       - packages/nova_harness
