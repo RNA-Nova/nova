@@ -6,8 +6,6 @@ import asyncio
 
 import pytest
 from fake_transport import FakeTransport
-from nova_protocol import InitializeResponse
-
 from nova_exec_server_client import (
     ConnectionError,
     ExecutorClient,
@@ -17,6 +15,7 @@ from nova_exec_server_client import (
 from nova_exec_server_client.errors import SESSION_ALREADY_ATTACHED, AuthError
 from nova_exec_server_client.notifications import NotificationRouter
 from nova_exec_server_client.recovery import ManagedTransport
+from nova_protocol import InitializeResponse
 
 FAST = ReconnectStrategy(interval=0.01, timeout=2.0)
 
@@ -952,8 +951,8 @@ class SlowCloseTransport(FakeTransport):
 
 @pytest.mark.asyncio
 async def test_retired_close_tasks_tracked_and_gathered_on_disconnect():
-    """退役传输的后台关闭任务跟踪集（对齐 _cleanup_tasks 模式）：连续多次
-    恢复各自跟踪不被覆盖；disconnect 时 gather 全量收尾"""
+    """退役传输的后台关闭任务台账（nova_async TaskTracker）：连续多次
+    恢复各自登记不被覆盖；disconnect 时排水全量收尾"""
     sink: list[FakeTransport] = []
     made = 0
 
@@ -986,7 +985,7 @@ async def test_retired_close_tasks_tracked_and_gathered_on_disconnect():
             break
         await asyncio.sleep(0.01)
 
-    # 两条退役传输的关闭都未完成——任务全量跟踪，不被单槽覆盖
+    # 两条退役传输的关闭都未完成——任务全量登记，不被单槽覆盖
     assert len(managed._retired_close_tasks) == 2
     first, second = sink[0], sink[1]
     assert isinstance(first, SlowCloseTransport) and isinstance(
@@ -996,8 +995,8 @@ async def test_retired_close_tasks_tracked_and_gathered_on_disconnect():
     first.release_close.set()
     second.release_close.set()
     await managed.disconnect()
-    assert first.close_done and second.close_done  # gather 全量收尾
-    assert managed._retired_close_tasks == set()
+    assert first.close_done and second.close_done  # 排水全量收尾
+    assert len(managed._retired_close_tasks) == 0
 
 
 class HangingConnectTransport(FakeTransport):

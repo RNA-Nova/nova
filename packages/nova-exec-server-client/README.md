@@ -5,7 +5,7 @@
 ## 定位
 
 - **连接与协议**：WebSocket / stdio 连接、JSON-RPC 调用（initialize 时做 `protocolVersion` major 匹配）、进程/文件系统/PTY 管理、断线重连与会话恢复、多连接通道分离
-- **发现与物化**：读取 executor 配置根（user 层 `~/.nova/executor/config.toml` + 项目层 `<cwd>/.nova/settings.json` 的 `executor` 段，trust 门控），把套餐档/网络代理/审批档**物化展开**成线上协议对象——套餐名与配置词汇永不上线
+- **发现与物化**：读取 executor 配置根（user 层 `~/.nova/exec-server/config.toml` + 项目层 `<cwd>/.nova/settings.json` 的 `executor` 段，trust 门控），把套餐档/网络代理/审批档**物化展开**成线上协议对象——套餐名与配置词汇永不上线
 - **不做部署**：不负责上传、安装、启动 nova-exec-server 到服务器
 - **不做裁决交互**：网络/命令裁决只返回结果（allow/deny/ask），弹窗回路归调用方（如 nova 的 bundle 扩展）
 - **通用**：不绑定 Nova，可用于任何 Python 项目
@@ -92,14 +92,14 @@ async with ExecutorClient.from_stdio(connections=2) as client:
 框架的 settings。SDK 负责发现并**物化展开**成协议对象——executor daemon
 只收展开结果，不理解配置词汇。
 
-配置层栈（对位 PROTOCOL v1.4 `environmentConfig/read` 层栈）：
+配置层栈（对位 PROTOCOL v1.7 `environmentConfig/read` 层栈）：
 
-- **user 层**：`~/.nova/executor/config.toml`（TOML；`NOVA_EXECUTOR_HOME` 可覆盖根）
+- **user 层**：`~/.nova/exec-server/config.toml`（TOML；`NOVA_EXEC_SERVER_HOME` 可覆盖根）
 - **project 层**：`<cwd>/.nova/settings.json` 的 `executor` 段（JSON；**仅在
   `project_trusted=True` 时读取**——Project Trust 裁决归调用方）
 
 ```toml
-# ~/.nova/executor/config.toml
+# ~/.nova/exec-server/config.toml
 sandbox_mode = "workspace-write"        # 或 "read-only"；缺席 = 不沙箱
 approval_policy = "on-request"          # on-request / on-failure / never
 
@@ -117,10 +117,10 @@ denied_domains = ["evil.example.com"]   # 展开时 deny 在前（拒绝优先�
 ```
 
 ```python
-from nova_exec_server_client import load_executor_config, resolve_execution_policy
+from nova_exec_server_client import load_executor_config
 
 config = load_executor_config(cwd="/path/to/project", project_trusted=True)
-policy = resolve_execution_policy(config, cwd="/path/to/project")
+policy = config.resolve_execution(cwd="/path/to/project")
 # policy.sandbox / policy.network_proxy 即为可直接下发 process/start 的展开对象
 # （套餐名永不上线）；policy.approval_policy 供裁决方做 ask 降级判断
 ```
@@ -128,22 +128,30 @@ policy = resolve_execution_policy(config, cwd="/path/to/project")
 合并语义（对位 codex `merge.rs`）：表按键深合并，列表与标量由高层整体覆盖
 （不追加）。未知键 warn-and-ignore；坏文件抛 `ConfigError`（带路径）。
 
-## 网络沙箱裁决（policyRequest 回调底座）
+## 网络沙箱裁决（policyRequest 回调）
 
 executor 托管代理对**未列名**主机发起 `network/policyRequest` 反向裁决
-（静态 allow/deny 名单由服务端按 `networkProxy` 配置自行评估）。SDK 提供
-可复用裁决门——会话记忆 + ask 注入点 + fail-closed 兜底，UI 弹窗归调用方：
+（静态 allow/deny 名单由服务端按 `networkProxy` 配置自行评估）。SDK 以
+回调注入裁决——交互（弹窗/会话记忆）归调用方实现：
 
 ```python
-from nova_exec_server_client import ExecutorClient, NetworkPolicyGate, AskOutcome
+from nova_exec_server_client import (
+    ExecutorClient,
+    NetworkPolicyDecision,
+    NetworkPolicyRequestParams,
+)
 
-async def my_ui_ask(params) -> AskOutcome:   # 调用方实现交互（弹窗等）
+async def my_policy(params: NetworkPolicyRequestParams) -> NetworkPolicyDecision:
     host = params.request.host
-    ...  # AskOutcome.ALLOW / DENY / ALLOW_REMEMBER / DENY_REMEMBER
+    ...  # 调用方决定 allow / deny（可弹窗、可记忆——fail-closed 之外的
+    ...  # 会话缓存与"永远允许"语义都归调用方实现）
 
-gate = NetworkPolicyGate(on_ask=my_ui_ask)   # approval_policy=never 或无 on_ask
-client = ExecutorClient(url, network_policy=gate.decide)  # 时一律 deny（fail-closed）
+client = ExecutorClient(url, network_policy=my_policy)
 ```
+
+不传 `network_policy`（默认）时不注册处理器——服务端收到 METHOD_NOT_FOUND
+并按 **fail-closed** 拒绝该访问；回调超时/异常同样 fail-closed（安全缺省）。
+注册挂在控制面连接上，断线重连自动重挂。
 
 审计通知（executor 每次裁决单向汇报）经类型化糖 API 订阅：
 
@@ -363,7 +371,7 @@ except ProtocolError as e:
 本 SDK **不负责部署** nova-exec-server。你需要：
 
 1. 在服务器上编译或下载 `nova-exec-server` 二进制
-2. 启动服务：`nova-exec-server --listen ws://0.0.0.0:8080 --auth bearer --auth-token your-token`（stdio 模式为 `nova-exec-server --listen stdio`，单连接，由 SDK 直接 spawn 时无需手动启动）
+2. 启动服务：`nova-exec-server --listen ws://127.0.0.1:8080`（executor 本体**无入站鉴权**、只做回环承载——对外暴露与鉴权归 SSH 隧道/上层中继；stdio 模式为 `nova-exec-server --listen stdio`，单连接，由 SDK 直接 spawn 时无需手动启动）
 3. 使用 SDK 连接
 
 ## 测试

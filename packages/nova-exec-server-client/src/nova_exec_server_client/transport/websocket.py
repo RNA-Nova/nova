@@ -73,6 +73,8 @@ class WebSocketTransport(_JsonRpcTransport):
             raise ConnectionError(f"failed to connect to {self.url}: {e}") from e
 
         self._closed = False
+        # 新连接代另起新账（TaskTracker 无 reopen——旧账在断线/关闭收尾时已落闸）
+        self._inbound = self._new_inbound_tracker()
         self._receive_task = asyncio.create_task(self._receive_loop())
 
     async def disconnect(self) -> None:

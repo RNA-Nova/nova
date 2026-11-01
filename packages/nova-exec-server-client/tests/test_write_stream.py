@@ -7,10 +7,9 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
-from nova_protocol import MAX_WRITE_STREAM_CHUNK_BYTES, FileSystemSandboxContext
-
 from nova_exec_server_client import FileSystemError, ProtocolError
 from nova_exec_server_client.fs import FileSystemManager
+from nova_protocol import MAX_WRITE_STREAM_CHUNK_BYTES, FileSystemSandboxContext
 
 
 def make_fs(responses: dict | None = None) -> tuple[FileSystemManager, FakeTransport]:
@@ -203,8 +202,9 @@ async def test_write_stream_cancellation_aborts_handle():
 
 @pytest.mark.asyncio
 async def test_write_stream_abort_failure_is_best_effort(caplog):
-    """中止时连接已死：close 失败被吞掉（即发即忘任务的异常取回留痕，不打
-    "Task exception was never retrieved" 循环告警），原异常照常传播"""
+    """中止时连接已死：close 失败不传播（即发即忘任务的异常经收摊台账日志
+    强制浮出——兼作 "Task exception was never retrieved" 的合法消费），
+    原异常照常传播"""
     responses = ok_responses(total=0)
     responses["fs/close"] = ConnectionErrorStub("connection closed")
     fs, transport = make_fs(responses)
@@ -213,17 +213,18 @@ async def test_write_stream_abort_failure_is_best_effort(caplog):
         yield b"partial"
         raise RuntimeError("boom")
 
-    with caplog.at_level("DEBUG", logger="nova_exec_server_client.fs"):
+    with caplog.at_level("ERROR", logger="nova_async.task_tracker"):
         with pytest.raises(RuntimeError, match="boom"):
             await fs.write_stream("file:///tmp/out.bin", broken_source())
         close_calls = await wait_close_requests(transport)
-        # 等即发即忘任务完成（异常在 done_callback 取回留痕）
+        # 等即发即忘任务完成（异常经 TaskTracker._on_done 浮出留痕）
         deadline = asyncio.get_running_loop().time() + 5.0
         while fs._pending_closes:
             assert asyncio.get_running_loop().time() < deadline
             await asyncio.sleep(0.01)
     assert close_calls
-    assert "fs/close 收摊任务失败" in caplog.text
+    # 台账名归属（替代旧 done 回调在 fs logger 上的 debug 留痕）
+    assert "fs-close" in caplog.text
 
 
 class ConnectionErrorStub(Exception):

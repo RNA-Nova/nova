@@ -179,6 +179,8 @@ class StdioTransport(_JsonRpcTransport):
             ) from e
 
         self._closed = False
+        # 新连接代另起新账（TaskTracker 无 reopen——旧账在断线/关闭收尾时已落闸）
+        self._inbound = self._new_inbound_tracker()
         self._receive_task = asyncio.create_task(self._receive_loop())
         self._stderr_task = asyncio.create_task(self._stderr_loop())
         self._wait_task = asyncio.create_task(self._wait_loop())
@@ -236,7 +238,8 @@ class StdioTransport(_JsonRpcTransport):
         Rust 监督器在 child wait 完成后无条件 kill_process_tree）。
         """
         try:
-            await asyncio.wait_for(process.wait(), timeout=self._SHUTDOWN_GRACE)
+            async with asyncio.timeout(self._SHUTDOWN_GRACE):
+                await process.wait()
         except asyncio.TimeoutError:
             pass
         else:
@@ -244,7 +247,8 @@ class StdioTransport(_JsonRpcTransport):
             return
         self._terminate_process_tree(process)
         try:
-            await asyncio.wait_for(process.wait(), timeout=self._SHUTDOWN_GRACE)
+            async with asyncio.timeout(self._SHUTDOWN_GRACE):
+                await process.wait()
         except asyncio.TimeoutError:
             pass
         self._kill_process_tree(process)

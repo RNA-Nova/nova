@@ -28,7 +28,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from nova_protocol.signal import await_with_signal
+from nova_async import Deadline, TaskTracker, await_with_signal
 
 from .errors import (
     JSON_RPC_TRANSPORT_CLOSED,
@@ -189,10 +189,10 @@ class ManagedTransport:
         self._state: State = "disconnected"
         self._failure_message: str | None = None
         self._recover_task: asyncio.Task | None = None
-        #: request_recovery 退役传输的后台关闭任务跟踪集（持引用防 GC——
-        #: 对齐 _ProcessStartGate._cleanup_tasks 模式；连续多次恢复各自
-        #: 跟踪，disconnect 时 gather 全量收尾）
-        self._retired_close_tasks: set[asyncio.Task] = set()
+        #: request_recovery 退役传输的后台关闭任务台账（连续多次恢复各自
+        #: 登记，disconnect 时排水全量收尾；异常终结经台账日志强制浮出——
+        #: 替代旧 gather(return_exceptions=True) 的静默吞）
+        self._retired_close_tasks = TaskTracker(name="retired-transport-close")
         self._closing = False
         #: 显式刷新串行化（普通连接/恢复工作可并发；对位 Rust refresh_lock）
         self._refresh_lock = asyncio.Lock()
@@ -273,10 +273,12 @@ class ManagedTransport:
             except asyncio.CancelledError:
                 pass
             self._recover_task = None
-        if self._retired_close_tasks:
-            # 退役传输的后台关闭任务全量收尾（连续多次恢复各自跟踪）
-            await asyncio.gather(*self._retired_close_tasks, return_exceptions=True)
-            self._retired_close_tasks.clear()
+        # 退役传输的后台关闭任务全量收尾：落闸 + 排水后另起新账
+        # （TaskTracker 无 reopen——disconnect 后可再 connect，新一代恢复
+        # 须能再登记；`_closing` 先于落闸置位，排水期间无新登记流入）
+        self._retired_close_tasks.close()
+        await self._retired_close_tasks.wait()
+        self._retired_close_tasks = TaskTracker(name="retired-transport-close")
         await self._transport.disconnect()
         if self._state != "disconnected":
             # 仅在拆已建立/尝试过的会话时清空——未连接过的显式
@@ -321,9 +323,11 @@ class ManagedTransport:
         if abort_connection is not None:
             abort_connection()
         self._recover_task = asyncio.create_task(self._recover(reason))
-        close_task = asyncio.create_task(self._close_retired(old))
-        self._retired_close_tasks.add(close_task)
-        close_task.add_done_callback(self._retired_close_tasks.discard)
+        # 登记退役关闭任务（持引用防 GC，完成自摘）；台账只在 disconnect
+        # 收尾期短暂落闸，而 `_closing` 先于它拦截本方法——None 返回不可达
+        self._retired_close_tasks.spawn(
+            self._close_retired(old), name="retired-transport-close"
+        )
 
     async def _close_retired(self, transport: Transport) -> None:
         """退役传输的后台关闭（request_recovery 专用）：主动关闭不触发断线
@@ -531,18 +535,18 @@ class ManagedTransport:
             self._fail(disconnect_message)
             return
 
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + strategy.timeout
+        # 恢复总预算（nova_async Deadline 值对象——对位 Rust 的 deadline
+        # 算术：loop.time() 即 time.monotonic 同族单调钟；remaining_s 不返负、
+        # wait_for 吃秒，替代旧手写 deadline - loop.time()）
+        deadline = Deadline(timeout_ms=strategy.timeout * 1000)
         # 对位 Rust recover() 起手：清扫在途推送（上面 _fail_in_flight_work）
         # 之后、重建传输之前，等在飞 process/start 归零（timeout_at(deadline,
         # wait_for_process_starts())）——start 不落地就不许 resume；超时整个
         # 恢复转 failed
         if self._pre_recovery is not None:
             try:
-                await asyncio.wait_for(
-                    self._pre_recovery(),
-                    timeout=max(deadline - loop.time(), 0.0),
-                )
+                async with asyncio.timeout(deadline.remaining_s):
+                    await self._pre_recovery()
             except asyncio.TimeoutError:
                 self._fail(
                     "in-flight process starts did not settle before the recovery deadline"
@@ -557,8 +561,7 @@ class ManagedTransport:
         last_error = f"recovery timed out after {strategy.timeout}s"
 
         while True:
-            now = loop.time()
-            if now >= deadline:
+            if deadline.expired:
                 break
             if strategy.max_attempts is not None and attempts >= strategy.max_attempts:
                 last_error = f"reconnect attempts exhausted ({attempts})"
@@ -567,10 +570,15 @@ class ManagedTransport:
             candidate: Transport | None = None
             try:
                 candidate = self._factory()
-                await asyncio.wait_for(candidate.connect(), deadline - now)
-                response = await asyncio.wait_for(
-                    self._handshake(candidate, self._session_id), deadline - loop.time()
-                )
+                # asyncio.timeout 结构化换件（取消传播逐行等价论证：超时触发时
+                # CM 把自家取消转 TimeoutError——进不去上面的 CancelledError
+                # 臂；外部 disconnect 取消非 CM 所发——uncancel 计数不符，
+                # CancelledError 原样穿过 CM 进取消臂清理候选后传播，与
+                # wait_for 时代两臂分工一致）
+                async with asyncio.timeout(deadline.remaining_s):
+                    await candidate.connect()
+                async with asyncio.timeout(deadline.remaining_s):
+                    response = await self._handshake(candidate, self._session_id)
                 self._install(candidate, response)
             except asyncio.CancelledError:
                 # 主动 disconnect 取消恢复：半成品候选连接清理后传播取消
@@ -605,7 +613,7 @@ class ManagedTransport:
                 self._set_state("connected")
                 return
 
-            remaining = deadline - loop.time()
+            remaining = deadline.remaining_s
             if remaining <= 0:
                 break
             await asyncio.sleep(min(next(delays), remaining))

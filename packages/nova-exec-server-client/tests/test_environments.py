@@ -7,7 +7,6 @@ client.from_environment 构造）
 from pathlib import Path
 
 import pytest
-
 from nova_exec_server_client import (
     ConfigError,
     ExecutorClient,

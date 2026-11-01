@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from nova_protocol import HttpRequestBodyDeltaNotification
-
 from nova_exec_server_client import StdioTransport
 from nova_exec_server_client.client import ExecutorClient
 from nova_exec_server_client.errors import ProtocolError
@@ -17,6 +15,7 @@ from nova_exec_server_client.notifications import (
     MAX_ENCODED_HTTP_BODY_DELTA_BYTES,
     NotificationRouter,
 )
+from nova_protocol import HttpRequestBodyDeltaNotification
 
 FAKE_SERVER = str(Path(__file__).parent / "fake_executor_server.py")
 

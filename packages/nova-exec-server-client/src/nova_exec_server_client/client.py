@@ -8,6 +8,7 @@ import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
+from nova_async import TaskTracker, await_with_signal
 from nova_protocol import (
     ENVIRONMENT_CONFIG_READ,
     ENVIRONMENT_INFO,
@@ -42,7 +43,6 @@ from nova_protocol import (
     ProcessTerminateParams,
     ResolvedEnvironment,
 )
-from nova_protocol.signal import await_with_signal
 from pydantic import ValidationError
 
 from .errors import (
@@ -178,14 +178,11 @@ class _ProcessStartGate:
         # 归零事件（计数 0 时置位；恢复编排等待它——事件常置不换代）
         self._idle = asyncio.Event()
         self._idle.set()
-        # 后台任务跟踪集（terminate 清理 / start 线 RPC——持引用防 GC，
-        # 对位 transport/base.py _spawn_inbound_task 的跟踪集模式）
-        self._cleanup_tasks: set[asyncio.Task] = set()
-
-    def _track_task(self, task: asyncio.Task) -> None:
-        """后台任务入跟踪集持引用（防 GC 提前回收悬挂任务）"""
-        self._cleanup_tasks.add(task)
-        task.add_done_callback(self._cleanup_tasks.discard)
+        # 后台任务台账（terminate 清理 / start 线 RPC——持引用防 GC；
+        # 实现为 nova_async TaskTracker：完成自摘、异常终结强制浮出，
+        # 对位 transport/base.py 的反向请求台账模式）。台账随客户端
+        # 生命周期不主动落闸（门控无收尾路径），spawn 的 None 返回不可达
+        self._tasks = TaskTracker(name="process-start-gate")
 
     def try_begin(self, transport: Transport) -> bool:
         """原子准入（同步无 await，对位 begin_process_start 的锁内检查+计数）"""
@@ -214,7 +211,9 @@ class _ProcessStartGate:
     def schedule_cleanup(self, process_id: str | None) -> None:
         """调度后台 terminate 清理（processId 缺失即请求未成形，无需清理）"""
         if process_id:
-            self._track_task(asyncio.create_task(self._cleanup(process_id)))
+            self._tasks.spawn(
+                self._cleanup(process_id), name=f"process-cleanup:{process_id}"
+            )
 
     async def _cleanup(self, process_id: str) -> None:
         """对位 Rust cleanup_process_start 的 loop：terminate 经连接池走
@@ -294,8 +293,9 @@ class _ProcessStartGatedTransport:
         # （服务端进程表尚无此 id，terminate 返回成功），start 随后落地
         # Running 成孤儿
         settled: asyncio.Future = asyncio.get_running_loop().create_future()
-        gate._track_task(
-            asyncio.create_task(self._run_start_rpc(transport, method, params, settled))
+        gate._tasks.spawn(
+            self._run_start_rpc(transport, method, params, settled),
+            name="process-start-rpc",
         )
         try:
             # 回执等待经竞速包装：signal 触发即取消等待（settled 随取消关闭）、
@@ -585,10 +585,10 @@ class ExecutorClient:
             # policy_decision_timeout_ms）；未声明回退全局时限
             timeout = self.process.live_processes.get(request.process_id)
             try:
-                decision = await asyncio.wait_for(
-                    self._network_policy(request),
-                    timeout if timeout is not None else self._network_policy_timeout,
-                )
+                async with asyncio.timeout(
+                    timeout if timeout is not None else self._network_policy_timeout
+                ):
+                    decision = await self._network_policy(request)
             except asyncio.TimeoutError:
                 # 回调超时即 deny（对位 Rust timeout(controller.timeout, ...)
                 # 的 unwrap_or_else 兜底）
@@ -804,7 +804,8 @@ class ExecutorClient:
             return response
 
         try:
-            return await asyncio.wait_for(do_handshake(), self._initialize_timeout)
+            async with asyncio.timeout(self._initialize_timeout):
+                return await do_handshake()
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"initialize handshake timed out after {self._initialize_timeout}s"
@@ -821,7 +822,8 @@ class ExecutorClient:
         try:
             if self._connect_timeout is not None:
                 # 环境声明的连接总时限（config 的 connect_timeout_sec）
-                await asyncio.wait_for(self._pool.connect(), self._connect_timeout)
+                async with asyncio.timeout(self._connect_timeout):
+                    await self._pool.connect()
             else:
                 await self._pool.connect()
         except Exception:
@@ -929,10 +931,10 @@ class ExecutorClient:
             self._control._await_transport(), signal
         )
         try:
-            result = await asyncio.wait_for(
-                probe_transport.send_request(ENVIRONMENT_INFO, **_signal_kwarg(signal)),
-                ENVIRONMENT_INFO_TIMEOUT,
-            )
+            async with asyncio.timeout(ENVIRONMENT_INFO_TIMEOUT):
+                result = await probe_transport.send_request(
+                    ENVIRONMENT_INFO, **_signal_kwarg(signal)
+                )
         except asyncio.TimeoutError:
             error = TimeoutError(f"request {ENVIRONMENT_INFO} timed out")
             # 只退役所探连接；陈旧探针/已在恢复由 ManagedTransport 守卫忽略
@@ -964,10 +966,10 @@ class ExecutorClient:
             # recovering（或 connected 但底层已断、断线回调未至）
             raise ConnectionError("exec-server environment is recovering")
         try:
-            result = await asyncio.wait_for(
-                transport.send_request(ENVIRONMENT_STATUS, **_signal_kwarg(signal)),
-                ENVIRONMENT_STATUS_TIMEOUT,
-            )
+            async with asyncio.timeout(ENVIRONMENT_STATUS_TIMEOUT):
+                result = await transport.send_request(
+                    ENVIRONMENT_STATUS, **_signal_kwarg(signal)
+                )
         except asyncio.TimeoutError:
             raise TimeoutError(f"request {ENVIRONMENT_STATUS} timed out") from None
         return EnvironmentStatus.model_validate(result)

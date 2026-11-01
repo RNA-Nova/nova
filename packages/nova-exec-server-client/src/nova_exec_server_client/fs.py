@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import logging
 import uuid
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable
 from urllib.parse import quote
 
+from nova_async import TaskTracker, await_with_signal
 from nova_protocol import (
     ENVIRONMENT_INFO,
     FS_CANONICALIZE,
@@ -68,7 +67,6 @@ from nova_protocol import (
     WalkOptions,
     WalkOutcome,
 )
-from nova_protocol.signal import await_with_signal
 
 from .errors import (
     JSON_RPC_METHOD_NOT_FOUND,
@@ -79,8 +77,6 @@ from .errors import (
 )
 from .notifications import NotificationRouter, ReadStreamEvent
 from .transport import Transport, _signal_kwarg
-
-logger = logging.getLogger(__name__)
 
 #: walk 上限（对位 Rust exec-server-file-system 的 MAX_WALK_* 族与响应字节
 #: 预算）——直连 fs/walk 时由服务端执法；-32601 回退原语合成路径本地执法
@@ -142,8 +138,9 @@ class FileSystemManager:
         self._router = router
         self._environment_info_provider = environment_info
         self._environment_info_cached: EnvironmentInfo | None = None
-        #: 即发即忘的 fs/close 收摊任务集（持引用防 GC 中途回收，完成自弃）
-        self._pending_closes: set[asyncio.Task] = set()
+        #: 即发即忘的 fs/close 收摊任务台账（持引用防 GC 中途回收，完成
+        #: 自摘；异常终结经台账日志强制浮出——best-effort 语义不变）
+        self._pending_closes = TaskTracker(name="fs-close")
 
     def _stream_channel(self, method: str) -> str | None:
         """解析流式方法的落点通道名（池化传输打标签用；裸传输无此概念归 None）"""
@@ -154,28 +151,18 @@ class FileSystemManager:
         """即发即忘的 fs/close 收摊（对位 Rust `runtime.spawn`——inline await
         会把消费者的 aclose()/取消路径挂在"连接活着但服务端不答 fs/close"的
         半死窗口上）。落点通道与流注册同一解析（自定义 method_routes 时 close
-        不错落连接；裸传输无通道概念归 None）。任务持引用防 GC 中途回收。"""
-        task = asyncio.create_task(
+        不错落连接；裸传输无通道概念归 None）。任务登记 `_pending_closes`
+        台账——管理器无收尾路径（台账不落闸），spawn 的 None 返回不可达。"""
+        self._pending_closes.spawn(
             self._transport.send_request(
                 FS_CLOSE,
                 FsCloseParams(handleId=handle_id).model_dump(by_alias=True),
                 channel=self._stream_channel(stream_method),
                 # 收摊调用（对位 Rust call_for_cleanup 的保留槽语义）
                 for_cleanup=True,
-            )
+            ),
+            name=f"fs/close:{handle_id}",
         )
-        self._pending_closes.add(task)
-        task.add_done_callback(self._discard_close_task)
-
-    def _discard_close_task(self, task: asyncio.Task) -> None:
-        """收摊任务完成即自弃；异常取回留痕（best-effort 语义不变——连接已死
-        时尽力而为，但不打 "Task exception was never retrieved" 循环告警）"""
-        self._pending_closes.discard(task)
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.debug("fs/close 收摊任务失败（best-effort 忽略）", exc_info=exc)
 
     async def read_file(
         self,

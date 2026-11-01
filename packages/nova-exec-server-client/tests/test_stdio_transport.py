@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from nova_exec_server_client import (
     NETWORK_POLICY_REQUEST,
     ConnectionError,

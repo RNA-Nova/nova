@@ -13,8 +13,9 @@ import asyncio
 import logging
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Coroutine
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
+from nova_async import TaskTracker, await_with_signal
 from nova_protocol import (
     NETWORK_POLICY_REQUEST,
     AbortedError,
@@ -22,7 +23,6 @@ from nova_protocol import (
     NetworkPolicyDecision,
     NetworkPolicyRequestResponse,
 )
-from nova_protocol.signal import await_with_signal
 
 from ..errors import (
     JSON_RPC_INTERNAL_ERROR,
@@ -139,11 +139,13 @@ class _JsonRpcTransport:
         #: 在飞反向请求的 id 集（准入去重；任务收尾即释放——对位 Rust
         #: RpcInboundRequestGuard 的 drop）
         self._inbound_request_ids: set[int] = set()
-        #: 在飞反向请求任务（断线/关闭时统一取消——对位 Rust 的
-        #: connection_cancelled drop guard：连接退役后裁决不再回包）。
+        #: 在飞反向请求任务台账（断线/关闭时统一取消+排水——对位 Rust 的
+        #: connection_cancelled drop guard：连接退役后裁决不再回包；实现为
+        #: nova_async TaskTracker：完成自摘、异常终结强制浮出）。
         #: Rust 的槽位信号量跨重连共享（旧连接的在飞请求与新连接并存收尾）；
-        #: py 侧断线即取消在飞裁决，重叠窗口不存在，槽位故随连接实例
-        self._inbound_tasks: set[asyncio.Task] = set()
+        #: py 侧断线即取消在飞裁决，重叠窗口不存在，槽位故随连接实例。
+        #: 台账无 reopen——同实例再 connect 时另起新账（见子类 connect）
+        self._inbound = self._new_inbound_tracker()
         self._closed = True  # 未连接即关闭态
 
     # ------------------------------------------------------------------
@@ -210,6 +212,11 @@ class _JsonRpcTransport:
 
         try:
             await self._send_message(message)
+            # wait_for 白名单保留（不换 `asyncio.timeout`）：超时必须**取消
+            # pending future 本身**——per-request 回执 Future 超时即撤单
+            # （对位 Rust PendingRequestGuard drop，finally 的 pending 表
+            # 清理依赖落定确定性）；且嵌在 `await_with_signal` 竞速的内层，
+            # 改 CM 会把超时取消挪到外层任务、改写竞速两臂的归因分工
             return await await_with_signal(
                 asyncio.wait_for(future, timeout=self.request_timeout), signal
             )
@@ -356,13 +363,23 @@ class _JsonRpcTransport:
             self._spawn_inbound_task(self._reply_at_capacity(message_id, method))
             return
         self._inbound_request_ids.add(message_id)
-        self._spawn_inbound_task(self._run_server_request(message, handler))
+        if self._spawn_inbound_task(self._run_server_request(message, handler)) is None:
+            # 收尾竞态期的晚到请求（连接已关）：任务不起跑，回收已登记的在飞 id
+            self._inbound_request_ids.discard(message_id)
 
-    def _spawn_inbound_task(self, coro: Coroutine[Any, Any, None]) -> None:
-        """反向请求相关协程统一 spawn 并跟踪（断线/关闭时取消）"""
-        task = asyncio.create_task(coro)
-        self._inbound_tasks.add(task)
-        task.add_done_callback(self._inbound_tasks.discard)
+    def _new_inbound_tracker(self) -> TaskTracker:
+        """新连接代的反向请求台账（TaskTracker 无 reopen：断线/关闭收尾
+        已落闸，同实例再 connect 须另起新账）"""
+        return TaskTracker(name=f"{type(self).__name__}.inbound")
+
+    def _spawn_inbound_task(
+        self, coro: Coroutine[Any, Any, None]
+    ) -> Optional[asyncio.Task]:
+        """反向请求相关协程统一登记启动（断线/关闭收尾由台账取消+排水）。
+
+        台账已落闸（`_mark_disconnected` / disconnect 收尾竞态期）时返回
+        None 且协程不起跑——调用方把 None 当"连接已关"静默丢弃。"""
+        return self._inbound.spawn(coro)
 
     async def _run_server_request(self, message: dict, handler: RequestHandler) -> None:
         """裁决执行任务（对位 Rust tokio::spawn 的决策 future）。
@@ -446,18 +463,19 @@ class _JsonRpcTransport:
             )
 
     def _cancel_inbound_tasks(self) -> None:
-        """取消在飞反向请求任务（断线/关闭收尾；幂等）"""
-        current = asyncio.current_task()
-        for task in self._inbound_tasks:
-            if task is not current:
-                task.cancel()
+        """取消在飞反向请求任务（断线/关闭收尾；幂等）：先落闸（收尾竞态期
+        的晚到反向请求由 `_spawn_inbound_task` 丢弃），再同步举旗硬取消。
+        跳过当前任务由 TaskTracker.cancel_all 内置——本方法会从台账内任务
+        发起（反向请求任务内部 reply 失败经 `_reply_to_server_request` →
+        `_mark_disconnected` 触发全连接收摊），不杀自己"""
+        self._inbound.close()
+        self._inbound.cancel_all()
 
     async def _drain_inbound_tasks(self) -> None:
-        """等已取消的反向请求任务收尾（disconnect 用——事件循环关闭前不留悬挂）"""
-        current = asyncio.current_task()
-        tasks = [task for task in self._inbound_tasks if task is not current]
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        """等已取消的反向请求任务收尾（disconnect 用——事件循环关闭前不留
+        悬挂）。跳过当前任务由 TaskTracker.wait 内置（等自己 = 死锁）；
+        任务异常终结经台账日志强制浮出（替代旧 gather 的静默吞异常）"""
+        await self._inbound.wait()
 
     # ------------------------------------------------------------------
     # 断线

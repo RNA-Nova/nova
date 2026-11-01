@@ -10,8 +10,6 @@ import logging
 import re
 
 import pytest
-from nova_protocol import NetworkMode
-
 from nova_exec_server_client import (
     ApprovalPolicy,
     ConfigError,
@@ -20,6 +18,7 @@ from nova_exec_server_client import (
     load_executor_config,
 )
 from nova_exec_server_client.config import NOVA_EXEC_SERVER_HOME_ENV
+from nova_protocol import NetworkMode
 
 
 @pytest.fixture

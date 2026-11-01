@@ -1,5 +1,7 @@
 """nova-exec-server Python SDK"""
 
+# 线型（environment_status() 的返回类型）以别名入驻——包顶 `EnvironmentStatus`
+# 归连接状态型（environments.py），遮蔽修复（审计范围C C1）
 from nova_protocol import (
     LOCAL_ENVIRONMENT_ID,
     NETWORK_POLICY_DECISION,
@@ -11,7 +13,10 @@ from nova_protocol import (
     EnvironmentConfigReadParams,
     EnvironmentConfigReadResponse,
     EnvironmentInfo,
-    EnvironmentStatus,
+)
+from nova_protocol import EnvironmentStatus
+from nova_protocol import EnvironmentStatus as WireEnvironmentStatus
+from nova_protocol import (
     ExecEnvPolicy,
     ExecFileSystemPath,
     ExecFileSystemSandboxEntry,
@@ -51,10 +56,6 @@ from nova_protocol import (
     WindowsSandboxLevel,
     WindowsSandboxProxySettingsMode,
 )
-
-# 线型（environment_status() 的返回类型）以别名入驻——包顶 `EnvironmentStatus`
-# 归连接状态型（environments.py），遮蔽修复（审计范围C C1）
-from nova_protocol import EnvironmentStatus as WireEnvironmentStatus
 
 from .client import ExecutorClient
 from .config import (

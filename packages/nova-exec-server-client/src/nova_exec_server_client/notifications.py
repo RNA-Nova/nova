@@ -24,6 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from nova_async import TaskTracker
 from nova_protocol import (
     FS_READ_STREAM_CHUNK,
     FS_READ_STREAM_DONE,
@@ -167,9 +168,10 @@ class NotificationRouter:
         #: http 在队字节的连接级共享预算（跨全部并发 http 流——对位 Rust
         #: `Inner.http_body_stream_byte_budget` 单一信号量）
         self._http_byte_budget = _HttpByteBudget()
-        #: 满队列转异步投递的终止事件任务集（持引用防 GC 中途回收任务；
-        #: 完成即自弃——对位 Rust 满员 spawn send 的"任务不滞留"语义）
-        self._terminal_tasks: set[asyncio.Task] = set()
+        #: 满队列转异步投递的终止事件任务台账（持引用防 GC 中途回收，完成
+        #: 自摘，异常终结经台账日志强制浮出——对位 Rust 满员 spawn send 的
+        #: "任务不滞留"语义）
+        self._terminal_tasks = TaskTracker(name="terminal-event-delivery")
 
     def register_method(self, method: str) -> asyncio.Queue[dict[str, Any]]:
         """按方法名注册通用通知订阅（返回消费队列；重复注册追加新队列）"""
@@ -512,21 +514,12 @@ class NotificationRouter:
 
         消费方已消失时任务挂起无害：asyncio.Queue 无对端关闭概念（Rust 侧
         接收端消失 send 即败返回），挂起任务不耗资源，随事件循环终结连带
-        清理。任务记入 `_terminal_tasks` 持引用，防 GC 中途回收。
+        清理。任务登记 `_terminal_tasks` 台账持引用，防 GC 中途回收（路由器
+        无收尾路径、台账不落闸，spawn 的 None 返回不可达）。
         """
         try:
             registration.queue.put_nowait(event)
         except asyncio.QueueFull:
-            task = asyncio.create_task(registration.queue.put(event))
-            self._terminal_tasks.add(task)
-            task.add_done_callback(self._discard_terminal_task)
-
-    def _discard_terminal_task(self, task: "asyncio.Task[None]") -> None:
-        """终态投递任务完成即自弃；异常取回留痕（不打 "Task exception was
-        never retrieved" 循环告警）"""
-        self._terminal_tasks.discard(task)
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.debug("terminal event delivery task failed", exc_info=exc)
+            self._terminal_tasks.spawn(
+                registration.queue.put(event), name="terminal-event-put"
+            )
