@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Any, List
 
 import pytest
-from nova_ai.providers import get_volcengine_model
 from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
 from nova_harness.types.session.config import CreateAgentSessionOptions
+
+from nova_ai.providers import get_volcengine_model
 
 pytestmark = pytest.mark.integration
 
@@ -35,7 +36,7 @@ async def _has_key() -> bool:
     if os.environ.get("VOLCENGINE_API_KEY"):
         return True
     try:
-        return (await AuthStorage.create().read("volcengine")) is not None
+        return (AuthStorage.create().read("volcengine")) is not None
     except Exception:
         return False
 

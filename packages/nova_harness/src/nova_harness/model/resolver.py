@@ -396,11 +396,7 @@ def resolve_cli_model(
                 if m.id.lower() == cli_model.lower()
                 and not _models_are_equal(m, parsed.model)
             ]
-            if (
-                raw_exact
-                and hasattr(model_runtime, "has_configured_auth")
-                and not model_runtime.has_configured_auth(parsed.model)
-            ):
+            if raw_exact and not model_runtime.has_configured_auth(parsed.model):
                 authenticated = [
                     m for m in raw_exact if model_runtime.has_configured_auth(m)
                 ]
@@ -593,11 +589,7 @@ async def restore_model_from_session(
     restored = model_runtime.find(saved_provider, saved_model_id)
     has_auth = False
     if restored is not None:
-        if hasattr(model_runtime, "has_configured_auth"):
-            has_auth = model_runtime.has_configured_auth(restored)
-        else:
-            key = await model_runtime.get_api_key(restored)
-            has_auth = key is not None
+        has_auth = model_runtime.has_configured_auth(restored)
 
     if restored is not None and has_auth:
         return RestoreModelResult(model=restored)

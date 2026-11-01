@@ -24,9 +24,13 @@ import asyncio
 import contextvars
 import enum
 import itertools
+import logging
 from typing import Any, Callable, Dict, Optional, Set
 
+from nova_async import TaskTracker
 from nova_server.transport.base import Transport
+
+logger = logging.getLogger(__name__)
 
 # 进程级连接 id 发号器（codex ConnectionId AtomicU64 对位）
 _connection_ids = itertools.count(1)
@@ -87,13 +91,16 @@ class Connection:
         self.initialized: bool = False
         # 本连接宣告的 UI 能力集（system/capabilities 按连接记账）
         self.ui_capabilities: Set[str] = set()
-        # 全部 handler task 的强引用集（asyncio 对 task 只持弱引用，
-        # 无 id 的通知任务无表可入——不入集会 GC 风险）；连接关闭即全部取消
-        self.tasks: Set[asyncio.Task] = set()
+        # 全部 handler task 的台账（完成自摘 + 关闭落闸 + 取消级联）；
+        # len(conn.tasks) 兼作读泵的 overload 在飞计数
+        self.tasks = TaskTracker(name=f"conn:{self.id}")
         # 在飞请求 id → handler task（cancelRequest 寻址——tasks 的 id 索引子集）
         self.request_tasks: Dict[Any, asyncio.Task] = {}
         self._outbound: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
         self._writer_task: Optional[asyncio.Task] = None
+        # 慢消费者断连的自关任务槽位（专用：不进 self.tasks——级联取消
+        # 会取消它自己，transport 收尸被打断）
+        self._close_task: Optional[asyncio.Task] = None
         self._closed = False
 
     @property
@@ -126,9 +133,10 @@ class Connection:
             self._outbound.put_nowait(frame)
         except asyncio.QueueFull:
             if self.origin in _TRUSTED_ORIGINS:
-                asyncio.create_task(self._outbound.put(frame))
+                # 让出式等位：台账登记（防 GC 蒸发丢帧；连接关闭时被级联取消）
+                self.tasks.spawn(self._outbound.put(frame), name="outbound-spill")
             else:
-                asyncio.create_task(self.close())
+                self._spawn_close()
 
     async def _write_loop(self) -> None:
         while True:
@@ -142,21 +150,51 @@ class Connection:
                 break
         await self.close()
 
+    def _spawn_close(self) -> None:
+        """慢消费者断连的自关（sync 上下文触发）：专用槽位持有防 GC。"""
+        if self._closed:
+            return
+        if self._close_task is not None and not self._close_task.done():
+            return
+        self._close_task = asyncio.create_task(self.close())
+        self._close_task.add_done_callback(self._on_close_task_done)
+
+    def _on_close_task_done(self, task: "asyncio.Task[None]") -> None:
+        if self._close_task is task:
+            self._close_task = None
+        if not task.cancelled() and task.exception() is not None:
+            # 自关失败的异常必须浮出（兼作 never-retrieved 合法消费）
+            logger.error(
+                "Connection[%s] 自关任务异常终结", self.id, exc_info=task.exception()
+            )
+
     # ------------------------------------------------------------------
     # 关闭
     # ------------------------------------------------------------------
 
     async def close(self) -> None:
-        """关闭连接（幂等）：先回调服务器摘表/取消在飞请求，再停泵收通道。"""
+        """关闭连接（幂等）：落闸 → 举旗 → 回调服务器记账 → 排水 → 收资源。
+
+        生命周期协议四段式：close() 返回时本连接名下没有任何在途任务
+        （不靠 closed 守卫吞帧兜底，靠排水保证）；handler 内触发关闭是
+        合法路径（wait 自动排除调用方自身）。
+        """
         if self._closed:
             return
         self._closed = True
-        # 先回调：服务器取消本连接在飞 handler——其 CancelledError 路径的
-        # 收尾写帧会被 send() 的 closed 守卫吞掉，不会写入半关的通道
+        # 1. 落闸：收尾竞态期的晚到任务直接丢弃（spawn 返回 None）
+        self.tasks.close()
+        # 2. 举旗：在飞 handler 全部硬取消——其 CancelledError 路径的
+        #    收尾写帧会被 send() 的 closed 守卫吞掉，不会写入半关的通道
+        self.tasks.cancel_all()
+        # 3. 服务器侧记账（注册表摘表 / cancelRequest 索引清理 / UI 收尾）
         if self._on_closed is not None:
             self._on_closed(self)
-        # 写泵自杀守卫：_write_loop 写失败走到这里时 current_task 就是写泵
-        # 自身——cancel 自己会让 CancelledError 打断后续的 transport 收尸
+        # 4. 排水：等在飞任务收尾真正收完
+        await self.tasks.wait()
+        # 5. 收资源：写泵自杀守卫——_write_loop 写失败走到这里时
+        #    current_task 就是写泵自身，cancel 自己会让 CancelledError
+        #    打断后续的 transport 收尸
         if self._writer_task is not None:
             if self._writer_task is not asyncio.current_task():
                 self._writer_task.cancel()

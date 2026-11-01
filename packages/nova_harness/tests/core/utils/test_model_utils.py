@@ -13,12 +13,7 @@ from nova_harness.core.utils.model_utils import (
     models_are_equal,
     to_thinking_level,
 )
-from nova_protocol import (
-    Model,
-    ModelCost,
-    ModelThinkingLevel,
-    ThinkingLevel,
-)
+from nova_protocol import Model, ModelCost, ModelThinkingLevel, ThinkingLevel
 
 
 def _model(

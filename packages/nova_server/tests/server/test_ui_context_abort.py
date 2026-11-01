@@ -9,11 +9,7 @@ import asyncio
 import time
 
 import pytest
-from nova_server.connection import (
-    Connection,
-    ConnectionOrigin,
-    ConnectionRegistry,
-)
+from nova_server.connection import Connection, ConnectionOrigin, ConnectionRegistry
 from nova_server.transport import MemoryTransport
 from nova_server.ui_context import RoutingUIContext
 

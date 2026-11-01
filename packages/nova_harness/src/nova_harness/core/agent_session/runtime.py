@@ -37,6 +37,7 @@ from nova_harness.types.session.options import (
     ForkOptions,
     NewSessionOptions,
     SwitchSessionOptions,
+    WithSessionHook,
 )
 from nova_protocol import UserMessage
 
@@ -173,7 +174,7 @@ class AgentSessionRuntime:
     async def _finish_session_replacement(
         self,
         reason: str,
-        with_session: Optional[Callable[[Any], Awaitable[None]]] = None,
+        with_session: Optional[WithSessionHook] = None,
     ) -> None:
         if self._rebind_session is not None:
             await self._rebind_session(self._session)

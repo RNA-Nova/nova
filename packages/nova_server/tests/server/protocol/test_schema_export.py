@@ -36,8 +36,9 @@ def test_envelope_covers_bus2_events():
         variant["properties"]["type"]["const"]
         for variant in schema["novaEvent"]["oneOf"]
     }
-    # Bus 2 当前 25 个域事件 type（与 AgentSessionEvent union 一一对应——
-    # user_tool 事件组已消亡：用户工具进度归 item 发射通道）
+    # Bus 2 当前 26 个域事件 type（与 AgentSessionEvent union 一一对应——
+    # user_tool 事件组已消亡：用户工具进度归 item 发射通道；warning =
+    # 诊断家族流模式成员，经会话桥接上线）
     # + 3 个 item 通知（纯线上词汇，reducer 产物，手动并入信封）
     expected = {
         "agent_start",
@@ -66,6 +67,7 @@ def test_envelope_covers_bus2_events():
         "compaction_end",
         "entry_appended",
         "cache_miss",
+        "warning",
         "item_started",
         "item_delta",
         "item_completed",

@@ -23,10 +23,7 @@ from nova_harness.types.resources.tools import (
     ToolDefinition,
     ToolExecContext,
 )
-from nova_protocol import (
-    AgentToolResult,
-    TextContent,
-)
+from nova_protocol import AgentToolResult, TextContent
 
 _EXECUTOR = """
 class Tool:

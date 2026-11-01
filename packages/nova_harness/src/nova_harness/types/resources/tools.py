@@ -5,12 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol
 
-from nova_agent import ToolExecutionMode
+from nova_agent import AgentToolCall, ToolExecutionMode
 from nova_harness.types.extensions.source import SourceInfo
 from nova_harness.types.ui.context import UIContext
 from nova_harness.types.ui.noop import NoOpUIContext
-from nova_protocol import Model
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import AgentToolResult, Model, NovaBaseModel
 
 if TYPE_CHECKING:
     # 仅类型检查视角（运行期不导入——agents.py 反向 import 本模块的 ToolInfo，
@@ -138,8 +137,8 @@ class ToolDefinition:
     # 按名渲染）；本字段面向将来的文本渲染面（print/headless 模式的逐工具
     # 定制）。当前无消费者，loader 不读这两个类属性——落地时再接线，
     # 勿提前消费。
-    render_call: Optional[Callable[[Any], Optional[str]]] = None
-    render_result: Optional[Callable[[Any], Optional[str]]] = None
+    render_call: Optional[Callable[[AgentToolCall], Optional[str]]] = None
+    render_result: Optional[Callable[[AgentToolResult[Any]], Optional[str]]] = None
 
     # 系统提示词元数据
     prompt_snippet: Optional[str] = None

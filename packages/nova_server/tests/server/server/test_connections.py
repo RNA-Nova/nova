@@ -297,3 +297,53 @@ async def test_loop_lag_probe_fires_on_blocked_loop(methods, capfd):
 
     err = capfd.readouterr().err
     assert "event-loop lag" in err
+
+
+@pytest.mark.asyncio
+async def test_deprecated_method_emits_notice_before_response(methods):
+    """弃用纪律：deprecated 方法先发 system/deprecationNotice 再响应
+    （codex 同款——迁移窗口内客户端可见）。"""
+    methods.register(
+        "old_method", lambda params: {"ok": True}, deprecated="请改用 new_method"
+    )
+    server = RpcServer(methods, ServerState())
+    run_task = asyncio.create_task(server.run())
+    try:
+        await asyncio.sleep(0)
+        _, client_t = await _connect(server)
+        await _initialize(client_t)
+        await client_t.write(
+            {"jsonrpc": "2.0", "id": 1, "method": "old_method", "params": {}}
+        )
+        notice = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        assert notice.get("method") == "system/deprecationNotice"
+        assert notice["params"]["method"] == "old_method"
+        assert notice["params"]["details"] == "请改用 new_method"
+        resp = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        assert resp["id"] == 1
+        assert resp["result"] == {"ok": True}
+    finally:
+        server.shutdown()
+        await asyncio.wait_for(run_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_non_deprecated_method_no_notice(methods):
+    """未弃用方法不掺通知——首个帧即响应。"""
+    server = RpcServer(methods, ServerState())
+    run_task = asyncio.create_task(server.run())
+    try:
+        await asyncio.sleep(0)
+        _, client_t = await _connect(server)
+        await _initialize(client_t)
+        await client_t.write(
+            {"jsonrpc": "2.0", "id": 1, "method": "echo", "params": {}}
+        )
+        first = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        assert first.get("id") == 1  # 是响应不是通知
+        assert (
+            "method" not in first or first.get("method") != "system/deprecationNotice"
+        )
+    finally:
+        server.shutdown()
+        await asyncio.wait_for(run_task, timeout=1.0)

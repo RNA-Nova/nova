@@ -7,7 +7,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from nova_server.protocol.serialize import serialize_event
 
 

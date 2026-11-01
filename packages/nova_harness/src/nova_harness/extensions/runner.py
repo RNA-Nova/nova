@@ -1109,6 +1109,7 @@ class ExtensionRunner:
     # 错误处理
     # -------------------------------------------------------------------------
 
+    # 事件/错误负载为开放集（扩展可注册自定义类型）——Any 为有意开放（规则 11 Ⅳ 型豁免）
     def on_error(self, listener: Callable[[Any], None]) -> Callable[[], None]:
         self._error_listeners.append(listener)
 

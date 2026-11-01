@@ -298,7 +298,15 @@
               {
                 "$ref": "#/$defs/ToolCall"
               }
-            ]
+            ],
+            "discriminator": {
+              "mapping": {
+                "text": "#/$defs/TextContent",
+                "thinking": "#/$defs/ThinkingContent",
+                "toolCall": "#/$defs/ToolCall"
+              },
+              "propertyName": "type"
+            }
           },
           "type": "array"
         },
@@ -329,6 +337,33 @@
           "anyOf": [
             {
               "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorKind": {
+          "anyOf": [
+            {
+              "enum": [
+                "httpConnectionFailed",
+                "streamDisconnected",
+                "requestTimeout",
+                "overloaded",
+                "rateLimited",
+                "upstreamError",
+                "unauthorized",
+                "loginRequired",
+                "usageLimitExceeded",
+                "badRequest",
+                "contextOverflow",
+                "modelNotFound",
+                "sandboxDenied",
+                "executorUnavailable",
+                "internal"
+              ],
+              "type": "string"
             },
             {
               "type": "null"
@@ -418,6 +453,16 @@
             }
           ]
         },
+        "retryAfterMs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "role": {
           "enum": [
             "assistant"
@@ -454,6 +499,8 @@
         "endTurn",
         "deferred",
         "errorMessage",
+        "errorKind",
+        "retryAfterMs",
         "responseId",
         "responseModel",
         "diagnostics",
@@ -1624,7 +1671,14 @@
                   {
                     "$ref": "#/$defs/ImageContent"
                   }
-                ]
+                ],
+                "discriminator": {
+                  "mapping": {
+                    "image": "#/$defs/ImageContent",
+                    "text": "#/$defs/TextContent"
+                  },
+                  "propertyName": "type"
+                }
               },
               "type": "array"
             }
@@ -1682,7 +1736,14 @@
                   {
                     "$ref": "#/$defs/ImageContent"
                   }
-                ]
+                ],
+                "discriminator": {
+                  "mapping": {
+                    "image": "#/$defs/ImageContent",
+                    "text": "#/$defs/TextContent"
+                  },
+                  "propertyName": "type"
+                }
               },
               "type": "array"
             }
@@ -2804,7 +2865,15 @@
         {
           "$ref": "#/$defs/ToolResultMessage"
         }
-      ]
+      ],
+      "discriminator": {
+        "mapping": {
+          "assistant": "#/$defs/AssistantMessage",
+          "toolResult": "#/$defs/ToolResultMessage",
+          "user": "#/$defs/UserMessage"
+        },
+        "propertyName": "role"
+      }
     },
     "MessageEndEvent": {
       "additionalProperties": false,
@@ -2887,7 +2956,24 @@
             {
               "$ref": "#/$defs/ErrorEvent"
             }
-          ]
+          ],
+          "discriminator": {
+            "mapping": {
+              "done": "#/$defs/DoneEvent",
+              "error": "#/$defs/ErrorEvent",
+              "start": "#/$defs/StartEvent",
+              "text_delta": "#/$defs/TextDeltaEvent",
+              "text_end": "#/$defs/TextEndEvent",
+              "text_start": "#/$defs/TextStartEvent",
+              "thinking_delta": "#/$defs/ThinkingDeltaEvent",
+              "thinking_end": "#/$defs/ThinkingEndEvent",
+              "thinking_start": "#/$defs/ThinkingStartEvent",
+              "toolcall_delta": "#/$defs/ToolCallDeltaEvent",
+              "toolcall_end": "#/$defs/ToolCallEndEvent",
+              "toolcall_start": "#/$defs/ToolCallStartEvent"
+            },
+            "propertyName": "type"
+          }
         },
         "message": {
           "$ref": "#/$defs/AgentMessage"
@@ -5731,7 +5817,14 @@
               {
                 "$ref": "#/$defs/ImageContent"
               }
-            ]
+            ],
+            "discriminator": {
+              "mapping": {
+                "image": "#/$defs/ImageContent",
+                "text": "#/$defs/TextContent"
+              },
+              "propertyName": "type"
+            }
           },
           "type": "array"
         },
@@ -5930,7 +6023,14 @@
                   {
                     "$ref": "#/$defs/ImageContent"
                   }
-                ]
+                ],
+                "discriminator": {
+                  "mapping": {
+                    "image": "#/$defs/ImageContent",
+                    "text": "#/$defs/TextContent"
+                  },
+                  "propertyName": "type"
+                }
               },
               "type": "array"
             }
@@ -5966,7 +6066,14 @@
               {
                 "$ref": "#/$defs/ImageContent"
               }
-            ]
+            ],
+            "discriminator": {
+              "mapping": {
+                "image": "#/$defs/ImageContent",
+                "text": "#/$defs/TextContent"
+              },
+              "propertyName": "type"
+            }
           },
           "type": "array"
         },
@@ -6020,6 +6127,36 @@
         "content"
       ],
       "title": "UserMessageItem",
+      "type": "object"
+    },
+    "WarningEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "general",
+            "config",
+            "capability",
+            "deprecation"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "warning"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "kind",
+        "message"
+      ],
+      "title": "WarningEvent",
       "type": "object"
     }
   },
@@ -7018,6 +7155,37 @@
         "additionalProperties": false,
         "properties": {
           "data": {
+            "$ref": "#/$defs/WarningEvent"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "const": "warning"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "seq",
+          "ts",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
             "$ref": "#/$defs/AgentSettledEvent"
           },
           "seq": {
@@ -7631,6 +7799,20 @@
     ]
   },
   "sessionEntry": {
+    "discriminator": {
+      "mapping": {
+        "branch_summary": "#/$defs/BranchSummaryEntry",
+        "compaction": "#/$defs/CompactionEntry",
+        "custom": "#/$defs/CustomEntry",
+        "custom_message": "#/$defs/CustomMessageEntry",
+        "label": "#/$defs/LabelEntry",
+        "message": "#/$defs/SessionMessageEntry",
+        "model_change": "#/$defs/ModelChangeEntry",
+        "session_info": "#/$defs/SessionInfoEntry",
+        "thinking_level_change": "#/$defs/ThinkingLevelChangeEntry"
+      },
+      "propertyName": "type"
+    },
     "oneOf": [
       {
         "$ref": "#/$defs/SessionMessageEntry"

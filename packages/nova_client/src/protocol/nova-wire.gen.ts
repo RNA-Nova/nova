@@ -77,6 +77,8 @@ export interface AssistantMessage {
   endTurn: boolean | null;
   deferred: boolean | null;
   errorMessage: string | null;
+  errorKind: "httpConnectionFailed" | "streamDisconnected" | "requestTimeout" | "overloaded" | "rateLimited" | "upstreamError" | "unauthorized" | "loginRequired" | "usageLimitExceeded" | "badRequest" | "contextOverflow" | "modelNotFound" | "sandboxDenied" | "executorUnavailable" | "internal" | null;
+  retryAfterMs: number | null;
   responseId: string | null;
   responseModel: string | null;
   diagnostics: Record<string, unknown>[] | null;
@@ -1212,6 +1214,12 @@ export interface UserMessageItem {
   content: (TextContent | ImageContent)[];
 }
 
+export interface WarningEvent {
+  type: "warning";
+  kind: "general" | "config" | "capability" | "deprecation";
+  message: string;
+}
+
 // ---- Union 别名 ----
 
 export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomAgentMessage;
@@ -1231,6 +1239,7 @@ export type NovaEventEnvelope =
   | { type: "tool_execution_start"; data: ToolExecutionStartEvent; seq: number; ts: number; sessionId: string | null }
   | { type: "tool_execution_update"; data: ToolExecutionUpdateEvent; seq: number; ts: number; sessionId: string | null }
   | { type: "tool_execution_end"; data: ToolExecutionEndEvent; seq: number; ts: number; sessionId: string | null }
+  | { type: "warning"; data: WarningEvent; seq: number; ts: number; sessionId: string | null }
   | { type: "agent_settled"; data: AgentSettledEvent; seq: number; ts: number; sessionId: string | null }
   | { type: "auto_compaction_start"; data: AutoCompactionStartEvent; seq: number; ts: number; sessionId: string | null }
   | { type: "auto_compaction_end"; data: AutoCompactionEndEvent; seq: number; ts: number; sessionId: string | null }

@@ -9,6 +9,7 @@ from nova_harness.resources.loaders.skills import load_skills
 from nova_harness.types.package import PathMetadata, SourceOrigin, SourceScope
 from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.types.resources.prompts import ResolvedResource
+
 from tests._helpers.settings_manager import settings_manager_in_memory
 
 

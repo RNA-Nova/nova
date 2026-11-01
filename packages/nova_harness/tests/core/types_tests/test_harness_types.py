@@ -6,10 +6,7 @@
 
 import pytest
 from nova_harness.types.compaction.compaction import CompactionSettings
-from nova_harness.types.config.settings import (
-    RetrySettings,
-    Settings,
-)
+from nova_harness.types.config.settings import RetrySettings, Settings
 from nova_harness.types.messages import (
     BranchSummaryMessage,
     CompactionSummaryMessage,

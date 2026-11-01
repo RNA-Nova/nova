@@ -23,6 +23,7 @@ from nova_harness.config.resolve import (
     resolve_headers,
     resolve_headers_or_throw,
 )
+
 from tests._helpers.resolve import clear_command_cache
 
 

@@ -6,9 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import pytest
 from nova_harness.types.resources.user_tools import UserToolInfo
-from nova_protocol import (
-    CustomAgentMessage,
-)
+from nova_protocol import CustomAgentMessage
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import user_tools as st_methods
 from nova_server.protocol.methods.state import ServerState

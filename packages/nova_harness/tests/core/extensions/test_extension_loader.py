@@ -76,9 +76,7 @@ async def test_extension_registers_message_types(tmp_path: Path) -> None:
         clear_session_message_types,
         get_session_message_type,
     )
-    from nova_protocol import (
-        CustomAgentMessage,
-    )
+    from nova_protocol import CustomAgentMessage
 
     ext = tmp_path / "extension.py"
     ext.write_text(

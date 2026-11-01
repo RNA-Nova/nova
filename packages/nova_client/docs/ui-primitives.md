@@ -39,13 +39,13 @@ class UIContext(Protocol):
 - **Python 糖库**：`select(ui, title, options)` 等便捷函数（包装
   `ui.request`，类型化返回值）——扩展作者 import 自 bundle；
 - **第三方富原语的前端渲染器**：自定义原语（`ext:` 前缀）的 TS 组件在包
-  `ui/` 段（M4 `dialog:*` slot 注册，挂账中——见 §6）。
+  `frontend/tui/dialogs/` 段（✅ `dialog:*` slot 已建成——question/tools/
+  interactive-shell/adjudication 四件首发）。
 
 > **form 的落地决策**：`form`（多字段表单）作为**第五件原生原语**落地
-> （TUI 原生组件 `components/dialogs/form.ts`），而非走包 `ui/` 段——
-> `dialog:*` slot 尚未落地，而 form 是足够通用的结构化输入原子
-> （与四件套同级的体验一致性收益大于包化灵活性）。`dialog:*` slot 落地后
-> 服务于第三方自定义原语，form 不迁回。
+> （TUI 原生组件 `components/dialogs/form.ts`），而非走包 `frontend/tui/dialogs/`
+> 段——form 是足够通用的结构化输入原子（与四件套同级的体验一致性收益大于
+> 包化灵活性）。`dialog:*` slot 已建成，服务于第三方自定义原语，form 不迁回。
 
 第三方包可定义自定义原语（建议 `ext:` 前缀命名空间防碰撞），经同一泛型
 `ui/request` 通道，**harness 零改动**。
@@ -54,8 +54,9 @@ class UIContext(Protocol):
 
 - 基线五件套的对话框**原生实现**（select/confirm/input/notify + form——
   任何像样前端的本职）；
-- 第三方包原语经 `dialog:*` slot 渲染（挂账）；
-- **能力自动宣告**：capabilities = 原生基线 + 已加载包原语（M1/M4 落地）。
+- 第三方包原语经 `dialog:*` slot 渲染（✅ 已建成）；
+- **能力自动宣告**：capabilities = 原生基线 + 已加载包原语（✅ 已落地——
+  包侧 dialog 注册即触发 system/capabilities 重宣告）。
 
 ## 2. 为什么这样分（判据与依赖方向）
 
@@ -73,8 +74,9 @@ class UIContext(Protocol):
 - **`UIResponse`**：`{ value: Any, cancelled: bool, confirmed?: bool }`——
   `value` 承载任意负载（select→str、confirm→bool、form→答案集），解释权归
   method 定义者；`cancelled` 统一"取消/不支持/超时"语义；
-- **超时**：传输层全局 300s 兜底；per-request 超时走 params 约定字段
-  `timeout_ms`（前端对话框自解释，倒计时呈现归前端）；
+- **超时**：无全局兜底（永等对齐 pi/codex——2026-09 删除 300s 默认值）；
+  per-request 超时走 params 约定字段 `timeout_ms`（业务语义，**到点必须
+  撤框**，倒计时呈现归前端）；
 - **取消**：调用方外部竞速（`request` 与调用方 signal 竞速，如
   `UIAuthInteraction`）；**abort 胜出后须撤销前端对话框**——协议补
   `ui/cancel {id}` 帧（M1 落地，pi `dialog.signal` 的对位物）；
@@ -88,7 +90,7 @@ harness 自身的流程改用泛型接口：
 - `UIAuthInteraction`（OAuth 登录交互）：`ui.request("select", ...)` /
   `ui.request("input", ...)` + cancelled → `LoginCancelledError`；
 - project trust 询问：`ui.request("confirm", ...)`；
-- 扩展（permission_gate / session_commands）：import bundle 糖库。
+- 扩展（adjudication / session_commands）：import bundle 糖库。
 
 ## 5. 联动与工具 UI 的定位（定案）
 
@@ -96,13 +98,14 @@ harness 自身的流程改用泛型接口：
   details 平铺；接头靠命名契约，前后端扩展永不相调；
 - **工具 UI 定位（v3.1 后期判决）**：工具永远 Python 侧执行（反向工具
   通道已取消——Node 不执行后端能力）。交互式工具（执行中询问用户）经
-  **反向原语**（`ui.request`：select/confirm/input）——permission_gate
+  **反向原语**（`ui.request`：select/confirm/input）——adjudication
   已验证该链路；执行前询问归扩展钩子（tool_call + ui），执行中澄清
   归对话回合。Python 工具保持"参数进、结果出 + 可询问"的执行器形态。
 
 ## 6. 里程碑挂账
 
-- **M1**：基线四件套前端对话框；`ui/cancel` 撤销帧；断线 pending 收尾；
-- **M1/M4**：`dialog:*` slot + 能力自动宣告；
+- ~~**M1**~~：基线四件套前端对话框；`ui/cancel` 撤销帧；断线 pending 收尾（✅）；
+- ~~**M1/M4**~~：`dialog:*` slot + 能力自动宣告（✅ 已建成——question/tools/
+  interactive-shell/adjudication 四件首发，注册即触发 capabilities 重宣告）；
 - **M4**：逃生舱、`entry:*` 渲染器发现约定；
 - **后 M1**：官方原语包落地 `form`（声明式富对话框）。

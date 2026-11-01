@@ -64,6 +64,11 @@ def get_http_idle_timeout_ms(settings_manager) -> int:
     1. ``NOVA_HTTP_IDLE_TIMEOUT_MS`` environment variable if set and valid.
     2. ``SettingsManager.get_http_idle_timeout_ms()`` otherwise.
     3. ``DEFAULT_HTTP_IDLE_TIMEOUT_MS`` as fallback.
+
+    返回值的消费语义（``nova_ai.stream_options.StreamOptions.timeout`` 的
+    上游来源）：``0``（disabled）= 显式关闭 read 相与 SSE idle 看门狗——
+    connect/pool 相的引擎上限（``nova_ai.api_impls._shared.timeouts``
+    的 ``CONNECT_TIMEOUT_S``）不受影响，不在本层翻译。
     """
     env_value = os.environ.get("NOVA_HTTP_IDLE_TIMEOUT_MS")
     if env_value is not None:
@@ -77,28 +82,10 @@ def get_http_idle_timeout_ms(settings_manager) -> int:
         return DEFAULT_HTTP_IDLE_TIMEOUT_MS
 
 
-# 用户禁用空闲超时时传给 HTTP 客户端的最大超时值（约 24.8 天）。
-MAX_HTTP_IDLE_TIMEOUT_MS = 2_147_483_647
-
-
-def get_http_idle_timeout_seconds(settings_manager) -> float:
-    """Return the effective HTTP idle timeout in seconds for HTTP clients.
-
-    A setting of ``0`` (disabled) is converted to a very large value so the
-    client effectively never times out.
-    """
-    timeout_ms = get_http_idle_timeout_ms(settings_manager)
-    if timeout_ms == 0:
-        return MAX_HTTP_IDLE_TIMEOUT_MS / 1000
-    return timeout_ms / 1000
-
-
 __all__ = [
     "DEFAULT_HTTP_IDLE_TIMEOUT_MS",
     "HTTP_IDLE_TIMEOUT_CHOICES",
-    "MAX_HTTP_IDLE_TIMEOUT_MS",
     "parse_http_idle_timeout_ms",
     "format_http_idle_timeout_ms",
     "get_http_idle_timeout_ms",
-    "get_http_idle_timeout_seconds",
 ]

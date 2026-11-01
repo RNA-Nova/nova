@@ -7,11 +7,13 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, get_type_hints
 
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.jsonrpc import JsonRpcMessage, build_error, build_response
 from pydantic import BaseModel, RootModel, ValidationError
 
+# 注册表的擦除存储型（注册时从 handler 真实签名推导精确形状——规则 9）；
+# Dict[str, Any] 为自由负载语义（规则 11 款 3）
 Handler = Callable[[Dict[str, Any]], Any | Awaitable[Any]]
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,8 @@ class MethodRegistry:
     def __init__(self) -> None:
         self._handlers: Dict[str, Handler] = {}
         self._shapes: Dict[str, MethodShape] = {}
+        # 弃用注册表（方法名 → 迁移指引）——分派时先发 deprecationNotice
+        self._deprecated: Dict[str, str] = {}
 
     def register(
         self,
@@ -67,12 +71,17 @@ class MethodRegistry:
         domain: Optional[str] = None,
         params_model: Optional[Type[BaseModel]] = None,
         result_model: Optional[Type[BaseModel]] = None,
+        deprecated: Optional[str] = None,
     ) -> None:
         """注册一个方法处理器（建议同时声明形状——校验/导出/能力位共用）。
 
         形状优先从 handler 签名注解推导（``params: XxxParams ->
         XxxResult``——签名即声明，注册处零重复）；显式参数仅作推导失败
         时的兜底/覆盖（自由负载方法注解为 Dict 时经显式声明补形状）。
+
+        ``deprecated``：迁移指引文案（非 None 即该方法已弃用）——分派时
+        由服务器先发 ``system/deprecationNotice`` 再响应（codex 同款纪律；
+        schema 导出的 @deprecated 标注归后续）。
         """
         inferred_params, inferred_result = _infer_handler_shapes(handler)
         self._handlers[method] = handler
@@ -82,18 +91,25 @@ class MethodRegistry:
                 params_model=params_model or inferred_params,
                 result_model=result_model or inferred_result,
             )
+        if deprecated is not None:
+            self._deprecated[method] = deprecated
 
     def register_many(self, methods: Dict[str, Handler]) -> None:
         """批量注册方法处理器。"""
         self._handlers.update(methods)
 
     def unregister(self, method: str) -> None:
-        """注销方法处理器（连同形状一并移除）。"""
+        """注销方法处理器（连同形状与弃用标记一并移除）。"""
         self._handlers.pop(method, None)
         self._shapes.pop(method, None)
+        self._deprecated.pop(method, None)
 
     def has(self, method: str) -> bool:
         return method in self._handlers
+
+    def deprecated_note(self, method: str) -> Optional[str]:
+        """方法的弃用迁移指引（None = 未弃用）。"""
+        return self._deprecated.get(method)
 
     def method_names(self) -> List[str]:
         """全部已注册方法名（能力位宣告的数据源）。"""

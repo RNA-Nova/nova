@@ -2,7 +2,7 @@
 
 from typing import Callable, Literal, Optional
 
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 
 
 class ProgressEvent(NovaBaseModel):

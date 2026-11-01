@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, List, Literal, Optional
+from typing import Awaitable, Callable, List, Literal, Optional
 
-from nova_protocol import ImageContent
-from nova_protocol.base_model import NovaBaseModel
+from nova_harness.types.extensions.context import ExtensionCommandContext
+from nova_harness.types.project_trust import ProjectTrustContext
+from nova_harness.types.protocols import SessionManagerProtocol
+from nova_protocol import ImageContent, NovaBaseModel
+
+SessionSetupHook = Callable[[SessionManagerProtocol], Awaitable[None]]
+"""新会话装配钩子（收到会话的 SessionManager——落盘/预填充用；规则 11 命名别名）。"""
+
+WithSessionHook = Callable[[ExtensionCommandContext], Awaitable[None]]
+"""会话替换完成钩子（收到带 send_message/send_user_message 的 ExtensionCommandContext）。"""
 
 
 @dataclass
@@ -25,8 +33,8 @@ class NewSessionOptions:
     """新建会话的选项。"""
 
     parent_session: Optional[str] = None
-    setup: Optional[Callable[[Any], Awaitable[None]]] = None
-    with_session: Optional[Callable[[Any], Awaitable[None]]] = None
+    setup: Optional[SessionSetupHook] = None
+    with_session: Optional[WithSessionHook] = None
 
 
 @dataclass
@@ -34,8 +42,8 @@ class SwitchSessionOptions:
     """切换会话的选项。"""
 
     cwd_override: Optional[str] = None
-    with_session: Optional[Callable[[Any], Awaitable[None]]] = None
-    project_trust_context_factory: Optional[Callable[[str], Any]] = None
+    with_session: Optional[WithSessionHook] = None
+    project_trust_context_factory: Optional[Callable[[str], ProjectTrustContext]] = None
 
 
 @dataclass
@@ -43,7 +51,7 @@ class ForkOptions:
     """Fork 会话的选项。"""
 
     position: Literal["before", "at"] = "before"
-    with_session: Optional[Callable[[Any], Awaitable[None]]] = None
+    with_session: Optional[WithSessionHook] = None
 
 
 class NavigateOptions(NovaBaseModel):

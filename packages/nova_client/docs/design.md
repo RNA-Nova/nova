@@ -52,7 +52,7 @@ pi 的 coding-agent 能力全集的二分（不变）：
         presentation（呈现）◄─────┘   │   │   │            │        │
         slot 注册表 + 声明式块          │   │   ▼            ▼        ▼
               │                       │  packages（包）    settings（配置/数据）
-              │                       │  索引/资产/生命周期  ui-settings/state
+              │                       │  索引/资产/生命周期  settings/state
               └──► 渲染模型（供 hosts）◄┘
 ```
 
@@ -92,10 +92,12 @@ pi 的 coding-agent 能力全集的二分（不变）：
 wire/
 ├── client.ts           spawn/关停（command: string[]，后端可换语言）；
 │                       请求-响应配对 / 并发分派 / 写锁 / stderr 直通
-├── protocol.gen.ts     契约生成类型（Python 构建期导出，漂移测试保鲜）
 ├── capabilities.ts     契约版本（major/minor，✅ R6 已修：major 不等硬拒、
 │                       minor 差放行）+ 能力位模型（domains/methods 驱动前端降级）
 └── bridge.ts           反向通道路由：ui/request ↔ ui/response（原语）
+
+契约生成类型不住 wire/——`src/protocol/nova-wire.gen.ts`（Python 构建期导出
+`protocol/nova-wire.schema.json`，漂移测试保鲜），全层基于生成类型编程。
 ```
 
 纪律：wire 不懂呈现、不懂会话语义——帧进来翻译为 bus 事件，命令从门面转发。
@@ -119,7 +121,7 @@ wire/
   覆盖规则（后注册覆盖同键，记录来源用于诊断）；
 - **通用回退是 slot 的空态**（无生产者时的 args+文本+状态色），不是"内建渲染器"；
 - 内建渲染器（官方 bundle 的 bash/edit 等）与第三方**走同一 register 调用**——
-  它们只是 `ui/renderers/` 加载器注册的普通生产者。
+  它们只是 `frontend/tui/tools/` 加载器注册的普通生产者。
 
 ### 4.2 声明式块词汇（开放集）
 
@@ -227,7 +229,7 @@ setStatus（footer 扩展状态行）+ onTerminalInput + toolsExpanded 读写 +
 
 - 分工终版：Node = 呈现推导 + 前端本地行为；工具执行 = Python（唯一实现）；
 - 交互式工具（执行中询问用户）的出路：Python 工具经**反向原语**
-  （`ui/request`：select/confirm/input）——permission_gate 已验证该链路，
+  （`ui/request`：select/confirm/input）——adjudication 已验证该链路，
   无需 Node 执行即可齐平 pi 的交互式工具；
 - 牺牲的远期场景：M3 远程后"必须在前端机器执行的工具"（操作浏览器/编辑器
   环境）——真有需求再议，现在不背。
@@ -242,8 +244,8 @@ pi 在这件事上只有 flags + `appendEntry` + 自写文件——本层把它�
 
 ```
 settings/
-└── store.ts        UISettings（设置键注册表 + ui-settings.json 原子写 +
-                    变更回调）+ UIStateStore（ui-state/<扩展>.json 每扩展
+└── store.ts        UISettings（设置键注册表 + settings.json 原子写 +
+                    变更回调）+ UIStateStore（state/<扩展>.json 每扩展
                     一个文件，原子写）——registry/watch 内聚其中
 ```
 
@@ -251,7 +253,7 @@ settings/
 
 - 扩展经 `api.settings.define("myext.interval", { type: "number", default: 30, description: "…" })`
   声明设置键（schema 在代码里，与"工具即代码"同一纪律）；
-- **存储归 Node 层**（`~/.nova/agent/ui-settings.json`）：后端 settings 不背——
+- **存储归 Node 层**（`~/.nova/agent/frontend/tui/settings.json`）：后端 settings 不背——
   它的 schema 有未知键拒绝，且这是前端域；两个文件主权分明（后端管运行时，
   Node 管 UI/扩展）；
 - 读写：`api.settings.get(...)`（自动并入默认值与类型）；用户面经设置面板
@@ -281,34 +283,40 @@ packages/
 └── updates.ts      pkgCheckUpdates 结果缓存（启动更新提醒与包面板角标的数据源）
 ```
 
-**复合包全规格**（一个包能贡献的一切）：
+**复合包全规格**（一个包能贡献的一切——两段式终稿，与 §6.2 同构）：
 
 ```
-my-package/
-├── pyproject.toml [tool.nova]    → Python 身份 + pip 依赖 + 能力 6 类目：
+my-package/（A 型：pyproject 身份证）
+├── pyproject.toml [tool.nova]    → Python 身份 + pip 依赖 + 能力 7 类目：
 │                                    agents / tools / skills / extensions /
-│                                    prompts / user_tools
-├── package.json                  → 【根】npm 清单（dependencies；devDependencies 不装；
-│                                    仅 TS 侧有第三方依赖时才需要；version 被忽略——
-│                                    版本权威在 pyproject）
-├── package-lock.json             → 【根】锁版本（有则 npm ci，无则 npm install）
-├── node_modules/                 → 【根】npm 安装产物（每包自含，天然隔离；不入库）
-├── tsconfig.json                 → 【根】TS 开发配置（dev-only）
-├── src/<pkg>/                    → Python 共享 helper（有 build-system 时自安装）
-├── agents/ tools/ skills/ extensions/ prompts/ user_tools/
-└── ui/（约定段，纯源码与资产）    → TS 资产：
-    ├── index.ts                  → 扩展入口（工厂，全量 API：slot/region/命令/
-    │                               快捷键/settings/state/通知）
-    ├── renderers/<tool>.ts       → 纯函数渲染器（轻量入口，仅渲染；文件名 = 工具名）
-    ├── lib/                      → TS 共享代码（渲染器/扩展共用）
-    ├── components/               → 逃生舱组件（被 index.ts import）
-    └── themes/*.json             → 主题资产
+│                                    prompts / user_tools / personas
+├── backend/                      → Python 半区（能力资源 + 共享 helper 包）
+├── agents/                       → 组合层（角色选配 yaml，与两半区平级）
+└── frontend/                     → TS 半区（自含子包，按宿主分段）
+    ├── package.json              → npm 清单（dependencies；devDependencies 不装；
+    │                                version 被忽略——版本权威在 pyproject）
+    ├── package-lock.json         → 锁版本（有则 npm ci，无则 npm install）
+    ├── node_modules/             → npm 安装产物（每包自含，天然隔离；不入库）
+    ├── tsconfig.json             → TS 开发配置（dev-only）
+    └── tui/                      → 按宿主分段（M3 增 web/），镜像后端资源
+        ├── index.ts              → 扩展入口（工厂，全量 API：slot/region/命令/
+        │                           快捷键/settings/state/通知）
+        ├── tools/<tool>.ts       → 工具渲染器（文件名即工具名；
+        │                           NovaBlock[] | Component 双形态）
+        ├── user_tools/           → 用户工具渲染器
+        ├── extensions/           → 前端扩展编排/组件（镜像后端扩展归属）
+        ├── dialogs/<name>.ts     → 包自定义对话框（dialog:* slot）
+        ├── lib/                  → TS 共享代码（渲染器/扩展共用）
+        └── themes/*.json         → 主题资产
+
+B 型纯 TS 包：package.json 身份证（顶层 "nova" 段），无 pyproject——
+包根即前端半区（渲染器归 tui/tools/<tool>.ts、辅助件归 tui/lib/）。
 ```
 
-- **package.json 永远在包根**（A/B 型一条规则；JupyterLab 扩展同款 polyglot 形态）；
-  ui/ 是纯源码与资产目录（零清单零产物）；
+- **A 型 package.json 在 `frontend/` 下**（B 型在包根——一条规则：npm 清单住
+  前端半区根）；`tui/` 宿主段是纯源码与资产目录（零清单零产物）；
 - settings 键 / 块类型 / 部件 / 命令 / 快捷键 / 工具**全部在代码里声明**，
-  `ui/` 下不加任何元数据文件（与"工具即代码"同一纪律）；
+  `frontend/` 下不加任何元数据文件（与"工具即代码"同一纪律）；
 - 一次安装、一个版本号、一个 trust 决策（nova-pkg 统一物理生命周期）。
 
 ### 8.1 复合依赖编排（pip + npm 两个生态系统）
@@ -325,9 +333,11 @@ npm 是第四个被编排的。每个生态系统用自己的 manifest（`pyproj
 ② pip/uv 依赖（pyproject）
 ③ 自安装（--no-deps 装工具包本体）
 ④ 二进制依赖
-⑤ npm 阶段：包根 package.json 存在 → npm ci --omit=dev（有 lock）
-     或 npm install --omit=dev（无 lock）；
-     copy 模式在安装副本根执行，editable 模式在源目录根执行
+⑤ npm 阶段：前端半区 package.json 存在 → npm ci --omit=dev（有 lock）
+     或 npm install --omit=dev（无 lock）——探测点：A 型复合包为
+     <包根>/frontend/package.json，B 型纯 TS 包为包根 package.json
+     （不做双轨，A 型包根遗留 package.json 不触发）；
+     copy 模式在安装副本的前端半区执行，editable 模式在源目录执行
      （与 pip -e 语义一致：依赖安装、源码链接）
 ```
 
@@ -360,14 +370,14 @@ assets/
 │   ├── builtin.ts      内建主题（极少，2-3 个兜底，dogfood 同一注册通道）
 │   └── loader.ts       三源发现 + 注册 + 优先级裁决：
 │                       ① 包内（resources/discovery.ts 索引，随包分发）
-│                       ② 用户级 ~/.nova/agent/ui/themes/
-│                       ③ 项目级 <cwd>/.nova/ui/themes/
+│                       ② 用户级 ~/.nova/agent/frontend/tui/themes/
+│                       ③ 项目级 <cwd>/.nova/frontend/tui/themes/
 └── keybindings.ts      键位 JSON（②③ 同型；内置键位表在 modes/tui 前端）
 ```
 
 - **来源追踪与优先级**：`project > user > package`（同名项目级覆盖，诊断记录来源——
   对齐 Python `SourceInfo` 先例）；
-- **激活主题是设置不是资产**：`settings/ui-settings.json`（§7）记录当前主题名；
+- **激活主题是设置不是资产**：`frontend/tui/settings.json`（§7）记录当前主题名；
 - **无执行性故无 trust 门控**（颜色/键位 JSON 不跑代码；代码资产才走 trust，
   与 resources/loader 的纪律互补）；
 - **不进后端**：Python 完全不知道这些文件存在（themes 当年移出 Python 资源系统
@@ -377,7 +387,7 @@ assets/
 
 ## 10. 统一命令表
 
-前端可调的命令三源合并：**后端 RPC 方法**（61 域方法）+ **后端扩展命令**
+前端可调的命令三源合并：**后端 RPC 方法**（76 域方法）+ **后端扩展命令**
 （`getCommands` 透出，prompt 转发）+ **Node 扩展命令**（§6.2 注册）。
 palette 数据源统一，键位/slash 共享同一表——pi 的命令面在本层的对应形态。
 
@@ -515,12 +525,13 @@ RPC——官方与第三方同机制，dogfood）；四件套反向原语只承�
 3. **骨架升级（原 M2）**：~~bus 脊柱化~~（✅）+ ~~slot/presentation 层~~（✅）+
    ~~渲染器加载器（`ui/renderers/*.ts` 纯函数级，经 slot 注册——dogfood 已跑通：
    官方 bundle 与 B 型包的 bash/edit/read 渲染器真实加载并产出块）~~ +
-   薄块适配器（归 modes/tui）+ **settings/state 子系统**（§7，随 M4 扩展
-   API 一同落地——没有消费者的存储层是投机）；
+   薄块适配器（归 modes/tui）+ ~~**settings/state 子系统**~~（✅ 已建成——
+   `src/settings/store.ts`：UISettings + UIStateStore，存储归
+   `~/.nova/agent/frontend/tui/`）；
 4. **M3**：WS 宿主 + 远程信任门控；
 5. **M4（扩展 runtime 全量）**：host/loader/api 全量（§6）+ 区域逃生舱 +
-   theme 加载 + settings/state + **包面板内建扩展**——本层能力
-   对齐并超越 pi 的终点。
+   ~~theme 加载~~（✅）+ ~~settings/state~~（✅）+ ~~**包面板内建扩展**~~
+   （✅ `modes/tui/builtin/` 首发）——残余：全量 UI 扩展宿主。
    **配套（nova-pkg 侧）**：install 第 ⑤ 阶段（npm 编排，§8.1）✅ 已实现——
    包根 package.json 检测 → npm ci/install，失败解耦（`test_npm_stage.py` 锁定）。
 
@@ -552,6 +563,7 @@ mirror/presentation/packages/extensions 六子系统目录就位），未走"先
   RPC（新增，契约 MINOR 3）三重取消）；
 - ~~`/share` 无 Esc 取消加载框~~（✅ 同一 ForegroundTasks 通道——kill gist
   子进程 + 静默收尾）；
-- `dialog:*` slot（后端声明的自定义原语词汇的前端组件注册——与已落地的
+- ~~`dialog:*` slot~~（✅ 已建成——后端声明的自定义原语词汇的前端组件注册，
+  question/tools/interactive-shell/adjudication 四件首发；与已落地的
   `ctx.custom`（Node 扩展的模态宿主原语）分工：前者服务后端自定义词汇，
   后者服务 Node 扩展命令 UI；form 已原生落地）；

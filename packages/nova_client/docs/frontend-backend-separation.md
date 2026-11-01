@@ -15,7 +15,7 @@
   终端效果等）；后端方法的访问面 = `invoke`（生成的 NovaWireMethodMap 带类型、
   全量、零维护、随后端自动增长）。**不得为后端方法手写包装域**（双份维护 +
   开放幻觉——手写糖 API 曾加后撤销，教训在案）。
-- 写死位置：`packages/nova-harness/frontend/src/presentation/extension-api.ts` 注释。
+- 写死位置：`packages/nova_client/src/presentation/extension-api.ts` 注释。
 
 ## 2. 扩展能力开放（✅ 已实施）
 
@@ -150,8 +150,9 @@ notifyDesktop 内建 / registerDialog / 工具渲染器独立覆盖（pi 须连�
   project 级未信任不 stat 不 import；注册顺序即覆盖优先级
   project > user > package > builtin，碰撞诊断复用既有机制）。
 
-**配套任务（同批未做）**：`packages/nova-harness/{backend,frontend}` 伞目录归并
-（现 nova_harness → backend、现 nova-client → frontend；纯搬家变更集，独立做）。
+**配套任务（已完成并后续回收）**：`packages/nova-harness/{backend,frontend}` 伞目录归并
+曾落地（纯搬家），其后已回收拆分——Python 半区归 `packages/nova_harness`、TS 半区
+独立为 `packages/nova_client`（现行结构，见根 CHANGELOG「仓库结构重整」条目）。
 
 ## 10. 明确不做
 

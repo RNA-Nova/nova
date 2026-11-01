@@ -22,11 +22,12 @@ from nova_harness.model import ModelRuntime
 from nova_harness.package import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader, ResourceLoader
 from nova_harness.types.extensions import ExtensionFlag, LoadedExtensionsResult
+from nova_harness.types.package.progress import ProgressCallback
 from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
 from nova_harness.types.resources.tools import ToolContext
 from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
 from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
-from nova_protocol.signal import AbortController
+from nova_protocol import AbortController
 
 __all__ = ["AgentSessionServices"]
 
@@ -61,7 +62,7 @@ class AgentSessionServices:
         install_missing_packages: bool = True,
         additional_skill_paths: Optional[List[str]] = None,
         additional_prompt_template_paths: Optional[List[str]] = None,
-        on_progress: Optional[Callable[[Any], None]] = None,
+        on_progress: Optional[ProgressCallback] = None,
         project_trusted: Optional[bool] = None,
         resolve_project_trust: Optional[
             Callable[[LoadedExtensionsResult], Awaitable[bool]]

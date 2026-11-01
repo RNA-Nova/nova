@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from nova_harness.types.resources.personas import SourceInfo
 from nova_harness.types.resources.tools import ToolInfo
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from pydantic import Field
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from nova_harness.types.extensions import ExtensionFactory
+from nova_harness.types.extensions.loading import LoadedExtensionsResult
 from nova_harness.types.protocols import (
     EventBusProtocol,
     ExtensionAPIFactory,
@@ -56,9 +57,11 @@ class DefaultResourceLoaderOptions:
     install_missing_packages: bool = True
 
     # 资源覆盖回调。每个回调接收加载器准备写入内部状态的原始结果，返回修改后的结果。
-    extensions_override: Optional[Callable[[Any], Any]] = None
+    extensions_override: Optional[
+        Callable[[LoadedExtensionsResult], LoadedExtensionsResult]
+    ] = None
     skills_override: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
-    prompts_override: Optional[Callable[[Any], Any]] = None
+    prompts_override: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
     agents_override: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
     # 上下文文件覆盖回调（对齐 pi 的 agentsFilesOverride）：在 no_context_files
     # 之后应用——SDK 可以过滤、改写，也可以在禁用自动发现后注入自定义条目。

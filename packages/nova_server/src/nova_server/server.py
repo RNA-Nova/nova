@@ -23,8 +23,9 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
+from nova_async import TaskTracker
 from nova_harness.events.constants import ITEM_EMISSION
 from nova_harness.types.ui.context import UIContext
 from nova_server.connection import (
@@ -44,6 +45,7 @@ from nova_server.protocol import (
 from nova_server.protocol.serialize import serialize_event, to_json_safe
 from nova_server.reduction import SessionReducer
 from nova_server.transport.base import Transport
+from nova_server.types.notifications import ItemNotification
 from nova_server.ui_context import RoutingUIContext
 
 
@@ -78,6 +80,7 @@ class RpcServer:
         methods: MethodRegistry,
         state: Any,
         ui: Optional[UIContext] = None,
+        # on_event：自由负载（序列化后的线上原始帧 Dict——规则 11 款 3）
         on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
         *,
         lag_interval: float = 1.0,
@@ -95,7 +98,10 @@ class RpcServer:
         state.ui_context = self.ui
         self._shutdown_requested = False
         self._shutdown_event: Optional[asyncio.Event] = None
-        self._read_pumps: List[asyncio.Task] = []
+        # 服务器级派生任务台账（关停信号触发的 conn.close() 群）
+        self._tasks = TaskTracker(name="rpc-server")
+        # 读泵台账（每连接一条，stop 时落闸排水）
+        self._pumps = TaskTracker(name="rpc-read-pumps")
         self._unsubscribe_session: Optional[Callable[[], None]] = None
         self._reducer: Optional[SessionReducer] = None
         # 事件循环滞后探针（P3 观测）：周期任务测漂移——单循环的三类卡顿
@@ -146,7 +152,7 @@ class RpcServer:
         )
         self._connections.add(conn)
         conn.start_writer()
-        self._read_pumps.append(asyncio.create_task(self._read_pump(conn)))
+        self._pumps.spawn(self._read_pump(conn), name=f"read-pump:{conn.id}")
         return conn
 
     async def _read_pump(self, conn: Connection) -> None:
@@ -180,19 +186,21 @@ class RpcServer:
                         )
                     # 通知无 id 无从应答——丢弃
                     continue
-                task = asyncio.create_task(self._handle(conn, raw))
-                # 强引用登记（防 GC）；id → task 的 cancelRequest 索引
-                # 由 _handle 内部建立
-                conn.tasks.add(task)
-                task.add_done_callback(conn.tasks.discard)
+                # 台账登记即持有（完成自摘、连接关闭级联取消）；
+                # id → task 的 cancelRequest 索引由 _handle 内部建立
+                conn.tasks.spawn(
+                    self._handle(conn, raw), name=f"rpc:{raw.get('method', '?')}"
+                )
         finally:
             await conn.close()
 
     def _connection_closed(self, conn: Connection) -> None:
-        """连接关闭编排：摘表、取消在飞 handler、UI pending 收尾。"""
+        """连接关闭后的服务器侧记账：摘表、清 cancelRequest 索引、UI 收尾。
+
+        在飞任务的落闸/取消/排水由 ``Connection.close()`` 自己编排
+        （生命周期协议四段式），本回调不再碰任务。
+        """
         self._connections.remove(conn)
-        for task in list(conn.tasks):
-            task.cancel()
         conn.request_tasks.clear()
         connection_closed = getattr(self.ui, "connection_closed", None)
         if callable(connection_closed):
@@ -206,9 +214,9 @@ class RpcServer:
         if self._shutdown_event is not None:
             self._shutdown_event.set()
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()  # 探活：无运行中循环则放弃派生
             for conn in self._connections.all():
-                loop.create_task(conn.close())
+                self._tasks.spawn(conn.close(), name=f"conn-close:{conn.id}")
         except RuntimeError:
             pass
 
@@ -236,17 +244,17 @@ class RpcServer:
         await self.stop()
 
     async def stop(self) -> None:
-        """关停全部连接与读泵（幂等）。"""
+        """关停（幂等）：探针停 → 连接逐条四段式收尾 → 读泵排水 → 服务器台账排水。"""
         if self._lag_probe_task is not None:
             self._lag_probe_task.cancel()
             self._lag_probe_task = None
+        self._pumps.close()
+        self._tasks.close()
         for conn in self._connections.all():
             await conn.close()
-        for pump in self._read_pumps:
-            pump.cancel()
-        if self._read_pumps:
-            await asyncio.gather(*self._read_pumps, return_exceptions=True)
-        self._read_pumps.clear()
+        self._pumps.cancel_all()
+        await self._pumps.wait()
+        await self._tasks.wait()
         if self._unsubscribe_session is not None:
             self._unsubscribe_session()
             self._unsubscribe_session = None
@@ -317,7 +325,7 @@ class RpcServer:
 
         self._unsubscribe_session = session.subscribe(listener)
 
-    def _emit_reduced(self, notification: Any) -> None:
+    def _emit_reduced(self, notification: ItemNotification) -> None:
         """归约产物的广播出口（item 通知帧——与域通知同一信封纪律）。"""
         payload = serialize_event(notification)
         if payload is not None:
@@ -375,6 +383,23 @@ class RpcServer:
         # 全程可取——UI 寻址"发起方优先"与 cancelRequest 隔离的基础
         token = _current_connection.set(conn)
         try:
+            # 弃用纪律：deprecated 方法先发 deprecationNotice 再响应
+            # （codex 同款——迁移窗口内客户端可见；第一方豁免待 ClientInfo）
+            if msg.method is not None:
+                deprecated_note = self._methods.deprecated_note(msg.method)
+                if deprecated_note is not None:
+                    await conn.send(
+                        to_json_safe(
+                            build_notification(
+                                "system/deprecationNotice",
+                                {
+                                    "method": msg.method,
+                                    "summary": f"方法已弃用：{msg.method}",
+                                    "details": deprecated_note,
+                                },
+                            ).to_dict()
+                        )
+                    )
             response = await self._methods.dispatch(msg)
             # initialize 握手成功即上线（事件广播门/UI 寻址以此为准）
             if (

@@ -920,10 +920,7 @@ def test_install_editable_rejects_git_source(pm, tmp_path):
 
 def test_find_by_name_raises_ambiguous_error():
     """同一名称匹配到多个包时应抛出 AmbiguousPackageNameError。"""
-    from nova_harness.types.package import (
-        AmbiguousPackageNameError,
-        PackageMetadata,
-    )
+    from nova_harness.types.package import AmbiguousPackageNameError, PackageMetadata
 
     installer = MagicMock()
     installer.list.return_value = [

@@ -536,7 +536,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         return SyncSessionResult(
             state=_session_state_payload(session),
             entries=[
-                entry.dump_wire() for entry in page if hasattr(entry, "model_dump")
+                entry.dump_wire() for entry in page if hasattr(entry, "dump_wire")
             ],
             total=len(entries),
             entries_offset=offset,
@@ -719,7 +719,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             cost=getattr(stats, "cost", 0.0),
             cache_waste=(
                 cache_waste.dump_wire()
-                if hasattr(cache_waste, "model_dump")
+                if hasattr(cache_waste, "dump_wire")
                 else cache_waste
             ),
         )
@@ -750,7 +750,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         page = entries[offset:] if limit <= 0 else entries[offset : offset + limit]
         return GetSessionEntriesResult(
             entries=[
-                entry.dump_wire() for entry in page if hasattr(entry, "model_dump")
+                entry.dump_wire() for entry in page if hasattr(entry, "dump_wire")
             ],
             total=len(entries),
             offset=offset,

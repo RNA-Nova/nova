@@ -21,12 +21,19 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Awaitable, Callable, Dict, Optional, cast
+from typing import Any, Awaitable, Callable, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
+from nova_async import await_with_signal
 from nova_harness.types.ui.context import UIContext
-from nova_protocol.auth import AuthorizationRequest, AuthPrompt, LoginCancelledError
-from nova_protocol.signal import AbortSignal, is_aborted
+from nova_protocol import (
+    AbortedError,
+    AbortSignal,
+    AuthorizationRequest,
+    AuthPrompt,
+    LoginCancelledError,
+    is_aborted,
+)
 
 
 def _first_qs(parsed: dict, key: str) -> Optional[str]:
@@ -269,33 +276,19 @@ async def acquire_authorization_code(
 
     waiter = asyncio.ensure_future(_wait_channels())
 
-    # signal 举旗监听（有 wait 能力才挂）
-    abort_waiter: Optional[asyncio.Task] = None
-    signal_wait = cast(
-        Optional[Callable[[], Awaitable[None]]],
-        getattr(signal, "wait", None) if signal is not None else None,
-    )
-    if signal_wait is not None:
-
-        async def _watch_abort() -> None:
-            await signal_wait()
-
-        abort_waiter = asyncio.ensure_future(_watch_abort())
-
     try:
-        watch_list = [waiter] + ([abort_waiter] if abort_waiter is not None else [])
-        done, _pending = await asyncio.wait(
-            watch_list,
-            timeout=request.timeout_seconds,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if not done:
-            waiter.cancel()
-            raise TimeoutError("Authorization timed out")
-        if abort_waiter is not None and abort_waiter in done:
-            waiter.cancel()
-            raise LoginCancelledError()
-        code = waiter.result()
+        try:
+            # 超时帽在内（wait_for）、signal 竞速在外（nova_async 原语单点，
+            # 不手写第三份）。_wait_channels 与其通道自身不抛 TimeoutError，
+            # 此处 TimeoutError 唯一来源是 wait_for 到期。
+            code = await await_with_signal(
+                asyncio.wait_for(waiter, timeout=request.timeout_seconds), signal
+            )
+        except AbortedError:
+            # signal 举旗 → 翻译为登录域取消词汇
+            raise LoginCancelledError() from None
+        except TimeoutError as error:
+            raise TimeoutError("Authorization timed out") from error
         if code:
             return code
         raise TimeoutError("Authorization channels exhausted")
@@ -304,8 +297,6 @@ async def acquire_authorization_code(
         raise LoginCancelledError() from None
     finally:
         waiter.cancel()
-        if abort_waiter is not None:
-            abort_waiter.cancel()
         for task in channels:
             if not task.done():
                 task.cancel()

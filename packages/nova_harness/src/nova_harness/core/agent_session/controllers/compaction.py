@@ -26,7 +26,7 @@ from nova_harness.events.constants import SESSION_BEFORE_COMPACT
 from nova_harness.sessions.utils import get_latest_compaction_entry
 from nova_harness.types.compaction.compaction import CompactionResult
 from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import AbortController, Model
+from nova_protocol import AbortController, Model, NovaErrorKind
 
 if TYPE_CHECKING:
     from nova_protocol import AssistantMessage
@@ -285,10 +285,14 @@ class CompactionController:
         ) <= _to_epoch_ms(compaction_entry.timestamp):
             return False
 
-        # 情况 1：上下文溢出。
+        # 情况 1：上下文溢出——用量超窗（成功但超限的响应）或 provider 报错
+        # 经归一的溢出分类（error_kind==contextOverflow，可能零 usage）。
         # 成功但超窗的响应只压不重试：回答已完成，agent.continue 无法从
         # assistant 消息续跑；错误响应才执行压缩+重试。
-        if same_model and is_context_overflow(assistant_message, context_window):
+        if same_model and (
+            assistant_message.error_kind == NovaErrorKind.CONTEXT_OVERFLOW
+            or is_context_overflow(assistant_message, context_window)
+        ):
             will_retry = assistant_message.stop_reason != "stop"
             if not will_retry:
                 return await self.run_auto_compaction("overflow", will_retry=False)

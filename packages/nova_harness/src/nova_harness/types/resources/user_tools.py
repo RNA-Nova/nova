@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional
 
 from nova_harness.types.extensions.source import SourceInfo
-from nova_protocol import CustomAgentMessage
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import AbortSignal, CustomAgentMessage, NovaBaseModel
+
+if TYPE_CHECKING:
+    from nova_harness.core.agent_session.agent import AgentSession
 
 # 进度事件回调签名：``on_event(event_name, data)``，同步/异步均可。
 UserToolEventCallback = Callable[[str, Dict[str, Any]], Any]
@@ -31,7 +33,7 @@ UserToolEventCallback = Callable[[str, Dict[str, Any]], Any]
 # ``nova_harness.types.messages.ContextInjectable`` 协议，
 # 否则无法进入 LLM 上下文。
 UserToolExecute = Callable[
-    [Dict[str, Any], Optional[UserToolEventCallback], Any],
+    [Dict[str, Any], Optional[UserToolEventCallback], Optional[AbortSignal]],
     Awaitable[CustomAgentMessage],
 ]
 
@@ -80,7 +82,7 @@ class UserToolDefinition:
 
 # 包级用户工具工厂签名：``create(session) -> UserToolDefinition``。
 # 会话上下文由工厂闭包捕获（settings、cwd、扩展 spawn hooks 等执行期读取）。
-UserToolFactory = Callable[[Any], UserToolDefinition]
+UserToolFactory = Callable[["AgentSession"], UserToolDefinition]
 
 
 @dataclass

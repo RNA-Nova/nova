@@ -14,8 +14,7 @@ import asyncio
 from typing import Any
 
 from nova_harness.config.auth.interaction import UIAuthInteraction
-from nova_protocol.auth import ApiKeyCredential
-from nova_protocol.signal import AbortController
+from nova_protocol import AbortController, ApiKeyCredential
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.methods import shapes
 from nova_server.protocol.methods.shapes import (
@@ -50,13 +49,12 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             from nova_harness.config import AuthStorage
 
             storage = AuthStorage.create()
-        infos = await storage.list()
+        infos = storage.list()
         return GetAuthStatusResult(
             credentials=[
                 CredentialInfo(
-                    provider=getattr(info, "provider_id", None)
-                    or getattr(info, "provider", None),
-                    type=getattr(info, "type", None),
+                    provider=info.provider_id,
+                    type=info.type,
                 )
                 for info in infos
             ]
@@ -71,12 +69,11 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             raise JSONRPCError(
                 JSONRPCError.INVALID_PARAMS, "Missing 'apiKey' parameter"
             )
-        storage = state.runtime.services.auth_storage
-
-        async def _set(_current: Any) -> ApiKeyCredential:
-            return ApiKeyCredential(key=api_key.strip())
-
-        await storage.modify(provider, _set)
+        # 经统一写漏斗（per-provider 锁串行）——不直接摸 AuthStorage，
+        # 否则可被在飞刷新整条目覆盖
+        await session.model_runtime.set_credential(
+            provider, ApiKeyCredential(key=api_key.strip())
+        )
         # 与 login 同一联动：credential 变更后刷新模型与可用性快照
         await session.model_runtime.refresh()
         return ProviderResult(success=True, provider=provider)

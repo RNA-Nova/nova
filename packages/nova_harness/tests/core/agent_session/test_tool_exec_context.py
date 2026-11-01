@@ -14,10 +14,7 @@ from nova_harness.core.runtime_manager.assembly import (
     create_agent_session_from_services,
 )
 from nova_harness.sessions import SessionManager
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolExecContext,
-)
+from nova_harness.types.resources.tools import NULL_TOOL_EXEC_CONTEXT, ToolExecContext
 from nova_harness.types.session.config import CreateAgentSessionOptions
 
 

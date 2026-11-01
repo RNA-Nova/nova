@@ -159,6 +159,7 @@ ExtensionEventResult = Union[
     None,
 ]
 
+# 扩展事件载荷为开放集（扩展自定义事件类型）——Any 为有意开放（规则 11 Ⅳ 型豁免）
 ExtensionEventHandler = Callable[
     [Any], Union[ExtensionEventResult, Awaitable[ExtensionEventResult]]
 ]

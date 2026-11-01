@@ -12,10 +12,7 @@ from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import pytest
-from nova_harness.core.runtime_manager import (
-    RuntimeManager,
-    SessionIdCollisionError,
-)
+from nova_harness.core.runtime_manager import RuntimeManager, SessionIdCollisionError
 from nova_harness.types.session.config import CreateAgentSessionOptions
 
 

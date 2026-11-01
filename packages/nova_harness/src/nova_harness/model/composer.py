@@ -14,8 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from nova_ai import Provider, create_provider
-from nova_ai.api_impls import openai_completions
+from nova_ai import Provider, RefreshModelsContext, create_provider
 from nova_harness.config.resolve import (
     get_config_value_env_var_names,
     is_command_config_value,
@@ -48,17 +47,24 @@ from nova_protocol import (
     is_aborted,
 )
 
-# 当前唯一完整的协议实现；新增协议时在此登记
-_API_IMPLS: Dict[str, Any] = {
-    "openai-completions": openai_completions,
+# 协议实现注册表（模块路径，get_api_impl 惰性物化——SDK 重依赖
+# 按首次使用加载，对齐 nova_ai.api_impls 的惰性纪律）
+_API_IMPLS: Dict[str, str] = {
+    "openai-completions": "nova_ai.api_impls.openai_completions",
+    "anthropic-messages": "nova_ai.api_impls.anthropic_messages",
 }
 
 
 def get_api_impl(api: Optional[str]) -> Optional[Any]:
-    """按 api 名称查找协议实现模块。"""
+    """按 api 名称查找协议实现模块（惰性物化）。"""
     if api is None:
         return None
-    return _API_IMPLS.get(api)
+    path = _API_IMPLS.get(api)
+    if path is None:
+        return None
+    import importlib
+
+    return importlib.import_module(path)
 
 
 def _api_name(api: Any) -> str:
@@ -639,8 +645,8 @@ class _ComposedProvider(Provider):
     - ``get_models()`` 每次调用时基于 base 的**当前**模型列表重新合成，
       动态刷新（base.refresh_models / 扩展 refresh_models_fn）到达的新模型
       也会自动经过 models.json 覆盖、扩展替换与 model_overrides；
-    - ``refresh_models`` 仅在有刷新能力时存在（实例属性遮蔽为 None），
-      供 ``Models.refresh`` 的 duck-type 过滤识别；
+    - ``refresh_models`` 为能力字段：有刷新能力时是方法覆写，无能力时
+      实例属性遮蔽为 None——供 ``ModelsManager.refresh`` 的能力过滤识别；
     - 扩展 OAuth 的 ``modify_models`` 在拿到 OAuth credential 后生效。
     """
 
@@ -663,8 +669,8 @@ class _ComposedProvider(Provider):
             base_url=base_url,
             headers=base.headers if base is not None else None,
             # get_models 为 live 计算，静态列表不参与
-            models=[],
-            api_impl=_ComposedStreams(
+            _baseline_models=[],
+            _api_impl=_ComposedStreams(
                 provider_id,
                 base,
                 extension.api if extension is not None else None,
@@ -672,6 +678,8 @@ class _ComposedProvider(Provider):
             ),
             auth=auth,
             filter_models=base.filter_models if base is not None else None,
+            catalog_source=base.catalog_source if base is not None else None,
+            catalog_knowledge=(base.catalog_knowledge if base is not None else None),
         )
         self._base = base
         self._config = config
@@ -683,13 +691,14 @@ class _ComposedProvider(Provider):
         self._refreshed_extension_models: Optional[List[ModelDefinition]] = None
         self._extension_oauth_credential: Optional[OAuthCredential] = None
 
-        base_refresh = getattr(base, "refresh_models", None) if base else None
+        base_refresh = base.refresh_models if base else None
         if (
             base_refresh is None
             and refresh_models_fn is None
             and self._modify_models is None
         ):
-            # 无刷新能力：实例级遮蔽，让 Models.refresh 的 getattr 过滤生效
+            # 无刷新能力：实例级遮蔽能力字段为 None，让 ModelsManager.refresh
+            # 的能力过滤（``refresh_models is not None``）识别
             self.refresh_models = None  # type: ignore[assignment]
 
     def _current_extension(self) -> Optional[ProviderConfigInput]:
@@ -707,20 +716,19 @@ class _ComposedProvider(Provider):
             models = self._modify_models(models, self._extension_oauth_credential)
         return models
 
-    async def refresh_models(self, context: Any) -> None:
+    async def refresh_models(self, context: RefreshModelsContext) -> None:
         if self._base is not None:
-            base_refresh = getattr(self._base, "refresh_models", None)
+            base_refresh = self._base.refresh_models
             if base_refresh is not None:
                 await base_refresh(context)
         if self._refresh_models_fn is not None:
             # 两阶段刷新契约（对齐 TS createProvider.refreshModels）：
             # 离线阶段（allow_network=False）只做存储恢复——扩展刷新_fn
             # 没有可恢复的存储，直接跳过，等网络阶段再拉。
-            if not getattr(context, "allow_network", True):
+            if not context.allow_network:
                 return
             refreshed = await self._refresh_models_fn(context)
-            signal = getattr(context, "signal", None)
-            if not is_aborted(signal):
+            if not is_aborted(context.signal):
                 # 发布前先校验，非法结构不污染线上列表
                 apply_extension(
                     self.id,
@@ -736,10 +744,10 @@ class _ComposedProvider(Provider):
                     ),
                 )
                 self._refreshed_extension_models = list(refreshed)
-        credential = getattr(context, "credential", None)
+        credential = context.credential
         self._extension_oauth_credential = (
             credential
-            if credential is not None and getattr(credential, "type", None) == "oauth"
+            if credential is not None and credential.type == "oauth"
             else None
         )
 

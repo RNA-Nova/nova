@@ -7,7 +7,7 @@ from typing import Dict, List, Literal, Optional
 
 from nova_harness.types.package.enums import SourceScope
 from nova_harness.types.package.resolution import PackageFilter
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from pydantic import Field
 
 

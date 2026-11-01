@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
 
+from nova_async import TaskTracker
+
 
 class ExtensionEventBus:
     """扩展间事件总线。
@@ -11,11 +13,13 @@ class ExtensionEventBus:
     - ``on`` 返回取消订阅函数；
     - ``emit`` 不收集返回值，逐个触发 handler；
     - 单个 handler 异常不影响其它 handler；
-    - async handler 被 ``asyncio.create_task`` 调度。
+    - async handler 经本总线的 TaskTracker 派发（台账持有防 GC 蒸发，
+      异常终结经台账日志浮出）。
     """
 
     def __init__(self) -> None:
         self._handlers: Dict[str, List[Callable[..., Any]]] = {}
+        self._tasks = TaskTracker(name="extension-event-bus")
 
     def on(self, event_type: str, handler: Callable[..., Any]) -> Callable[[], None]:
         """订阅指定事件类型。"""
@@ -38,7 +42,7 @@ class ExtensionEventBus:
             try:
                 result = handler(*args, **kwargs)
                 if asyncio.iscoroutine(result):
-                    asyncio.create_task(result)
+                    self._tasks.spawn(result, name=f"bus:{event_type}")
             except Exception:
                 # 单个 handler 异常不应影响其它 handler
                 pass

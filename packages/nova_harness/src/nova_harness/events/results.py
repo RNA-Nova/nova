@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Any, List, Literal, Optional, Union
 
 from nova_harness.types.compaction.compaction import CompactionResult
-from nova_protocol import AgentMessage, ImageContent, TextContent
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import AgentMessage, ImageContent, NovaBaseModel, TextContent
 from pydantic import Field
 
 

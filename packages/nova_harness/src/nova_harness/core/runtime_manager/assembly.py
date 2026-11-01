@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, List, Optional
 
 from nova_harness.config.defaults import AGENTS_DIR_NAME, get_agent_dir
 from nova_harness.core.agent_session import (
@@ -39,6 +39,7 @@ from nova_harness.model.resolver import (
 from nova_harness.package import PackageManager
 from nova_harness.package.validation import is_agent_file
 from nova_harness.sessions import SessionManager
+from nova_harness.types.package.progress import ProgressCallback
 from nova_harness.types.session.config import CreateAgentSessionOptions
 from nova_harness.types.session.factory import (
     CreateAgentSessionResult,
@@ -78,7 +79,7 @@ async def create_agent_session_services(
 
 def _resolve_on_progress(
     options: CreateAgentSessionOptions,
-) -> Optional[Callable[[Any], None]]:
+) -> Optional[ProgressCallback]:
     """解析包管理进度回调：显式回调优先，否则从 ui_context 桥接为通知。
 
     通知形状与 ``rpc/protocol/methods/package.py`` 的 ``package_progress``

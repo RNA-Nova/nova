@@ -18,7 +18,7 @@
 pixi install --environment dev
 
 # 兼容：子包独立 Poetry
-cd packages/nova-harness/backend
+cd packages/nova_harness
 poetry install
 ```
 
@@ -29,7 +29,6 @@ poetry install
 - `pydantic ^2.0`
 - `pyyaml ^6.0`
 - `filelock ^3.0`
-- `tomli ^2.0.1`（Python < 3.11）
 
 ## 运行测试
 
@@ -38,11 +37,11 @@ poetry install
 pixi run -e dev test-harness
 
 # 或在子包内直接跑（pixi 环境下）
-pixi run -e dev pytest packages/nova-harness/backend/tests -m "not integration"
+cd packages/nova_harness && pixi run -e dev pytest tests -m "not integration"
 ```
 
 ## 示例
 
-详见 [`examples/`](./examples) 目录下的 Jupyter Notebook：
+详见 [`examples/`](./examples) 目录——8 篇现行设计文档（索引见该目录 README）+ Jupyter Notebook：
 
 - `01-quickstart.ipynb` — 创建 `AgentSession` 并发起对话

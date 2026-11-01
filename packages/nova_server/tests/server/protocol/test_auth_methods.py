@@ -4,31 +4,28 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import pytest
-from nova_protocol.auth import ApiKeyCredential, CredentialInfo
+from nova_protocol import ApiKeyCredential, CredentialInfo
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import auth as auth_methods
 from nova_server.protocol.methods.state import ServerState
 
 
 class FakeAuthStorage:
-    """内存版 AuthStorage 替身。"""
+    """内存版 AuthStorage 替身（sync 协议）。"""
 
     def __init__(self):
         self.data: Dict[str, Any] = {"volcengine": ApiKeyCredential(key="k-1")}
 
-    async def list(self):
+    def list(self):
         return [
             CredentialInfo(provider_id=pid, type=cred.type)
             for pid, cred in self.data.items()
         ]
 
-    async def modify(self, provider_id, fn):
-        next_cred = await fn(self.data.get(provider_id))
-        if next_cred is not None:
-            self.data[provider_id] = next_cred
-        return next_cred
+    def write(self, provider_id, credential):
+        self.data[provider_id] = credential
 
-    async def delete(self, provider_id):
+    def delete(self, provider_id):
         self.data.pop(provider_id, None)
 
 
@@ -40,6 +37,9 @@ class FakeModelRuntime:
 
     async def refresh(self, *args, **kwargs):
         self.calls.append(("refresh",))
+
+    async def set_credential(self, provider_id, credential):
+        self.calls.append(("set_credential", provider_id, credential))
 
     async def login(self, provider_id, auth_type, interaction):
         self.calls.append(("login", provider_id, auth_type, interaction))
@@ -102,14 +102,18 @@ async def test_get_auth_status(registry):
 
 @pytest.mark.asyncio
 async def test_set_api_key_writes_and_refreshes(registry):
-    """setApiKey：写存储 + model_runtime.refresh() 联动（可用性快照重算）。"""
-    reg, storage, model_runtime = registry
+    """setApiKey：经 model_runtime.set_credential 统一写漏斗（trim 后落值）
+    + model_runtime.refresh() 联动（可用性快照重算）。"""
+    reg, _storage, model_runtime = registry
     result = _result(
         await _call(reg, "setApiKey", {"provider": "kimi", "apiKey": "  sk-x  "})
     )
     assert result["success"] is True
-    assert storage.data["kimi"].key == "sk-x"
-    assert model_runtime.calls == [("refresh",)]
+    set_calls = [c for c in model_runtime.calls if c[0] == "set_credential"]
+    assert len(set_calls) == 1
+    assert set_calls[0][1] == "kimi"
+    assert set_calls[0][2].key == "sk-x"
+    assert ("refresh",) in model_runtime.calls
 
 
 @pytest.mark.asyncio

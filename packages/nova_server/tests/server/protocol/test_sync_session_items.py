@@ -11,15 +11,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from nova_server.protocol.methods.shapes import (
-    SessionStateResult,
-    SyncSessionResult,
-)
-from nova_server.types.items import (
-    AgentMessageItem,
-    NovaItem,
-    ThinkingItem,
-)
+from nova_server.protocol.methods.shapes import SessionStateResult, SyncSessionResult
+from nova_server.types.items import AgentMessageItem, NovaItem, ThinkingItem
 
 
 class FakePackageItem(NovaItem):

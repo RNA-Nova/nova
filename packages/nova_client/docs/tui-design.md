@@ -43,17 +43,27 @@ pi 的组件是模块化的，但编排层没收住（interactive-mode.ts 6000 �
 modes/tui/
 ├── main.ts               # CLI 入口（commander）
 ├── app.ts                # 装配根：创建组件树 + 接线 controllers + 启动。零业务逻辑
-├── controllers/          # 编排层（每域一个）
+├── controllers/          # 编排层（每域一个，现行 12 件）
 │   ├── keymap.ts         # 全局键位路由（Esc 域级分派/ctrl 族，键位表驱动）
 │   ├── editor.ts         # 编辑器接线（submit/粘贴折叠/图片/补全/历史）
-│   ├── dialogs.ts        # 对话框调度（四件套 + auth 等待框 + ui/cancel）
+│   ├── dialogs.ts        # 对话框调度（五件套 + auth 等待框 + ui/cancel）
 │   ├── transcript.ts     # transcript 调度（reconcile/展开折叠/customType 路由）
 │   ├── status.ts         # 状态区调度（指示器家族/footer/通知槽位）
-│   └── pickers.ts        # 选择器调度（picker 字段路由 → 专用选择器）
+│   ├── theme.ts          # 主题调度（三源发现 + /theme 预览）
+│   ├── settings.ts       # 设置面板（18 项）
+│   ├── export.ts         # 会话导出 HTML
+│   ├── share.ts          # /share 分享
+│   ├── foreground.ts     # 前台任务取消登记处（Esc 域级路由一环）
+│   ├── terminal.ts       # OSC 0 标题 + OSC 9;4 进度 + turn 结束桌面通知
+│   └── startup.ts        # 启动编排
+│   （注：专用导航选择器已整体迁 bundle `frontend/tui/extensions/`，
+│    宿主不再设 pickers controller——只留 runCommand 推命令通道）
 ├── components/           # 纯组件：自包含、自渲染、零编排逻辑
 │   ├── transcript/       # 条目视图族（含 skill-invocation 折叠条目）
-│   ├── dialogs/          # 四件套 + auth-waiting
-│   ├── pickers/          # 选择器族（基础件 + searchable 基类 + hints）
+│   ├── dialogs/          # form + auth-waiting + help-viewer（select/confirm/input
+│   │                     #   经 pi-tui 在控制器内直渲）
+│   ├── pickers/          # 通用选择器件（searchable/selector/hints——专用导航
+│   │                     #   选择器已迁 bundle frontend/tui/extensions/）
 │   ├── status/           # StatusIndicator 基类 + 变体 + countdown-timer + footer
 │   └── layout/           # dynamic-border + welcome 启动区
 ├── blocks/               # 块适配层（注册制：官方五块 builtin 注册 + schema 校验）
@@ -84,7 +94,7 @@ interface BlockDefinition {
 slots.registerBlock('diff', def, source);   // source: 'builtin' | 包名
 ```
 
-- **官方块**（diff/markdown/code/table/text/image）→ `builtin` 注册——
+- **官方块**（markdown/code/diff/table/json）→ `builtin` 注册——
   现有 `blocks/` 的硬编码 switch 适配器**迁移为 builtin 注册**（dogfood 同一机制）；
 - **自定义块**（扩展注册）→ 包注册：`schema` + 自带适配器组件；
 - **校验**：块数据渲染前过 schema——扩展产出对宿主是不可信输入
@@ -154,8 +164,8 @@ slots.registerBlock('diff', def, source);   // source: 'builtin' | 包名
 
 ### 5.4 键位系统
 
-- `keymap/`：内置键位表 + `~/.nova/agent/keybindings.json` + 项目级
-  `.nova/keybindings.json`（合并优先级 project > user > builtin）；
+- `keymap/`：内置键位表 + `~/.nova/agent/frontend/tui/keybindings.json` + 项目级
+  `<cwd>/.nova/frontend/tui/keybindings.json`（合并优先级 project > user > builtin）；
 - **restrictOverride**（pi 同款：保留键位禁覆盖 / 可覆盖带诊断）；
 - **keybinding-hints**：选择器/对话框底部提示行从键位表动态生成；
 - Esc 域级路由、ctrl+c/ctrl+d/ctrl+o 全部迁入键位表（可配置）。

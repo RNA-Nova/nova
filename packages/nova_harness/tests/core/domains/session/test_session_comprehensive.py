@@ -12,12 +12,7 @@ from nova_harness.sessions import (
     build_session_context,
     load_entries_from_file,
 )
-from nova_protocol import (
-    AssistantMessage,
-    ModelThinkingLevel,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import AssistantMessage, ModelThinkingLevel, TextContent, UserMessage
 
 
 def _user(text: str) -> UserMessage:

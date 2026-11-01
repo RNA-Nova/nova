@@ -6,7 +6,7 @@ from typing import Any, List, Optional, Union
 
 from nova_harness.types.extensions import SourceInfo
 from nova_harness.types.package import ResolvedResource
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 
 
 class PromptTemplate(NovaBaseModel):

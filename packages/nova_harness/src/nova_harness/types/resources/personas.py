@@ -11,7 +11,7 @@ persona = 角色身份文本（装配进系统提示词）；skills = 模型自�
 from typing import Optional
 
 from nova_harness.types.extensions import SourceInfo
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 
 
 class Persona(NovaBaseModel):

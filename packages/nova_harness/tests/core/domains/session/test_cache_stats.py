@@ -9,12 +9,8 @@ from nova_harness.sessions.cache_stats import (
     compute_cache_waste,
     detect_cache_miss,
 )
-from nova_harness.types.session.entries import (
-    CompactionEntry,
-    SessionMessageEntry,
-)
-from nova_protocol import AssistantMessage
-from nova_protocol.model import Cost, Usage
+from nova_harness.types.session.entries import CompactionEntry, SessionMessageEntry
+from nova_protocol import AssistantMessage, Cost, Usage
 
 T0 = 1_700_000_000_000
 

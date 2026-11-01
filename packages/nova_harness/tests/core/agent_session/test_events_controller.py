@@ -14,10 +14,7 @@ from nova_harness.core.agent_session.controllers.events import EventController
 from nova_harness.events.results import MessageEndEventResult
 from nova_harness.extensions.runner import ExtensionRunner
 from nova_harness.types.extensions.runtime import ExtensionRuntime
-from nova_protocol import (
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import TextContent, UserMessage
 
 
 class _FakeQueue:

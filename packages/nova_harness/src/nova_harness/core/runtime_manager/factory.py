@@ -18,7 +18,7 @@ from nova_ai import ProviderResponse
 from nova_harness.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
 from nova_harness.core.utils import resolve_api_key
-from nova_harness.core.utils.http_idle_timeout import get_http_idle_timeout_seconds
+from nova_harness.core.utils.http_idle_timeout import get_http_idle_timeout_ms
 from nova_harness.core.utils.messages import convert_to_llm
 from nova_harness.events import AfterProviderResponseEvent, SessionStartEvent
 from nova_harness.events.constants import (
@@ -110,7 +110,11 @@ def create_stream_fn(
         if provider_timeout_ms is not None and provider_timeout_ms > 0:
             options.timeout = provider_timeout_ms / 1000.0
         elif options.timeout is None:
-            options.timeout = get_http_idle_timeout_seconds(services.settings_manager)
+            # 0（disabled）原样下发：nova_ai 解释为关 read/idle 看门狗，
+            # connect 上限不受影响（见 core/utils/http_idle_timeout.py）
+            options.timeout = (
+                get_http_idle_timeout_ms(services.settings_manager) / 1000.0
+            )
 
         # Provider 级最大重试次数
         if options.max_retries is None:
@@ -239,7 +243,7 @@ def create_agent(
         session_id=session_id,
         get_api_key=get_api_key,
         thinking_budgets=services.settings_manager.get_thinking_budgets(),
-        timeout=get_http_idle_timeout_seconds(services.settings_manager),
+        timeout=get_http_idle_timeout_ms(services.settings_manager) / 1000.0,
         stream_fn=create_stream_fn(services, session_id, extension_runner_ref),
         on_payload=lambda payload, model: _on_payload(extension_runner_ref, payload),
         on_response=lambda response, _model: _on_response(

@@ -21,7 +21,7 @@ from enum import Enum
 from typing import Annotated, Any, List, Literal, Optional, Union
 
 from nova_harness.types.messages import CustomMessageContent
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from pydantic import ConfigDict, Field
 
 

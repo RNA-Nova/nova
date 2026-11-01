@@ -4,10 +4,7 @@ from pathlib import Path
 
 import pytest
 from nova_harness.resources.loaders.extensions import detect_extension_conflicts
-from nova_harness.types.extensions import (
-    Extension,
-    ExtensionFlag,
-)
+from nova_harness.types.extensions import Extension, ExtensionFlag
 
 
 def test_detect_extension_conflicts_flag_conflict():
@@ -67,11 +64,7 @@ async def test_load_extensions_includes_conflict_diagnostics(tmp_path: Path):
         encoding="utf-8",
     )
 
-    from nova_harness.types.package import (
-        PathMetadata,
-        ResolvedResource,
-        SourceScope,
-    )
+    from nova_harness.types.package import PathMetadata, ResolvedResource, SourceScope
 
     resolved = [
         ResolvedResource(

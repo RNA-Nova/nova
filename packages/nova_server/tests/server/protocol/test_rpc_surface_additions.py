@@ -280,6 +280,7 @@ async def test_invoke_shortcut_requires_param():
 @pytest.mark.asyncio
 async def test_get_settings_without_runtime(monkeypatch):
     from nova_harness.config.settings.manager import SettingsManager
+
     from tests._helpers.settings_storage import InMemorySettingsStorage
 
     fallback = SettingsManager.from_storage(InMemorySettingsStorage())
@@ -312,7 +313,7 @@ async def test_get_auth_status_without_runtime(monkeypatch):
     from nova_harness.config import AuthStorage
 
     class _FakeStorage:
-        async def list(self):
+        def list(self):
             return [SimpleNamespace(provider_id="volcengine", type="api_key")]
 
     monkeypatch.setattr(AuthStorage, "create", staticmethod(lambda: _FakeStorage()))

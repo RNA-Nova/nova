@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Protocol
 
+from nova_harness.types.resources.tools import ToolExecContext
 from nova_protocol import (
     ApprovalPolicy,
     ExecApprovalRequirement,
@@ -156,7 +157,7 @@ class ExecRuntime(Approvable, Protocol):
         self,
         request: OrchestratorRequest,
         attempt: SandboxAttempt,
-        ctx: Any,
+        ctx: ToolExecContext,
     ) -> ExecAttemptOutput:
         """真执行（唯一挂点）"""
         ...
@@ -189,7 +190,9 @@ def default_exec_approval_requirement(
 # 回调签名
 # =============================================================================
 
-RequestApprovalFn = Callable[[ApprovalAction, Any], Awaitable[ReviewDecisionPayload]]
+RequestApprovalFn = Callable[
+    [ApprovalAction, ToolExecContext], Awaitable[ReviewDecisionPayload]
+]
 """审批流回调（对位 session.request_approval）：动作描述 → 用户结局。
 弹窗/会话缓存/amend 写回全归回调实现；headless 由调用方传 fail-closed deny。"""
 
@@ -223,7 +226,7 @@ class Orchestrator:
         )
 
     async def run(
-        self, runtime: ExecRuntime, request: OrchestratorRequest, ctx: Any
+        self, runtime: ExecRuntime, request: OrchestratorRequest, ctx: ToolExecContext
     ) -> ExecAttemptOutput:
         # 1) 审批要求：工具自报优先，缺席落默认（对位 orchestrator.rs:171-183）
         requirement = runtime.exec_approval_requirement(request)

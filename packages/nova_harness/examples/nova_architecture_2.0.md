@@ -11,8 +11,9 @@
 > 无显式 token 拒启 + Origin 白名单 403）；Node 层（TUI）与将来的浏览器同为
 > 客户端，mirror/presentation 作为客户端侧 TS 库被两端复用。§2 的 stdio
 > "唯一跨进程通道"与 §5.4 的传输分工以此修订为准。
-> 与 `nova_ui_layer_redesign.md` 的关系：本文档是其"彻底版"——三层模型确立后，
-> 旧稿中"Python 后端 + RPC 声明式 UI"的协议段**作废**，仅前后端分离的 RPC 骨架保留。
+> 与旧稿 `nova_ui_layer_redesign.md` 的关系：本文档是其"彻底版"——三层模型确立后，
+> 旧稿中"Python 后端 + RPC 声明式 UI"的协议段**作废**，仅前后端分离的 RPC 骨架保留
+> （旧稿已随 examples 清理删除，此处仅留历史注记）。
 > 后续阅读：**`nova_architecture_2.1.md`**（落地终态 + Node 层/复合包/多后端完整设计）。
 
 ---
@@ -181,7 +182,7 @@ ui 索引登记；按需加载落地（索引层/加载层拆分）。
 
 - tools 链路：框架零内置、零预设名单；默认激活 = registry 全部；激活三态
   （None 默认 / [] 显式空 / [names] 显式）；agent.yaml 白名单过滤。
-- session/compaction/messages 与 TS 逐项对齐（见 `session_compaction_ts_alignment_audit.md`）。
+- session/compaction/messages 与 TS 逐项对齐（对照审计已完成，快照文档已随 examples 清理删除）。
 - project_trust：emit 归扩展层、决策链安全语义。
 - skills：加载+warning 诊断模型、发现规则、共享跳过名单。
 - nova_ai：gateway/providers/auth/OAuth 与 TS 架构同构（无模块级状态）。

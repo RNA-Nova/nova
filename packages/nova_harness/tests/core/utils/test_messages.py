@@ -16,12 +16,7 @@ from nova_harness.types.messages import (
     CompactionSummaryMessage,
     CustomMessage,
 )
-from nova_protocol import (
-    AssistantMessage,
-    CustomAgentMessage,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import AssistantMessage, CustomAgentMessage, TextContent, UserMessage
 
 
 class FakeInjectableMessage(CustomAgentMessage):

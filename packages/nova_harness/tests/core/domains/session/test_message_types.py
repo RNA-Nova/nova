@@ -19,9 +19,7 @@ from nova_harness.sessions.message_types import (
 from nova_harness.sessions.utils import parse_session_entry_line
 from nova_harness.types.messages import OpaqueUserToolMessage
 from nova_harness.types.session.entries import SessionMessageEntry
-from nova_protocol import (
-    CustomAgentMessage,
-)
+from nova_protocol import CustomAgentMessage
 
 
 class SearchResultMessage(CustomAgentMessage):

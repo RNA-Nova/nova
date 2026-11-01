@@ -4,14 +4,15 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
 from nova_protocol import (
+    AuthInteraction,
     Model,
     ModelCost,
+    NovaBaseModel,
+    OAuthCredential,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     ThinkingLevelMap,
 )
-from nova_protocol.auth import OAuthCredential
-from nova_protocol.base_model import NovaBaseModel
 from pydantic import ConfigDict, Field
 
 # 类型别名
@@ -104,9 +105,13 @@ class ExtensionOAuthConfig:
 
     name: str
     # 登录流程：接收 nova_ai AuthInteraction，返回 OAuthCredential 或可校验的 dict
-    login: Callable[[Any], Awaitable[Any]]
+    login: Callable[
+        [AuthInteraction], Awaitable[Union[OAuthCredential, Dict[str, Any]]]
+    ]
     # 刷新 token：接收过期 credential，返回新 credential
-    refresh_token: Callable[[OAuthCredential], Awaitable[Any]]
+    refresh_token: Callable[
+        [OAuthCredential], Awaitable[Union[OAuthCredential, Dict[str, Any]]]
+    ]
     # 从 credential 提取请求用 api key
     get_api_key: Callable[[OAuthCredential], str]
     # 可选：拿到 OAuth credential 后修改模型列表（如按账号过滤）

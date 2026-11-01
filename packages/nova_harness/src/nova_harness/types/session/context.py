@@ -2,8 +2,7 @@
 
 from typing import List, Optional, Tuple
 
-from nova_protocol import AgentMessage, ModelThinkingLevel
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import AgentMessage, ModelThinkingLevel, NovaBaseModel
 from pydantic import Field
 
 

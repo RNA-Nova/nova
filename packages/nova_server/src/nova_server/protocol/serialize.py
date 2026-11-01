@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import is_dataclass
 from typing import Any, Dict, Optional
 
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 
 
 def _safe_serialize(value: Any) -> Any:

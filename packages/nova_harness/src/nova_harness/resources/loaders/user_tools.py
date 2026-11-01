@@ -29,7 +29,7 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from nova_harness.core.utils.files import canonicalize_path
 from nova_harness.resources.source_info import (
@@ -44,6 +44,9 @@ from nova_harness.types.resources.diagnostics import (
 from nova_harness.types.resources.personas import SourceInfo
 from nova_harness.types.resources.prompts import ResolvedResource
 from nova_harness.types.resources.user_tools import UserToolDefinition, UserToolResource
+
+if TYPE_CHECKING:
+    from nova_harness.core.agent_session.agent import AgentSession
 
 # UserTool 类必须声明的元数据属性及期望类型
 _REQUIRED_ATTRS: Dict[str, type] = {
@@ -155,7 +158,7 @@ def _load_user_tool(
     description = attrs["description"]
     parameters = attrs["parameters"]
 
-    def _create(session: Any) -> UserToolDefinition:
+    def _create(session: AgentSession) -> UserToolDefinition:
         """按会话实例化 UserTool 并包装为定义。"""
         instance = cls(session)
         return UserToolDefinition(

@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{ include = "nova_server", from = "src" }]
 
 [tool.poetry.dependencies]
-python = ">=3.12,<3.14"
+python = ">=3.13,<3.14"
 # 兄弟包依赖（nova-harness / nova-ai / nova-agent）按仓库约定不在此声明，
 # 统一由根 pyproject.toml 的 [tool.pixi.pypi-dependencies] editable 安装。
 

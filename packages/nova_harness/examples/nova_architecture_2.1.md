@@ -167,7 +167,7 @@ harness 是实现变量（今天 Python，明天 Rust/Go）。契约只钉线上
 ## 3. nova-client（Node，TS）：呈现的一切
 
 > 本节的完整施工图（定位/模块/机制/判决记录）见
-> **`packages/nova-harness/frontend/docs/design.md`**；TUI 已作为内置宿主落位于
+> **`packages/nova_client/docs/design.md`**；TUI 已作为内置宿主落位于
 > `src/modes/tui/`（原独立 nova-tui 包已并入）。
 
 ### 3.1 六子系统，骨架已按 v3.1 一次成型

@@ -15,10 +15,11 @@ import tempfile
 from typing import Any, List
 
 import pytest
-from nova_ai.providers import get_kimi_coding_model, get_volcengine_model
 from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
 from nova_harness.types.session.config import CreateAgentSessionOptions
+
+from nova_ai.providers import get_kimi_coding_model, get_volcengine_model
 
 pytestmark = pytest.mark.integration
 
@@ -34,7 +35,7 @@ async def _has_credential(provider: str) -> bool:
         return True
     try:
         storage = AuthStorage.create()
-        return (await storage.read(provider)) is not None
+        return (storage.read(provider)) is not None
     except Exception:
         return False
 

@@ -195,7 +195,8 @@ class RuntimeManager:
     @staticmethod
     async def _dispose_bounded(runtime: AgentSessionRuntime, timeout: float) -> str:
         try:
-            await asyncio.wait_for(runtime.dispose(), timeout)
+            async with asyncio.timeout(timeout):
+                await runtime.dispose()
         except asyncio.TimeoutError:
             return "timed_out"
         except Exception:

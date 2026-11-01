@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from nova_agent import Agent, AgentTool
+from nova_harness.types.package.progress import ProgressCallback
 from nova_harness.types.protocols import (
     AuthStorageProtocol,
     ExtensionRunnerProtocol,
@@ -114,7 +115,7 @@ class CreateAgentSessionOptions:
     additional_prompt_template_paths: Optional[List[str]] = None
     # 会话启动自愈重装包的进度回调（未提供时，若给了 ui_context 则自动
     # 桥接为 "package_progress" UI 通知）
-    on_progress: Optional[Callable[[Any], None]] = None
+    on_progress: Optional[ProgressCallback] = None
     # None 表示不覆盖信任状态；由 resolve_project_trust 回调或默认策略决定
     project_trusted: Optional[bool] = None
     resolve_project_trust: Optional[ResolveProjectTrustCallback] = None

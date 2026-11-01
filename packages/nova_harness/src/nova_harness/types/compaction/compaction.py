@@ -4,8 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from nova_harness.types.compaction.file_ops import FileOperations
-from nova_protocol import AgentMessage
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import AgentMessage, NovaBaseModel
 from pydantic import Field
 
 

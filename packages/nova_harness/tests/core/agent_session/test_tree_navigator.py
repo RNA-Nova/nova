@@ -16,13 +16,7 @@ from nova_harness.core.agent_session.controllers.tree import TreeNavigator
 from nova_harness.sessions import SessionManager
 from nova_harness.types.config.settings import BranchSummarySettings
 from nova_harness.types.session.options import NavigateOptions
-from nova_protocol import (
-    AssistantMessage,
-    Model,
-    ModelCost,
-    Usage,
-    UserMessage,
-)
+from nova_protocol import AssistantMessage, Model, ModelCost, Usage, UserMessage
 
 
 def _model() -> Model:

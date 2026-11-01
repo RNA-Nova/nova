@@ -54,6 +54,7 @@ from nova_protocol import (
     Message,
     ModelThinkingLevel,
     TextContent,
+    redact_secrets,
 )
 from pydantic import BaseModel
 
@@ -86,12 +87,16 @@ def entry_to_json(entry: FileEntry) -> str:
     """把条目序列化为 JSONL 行（对齐 TS ``JSON.stringify`` 的输出形状）。
 
     - 紧凑分隔符（无空格），与 TS 逐字节一致；
-    - ``exclude_none=True``：None 字段省略键（对齐 TS undefined 键不落盘）。
+    - ``exclude_none=True``：None 字段省略键（对齐 TS undefined 键不落盘）；
+    - **落盘出口 secret 清洗**（codex ``redact_secrets`` 对位）——命令/输出
+      里的密钥模式不落盘（导出路径 ``export_to_jsonl`` 不经本函数，不受影响）。
     """
-    return json.dumps(
-        entry.model_dump(exclude_none=True),
-        ensure_ascii=False,
-        separators=(",", ":"),
+    return redact_secrets(
+        json.dumps(
+            entry.model_dump(exclude_none=True),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     )
 
 

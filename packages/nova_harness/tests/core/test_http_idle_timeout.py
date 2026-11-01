@@ -5,9 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from nova_harness.core.utils.http_idle_timeout import (
     DEFAULT_HTTP_IDLE_TIMEOUT_MS,
-    MAX_HTTP_IDLE_TIMEOUT_MS,
     get_http_idle_timeout_ms,
-    get_http_idle_timeout_seconds,
     parse_http_idle_timeout_ms,
 )
 
@@ -50,15 +48,9 @@ def test_get_timeout_ms_default_when_settings_fail():
         assert get_http_idle_timeout_ms(settings) == DEFAULT_HTTP_IDLE_TIMEOUT_MS
 
 
-def test_get_timeout_seconds_converts_ms():
-    settings = MagicMock(get_http_idle_timeout_ms=lambda: 60_000)
-    with patch.dict(os.environ, {}, clear=True):
-        assert get_http_idle_timeout_seconds(settings) == 60.0
-
-
-def test_get_timeout_seconds_disabled_uses_max():
+def test_get_timeout_ms_disabled_passthrough():
+    """disabled（0）原样下发——关看门狗的语义由 nova_ai 侧解释，本层不再
+    翻译成"约 24.8 天"的假超时（connect 上限因此始终有效）。"""
     settings = MagicMock(get_http_idle_timeout_ms=lambda: 0)
     with patch.dict(os.environ, {}, clear=True):
-        assert (
-            get_http_idle_timeout_seconds(settings) == MAX_HTTP_IDLE_TIMEOUT_MS / 1000
-        )
+        assert get_http_idle_timeout_ms(settings) == 0

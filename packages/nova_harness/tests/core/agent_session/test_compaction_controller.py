@@ -16,12 +16,7 @@ from nova_harness.core.agent_session.controllers.compaction import CompactionCon
 from nova_harness.core.agent_session.controllers.tree import TreeNavigator
 from nova_harness.sessions import SessionManager
 from nova_harness.types.compaction import CompactionSettings
-from nova_protocol import (
-    AssistantMessage,
-    Model,
-    ModelCost,
-    Usage,
-)
+from nova_protocol import AssistantMessage, Model, ModelCost, NovaErrorKind, Usage
 
 
 def _model(context_window: int = 1000) -> Model:
@@ -364,10 +359,7 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
     provider headers 与 env（对齐 TS：摘要请求保持 SDK 请求行为一致）。"""
     from types import SimpleNamespace
 
-    from nova_harness.types.compaction import (
-        CompactionPreparation,
-        CompactionResult,
-    )
+    from nova_harness.types.compaction import CompactionPreparation, CompactionResult
     from nova_protocol import AuthResult
 
     session = _session(tmp_path, _model(), [])
@@ -415,3 +407,25 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
     assert kwargs["headers"] == {"X-A": "1"}
     assert kwargs["env"] == {"E": "v"}
     assert kwargs["stream_fn"] is session.agent.stream_fn
+
+
+@pytest.mark.asyncio
+async def test_provider_overflow_error_triggers_compact_and_retry(tmp_path):
+    """provider 报错型溢出（error_kind=contextOverflow，零 usage）触发压缩+重试——
+    归一 kind 替代用量判定（错误响应可能不带 usage，用量判定会漏）。"""
+    model = _model(context_window=100)
+    message = _assistant(
+        "failed",
+        stop_reason="error",
+        usage=Usage(),
+    )
+    message.error_kind = NovaErrorKind.CONTEXT_OVERFLOW
+    session = _session(tmp_path, model, [message])
+
+    controller = CompactionController(session)
+    controller.run_auto_compaction = AsyncMock(return_value=True)
+
+    result = await controller.check_compaction(message)
+
+    assert result is True
+    controller.run_auto_compaction.assert_called_once_with("overflow", will_retry=True)

@@ -233,10 +233,7 @@ def test_collect_explicit_respects_gitignore_for_files(tmp_path):
 
 def test_collect_explicit_respects_gitignore_for_dirs(tmp_path):
     """manifest 显式声明的目录路径应递归扫描，并应用 .gitignore 过滤。"""
-    from nova_harness.package.resolve.discovery import (
-        ResourceType,
-        collect_explicit,
-    )
+    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
 
     keep = tmp_path / "keep"
     keep.mkdir()
@@ -290,10 +287,7 @@ def test_collect_explicit_with_override_patterns(tmp_path):
 
 def test_collect_explicit_directory_as_skill(tmp_path):
     """manifest 显式声明的目录本身即为 skill 时应返回该目录。"""
-    from nova_harness.package.resolve.discovery import (
-        ResourceType,
-        collect_explicit,
-    )
+    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
 
     skill_dir = tmp_path / "my-skill"
     skill_dir.mkdir()
@@ -307,10 +301,7 @@ def test_collect_explicit_directory_as_skill(tmp_path):
 
 def test_collect_explicit_directory_recursive_for_prompts(tmp_path):
     """manifest 显式声明的 prompt 目录应递归发现其内部 .md 文件。"""
-    from nova_harness.package.resolve.discovery import (
-        ResourceType,
-        collect_explicit,
-    )
+    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
 
     prompt_dir = tmp_path / "prompts"
     prompt_dir.mkdir()
@@ -327,10 +318,7 @@ def test_collect_explicit_directory_recursive_for_prompts(tmp_path):
 
 def test_collect_explicit_directory_recursive_for_extensions(tmp_path):
     """manifest 显式声明的 extension 目录应递归发现内部扩展。"""
-    from nova_harness.package.resolve.discovery import (
-        ResourceType,
-        collect_explicit,
-    )
+    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
 
     ext_dir = tmp_path / "extensions"
     ext_dir.mkdir()
@@ -344,10 +332,7 @@ def test_collect_explicit_directory_recursive_for_extensions(tmp_path):
     assert str(sub.resolve()) in result
     assert str(ext_dir.resolve()) not in result
     """manifest 中的 glob 匹配到目录时也应递归扫描。"""
-    from nova_harness.package.resolve.discovery import (
-        ResourceType,
-        collect_explicit,
-    )
+    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
 
     prompt_dir = tmp_path / "prompts"
     prompt_dir.mkdir()
@@ -400,10 +385,7 @@ def test_collect_ancestor_agents_skills_dirs(tmp_path):
 
 def test_nested_ignore_negation_reincludes(tmp_path) -> None:
     """子级 .gitignore 的 ``!`` 反选可以恢复被上层忽略的路径（last-match-wins）。"""
-    from nova_harness.package.utils import (
-        is_ignored_by_specs,
-        load_ignore_specs,
-    )
+    from nova_harness.package.utils import is_ignored_by_specs, load_ignore_specs
 
     (tmp_path / ".gitignore").write_text("*.md\n", encoding="utf-8")
     docs = tmp_path / "docs"

@@ -9,10 +9,6 @@ from typing import Literal, Optional
 
 import nova_harness.core.domains.compaction.compaction as compaction_module
 import pytest
-from nova_ai import (
-    AssistantMessageEventStream,
-    SimpleStreamOptions,
-)
 from nova_harness.core.domains.compaction.branch_summarization import (
     collect_entries_for_branch_summary,
     prepare_branch_entries,
@@ -53,6 +49,8 @@ from nova_protocol import (
     Usage,
     UserMessage,
 )
+
+from nova_ai import AssistantMessageEventStream, SimpleStreamOptions
 
 
 def _user(text: str) -> UserMessage:

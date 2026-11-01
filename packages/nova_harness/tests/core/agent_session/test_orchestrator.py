@@ -1,14 +1,6 @@
 """Orchestrator 测试——编排四步对位 codex orchestrator.rs 语义"""
 
 import pytest
-from nova_protocol import (
-    ApprovalPolicy,
-    ExecApprovalRequirement,
-    ReviewDecision,
-    ReviewDecisionPayload,
-    ToolDecisionSource,
-)
-
 from nova_harness.core.agent_session.controllers.orchestrator import (
     ApprovalAction,
     ExecAttemptOutput,
@@ -17,6 +9,13 @@ from nova_harness.core.agent_session.controllers.orchestrator import (
     SandboxAttempt,
     ToolRejected,
     default_exec_approval_requirement,
+)
+from nova_protocol import (
+    ApprovalPolicy,
+    ExecApprovalRequirement,
+    ReviewDecision,
+    ReviewDecisionPayload,
+    ToolDecisionSource,
 )
 
 

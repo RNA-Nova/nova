@@ -3,7 +3,7 @@
 from typing import List, Optional
 
 from nova_harness.types.session.entries import SessionEntry
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from pydantic import Field
 
 

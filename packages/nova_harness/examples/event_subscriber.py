@@ -8,17 +8,22 @@ from nova_protocol import (
     AgentEndEvent,
     AgentEvent,
     AgentStartEvent,
+    AssistantMessage,
+    ImageContent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
+    ToolResultMessage,
     TurnEndEvent,
     TurnStartEvent,
+    UserMessage,
 )
-from nova_protocol.content import ImageContent, TextContent, ThinkingContent, ToolCall
-from nova_protocol.messages import AssistantMessage, ToolResultMessage, UserMessage
 
 
 def on_print(event: AgentEvent, file: TextIO = sys.stdout) -> None:

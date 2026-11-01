@@ -10,16 +10,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from nova_ai import (
-    VOLCENGINE_MODELS,
-    builtin_models,
-)
 from nova_harness import create_agent_session
-from nova_protocol import (
-    Context,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import Context, TextContent, UserMessage
+
+from nova_ai import VOLCENGINE_MODELS, builtin_models
 
 
 def _volc_key():

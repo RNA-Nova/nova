@@ -89,6 +89,23 @@ def test_session_file_roundtrip_uses_camelcase():
         assert ctx.thinking_level == ModelThinkingLevel.LOW
 
 
+def test_persisted_content_is_secret_redacted():
+    """落盘出口 secret 清洗：消息文本里的密钥模式不落盘
+    （codex redact_secrets 对位——entry_to_json 单点）。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = SessionManager.create(cwd="/tmp", session_dir=tmp)
+        manager.append_message(
+            __assistant_message(
+                'run: curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9" api.x'
+            )
+        )
+        file_path = manager.get_session_file()
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "eyJhbGciOiJIUzI1NiJ9" not in content
+        assert "[REDACTED_SECRET]" in content
+
+
 def __assistant_message(text: str):
     """构造一个最简的 assistant message。"""
     from nova_protocol import AssistantMessage, TextContent

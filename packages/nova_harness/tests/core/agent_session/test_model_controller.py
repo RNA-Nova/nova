@@ -4,11 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from nova_harness.core.agent_session.controllers import ModelController
-from nova_protocol import (
-    Model,
-    ModelCost,
-    ModelThinkingLevel,
-)
+from nova_protocol import Model, ModelCost, ModelThinkingLevel
 
 
 def _model(reasoning: bool = True, thinking_level_map=None) -> Model:

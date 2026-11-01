@@ -9,8 +9,7 @@ from enum import Enum
 from typing import Any, Literal, Optional, Union
 
 from nova_harness.types.compaction.compaction import CompactionSettings
-from nova_protocol import ModelThinkingLevel
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import ModelThinkingLevel, NovaBaseModel
 
 
 class SettingsScope(str, Enum):

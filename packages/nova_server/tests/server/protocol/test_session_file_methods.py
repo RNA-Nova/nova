@@ -21,11 +21,7 @@ from nova_harness.core import AgentSession
 from nova_harness.sessions import SessionManager
 from nova_harness.sessions.utils import get_default_session_dir_path
 from nova_harness.types.session.config import AgentSessionConfig
-from nova_protocol import (
-    AssistantMessage,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import AssistantMessage, TextContent, UserMessage
 from nova_server.protocol import JSONRPCError, MethodRegistry
 from nova_server.protocol.methods import session as session_methods
 from nova_server.protocol.methods.state import ServerState

@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Union
 
-from nova_protocol.base_model import NovaBaseModel
+from nova_protocol import NovaBaseModel
 from nova_server.types.items import NovaItem
 from pydantic import Field, SerializeAsAny
 
@@ -52,4 +52,11 @@ __all__ = [
     "ItemStartedNotification",
     "ItemDeltaNotification",
     "ItemCompletedNotification",
+    "ItemNotification",
 ]
+
+
+ItemNotification = Union[
+    ItemStartedNotification, ItemDeltaNotification, ItemCompletedNotification
+]
+"""归约层产出的 item 通知联合（SessionReducer emit 的载荷类型——规则 11 命名别名）。"""

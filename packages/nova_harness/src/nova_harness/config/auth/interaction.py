@@ -16,16 +16,18 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional
 
+from nova_async import TaskTracker
 from nova_harness.config.auth.acquisition import acquire_authorization_code
 from nova_harness.types.ui.context import UIContext
-from nova_protocol.auth import (
+from nova_protocol import (
+    AbortSignal,
     AuthEvent,
     AuthInteraction,
     AuthorizationRequest,
     AuthPrompt,
     LoginCancelledError,
+    is_aborted,
 )
-from nova_protocol.signal import AbortSignal, is_aborted
 
 
 class UIAuthInteraction(AuthInteraction):
@@ -35,6 +37,9 @@ class UIAuthInteraction(AuthInteraction):
         self.ui = ui
         self.signal = signal
         self._opened_url: Optional[str] = None
+        # host:openUrl 即发即答任务的台账（防 GC 蒸发；短寿命 UI 请求，
+        # 完成自摘，无需关停仪式）
+        self._tasks = TaskTracker(name="auth-interaction")
 
     def _open_browser(self, url: Optional[str]) -> None:
         """经客户端打开授权页（``host:openUrl``——执行位置永远在客户端）。
@@ -53,8 +58,9 @@ class UIAuthInteraction(AuthInteraction):
         try:
             # 即发即答（执行调用无 UI 生命周期负担）：全局作用域（登录不归
             # 某个 run），fire-and-forget——打开失败不影响流程
-            asyncio.get_running_loop().create_task(
-                self.ui.request("host:openUrl", {"url": url}, scope="global")
+            self._tasks.spawn(
+                self.ui.request("host:openUrl", {"url": url}, scope="global"),
+                name="host:openUrl",
             )
         except Exception:
             pass

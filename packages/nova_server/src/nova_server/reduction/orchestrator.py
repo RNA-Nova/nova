@@ -52,6 +52,7 @@ from nova_server.types.items import (
 from nova_server.types.notifications import (
     ItemCompletedNotification,
     ItemDeltaNotification,
+    ItemNotification,
     ItemStartedNotification,
 )
 
@@ -92,7 +93,7 @@ class SessionReducer:
     内存——落盘仍是消息形，item 层是纯线上产物。
     """
 
-    def __init__(self, emit: Callable[[Any], None]) -> None:
+    def __init__(self, emit: Callable[[ItemNotification], None]) -> None:
         self._emit = emit
         # 在飞 item（started 未 completed）——syncSession 快照的在飞段来源
         self._in_flight: Dict[str, NovaItem] = {}

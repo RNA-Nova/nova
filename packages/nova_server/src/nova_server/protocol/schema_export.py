@@ -186,6 +186,45 @@ def _literal_default(py_type: Any, field_name: str) -> Optional[Any]:
     return None
 
 
+def _discriminator_for(members: List[Any]) -> Optional[Dict[str, Any]]:
+    """模型变体联合的判别键（发射 JSON Schema ``discriminator``）。
+
+    全部成员是 pydantic 模型、且存在唯一共享的单值 ``Literal`` 字段
+    （各成员值互异）时返回判别声明；否则 None——标量/自由联合
+    （``Union[KnownApi, str]``）与开放集联合（含 ``CustomItem``/
+    ``CustomAgentMessage`` 兜底成员）不发射判别键。
+    """
+    unwrapped = [_unwrap(m) for m in members]
+    if not unwrapped or not all(_is_pydantic_model(m) for m in unwrapped):
+        return None
+    literal_fields: List[Dict[str, Any]] = []
+    for member in unwrapped:
+        singles: Dict[str, Any] = {}
+        for name, finfo in member.model_fields.items():
+            ann = _unwrap(finfo.annotation)
+            if get_origin(ann) is Literal:
+                values = list(get_args(ann))
+                if len(values) == 1:
+                    singles[name] = values[0]
+        literal_fields.append(singles)
+    common = set(literal_fields[0])
+    for singles in literal_fields[1:]:
+        common &= set(singles)
+    candidates = [
+        name
+        for name in common
+        if len({singles[name] for singles in literal_fields}) == len(literal_fields)
+    ]
+    if len(candidates) != 1:
+        return None
+    field_name = candidates[0]
+    mapping = {
+        str(singles[field_name]): f"#/$defs/{_ts_name(member)}"
+        for member, singles in zip(unwrapped, literal_fields)
+    }
+    return {"propertyName": field_name, "mapping": mapping}
+
+
 class _Walker:
     """单一 annotation walker，同时产出 TS 与 JSON Schema。"""
 
@@ -226,6 +265,9 @@ class _Walker:
                     self._named_model(member)
                     member_refs.append({"$ref": f"#/$defs/{_ts_name(member)}"})
             self.reg.schema_defs["NovaWireItem"] = {"anyOf": member_refs}
+            disc = _discriminator_for(list(get_args(NovaWireItem)))
+            if disc is not None:
+                self.reg.schema_defs["NovaWireItem"]["discriminator"] = disc
             return "NovaWireItem", {"$ref": "#/$defs/NovaWireItem"}
 
         # 具名 Union 别名：发射别名引用并确保成员已注册
@@ -247,6 +289,9 @@ class _Walker:
                         f"export type {alias_name} = {' | '.join(member_ts)};"
                     )
                     self.reg.schema_defs[alias_name] = {"anyOf": member_refs}
+                    disc = _discriminator_for(_union_members(alias_ann))
+                    if disc is not None:
+                        self.reg.schema_defs[alias_name]["discriminator"] = disc
                 return alias_name, {"$ref": f"#/$defs/{alias_name}"}
 
         if annotation in (str, datetime, date, time, bytes):
@@ -276,7 +321,13 @@ class _Walker:
                 ts, schema = self.map(arg)
                 ts_parts.append(ts)
                 schema_parts.append(schema)
-            return " | ".join(ts_parts), {"anyOf": schema_parts}
+            union_schema: Dict[str, Any] = {"anyOf": schema_parts}
+            # 模型变体联合发射判别键（codex serde tag 对位——其他语言
+            # codegen 需要它重建判别联合）
+            disc = _discriminator_for(args)
+            if disc is not None:
+                union_schema["discriminator"] = disc
+            return " | ".join(ts_parts), union_schema
 
         if origin in (list, set, frozenset) or (
             origin is not None
@@ -579,9 +630,21 @@ def build_artifacts() -> Tuple[Dict[str, Any], str]:
         "contractVersionMinor": CONTRACT_VERSION_MINOR,
         "novaEvent": {"oneOf": schema_envelope_variants},
         "sessionEntry": {
-            "oneOf": [{"$ref": f"#/$defs/{name}"} for name in entry_names]
+            "oneOf": [{"$ref": f"#/$defs/{name}"} for name in entry_names],
+            **(
+                {"discriminator": disc}
+                if (disc := _discriminator_for(entry_members)) is not None
+                else {}
+            ),
         },
-        "novaItem": {"oneOf": [{"$ref": f"#/$defs/{name}"} for name in item_names]},
+        "novaItem": {
+            "oneOf": [{"$ref": f"#/$defs/{name}"} for name in item_names],
+            **(
+                {"discriminator": disc}
+                if (disc := _discriminator_for(item_members)) is not None
+                else {}
+            ),
+        },
         "methods": methods_schema,
         "$defs": defs,
     }

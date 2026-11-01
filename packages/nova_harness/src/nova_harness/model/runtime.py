@@ -1,7 +1,7 @@
 # model_runtime/runtime.py
 """ModelRuntime：模型与鉴权的运行时（对齐 TS ``core/model-runtime.ts``）。
 
-本类是 nova_ai ``Models`` 集合之上的完整运行时，而非兼容壳：
+本类是 nova_ai ``ModelsManager`` 集合之上的完整运行时，而非兼容壳：
 
 - provider 通过 ``composer`` 三层合成（内置 → models.json → 扩展注册），
   内置 provider 的 auth（含 OAuth）在无覆盖时原样保留；
@@ -9,7 +9,7 @@
   models.json/extension key → 环境变量链 → OAuth 刷新），
   不把 api_key / Authorization 烘焙进 Model；
 - ``stream`` / ``stream_simple`` / ``complete`` / ``login`` / ``logout``
-  等 Models 表面直接透传内部集合，调用方无需触碰底层 ``Models`` 实例；
+  等 ModelsManager 表面直接透传内部集合，调用方无需触碰底层 ``ModelsManager`` 实例；
 - ``get_available`` / ``has_configured_auth`` 是同步快照读，
   由 ``refresh_availability``（async）或同步近似 ``_update_sync_snapshot`` 维护。
 """
@@ -22,12 +22,14 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from nova_ai import Provider, builtin_models, create_models
+from nova_ai import Provider, builtin_models, create_models_manager
 from nova_ai.auth.resolve import AuthResolutionOverrides
+from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
 from nova_ai.gateway.store import InMemoryModelsStore
-from nova_ai.providers.all import get_builtin_model_data_generated_at
-from nova_ai.providers.remote_catalog import with_remote_catalog
+from nova_ai.model_catalog import builtin_catalog_generated_at
 from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
+from nova_async import TaskTracker
+from nova_harness.config.auth.refresh_locks import file_refresh_locks
 from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.config.defaults import (
     MODELS_FILE_NAME,
@@ -42,6 +44,7 @@ from nova_harness.config.resolve import (
     resolve_headers_or_throw,
 )
 from nova_harness.core.utils.json import strip_json_comments
+from nova_harness.model.catalog import catalog_refresh_policy
 from nova_harness.model.composer import compose_provider, validate_extension_provider
 from nova_harness.model.store import FileModelsStore
 from nova_harness.package.utils import is_offline_mode_enabled
@@ -50,13 +53,18 @@ from nova_harness.types.model import (
     ModelsConfig,
     ProviderConfigInput,
 )
-from nova_protocol import Model
-from nova_protocol.auth import AuthCheck, AuthResult, AuthType, CredentialInfo
-from nova_protocol.messages import AssistantMessage, Context
-from nova_protocol.signal import AbortSignal
-
-# 无远程数据源的内置 provider（订阅制单模型，目录静态）
-_STATIC_CATALOG_PROVIDERS = {"kimi-coding"}
+from nova_protocol import (
+    AbortSignal,
+    AssistantMessage,
+    AuthCheck,
+    AuthResult,
+    AuthType,
+    Context,
+    Credential,
+    CredentialInfo,
+    Model,
+    NovaDiagnostic,
+)
 
 
 class ModelRuntime:
@@ -83,18 +91,21 @@ class ModelRuntime:
         self.load_error: Optional[str] = None
 
         self._config: Optional[ModelsConfig] = None
-        # 内置 provider 叠加远程目录物化包装（对齐 TS withRemoteCatalog）：
-        # 基线 = 包内生成种子；运行时刷新物化到 ~/.nova/agent/models-store.json。
-        # kimi-coding 无远程数据源（订阅制单模型），保持静态。
+        # 内置 provider 的六件套刷新在组合根包装（对齐 pi ModelRuntime 的
+        # withRemoteCatalog）：nova_ai 出厂时 moonshotai×2 为静态（仅
+        # catalog_source 选配），kimi/火山自带三件套刷新——只包装
+        # "有选配且无刷新"者（radius 同款豁免）
         self._builtins: Dict[str, Provider] = {}
+        _generated_at = builtin_catalog_generated_at()
         for _provider in builtin_models().get_providers():
-            self._builtins[_provider.id] = (
-                _provider
-                if _provider.id in _STATIC_CATALOG_PROVIDERS
-                else with_remote_catalog(
-                    _provider, get_builtin_model_data_generated_at()
+            if (
+                _provider.refresh_models is None
+                and _provider.catalog_source is not None
+            ):
+                _provider.refresh_models = catalog_refresh_policy(
+                    _provider, _generated_at
                 )
-            )
+            self._builtins[_provider.id] = _provider
         self._extension_providers: Dict[str, ProviderConfigInput] = {}
         # 代码级配置（无法 JSON 化），与纯数据配置分开存储
         self._extension_stream_fns: Dict[str, Callable[..., Any]] = {}
@@ -113,11 +124,24 @@ class ModelRuntime:
                 if self.models_json_path
                 else InMemoryModelsStore()
             )
-        self._models = create_models(
+        # 诊断实时缝：稳定转发闭包注入 manager；真正的听众由会话装配后
+        # 经 set_diagnostic_listener 晚绑定（启动刷新早于会话存在——
+        # 那时诊断随结果批量返回，不接实时通道）
+        self._diagnostic_listener: Optional[Callable[[NovaDiagnostic], None]] = None
+        self._models = create_models_manager(
             credential_store=auth_storage,
             models_store=models_store,
             auth_context=auth_context,
             model_headers_resolver=self._resolve_model_headers,
+            # 目录站容器（组合根供给）：公开站按 provider.catalog_source
+            # 路由发放进 RefreshModelsContext.catalog_fetch
+            catalog_services={
+                "pi.dev": PiDevCatalog(),
+                "models.dev": ModelsDevCatalog(),
+            },
+            # per-provider 刷新锁的文件实现（跨进程去重——多进程共享 auth.json）
+            refresh_locks=file_refresh_locks(Path(get_agent_dir()) / "auth-locks"),
+            on_diagnostic=self._forward_diagnostic,
         )
 
         # 可用性快照（同步读取路径）
@@ -126,6 +150,8 @@ class ModelRuntime:
         self._auth_checks: Dict[str, Optional[AuthCheck]] = {}
         self._availability_error: Optional[str] = None
         self._availability_task: Optional[asyncio.Task] = None
+        # 后台刷新任务的台账（防 GC 蒸发；完成自摘）
+        self._background = TaskTracker(name="model-runtime")
 
         self._load_config()
         self._rebuild_providers()
@@ -341,7 +367,7 @@ class ModelRuntime:
                 # 错误已记录到 _availability_error，后台任务不再抛出
                 pass
 
-        asyncio.ensure_future(_swallow())
+        self._background.spawn(_swallow(), name="availability-refresh")
 
     # ------------------------------------------------------------------
     # 查询（同步）
@@ -429,7 +455,7 @@ class ModelRuntime:
         return provider.name if provider is not None else provider_id
 
     # ------------------------------------------------------------------
-    # Models 表面：provider / 模型访问
+    # ModelsManager 表面：provider / 模型访问
     # ------------------------------------------------------------------
 
     def get_providers(self) -> List[Provider]:
@@ -477,7 +503,7 @@ class ModelRuntime:
         return await self._models.check_auth(provider_id)
 
     # ------------------------------------------------------------------
-    # Models 表面：流式调用
+    # ModelsManager 表面：流式调用
     # ------------------------------------------------------------------
 
     def stream(
@@ -617,6 +643,15 @@ class ModelRuntime:
     # Runtime credential 管理
     # ------------------------------------------------------------------
 
+    async def set_credential(self, provider_id: str, credential: Credential) -> None:
+        """写入 credential（经 ModelsManager 的统一写漏斗——per-provider
+        锁串行；联动刷新归调用方）。
+
+        ``credential`` 的形状归 ``nova_protocol``（``ApiKeyCredential`` /
+        ``OAuthCredential``）。
+        """
+        await self._models.set_credential(provider_id, credential)
+
     async def set_runtime_api_key(self, provider_id: str, api_key: str) -> None:
         """设置 runtime API key（不落盘），并联动快照与模型刷新。"""
         self.auth_storage.set_runtime_api_key(provider_id, api_key)
@@ -631,11 +666,23 @@ class ModelRuntime:
 
     async def list_credentials(self) -> List[CredentialInfo]:
         """列出全部 credential 元信息（不暴露 secret）。"""
-        return await self.auth_storage.list()
+        return self.auth_storage.list()
 
     # ------------------------------------------------------------------
     # 刷新与重载
     # ------------------------------------------------------------------
+
+    def set_diagnostic_listener(
+        self, listener: Optional[Callable[[NovaDiagnostic], None]]
+    ) -> None:
+        """晚绑定诊断听众（会话装配后调用；None 摘除，退回纯批模式）。"""
+        self._diagnostic_listener = listener
+
+    def _forward_diagnostic(self, diagnostic: NovaDiagnostic) -> None:
+        """稳定转发闭包（注入 manager 的诊断实时缝）——转发给当前听众。"""
+        listener = self._diagnostic_listener
+        if listener is not None:
+            listener(diagnostic)
 
     async def refresh(
         self,

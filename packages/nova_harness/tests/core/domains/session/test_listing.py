@@ -14,11 +14,7 @@ from nova_harness.sessions.listing import (
 from nova_harness.sessions.utils import generate_session_id
 from nova_harness.types.session.entries import SessionHeader, SessionMessageEntry
 from nova_harness.types.session.info import SessionInfo
-from nova_protocol import (
-    AssistantMessage,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import AssistantMessage, TextContent, UserMessage
 
 
 def _write_session(path, header, entries):

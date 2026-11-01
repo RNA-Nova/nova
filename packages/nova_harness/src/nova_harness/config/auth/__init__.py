@@ -9,7 +9,7 @@ from nova_harness.config.auth.guidance import (
 )
 from nova_harness.config.auth.interaction import UIAuthInteraction
 from nova_harness.config.auth.storage import ApiKeyCredential, AuthStorage
-from nova_protocol.auth import LoginCancelledError
+from nova_protocol import LoginCancelledError
 
 __all__ = [
     "ApiKeyCredential",

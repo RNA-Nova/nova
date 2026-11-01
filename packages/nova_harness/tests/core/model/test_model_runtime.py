@@ -17,6 +17,7 @@ from nova_harness.model import ModelRuntime
 from nova_harness.model.composer import compose_provider
 from nova_harness.types.model import ProviderConfigInput
 from nova_protocol import OAuthCredential, OpenAICompletionsCompat
+
 from tests._helpers.auth_storage import auth_storage_in_memory
 
 
@@ -402,12 +403,10 @@ async def test_get_api_key_resolves_oauth_access_token():
     storage = auth_storage_in_memory({})
     runtime = ModelRuntime(storage)
 
-    async def _set_oauth(_current):
-        return OAuthCredential(
-            access="kimi-oauth-token", refresh="r", expires=9999999999999
-        )
-
-    await storage.modify("kimi-coding", _set_oauth)
+    storage.write(
+        "kimi-coding",
+        OAuthCredential(access="kimi-oauth-token", refresh="r", expires=9999999999999),
+    )
 
     model = runtime.find("kimi-coding", "k3")
     assert model is not None
@@ -459,10 +458,10 @@ async def test_refresh_availability_marks_oauth():
     storage = auth_storage_in_memory({})
     runtime = ModelRuntime(storage)
 
-    async def _set_oauth(_current):
-        return OAuthCredential(access="a", refresh="r", expires=9999999999999)
-
-    await storage.modify("kimi-coding", _set_oauth)
+    storage.write(
+        "kimi-coding",
+        OAuthCredential(access="a", refresh="r", expires=9999999999999),
+    )
     await runtime.refresh_availability()
 
     assert runtime.is_using_oauth("kimi-coding")
@@ -744,10 +743,11 @@ def _make_model(model_id: str, provider: str = "dyn", max_tokens: int = 8192):
 
 
 def _make_dynamic_base(fetch):
+    from nova_protocol import ProviderAuth
+
     from nova_ai import create_provider
     from nova_ai.api_impls import openai_completions
     from nova_ai.auth.helpers import env_api_key_auth
-    from nova_protocol import ProviderAuth
 
     return create_provider(
         id="dyn",
@@ -792,6 +792,82 @@ async def test_composed_provider_preserves_dynamic_refresh(tmp_path, monkeypatch
     model_ids = [m.id for m in provider.get_models()]
     assert "old-m" in model_ids and "new-m" in model_ids
     assert provider.get_model("new-m").max_tokens == 111
+
+
+def test_composed_provider_preserves_catalog_source():
+    """组合透传：base 的目录站选配（catalog_source）与修正知识
+    （catalog_knowledge）随组合保留——manager 站路由不因组合而失效。"""
+    from nova_harness.types.model import ProviderConfig
+
+    from nova_ai import create_provider
+    from nova_catalog.providers.moonshotai import DEF as knowledge
+
+    base = create_provider(
+        id="p",
+        name="p",
+        base_url="http://p/v1",
+        catalog_source="pi.dev",
+        catalog_knowledge=knowledge,
+    )
+    composed = compose_provider(
+        "p", base, ProviderConfig.model_validate({"apiKey": "sk-x"}), None
+    )
+    assert composed.catalog_source == "pi.dev"
+    assert composed.catalog_knowledge is knowledge
+
+
+@pytest.mark.asyncio
+async def test_composed_builtin_keeps_catalog_refresh(tmp_path, monkeypatch):
+    """models.json 覆盖内置 provider（仅 apiKey 也会触发组合）后，
+    公开站刷新仍生效——回归：组合丢失 catalog_source 导致刷新静默残废。
+
+    （conftest 将两站 fetch 离线化，此处按站方法层级覆盖假拉取器。）
+    """
+    import time
+
+    from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
+    from nova_ai.gateway.catalog import CatalogOutcome
+
+    async def fake_pi_dev_fetch(self, key, signal, validator):
+        return CatalogOutcome(
+            status=200,
+            models_fields=[
+                {
+                    "id": "kimi-k9",
+                    "name": "Kimi K9",
+                    "api": "openai-completions",  # 真实站必带的协议标注（源数据驱动前提）
+                    "reasoning": True,
+                    "input_types": ["text"],
+                    "cost": {
+                        "input": 1,
+                        "output": 2,
+                        "cache_read": 0.1,
+                        "cache_write": 0,
+                    },
+                    "context_window": 262144,
+                    "max_tokens": 32768,
+                }
+            ],
+            etag='"v1"',
+            # 新鲜度竞速守卫：须晚于基线生成时间，否则 overlay 被忽略
+            last_modified=int(time.time() * 1000),
+        )
+
+    async def fake_models_dev_fetch(self, key, signal, validator):
+        return CatalogOutcome(status=200, models_fields=[])
+
+    monkeypatch.setattr(PiDevCatalog, "fetch", fake_pi_dev_fetch)
+    monkeypatch.setattr(ModelsDevCatalog, "fetch", fake_models_dev_fetch)
+    runtime = _runtime(tmp_path, {"providers": {"moonshotai": {"apiKey": "sk-x"}}})
+    provider = runtime.get_provider("moonshotai")
+    assert type(provider).__name__ == "_ComposedProvider"  # 覆盖确实触发了组合
+
+    result = await runtime.refresh(allow_network=True)
+    assert "moonshotai" not in result["errors"]
+    model = provider.get_model("kimi-k9")
+    assert model is not None
+    assert model.provider == "moonshotai"
+    assert model.base_url == "https://api.moonshot.ai/v1"
 
 
 def test_composed_provider_without_refresh_capability():
@@ -936,8 +1012,9 @@ async def test_file_models_store_roundtrip(tmp_path):
 @pytest.mark.asyncio
 async def test_refresh_restores_models_from_store_when_offline(tmp_path, monkeypatch):
     """离线刷新：从 models-store 缓存恢复动态模型，不触网。"""
-    from nova_ai.gateway.store import InMemoryModelsStore
     from nova_protocol import ModelsStoreEntry
+
+    from nova_ai.gateway.store import InMemoryModelsStore
 
     monkeypatch.setenv("NOVA_TEST_DYN_KEY", "dyn-key")
 
@@ -1209,10 +1286,7 @@ async def test_env_ref_resolves_via_custom_auth_context(tmp_path, monkeypatch):
 
 def test_config_types_are_frozen():
     """models.json 配置类型冻结：顶层赋值被拒绝（对齐 TS deepFreeze 的顶层语义）。"""
-    from nova_harness.types.model import (
-        ModelsConfig,
-        ProviderConfig,
-    )
+    from nova_harness.types.model import ModelsConfig, ProviderConfig
     from pydantic import ValidationError
 
     cfg = ModelsConfig.model_validate({"providers": {"p": {"base_url": "http://x"}}})

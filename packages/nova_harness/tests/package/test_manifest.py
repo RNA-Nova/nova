@@ -1,9 +1,6 @@
 """Tests for package_manager/manifest.py."""
 
-from nova_harness.package.manifest import (
-    read_manifest,
-    read_requirements,
-)
+from nova_harness.package.manifest import read_manifest, read_requirements
 
 
 def _write_pyproject(path, content: str) -> None:

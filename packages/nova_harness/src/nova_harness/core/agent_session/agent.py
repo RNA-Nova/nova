@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from nova_agent import Agent
+from nova_async import TaskTracker
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
@@ -88,6 +89,7 @@ from nova_harness.types.extensions.actions import (
     ExtensionProviderActions,
 )
 from nova_harness.types.extensions.commands import SlashCommandInfo
+from nova_harness.types.extensions.context import ExtensionCommandContext
 from nova_harness.types.extensions.exec import ExecOptions, ExecResult
 from nova_harness.types.protocols import (
     ModelRuntimeProtocol,
@@ -117,8 +119,10 @@ from nova_protocol import (
     CustomAgentMessage,
     ImageContent,
     ModelThinkingLevel,
+    NovaDiagnostic,
     TextContent,
     UserMessage,
+    WarningEvent,
 )
 
 # ============================================================================
@@ -224,6 +228,9 @@ class AgentSession:
         self._extension_runner: Optional[ExtensionRunner] = None
         self._unsubscribe_agent: Optional[Callable[[], None]] = None
         self._event_listeners: List[Callable[[AgentSessionEvent], None]] = []
+        # 会话级任务台账：listener 派发 / runner.emit / abort shim 等
+        # fire-and-forget 的属主（dispose 时落闸 + 级联取消）
+        self._tasks = TaskTracker(name="agent-session")
 
         self._steering_messages: List[str] = []
         self._follow_up_messages: List[str] = []
@@ -294,6 +301,7 @@ class AgentSession:
 
         self._subscribe_agent_events()
         self._install_agent_hooks()
+        self._bridge_model_diagnostics()
         self._build_runtime()
         self.sync_queue_modes_from_settings()
 
@@ -303,13 +311,23 @@ class AgentSession:
 
     def _subscribe_agent_events(self) -> None:
         """订阅底层 Agent 事件，用于持久化与会话生命周期。"""
-        if hasattr(self.agent, "subscribe"):
-            self._unsubscribe_agent = self.agent.subscribe(self._events.handle)
+        self._unsubscribe_agent = self.agent.subscribe(self._events.handle)
+
+    def _bridge_model_diagnostics(self) -> None:
+        """把模型目录刷新的诊断实时缝桥进会话事件（WarningEvent 上主干道）。
+
+        组合根职责：nova_ai 是库不发射事件——刷新诊断经 manager 的
+        ``on_diagnostic`` 缝外发到这里，转成 WarningEvent 由会话分发
+        （瞬态，不落盘）。启动刷新早于此桥接（随结果批量返回）。
+        """
+
+        def _on_diagnostic(diagnostic: NovaDiagnostic) -> None:
+            self._emit(WarningEvent(kind=diagnostic.kind, message=diagnostic.message))
+
+        self._model_runtime.set_diagnostic_listener(_on_diagnostic)
 
     def _install_agent_hooks(self) -> None:
         """把扩展 runner 的能力挂到 Agent 的工具/续话钩子上。"""
-        if not hasattr(self.agent, "before_tool_call"):
-            return
 
         async def before_tool_call(ctx: Any, signal: Optional[Any] = None) -> Any:
             runner = self._extension_runner
@@ -929,7 +947,7 @@ class AgentSession:
             try:
                 result = listener(event)
                 if inspect.isawaitable(result):
-                    asyncio.create_task(result)
+                    self._tasks.spawn(result, name="session-listener")
             except Exception:
                 # 监听者异常不应中断主流程
                 pass
@@ -1033,7 +1051,7 @@ class AgentSession:
             if self._extension_abort_handler is not None:
                 self._extension_abort_handler()
                 return
-            asyncio.create_task(self.abort())
+            self._tasks.spawn(self.abort(), name="abort")
 
         async def exec_command(
             command: str, args: List[str], options: Optional[Any] = None
@@ -1056,9 +1074,8 @@ class AgentSession:
                 )
                 if opts.timeout and opts.timeout > 0:
                     try:
-                        stdout_b, stderr_b = await asyncio.wait_for(
-                            proc.communicate(), timeout=opts.timeout
-                        )
+                        async with asyncio.timeout(opts.timeout):
+                            stdout_b, stderr_b = await proc.communicate()
                     except asyncio.TimeoutError:
                         proc.kill()
                         stdout_b, stderr_b = await proc.communicate()
@@ -1249,8 +1266,7 @@ class AgentSession:
         """当外部（如 RPC/TUI）未注入命令上下文 actions 时，使用 AgentSession 自身能力构造默认值。"""
 
         async def wait_for_idle() -> None:
-            if hasattr(self.agent, "wait_for_idle"):
-                await self.agent.wait_for_idle()
+            await self.agent.wait_for_idle()
 
         async def new_session(*args: Any, **kwargs: Any) -> Dict[str, Any]:
             return await self.new_agent_session(
@@ -1410,14 +1426,15 @@ class AgentSession:
         self._subscribe_agent_events()
 
     def dispose(self) -> None:
-        """释放当前会话占用的资源。"""
+        """释放当前会话占用的资源（含在途派发任务的落闸与级联取消）。"""
+        self._tasks.close()
+        self._tasks.cancel_all()
         try:
             self.abort_retry()
             self.abort_compaction()
             self.abort_branch_summary()
             self.abort_user_tool()
-            if hasattr(self.agent, "abort"):
-                self.agent.abort()
+            self.agent.abort()
         except Exception:
             pass
 
@@ -1504,8 +1521,7 @@ class AgentSession:
                 raise RuntimeError(format_no_model_selected_message())
 
             api_key = None
-            if hasattr(self.model_runtime, "get_api_key"):
-                api_key = await self.model_runtime.get_api_key(self.model)
+            api_key = await self.model_runtime.get_api_key(self.model)
             if not api_key:
                 raise RuntimeError(
                     format_no_auth_message(
@@ -1571,6 +1587,7 @@ class AgentSession:
         self,
         name: str,
         params: Optional[Dict[str, Any]] = None,
+        # on_event：自由负载（用户工具自定义进度事件——规则 11 款 3）
         on_event: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
     ) -> CustomAgentMessage:
         """按名调用一个已注册的用户工具并记录结果消息。"""
@@ -1613,10 +1630,7 @@ class AgentSession:
         msg = self._last_assistant_message
         self._last_assistant_message = None
         if msg is None:
-            return bool(
-                hasattr(self.agent, "has_queued_messages")
-                and self.agent.has_queued_messages()
-            )
+            return bool(self.agent.has_queued_messages())
 
         if self._retry.is_retryable_error(msg) and await self._retry.prepare_retry(msg):
             return True
@@ -1634,10 +1648,7 @@ class AgentSession:
         if await self._compaction.check_compaction(msg):
             return True
 
-        return bool(
-            hasattr(self.agent, "has_queued_messages")
-            and self.agent.has_queued_messages()
-        )
+        return bool(self.agent.has_queued_messages())
 
     def abort_retry(self) -> None:
         self._retry.abort_retry()
@@ -1815,7 +1826,7 @@ class AgentSession:
         self._emit(MessageStartEvent(message=custom_message))
         self._emit(MessageEndEvent(message=custom_message))
 
-    def create_replaced_session_context(self) -> Any:
+    def create_replaced_session_context(self) -> ExtensionCommandContext:
         """创建用于 session 替换后的扩展上下文。
 
         复制 ``ExtensionCommandContext`` 的所有能力，并额外提供
@@ -1845,10 +1856,8 @@ class AgentSession:
         self.abort_compaction()
         self.abort_branch_summary()
         self.abort_user_tool()
-        if hasattr(self.agent, "abort"):
-            self.agent.abort()
-        if hasattr(self.agent, "wait_for_idle"):
-            await self.agent.wait_for_idle()
+        self.agent.abort()
+        await self.agent.wait_for_idle()
 
     # -------------------------------------------------------------------------
     # 队列模式管理
@@ -1856,22 +1865,18 @@ class AgentSession:
 
     def sync_queue_modes_from_settings(self) -> None:
         """从设置同步 steering/follow-up 模式。"""
-        if hasattr(self.settings_manager, "get_steering_mode"):
-            self.agent.steering_mode = self.settings_manager.get_steering_mode()
-        if hasattr(self.settings_manager, "get_follow_up_mode"):
-            self.agent.follow_up_mode = self.settings_manager.get_follow_up_mode()
+        self.agent.steering_mode = self.settings_manager.get_steering_mode()
+        self.agent.follow_up_mode = self.settings_manager.get_follow_up_mode()
 
     def set_steering_mode(self, mode: str) -> None:
         """设置 steering 模式并保存到设置。"""
         self.agent.steering_mode = mode
-        if hasattr(self.settings_manager, "set_steering_mode"):
-            self.settings_manager.set_steering_mode(mode)
+        self.settings_manager.set_steering_mode(mode)
 
     def set_follow_up_mode(self, mode: str) -> None:
         """设置 follow-up 模式并保存到设置。"""
         self.agent.follow_up_mode = mode
-        if hasattr(self.settings_manager, "set_follow_up_mode"):
-            self.settings_manager.set_follow_up_mode(mode)
+        self.settings_manager.set_follow_up_mode(mode)
 
     # -------------------------------------------------------------------------
     # 模型与思考级别
@@ -2077,7 +2082,7 @@ class AgentSession:
         event = SessionInfoChangedEvent(name=self.session_manager.get_session_name())
         runner = self._extension_runner
         if runner is not None and runner.has_handlers(event.type):
-            asyncio.create_task(runner.emit(event))
+            self._tasks.spawn(runner.emit(event), name="runner-emit")
 
     def set_label(self, entry_id: str, label: Optional[str]) -> None:
         """给会话条目设置/清除标签（对齐 pi setLabel）。"""
@@ -2366,7 +2371,10 @@ class AgentSession:
     # -------------------------------------------------------------------------
 
     def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], None]:
-        """订阅 AgentSession 事件；返回取消订阅函数。"""
+        """订阅 AgentSession 事件；返回取消订阅函数。
+
+        事件为开放集（总线含扩展自定义事件），listener 的 Any 为有意开放（规则 11 Ⅳ 型豁免）。
+        """
         self._event_listeners.append(listener)
 
         def unsubscribe() -> None:
