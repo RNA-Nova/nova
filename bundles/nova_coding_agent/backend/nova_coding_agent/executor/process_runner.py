@@ -16,7 +16,7 @@ terminate + 退出码 + stderr 收集（远程经 ``output_with_stream`` 的流
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, List, Optional, Protocol
+from typing import Any, AsyncIterator, List, Optional, Protocol
 
 from nova_coding_agent.executor.provision import is_ssh_url, parse_ssh_target
 from nova_harness.core.utils.binaries import resolve_binary
@@ -53,8 +53,15 @@ class ProcessRunner(Protocol):
         """本层可用的 fd 路径（远程 v1 恒 None）。"""
         ...
 
-    async def spawn(self, argv: List[str], cwd: str) -> ProcessSession:
-        """无壳 argv 直启进程。"""
+    async def spawn(
+        self, argv: List[str], cwd: str, *, signal: Any = None
+    ) -> ProcessSession:
+        """无壳 argv 直启进程。
+
+        ``signal``：取消词汇——远程实现透传 SDK ``process/start``（启动等待
+        可被打断，AbortedError 直通）并进会话（流式读取逐轮可断）；本地实现
+        仅签名对齐（asyncio 子进程 spawn 无取消点，杀进程归 watcher→
+        terminate 既有路径）。"""
         ...
 
 
@@ -109,7 +116,11 @@ class _LocalSession:
 
 
 class LocalProcessRunner:
-    """本机 spawn（现状等价物：fd/rg 经 resolve_binary 三级解析）。"""
+    """本机 spawn（现状等价物：fd/rg 经 resolve_binary 三级解析）。
+
+    ``signal`` 仅签名对齐协议：asyncio 子进程 spawn 无取消点（本地进程
+    组 kill 的 abort 路径归 ``_session_lines_with_abort`` watcher）。
+    """
 
     async def rg_path(self) -> Optional[str]:
         return resolve_binary("rg")
@@ -117,7 +128,9 @@ class LocalProcessRunner:
     async def fd_path(self) -> Optional[str]:
         return resolve_binary("fd")
 
-    async def spawn(self, argv: List[str], cwd: str) -> ProcessSession:
+    async def spawn(
+        self, argv: List[str], cwd: str, *, signal: Any = None
+    ) -> ProcessSession:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=cwd,
@@ -133,13 +146,22 @@ class LocalProcessRunner:
 
 
 class _ExecutorSession:
-    def __init__(self, handle) -> None:
+    """executor 进程会话。
+
+    ``signal``（取消词汇，随 spawn 透进会话）：流式读取逐轮透传 SDK——
+    signal 触发即打断在飞 read 等待、迭代以 AbortedError 中止（**流停**）；
+    杀进程仍归 ``_session_lines_with_abort`` watcher 的 terminate（流中断
+    ≠ 进程死）——两者分工：流停由 signal，收尸由 watcher。
+    """
+
+    def __init__(self, handle, signal: Any = None) -> None:
         self._handle = handle
+        self._signal = signal
         self._stderr_parts: List[bytes] = []
 
     async def stdout_lines(self) -> AsyncIterator[str]:
         buffer = b""
-        async for stream, chunk in self._handle.output_with_stream():
+        async for stream, chunk in self._handle.output_with_stream(signal=self._signal):
             if stream == "stderr":
                 self._stderr_parts.append(chunk)
                 continue
@@ -157,8 +179,17 @@ class _ExecutorSession:
             pass
 
     async def wait(self) -> int:
-        output = await self._handle.read(wait_ms=1)
-        return output.exit_code if output.exit_code is not None else -1
+        """等退出码（对位本地实现的轮询语义——消费 SDK ``ProcessHandle.wait``
+        的 ``read(wait_ms=1000)`` 轮询循环，进程未退出不返回；修复前是单次
+        ``read(wait_ms=1)`` 快照，对未退出进程恒返 -1）。
+
+        杀后 reap 底限不靠超时：服务端 terminate 必致死（异步生效、下一轮
+        长轮询被终态事件唤醒），连接断开则 read 抛 ConnectionError——本地
+        5s 轮询 + wait_for 兜底针对的是本地子进程管道唤醒丢失竞态，远程
+        无此形态。wait 的 signal 不接：本方法是 terminate 后的收尾读码，
+        取消时机归消费方的 watcher/检查点。
+        """
+        return await self._handle.wait()
 
     async def stderr_text(self) -> str:
         return b"".join(self._stderr_parts).decode("utf-8", errors="replace").strip()
@@ -191,10 +222,14 @@ class ExecutorProcessRunner:
     async def fd_path(self) -> Optional[str]:
         return None
 
-    async def spawn(self, argv: List[str], cwd: str) -> ProcessSession:
+    async def spawn(
+        self, argv: List[str], cwd: str, *, signal: Any = None
+    ) -> ProcessSession:
         client = await self._client()
         extra = self._policy.start_kwargs() if self._policy is not None else {}
+        # signal 透传 SDK：start 等待可被打断（AbortedError 直通）；随会话
+        # 持有供流式读取逐轮透传（见 _ExecutorSession docstring 的分工）
         handle = await client.process.start(
-            argv=argv, cwd=f"file://{cwd}", env={}, **extra
+            argv=argv, cwd=f"file://{cwd}", env={}, signal=signal, **extra
         )
-        return _ExecutorSession(handle)
+        return _ExecutorSession(handle, signal=signal)

@@ -384,7 +384,7 @@ class SquareTool(AgentTool):
         )
 ```
 
-`AgentToolResult` 字段：`content`（`TextContent` / `ImageContent` 列表，回给模型）、`details`（任意 JSON，供 UI 渲染或日志）、`is_error`（默认 `False`，预期内失败——非零退出、文件不存在等——置 `True`）、`terminate`（提前终止提示，见下）、`added_tool_names`（本次结果新引入的工具名，高级用法）。
+`AgentToolResult` 字段：`content`（`TextContent` / `ImageContent` 列表，回给模型）、`details`（任意 JSON，供 UI 渲染或日志）、`is_error`（默认 `False`，预期内失败——非零退出、文件不存在等——置 `True`）、`terminate`（提前终止提示，见下）。
 
 ### 参数校验与矫正
 

@@ -44,6 +44,7 @@ from nova_coding_agent.tools_common.truncate import (
     truncate_head,
     truncate_line,
 )
+from nova_protocol import AbortedError
 
 # ---------------------------------------------------------------------------
 # Read
@@ -87,26 +88,32 @@ class ReadResult:
 
 
 class ReadOperations(Protocol):
-    """Read tool 的可插拔 operations。"""
+    """Read tool 的可插拔 operations。
+
+    ``signal``（keyword-only，缺省 None）：取消词汇——透传到底层
+    FileSystemLayer（远程实现随 RPC 等待被 interrupt，AbortedError 直通）。
+    """
 
     @abstractmethod
-    async def read_text(self, path: str, encoding: str = "utf-8") -> ReadResult:
+    async def read_text(
+        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+    ) -> ReadResult:
         """读取文本文件。"""
 
     @abstractmethod
-    async def read_image(self, path: str) -> ReadResult:
+    async def read_image(self, path: str, *, signal: Any = None) -> ReadResult:
         """读取图片文件，返回原始字节与 MIME 类型。"""
 
     @abstractmethod
-    async def exists(self, path: str) -> bool:
+    async def exists(self, path: str, *, signal: Any = None) -> bool:
         """路径是否存在。"""
 
     @abstractmethod
-    async def is_file(self, path: str) -> bool:
+    async def is_file(self, path: str, *, signal: Any = None) -> bool:
         """是否是文件。"""
 
     @abstractmethod
-    async def is_image_file(self, path: str) -> bool:
+    async def is_image_file(self, path: str, *, signal: Any = None) -> bool:
         """是否是图片文件。"""
 
     @abstractmethod
@@ -124,17 +131,21 @@ class LocalReadOperations:
     def __init__(self, fs: Optional[FileSystemLayer] = None) -> None:
         self._fs = fs or get_local_file_system_layer()
 
-    async def read_text(self, path: str, encoding: str = "utf-8") -> ReadResult:
+    async def read_text(
+        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+    ) -> ReadResult:
         try:
-            raw = await self._fs.read_bytes(path)
+            raw = await self._fs.read_bytes(path, signal=signal)
             text = raw.decode(encoding, errors="replace")
             return ReadResult(text=text, size=len(raw))
+        except AbortedError:
+            raise  # 取消词汇直通——不收编成 ReadResult.error
         except Exception as exc:
             return ReadResult(error=str(exc))
 
-    async def read_image(self, path: str) -> ReadResult:
+    async def read_image(self, path: str, *, signal: Any = None) -> ReadResult:
         try:
-            data = await self._fs.read_bytes(path)
+            data = await self._fs.read_bytes(path, signal=signal)
             # MIME 以魔数嗅探为准（对齐 pi detectSupportedImageMimeTypeFromFile）：
             # 扩展名不可信（无扩展名或张冠李戴时 mimetypes 会标错类型）；
             # 嗅探不出再退 mimetypes，最后兜底 image/png
@@ -142,21 +153,25 @@ class LocalReadOperations:
             if mime is None:
                 mime = mimetypes.guess_type(path)[0] or "image/png"
             return ReadResult(bytes_data=data, mime_type=mime, size=len(data))
+        except AbortedError:
+            raise  # 取消词汇直通（同上）
         except Exception as exc:
             return ReadResult(error=str(exc))
 
-    async def exists(self, path: str) -> bool:
-        return (await self._fs.metadata(path)).exists
+    async def exists(self, path: str, *, signal: Any = None) -> bool:
+        return (await self._fs.metadata(path, signal=signal)).exists
 
-    async def is_file(self, path: str) -> bool:
-        return (await self._fs.metadata(path)).is_file
+    async def is_file(self, path: str, *, signal: Any = None) -> bool:
+        return (await self._fs.metadata(path, signal=signal)).is_file
 
-    async def is_image_file(self, path: str) -> bool:
+    async def is_image_file(self, path: str, *, signal: Any = None) -> bool:
         ext = os.path.splitext(path)[1].lower().lstrip(".")
         if ext in SUPPORTED_IMAGE_TYPES:
             return True
         try:
-            header = await self._fs.read_range(path, 0, 12)
+            header = await self._fs.read_range(path, 0, 12, signal=signal)
+        except AbortedError:
+            raise  # 取消词汇直通（同上）
         except Exception:
             return False
         return detect_image_mime_type(header) is not None
@@ -187,20 +202,20 @@ class WriteResult:
 
 
 class WriteOperations(Protocol):
-    """Write tool 的可插拔 operations。"""
+    """Write tool 的可插拔 operations（``signal`` 取消词汇同 ReadOperations）。"""
 
     @abstractmethod
     async def write_file(
-        self, path: str, content: str, encoding: str = "utf-8"
+        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
     ) -> WriteResult:
         """写入文件。"""
 
     @abstractmethod
-    async def exists(self, path: str) -> bool:
+    async def exists(self, path: str, *, signal: Any = None) -> bool:
         """路径是否存在。"""
 
     @abstractmethod
-    async def ensure_parent_dir(self, path: str) -> None:
+    async def ensure_parent_dir(self, path: str, *, signal: Any = None) -> None:
         """确保父目录存在。"""
 
 
@@ -211,24 +226,26 @@ class LocalWriteOperations:
         self._fs = fs or get_local_file_system_layer()
 
     async def write_file(
-        self, path: str, content: str, encoding: str = "utf-8"
+        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
     ) -> WriteResult:
         try:
-            existed = (await self._fs.metadata(path)).exists
-            await self.ensure_parent_dir(path)
+            existed = (await self._fs.metadata(path, signal=signal)).exists
+            await self.ensure_parent_dir(path, signal=signal)
             # 显式 encode 落盘：内容原样写出（对齐原实现的字节保真语义）
-            await self._fs.write_bytes(path, content.encode(encoding))
+            await self._fs.write_bytes(path, content.encode(encoding), signal=signal)
             return WriteResult(existed=existed, chars=len(content))
+        except AbortedError:
+            raise  # 取消词汇直通——不收编成 WriteResult.error
         except Exception as exc:
             return WriteResult(error=str(exc))
 
-    async def exists(self, path: str) -> bool:
-        return (await self._fs.metadata(path)).exists
+    async def exists(self, path: str, *, signal: Any = None) -> bool:
+        return (await self._fs.metadata(path, signal=signal)).exists
 
-    async def ensure_parent_dir(self, path: str) -> None:
+    async def ensure_parent_dir(self, path: str, *, signal: Any = None) -> None:
         parent = os.path.dirname(path)
         if parent:
-            await self._fs.create_dir(parent)
+            await self._fs.create_dir(parent, signal=signal)
 
 
 def create_local_write_operations(
@@ -243,19 +260,22 @@ def create_local_write_operations(
 
 
 class EditOperations(Protocol):
-    """Edit tool 的可插拔 operations（仅文件 IO；编辑语义见 edit_engine）。"""
+    """Edit tool 的可插拔 operations（仅文件 IO；编辑语义见 edit_engine；
+    ``signal`` 取消词汇同 ReadOperations）。"""
 
     @abstractmethod
-    async def access(self, path: str) -> None:
+    async def access(self, path: str, *, signal: Any = None) -> None:
         """检查文件存在且可读可写（不满足则抛异常，对齐 pi EditOperations.access）。"""
 
     @abstractmethod
-    async def read_text(self, path: str, encoding: str = "utf-8") -> str:
+    async def read_text(
+        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+    ) -> str:
         """读取文本。"""
 
     @abstractmethod
     async def write_text(
-        self, path: str, content: str, encoding: str = "utf-8"
+        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
     ) -> None:
         """写入文本。"""
 
@@ -270,22 +290,24 @@ class LocalEditOperations:
     def __init__(self, fs: Optional[FileSystemLayer] = None) -> None:
         self._fs = fs or get_local_file_system_layer()
 
-    async def access(self, path: str) -> None:
+    async def access(self, path: str, *, signal: Any = None) -> None:
         # 读前 fail-fast：不存在/只读在读与匹配之前就报错，而不是等写盘
         # 才暴露（本地带 R_OK|W_OK；远程写时自然报错，见 layer 文档）
-        await self._fs.check_writable(path)
+        await self._fs.check_writable(path, signal=signal)
 
-    async def read_text(self, path: str, encoding: str = "utf-8") -> str:
+    async def read_text(
+        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+    ) -> str:
         # 二进制读 + 显式 decode：保原字节（detect_line_ending 需要看到
         # 真实 CRLF，文本模式的 universal newlines 会抹掉）
-        raw = await self._fs.read_bytes(path)
+        raw = await self._fs.read_bytes(path, signal=signal)
         return raw.decode(encoding)
 
     async def write_text(
-        self, path: str, content: str, encoding: str = "utf-8"
+        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
     ) -> None:
         # 显式 encode 落盘：restore_line_endings 恢复出的 \r\n 原样写出
-        await self._fs.write_bytes(path, content.encode(encoding))
+        await self._fs.write_bytes(path, content.encode(encoding), signal=signal)
 
 
 def create_local_edit_operations(
@@ -356,6 +378,14 @@ async def _session_lines_with_abort(session: Any, signal: Any) -> AsyncIterator[
     三个加速链调用点（grep rg --json / find fd / find rg --files）共用的
     读泵形状；提前停止（达 limit/abort）的 terminate 归调用方（见各
     调用点注释——EOF 自然收尾时不 terminate，保住真实退出码）。
+
+    与流内 signal 透传的分工（远程 executor 会话）：**流停**由 signal
+    （SDK 流在 signal 触发时打断逐轮 read 等待、以 AbortedError 中止——
+    这里收编为迭代结束，abort 归因仍归调用方的 ``_is_aborted`` 检查点，
+    错误词汇不变）；**杀进程**由本 watcher 的 terminate（流中断 ≠ 进程
+    死——远端 rg 只认 terminate）。abort 路径上 watcher 不得取消、要等
+    terminate 落定：否则流先停、finally 的 cancel 会把在飞 terminate
+    RPC 掐死在半路（远程进程泄漏到连接寿命）。
     """
 
     async def _watch() -> None:
@@ -369,14 +399,22 @@ async def _session_lines_with_abort(session: Any, signal: Any) -> AsyncIterator[
 
     watcher = asyncio.create_task(_watch())
     try:
-        async for line in session.stdout_lines():
-            yield line
-    finally:
-        watcher.cancel()
         try:
-            await watcher
-        except asyncio.CancelledError:
+            async for line in session.stdout_lines():
+                yield line
+        except AbortedError:
+            # 流内 signal 中止（远程会话）：收编为迭代结束（归因归调用方）
             pass
+    finally:
+        if _is_aborted(signal) and not watcher.done():
+            # abort 路径：等 watcher 的 terminate 落定（杀进程唯一路径）
+            await watcher
+        else:
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
 
 
 class LocalGrepOperations:
@@ -405,7 +443,7 @@ class LocalGrepOperations:
         if _is_aborted(options.signal):
             raise RuntimeError("Operation aborted")
         # 路径不存在统一前置报错（rg 与便携引擎同语义），不再静默误报无匹配
-        stat = await self._fs.metadata(path)
+        stat = await self._fs.metadata(path, signal=options.signal)
         if not stat.exists:
             raise RuntimeError(f"Path not found: {path}")
         is_dir = stat.is_dir
@@ -474,7 +512,7 @@ class LocalGrepOperations:
         args.extend(["--", options.pattern, path])
 
         cwd = path if is_dir else (os.path.dirname(path) or ".")
-        session = await self._runner.spawn(args, cwd)
+        session = await self._runner.spawn(args, cwd, signal=options.signal)
 
         limit = max(1, options.limit)
         match_limit_reached = False
@@ -527,7 +565,7 @@ class LocalGrepOperations:
         limit = max(1, options.limit)
 
         if is_dir:
-            walk = await self._fs.walk(path)
+            walk = await self._fs.walk(path, signal=options.signal)
             targets = [
                 item.path
                 for item in walk.entries
@@ -542,7 +580,9 @@ class LocalGrepOperations:
 
         async def _scan(file_path: str) -> List[GrepMatch]:
             try:
-                raw = await self._fs.read_bytes(file_path)
+                raw = await self._fs.read_bytes(file_path, signal=options.signal)
+            except AbortedError:
+                raise  # 取消词汇直通——收编成"跳过该文件"会把取消拖成静默降级
             except Exception:
                 return []
             text = raw.decode("utf-8", errors="replace")
@@ -602,11 +642,13 @@ class LocalGrepOperations:
         async def get_file_lines(file_path: str) -> List[str]:
             if file_path not in file_cache:
                 try:
-                    raw = await self._fs.read_bytes(file_path)
+                    raw = await self._fs.read_bytes(file_path, signal=options.signal)
                     content = raw.decode("utf-8", errors="replace")
                     file_cache[file_path] = (
                         content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
                     )
+                except AbortedError:
+                    raise  # 取消词汇直通——不收编成 "(unable to read file)" 渲染
                 except Exception:
                     file_cache[file_path] = []
             return file_cache[file_path]
@@ -727,7 +769,7 @@ class LocalFindOperations:
         if _is_aborted(options.signal):
             raise RuntimeError("Operation aborted")
         # 路径不存在统一前置报错（各路径同语义），不再静默误报无结果
-        if not (await self._fs.metadata(options.path)).exists:
+        if not (await self._fs.metadata(options.path, signal=options.signal)).exists:
             raise RuntimeError(f"Path not found: {options.path}")
         if self._runner is not None:
             fd_path = await self._runner.fd_path()
@@ -759,7 +801,7 @@ class LocalFindOperations:
                 pattern = f"**/{pattern}"
         args.extend(["--", pattern, search_path])
 
-        session = await self._runner.spawn(args, search_path)
+        session = await self._runner.spawn(args, search_path, signal=options.signal)
         results: List[str] = []
         async for text in _session_lines_with_abort(session, options.signal):
             if text:
@@ -791,7 +833,7 @@ class LocalFindOperations:
             args.extend(["--glob", options.pattern])
         args.extend(["--", search_path])
 
-        session = await self._runner.spawn(args, search_path)
+        session = await self._runner.spawn(args, search_path, signal=options.signal)
         limit = max(1, options.limit)
         results: List[str] = []
         async for text in _session_lines_with_abort(session, options.signal):
@@ -815,7 +857,7 @@ class LocalFindOperations:
 
     async def _find_with_walk(self, options: FindOptions) -> List[str]:
         """便携引擎（layer.walk——远程后端与本机无 fd/rg 时共用）。"""
-        walk = await self._fs.walk(options.path)
+        walk = await self._fs.walk(options.path, signal=options.signal)
         limit = max(1, options.limit)
         results: List[str] = []
         for item in walk.entries:
@@ -865,6 +907,7 @@ class LsOptions:
 
     path: str = "."
     limit: int = 500
+    signal: Any = None  # abort 信号（取消词汇，透传 layer——同 GrepOptions/FindOptions）
 
 
 class LsOperations(Protocol):
@@ -886,7 +929,7 @@ class LocalLsOperations:
         self._fs = fs or get_local_file_system_layer()
 
     async def list_dir(self, options: LsOptions) -> Tuple[List[LsEntry], bool]:
-        raw = await self._fs.list_dir(options.path)
+        raw = await self._fs.list_dir(options.path, signal=options.signal)
         raw.sort(key=lambda entry: entry.name.lower())
         entries: List[LsEntry] = []
         truncated = False

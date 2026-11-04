@@ -469,7 +469,7 @@ async def _finalize_executed_tool_call(
                 signal,
             )
             if after_result:
-                # model_copy 保留 added_tool_names 等 afterToolCall 不可覆盖的字段
+                # model_copy 保留 afterToolCall 不可覆盖的其余字段
                 result = result.model_copy(
                     update={
                         "content": (
@@ -543,11 +543,6 @@ def _create_tool_result_message(
         tool_name=finalized.tool_call.name,
         content=finalized.result.content,
         details=finalized.result.details,
-        added_tool_names=(
-            finalized.result.added_tool_names
-            if finalized.result.added_tool_names
-            else None
-        ),
         is_error=finalized.is_error,
         timestamp=int(time.time() * 1000),
     )

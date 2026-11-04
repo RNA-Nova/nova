@@ -28,8 +28,6 @@ from nova_agent import (
     ShouldStopAfterTurnContext,
     set_default_stream_fn,
 )
-from nova_ai import ProviderResponse, builtin_models
-from nova_ai.providers.volcengine import get_volcengine_model
 from nova_protocol import (
     AbortSignal,
     AgentMessage,
@@ -44,6 +42,9 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
+
+from nova_ai import ProviderResponse, builtin_models
+from nova_ai.providers.volcengine import get_volcengine_model
 
 pytestmark = pytest.mark.integration
 

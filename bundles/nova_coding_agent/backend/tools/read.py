@@ -21,7 +21,13 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import AbortSignal, AgentToolResult, ImageContent, TextContent
+from nova_protocol import (
+    AbortSignal,
+    AgentToolResult,
+    ConstrainedSampling,
+    ImageContent,
+    TextContent,
+)
 
 
 class Tool:
@@ -32,6 +38,8 @@ class Tool:
     )
     prompt_snippet = "Read file contents"
     prompt_guidelines = ["Use read to examine files instead of cat or sed."]
+    # strict 按工具 opt-in（pi 同款 prefer：可净化则 strict，否则自动回落）
+    constrained_sampling = ConstrainedSampling(type="json_schema", strict="prefer")
     parameters = {
         "type": "object",
         "properties": {
@@ -86,6 +94,32 @@ class Tool:
             "The image will be omitted from this request.]"
         )
 
+    @staticmethod
+    def _model_resize_kwargs(ctx: ToolExecContext) -> Dict[str, Any]:
+        """模型级缩放配置（``input_limits.images.resize``）→ process_image 覆盖参数。
+
+        对齐 pi agent-session 的 ``resizeOptions`` 注入：逐字段覆盖缺省，
+        未声明的字段保持引擎缺省（2000x2000 / 4.5MB / quality 80）。
+        """
+        model = ctx.model
+        input_limits = (
+            getattr(model, "input_limits", None) if model is not None else None
+        )
+        image_limits = (
+            getattr(input_limits, "images", None) if input_limits is not None else None
+        )
+        resize_options = (
+            getattr(image_limits, "resize", None) if image_limits is not None else None
+        )
+        if resize_options is None:
+            return {}
+        kwargs: Dict[str, Any] = {}
+        for key in ("max_width", "max_height", "max_bytes", "jpeg_quality"):
+            value = getattr(resize_options, key, None)
+            if value is not None:
+                kwargs[key] = value
+        return kwargs
+
     async def execute(
         self,
         tool_call_id: str,
@@ -113,7 +147,7 @@ class Tool:
         path = resolve_backend_path(path, self._context)
         operations = self._resolve_operations()
 
-        if not await operations.exists(path):
+        if not await operations.exists(path, signal=signal):
             return AgentToolResult(
                 content=[
                     TextContent(type="text", text=f"## ❌ 文件不存在\n\n路径: `{path}`")
@@ -122,7 +156,7 @@ class Tool:
                 is_error=True,
             )
 
-        if not await operations.is_file(path):
+        if not await operations.is_file(path, signal=signal):
             return AgentToolResult(
                 content=[
                     TextContent(type="text", text=f"## ❌ 不是文件\n\n路径: `{path}`")
@@ -139,8 +173,8 @@ class Tool:
             _throw_if_aborted()
             # 图片文件：格式归一 + EXIF 校正 + 预算压缩后返回图片内容
             # （对齐 pi processImage：2000x2000 维度限 + base64 ≤4.5MB 预算）
-            if await operations.is_image_file(path):
-                result = await operations.read_image(path)
+            if await operations.is_image_file(path, signal=signal):
+                result = await operations.read_image(path, signal=signal)
                 if result.error:
                     raise RuntimeError(result.error)
                 _throw_if_aborted()
@@ -163,6 +197,7 @@ class Tool:
                     result.bytes_data or b"",
                     result.mime_type or "image/png",
                     resize=self._context.settings.get_image_auto_resize(),
+                    **self._model_resize_kwargs(ctx),
                 )
                 if not processed.ok:
                     # 对齐 pi read.ts：图片无法解码/压不进预算时给提示文本，
@@ -204,7 +239,7 @@ class Tool:
             # 文本文件：读取全文，先分页后截断（对齐 TS read.ts 的顺序：
             # offset/limit 切片作用于完整内容，truncate 作用于切片结果；
             # 否则 offset 超过截断线时分页完全失效）
-            result = await operations.read_text(path, encoding=encoding)
+            result = await operations.read_text(path, encoding=encoding, signal=signal)
             if result.error:
                 raise RuntimeError(result.error)
             _throw_if_aborted()

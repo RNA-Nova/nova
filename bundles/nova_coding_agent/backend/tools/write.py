@@ -13,7 +13,7 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import AbortSignal, AgentToolResult, TextContent
+from nova_protocol import AbortSignal, AgentToolResult, ConstrainedSampling, TextContent
 
 
 class Tool:
@@ -21,6 +21,8 @@ class Tool:
     description = (
         "将内容写入本地文件。如果文件不存在则创建，存在则覆盖。自动创建缺失的父目录。"
     )
+    # strict 按工具 opt-in（pi 同款 prefer：可净化则 strict，否则自动回落）
+    constrained_sampling = ConstrainedSampling(type="json_schema", strict="prefer")
     parameters = {
         "type": "object",
         "properties": {
@@ -114,10 +116,12 @@ class Tool:
             # 写入那一步——否则并发首写时 existed 判定与父目录创建会交错
             async with with_file_write_lock(path):
                 _throw_if_aborted()
-                await operations.ensure_parent_dir(path)
-                existed = await operations.exists(path)
+                await operations.ensure_parent_dir(path, signal=signal)
+                existed = await operations.exists(path, signal=signal)
                 _throw_if_aborted()
-                result = await operations.write_file(path, content, encoding=encoding)
+                result = await operations.write_file(
+                    path, content, encoding=encoding, signal=signal
+                )
                 if result.error:
                     raise RuntimeError(result.error)
                 _throw_if_aborted()

@@ -32,6 +32,11 @@ class MemLayer:
 
     def __init__(self):
         self.files = {}
+        # 逐方法记录收到的 signal（(方法名, signal)——工具 → layer 透传链验证用）
+        self.seen_signals = []
+
+    def _record(self, method, signal):
+        self.seen_signals.append((method, signal))
 
     def _dirs(self):
         dirs = {"/"}
@@ -41,26 +46,30 @@ class MemLayer:
                 dirs.add("/".join(parts[:i]))
         return dirs
 
-    async def read_bytes(self, path):
+    async def read_bytes(self, path, signal=None):
+        self._record("read_bytes", signal)
         if path not in self.files:
             raise FileNotFoundError(path)
         return self.files[path]
 
-    async def read_range(self, path, offset, length):
-        return (await self.read_bytes(path))[offset : offset + length]
+    async def read_range(self, path, offset, length, signal=None):
+        return (await self.read_bytes(path, signal=signal))[offset : offset + length]
 
-    async def write_bytes(self, path, data):
+    async def write_bytes(self, path, data, signal=None):
+        self._record("write_bytes", signal)
         self.files[path] = data
 
-    async def metadata(self, path):
+    async def metadata(self, path, signal=None):
+        self._record("metadata", signal)
         if path in self.files:
             return FsStat(exists=True, is_file=True, size=len(self.files[path]))
         if path in self._dirs():
             return FsStat(exists=True, is_dir=True)
         return FsStat(exists=False)
 
-    async def list_dir(self, path):
-        meta = await self.metadata(path)
+    async def list_dir(self, path, signal=None):
+        self._record("list_dir", signal)
+        meta = await self.metadata(path, signal=signal)
         if not meta.exists:
             raise FileNotFoundError(path)
         if not meta.is_dir:
@@ -75,11 +84,12 @@ class MemLayer:
                     names[rest] = candidate in dirs and candidate not in self.files
         return [FsEntry(name=name, is_dir=is_dir) for name, is_dir in names.items()]
 
-    async def create_dir(self, path):
-        pass
+    async def create_dir(self, path, signal=None):
+        self._record("create_dir", signal)
 
-    async def walk(self, path, *, max_entries=100_000):
-        meta = await self.metadata(path)
+    async def walk(self, path, *, max_entries=100_000, signal=None):
+        self._record("walk", signal)
+        meta = await self.metadata(path, signal=signal)
         if not meta.exists:
             raise FileNotFoundError(path)
         if meta.is_file:
@@ -96,8 +106,8 @@ class MemLayer:
         ]
         return WalkResult(entries=tuple(items))
 
-    async def check_writable(self, path):
-        if not (await self.metadata(path)).exists:
+    async def check_writable(self, path, signal=None):
+        if not (await self.metadata(path, signal=signal)).exists:
             raise FileNotFoundError(path)
 
 
@@ -205,3 +215,50 @@ def test_find_remote_portable_engine():
     result = _run(find_tool.execute("id", {"path": ".", "pattern": "*.py"}, None))
     text = result.content[0].text
     assert "src/a.py" in text and "b.md" not in text
+
+
+def test_tool_signal_reaches_file_layer():
+    """工具的 AbortSignal 经 operations 透传到 fs 层（取消词汇链全程不断）。
+
+    write/read/ls/grep/find 五链各跑一次（edit 链由 write/read 同层覆盖）：
+    layer 每个被触达的原语收到的 signal 必须就是工具入参那个对象。
+    """
+    from nova_protocol import AbortController
+
+    ctl = AbortController()
+    layer = MemLayer()
+    layer.files[f"{_REMOTE_CWD}/a.py"] = b"def alpha():\n    pass\n"
+
+    write_tool = _make_tool("write", layer)
+    result = _run(
+        write_tool.execute("w", {"path": "b.txt", "content": "x"}, signal=ctl.signal)
+    )
+    assert not result.is_error
+
+    read_tool = _make_tool("read", layer)
+    result = _run(read_tool.execute("r", {"path": "a.py"}, signal=ctl.signal))
+    assert not result.is_error
+
+    ls_tool = _make_tool("ls", layer)
+    result = _run(ls_tool.execute("l", {"path": "."}, signal=ctl.signal))
+    assert not result.is_error
+
+    grep_tool = _make_tool("grep", layer)
+    result = _run(
+        grep_tool.execute("g", {"pattern": "alpha", "path": "."}, signal=ctl.signal)
+    )
+    assert not result.is_error
+
+    find_tool = _make_tool("find", layer)
+    result = _run(
+        find_tool.execute("f", {"path": ".", "pattern": "*"}, signal=ctl.signal)
+    )
+    assert not result.is_error
+
+    touched = {method for method, _ in layer.seen_signals}
+    # 五链触达的原语面：write(metadata/create_dir/write_bytes)、
+    # read(metadata/read_bytes)、ls(list_dir)、grep/find(walk)
+    assert {"metadata", "write_bytes", "read_bytes", "list_dir", "walk"} <= touched
+    # 每一次触达收到的都是工具入参的同一个 signal 对象（断链即 None 混入）
+    assert layer.seen_signals
+    assert all(signal is ctl.signal for _, signal in layer.seen_signals)

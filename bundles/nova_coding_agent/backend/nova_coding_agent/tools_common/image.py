@@ -14,15 +14,19 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-# 单边最大尺寸（对齐 pi autoResizeImages 的 2000x2000 上限）
+# 单边最大尺寸（对齐 pi autoResizeImages 的 2000x2000 缺省上限；
+# 模型级 ``input_limits.images.resize`` 可逐字段覆盖）
 MAX_IMAGE_DIMENSION = 2000
 
 # base64 编码后的字节预算（对齐 pi image-resize-core.ts：4.5MB，
 # 低于 Anthropic 5MB 限制留余量）
 MAX_IMAGE_BASE64_BYTES = int(4.5 * 1024 * 1024)
 
-# JPEG 质量递减步（对齐 pi qualitySteps 默认链：[80, 85, 70, 55, 40]）
-_JPEG_QUALITY_STEPS = (80, 85, 70, 55, 40)
+# JPEG 缺省质量（对齐 pi DEFAULT_OPTIONS.jpegQuality）
+DEFAULT_JPEG_QUALITY = 80
+
+# JPEG 质量递减基准链（对齐 pi qualitySteps：配置档打头后接固定降档）
+_JPEG_QUALITY_FALLBACK_STEPS = (85, 70, 55, 40)
 
 # 尺寸递减系数（对齐 pi：每轮 0.75 倍直至 1x1）
 _DIMENSION_SHRINK_FACTOR = 0.75
@@ -133,15 +137,19 @@ def process_image(
     mime_type: str,
     resize: bool = True,
     *,
-    max_dimension: int = MAX_IMAGE_DIMENSION,
+    max_width: int = MAX_IMAGE_DIMENSION,
+    max_height: int = MAX_IMAGE_DIMENSION,
     max_bytes: int = MAX_IMAGE_BASE64_BYTES,
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
 ) -> ProcessedImage:
     """处理图片（对齐 pi ``processImage``）。
 
     1. 格式归一：png/jpeg/gif/webp 原样通过（jpg 归一为 jpeg），其余格式
        （bmp 等）转 PNG 并记转换提示；
     2. ``resize`` 为真时做 EXIF 方向校正（竖拍照片方向正确），并按
-       2000x2000 维度限 + base64 ≤4.5MB 预算链压缩；
+       维度限 + base64 ≤4.5MB 预算链压缩——四个预算参数对应 pi
+       ``ImageResizeOptions``（模型级 ``input_limits.images.resize`` 逐字段
+       覆盖缺省）；
     3. 输出 hints：格式转换提示 + 缩放坐标映射系数提示。
     """
     from PIL import Image, ImageOps  # 延迟导入：文本读取路径不付出 PIL 加载成本
@@ -192,8 +200,8 @@ def process_image(
 
     # 3. 已在全部限制内：原样返回（对齐 pi：字节不动，宽高取 EXIF 校正后）
     if (
-        original_width <= max_dimension
-        and original_height <= max_dimension
+        original_width <= max_width
+        and original_height <= max_height
         and _b64_size(norm_data) < max_bytes
     ):
         return ProcessedImage(
@@ -208,24 +216,35 @@ def process_image(
             original_height=original_height,
         )
 
-    # 4. 首轮 clamp 到 max_dimension 内（保比例，对齐 pi 的两段 if）
+    # 4. 首轮 clamp 到维度限内（保比例，对齐 pi 的两段 if）
     target_width, target_height = original_width, original_height
-    if target_width > max_dimension:
-        target_height = _js_round(target_height * max_dimension / target_width)
-        target_width = max_dimension
-    if target_height > max_dimension:
-        target_width = _js_round(target_width * max_dimension / target_height)
-        target_height = max_dimension
+    if target_width > max_width:
+        target_height = _js_round(target_height * max_width / target_width)
+        target_width = max_width
+    if target_height > max_height:
+        target_width = _js_round(target_width * max_height / target_height)
+        target_height = max_height
 
-    # 5. 预算链：PNG/JPEG 择优 → JPEG 质量递减 → 尺寸 0.75 倍递减至 1x1
+    # 质量链：配置档打头（对齐 pi `new Set([jpegQuality, 85, 70, 55, 40])`）
+    quality_steps = tuple(dict.fromkeys((jpeg_quality, *_JPEG_QUALITY_FALLBACK_STEPS)))
+
+    # 5. 预算链：PNG/JPEG@配置档择优 → JPEG 质量递减 → 尺寸 0.75 倍递减至 1x1
     current_width, current_height = target_width, target_height
     while True:
         resized_image = image.resize((current_width, current_height), Image.LANCZOS)
-        candidates: List[Tuple[bytes, str]] = [
-            (_encode_png(resized_image), "image/png")
+        png_candidate: Tuple[bytes, str] = (_encode_png(resized_image), "image/png")
+        jpeg_candidates: List[Tuple[bytes, str]] = [
+            (_encode_jpeg(resized_image, quality), "image/jpeg")
+            for quality in quality_steps
         ]
-        for quality in _JPEG_QUALITY_STEPS:
-            candidates.append((_encode_jpeg(resized_image, quality), "image/jpeg"))
+        # PNG 与 JPEG@配置档取小者优先（对齐 pi preferred 序），降档 JPEG 殿后
+        first_jpeg = jpeg_candidates[0]
+        preferred = (
+            [first_jpeg, png_candidate]
+            if _b64_size(first_jpeg[0]) < _b64_size(png_candidate[0])
+            else [png_candidate, first_jpeg]
+        )
+        candidates = preferred + jpeg_candidates[1:]
         for candidate_data, candidate_mime in candidates:
             if _b64_size(candidate_data) < max_bytes:
                 return ProcessedImage(
@@ -269,6 +288,7 @@ def process_image(
 
 
 __all__ = [
+    "DEFAULT_JPEG_QUALITY",
     "MAX_IMAGE_BASE64_BYTES",
     "MAX_IMAGE_DIMENSION",
     "ProcessedImage",

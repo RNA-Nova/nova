@@ -1,12 +1,7 @@
 """共享 fixture。"""
 
 import pytest
-from nova_protocol import (
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
-)
+from nova_protocol import KnownApi, KnownProvider, Model, ModelCost
 
 
 @pytest.fixture

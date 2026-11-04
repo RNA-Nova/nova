@@ -25,15 +25,15 @@ class _SlowLayer:
         self.delay = delay
         self.read_count = 0
 
-    async def read_bytes(self, path):
+    async def read_bytes(self, path, signal=None):
         self.read_count += 1
         await asyncio.sleep(self.delay)
         return self.files[path]
 
-    async def metadata(self, path):
+    async def metadata(self, path, signal=None):
         return FsStat(exists=True, is_dir=True)
 
-    async def walk(self, path, *, max_entries=50_000):
+    async def walk(self, path, *, max_entries=50_000, signal=None):
         return WalkResult(
             entries=tuple(WalkItem(path=p, is_dir=False) for p in self.files)
         )
@@ -92,3 +92,56 @@ class TestPortableGrepConcurrency:
             raise AssertionError("should abort")
         except RuntimeError as exc:
             assert "aborted" in str(exc)
+
+
+def test_session_lines_abort_awaits_terminate_settlement():
+    """abort 路径：watcher 的 terminate 等落定不被取消（杀进程唯一路径）。
+
+    流内 signal 中止（会话行流以 AbortedError 收，模拟远程 SDK 流的 signal
+    收口）先于 terminate 落定到达——读泵生成器退出前必须等到 terminate
+    完成，否则 finally 的 watcher.cancel() 会把在飞 terminate 掐死在半路。
+    全程 Event 受控完成序（terminate 经闸门挂起，释放权在测试）。
+    """
+    from nova_coding_agent.tools_common.operations import _session_lines_with_abort
+    from nova_protocol import AbortController, AbortedError
+
+    class _AbortingSession:
+        def __init__(self):
+            self.entered = asyncio.Event()  # 行流已挂起（测试同步点）
+            self.saw_abort = asyncio.Event()  # 放行行流的 AbortedError
+            self.terminate_started = asyncio.Event()
+            self.terminate_release = asyncio.Event()  # terminate 落定闸门
+            self.terminated = False
+
+        async def stdout_lines(self):
+            self.entered.set()
+            await self.saw_abort.wait()
+            raise AbortedError("Operation aborted: test")
+            yield  # pragma: no cover——生成器形态
+
+        async def terminate(self):
+            self.terminate_started.set()
+            await self.terminate_release.wait()
+            self.terminated = True
+
+    async def scenario():
+        ctl = AbortController()
+        session = _AbortingSession()
+        collected = []
+
+        async def _pump():
+            async for line in _session_lines_with_abort(session, ctl.signal):
+                collected.append(line)
+
+        pump = asyncio.create_task(_pump())
+        await session.entered.wait()  # 行流已挂起
+        ctl.abort()
+        await session.terminate_started.wait()  # watcher 已进 terminate（挂闸门）
+        session.saw_abort.set()  # 流内 signal 中止（先于 terminate 落定）
+        session.terminate_release.set()
+        await pump
+        return session, collected
+
+    session, collected = _run(scenario())
+    assert collected == []
+    assert session.terminated is True  # terminate 落定后才退出（旧代码此处为 False）

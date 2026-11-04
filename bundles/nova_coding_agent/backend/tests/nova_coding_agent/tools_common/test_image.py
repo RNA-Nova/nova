@@ -131,7 +131,9 @@ def test_bmp_resize_hint_uses_final_mime():
     """bmp 经预算链落到 JPEG 时，转换提示的目标用最终输出 mime（对齐 pi）。"""
     data = _make_image_bytes(200, 200, fmt="BMP", noise=True)
     # max_bytes 卡到 PNG（~30KB）超预算、JPEG q80 可进
-    result = process_image(data, "image/bmp", max_dimension=100, max_bytes=8000)
+    result = process_image(
+        data, "image/bmp", max_width=100, max_height=100, max_bytes=8000
+    )
 
     assert result.ok is True
     assert result.resized is True
@@ -152,13 +154,13 @@ def test_resize_disabled_returns_normalized_bytes():
 
 
 # ---------------------------------------------------------------------------
-# 字节预算压缩链（对齐 pi image-resize-core.ts：PNG 优先 → JPEG 质量递减
-# → 尺寸 0.75 倍递减）
+# 字节预算压缩链（对齐 pi image-resize-core.ts：PNG/JPEG@配置档取小者优先
+# → JPEG 质量递减 → 尺寸 0.75 倍递减）
 # ---------------------------------------------------------------------------
 
 
 def test_png_preferred_when_within_budget():
-    """维度超限但 PNG 编码进预算：优先 PNG（对齐 pi 候选顺序首位）。"""
+    """维度超限但 PNG 编码进预算且更小：PNG 胜出（对齐 pi 取小者优先序）。"""
     data = _make_image_bytes(3000, 2000)  # 纯色 PNG 极小
     result = process_image(data, "image/png")
 
@@ -189,7 +191,9 @@ def test_budget_chain_descends_until_fit():
     """预算极紧时逐级递减（质量 80/85/70/55/40 → 尺寸 0.75 倍）直到进预算。"""
     data = _make_image_bytes(200, 200, noise=True)
     # 100x100 噪声 PNG ~30KB、JPEG q80 ~3KB：2000 字节预算必走递减链
-    result = process_image(data, "image/png", max_dimension=100, max_bytes=2000)
+    result = process_image(
+        data, "image/png", max_width=100, max_height=100, max_bytes=2000
+    )
 
     assert result.ok is True
     assert result.resized is True
@@ -201,7 +205,9 @@ def test_budget_chain_descends_until_fit():
 def test_over_budget_returns_failure_message():
     """连 1x1 都压不进预算：ok=False + pi 同款提示（对齐 pi 返回 null 的路径）。"""
     data = _make_image_bytes(200, 200, noise=True)
-    result = process_image(data, "image/png", max_dimension=100, max_bytes=10)
+    result = process_image(
+        data, "image/png", max_width=100, max_height=100, max_bytes=10
+    )
 
     assert result.ok is False
     assert (
@@ -245,3 +251,41 @@ def test_undecodable_unsupported_format_returns_convert_failure():
         result.message
         == "[Image omitted: could not be converted to a supported inline image format.]"
     )
+
+
+# ---------------------------------------------------------------------------
+# 模型级缩放配置（input_limits.images.resize → max_width/max_height/max_bytes/
+# jpeg_quality——对齐 pi ImageResizeOptions 注入）
+# ---------------------------------------------------------------------------
+
+
+def test_distinct_max_width_and_height():
+    """宽高限分离（对齐 pi maxWidth/maxHeight 两段 clamp，保比例）。"""
+    data = _make_image_bytes(3000, 1000)
+    result = process_image(data, "image/png", max_width=1000, max_height=500)
+
+    assert result.ok is True
+    assert result.resized is True
+    # 3000x1000 → 宽先卡 1000（1000x333），高已进 500 不再缩
+    assert (result.width, result.height) == (1000, 333)
+
+
+def test_custom_jpeg_quality_leads_quality_chain():
+    """自定义 jpeg_quality 打头质量链（对齐 pi `new Set([jpegQuality, ...])`）。"""
+    data = _make_image_bytes(2100, 2100, noise=True)
+    result = process_image(data, "image/png", jpeg_quality=95)
+
+    assert result.ok is True
+    assert result.resized is True
+    # 质量 95 打头仍优先更小者——噪声大图 JPEG 必小于 PNG
+    assert result.mime_type == "image/jpeg"
+    assert _b64_len(result.data) < MAX_IMAGE_BASE64_BYTES
+
+
+def test_smaller_of_png_jpeg_wins():
+    """噪声图 JPEG 小于 PNG 时 JPEG 胜出（对齐 pi preferred 序：取小者优先）。"""
+    data = _make_image_bytes(2100, 2100, noise=True)
+    result = process_image(data, "image/png")
+
+    assert result.ok is True
+    assert result.mime_type == "image/jpeg"

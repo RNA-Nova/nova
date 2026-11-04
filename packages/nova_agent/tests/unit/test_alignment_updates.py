@@ -9,20 +9,10 @@ import asyncio
 
 import pytest
 from helpers import EchoTool, final_stream, tool_call_stream
-from nova_agent import (
-    Agent,
-    BeforeToolCallResult,
-    set_default_stream_fn,
-)
-from nova_agent.types import (
-    ShouldStopAfterTurnContext,
-)
+from nova_agent import Agent, BeforeToolCallResult, set_default_stream_fn
+from nova_agent.types import ShouldStopAfterTurnContext
 from nova_agent.types.tool import AgentTool
-from nova_protocol import (
-    AgentToolResult,
-    TextContent,
-    UserMessage,
-)
+from nova_protocol import AgentToolResult, TextContent, UserMessage
 
 # ---------------------------------------------------------------------------
 # B1：非 dict details 透传

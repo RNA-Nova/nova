@@ -12,6 +12,7 @@ import pytest
 from nova_coding_agent.executor.process_runner import (
     ExecutorProcessRunner,
     LocalProcessRunner,
+    _ExecutorSession,
 )
 from nova_coding_agent.tools_common.fs_layer import FsStat, WalkItem, WalkResult
 from nova_coding_agent.tools_common.operations import GrepOptions, LocalGrepOperations
@@ -19,6 +20,10 @@ from nova_coding_agent.tools_common.operations import GrepOptions, LocalGrepOper
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+async def _collect_lines(session):
+    return [line async for line in session.stdout_lines()]
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +77,10 @@ class _FakeHandle:
         self._chunks = chunks
         self._exit_code = exit_code
         self.terminated = False
+        self.stream_signals = []  # output_with_stream 收到的 signal（透传验证用）
 
-    async def output_with_stream(self):
+    async def output_with_stream(self, *, signal=None):
+        self.stream_signals.append(signal)
         for stream, chunk in self._chunks:
             yield stream, chunk
 
@@ -82,6 +89,10 @@ class _FakeHandle:
 
     async def read(self, wait_ms=0):
         return SimpleNamespace(exit_code=self._exit_code)
+
+    async def wait(self, timeout=None, *, signal=None):
+        # 对齐 SDK ProcessHandle.wait 形状（轮询在 SDK 侧——fake 直接给码）
+        return self._exit_code
 
 
 class _FakeProcess:
@@ -148,11 +159,71 @@ class TestExecutorProcessRunner:
         lines, code, stderr = _run(go())
         # argv 与 cwd（file:// 包装）按约传递
         assert client.process.started == [
-            {"argv": ["rg", "--json"], "cwd": "file:///remote/work", "env": {}}
+            {
+                "argv": ["rg", "--json"],
+                "cwd": "file:///remote/work",
+                "env": {},
+                "signal": None,
+            }
         ]
         assert lines == ['{"a":1}', '{"b":2}']  # 跨 chunk 拼行
         assert stderr == "warn: something"  # 流标签分离
         assert code == 0
+
+    def test_spawn_passes_signal_to_start_and_session(self):
+        """spawn 的 signal 透传 SDK process/start 并随会话持有（流读取用）。"""
+        from nova_protocol import AbortController
+
+        handle = _FakeHandle([], exit_code=0)
+        client = _FakeClient(handle)
+        runner = ExecutorProcessRunner(_FakeManager(client=client), "ssh://u@h")
+        ctl = AbortController()
+        session = _run(runner.spawn(["rg", "x"], "/w", signal=ctl.signal))
+        assert client.process.started[0]["signal"] is ctl.signal
+        assert session._signal is ctl.signal
+
+    def test_stdout_lines_passes_signal_to_stream(self):
+        """会话行流把 signal 透进 SDK 流式读取（流停由 signal 的分工）。"""
+        from nova_protocol import AbortController
+
+        handle = _FakeHandle([("stdout", b"a\n")], exit_code=0)
+        ctl = AbortController()
+        session = _ExecutorSession(handle, signal=ctl.signal)
+        lines = _run(_collect_lines(session))
+        assert lines == ["a"]
+        assert handle.stream_signals == [ctl.signal]
+
+    def test_wait_polls_until_exit_code(self):
+        """wait() 轮询到真退出码（回归：单次 read(wait_ms=1) 快照对未退出
+        进程恒返 -1——修复后消费 SDK ProcessHandle.wait 的轮询循环）。
+
+        真 SDK ``ProcessHandle.wait`` + 脚本化 read 响应序列（Event 受控
+        完成序：响应即脚本，零 sleep）——前两次快照未退出（exit_code=None）
+        必须继续轮询，第三次拿到退出码。
+        """
+        from nova_exec_server_client.process import ProcessHandle, ProcessOutput
+
+        class _ScriptedReadClient:
+            """SDK ProcessHandle.wait 的最小 client 缝（read 脚本化）。"""
+
+            def __init__(self, responses):
+                self._responses = list(responses)
+                self.read_calls = []
+
+            async def read(self, process_id, wait_ms=1000, max_bytes=None, signal=None):
+                self.read_calls.append(wait_ms)
+                return self._responses.pop(0)
+
+        client = _ScriptedReadClient(
+            [
+                ProcessOutput(chunks=[], exited=False, exit_code=None, closed=False),
+                ProcessOutput(chunks=[], exited=False, exit_code=None, closed=False),
+                ProcessOutput(chunks=[], exited=True, exit_code=3, closed=False),
+            ]
+        )
+        session = _ExecutorSession(ProcessHandle(process_id="proc-x", client=client))
+        assert _run(session.wait()) == 3  # 不是旧行为的 -1
+        assert client.read_calls == [1000, 1000, 1000]  # SDK 轮询粒度
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +264,7 @@ class _FakeRunner:
     async def fd_path(self):
         return None
 
-    async def spawn(self, argv, cwd):
+    async def spawn(self, argv, cwd, *, signal=None):
         self.spawned.append((argv, cwd))
         return self.session
 
@@ -203,15 +274,15 @@ class _MemLayer:
         self.files = files or {}
         self._is_dir = is_dir
 
-    async def metadata(self, path):
+    async def metadata(self, path, signal=None):
         return FsStat(exists=True, is_dir=self._is_dir, is_file=not self._is_dir)
 
-    async def walk(self, path, *, max_entries=50_000):
+    async def walk(self, path, *, max_entries=50_000, signal=None):
         return WalkResult(
             entries=tuple(WalkItem(path=p, is_dir=False) for p in self.files)
         )
 
-    async def read_bytes(self, path):
+    async def read_bytes(self, path, signal=None):
         return self.files[path]
 
 

@@ -7,10 +7,7 @@ validate_tool_arguments 在 jsonschema 校验前按 schema 做类型矫正（coe
 
 import pytest
 from nova_agent.utils import validate_tool_arguments
-from nova_protocol import (
-    Tool,
-    ToolCall,
-)
+from nova_protocol import Tool, ToolCall
 
 
 def _tool(schema: dict) -> Tool:

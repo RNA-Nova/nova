@@ -123,6 +123,35 @@ def test_read_image_vision_model_returns_image(tmpdir):
     assert any(isinstance(c, ImageContent) for c in result.content)
 
 
+def test_read_image_uses_model_resize_options(tmpdir):
+    """模型级 ``input_limits.images.resize`` 逐字段覆盖引擎缺省（对齐 pi
+    agent-session 的 resizeOptions 注入）：小维度限生效并记缩放提示。"""
+    from types import SimpleNamespace
+
+    from nova_harness.types.resources.tools import ToolExecContext
+
+    path = os.path.join(tmpdir, "big.png")
+    _make_noise_png(path, width=300, height=200)
+
+    resize = SimpleNamespace(
+        max_width=100, max_height=None, max_bytes=None, jpeg_quality=None
+    )
+    model = SimpleNamespace(
+        input_types=["text", "image"],
+        input_limits=SimpleNamespace(images=SimpleNamespace(resize=resize)),
+    )
+    executor = _load_executor()
+    result = _run(
+        executor.execute("id", {"path": path}, ctx=ToolExecContext(model=model))
+    )
+
+    assert result.details.get("resized") is True
+    # 300x200 → 宽卡 100（100x67），缩放坐标提示出现
+    text = result.content[0].text
+    assert "100x67" in text
+    assert "Multiply coordinates by" in text
+
+
 # ---------------------------------------------------------------------------
 # read 图片管线（对齐 pi processImage：to_thread 异步化、失败语义、hints）
 # ---------------------------------------------------------------------------

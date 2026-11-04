@@ -96,34 +96,47 @@ class _FakeFs:
     def __init__(self):
         self.files = {}
         self.uris = []
+        # 逐方法记录收到的 signal（(方法名, signal)——layer → SDK 透传链验证用）
+        self.seen_signals = []
 
     def _track(self, path):
         self.uris.append(path)
         return path
 
-    async def read_file(self, path):
+    async def read_file(self, path, signal=None):
+        self.seen_signals.append(("read_file", signal))
         path = self._track(path)
         if path not in self.files:
             raise RuntimeError("not found")
         return self.files[path]
 
-    async def write_file(self, path, data):
+    async def write_file(self, path, data, signal=None):
+        self.seen_signals.append(("write_file", signal))
         self.files[self._track(path)] = data
 
-    async def open(self, path):
+    async def open(self, path, signal=None):
+        self.seen_signals.append(("open", signal))
         self._track(path)
         return "h1"
 
-    async def read_block(self, handle, offset, length):
+    async def read_block(self, handle, offset, length, signal=None):
+        self.seen_signals.append(("read_block", signal))
         data = self.files.get("file:///r/f.bin", b"")
         return data[offset : offset + length], True
 
     async def close(self, handle):
+        # 收摊调用：签名有意不收 signal——layer 把 signal 传进来即 TypeError 判红
         pass
 
-    async def metadata(self, path):
+    async def metadata(self, path, signal=None):
         from nova_protocol import FileMetadata
 
+        self.seen_signals.append(("metadata", signal))
+        # 取消词汇：预触发信号按 SDK 举旗点语义抛 AbortedError（仿真 SDK 行为）
+        if signal is not None and getattr(signal, "aborted", False):
+            from nova_protocol import AbortedError
+
+            raise AbortedError("Operation aborted: test")
         self._track(path)
         if path in self.files:
             return FileMetadata(
@@ -145,21 +158,24 @@ class _FakeFs:
             )
         raise RuntimeError("not found")
 
-    async def read_dir(self, path):
+    async def read_dir(self, path, signal=None):
         from nova_protocol import DirEntry
 
+        self.seen_signals.append(("read_dir", signal))
         self._track(path)
         return [
             DirEntry(fileName="b.txt", isDirectory=False, isFile=True),
             DirEntry(fileName="sub", isDirectory=True, isFile=False),
         ]
 
-    async def create_dir(self, path, recursive=True):
+    async def create_dir(self, path, recursive=True, signal=None):
+        self.seen_signals.append(("create_dir", signal))
         self._track(path)
 
-    async def walk(self, path, options):
+    async def walk(self, path, options, signal=None):
         from nova_protocol import WalkOutcome
 
+        self.seen_signals.append(("walk", signal))
         self._track(path)
         assert options.max_entries == 123
         return WalkOutcome(
@@ -235,6 +251,44 @@ class TestExecutorLayer:
         layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ssh://u@h")
         single = _run(layer.walk("/r/a.py"))
         assert [i.path for i in single.entries] == ["/r/a.py"]
+
+    def test_signal_passthrough_to_sdk(self):
+        """layer 全原语收到的 signal 原样透传进 SDK fs 调用（收摊 close 除外——
+        fake close 签名不收 signal，误传即 TypeError 判红）。"""
+        layer, fs = self._make()
+        sentinel = object()
+        fs.files["file:///r/a.txt"] = b"data"
+        _run(layer.read_bytes("/r/a.txt", signal=sentinel))
+        _run(layer.write_bytes("/r/a.txt", b"x", signal=sentinel))
+        _run(layer.metadata("/r/a.txt", signal=sentinel))
+        _run(layer.list_dir("/r", signal=sentinel))
+        _run(layer.create_dir("/r/d", signal=sentinel))
+        _run(layer.walk("/r", max_entries=123, signal=sentinel))
+        _run(layer.read_range("/r/f.bin", 0, 4, signal=sentinel))
+        _run(layer.check_writable("/r/a.txt", signal=sentinel))
+        touched = {method for method, _ in fs.seen_signals}
+        assert touched == {
+            "read_file",
+            "write_file",
+            "metadata",
+            "read_dir",
+            "create_dir",
+            "walk",
+            "open",
+            "read_block",
+        }
+        assert all(signal is sentinel for _, signal in fs.seen_signals)
+
+    def test_metadata_abort_not_collapsed(self):
+        """取消词汇直通：预触发 signal 的 AbortedError 不得收编成
+        ``FsStat(exists=False)``（否则用户取消被误报成"文件不存在"）。"""
+        from nova_protocol import AbortController, AbortedError
+
+        layer, _fs = self._make()
+        ctl = AbortController()
+        ctl.abort()
+        with pytest.raises(AbortedError):
+            _run(layer.metadata("/r/a.txt", signal=ctl.signal))
 
 
 # ---------------------------------------------------------------------------

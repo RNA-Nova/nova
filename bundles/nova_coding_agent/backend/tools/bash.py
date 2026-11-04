@@ -42,7 +42,13 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import AbortSignal, AgentToolResult, ApprovalPolicy, TextContent
+from nova_protocol import (
+    AbortSignal,
+    AgentToolResult,
+    ApprovalPolicy,
+    ConstrainedSampling,
+    TextContent,
+)
 
 # 对齐 pi bash.ts：timeout 上限（毫秒）。超过即参数非法，显式报错反馈给 LLM。
 MAX_TIMEOUT_MS = 2_147_483_647
@@ -108,6 +114,8 @@ class Tool:
         "可选提供 timeout（秒），不提供则不限时。"
     )
     prompt_snippet = "执行 bash 命令（ls、grep、find 等）"
+    # strict 按工具 opt-in（pi 同款 prefer：可净化则 strict，否则自动回落）
+    constrained_sampling = ConstrainedSampling(type="json_schema", strict="prefer")
     parameters = {
         "type": "object",
         "properties": {

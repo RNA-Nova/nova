@@ -8,13 +8,6 @@ import inspect
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
-from nova_ai import (
-    ModelIdentity,
-    ProviderResponse,
-    SimpleStreamOptions,
-    ThinkingBudgets,
-    to_thinking_level,
-)
 from nova_protocol import (
     AbortController,
     AbortSignal,
@@ -38,6 +31,14 @@ from nova_protocol import (
     Usage,
     UserMessage,
     is_aborted,
+)
+
+from nova_ai import (
+    ModelIdentity,
+    ProviderResponse,
+    SimpleStreamOptions,
+    ThinkingBudgets,
+    to_thinking_level,
 )
 
 from .agent_loop import run_agent_loop, run_agent_loop_continue

@@ -14,6 +14,12 @@
 实现：``LocalFileSystemLayer``（os/pathlib）；远程实现
 ``ExecutorFileSystemLayer`` 在 ``nova_coding_agent/executor/fs_layer.py``
 （避免 tools_common → executor 的反向依赖）。
+
+取消词汇：全部原语带 keyword-only ``signal``（nova_protocol
+AbortSignal，缺省 None）。本地实现是同步文件 I/O（to_thread 挪出事件
+循环后无取消点），仅签名对齐不消费；远程实现透传到 SDK fs 调用——
+响应等待可被 signal 打断（AbortedError 直通），预触发在 SDK 举旗点
+快失败（不发请求）。
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ import os
 import stat as stat_module
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, Tuple
+
+from nova_protocol import AbortSignal
 
 
 @dataclass(frozen=True)
@@ -62,39 +70,68 @@ class WalkResult:
 
 
 class FileSystemLayer(Protocol):
-    """六个 fs 工具共享的文件系统原语（全 async）。"""
+    """六个 fs 工具共享的文件系统原语（全 async）。
 
-    async def read_bytes(self, path: str) -> bytes:
+    ``signal``（全方法 keyword-only，缺省 None）：取消词汇——远程实现
+    透传 SDK（响应等待可被打断）；本地实现仅签名对齐（同步 I/O 无取消点）。
+    """
+
+    async def read_bytes(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> bytes:
         """读取整个文件（大文件调用方自律——文本读取先分页/截断）。"""
         ...
 
-    async def read_range(self, path: str, offset: int, length: int) -> bytes:
+    async def read_range(
+        self,
+        path: str,
+        offset: int,
+        length: int,
+        *,
+        signal: Optional[AbortSignal] = None,
+    ) -> bytes:
         """读取文件切片（图片魔数嗅探等只需头部字节的场景）。"""
         ...
 
-    async def write_bytes(self, path: str, data: bytes) -> None:
+    async def write_bytes(
+        self, path: str, data: bytes, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         """写入文件（父目录准备是独立一步——见 create_dir）。"""
         ...
 
-    async def metadata(self, path: str) -> FsStat:
+    async def metadata(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> FsStat:
         """路径元信息；不存在回 ``FsStat(exists=False)``（不抛错）。"""
         ...
 
-    async def list_dir(self, path: str) -> List[FsEntry]:
+    async def list_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> List[FsEntry]:
         """列目录；不存在抛 ``FileNotFoundError``、非目录抛
         ``NotADirectoryError``（双实现同语义）。"""
         ...
 
-    async def create_dir(self, path: str) -> None:
+    async def create_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         """递归创建目录（已存在不报错）。"""
         ...
 
-    async def walk(self, path: str, *, max_entries: int = 50_000) -> WalkResult:
+    async def walk(
+        self,
+        path: str,
+        *,
+        max_entries: int = 50_000,
+        signal: Optional[AbortSignal] = None,
+    ) -> WalkResult:
         """递归遍历（含隐藏文件，与 fd/rg 的 --hidden 语义对齐）；
         不存在抛 ``FileNotFoundError``。"""
         ...
 
-    async def check_writable(self, path: str) -> None:
+    async def check_writable(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         """写前 fail-fast 检查（edit 的 access 语义）：不存在抛
         ``FileNotFoundError``；本地附带 R_OK|W_OK 权限检查，远程写时
         自然报错（元信息无权限位，尽力而为）。"""
@@ -102,16 +139,29 @@ class FileSystemLayer(Protocol):
 
 
 class LocalFileSystemLayer:
-    """本地文件系统 FileSystemLayer 实现（阻塞调用一律 to_thread）。"""
+    """本地文件系统 FileSystemLayer 实现（阻塞调用一律 to_thread）。
 
-    async def read_bytes(self, path: str) -> bytes:
+    ``signal`` 仅签名对齐协议：同步文件 I/O 经 to_thread 挪出事件循环
+    后无取消点，本地原语毫秒级落定，不消费取消词汇。
+    """
+
+    async def read_bytes(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> bytes:
         def _read() -> bytes:
             with open(path, "rb") as f:
                 return f.read()
 
         return await asyncio.to_thread(_read)
 
-    async def read_range(self, path: str, offset: int, length: int) -> bytes:
+    async def read_range(
+        self,
+        path: str,
+        offset: int,
+        length: int,
+        *,
+        signal: Optional[AbortSignal] = None,
+    ) -> bytes:
         def _read() -> bytes:
             with open(path, "rb") as f:
                 f.seek(offset)
@@ -119,14 +169,18 @@ class LocalFileSystemLayer:
 
         return await asyncio.to_thread(_read)
 
-    async def write_bytes(self, path: str, data: bytes) -> None:
+    async def write_bytes(
+        self, path: str, data: bytes, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         def _write() -> None:
             with open(path, "wb") as f:
                 f.write(data)
 
         await asyncio.to_thread(_write)
 
-    async def metadata(self, path: str) -> FsStat:
+    async def metadata(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> FsStat:
         def _stat() -> FsStat:
             try:
                 st = os.stat(path)
@@ -142,7 +196,9 @@ class LocalFileSystemLayer:
 
         return await asyncio.to_thread(_stat)
 
-    async def list_dir(self, path: str) -> List[FsEntry]:
+    async def list_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> List[FsEntry]:
         def _list() -> List[FsEntry]:
             # os.listdir 对不存在/非目录原生抛 FileNotFoundError/
             # NotADirectoryError——协议语义零翻译
@@ -160,10 +216,18 @@ class LocalFileSystemLayer:
 
         return await asyncio.to_thread(_list)
 
-    async def create_dir(self, path: str) -> None:
+    async def create_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         await asyncio.to_thread(os.makedirs, path, exist_ok=True)
 
-    async def walk(self, path: str, *, max_entries: int = 50_000) -> WalkResult:
+    async def walk(
+        self,
+        path: str,
+        *,
+        max_entries: int = 50_000,
+        signal: Optional[AbortSignal] = None,
+    ) -> WalkResult:
         def _walk() -> WalkResult:
             if not os.path.exists(path):
                 raise FileNotFoundError(path)
@@ -185,7 +249,9 @@ class LocalFileSystemLayer:
 
         return await asyncio.to_thread(_walk)
 
-    async def check_writable(self, path: str) -> None:
+    async def check_writable(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         def _check() -> None:
             # 对齐原 EditOperations.access：不存在/只读在读与匹配之前就报错；
             # 异常带 errno（edit 工具的 _error_detail 透出 ENOENT/EACCES）

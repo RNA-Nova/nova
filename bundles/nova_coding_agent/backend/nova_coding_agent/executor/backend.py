@@ -14,10 +14,10 @@ accumulator + on_chunk，abort 经 terminate 升级。
 
 from __future__ import annotations
 
-import asyncio
 import codecs
 from typing import Any, Callable, Dict, Optional
 
+from nova_async import await_with_signal
 from nova_coding_agent.bash.engine import BashResult
 from nova_coding_agent.tools_common.output_accumulator import (
     OutputAccumulator,
@@ -25,16 +25,9 @@ from nova_coding_agent.tools_common.output_accumulator import (
 )
 from nova_coding_agent.tools_common.shell import sanitize_shell_output
 from nova_coding_agent.tools_common.truncate import DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES
+from nova_protocol import AbortedError
 
 from .manager import ExecutorClientManager
-
-
-def _is_aborted(signal: Any) -> bool:
-    if signal is None:
-        return False
-    if isinstance(signal, asyncio.Event):
-        return signal.is_set()
-    return bool(getattr(signal, "aborted", False))
 
 
 class ExecutorBashOperations:
@@ -165,38 +158,27 @@ class ExecutorBashOperations:
         handle_chunk_bytes: Callable[[bytes], None],
     ) -> bool:
         """读泵：经 ``handle.output()`` 流式读取（SDK 内部按 afterSeq 续读，
-        不重复）；abort 竞速中断。返回是否被 abort。"""
+        不重复）；abort 竞速中断。返回是否被 abort。
+
+        竞速归 nova_async ``await_with_signal``（取消原语族单点，不手写
+        第三份）：signal 与 ``__anext__`` 赛跑、同刻就绪完成优先、signal
+        胜出即取消挂起的读并等其落定——取消沿生成器传入传输层响应等待，
+        pending 表/在飞槽由 SDK ``send_request`` 的 finally 收拾（对取消
+        安全），与手写 ``next_chunk.cancel()`` 等价且不留悬挂任务。
+        ``sig``（生产链恒为 nova_protocol AbortSignal 或 None）为 None
+        零开销直通；预触发信号在举旗点快失败（读协程未起跑即关闭，不发
+        读请求），竞速窗口兜底随原语内建。
+        """
         self._last_exit_code: Optional[int] = None
         stream = handle.output()
-        abort_task = (
-            asyncio.create_task(sig.wait())
-            if sig is not None and hasattr(sig, "wait")
-            else None
-        )
-        try:
-            while True:
-                next_chunk = asyncio.ensure_future(stream.__anext__())
-                wait_set: set = {next_chunk}
-                if abort_task is not None:
-                    wait_set.add(abort_task)
-                done, _pending = await asyncio.wait(
-                    wait_set, return_when=asyncio.FIRST_COMPLETED
-                )
-                if abort_task is not None and abort_task in done:
-                    next_chunk.cancel()
-                    return True
-                if next_chunk in done:
-                    try:
-                        chunk = next_chunk.result()
-                    except StopAsyncIteration:
-                        # 流结束：读一次拿最终退出码
-                        output = await handle.read(wait_ms=1)
-                        self._last_exit_code = output.exit_code
-                        return False
-                    handle_chunk_bytes(chunk)
-                elif _is_aborted(sig):
-                    next_chunk.cancel()
-                    return True
-        finally:
-            if abort_task is not None and not abort_task.done():
-                abort_task.cancel()
+        while True:
+            try:
+                chunk = await await_with_signal(stream.__anext__(), sig)
+            except AbortedError:
+                return True
+            except StopAsyncIteration:
+                # 流结束：读一次拿最终退出码
+                output = await handle.read(wait_ms=1)
+                self._last_exit_code = output.exit_code
+                return False
+            handle_chunk_bytes(chunk)

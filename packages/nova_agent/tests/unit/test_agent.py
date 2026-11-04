@@ -16,7 +16,7 @@ from helpers import (
     text_stream,
     tool_call_then_text_stream,
 )
-from nova_ai import EventStream, ModelIdentity, ProviderResponse
+from nova_agent import Agent, BeforeToolCallContext
 from nova_protocol import (
     DoneEvent,
     ImageContent,
@@ -30,7 +30,7 @@ from nova_protocol import (
     UserMessage,
 )
 
-from nova_agent import Agent, BeforeToolCallContext
+from nova_ai import EventStream, ModelIdentity, ProviderResponse
 
 # ------------------------------------------------------------------------------
 # 初始化与状态
@@ -561,9 +561,8 @@ def test_initial_state_rejects_unknown_keys(dummy_model):
 
 def test_default_convert_to_llm_filters_messages_without_role(dummy_model):
     """不带 role 字段的自定义消息应被默认 convert_to_llm 过滤而不是炸掉。"""
-    from nova_protocol import CustomAgentMessage
-
     from nova_agent.utils import default_convert_to_llm
+    from nova_protocol import CustomAgentMessage
 
     class Notification(CustomAgentMessage):
         text: str = ""

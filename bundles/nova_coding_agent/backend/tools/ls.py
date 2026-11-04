@@ -86,7 +86,7 @@ class Tool:
             # 不存在/非目录的错误形态归 layer（双实现同语义异常类型，
             # 不再在工具侧直调 os 预检——缝外调用已清理）
             entries, truncated = await self._resolve_operations().list_dir(
-                LsOptions(path=path, limit=limit)
+                LsOptions(path=path, limit=limit, signal=signal)
             )
         except FileNotFoundError:
             return AgentToolResult(

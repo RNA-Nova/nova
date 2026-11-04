@@ -5,7 +5,6 @@ Agent loop core: main loop and assistant streaming.
 import dataclasses
 from typing import List, Optional, cast
 
-from nova_ai import AssistantMessageEventStream, to_thinking_level
 from nova_protocol import (
     AbortSignal,
     AgentEndEvent,
@@ -24,6 +23,8 @@ from nova_protocol import (
     TurnEndEvent,
     TurnStartEvent,
 )
+
+from nova_ai import AssistantMessageEventStream, to_thinking_level
 
 from ..stream_fn import get_default_stream_fn
 from ..types import (

@@ -5,10 +5,16 @@
 
 - 路径以 ``file://`` URI 传递（与 process/cwd 同一 PathUri 形态）；
 - ``metadata`` 不存在时回 ``FsStat(exists=False)``（远端报错归一为
-  不存在——协议语义）；
+  不存在——协议语义）；取消词汇例外直通（见下）；
 - ``list_dir``/``walk`` 先做 metadata 前检，保证 ``FileNotFoundError``/
   ``NotADirectoryError`` 与本地层同语义（不解析远端错误字符串）；
 - 遍历走 SDK 的 ``fs/walk``（服务端有界遍历——WalkOptions 上限）。
+
+取消词汇：``signal`` 全方法透传 SDK fs 调用——在飞 RPC 的响应等待
+被打断（AbortedError 直通，不收编成"不存在"之类的业务语义），预触发
+在 SDK 举旗点快失败（不发请求）。收摊调用（``read_range`` finally 的
+``fs/close``）有意不挂 signal：预触发快失败会把 close 掐死在发送前，
+服务端句柄随连接干等泄漏（对位 SDK 收摊路径的 for_cleanup 纪律）。
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from nova_coding_agent.tools_common.fs_layer import (
     WalkResult,
 )
 from nova_exec_server_client import ExecutorClient
+from nova_protocol import AbortedError, AbortSignal
 
 _URI_PREFIX = "file://"
 
@@ -47,27 +54,46 @@ class ExecutorFileSystemLayer:
     async def _client(self) -> ExecutorClient:
         return await self._manager.get_client(self._url)
 
-    async def read_bytes(self, path: str) -> bytes:
+    async def read_bytes(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> bytes:
         client = await self._client()
-        return await client.fs.read_file(_to_uri(path))
+        return await client.fs.read_file(_to_uri(path), signal=signal)
 
-    async def read_range(self, path: str, offset: int, length: int) -> bytes:
+    async def read_range(
+        self,
+        path: str,
+        offset: int,
+        length: int,
+        *,
+        signal: Optional[AbortSignal] = None,
+    ) -> bytes:
         client = await self._client()
-        handle = await client.fs.open(_to_uri(path))
+        handle = await client.fs.open(_to_uri(path), signal=signal)
         try:
-            data, _eof = await client.fs.read_block(handle, offset, length)
+            data, _eof = await client.fs.read_block(
+                handle, offset, length, signal=signal
+            )
             return data
         finally:
+            # 收摊不挂 signal（见模块 docstring——预触发快失败会掐死 close）
             await client.fs.close(handle)
 
-    async def write_bytes(self, path: str, data: bytes) -> None:
+    async def write_bytes(
+        self, path: str, data: bytes, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         client = await self._client()
-        await client.fs.write_file(_to_uri(path), data)
+        await client.fs.write_file(_to_uri(path), data, signal=signal)
 
-    async def metadata(self, path: str) -> FsStat:
+    async def metadata(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> FsStat:
         client = await self._client()
         try:
-            meta = await client.fs.metadata(_to_uri(path))
+            meta = await client.fs.metadata(_to_uri(path), signal=signal)
+        except AbortedError:
+            # 取消词汇直通——收编成"不存在"会把用户取消误报成 FileNotFound
+            raise
         except Exception:
             return FsStat(exists=False)
         return FsStat(
@@ -78,28 +104,38 @@ class ExecutorFileSystemLayer:
             mtime_ms=meta.modified_at_ms,
         )
 
-    async def list_dir(self, path: str) -> List[FsEntry]:
+    async def list_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> List[FsEntry]:
         # metadata 前检：错误形态与本地层同语义（不解析远端错误字符串）
-        stat = await self.metadata(path)
+        stat = await self.metadata(path, signal=signal)
         if not stat.exists:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
         if not stat.is_dir:
             raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), path)
         client = await self._client()
-        entries = await client.fs.read_dir(_to_uri(path))
+        entries = await client.fs.read_dir(_to_uri(path), signal=signal)
         return [
             FsEntry(name=entry.file_name, is_dir=entry.is_directory)
             for entry in entries
         ]
 
-    async def create_dir(self, path: str) -> None:
+    async def create_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         client = await self._client()
-        await client.fs.create_dir(_to_uri(path), recursive=True)
+        await client.fs.create_dir(_to_uri(path), recursive=True, signal=signal)
 
-    async def walk(self, path: str, *, max_entries: int = 50_000) -> WalkResult:
+    async def walk(
+        self,
+        path: str,
+        *,
+        max_entries: int = 50_000,
+        signal: Optional[AbortSignal] = None,
+    ) -> WalkResult:
         from nova_protocol import WalkOptions
 
-        stat = await self.metadata(path)
+        stat = await self.metadata(path, signal=signal)
         if not stat.exists:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
         # 文件自身参与遍历：单文件路径 walk 即自身（与本地层同语义）
@@ -107,7 +143,7 @@ class ExecutorFileSystemLayer:
             return WalkResult(entries=(WalkItem(path=path, is_dir=False),))
         client = await self._client()
         outcome = await client.fs.walk(
-            _to_uri(path), WalkOptions(maxEntries=max_entries)
+            _to_uri(path), WalkOptions(maxEntries=max_entries), signal=signal
         )
         items = tuple(
             WalkItem(path=_from_uri(entry.path), is_dir=entry.kind == "directory")
@@ -115,8 +151,10 @@ class ExecutorFileSystemLayer:
         )
         return WalkResult(entries=items, truncated=outcome.truncated)
 
-    async def check_writable(self, path: str) -> None:
-        stat = await self.metadata(path)
+    async def check_writable(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
+        stat = await self.metadata(path, signal=signal)
         if not stat.exists:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
         # 远程元信息无权限位——写时自然报错（尽力而为，注释语义见协议文档）

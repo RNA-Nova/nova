@@ -32,7 +32,7 @@ from nova_harness.types.resources.tools import (
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import AbortSignal, AgentToolResult, TextContent
+from nova_protocol import AbortSignal, AgentToolResult, ConstrainedSampling, TextContent
 
 
 def _throw_if_aborted(signal: Optional[AbortSignal]) -> None:
@@ -97,6 +97,8 @@ class Tool:
         "Keep edits[].oldText as small as possible while still being unique "
         "in the file. Do not pad with large unchanged regions.",
     ]
+    # strict 按工具 opt-in（pi 同款 prefer：可净化则 strict，否则自动回落）
+    constrained_sampling = ConstrainedSampling(type="json_schema", strict="prefer")
     parameters = {
         "type": "object",
         "properties": {
@@ -193,7 +195,7 @@ class Tool:
                 # 读写权限 fail-fast（对齐 pi access(R_OK|W_OK)）：不存在/只读
                 # 文件在读与匹配之前报错，而不是等写盘才暴露
                 try:
-                    await operations.access(path)
+                    await operations.access(path, signal=signal)
                 except Exception as exc:
                     detail = _error_detail(exc)
                     return AgentToolResult(
@@ -208,7 +210,9 @@ class Tool:
                     )
                 _throw_if_aborted(signal)
                 try:
-                    original = await operations.read_text(path, encoding=encoding)
+                    original = await operations.read_text(
+                        path, encoding=encoding, signal=signal
+                    )
                 except Exception as exc:
                     return AgentToolResult(
                         content=[
@@ -255,7 +259,9 @@ class Tool:
                 final_text = bom + restore_line_endings(
                     applied.new_content, original_ending
                 )
-                await operations.write_text(path, final_text, encoding=encoding)
+                await operations.write_text(
+                    path, final_text, encoding=encoding, signal=signal
+                )
 
             diff, first_changed_line = generate_diff_string(
                 applied.base_content, applied.new_content

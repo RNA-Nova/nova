@@ -47,10 +47,6 @@ from nova_agent import (
     ShouldStopAfterTurnContext,
 )
 from nova_agent.agent_loop import run_agent_loop, run_agent_loop_continue
-from nova_ai import (
-    EventStream,
-    SimpleStreamOptions,
-)
 from nova_protocol import (
     AbortController,
     AgentToolResult,
@@ -68,6 +64,8 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
+
+from nova_ai import EventStream, SimpleStreamOptions
 
 # ----------------------------------------------------------------------
 # Basic prompt flow
@@ -543,35 +541,8 @@ async def test_truncated_tool_calls_are_failed_not_executed(dummy_model):
 
 
 @pytest.mark.asyncio
-async def test_added_tool_names_propagated_to_tool_result(dummy_model):
-    """工具结果里的 added_tool_names 应透传到 ToolResultMessage。"""
-
-    class DeferredTool(AgentTool):
-        name: str = "deferred"
-        description: str = "Introduces new tools"
-        label: str = "Deferred"
-        parameters: dict = {"type": "object", "properties": {}}
-
-        async def execute(self, tool_call_id, params, signal=None, on_update=None):
-            return AgentToolResult(
-                content=[TextContent(text="ok")],
-                details={},
-                added_tool_names=["new_tool_a", "new_tool_b"],
-            )
-
-    agent = Agent(stream_fn=tool_call_then_text_stream("deferred", {}))
-    agent.set_model(dummy_model)
-    agent.set_tools([DeferredTool()])
-
-    await agent.prompt(UserMessage(role="user", content="go"))
-
-    tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
-    assert tool_result.added_tool_names == ["new_tool_a", "new_tool_b"]
-
-
-@pytest.mark.asyncio
-async def test_after_tool_call_override_preserves_added_tool_names(dummy_model):
-    """after_tool_call 覆盖 content 时，added_tool_names 等其余字段必须保留。"""
+async def test_after_tool_call_override_preserves_other_fields(dummy_model):
+    """after_tool_call 覆盖 content 时，details 等其余字段必须保留。"""
 
     class DeferredTool(AgentTool):
         name: str = "deferred"
@@ -583,7 +554,6 @@ async def test_after_tool_call_override_preserves_added_tool_names(dummy_model):
             return AgentToolResult(
                 content=[TextContent(text="original")],
                 details={"k": "v"},
-                added_tool_names=["new_tool"],
             )
 
     def after(ctx, signal):
@@ -600,7 +570,7 @@ async def test_after_tool_call_override_preserves_added_tool_names(dummy_model):
 
     tool_result = [m for m in agent.state.messages if m.role == "toolResult"][0]
     assert tool_result.content[0].text == "override"
-    assert tool_result.added_tool_names == ["new_tool"]
+    assert tool_result.details == {"k": "v"}
 
 
 @pytest.mark.asyncio
