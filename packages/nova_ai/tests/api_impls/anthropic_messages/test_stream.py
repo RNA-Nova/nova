@@ -771,3 +771,65 @@ class TestServerSideFallback:
         result = await es.result()
         assert result.stop_reason == StopReason.ERROR
         assert "mid-output model fallback" in (result.error_message or "")
+
+    async def test_input_transformations_recorded_as_diagnostic(self):
+        """服务端入参改写留痕（对齐 TS anthropic_input_transformations）：
+        message_delta 携带 input_transformations → 成功收尾落诊断。"""
+        frames = [
+            ant_message_start(),
+            ant_text_block(0),
+            ant_text_delta("ok", 0),
+            ant_block_stop(0),
+            (
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn"},
+                    "usage": {"output_tokens": 5},
+                    "input_transformations": [
+                        {
+                            "type": "thinking_dropped",
+                            "path": "messages[1].content[0]",
+                            "reason": "signature_mismatch",
+                        }
+                    ],
+                },
+            ),
+            ant_message_stop(),
+        ]
+        capture = RequestCapture()
+        client = anthropic_client(frames, capture)
+        es = stream(
+            self._fallback_model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(api_key="sk-test", client=client),
+        )
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        diagnostics = result.diagnostics or []
+        entry = next(
+            d for d in diagnostics if d.get("type") == "anthropic_input_transformations"
+        )
+        assert entry["details"]["transformations"] == [
+            {
+                "type": "thinking_dropped",
+                "path": "messages[1].content[0]",
+                "reason": "signature_mismatch",
+            }
+        ]
+
+    async def test_no_input_transformations_no_diagnostic(self):
+        """无改写：无诊断（不污染常态路径）。"""
+        capture = RequestCapture()
+        client = anthropic_client(_text_flow_frames(), capture)
+        es = stream(
+            self._fallback_model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(api_key="sk-test", client=client),
+        )
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        assert not any(
+            d.get("type") == "anthropic_input_transformations"
+            for d in (result.diagnostics or [])
+        )

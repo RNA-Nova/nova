@@ -100,9 +100,10 @@ def finalize_catalog_models(
 
     def _finalize(model_id: str, fields: ModelFields) -> Model:
         # 修正+盖戳归 nova_catalog.engine.stamp_fields（单一实现点）；
-        # 本层只补 Model 构造（运行期产物形态）
-        return Model(
-            **stamp_fields(
+        # 本层只补 Model 构造（运行期产物形态——model_validate 即目录边界
+        # 一次性校验入口，TypedDict 声明形状在此验收）
+        return Model.model_validate(
+            stamp_fields(
                 knowledge,
                 model_id,
                 fields,

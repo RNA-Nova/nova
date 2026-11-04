@@ -134,6 +134,11 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # invalid_request_error）；引擎层据此做规范化折叠
     requires_moonshot_flavored_schema: Optional[bool] = None
 
+    # vLLM 调度优先级（对齐 pi vllmPriority——顶层 ``priority`` 字段，
+    # 小值先调度；仅 --scheduling-policy priority 的自托管端点有意义，
+    # 缺省不发）
+    vllm_priority: Optional[float] = None
+
     # 是否接受会话开始后的 system 文本消息（对位 pi
     # supportsMidConvoSystemMessages；pi.dev 数据携带同名 camelCase 键）
     supports_mid_convo_system_messages: Optional[bool] = None

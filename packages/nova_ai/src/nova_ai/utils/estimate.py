@@ -15,6 +15,7 @@ from nova_protocol import (
     ImageContent,
     Message,
     StopReason,
+    SystemMessage,
     TextContent,
     Tool,
     ToolResultMessage,
@@ -74,6 +75,19 @@ def estimate_message_tokens(message: Message) -> int:
         return math.ceil(
             _estimate_text_and_image_chars(message.content) / CHARS_PER_TOKEN
         )
+    if isinstance(message, SystemMessage):
+        # 系统消息（L2 词汇）：content 可为字符串，sections 按值计入——
+        # 与上线时的呈现文本同口径（工具定义 tokens 归 estimate_context_tokens
+        # 的 tools_added 追加项，此处不重复计）
+        text = (
+            message.content
+            if isinstance(message.content, str)
+            else "\n".join(block.text for block in message.content or [])
+        )
+        section_text = "\n".join(
+            value for value in (message.sections or {}).values() if value
+        )
+        return estimate_text_tokens(text + section_text)
 
     chars = 0
     for block in message.content:

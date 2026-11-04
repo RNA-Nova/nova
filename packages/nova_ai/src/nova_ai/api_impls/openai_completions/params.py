@@ -267,6 +267,11 @@ def build_params(
     if tool_choice and params.get("tools"):
         params["tool_choice"] = tool_choice
 
+    # vLLM 调度优先级（对齐 TS：compat.vllmPriority 非 None 才发顶层
+    # priority——非标准字段，经 extra_body 上线）
+    if compat.vllm_priority is not None:
+        extra_body["priority"] = compat.vllm_priority
+
     # ---- 思考参数（按 thinking_format 分派；对齐 TS 分支序）----
     # "off" 入口归一为 None：pi 的 reasoningEffort 类型层不含 off
     # （stream_simple 已过滤），但本层类型是宽松 str——归一保证任何

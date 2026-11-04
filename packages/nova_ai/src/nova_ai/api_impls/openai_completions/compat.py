@@ -228,6 +228,8 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             compat.requires_moonshot_flavored_schema,
             detected.requires_moonshot_flavored_schema,
         ),
+        # 无检测默认（None = 不发——对齐 pi getCompat 直通）
+        vllm_priority=_pick(compat.vllm_priority, detected.vllm_priority),
         supports_thinking_token_budget=_pick(
             compat.supports_thinking_token_budget,
             detected.supports_thinking_token_budget,

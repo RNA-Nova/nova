@@ -91,6 +91,14 @@ from .threads import (
 # 流式期内的内容块（文档化的可变累积器——数据建模标准规则 1 例外）
 ContentBlock = Union[TextContent, ThinkingContent, ToolCall]
 
+
+def _transformation_field(entry: Any, name: str) -> Any:
+    """input_transformation 条目的字段读取（SDK 对象/dict 双形态——extra 直通）。"""
+    if isinstance(entry, dict):
+        return entry.get(name)
+    return getattr(entry, name, None)
+
+
 # SDK ``AsyncMessages.create()`` 的声明命名参数（anthropic SDK 1.x——
 # 声明集外的请求字段经 extra_body 上线，见 ``_send``）
 _SDK_CREATE_KWARG_KEYS = frozenset(
@@ -252,6 +260,9 @@ def stream(
         # 成本计费模型（服务端 fallback 应答时换 fallback 条目的本地定价——
         # 对齐 TS usageModel；message_start 处改写）
         usage_model = model
+        # 服务端对入参的改写留痕（对齐 TS inputTransformations——
+        # message_start / message_delta 两处读，成功收尾落诊断）
+        input_transformations: Optional[List[Any]] = None
 
         def finish_block(position: int) -> None:
             if position in finished_positions:
@@ -514,6 +525,31 @@ def stream(
                                         "cost": fallback_entry.cost,
                                     }
                                 )
+                        # 服务端对入参的改写留痕（SDK extra 直通——对齐 TS
+                        # `Array.isArray` 防御：非 list 不取）
+                        _start_transformations = getattr(
+                            event.message, "input_transformations", None
+                        )
+                        if isinstance(_start_transformations, list):
+                            input_transformations = _start_transformations
+                            # 服务端 fallback 应答：按 fallback 条目的本地
+                            # 定价计成本（对齐 TS usageModel 解析）
+                            fallback_entry = next(
+                                (
+                                    entry
+                                    for entry in (compat.allowed_fallback_models or [])
+                                    if entry.provider == model.provider
+                                    and entry.model == output.response_model
+                                ),
+                                None,
+                            )
+                            if fallback_entry is not None:
+                                usage_model = model.model_copy(
+                                    update={
+                                        "id": output.response_model,
+                                        "cost": fallback_entry.cost,
+                                    }
+                                )
                         usage = event.message.usage
                         output.usage.input = usage.input_tokens or 0
                         output.usage.output = usage.output_tokens or 0
@@ -661,6 +697,12 @@ def stream(
                             finish_block(position)
 
                     elif event.type == "message_delta":
+                        # 服务端入参改写留痕（对齐 TS——message_delta 处覆盖式再读）
+                        _delta_transformations = getattr(
+                            event, "input_transformations", None
+                        )
+                        if isinstance(_delta_transformations, list):
+                            input_transformations = _delta_transformations
                         if event.delta.stop_reason:
                             output.raw_stop_reason = event.delta.stop_reason
                             stop_reason, error_message = map_stop_reason(
@@ -715,6 +757,25 @@ def stream(
                 # 干净回复落账：会话下一请求可从此续接（对齐 pi recordThreadReply）
                 if thread is not None:
                     record_thread_reply(model, thread, params, output, compat, betas)
+
+                # 服务端入参改写留痕上诊断（对齐 TS anthropic_input_transformations）
+                if input_transformations:
+                    append_diagnostic(
+                        output,
+                        {
+                            "type": "anthropic_input_transformations",
+                            "details": {
+                                "transformations": [
+                                    {
+                                        "type": _transformation_field(t, "type"),
+                                        "path": _transformation_field(t, "path"),
+                                        "reason": _transformation_field(t, "reason"),
+                                    }
+                                    for t in input_transformations
+                                ]
+                            },
+                        },
+                    )
 
                 event_stream.push(DoneEvent(reason=output.stop_reason, message=output))
                 event_stream.end()

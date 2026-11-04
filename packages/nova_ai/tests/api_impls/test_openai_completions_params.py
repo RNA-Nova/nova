@@ -283,6 +283,33 @@ class TestBuildParams:
 
         assert params["temperature"] == 0.7
 
+    def test_vllm_priority_via_extra_body(self):
+        """vllm_priority（对齐 pi vllmPriority）：顶层 priority 经 extra_body
+        上线；缺省不发。"""
+        from nova_protocol import OpenAICompletionsCompat
+
+        model = Model(
+            id="vllm-model",
+            name="m",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider="custom",
+            base_url="https://vllm.example.com",
+            reasoning=False,
+            input_types=["text"],
+            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
+            context_window=128000,
+            max_tokens=4096,
+            compat=OpenAICompletionsCompat(vllm_priority=-1),
+        )
+        ctx = Context(messages=[UserMessage(content="hello")])
+        params = build_params(model, ctx)
+
+        assert (params.get("extra_body") or {}).get("priority") == -1
+        # 缺省（未声明旗标）不发
+        model_default = model.model_copy(update={"compat": None})
+        params_default = build_params(model_default, ctx)
+        assert "priority" not in (params_default.get("extra_body") or {})
+
     def test_max_tokens_field(self):
         """测试 max_tokens 字段选择"""
         model = Model(

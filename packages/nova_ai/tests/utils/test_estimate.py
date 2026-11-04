@@ -106,6 +106,23 @@ class TestEstimateContextTokens:
         # 应包含 tools_added 声明的工具定义 tokens
         assert estimate.trailing_tokens > 0
 
+    def test_system_message_with_string_content_estimated(self):
+        """SystemMessage（L2 词汇）字符串 content 不再炸估算循环，且按
+        呈现口径计入（sections 值同样计）。"""
+        from nova_protocol import SystemMessage
+
+        ctx = Context(
+            messages=[
+                UserMessage(content="q"),
+                SystemMessage(
+                    content="追加指令", sections={"mode": "只读"}, timestamp=1
+                ),
+            ]
+        )
+        estimate = estimate_context_tokens(ctx)
+        # 两条消息都被计入（修复前：SystemMessage 的 str content 让循环 AttributeError）
+        assert estimate.tokens > 0
+
     def test_error_assistant_not_used_as_anchor(self):
         usage = Usage(
             input=1000,
