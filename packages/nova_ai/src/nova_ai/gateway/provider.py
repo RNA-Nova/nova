@@ -5,10 +5,13 @@ Provider 是独立的运行时单元：持有 auth 配置、模型目录与 stre
 的职责）。
 
 能力即字段（对齐 TS ``refreshModels`` 的函数口袋形态）：``refresh_models``
-为 ``None`` 是静态 provider（目录仅基线）；注入策略闭包即为动态 provider——
-默认策略（``fetch_models`` 回调，三件套：恢复 → 拉取 → 持久化）由
-``create_provider`` 装配；远程目录六件套治理皮归 harness 层组合时包装。
-``ModelsManager.refresh`` 只收集非 None 者。
+为 ``None`` 是静态 provider（目录仅基线）；注入策略闭包即为动态 provider。
+刷新治理只有一份（``gateway/strategies.py`` 的策略工厂，两形态——overlay
+纯站 / personalized 站+账户钩子），``create_provider`` 按形态装配：
+``personalize`` 传入 → personalized 策略 + replace 读取位；
+仅 ``catalog_source`` → overlay 策略出生自带；皆无 → 静态（要别的形态
+自己实现 ``refresh_models`` 裸口袋，pi 同款）。``ModelsManager.refresh``
+只收集非 None 者。
 
 ``catalog_source`` 是目录站选配 key（对位 ``Model.api``）：manager 持有站
 容器（``CatalogServices``，对位 ``ApiImpl`` 的单站/dict 双形态）时按它路由，
@@ -17,15 +20,15 @@ Provider 是独立的运行时单元：持有 auth 配置、模型目录与 stre
 
 纪律（TS 闭包隐藏纪律在 Python 的约定实现）：
 
-- 模型列表的读取只经 ``get_models()``（基线 ∪ 动态的合并视图）——直读
+- 模型列表的读取只经 ``get_models()``（merge/replace 两形态）——直读
   ``_baseline_models`` 会漏掉动态 overlay；
 - 动态集合的写入只经刷新策略内的 ``context.publish()``（世代校验闸）；
-- ``_baseline_models`` / ``_dynamic_models`` / ``_api_impl`` 均为实现细节。
+- ``_baseline_models`` / ``_dynamic_models`` / ``_api_impl`` /
+  ``_dynamic_replaces_baseline`` 均为实现细节。
 """
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
@@ -124,7 +127,7 @@ class RefreshModelsContext:
     无站或未选配（恢复照常，网络阶段由实现方自行收场）。"""
     diagnostics: DiagnosticsCollector = field(default_factory=DiagnosticsCollector)
     """本次刷新的诊断收集器（**warnings as data** 双通道——refresh 实现方
-    ``append``（如无站降级、订阅源单独供数）：``items`` 无条件收集进
+    ``append``（如无站降级、订阅源不可达）：``items`` 无条件收集进
     refresh 结果的 ``diagnostics`` 键；槽位 ``on_diagnostic`` 由 manager
     装配（组合根注入）时 append 即实时外发。nova_ai 是库不发射事件——
     呈现（WarningEvent 转换）归上层组合根。"""
@@ -132,6 +135,11 @@ class RefreshModelsContext:
 
 RefreshModelsFn = Callable[[RefreshModelsContext], Awaitable[None]]
 """刷新策略签名（``Provider.refresh_models`` 能力字段的类型）。"""
+
+PersonalizeFn = Callable[[List[Model], RefreshModelsContext], Awaitable[List[Model]]]
+"""账户层钩子签名（pi ``PersonalizeCatalog`` 对位）：已修正基底 + 上下文
+→ 个性化目录。``create_provider(personalize=...)`` 装配进 personalized
+刷新策略，在"基底备好、发布之前"被调用——kimi 订阅覆盖 / 火山 ark 筛选。"""
 
 
 def merge_models(baseline: List[Model], dynamic: List[Model]) -> List[Model]:
@@ -176,18 +184,27 @@ class Provider:
     _baseline_models: List[Model] = field(default_factory=list)
     _dynamic_models: List[Model] = field(default_factory=list)
     _api_impl: Optional[ApiImpl] = None
+    _dynamic_replaces_baseline: bool = False
+    """目录读取模式（装配置位——personalized 形态专属，pi
+    ``withPersonalizedCatalog`` 对位）：True 且动态目录非空时
+    ``get_models()`` 整取代基线（账户个性化目录是"全部真相"）；
+    False = merge（基线 ∪ 动态——公共事实的增量覆盖）。"""
     # 能力字段（非构造面）：None = 静态 provider；策略闭包由 create_provider
-    # （fetch_models 默认策略）/ with_remote_catalog（远程目录治理）注入。
+    # 装配（personalize → personalized 策略；catalog_source → overlay 策略）。
     # init=False：子类以同名方法覆写兼容（TS 的"方法在不在"探测在 Python
     # 落到"字段是不是 None"）。
     refresh_models: Optional[RefreshModelsFn] = field(default=None, init=False)
 
     def get_models(self) -> List[Model]:
-        """返回该 provider 的模型列表（基线 ∪ 动态，对齐 TS Provider.getModels）。
+        """返回该 provider 的模型列表（对齐 TS Provider.getModels）。
 
-        模型列表的唯一读取口——merge 逻辑只活在这里，直读
-        ``_baseline_models`` 会漏掉动态 overlay。
+        模型列表的唯一读取口——直读 ``_baseline_models`` 会漏掉动态
+        overlay/replace。两种形态：replace（``_dynamic_replaces_baseline``
+        且动态非空）整取代——账户个性化目录是全部真相（pi personalized
+        同款：空动态回退基线）；否则 merge（基线 ∪ 动态，同 id 动态胜）。
         """
+        if self._dynamic_replaces_baseline and self._dynamic_models:
+            return list(self._dynamic_models)
         return merge_models(self._baseline_models, self._dynamic_models)
 
     def get_model(self, model_id: str) -> Optional[Model]:
@@ -212,6 +229,7 @@ class Provider:
         self,
         model: Model,
         run: Callable[[ProviderStreams], AssistantMessageEventStream],
+        signal: Optional[AbortSignal] = None,
     ) -> AssistantMessageEventStream:
         """按 model.api 派发；缺实现时以 error 流收尾（对齐 TS dispatch）。
 
@@ -226,7 +244,7 @@ class Provider:
                     f'Provider {self.id} has no API implementation for "{model.api}"',
                 )
 
-            return lazy_stream(model, _missing)
+            return lazy_stream(model, _missing, signal=signal)
         return run(impl)
 
     def stream(
@@ -236,7 +254,11 @@ class Provider:
         options: Optional[StreamOptions] = None,
     ) -> AssistantMessageEventStream:
         """使用本 provider 绑定的 API 实现发起流式调用。"""
-        return self._dispatch(model, lambda api: api.stream(model, context, options))
+        return self._dispatch(
+            model,
+            lambda api: api.stream(model, context, options),
+            signal=options.signal if options else None,
+        )
 
     def stream_simple(
         self,
@@ -246,67 +268,10 @@ class Provider:
     ) -> AssistantMessageEventStream:
         """使用本 provider 绑定的 API 实现发起简化流式调用。"""
         return self._dispatch(
-            model, lambda api: api.stream_simple(model, context, options)
+            model,
+            lambda api: api.stream_simple(model, context, options),
+            signal=options.signal if options else None,
         )
-
-
-def _default_refresh_models(
-    provider: Provider,
-    fetch_models: Callable[[RefreshModelsContext], Awaitable[Optional[List[Model]]]],
-) -> RefreshModelsFn:
-    """默认刷新策略：``fetch_models`` 回调的两阶段实现（对齐 TS createProvider
-    内的 refreshModels——恢复缓存 → 拉取 → 经 publish 世代校验持久化）。
-
-    回调返回 ``None`` = **本次无发布**（无站降级等）——内存与落盘保持现状
-    （离线恢复阶段读出的缓存继续服役）；与"拉到空列表"严格区分：空列表
-    照常发布（清空 overlay 是真实语义）。
-
-    闭包捕获 provider 实例与拉取回调（provider → 策略 → provider 引用环，
-    Python GC 收环无压力；策略与属主同生共死）。
-    """
-
-    async def _refresh_models(context: RefreshModelsContext) -> None:
-        """两阶段刷新（离线恢复 + 网络拉取），持久化策略归本 provider，
-        但发布必须经上下文（世代校验在 ModelsManager 侧）。"""
-        publish = context.publish
-
-        async def _publish(publication: ModelsPublication) -> bool:
-            if publish is None:
-                return False
-            return await publish(publication)
-
-        if context.stored is not None:
-            # 离线恢复尽力而为：publish 缺席/失败都不阻断后续网络阶段
-            restored = [m for m in context.stored.models if m.provider == provider.id]
-            await _publish(
-                ModelsPublication(
-                    update=lambda restored=restored: setattr(
-                        provider, "_dynamic_models", restored
-                    )
-                )
-            )
-        if not context.allow_network:
-            return
-        if is_aborted(context.signal):
-            return
-        refreshed = await fetch_models(context)
-        if refreshed is None:
-            # 本次无发布（无站降级等）：内存与落盘缓存都保持现状
-            return
-        if is_aborted(context.signal):
-            return
-        await _publish(
-            ModelsPublication(
-                persist=ModelsStoreEntry(
-                    models=list(refreshed), checked_at=int(time.time() * 1000)
-                ),
-                update=lambda refreshed=refreshed: setattr(
-                    provider, "_dynamic_models", list(refreshed)
-                ),
-            )
-        )
-
-    return _refresh_models
 
 
 def create_provider(
@@ -317,14 +282,12 @@ def create_provider(
     models: Optional[List[Model]] = None,
     api: Optional[ApiImpl] = None,
     auth: Optional[ProviderAuth] = None,
-    fetch_models: Optional[
-        Callable[[RefreshModelsContext], Awaitable[Optional[List[Model]]]]
-    ] = None,
     filter_models: Optional[
         Callable[[List[Model], Optional[Credential]], List[Model]]
     ] = None,
     catalog_source: Optional[str] = None,
     catalog_knowledge: Optional[ProviderDefinition] = None,
+    personalize: Optional[PersonalizeFn] = None,
 ) -> Provider:
     """构造 Provider 实例（对齐 TS ``createProvider``）。
 
@@ -336,15 +299,14 @@ def create_provider(
         models: 静态模型列表（baseline）
         api: API 实现（单个实现或按 ``model.api`` 分发的字典）
         auth: provider 鉴权配置
-        fetch_models: 动态模型拉取回调；传入即为动态 provider——默认刷新
-            策略会先从存储恢复缓存目录，再拉取新目录并经 ``publish``
-            世代校验地持久化。回调返回 ``None`` = 本次无发布（无站降级
-            等），内存与落盘缓存保持现状
         filter_models: 凭据级模型过滤策略
         catalog_source: 目录站选配 key（manager 站容器为 dict 形态时的
             路由键）；None 表示不选配公开站
         catalog_knowledge: 目录修正知识（nova_catalog 的 DEF，
             ``ProviderDefinition``）；None = 无修正
+        personalize: 账户层钩子（pi ``PersonalizeCatalog`` 对位）——传入即
+            装配 personalized 刷新策略（站 + 钩子、replace 读取形态）；
+            None 且配了 ``catalog_source`` 时装配 overlay 策略（纯站）
 
     Returns:
         可独立调度的 Provider 实例
@@ -361,19 +323,24 @@ def create_provider(
         _baseline_models=list(models) if models is not None else [],
         _api_impl=api,
     )
-    if fetch_models is not None:
+    if personalize is not None:
+        # 账户个性化形态（kimi 订阅覆盖 / 火山 ark 筛选）：replace 读取
+        from .strategies import personalized_refresh_policy
 
-        async def _fetch(context: RefreshModelsContext) -> Optional[List[Model]]:
-            result = await fetch_models(context)
-            return None if result is None else list(result)
+        provider.refresh_models = personalized_refresh_policy(provider, personalize)
+        provider._dynamic_replaces_baseline = True
+    elif catalog_source is not None:
+        # 纯站形态（公共事实目录）：六件套治理出生自带
+        from .strategies import overlay_refresh_policy
 
-        provider.refresh_models = _default_refresh_models(provider, _fetch)
+        provider.refresh_models = overlay_refresh_policy(provider)
     return provider
 
 
 __all__ = [
     "ApiImpl",
     "ModelsPublication",
+    "PersonalizeFn",
     "Provider",
     "ProviderStreams",
     "RefreshModelsContext",

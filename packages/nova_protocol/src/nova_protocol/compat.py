@@ -5,9 +5,10 @@
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from .base_model import NovaBaseModel
+from .cost import ModelCost
 from .enums import ThinkingFormat, ThinkingTokenBudgetField
 
 SessionAffinityFormat = Literal["openai", "openai-nosession", "openrouter"]
@@ -85,6 +86,10 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # 工具结果后的用户消息是否需要中间的助手消息。默认：基于URL自动检测
     requires_assistant_after_tool_result: Optional[bool] = None
 
+    # assistant 消息的 null content 是否必须改写为空串（部分端点拒绝
+    # null content——对齐 TS requiresNonNullAssistantContent）。默认 false
+    requires_non_null_assistant_content: Optional[bool] = None
+
     # 思考块是否需要转换为带<thinking>分隔符的文本块。默认：基于URL自动检测
     requires_thinking_as_text: Optional[bool] = None
 
@@ -111,11 +116,23 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # - openrouter: x-session-id
     session_affinity_format: Optional[SessionAffinityFormat] = None
 
+    # prompt_cache_key 请求字段的三态控制（对位 pi promptCacheKeyMode，
+    # 0f4d5e960——兼容代理显式开/关缓存键）：
+    # - auto（缺省）：api.openai.com 直发，或 long 保留 + supports_long_cache_retention；
+    # - enabled：缓存激活（retention 非 none）即发——兼容代理场景；
+    # - disabled：永不发送。
+    prompt_cache_key_mode: Optional[Literal["auto", "enabled", "disabled"]] = None
+
     # 是否支持长缓存保留（long cache retention）
     supports_long_cache_retention: Optional[bool] = None
 
     # Z.ai 提供商是否使用 tool_stream 参数
     zai_tool_stream: Optional[bool] = None
+
+    # 工具 schema 需满足 Moonshot-flavored JSON Schema 子集（nova 特有——
+    # kimi/moonshot 系端点拒绝 ``type`` 与 ``anyOf`` 同级共存，400
+    # invalid_request_error）；引擎层据此做规范化折叠
+    requires_moonshot_flavored_schema: Optional[bool] = None
 
     # 是否接受会话开始后的 system 文本消息（对位 pi
     # supportsMidConvoSystemMessages；pi.dev 数据携带同名 camelCase 键）
@@ -156,6 +173,43 @@ class OpenAIResponsesCompat(NovaBaseModel):
     # 是否在启用缓存时发送 OpenAI session_id 缓存亲和性头部
     send_session_id_header: Optional[bool] = None
 
+    # 是否接受对话中段的 system/developer 消息（对齐 TS
+    # supportsMidConvoSystemMessages）。默认 false
+    supports_mid_convo_system_messages: Optional[bool] = None
+
+    # 是否接受对话中途变更思考级别（对齐 TS supportsMidConvoEffort）。
+    # 默认 false
+    supports_mid_convo_effort: Optional[bool] = None
+
+    # 是否支持 OpenAI grammar 工具（对齐 TS supportsOpenAIGrammarTools）。
+    # 默认 false
+    supports_openai_grammar_tools: Optional[bool] = None
+
+    # 是否支持消息锚定的 additional_tools 输入项（对齐 TS
+    # supportsAdditionalTools）。默认 false
+    supports_additional_tools: Optional[bool] = None
+
+    # 是否支持显式 prompt cache 模式（cacheWrite>0 的模型——对齐 TS
+    # supportsExplicitPromptCacheMode）。默认 false
+    supports_explicit_prompt_cache_mode: Optional[bool] = None
+
+    # 是否支持 max_output_tokens 字段（对齐 TS supportsMaxOutputTokens）。
+    # 默认 false
+    supports_max_output_tokens: Optional[bool] = None
+
+    # 是否支持 strict 模式。默认 false
+    supports_strict_mode: Optional[bool] = None
+
+
+class AnthropicAllowedFallbackModel(NovaBaseModel):
+    """Anthropic 服务端 refusal fallback 的目标模型（对齐 pi
+    ``AnthropicAllowedFallbackModelSchema``）——``cost`` 为本地定价元数据，
+    fallback 应答按本费率计成本。"""
+
+    provider: str
+    model: str
+    cost: ModelCost
+
 
 class AnthropicMessagesCompat(NovaBaseModel):
     """
@@ -183,13 +237,31 @@ class AnthropicMessagesCompat(NovaBaseModel):
     # 是否允许空 thinking signature。默认：false
     allow_empty_signature: Optional[bool] = None
 
-    # 是否支持 deferred tools 的 tool_reference。默认：按模型判断
-    supports_tool_references: Optional[bool] = None
-
     # 是否支持 Anthropic strict 工具 schema。默认：false
     supports_strict_tools: Optional[bool] = None
 
-    # 有意缺席：pi 的 allowedFallbackModels（服务端 fallback 许可名单）未
-    # 收录——其 cost 子模型（ModelCost 住 model.py）会让 compat↔model 成环，
-    # 且当前零消费方。出现首个真实 fallback 用户时再补（加 optional 字段
-    # 是 minor 演化，回来之门常开）。
+    # 是否接受对话中段的 system 消息（新代 Claude 支持——对齐 TS
+    # supportsMidConvoSystemMessages）。默认 false
+    supports_mid_convo_system_messages: Optional[bool] = None
+
+    # 是否接受对话中途的工具增删（对齐 TS supportsMidConvoToolChanges）。
+    # 默认 false
+    supports_mid_convo_tool_changes: Optional[bool] = None
+
+    # 是否接受对话中途变更思考级别（对齐 TS supportsMidConvoEffort）。
+    # 默认 false
+    supports_mid_convo_effort: Optional[bool] = None
+
+    # 是否支持 Anthropic message threads（对齐 TS supportsMessageThreads——
+    # 服务端保管线程会话，带 session id 的请求只发增量消息续接上一条
+    # 回复）。默认：provider=anthropic 且 baseUrl 在 api.anthropic.com 上
+    # （会丢未知请求字段的网关会静默丢掉会话）；转发 thread 字段的网关
+    # 可显式开
+    supports_message_threads: Optional[bool] = None
+
+    # 服务端 refusal fallback 的许可名单（对齐 pi allowedFallbackModels——
+    # 带本地定价，fallback 应答按 fallback 费率计成本；缺省/空 = 调用方
+    # 必须省略 fallbacks 字段——无许可目标时 Anthropic 拒收该字段）
+    allowed_fallback_models: Optional[List["AnthropicAllowedFallbackModel"]] = Field(
+        default=None, max_length=3
+    )

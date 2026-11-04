@@ -6,9 +6,9 @@ dogfood；修正引擎直引 ``nova_catalog.engine``（构建/运行同一台）
 
 import pytest
 from nova_catalog.define import ProviderDefinition
+from nova_catalog.engine import apply_corrections
 from nova_protocol import KnownApi
 
-from nova_catalog.engine import apply_corrections
 from nova_ai.model_catalog import (
     builtin_catalog_generated_at,
     finalize_catalog_models,
@@ -150,7 +150,6 @@ class TestApiResolution:
         del fields["api"]
         with pytest.raises(ValueError, match="无法确定目录协议戳"):
             finalize_catalog_models("p1", "http://x/v1", [fields])
-
 
 
 class TestFinalizeCatalogModels:

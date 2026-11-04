@@ -58,6 +58,47 @@ def _pi_dev_entry_to_fields(entry: Dict[str, Any]) -> Optional[ModelFields]:
         fields["thinking_level_map"] = entry["thinkingLevelMap"]
     if entry.get("headers"):
         fields["headers"] = entry["headers"]
+    # 输入限制与缓存档寿命（pi Model.inputLimits/promptCache——键集小且
+    # 固定，显式逐键翻译；未知键不进）
+    input_limits = entry.get("inputLimits")
+    if isinstance(input_limits, dict):
+        images = input_limits.get("images")
+        resize = images.get("resize") if isinstance(images, dict) else None
+        translated_limits: Dict[str, Any] = {}
+        if isinstance(input_limits.get("maxRequestBytes"), int):
+            translated_limits["max_request_bytes"] = input_limits["maxRequestBytes"]
+        translated_images: Dict[str, Any] = {}
+        if isinstance(resize, dict):
+            translated_resize: Dict[str, Any] = {}
+            for camel, snake in (
+                ("maxWidth", "max_width"),
+                ("maxHeight", "max_height"),
+                ("maxBytes", "max_bytes"),
+                ("jpegQuality", "jpeg_quality"),
+            ):
+                if isinstance(resize.get(camel), int):
+                    translated_resize[snake] = resize[camel]
+            if translated_resize:
+                translated_images["resize"] = translated_resize
+        for camel, snake in (
+            ("maxPerMessage", "max_per_message"),
+            ("maxPerRequest", "max_per_request"),
+        ):
+            if isinstance(images, dict) and isinstance(images.get(camel), int):
+                translated_images[snake] = images[camel]
+        if translated_images:
+            translated_limits["images"] = translated_images
+        if translated_limits:
+            fields["input_limits"] = translated_limits
+    prompt_cache = entry.get("promptCache")
+    if isinstance(prompt_cache, dict):
+        translated_cache = {
+            tier: seconds
+            for tier, seconds in prompt_cache.items()
+            if tier in ("short", "long") and isinstance(seconds, (int, float))
+        }
+        if translated_cache:
+            fields["prompt_cache"] = translated_cache
     # compat 键统一 camelCase → snake_case（边界归一：pi.dev 的 TS 形状
     # 在此翻译成我们的字段形状——compat 类的字段名与 pi 同名仅大小写差异，
     # 机械下划线化即可；未知键同样转换后落 extra，不阻塞）

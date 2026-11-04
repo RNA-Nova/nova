@@ -1,7 +1,7 @@
-"""anthropic_messages/messages.py 测试（消息转换/工具转换/deferred 拆分/id 规范化）。
+"""anthropic_messages/messages.py 测试（消息转换/工具转换/id 规范化）。
 
 Anthropic 形态不变量逐条锁：签名回放、redacted 透传、tool_result 分组、
-tool_reference 兄弟块、cache_control 落点、schema 裁剪。
+INLINE_TOOLS 中途 system 块、cache_control 落点、schema 裁剪。
 """
 
 from nova_protocol import (
@@ -26,7 +26,6 @@ from nova_ai.api_impls.anthropic_messages.messages import (
     convert_messages,
     convert_tools,
     normalize_tool_call_id,
-    split_deferred_tools,
 )
 
 
@@ -219,45 +218,81 @@ class TestConvertMessagesToolResult:
             },
         ]
 
-    def test_tool_reference_emitted_for_deferred_tool(self):
-        """added_tool_names ∩ deferred → tool_reference 块，原内容降为兄弟块。"""
+    def test_error_result_images_split_after_tool_results(self):
+        """错误工具结果带图：图换占位进结果块，原图 + caption 随全部结果
+        之后送达（对齐 pi #10794——Anthropic 拒收错误结果里的非文本内容）。"""
         model = _model()
-        tools = [_tool("search")]
-        result_msg = ToolResultMessage(
-            tool_call_id="t1",
-            tool_name="tool_search",
-            content=[TextContent(text="found search")],
-            added_tool_names=["search"],
+        ctx = Context(
+            messages=[
+                UserMessage(content="q"),
+                ToolResultMessage(
+                    tool_call_id="t1",
+                    tool_name="shot",
+                    content=[
+                        TextContent(text="截图失败"),
+                        ImageContent(
+                            type="image", mime_type="image/png", data="aGVsbG8="
+                        ),
+                    ],
+                    is_error=True,
+                ),
+            ]
         )
-        ctx = Context(messages=[UserMessage(content="q"), result_msg], tools=tools)
-        immediate, deferred = split_deferred_tools(ctx, enabled=True)
-        assert immediate == [] and set(deferred) == {"search"}
-        params = convert_messages(model, ctx, get_compat(model), None, set(deferred))
+        params = convert_messages(model, ctx, get_compat(model), None)
         user = params[-1]
         assert user["content"][0] == {
             "type": "tool_result",
             "tool_use_id": "t1",
-            "content": [{"type": "tool_reference", "tool_name": "search"}],
-            "is_error": False,
+            "content": "截图失败\n(image attached after the tool results)",
+            "is_error": True,
         }
-        # 端点不收 reference 与普通内容的混合——原内容拆为兄弟块
-        assert user["content"][1] == {"type": "text", "text": "found search"}
+        assert user["content"][1] == {
+            "type": "text",
+            "text": "Images from the error result of tool call t1 (shot):",
+        }
+        assert user["content"][2]["type"] == "image"
+        assert user["content"][2]["source"]["data"] == "aGVsbG8="
 
-    def test_no_deference_when_unsupported(self):
-        """端点不支持 tool_reference：全部即刻组、无 reference 块。"""
+    def test_success_result_images_stay_inline(self):
+        """非错误结果的图片不拆（对齐 pi：成功结果原样）。"""
         model = _model()
-        tools = [_tool("search")]
+        ctx = Context(
+            messages=[
+                UserMessage(content="q"),
+                ToolResultMessage(
+                    tool_call_id="t1",
+                    tool_name="shot",
+                    content=[
+                        ImageContent(
+                            type="image", mime_type="image/png", data="aGVsbG8="
+                        ),
+                    ],
+                ),
+            ]
+        )
+        params = convert_messages(model, ctx, get_compat(model), None)
+        user = params[-1]
+        assert user["content"][0]["type"] == "tool_result"
+        blocks = user["content"][0]["content"]
+        assert any(b.get("type") == "image" for b in blocks)
+
+    def test_tool_result_plain_after_inline_tools_switch(self):
+        """INLINE_TOOLS 切换后 toolResult 只有结果块（对齐 pi 当前
+        convertMessages——工具变更只走 SystemMessage 通道）。"""
+        model = _model()
         result_msg = ToolResultMessage(
             tool_call_id="t1",
             tool_name="tool_search",
-            content=[TextContent(text="r")],
-            added_tool_names=["search"],
+            content=[TextContent(text="found search")],
         )
-        ctx = Context(messages=[UserMessage(content="q"), result_msg], tools=tools)
-        immediate, deferred = split_deferred_tools(ctx, enabled=False)
-        assert [t.name for t in immediate] == ["search"] and deferred == {}
-        params = convert_messages(model, ctx, get_compat(model), None, set())
-        assert params[-1]["content"][0]["content"] == "r"
+        ctx = Context(messages=[UserMessage(content="q"), result_msg])
+        params = convert_messages(model, ctx, get_compat(model), None)
+        assert params[-1]["content"][0] == {
+            "type": "tool_result",
+            "tool_use_id": "t1",
+            "content": "found search",
+            "is_error": False,
+        }
 
 
 class TestCacheControlPlacement:
@@ -292,7 +327,8 @@ class TestCacheControlPlacement:
 
 class TestConvertTools:
     def test_legacy_schema_strips_extra_keys(self):
-        """非 strict：input_schema 只留 type/properties/required（对齐 TS）。"""
+        """非 strict：input_schema 留 type/properties/required + $defs/definitions，
+        其余根键（$schema/additionalProperties/anyOf 族）丢弃。"""
         tool = _tool("search")
         tool.parameters = {
             **tool.parameters,
@@ -308,44 +344,157 @@ class TestConvertTools:
         assert entries[0]["eager_input_streaming"] is True
         assert "strict" not in entries[0]
 
-    def test_strict_keeps_full_schema_and_flag(self):
+    def test_legacy_schema_keeps_defs_drops_root_combinators(self):
+        """非 strict：$defs/definitions 保留（属性 $refs 可解析——对齐 TS
+        4a6a58eb5）；根 anyOf/oneOf/allOf 丢弃（Anthropic 拒收 400）。"""
+        tool = _tool("search")
+        tool.parameters = {
+            **tool.parameters,
+            "properties": {
+                "target": {"$ref": "#/$defs/entity"},
+            },
+            "$defs": {
+                "entity": {"type": "object", "properties": {"id": {"type": "string"}}}
+            },
+            "definitions": {"legacy": {"type": "string"}},
+            "anyOf": [{"type": "string"}],
+            "oneOf": [{"type": "number"}],
+            "allOf": [{"type": "boolean"}],
+        }
+        entries = convert_tools([tool], get_compat(_model()))
+        schema = entries[0]["input_schema"]
+        assert schema["$defs"] == {
+            "entity": {"type": "object", "properties": {"id": {"type": "string"}}}
+        }
+        assert schema["definitions"] == {"legacy": {"type": "string"}}
+        assert schema["properties"]["target"] == {"$ref": "#/$defs/entity"}
+        for dropped in ("anyOf", "oneOf", "allOf"):
+            assert dropped not in schema
+
+    def test_strict_requires_tool_opt_in(self):
+        """strict 是按工具裁决：模型支持但工具未声明 constrained_sampling →
+        不 strict（对位 pi——strict 是工具级契约不是模型级开关）。"""
         model = _model(compat=AnthropicMessagesCompat(supports_strict_tools=True))
         tool = _tool("search")
         tool.parameters = {**tool.parameters, "additionalProperties": False}
         entries = convert_tools([tool], get_compat(model))
+        assert "strict" not in entries[0]
+        assert entries[0]["input_schema"]["type"] == "object"
+
+    def test_strict_opt_in_viable_sanitized_schema(self):
+        """prefer + 模型支持 + schema 可净化 → strict + 净化后 schema
+        （required=全部属性、additionalProperties=false）。"""
+        from nova_protocol import ConstrainedSampling
+
+        model = _model(compat=AnthropicMessagesCompat(supports_strict_tools=True))
+        tool = _tool("search")
+        tool.constrained_sampling = ConstrainedSampling(
+            type="json_schema", strict="prefer"
+        )
+        entries = convert_tools([tool], get_compat(model))
         assert entries[0]["strict"] is True
+        assert entries[0]["input_schema"]["required"] == ["x"]
         assert entries[0]["input_schema"]["additionalProperties"] is False
 
-    def test_defer_loading_and_cache_control_on_last(self):
+    def test_strict_prefer_unviable_falls_back(self):
+        """prefer + schema 含 strict 不支持的关键字（minimum）→ 回落非严格
+        （pi viability 判定同款）。"""
+        from nova_protocol import ConstrainedSampling
+
+        model = _model(compat=AnthropicMessagesCompat(supports_strict_tools=True))
+        tool = _tool("search")
+        tool.parameters = {
+            **tool.parameters,
+            "properties": {"n": {"type": "integer", "minimum": 1}},
+        }
+        tool.constrained_sampling = ConstrainedSampling(
+            type="json_schema", strict="prefer"
+        )
+        entries = convert_tools([tool], get_compat(model))
+        assert "strict" not in entries[0]
+        assert entries[0]["input_schema"]["type"] == "object"
+
+    def test_strict_require_unviable_raises(self):
+        """require + 不可净化 → 请求期报错（不给模型次优）。"""
+        from nova_protocol import ConstrainedSampling
+
+        model = _model(compat=AnthropicMessagesCompat(supports_strict_tools=True))
+        tool = _tool("search")
+        tool.parameters = {
+            **tool.parameters,
+            "properties": {"n": {"type": "integer", "minimum": 1}},
+        }
+        tool.constrained_sampling = ConstrainedSampling(
+            type="json_schema", strict="require"
+        )
+        import pytest
+
+        with pytest.raises(ValueError, match="constrained sampling"):
+            convert_tools([tool], get_compat(model))
+
+    def test_cache_control_on_last(self):
         model = _model()
         tools = [_tool("a"), _tool("b")]
         entries = convert_tools(
             tools,
             get_compat(model),
             cache_control={"type": "ephemeral"},
-            defer_loading=True,
         )
-        assert all(e["defer_loading"] is True for e in entries)
         assert "cache_control" not in entries[0]
         assert entries[1]["cache_control"] == {"type": "ephemeral"}
 
 
-class TestSplitDeferredTools:
-    def test_used_tools_stay_immediate(self):
-        """已被 toolCall 使用的工具不再延迟（对齐 TS usedNames 排除）。"""
-        tools = [_tool("search"), _tool("read")]
-        assistant = _assistant(
-            [ToolCall(id="t1", name="search", arguments={})], stop_reason="toolUse"
+class TestInlineToolChangeBlocks:
+    """中途 system 消息的 INLINE_TOOLS 块（对齐 pi convertMessages 的
+    convertToolDefinitions 分支）。"""
+
+    def _system_with_tools(self):
+        from nova_protocol import SystemMessage, ToolReference
+
+        return SystemMessage(
+            sections={"mode": "只读"},
+            tools_added=[_tool("search"), _tool("read")],
+            tools_removed=[ToolReference(name="write"), ToolReference(name="search")],
+            timestamp=2,
         )
-        result = ToolResultMessage(
-            tool_call_id="t1",
-            tool_name="search",
-            content=[TextContent(text="r")],
-            added_tool_names=["search"],
-        )
+
+    def test_addition_removal_blocks(self):
+        """文本 + removal（被同名新增覆盖的跳过）+ addition（完整定义）。"""
+        model = _model()
         ctx = Context(
-            messages=[UserMessage(content="q"), assistant, result], tools=tools
+            messages=[
+                UserMessage(content="q1"),
+                self._system_with_tools(),
+                _assistant([TextContent(text="a1")]),
+            ]
         )
-        immediate, deferred = split_deferred_tools(ctx, enabled=True)
-        assert {t.name for t in immediate} == {"search", "read"}
-        assert deferred == {}
+        params = convert_messages(
+            model,
+            ctx,
+            get_compat(model),
+            None,
+            lambda tools: convert_tools(tools, get_compat(model)),
+        )
+        system = next(m for m in params if m["role"] == "system")
+        types = [b["type"] for b in system["content"]]
+        assert types == ["text", "tool_removal", "tool_addition", "tool_addition"]
+        assert system["content"][1]["tool"] == {
+            "type": "tool_reference",
+            "name": "write",
+        }
+        additions = [b["tool"]["definition"]["name"] for b in system["content"][2:]]
+        assert additions == ["search", "read"]
+
+    def test_no_definitions_converter_text_only(self):
+        """非 INLINE 形态（无转换器）：只发文本块。"""
+        model = _model()
+        ctx = Context(
+            messages=[
+                UserMessage(content="q1"),
+                self._system_with_tools(),
+                _assistant([TextContent(text="a1")]),
+            ]
+        )
+        params = convert_messages(model, ctx, get_compat(model), None)
+        system = next(m for m in params if m["role"] == "system")
+        assert [b["type"] for b in system["content"]] == ["text"]

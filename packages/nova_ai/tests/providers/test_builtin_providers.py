@@ -146,9 +146,9 @@ class TestMoonshotaiCnModels:
 class TestKimiCodingModels:
     def test_k3_model_attributes(self):
         model = get_kimi_coding_model("k3")
-        assert model.api == KnownApi.ANTHROPIC_MESSAGES
+        assert model.api == KnownApi.OPENAI_COMPLETIONS
         assert model.provider == KnownProvider.KIMI_CODING
-        assert model.base_url == "https://api.kimi.com/coding"
+        assert model.base_url == "https://api.kimi.com/coding/v1"
         assert model.context_window == 1_048_576
         assert model.reasoning is True
 

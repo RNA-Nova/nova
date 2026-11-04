@@ -76,7 +76,10 @@ class TestEstimateContextTokens:
         assert estimate.tokens == estimate.usage_tokens + estimate.trailing_tokens
         assert estimate.last_usage_index == 0
 
-    def test_usage_anchor_with_added_tool_names(self):
+    def test_usage_anchor_with_mid_convo_tools_added(self):
+        """usage 锚点之后的中途 system 消息 tools_added 计入尾量。"""
+        from nova_protocol import SystemMessage
+
         usage = Usage(
             input=1000,
             output=100,
@@ -92,21 +95,15 @@ class TestEstimateContextTokens:
             stop_reason=StopReason.STOP,
             timestamp=100,
         )
-        tool_result = ToolResultMessage(
-            tool_call_id="tc1",
-            tool_name="t1",
-            content=[TextContent(text="ok")],
-            added_tool_names=["dynamic_tool"],
-            timestamp=200,
-        )
         dynamic_tool = Tool(name="dynamic_tool", description="dynamic", parameters={})
+        tool_announce = SystemMessage(tools_added=[dynamic_tool], timestamp=200)
         ctx = Context(
-            messages=[assistant, tool_result],
+            messages=[assistant, tool_announce],
             tools=[dynamic_tool],
         )
 
         estimate = estimate_context_tokens(ctx)
-        # 应该包含 added_tool_names 对应的工具定义 tokens
+        # 应包含 tools_added 声明的工具定义 tokens
         assert estimate.trailing_tokens > 0
 
     def test_error_assistant_not_used_as_anchor(self):

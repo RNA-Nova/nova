@@ -1,7 +1,10 @@
-"""集成测试凭据与 manager 装配（对位 pi ``test/oauth.ts``）。
+"""集成测试凭据与 manager 装配（对位 pi ``test/oauth.ts`` 与其 e2e 调用点）。
 
-env 优先、``~/.nova/agent/auth.json`` 兜底；OAuth 过期经 provider 自家
-refresh 链刷新并回写（0600）。
+凭据解析序（对齐 pi e2e 的 ``getE2EApiKey``）：**env key 优先**（pi 在调用点
+``getEnvApiKey`` 直取），``~/.nova/agent/auth.json`` 的 OAuth 兜底（过期经
+provider 自家 refresh 链刷新并回写 0600）。env key 以 ``ApiKeyCredential``
+身份写入**内存**凭据店——与生产链语义兼容（stored api_key 是一等凭据，
+无 refresh 可死），不回写 auth.json。
 
 **仅 integration 使用**——触碰真实用户凭据是集成测试的特许例外
 （默认套件的密封条款不覆盖这里）。
@@ -58,6 +61,18 @@ class AuthJsonCredentialStore:
                 continue  # 畸形条目跳过，不拖垮整份凭据
             self._data[provider_id] = credential
             self._inner.write(provider_id, credential)
+        # env key 优先（对齐 pi e2e 调用点的 getEnvApiKey）：env 有 key 的
+        # provider 在内存店登记为 api_key 凭据——陈旧 OAuth（refresh 已被拒）
+        # 在测试里不再抢道。只写内存层：env 是进程级供给，不落盘（不回写
+        # auth.json）
+        from nova_protocol import ApiKeyCredential
+
+        from nova_ai.providers.all import builtin_providers
+
+        for provider in builtin_providers():
+            env_key = get_env_api_key(provider.id)
+            if env_key:
+                self._inner.write(provider.id, ApiKeyCredential(key=env_key))
 
     def _persist(self) -> None:
         payload = {

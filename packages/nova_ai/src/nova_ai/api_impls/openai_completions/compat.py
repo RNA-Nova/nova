@@ -39,6 +39,9 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         or provider == "moonshotai-cn"
         or "api.moonshot." in base_url
     )
+    # kimi-coding 同属 moonshot 系（api.kimi.com 同套 flavored schema 校验——
+    # 生产 400 实锤），nova 特有判定（pi 的 kimi-coding 走独立 provider 配置）
+    is_kimi_coding = provider == "kimi-coding" or "api.kimi.com" in base_url
     is_openrouter = provider == "openrouter" or "openrouter.ai" in base_url
     is_cloudflare_workers_ai = (
         provider == "cloudflare-workers-ai" or "api.cloudflare.com" in base_url
@@ -130,6 +133,7 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         max_tokens_field="max_tokens" if use_max_tokens else "max_completion_tokens",
         requires_tool_result_name=False,
         requires_assistant_after_tool_result=False,
+        requires_non_null_assistant_content=False,
         requires_thinking_as_text=False,
         requires_reasoning_content_on_assistant_messages=is_deepseek,
         thinking_format=thinking_format,
@@ -138,6 +142,7 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         chat_template_kwargs={},
         chat_template_args={},
         zai_tool_stream=False,
+        requires_moonshot_flavored_schema=is_moonshot or is_kimi_coding,
         supports_thinking_token_budget=False,
         thinking_token_budget_field=None,
         supports_strict_mode=not (
@@ -194,6 +199,10 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             compat.requires_assistant_after_tool_result,
             detected.requires_assistant_after_tool_result,
         ),
+        requires_non_null_assistant_content=_pick(
+            compat.requires_non_null_assistant_content,
+            detected.requires_non_null_assistant_content,
+        ),
         requires_thinking_as_text=_pick(
             compat.requires_thinking_as_text, detected.requires_thinking_as_text
         ),
@@ -215,6 +224,10 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
             compat.chat_template_args, detected.chat_template_args
         ),
         zai_tool_stream=_pick(compat.zai_tool_stream, detected.zai_tool_stream),
+        requires_moonshot_flavored_schema=_pick(
+            compat.requires_moonshot_flavored_schema,
+            detected.requires_moonshot_flavored_schema,
+        ),
         supports_thinking_token_budget=_pick(
             compat.supports_thinking_token_budget,
             detected.supports_thinking_token_budget,
@@ -234,6 +247,11 @@ def get_compat(model: Model) -> OpenAICompletionsCompat:
         ),
         session_affinity_format=_pick(
             compat.session_affinity_format, detected.session_affinity_format
+        ),
+        # 三态旗标无检测默认（None = auto，裁决归 params——对齐 pi getCompat
+        # 的 promptCacheKeyMode 直通）
+        prompt_cache_key_mode=_pick(
+            compat.prompt_cache_key_mode, detected.prompt_cache_key_mode
         ),
         supports_long_cache_retention=_pick(
             compat.supports_long_cache_retention,

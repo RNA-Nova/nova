@@ -43,7 +43,7 @@ from nova_protocol import (
     RedactedString,
 )
 
-from ..utils.errors import RequestTimeoutError
+from ..utils.errors import RequestTimeoutError, with_cause_detail
 
 ModelsErrorCode = Literal[
     "model_source", "model_validation", "provider", "stream", "auth", "oauth"
@@ -70,22 +70,13 @@ class AuthResolutionOverrides:
     refresh_locks: Optional[KeyedLockFactory] = None
 
 
-def _with_cause_detail(message: str, cause: Optional[BaseException]) -> str:
-    """把底层原因拼进 message（对齐 TS withCauseDetail）——调用方常只看 str(e)。"""
-    if cause is None:
-        return message
-    detail = str(cause).strip()
-    if not detail or detail in message:
-        return message
-    return f"{message}: {detail}"
-
-
 class ModelsError(Exception):
     """ModelsManager 集合运行时的错误。
 
     ``code`` 是子系统归属（排查/遥测用）；``kind`` 是可选的用户面分类
     （``nova_error_kind`` 自声明——归一阶梯第 1 级消费）。多数包装点不传
-    kind：底层 cause 的分类沿 ``__cause__`` 链上浮，包装不掩盖。
+    kind：底层 cause 的分类沿 ``__cause__`` 链上浮，包装不掩盖。消息经
+    ``with_cause_detail`` 拼入 cause 链最深层真因（调用方常只看 str(e)）。
     """
 
     def __init__(
@@ -96,7 +87,7 @@ class ModelsError(Exception):
         *,
         kind: Optional[NovaErrorKind] = None,
     ):
-        super().__init__(_with_cause_detail(message, cause))
+        super().__init__(with_cause_detail(message, cause))
         self.code = code
         if kind is not None:
             self.nova_error_kind = kind

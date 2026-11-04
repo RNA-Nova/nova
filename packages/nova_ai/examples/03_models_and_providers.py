@@ -3,7 +3,8 @@
 演示：
 - `builtin_models()`：内置 provider（volcengine / moonshotai / kimi-coding）开箱即用；
 - `create_models_manager()` + `create_provider()`：自建注册表，注册自定义 provider；
-- 动态模型目录：`fetch_models` 回调让 provider 的模型列表可刷新。
+- 动态模型目录：`refresh_models` 能力口袋（pi 的 refreshModels 对位）——
+  直接赋一个刷新函数，发布经 `context.publish`（世代校验闸）。
 
 运行：
     python examples/03_models_and_providers.py
@@ -106,9 +107,20 @@ async def demo_custom():
 
 
 def demo_dynamic():
-    async def fetch_models(context):
-        """真实场景里是 GET /v1/models；这里返回固定列表。"""
-        return [
+    provider = create_provider(
+        id="dyn",
+        name="Dynamic Provider",
+        models=[],
+        api=make_echo_api(),
+    )
+
+    async def refresh(context):
+        """真实场景里是 GET /v1/models 后发布；这里发布固定列表。"""
+        from nova_ai.gateway.provider import ModelsPublication
+
+        if context.publish is None:
+            return
+        dynamic = [
             Model(
                 id="dynamic-1",
                 name="Dynamic",
@@ -122,14 +134,13 @@ def demo_dynamic():
                 max_tokens=4096,
             )
         ]
+        await context.publish(
+            ModelsPublication(
+                update=lambda: setattr(provider, "_dynamic_models", dynamic)
+            )
+        )
 
-    provider = create_provider(
-        id="dyn",
-        name="Dynamic Provider",
-        models=[],
-        api=make_echo_api(),
-        fetch_models=fetch_models,
-    )
+    provider.refresh_models = refresh
     print("[dynamic] 刷新前:", len(provider.get_models()))
 
     from nova_ai import RefreshModelsContext

@@ -95,7 +95,8 @@ class TestStreamHappyPath:
         result = await es.result()
         assert result.stop_reason == StopReason.STOP
         assert result.response_id == "msg_1"
-        assert result.response_model == "claude-x"
+        # 实际服务模型与请求一致 → response_model 不落（仅被改写时落，对齐 TS）
+        assert result.response_model is None
         assert result.content[0].text == "你好"
         usage = result.usage
         assert (usage.input, usage.output, usage.total_tokens) == (12, 5, 17)
@@ -687,3 +688,86 @@ async def test_abort_during_on_response_closes_stream():
     await asyncio.wait_for(consumed.wait(), timeout=1.0)
     await consumer
     assert byte_stream.closed.is_set()  # 流被关——不留 GC 悬念
+
+
+class TestServerSideFallback:
+    """服务端 refusal fallback（对齐 pi）：fallback 标记块 + fallback 定价。"""
+
+    def _fallback_model(self):
+        from nova_protocol import AnthropicAllowedFallbackModel, AnthropicMessagesCompat
+
+        return _model().model_copy(
+            update={
+                "compat": AnthropicMessagesCompat(
+                    allowed_fallback_models=[
+                        AnthropicAllowedFallbackModel(
+                            provider="anthropic",
+                            model="claude-fallback-x",
+                            cost=ModelCost(
+                                input=1, output=2, cache_read=0, cache_write=0
+                            ),
+                        )
+                    ]
+                )
+            }
+        )
+
+    async def test_fallback_response_uses_fallback_cost(self):
+        """fallback 模型应答：response_model 落 + 按 fallback 费率计成本 +
+        标记块不进内容。"""
+        frames = [
+            ant_message_start(model="claude-fallback-x"),
+            ant_block_start(0, {"type": "fallback"}),
+            ant_block_stop(0),
+            ant_text_block(1),
+            ant_text_delta("兜底应答", 1),
+            ant_block_stop(1),
+            ant_message_delta("end_turn", 5),
+            ant_message_stop(),
+        ]
+        capture = RequestCapture()
+        client = anthropic_client(frames, capture)
+        es = stream(
+            self._fallback_model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(api_key="sk-test", client=client),
+        )
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        assert result.response_model == "claude-fallback-x"
+        # 内容只有文本块（fallback 标记不进）
+        assert [c.type for c in result.content] == ["text"]
+        assert result.content[0].text == "兜底应答"
+        # 成本按 fallback 费率：12*1 + 5*2 每百万
+        assert result.usage.cost.total == pytest.approx((12 * 1 + 5 * 2) / 1_000_000)
+
+    async def test_fallback_params_field(self):
+        """名单非空 → params.fallbacks 只带模型 id（对齐 TS buildParams 收尾）。"""
+        from nova_ai.api_impls.anthropic_messages.params import build_params
+
+        params = build_params(
+            self._fallback_model(), Context(messages=[UserMessage(content="hi")])
+        )
+        assert params["fallbacks"] == [{"model": "claude-fallback-x"}]
+
+    async def test_mid_output_fallback_rejected(self):
+        """fallback 标记出现在已有内容之后 → 报错（对齐 TS 不支持中途换模型）。"""
+        frames = [
+            ant_message_start(),
+            ant_text_block(0),
+            ant_text_delta("先出内容", 0),
+            ant_block_stop(0),
+            ant_block_start(1, {"type": "fallback"}),
+            ant_message_delta("end_turn", 5),
+            ant_message_stop(),
+        ]
+        capture = RequestCapture()
+        client = anthropic_client(frames, capture)
+        es = stream(
+            self._fallback_model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(api_key="sk-test", client=client),
+        )
+        result = await es.result()
+        assert result.stop_reason == StopReason.ERROR
+        assert "mid-output model fallback" in (result.error_message or "")

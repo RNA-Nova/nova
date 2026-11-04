@@ -37,19 +37,6 @@ class TestDefaults:
         assert compat.allow_empty_signature is False
         assert compat.force_adaptive_thinking is False
 
-    def test_tool_references_default_by_generation(self):
-        """一方 Anthropic + 非 Haiku + Claude 4.5 起才默认支持（TS 同款门）。"""
-        assert get_compat(_model("claude-opus-4-6")).supports_tool_references is True
-        assert get_compat(_model("claude-sonnet-4-5")).supports_tool_references is True
-        assert get_compat(_model("claude-opus-4-1")).supports_tool_references is False
-        assert get_compat(_model("claude-haiku-4-5")).supports_tool_references is False
-        assert get_compat(_model("claude-opus-5")).supports_tool_references is True
-
-    def test_tool_references_false_for_third_party(self):
-        assert (
-            get_compat(_model(provider="fireworks")).supports_tool_references is False
-        )
-
 
 class TestOverrides:
     def test_explicit_fields_override_defaults(self):
@@ -67,16 +54,6 @@ class TestOverrides:
         assert compat.force_adaptive_thinking is True
         # 未覆盖字段保持默认
         assert compat.supports_strict_tools is False
-
-    def test_override_wins_over_generation_default(self):
-        """显式关闭 tool_reference 覆盖代际默认。"""
-        compat = get_compat(
-            _model(
-                "claude-opus-4-6",
-                compat=AnthropicMessagesCompat(supports_tool_references=False),
-            )
-        )
-        assert compat.supports_tool_references is False
 
     def test_foreign_api_compat_ignored(self):
         """别的协议的 compat 对象不构成覆盖（判别归 Model.api）。"""

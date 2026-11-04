@@ -34,7 +34,7 @@ websockets = ">=12.0"
 # "generator didn't stop after athrow()" 噪音；3.9.0 及之前干净。上游修复后放开。
 openai = ">=2.0,<3.10.0"
 httpx = ">=0.27.0"
-anthropic = ">=0.69.0"
+anthropic = ">=1.0"
 # 取消作用域（CancelScope——请求/消费段的真杀执行层；>=4.11 归因与
 # uncancel 簿记修正），词汇层仍是自家 AbortSignal（TS 对齐）
 anyio = ">=4.11"

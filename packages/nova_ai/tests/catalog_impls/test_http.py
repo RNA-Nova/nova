@@ -8,12 +8,12 @@
 import httpx
 import pytest
 import respx
-from nova_protocol import OAuthCredential
+from nova_protocol import KnownApi, Model, ModelCost, OAuthCredential
 
 from nova_ai.catalog_impls.models_dev import MODELS_DEV_API, ModelsDevCatalog
 from nova_ai.catalog_impls.pi_dev import PI_DEV_CATALOG_BASE_URL, PiDevCatalog
 from nova_ai.gateway.provider import RefreshModelsContext
-from nova_ai.providers.kimi_coding.catalog import kimi_coding_fetch_models
+from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
 
 pytestmark = pytest.mark.asyncio
 
@@ -70,6 +70,8 @@ async def test_models_dev_request_line_and_catalog_ua():
                         "deepseek-v4": {
                             "id": "deepseek-v4",
                             "name": "DeepSeek V4",
+                            "type": "chat",
+                            "capabilities": {"tools": {"supported": True}},
                             "limit": {"context": 1048576, "output": 393216},
                         }
                     }
@@ -83,6 +85,22 @@ async def test_models_dev_request_line_and_catalog_ua():
     assert "nova-ai-model-data" in request.headers["user-agent"]
     assert outcome.status == 200
     assert outcome.models_fields[0]["id"] == "deepseek-v4"
+
+
+def _kimi_base_model() -> Model:
+    """覆盖式合并的基底模型（公共事实——compat/价格/max_tokens 继承源）。"""
+    return Model(
+        id="kimi-k3",
+        name="Kimi K3",
+        api=KnownApi.OPENAI_COMPLETIONS,
+        provider="kimi-coding",
+        base_url=BASE_URL,
+        reasoning=True,
+        input_types=["text"],
+        cost=ModelCost(input=3, output=15, cache_read=0.3, cache_write=0),
+        context_window=1048576,
+        max_tokens=131072,
+    )
 
 
 @respx.mock
@@ -107,11 +125,12 @@ async def test_kimi_managed_sends_bearer_and_parses():
     context = RefreshModelsContext(
         credential=OAuthCredential(access="tok", refresh="r", expires=9999999999999)
     )
-    models = await kimi_coding_fetch_models(context)
+    models = await kimi_personalize([_kimi_base_model()], context)
     assert route.called
     request = route.calls[0].request
     assert request.headers["authorization"] == "Bearer tok"
     assert request.headers["accept"] == "application/json"
+    # 覆盖式合并：managed 活字段生效（级别表来自 valid_efforts）
     assert [m.id for m in models] == ["kimi-k3"]
     assert models[0].thinking_level_map is not None
     assert models[0].thinking_level_map.get("high") == "high"

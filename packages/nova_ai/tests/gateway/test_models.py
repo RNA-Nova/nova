@@ -26,6 +26,7 @@ from nova_ai.providers import create_provider
 from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 from nova_ai.streaming import create_assistant_message_event_stream
 from nova_ai.utils.errors import RequestTimeoutError
+from tests._helpers.callback_refresh import callback_refresh
 
 
 def _make_model(
@@ -335,7 +336,6 @@ class TestModelsRefresh:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=_fetch,
             auth=ProviderAuth(
                 oauth=OAuthAuth(
                     name="Test OAuth",
@@ -345,6 +345,7 @@ class TestModelsRefresh:
                 ),
             ),
         )
+        provider.refresh_models = callback_refresh(provider, _fetch)
         models = ModelsManager(credential_store=store)
         models.set_provider(provider)
 
@@ -368,9 +369,9 @@ class TestModelsRefresh:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=_hanging_fetch,
             auth=_make_auth(api_key_env="TEST_DEADLINE_API_KEY"),
         )
+        provider.refresh_models = callback_refresh(provider, _hanging_fetch)
         models = ModelsManager(credential_store=store)
         models.set_provider(provider)
 

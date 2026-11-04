@@ -9,16 +9,15 @@
   ``apply_corrections``——构建/运行同一台引擎，本模块直引不另立）；
   知识唯一定义点在 ``nova_catalog.providers``（各 DEF——
   ``ProviderDefinition`` 结构满足者）；
-- provider 独有的内容裁决（kimi 方言换血、火山 ark 筛选、managed 合并）
+- provider 独有的内容裁决（kimi managed 订阅源覆盖、火山 ark 在售筛选）
   不在本模块——归各家目录的 ``catalog.py`` 回调。
 
 构建期专用流水线（``build_provider_models``/``source_models_for``）不在本
-模块——归 ``catalog/``（pi 同款：构建期世界独立成区）。
+模块——归 ``nova_catalog`` 包（pi 同款：构建期世界独立成区）。
 """
 
 from __future__ import annotations
 
-import fnmatch
 from typing import Any, Dict, List, Optional, cast
 
 from nova_catalog.define import ProviderDefinition
@@ -84,8 +83,8 @@ def finalize_catalog_models(
 
     盖戳素材（``provider_id``/``base_url``）与修正知识（``knowledge``——
     ``nova_catalog`` 的 ``ProviderDefinition``）全部由调用方递交——引擎
-    不查找、不注册、不含任何单家逻辑；provider 独有的内容裁决（kimi 方言换血、火山 ark
-    筛选）归各家回调。钉住模型（``pinned_models``）与站拉取合并，
+    不查找、不注册、不含任何单家逻辑；provider 独有的内容裁决（kimi managed
+    订阅源覆盖、火山 ark 在售筛选）归各家回调。钉住模型（``pinned_models``）与站拉取合并，
     同 id 站拉取胜。
     """
     raw: Dict[str, ModelFields] = {}

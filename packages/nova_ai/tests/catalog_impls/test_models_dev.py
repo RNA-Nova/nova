@@ -1,4 +1,9 @@
-"""ModelsDevCatalog 测试（切片/实例缓存去重/TTL）与 models.dev 方言翻译。"""
+"""ModelsDevCatalog 测试（v2 切片/实例缓存去重/TTL）与翻译委托（v2 翻译件）。
+
+翻译本体（价格分档/级别表推导/能力字段）的详尽用例归 nova_catalog 的
+sources 测试；本文件只钉运行期适配层的行为承诺与"用的就是 v2 翻译件"
+这一委托事实。
+"""
 
 import time
 
@@ -9,21 +14,26 @@ from nova_ai.catalog_impls.models_dev import ModelsDevCatalog, models_dev_to_nov
 pytestmark = pytest.mark.asyncio
 
 
-def _models_dev_payload():
-    return {
-        "volcengine": {
-            "models": {
-                "deepseek-v4": {
-                    "id": "deepseek-v4",
-                    "name": "DeepSeek V4",
-                    "reasoning": True,
-                    "limit": {"context": 1048576, "output": 393216},
-                    "cost": {"input": 1, "output": 2},
-                    "modalities": {"input": ["text"]},
-                }
-            }
-        }
+def _v2_entry(**overrides):
+    """合法 v2 条目基座（chat 类型 + 工具支持——v2 翻译件的入门门槛）。"""
+    entry = {
+        "id": "deepseek-v4",
+        "name": "DeepSeek V4",
+        "type": "chat",
+        "capabilities": {
+            "tools": {"supported": True},
+            "reasoning": {"supported": True},
+        },
+        "limit": {"context": 1048576, "output": 393216},
+        "cost": {"text": {"input": {"price": 1}, "output": {"price": 2}}},
+        "modalities": {"input": ["text"]},
     }
+    entry.update(overrides)
+    return entry
+
+
+def _models_dev_payload():
+    return {"volcengine": {"models": {"deepseek-v4": _v2_entry()}}}
 
 
 class TestModelsDevCatalog:
@@ -42,6 +52,9 @@ class TestModelsDevCatalog:
         assert fields["context_window"] == 1048576
         assert fields["max_tokens"] == 393216
         assert fields["reasoning"] is True
+        # v2 嵌套价格被翻译件拍平
+        assert fields["cost"]["input"] == 1
+        assert fields["cost"]["output"] == 2
 
     async def test_unknown_key_is_404(self, monkeypatch):
         async def fake_fetch_json(url, **kwargs):
@@ -120,38 +133,37 @@ class TestModelsDevCatalog:
         assert len(calls) == 2
 
 
-class TestModelsDevToNova:
+class TestModelsDevToNovaDelegation:
+    """运行期消费的就是构建管线的 v2 翻译件（过滤语义为证——v1 不过滤）。"""
+
+    async def test_non_chat_type_dropped(self):
+        assert models_dev_to_nova("p1", _v2_entry(type="image")) is None
+
+    async def test_deprecated_status_dropped(self):
+        assert models_dev_to_nova("p1", _v2_entry(status="deprecated")) is None
+
+    async def test_tools_unsupported_dropped(self):
+        entry = _v2_entry(capabilities={"tools": {"supported": False}})
+        assert models_dev_to_nova("p1", entry) is None
+
     async def test_strict_raises_on_missing_name(self):
+        entry = _v2_entry()
+        del entry["name"]
         try:
-            models_dev_to_nova("p1", {"id": "m1"}, strict=True)
+            models_dev_to_nova("p1", entry, strict=True)
             raise AssertionError("should have raised")
         except ValueError as e:
             assert "missing id/name" in str(e)
 
-    async def test_interleaved_maps_reasoning_content_compat(self):
-        fields = models_dev_to_nova(
-            "p1",
-            _models_dev_payload()["volcengine"]["models"]["deepseek-v4"]
-            | {"interleaved": {"field": "reasoning_content"}},
-        )
-        assert fields is not None
-        assert fields["compat"] == {
-            "requires_reasoning_content_on_assistant_messages": True
-        }
-
     async def test_modalities_filtered_to_text_image(self):
         fields = models_dev_to_nova(
-            "p1",
-            _models_dev_payload()["volcengine"]["models"]["deepseek-v4"]
-            | {"modalities": {"input": ["text", "image", "audio"]}},
+            "p1", _v2_entry(modalities={"input": ["text", "image", "audio"]})
         )
         assert fields is not None
         assert fields["input_types"] == ["text", "image"]
 
         only_audio = models_dev_to_nova(
-            "p1",
-            _models_dev_payload()["volcengine"]["models"]["deepseek-v4"]
-            | {"modalities": {"input": ["audio"]}},
+            "p1", _v2_entry(modalities={"input": ["audio"]})
         )
         assert only_audio is not None
         assert only_audio["input_types"] == ["text"]  # 无有效模态回落 text

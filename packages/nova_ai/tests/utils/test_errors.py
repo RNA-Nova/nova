@@ -191,6 +191,49 @@ class TestTransportTier:
         assert result.kind is NovaErrorKind.REQUEST_TIMEOUT
 
 
+class TestCauseDetail:
+    """连接级错误拼 cause 链最深层（对齐 pi 4c992154d withCauseDetail）。"""
+
+    def test_openai_connection_appends_deepest_cause(self):
+        """真实 SDK 形状：APIConnectionError 的通用文案 + httpx 最深层真因。"""
+        req = httpx.Request("POST", "https://api.example.com/v1")
+        err = openai.APIConnectionError(request=req)
+        err.__cause__ = httpx.ConnectError("connect ECONNREFUSED 127.0.0.1:8080")
+        result = normalize_error(err)
+        assert "Connection error" in result.message
+        assert "ECONNREFUSED" in result.message
+
+    def test_deepest_of_multi_level_chain_wins(self):
+        err = Exception("sdk wrap")
+        mid = Exception("mid layer")
+        leaf = OSError("name resolution failed")
+        err.__cause__ = mid
+        mid.__cause__ = leaf
+        result = normalize_error(err)
+        assert "name resolution failed" in result.message
+        assert "mid layer" not in result.message
+
+    def test_cause_code_appended_when_missing(self):
+        class _CodedError(Exception):
+            code = "EAI_AGAIN"
+
+        err = Exception("Connection error.")
+        err.__cause__ = _CodedError("getaddrinfo failed")
+        result = normalize_error(err)
+        assert "getaddrinfo failed (EAI_AGAIN)" in result.message
+
+    def test_no_cause_leaves_message_unchanged(self):
+        result = normalize_error(Exception("plain failure"))
+        assert result.message == "plain failure"
+
+    def test_status_present_skips_cause_detail(self):
+        """有 status 的错误不拼 cause（响应体已承载真因）。"""
+        err = _StatusError("boom", status_code=500)
+        err.__cause__ = Exception("should not appear")
+        result = normalize_error(err)
+        assert "should not appear" not in result.message
+
+
 class TestRateLimitTextTier:
     def test_rate_limit_text_without_status(self):
         result = normalize_error(Exception("Rate limit reached, retry soon"))

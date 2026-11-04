@@ -1,25 +1,28 @@
 """消息与工具转换（对齐 TS ``convertMessages`` / ``convertTools`` /
-``normalizeToolCallId`` / ``splitDeferredTools``）。
+``normalizeToolCallId``）。
 
 Anthropic 消息形态要点：
 
-- system 是顶层参数不是消息（归 params.py）；
+- system 是顶层参数不是消息（归 params.py）；中途 system 消息在穿过模式
+  下渲染为 ``role: system`` 内容块序列——文本块 + INLINE_TOOLS 的
+  ``tool_addition``/``tool_removal``（工具变更随消息按值下发，顶层工具
+  列表固定不动，缓存前缀存活——pi b271b0a52 起的形态）；
 - assistant 内容块保真回放：text / thinking（**签名原样回传**，缺签名降级
   纯文本——``allow_empty_signature`` 的模型除外）/ redacted_thinking /
   tool_use；
-- toolResult 消息合并为 user 消息的 tool_result 块；携带 ``added_tool_names``
-  的条目额外发 tool_reference 块（deferred tools 装载，端点要求
-  tool_reference 不得与普通 tool_result 内容混合——拆为同级兄弟块）；
-- cache_control 打在**最后一条 user 消息的最后一个块**上（缓存会话历史）。
+- toolResult 消息合并为 user 消息的 tool_result 块；
+- cache_control 打在**最后一条 user/system 消息的最后一个块**上（缓存
+  会话历史）；
+- strict 工具的按工具裁决与 schema 净化归 ``constrained.py``（pi
+  constrained-sampling.ts 对位）。
 """
 
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nova_protocol import (
     Context,
     ImageContent,
-    Message,
     Model,
     TextContent,
     Tool,
@@ -28,8 +31,14 @@ from nova_protocol import (
 
 from ...utils.surrogate import sanitize_surrogates
 from .._shared.prompt_cache import CacheControl
+from .._shared.transcript import render_system_message_update
 from .._shared.transform_messages import transform_messages
 from .compat import ResolvedAnthropicCompat
+from .constrained import (
+    make_strict_json_schema,
+    prefers_json_schema_strict_sampling,
+    resolve_json_schema_strict_sampling,
+)
 
 # Anthropic 工具调用 id 的合法形状（对齐 TS normalizeToolCallId）
 _TOOL_CALL_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
@@ -38,42 +47,6 @@ _TOOL_CALL_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
 def normalize_tool_call_id(tool_call_id: str) -> str:
     """规范化工具调用 id（非法字符换下划线，截断到 64——对齐 TS）。"""
     return _TOOL_CALL_ID_PATTERN.sub("_", tool_call_id)[:64]
-
-
-def split_deferred_tools(
-    context: Context, enabled: bool
-) -> Tuple[List[Tool], Dict[str, Tool]]:
-    """拆分当前工具为即刻/延迟两组（对齐 TS splitDeferredTools）。
-
-    延迟组 = 经 toolResult 的 ``added_tool_names`` 引入且尚未被 toolCall
-    使用的工具——随 ``defer_loading`` 下发，由 tool_reference 块按需装载。
-    """
-    unique: Dict[str, Tool] = {}
-    for tool in context.tools or []:
-        unique[tool.name] = tool
-    if not enabled:
-        return list(unique.values()), {}
-
-    deferred_names: Set[str] = set()
-    used_names: Set[str] = set()
-    for message in context.messages:
-        if message.role == "assistant":
-            for block in message.content:
-                if block.type == "toolCall":
-                    used_names.add(block.name)
-        elif isinstance(message, ToolResultMessage):
-            for name in message.added_tool_names or []:
-                if name not in used_names:
-                    deferred_names.add(name)
-
-    immediate: List[Tool] = []
-    deferred: Dict[str, Tool] = {}
-    for name, tool in unique.items():
-        if name in deferred_names:
-            deferred[name] = tool
-        else:
-            immediate.append(tool)
-    return immediate, deferred
 
 
 def _convert_content_blocks(content: List[Any]) -> Any:
@@ -105,36 +78,58 @@ def _convert_content_blocks(content: List[Any]) -> Any:
 
 def _convert_tool_result(
     message: ToolResultMessage,
-    deferred_tool_names: Set[str],
-    loaded_tool_names: Set[str],
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """toolResult → (tool_result 块, 兄弟内容块)（对齐 TS convertToolResult）。
-
-    携带新增工具名的条目发 tool_reference 块（端点要求 tool_reference 不与普通
-    tool_result 内容混合——原内容降级为兄弟块）。
-    """
-    references: List[Dict[str, Any]] = []
-    for name in message.added_tool_names or []:
-        if name not in deferred_tool_names or name in loaded_tool_names:
-            continue
-        loaded_tool_names.add(name)
-        references.append({"type": "tool_reference", "tool_name": name})
-
-    converted_content = _convert_content_blocks(message.content)
-    tool_result = {
+    content_override: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """toolResult → tool_result 块（对齐 TS convertToolResult）。"""
+    return {
         "type": "tool_result",
         "tool_use_id": message.tool_call_id,
-        "content": references if references else converted_content,
+        "content": _convert_content_blocks(
+            message.content if content_override is None else content_override
+        ),
         "is_error": message.is_error,
     }
-    if not references:
-        return tool_result, []
-    siblings = (
-        [{"type": "text", "text": converted_content}]
-        if isinstance(converted_content, str)
-        else converted_content
+
+
+# 错误工具结果的图片占位文案（对齐 pi ERROR_TOOL_IMAGE_PLACEHOLDER——
+# Anthropic 拒收错误结果里的非文本内容）
+_ERROR_TOOL_IMAGE_PLACEHOLDER = "(image attached after the tool results)"
+
+
+def _replace_images_with_placeholder(content: List[Any], placeholder: str) -> List[Any]:
+    """图片连段塌缩为单个占位文本（对齐 pi replaceImagesWithPlaceholder）。"""
+    result: List[Any] = []
+    previous_was_placeholder = False
+    for block in content:
+        if block.type == "image":
+            if not previous_was_placeholder:
+                result.append(TextContent(type="text", text=placeholder))
+            previous_was_placeholder = True
+            continue
+        result.append(block)
+        previous_was_placeholder = getattr(block, "text", None) == placeholder
+    return result
+
+
+def _split_error_tool_result_images(
+    message: ToolResultMessage,
+) -> Optional[Tuple[List[Any], str, List[Any]]]:
+    """错误工具结果拆图（对齐 pi splitErrorToolResultImages）：错误结果带图
+    时拆成（图换占位的文本内容, 命名工具调用的 caption, 图片块）——图片
+    随本轮全部 tool_result 之后在同一 user 消息送达（#10794）。无需拆分
+    （非错误/无图）返回 ``None``。"""
+    if not message.is_error:
+        return None
+    images = [block for block in message.content if block.type == "image"]
+    if not images:
+        return None
+    return (
+        _replace_images_with_placeholder(
+            message.content, _ERROR_TOOL_IMAGE_PLACEHOLDER
+        ),
+        f"Images from the error result of tool call {message.tool_call_id} ({message.tool_name}):",
+        images,
     )
-    return tool_result, siblings
 
 
 def convert_messages(
@@ -142,23 +137,71 @@ def convert_messages(
     context: Context,
     compat: ResolvedAnthropicCompat,
     cache_control: Optional[CacheControl],
-    deferred_tool_names: Optional[Set[str]] = None,
+    convert_tool_definitions: Optional[
+        Callable[[List[Tool]], List[Dict[str, Any]]]
+    ] = None,
 ) -> List[Dict[str, Any]]:
-    """把内部消息列表转换为 Anthropic MessageParam 形状（对齐 TS convertMessages）。"""
+    """把内部消息列表转换为 Anthropic MessageParam 形状（对齐 TS convertMessages）。
+
+    ``convert_tool_definitions``:INLINE_TOOLS 形态下把 SystemMessage 的
+    ``tools_added`` 转成 ``tool_addition`` 定义块的转换器（对齐 TS 同名
+    闭包参数）；``None`` = 非 INLINE 形态，中途 system 消息只发文本块。
+    """
     transformed = transform_messages(
         context.messages,
         model,
         lambda tool_call_id, _m, _src: normalize_tool_call_id(tool_call_id),
     )
-    deferred = deferred_tool_names or set()
-    loaded_tool_names: Set[str] = set()
 
     params: List[Dict[str, Any]] = []
+    # 中途 system 消息的 held-back 队列（对齐 TS convertMessages）：渲染后
+    # 先入队，在下一个**非空** assistant 入参前 flush——被丢弃的空 assistant
+    # 不触发（防止更新落在上一条 user 消息之前）；末尾清空余量。
+    pending_system: List[Dict[str, Any]] = []
+
+    def _flush_pending_system() -> None:
+        params.extend(pending_system)
+        pending_system.clear()
+
     i = 0
     while i < len(transformed):
         message = transformed[i]
 
-        if message.role == "user":
+        if message.role == "system":
+            # 模型接受中途 system 消息时才会走到这里（否则转录已折叠）。
+            # INLINE_TOOLS 形态：工具变更按值随消息下发（对齐 TS——移除名
+            # 被同名新增覆盖时跳过 removal；addition 带完整定义，同名重定义
+            # 天然可表达）
+            blocks: List[Dict[str, Any]] = []
+            text = sanitize_surrogates(render_system_message_update(message))
+            if text.strip():
+                blocks.append({"type": "text", "text": text})
+            if convert_tool_definitions is not None:
+                added = message.tools_added or []
+                redefined = {tool.name for tool in added}
+                for ref in message.tools_removed or []:
+                    if ref.name in redefined:
+                        continue
+                    blocks.append(
+                        {
+                            "type": "tool_removal",
+                            "tool": {"type": "tool_reference", "name": ref.name},
+                        }
+                    )
+                for definition in convert_tool_definitions(added):
+                    blocks.append(
+                        {
+                            "type": "tool_addition",
+                            "tool": {
+                                "type": "tool_definition",
+                                "definition": definition,
+                            },
+                        }
+                    )
+            if blocks:
+                pending_system.append({"role": "system", "content": blocks})
+
+        elif message.role == "user":
             if isinstance(message.content, str):
                 if message.content.strip():
                     params.append(
@@ -250,29 +293,47 @@ def convert_messages(
                         }
                     )
             if blocks:
+                _flush_pending_system()  # held-back：assistant 入参前发出
                 params.append({"role": "assistant", "content": blocks})
 
         elif isinstance(message, ToolResultMessage):
             # 连续的 toolResult 合并进一条 user 消息（z.ai 同款端点要求，
-            # 对齐 TS 的分组循环）；tool_reference 兄弟块排在全部结果块之后
+            # 对齐 TS 的分组循环）；错误结果的图片拆出随全部结果之后送达
+            # （Anthropic 拒收错误结果里的非文本内容——#10794，对齐 TS）
             tool_results: List[Dict[str, Any]] = []
-            siblings: List[Dict[str, Any]] = []
+            error_images: List[Dict[str, Any]] = []
             j = i
             while j < len(transformed):
                 current = transformed[j]
                 if not isinstance(current, ToolResultMessage):
                     break
-                tool_result, sibling = _convert_tool_result(
-                    current, deferred, loaded_tool_names
+                split = _split_error_tool_result_images(current)
+                tool_results.append(
+                    _convert_tool_result(
+                        current, content_override=split[0] if split else None
+                    )
                 )
-                tool_results.append(tool_result)
-                siblings.extend(sibling)
+                if split is not None:
+                    _, caption, images = split
+                    error_images.append({"type": "text", "text": caption})
+                    for image in images:
+                        error_images.append(
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": image.mime_type,
+                                    "data": image.data,
+                                },
+                            }
+                        )
                 j += 1
-            params.append({"role": "user", "content": [*tool_results, *siblings]})
+            params.append({"role": "user", "content": [*tool_results, *error_images]})
             i = j - 1  # 跳过已处理的连续段
 
         i += 1
 
+    _flush_pending_system()  # held-back 余量收尾（对齐 TS 循环后 flush）
     return _apply_cache_control(params, cache_control)
 
 
@@ -280,31 +341,48 @@ def convert_tools(
     tools: List[Tool],
     compat: ResolvedAnthropicCompat,
     cache_control: Optional[CacheControl] = None,
-    defer_loading: bool = False,
+    disable_preferred_strict_tools: bool = False,
 ) -> List[Dict[str, Any]]:
     """转换工具定义为 Anthropic 形状（对齐 TS convertTools）。
 
-    - 非 strict（默认）：``input_schema`` 只保留 type/properties/required
-      三键（对齐 TS legacyInputSchema——其余键丢弃）；
-    - strict（``supports_strict_tools``）：完整 parameters + strict 标记；
+    - 非 strict（默认）：``input_schema`` 保留 type/properties/required
+      三键 + ``$defs``/``definitions``（属性 $refs 要指向共享定义——
+      只留三键会让 $ref 悬空，Claude 产出错误参数；对齐 TS 4a6a58eb5），
+      其余根键（anyOf/oneOf/allOf）不进（Anthropic 拒收 400）；
+    - strict：**按工具裁决**（对位 pi——工具声明
+      ``constrained_sampling`` 且模型 ``supports_strict_tools`` 且
+      schema 过净化才启用；strict 的 ``input_schema`` 是净化后形态：
+      required=全部属性、additionalProperties=false、可空可选包 anyOf），
+      带 strict 标记。``disable_preferred_strict_tools`` 为真时 prefer
+      工具一律降级非严格（strict 限量 400 后的重发路径——pi 同款）；
     - ``supports_eager_tool_input_streaming`` 时逐工具带
       ``eager_input_streaming``（不支持的端点由客户端 beta 头兜底，见
-      client.py）；``defer_loading`` 标记延迟装载工具；
+      client.py）；
     - cache_control 打在最后一条工具上（对齐 TS index === length-1）。
     """
     result: List[Dict[str, Any]] = []
     for index, tool in enumerate(tools):
         parameters = tool.parameters or {}
-        legacy_input_schema: Dict[str, Any] = {
-            "type": "object",
-            "properties": parameters.get("properties") or {},
-            "required": parameters.get("required") or [],
-        }
-        input_schema = (
-            {**parameters, **legacy_input_schema}
-            if compat.supports_strict_tools
-            else legacy_input_schema
+        strict = (
+            None
+            if disable_preferred_strict_tools
+            and prefers_json_schema_strict_sampling(tool)
+            else resolve_json_schema_strict_sampling(tool, compat.supports_strict_tools)
         )
+        if strict:
+            input_schema = make_strict_json_schema(parameters)
+        else:
+            legacy_input_schema: Dict[str, Any] = {
+                "type": "object",
+                "properties": parameters.get("properties") or {},
+                "required": parameters.get("required") or [],
+            }
+            # 保共享定义（$ref 可解析）；其余根键不进（Anthropic 拒收）
+            if parameters.get("$defs") is not None:
+                legacy_input_schema["$defs"] = parameters["$defs"]
+            if parameters.get("definitions") is not None:
+                legacy_input_schema["definitions"] = parameters["definitions"]
+            input_schema = legacy_input_schema
         entry: Dict[str, Any] = {
             "name": tool.name,
             "description": tool.description,
@@ -312,10 +390,8 @@ def convert_tools(
         }
         if compat.supports_eager_tool_input_streaming:
             entry["eager_input_streaming"] = True
-        if compat.supports_strict_tools:
+        if strict:
             entry["strict"] = True
-        if defer_loading:
-            entry["defer_loading"] = True
         if cache_control and index == len(tools) - 1:
             entry["cache_control"] = cache_control
         result.append(entry)
@@ -325,11 +401,12 @@ def convert_tools(
 def _apply_cache_control(
     params: List[Dict[str, Any]], cache_control: Optional[CacheControl]
 ) -> List[Dict[str, Any]]:
-    """给最后一条 user 消息的最后一个块打 cache_control（对齐 TS 收尾段）。"""
+    """给最后一条 user/system 消息的最后一个块打 cache_control（对齐 TS
+    收尾段——held-back flush 后末条可能是 system 消息）。"""
     if not cache_control or not params:
         return params
     last_message = params[-1]
-    if last_message.get("role") != "user":
+    if last_message.get("role") not in ("user", "system"):
         return params
     content = last_message.get("content")
     if isinstance(content, str):
@@ -342,6 +419,8 @@ def _apply_cache_control(
             "text",
             "image",
             "tool_result",
+            "tool_addition",
+            "tool_removal",
         ):
             last_block["cache_control"] = cache_control
     return params

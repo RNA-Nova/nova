@@ -13,6 +13,11 @@ from .compat import (
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
 )
+from .cost import (  # noqa: F401  # 再导出（旧住所的引用面保持）
+    ModelCost,
+    ModelCostRates,
+    ModelCostTier,
+)
 from .enums import Api, KnownApi, ProviderId, ThinkingLevelMap
 
 _COMPAT_CLASS_BY_API = {
@@ -57,27 +62,47 @@ class ModelFields(TypedDict, total=False):
     # ``OpenAICompletionsCompat``/``OpenAIResponsesCompat``/``AnthropicMessagesCompat``
     # 三个 compat 类各自定义）
     compat: Dict[str, Any]
+    # 输入限制（pi ``Model.inputLimits``——pi.dev 已携）
+    input_limits: Dict[str, Any]
+    # prompt cache 各保留档寿命秒（pi ``Model.promptCache``）
+    prompt_cache: Dict[str, int]
 
 
-class ModelCostRates(NovaBaseModel):
-    """模型成本费率（$/百万tokens）"""
+class ModelImageResizeOptions(NovaBaseModel):
+    """图像输入的缓存安全缩放配置（对齐 pi ``ModelImageResizeOptions``）。"""
 
-    input: float = 0.0
-    output: float = 0.0
-    cache_read: float = 0.0
-    cache_write: float = 0.0
-
-
-class ModelCostTier(ModelCostRates):
-    """分层定价：总输入超过该阈值时使用本费率"""
-
-    input_tokens_above: int = 0
+    max_width: Optional[int] = None
+    max_height: Optional[int] = None
+    # base64 编码后的载荷上限（字节）
+    max_bytes: Optional[int] = None
+    jpeg_quality: Optional[int] = None
 
 
-class ModelCost(ModelCostRates):
-    """模型成本（$/百万tokens），支持分层定价"""
+class ModelImageInputLimits(NovaBaseModel):
+    """图像输入限制（对齐 pi ``ModelImageInputLimits``）。"""
 
-    tiers: Optional[List[ModelCostTier]] = None
+    # 新图像进入会话历史前应用的缩放配置
+    resize: Optional[ModelImageResizeOptions] = None
+    # 单条 provider 消息接受的图像上限
+    max_per_message: Optional[int] = None
+    # 单次 provider 请求跨消息接受的图像上限
+    max_per_request: Optional[int] = None
+
+
+class ModelInputLimits(NovaBaseModel):
+    """provider 输入限制与缓存安全预处理元数据（对齐 pi ``ModelInputLimits``）。"""
+
+    # 序列化后的 provider 请求体上限（字节）
+    max_request_bytes: Optional[int] = None
+    images: Optional[ModelImageInputLimits] = None
+
+
+class ModelPromptCache(NovaBaseModel):
+    """prompt cache 各保留档的寿命（秒；对齐 pi ``ModelPromptCache``——
+    只为已知寿命的档位做 cache 预热）。"""
+
+    short: Optional[int] = None
+    long: Optional[int] = None
 
 
 class Model(NovaBaseModel):
@@ -106,6 +131,12 @@ class Model(NovaBaseModel):
         Union[OpenAICompletionsCompat, OpenAIResponsesCompat, AnthropicMessagesCompat]
     ] = None
     sampling_params: Optional[Dict[str, Any]] = None
+    # provider 输入限制与缓存安全预处理元数据（对齐 pi ``Model.inputLimits``）；
+    # ``None`` = 无已知限制
+    input_limits: Optional[ModelInputLimits] = None
+    # prompt cache 各保留档寿命（对齐 pi ``Model.promptCache``）；``None`` =
+    # 缓存行为未知
+    prompt_cache: Optional[ModelPromptCache] = None
 
     @model_validator(mode="before")
     @classmethod

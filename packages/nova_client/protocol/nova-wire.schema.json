@@ -119,6 +119,9 @@
           "$ref": "#/$defs/ToolResultMessage"
         },
         {
+          "$ref": "#/$defs/SystemMessage"
+        },
+        {
           "$ref": "#/$defs/CustomAgentMessage"
         }
       ]
@@ -423,6 +426,16 @@
             }
           ]
         },
+        "providerThinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "rawStopReason": {
           "anyOf": [
             {
@@ -503,6 +516,7 @@
         "retryAfterMs",
         "responseId",
         "responseModel",
+        "providerThinkingLevel",
         "diagnostics",
         "timestamp"
       ],
@@ -1301,6 +1315,30 @@
         "customInstructions"
       ],
       "title": "CompactionStartEvent",
+      "type": "object"
+    },
+    "ConstrainedSampling": {
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "enum": [
+            "prefer",
+            "require"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "json_schema"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "strict"
+      ],
+      "title": "ConstrainedSampling",
       "type": "object"
     },
     "Cost": {
@@ -2864,11 +2902,15 @@
         },
         {
           "$ref": "#/$defs/ToolResultMessage"
+        },
+        {
+          "$ref": "#/$defs/SystemMessage"
         }
       ],
       "discriminator": {
         "mapping": {
           "assistant": "#/$defs/AssistantMessage",
+          "system": "#/$defs/SystemMessage",
           "toolResult": "#/$defs/ToolResultMessage",
           "user": "#/$defs/UserMessage"
         },
@@ -4987,6 +5029,89 @@
       "title": "SyncSessionResult",
       "type": "object"
     },
+    "SystemMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/TextContent"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "role": {
+          "enum": [
+            "system"
+          ],
+          "type": "string"
+        },
+        "sections": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "toolsAdded": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Tool"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toolsRemoved": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ToolReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "role",
+        "content",
+        "sections",
+        "toolsAdded",
+        "toolsRemoved",
+        "timestamp"
+      ],
+      "title": "SystemMessage",
+      "type": "object"
+    },
     "TextContent": {
       "additionalProperties": false,
       "properties": {
@@ -5391,6 +5516,38 @@
       "title": "TokenUsageSummary",
       "type": "object"
     },
+    "Tool": {
+      "additionalProperties": false,
+      "properties": {
+        "constrainedSampling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstrainedSampling"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "parameters",
+        "constrainedSampling"
+      ],
+      "title": "Tool",
+      "type": "object"
+    },
     "ToolCall": {
       "additionalProperties": false,
       "properties": {
@@ -5792,22 +5949,22 @@
       "title": "ToolInfo",
       "type": "object"
     },
+    "ToolReference": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ToolReference",
+      "type": "object"
+    },
     "ToolResultMessage": {
       "additionalProperties": false,
       "properties": {
-        "addedToolNames": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "content": {
           "items": {
             "anyOf": [
@@ -5862,7 +6019,6 @@
         "content",
         "details",
         "isError",
-        "addedToolNames",
         "timestamp"
       ],
       "title": "ToolResultMessage",

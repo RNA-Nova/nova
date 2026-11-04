@@ -124,7 +124,7 @@ def transform_messages(
             normalized_id = tool_call_id_map.get(tool_result.tool_call_id)
             if normalized_id and normalized_id != tool_result.tool_call_id:
                 # 创建新的 toolResult 消息，更新 toolCallId；
-                # model_copy 保留 details / added_tool_names 等其余字段
+                # model_copy 保留 details 等其余字段
                 transformed.append(
                     tool_result.model_copy(update={"tool_call_id": normalized_id})
                 )

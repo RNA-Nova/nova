@@ -83,6 +83,10 @@ class StreamOptions:
     transport: Optional[Transport] = None
     cache_retention: Optional[CacheRetention] = None
     session_id: Optional[str] = None
+    # 本请求不使用也不记录服务端续接状态（对齐 TS disableContinuation——
+    # 缓存预热类重放不得顶替真实会话的线程状态；无续接状态的 provider
+    # 忽略）
+    disable_continuation: Optional[bool] = None
     # 自定义请求头；值为 None 表示抑制同名默认头
     headers: Optional[ProviderHeaders] = field(default=None, repr=False)
     metadata: Optional[Dict[str, Any]] = None

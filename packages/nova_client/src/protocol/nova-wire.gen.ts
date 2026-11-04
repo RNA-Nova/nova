@@ -81,6 +81,7 @@ export interface AssistantMessage {
   retryAfterMs: number | null;
   responseId: string | null;
   responseModel: string | null;
+  providerThinkingLevel: string | null;
   diagnostics: Record<string, unknown>[] | null;
   timestamp: number;
 }
@@ -238,6 +239,11 @@ export interface CompactionStartEvent {
   type: "compaction_start";
   reason: "manual" | "threshold" | "overflow";
   customInstructions: string | null;
+}
+
+export interface ConstrainedSampling {
+  type: "json_schema";
+  strict: "prefer" | "require";
 }
 
 export interface Cost {
@@ -995,6 +1001,15 @@ export interface SyncSessionResult {
   eventSeq: number;
 }
 
+export interface SystemMessage {
+  role: "system";
+  content: string | TextContent[];
+  sections: Record<string, string | null> | null;
+  toolsAdded: Tool[] | null;
+  toolsRemoved: ToolReference[] | null;
+  timestamp: number;
+}
+
 export interface TextContent {
   type: "text";
   text: string;
@@ -1078,6 +1093,13 @@ export interface TokenUsageSummary {
   total: number;
 }
 
+export interface Tool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  constrainedSampling: ConstrainedSampling | null;
+}
+
 export interface ToolCall {
   type: "toolCall";
   id: string;
@@ -1157,6 +1179,10 @@ export interface ToolInfo {
   sourceInfo: SourceInfo | null;
 }
 
+export interface ToolReference {
+  name: string;
+}
+
 export interface ToolResultMessage {
   role: "toolResult";
   toolCallId: string;
@@ -1164,7 +1190,6 @@ export interface ToolResultMessage {
   content: (TextContent | ImageContent)[];
   details: unknown | null;
   isError: boolean;
-  addedToolNames: string[] | null;
   timestamp: number;
 }
 
@@ -1222,9 +1247,9 @@ export interface WarningEvent {
 
 // ---- Union 别名 ----
 
-export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomAgentMessage;
+export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | SystemMessage | CustomAgentMessage;
 
-export type Message = UserMessage | AssistantMessage | ToolResultMessage;
+export type Message = UserMessage | AssistantMessage | ToolResultMessage | SystemMessage;
 
 // ---- 信封与根联合 ----
 

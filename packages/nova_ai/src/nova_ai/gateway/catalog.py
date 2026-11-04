@@ -28,7 +28,7 @@ from typing import (
     runtime_checkable,
 )
 
-from nova_protocol import AbortSignal, NovaErrorKind
+from nova_protocol import AbortSignal, ModelFields, NovaErrorKind
 
 
 class CatalogError(RuntimeError):
@@ -112,6 +112,4 @@ __all__ = [
     "CatalogService",
     "CatalogServices",
     "FetchCatalogFn",
-    "ModelCostFields",
-    "ModelFields",
 ]

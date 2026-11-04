@@ -124,9 +124,9 @@ class TestKimiCodingModels:
         for model_id, model in KIMI_CODING_MODELS.items():
             assert model.id == model_id
             assert model.name
-            assert model.api == KnownApi.ANTHROPIC_MESSAGES
+            assert model.api == KnownApi.OPENAI_COMPLETIONS
             assert model.provider == KnownProvider.KIMI_CODING
-            assert model.base_url == "https://api.kimi.com/coding"
+            assert model.base_url == "https://api.kimi.com/coding/v1"
             assert isinstance(model.reasoning, bool)
             assert model.input_types
             assert model.context_window > 0
@@ -151,7 +151,8 @@ class TestKimiCodingModels:
     def test_kimi_for_coding_fields(self):
         m = get_kimi_coding_model("kimi-for-coding")
         assert m.id == "kimi-for-coding"
-        assert m.name == "Kimi K2.8 Preview"
+        # name 随源事实：pi.dev / models.dev global 键均给裸 id（仅 cn 键有美化名）
+        assert m.name == "kimi-for-coding"
         assert m.reasoning is True
         assert m.context_window == 1_048_576
         assert m.max_tokens == 32768

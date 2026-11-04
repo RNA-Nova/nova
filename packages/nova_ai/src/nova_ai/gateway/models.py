@@ -934,7 +934,7 @@ class ModelsManager:
             request_model, request_options = await self._apply_auth(model, options)
             return provider.stream(request_model, context, request_options)
 
-        return lazy_stream(model, _setup)
+        return lazy_stream(model, _setup, signal=options.signal if options else None)
 
     async def complete(
         self,
@@ -964,7 +964,7 @@ class ModelsManager:
                 cast(Optional[SimpleStreamOptions], request_options),
             )
 
-        return lazy_stream(model, _setup)
+        return lazy_stream(model, _setup, signal=options.signal if options else None)
 
     async def complete_simple(
         self,

@@ -95,6 +95,35 @@ def _extract_body(error: Any) -> Optional[str]:
     return _truncate_error_text(trimmed, MAX_PROVIDER_ERROR_BODY_CHARS)
 
 
+def with_cause_detail(message: str, chain_start: Optional[BaseException]) -> str:
+    """把 ``__cause__`` 链最深层的原因拼进 message（对齐 TS ``withCauseDetail``）。
+
+    连接级失败没有 status/body,SDK 把真因替换成通用文案（openai
+    ``"Connection error."``）——真因在 cause 链深处（httpx 的
+    ``ConnectError`` 裹着 ECONNREFUSED/DNS/TLS)。拼最深层让只看消息的
+    调用方（用户面/会话落盘）保留排查线索。最深 5 层、带环保护；底层
+    异常带 ``code`` 属性且文案未含时括注。
+    """
+    deepest: Optional[BaseException] = None
+    current = chain_start
+    seen = set()
+    depth = 0
+    while current is not None and depth < 5 and id(current) not in seen:
+        seen.add(id(current))
+        deepest = current
+        current = current.__cause__
+        depth += 1
+    if deepest is None:
+        return message
+    detail = (str(deepest) or type(deepest).__name__).strip()
+    code = getattr(deepest, "code", None)
+    if isinstance(code, (str, int)) and str(code) not in detail:
+        detail = f"{detail} ({code})" if detail else str(code)
+    if not detail or detail in message:
+        return message
+    return f"{message}: {detail}" if message else detail
+
+
 def normalize_provider_error(error: Any) -> NormalizedProviderError:
     """将任意 provider SDK 错误标准化为结构化对象。"""
     if not isinstance(error, Exception):
@@ -104,6 +133,9 @@ def normalize_provider_error(error: Any) -> NormalizedProviderError:
     status = status_code_of(error)
     body = _extract_body(error)
     message = str(error)
+    # 连接级错误（无 status/body）拼 cause 链最深层真因（对齐 pi 4c992154d）
+    if status is None and body is None:
+        message = with_cause_detail(message, error.__cause__)
     message_carries_body = body is None or body in message
 
     return NormalizedProviderError(

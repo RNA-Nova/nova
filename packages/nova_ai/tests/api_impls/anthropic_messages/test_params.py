@@ -7,14 +7,18 @@ metadata、sampling_params 出货边界。
 
 from nova_protocol import (
     AnthropicMessagesCompat,
+    AssistantMessage,
     CacheRetention,
     Context,
     KnownApi,
     Model,
     ModelCost,
+    StopReason,
+    SystemMessage,
     TextContent,
     Tool,
     ToolResultMessage,
+    Usage,
     UserMessage,
 )
 
@@ -54,6 +58,226 @@ class TestRequiredFields:
         assert params["max_tokens"] == 64000
         assert params["stream"] is True
         assert params["model"] == "claude-sonnet-4-5"
+
+
+class TestMidConvoSystemMessages:
+    """中途 system 消息（pi resolveTranscript 对位）：穿过=held-back 注入；
+    折叠=并入顶层 system 块。"""
+
+    def _ctx(self):
+        return Context(
+            system_prompt="base prompt",
+            messages=[
+                UserMessage(content="q1"),
+                SystemMessage(sections={"mode": "只读"}, timestamp=2),
+                AssistantMessage(
+                    role="assistant",
+                    content=[TextContent(type="text", text="a1")],
+                    stop_reason=StopReason.STOP,
+                    usage=Usage(),
+                ),
+                UserMessage(content="q2"),
+            ],
+        )
+
+    def test_passthrough_held_back_before_assistant(self):
+        from nova_protocol import AnthropicMessagesCompat
+
+        params = build_params(
+            _model(
+                compat=AnthropicMessagesCompat(supports_mid_convo_system_messages=True)
+            ),
+            self._ctx(),
+        )
+        roles = [m["role"] for m in params["messages"]]
+        assert "system" in roles
+        # system 条目在 assistant 之前（held-back，不插在 tool 对之间）
+        sys_idx = roles.index("system")
+        assert roles[sys_idx + 1] == "assistant"
+        entry = params["messages"][sys_idx]
+        assert 'Updated system prompt section "mode"' in entry["content"][0]["text"]
+        # 头部仍是顶层块
+        assert params["system"][0]["text"] == "base prompt"
+
+    def test_collapse_folds_into_top_level_system(self):
+        params = build_params(_model(), self._ctx())  # 旗标缺省 false
+        assert params["system"][0]["text"] == "base prompt\n\n只读"
+        assert all(m["role"] != "system" for m in params["messages"])
+
+    def test_held_back_survives_dropped_assistant(self):
+        """空 assistant（转换后无块被丢弃）不触发 flush——pending 延后到
+        下一个非空 assistant（pi #11091 同款）。"""
+        from nova_protocol import AnthropicMessagesCompat
+
+        ctx = Context(
+            system_prompt="base",
+            messages=[
+                UserMessage(content="q1"),
+                SystemMessage(sections={"mode": "只读"}, timestamp=2),
+                # 空文本 assistant——转换后无块，被丢弃
+                AssistantMessage(
+                    role="assistant",
+                    content=[TextContent(type="text", text="   ")],
+                    stop_reason=StopReason.STOP,
+                    usage=Usage(),
+                ),
+                # 非空 assistant——pending 应在此前 flush
+                AssistantMessage(
+                    role="assistant",
+                    content=[TextContent(type="text", text="real")],
+                    stop_reason=StopReason.STOP,
+                    usage=Usage(),
+                ),
+                UserMessage(content="q2"),
+            ],
+        )
+        params = build_params(
+            _model(
+                compat=AnthropicMessagesCompat(supports_mid_convo_system_messages=True)
+            ),
+            ctx,
+        )
+        roles = [m["role"] for m in params["messages"]]
+        sys_idx = roles.index("system")
+        # system 条目直接在"real"assistant 之前（跳过了空 assistant）
+        assert roles[sys_idx + 1] == "assistant"
+        entry = params["messages"][sys_idx]
+        assert 'Updated system prompt section "mode"' in entry["content"][0]["text"]
+
+    """mid-convo effort（对齐 TS：旗标 + 标记注入 + 历史回放）。"""
+
+
+class TestMidConvoEffort:
+    """mid-convo effort（对齐 TS：旗标 + 标记注入 + 历史回放）。"""
+
+    def _compat(self, **over):
+        from nova_protocol import AnthropicMessagesCompat
+
+        return AnthropicMessagesCompat(
+            force_adaptive_thinking=True,
+            supports_mid_convo_effort=True,
+            **over,
+        )
+
+    def _assistant_with_effort(self, effort, stop_reason=StopReason.STOP):
+        return AssistantMessage(
+            role="assistant",
+            content=[TextContent(type="text", text="ok")],
+            stop_reason=stop_reason,
+            provider_thinking_level=effort,
+            usage=Usage(),
+        )
+
+    def test_markers_inserted_when_flag_on(self):
+        """旗标为真：历史档（仅完整回复）前插标记 + 当前档收尾（对齐 TS
+        insertThinkingLevelMessages）。"""
+        from nova_protocol import Usage
+
+        ctx = Context(
+            messages=[
+                UserMessage(content="q1"),
+                self._assistant_with_effort("high"),
+                UserMessage(content="q2"),
+                self._assistant_with_effort("low", stop_reason=StopReason.ERROR),
+                UserMessage(content="q3"),
+                self._assistant_with_effort("medium"),
+            ]
+        )
+        params = build_params(_model(compat=self._compat()), ctx)
+        roles = [m["role"] for m in params["messages"]]
+        # system 标记数 = 2 条完整历史 + 1 条当前收尾（ERROR 的不计）
+        assert roles.count("system") == 3
+        efforts = [
+            m["output_config"]["effort"]
+            for m in params["messages"]
+            if m["role"] == "system"
+        ]
+        assert efforts == ["high", "medium", "high"]  # 当前缺省 high
+
+    def test_no_markers_when_flag_off(self):
+        from nova_protocol import AnthropicMessagesCompat
+
+        ctx = Context(
+            messages=[UserMessage(content="q"), self._assistant_with_effort("high")]
+        )
+        params = build_params(
+            _model(compat=AnthropicMessagesCompat(force_adaptive_thinking=True)), ctx
+        )
+        assert all(m["role"] != "system" for m in params["messages"])
+
+    def test_explicit_effort_wins_and_disabled_suppresses(self):
+        """options.effort 覆盖缺省 high；thinking_enabled=False 时标记全抑。"""
+        from nova_protocol import Usage
+
+        # 显式 effort
+        ctx = Context(messages=[UserMessage(content="q")])
+        params = build_params(
+            _model(compat=self._compat()),
+            ctx,
+            AnthropicOptions(thinking_enabled=True, effort="low"),
+        )
+        system_efforts = [
+            m["output_config"]["effort"]
+            for m in params["messages"]
+            if m["role"] == "system"
+        ]
+        assert system_efforts == ["low"]
+        # 显式关闭 → 无标记
+        params = build_params(
+            _model(compat=self._compat()),
+            ctx,
+            AnthropicOptions(thinking_enabled=False),
+        )
+        assert all(m["role"] != "system" for m in params["messages"])
+
+    def test_top_level_effort_fixed_low_with_block_binding(self):
+        """effortMessages 分支：顶层 output_config 固定 low（组织 cap 账户
+        拒绝高档——对齐 pi e3bc05e87），真档位由标记承载；thinking 为
+        adaptive + block_binding（前缀失配可 drop）。"""
+        ctx = Context(messages=[UserMessage(content="q")])
+        params = build_params(
+            _model(compat=self._compat()),
+            ctx,
+            AnthropicOptions(thinking_enabled=True, effort="max"),
+        )
+        assert params["thinking"] == {
+            "type": "adaptive",
+            "display": "summarized",
+            "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+        }
+        assert params["output_config"] == {"effort": "low"}
+        # 真档位在收尾标记上
+        markers = [
+            m["output_config"]["effort"]
+            for m in params["messages"]
+            if m["role"] == "system"
+        ]
+        assert markers == ["max"]
+
+    def test_temperature_suppressed_for_mid_convo_effort(self):
+        """mid-convo effort 模型不发 temperature（对齐 TS 温度条件）。"""
+        params = build_params(
+            _model(compat=self._compat()),
+            Context(messages=[UserMessage(content="q")]),
+            AnthropicOptions(temperature=0.5),
+        )
+        assert "temperature" not in params
+
+    def test_off_null_keeps_thinking_and_markers(self):
+        """off 显式 null（端点不支持关）：thinking_enabled=False 也不发
+        disabled、标记照走（对齐 TS thinkingDisabled 判定）。"""
+        model = _model(
+            compat=self._compat(),
+            thinking_level_map={"off": None, "high": "high"},
+        )
+        params = build_params(
+            model,
+            Context(messages=[UserMessage(content="q")]),
+            AnthropicOptions(thinking_enabled=False),
+        )
+        assert params.get("thinking", {}).get("type") == "adaptive"
+        assert params["output_config"] == {"effort": "low"}
+        assert any(m["role"] == "system" for m in params["messages"])
 
     def test_explicit_max_tokens_wins(self):
         params = build_params(
@@ -219,51 +443,87 @@ class TestTools:
         assert params["tools"][0]["name"] == "read"
         assert params["tools"][0]["eager_input_streaming"] is True
 
-    def test_deferred_tools_defer_loading(self):
-        """added_tool_names 引入的工具进延迟组，带 defer_loading。"""
-        result = ToolResultMessage(
-            tool_call_id="t1",
-            tool_name="tool_search",
-            content=[TextContent(text="r")],
-            added_tool_names=["search"],
-        )
+    def test_current_tools_sent_in_plain_form(self):
+        """普通形态（无 INLINE 旗标）：当前工具集原样下发、无占位工具。"""
         ctx = Context(
-            messages=[UserMessage(content="hi"), result],
+            messages=[UserMessage(content="hi")],
             tools=[_tool("read"), _tool("search")],
         )
         params = build_params(_model(), ctx)
-        by_name = {t["name"]: t for t in params["tools"]}
-        assert "defer_loading" not in by_name["read"]
-        assert by_name["search"]["defer_loading"] is True
+        names = [t["name"] for t in params["tools"]]
+        assert names == ["read", "search"]
+        assert all("defer_loading" not in t for t in params["tools"])
 
-    def test_all_deferred_falls_back_to_immediate(self):
-        """全部延迟 = 端点拿不到工具定义——回退全即刻（对齐 TS）。"""
-        result = ToolResultMessage(
-            tool_call_id="t1",
-            tool_name="tool_search",
-            content=[TextContent(text="r")],
-            added_tool_names=["search"],
-        )
-        ctx = Context(
-            messages=[UserMessage(content="hi"), result], tools=[_tool("search")]
-        )
-        params = build_params(_model(), ctx)
-        assert params["tools"][0]["name"] == "search"
-        assert "defer_loading" not in params["tools"][0]
 
-    def test_no_defer_when_tool_references_unsupported(self):
-        model = _model(compat=AnthropicMessagesCompat(supports_tool_references=False))
-        result = ToolResultMessage(
-            tool_call_id="t1",
-            tool_name="tool_search",
-            content=[TextContent(text="r")],
-            added_tool_names=["search"],
+class TestInlineToolsParams:
+    """INLINE_TOOLS 形态（对齐 pi buildParams 的 nativeToolChanges 分支）。"""
+
+    def _compat(self, **over):
+        return AnthropicMessagesCompat(
+            supports_mid_convo_system_messages=True,
+            supports_mid_convo_tool_changes=True,
+            **over,
         )
+
+    def test_fixed_tool_list_with_placeholder(self):
+        """顶层工具 = 初始工具 + 常驻占位（defer_loading），此后不变。"""
+        from nova_ai.api_impls.anthropic_messages.params import (
+            DEFERRED_TOOL_PLACEHOLDER,
+        )
+
+        ctx = Context(messages=[UserMessage(content="hi")], tools=[_tool("read")])
+        params = build_params(_model(compat=self._compat()), ctx)
+        assert [t["name"] for t in params["tools"]] == [
+            "read",
+            DEFERRED_TOOL_PLACEHOLDER["name"],
+        ]
+        assert params["tools"][-1]["defer_loading"] is True
+
+    def test_mid_convo_addition_blocks_in_messages(self):
+        """中途 system 消息的工具变更 → tool_addition/removal 块按值下发。"""
+        from nova_protocol import SystemMessage, ToolReference
+
         ctx = Context(
-            messages=[UserMessage(content="hi"), result], tools=[_tool("search")]
+            messages=[
+                UserMessage(content="q1"),
+                SystemMessage(
+                    tools_added=[_tool("search")],
+                    tools_removed=[ToolReference(name="write")],
+                    timestamp=2,
+                ),
+                UserMessage(content="q2"),
+            ],
+            tools=[_tool("read"), _tool("write")],
         )
-        params = build_params(model, ctx)
-        assert "defer_loading" not in params["tools"][0]
+        params = build_params(_model(compat=self._compat()), ctx)
+        # 顶层固定：初始（read+write）+ 占位——中途增删不进顶层
+        assert [t["name"] for t in params["tools"]][:2] == ["read", "write"]
+        system_msgs = [m for m in params["messages"] if m["role"] == "system"]
+        assert len(system_msgs) == 1
+        types = [b["type"] for b in system_msgs[0]["content"]]
+        assert types == ["tool_removal", "tool_addition"]
+        assert system_msgs[0]["content"][1]["tool"]["definition"]["name"] == "search"
+
+    def test_gate_requires_initial_tools(self):
+        """无初始工具（无锚）→ 回退普通形态，无占位（Anthropic 拒绝全 defer）。"""
+        ctx = Context(messages=[UserMessage(content="hi")])
+        params = build_params(_model(compat=self._compat()), ctx)
+        assert "tools" not in params
+
+    def test_gate_requires_tool_changes_flag(self):
+        """缺 supports_mid_convo_tool_changes → 普通形态。"""
+        ctx = Context(messages=[UserMessage(content="hi")], tools=[_tool("read")])
+        params = build_params(
+            _model(
+                compat=AnthropicMessagesCompat(
+                    supports_mid_convo_system_messages=True,
+                    supports_mid_convo_tool_changes=False,
+                )
+            ),
+            ctx,
+        )
+        names = [t["name"] for t in params["tools"]]
+        assert names == ["read"]
 
 
 class TestMisc:

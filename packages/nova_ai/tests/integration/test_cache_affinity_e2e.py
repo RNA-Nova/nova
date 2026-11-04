@@ -42,10 +42,15 @@ async def test_cache_options_accepted(probe):
     assert len(extract_text(second)) > 0
 
 
-async def test_kimi_coding_cache_control_in_payload():
-    """kimi 缓存契约（anthropic 形态）：cache_control 落在 system 块上。
+async def test_kimi_coding_cache_contract_in_payload():
+    """kimi 缓存契约（对齐 pi compat 实况）：缺省零客户端缓存标记。
 
-    经 on_payload 观测真实请求体（方言换血退役后 kimi 走 anthropic 缓存标记）。
+    kimi-coding 是 openai-completions 且 pi 的 kimi compat 无
+    cacheControlFormat——缺省请求（无 session、缺省保留）既不发 anthropic
+    形态 cache_control，也不发 prompt_cache_key（auto 启发式：api.openai.com
+    或 long+supportsLongCacheRetention 才发，pi 同款）；缓存归端点自动
+    （usage 报 cached_tokens）。本用例曾断言 anthropic 方言的 system
+    cache_control——协议切换后该前提作废，重写为实况契约。
     """
     if not has_credential("kimi-coding"):
         pytest.skip("kimi-coding 无凭据")
@@ -67,5 +72,16 @@ async def test_kimi_coding_cache_control_in_payload():
         )
     assert result.error_message is None
     assert len(payloads) == 1
-    system = payloads[0].get("system") or []
-    assert system and system[0].get("cache_control", {}).get("type") == "ephemeral"
+    body = payloads[0]
+    extra = body.get("extra_body") or {}
+    assert "prompt_cache_key" not in extra
+    assert "prompt_cache_retention" not in extra
+    # 消息体内也不得出现 anthropic 形态缓存标记
+    for message in body.get("messages") or []:
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else [content]
+        for block in blocks:
+            if isinstance(block, dict):
+                assert "cache_control" not in block
+    # 端点自动缓存的 usage 字段正常解析（cache_read ≥ 0，字段存在即可）
+    assert result.usage is not None and result.usage.cache_read >= 0

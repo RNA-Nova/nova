@@ -20,6 +20,7 @@ from nova_protocol import (
 
 from nova_ai.gateway import InMemoryModelsStore, ModelsManager, RefreshModelsContext
 from nova_ai.providers import create_provider
+from tests._helpers.callback_refresh import callback_refresh
 
 
 def _make_model(model_id: str = "test", provider: str = "test") -> Model:
@@ -60,8 +61,8 @@ class TestDynamicProvider:
             id="test",
             name="Test",
             models=baseline,
-            fetch_models=fetch_models,
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         # 初始只有 baseline
         assert len(provider.get_models()) == 1
@@ -91,8 +92,8 @@ class TestDynamicProvider:
             id="test",
             name="Test",
             models=baseline,
-            fetch_models=fetch_models,
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
         await provider.refresh_models(RefreshModelsContext())
 
         models = provider.get_models()
@@ -109,9 +110,9 @@ class TestDynamicProvider:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=fetch_models,
             auth=_resolving_auth(),
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         # 经 ModelsManager.refresh 走完整发布链（世代校验 + 持久化）
         models = ModelsManager(models_store=store)
@@ -136,9 +137,9 @@ class TestDynamicProvider:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=fetch_models,
             auth=_resolving_auth(),
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         # 两阶段刷新（对齐 TS）：先离线恢复缓存，再在线拉新
         models = ModelsManager(models_store=store)
@@ -169,9 +170,9 @@ class TestDynamicProvider:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=fetch_models,
             auth=_resolving_auth(),
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         models = ModelsManager(models_store=store)
         models.set_provider(provider)
@@ -201,9 +202,9 @@ class TestDynamicProvider:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=fetch_models,
             auth=_resolving_auth(),
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         models = ModelsManager(models_store=InMemoryModelsStore())
         models.set_provider(provider)
@@ -230,9 +231,9 @@ class TestDynamicProvider:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=fetch_models,
             auth=_resolving_auth(),
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         fired: List[NovaDiagnostic] = []
         models = ModelsManager(
@@ -257,9 +258,9 @@ class TestDynamicProvider:
         provider = create_provider(
             id="test",
             name="Test",
-            fetch_models=fetch_models,
             auth=_resolving_auth(),
         )
+        provider.refresh_models = callback_refresh(provider, fetch_models)
 
         # 并发经 ModelsManager 刷新：supersede 语义（对齐 pi）——各轮独立运行，
         # 世代校验保证终态一致（后发布者胜出，不会出现目录混合）
@@ -319,9 +320,9 @@ async def test_inflight_dedup_survives_follower_cancellation():
     provider = create_provider(
         id="test",
         name="Test",
-        fetch_models=fetch_models,
         auth=_resolving_auth(),
     )
+    provider.refresh_models = callback_refresh(provider, fetch_models)
     models = ModelsManager(models_store=store)
     models.set_provider(provider)
 
@@ -360,9 +361,9 @@ async def test_refresh_deadline_covers_credential_resolution():
     provider = create_provider(
         id="test",
         name="Test",
-        fetch_models=fetch_models,
         auth=ProviderAuth(api_key=ApiKeyAuth(name="test", resolve=_hanging_resolve)),
     )
+    provider.refresh_models = callback_refresh(provider, fetch_models)
     models = ModelsManager(models_store=InMemoryModelsStore())
     models.set_provider(provider)
 

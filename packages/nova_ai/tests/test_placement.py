@@ -19,6 +19,7 @@ _SRC = Path(__file__).resolve().parent.parent / "src" / "nova_ai"
 # task_tracker.py 同迁——structure-modeling §二 升格出口）
 _UTILS_MODULES = frozenset(
     {
+        "diagnostics.py",
         "env.py",
         "errors.py",
         "estimate.py",
@@ -40,6 +41,7 @@ _SHARED_MODULES = frozenset(
         "simple_options.py",
         "timeouts.py",
         "transform_messages.py",
+        "transcript.py",
         "user_agent.py",
     }
 )

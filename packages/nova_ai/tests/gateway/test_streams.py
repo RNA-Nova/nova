@@ -3,7 +3,14 @@
 import asyncio
 
 import pytest
-from nova_protocol import KnownApi, KnownProvider, Model, ModelCost
+from nova_protocol import (
+    AbortController,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    StopReason,
+)
 
 from nova_ai.gateway.streams import lazy_stream
 
@@ -64,3 +71,36 @@ async def test_cancel_terminates_without_error_event():
     with pytest.raises(RuntimeError, match="ended without result"):  # 钉 3
         await stream.result()
     assert stream.task is None  # 驱动任务完成自清
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_reports_aborted_when_signal_aborted():
+    """装配失败时信号已 abort → 终态报 aborted（对齐 TS f3a64af07：
+
+    用户在装配期（auth 解析等）中断，失败不伪装成 error）。
+    """
+    controller = AbortController()
+
+    async def failing_setup():
+        controller.abort()
+        raise RuntimeError("auth exploded")
+
+    stream = lazy_stream(_model(), failing_setup, signal=controller.signal)
+    result = await stream.result()
+
+    assert result.stop_reason == StopReason.ABORTED
+    assert result.error_message is not None
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_reports_error_without_abort():
+    """装配失败且信号未 abort → 终态报 error（原语义不回归）。"""
+    controller = AbortController()
+
+    async def failing_setup():
+        raise RuntimeError("auth exploded")
+
+    stream = lazy_stream(_model(), failing_setup, signal=controller.signal)
+    result = await stream.result()
+
+    assert result.stop_reason == StopReason.ERROR

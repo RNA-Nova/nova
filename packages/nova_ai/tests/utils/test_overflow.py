@@ -136,6 +136,19 @@ class TestErrorPatterns:
         )
         assert is_context_overflow(msg) is True
 
+    def test_litellm_context_window_exceeded(self):
+        """LiteLLM pre-call 校验的溢出报文（pi #11494 同款回归）——
+        通用模式 context[_ ]?window[_ ]?exceeded 覆盖，防词表回退。"""
+        msg = _message(
+            stop_reason=StopReason.ERROR,
+            error_message=(
+                "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+                "litellm._pre_call_checks: Context Window exceeded for given call. "
+                "Max Input Tokens=262144, Got=265262"
+            ),
+        )
+        assert is_context_overflow(msg) is True
+
 
 class TestNonOverflowPatterns:
     def test_rate_limit_not_overflow(self):

@@ -180,6 +180,58 @@ class TestBuildParamsCache:
         assert extra.get("prompt_cache_key") == "session-123"
         assert "prompt_cache_retention" not in extra
 
+    def test_prompt_cache_key_mode_enabled_sends_for_proxy(self):
+        """enabled：兼容代理即使非 openai 官方端点、short 保留也发缓存键
+        （对齐 pi 0f4d5e960——compatible proxies 场景）。"""
+        model = _make_model(
+            base_url="https://proxy.example.com/v1",
+            compat=OpenAICompletionsCompat(
+                supports_long_cache_retention=False,
+                prompt_cache_key_mode="enabled",
+            ),
+        )
+        ctx = Context(messages=[UserMessage(content="hi")])
+        options = OpenAICompletionsOptions(
+            session_id="session-123",
+            cache_retention=CacheRetention.SHORT,
+        )
+        params = build_params(model, ctx, options)
+
+        extra = params.get("extra_body", {})
+        assert extra.get("prompt_cache_key") == "session-123"
+
+    def test_prompt_cache_key_mode_disabled_never_sends(self):
+        """disabled：即使 openai 官方端点也永不发（对齐 pi 0f4d5e960）。"""
+        model = _make_model(
+            base_url="https://api.openai.com/v1",
+            compat=OpenAICompletionsCompat(prompt_cache_key_mode="disabled"),
+        )
+        ctx = Context(messages=[UserMessage(content="hi")])
+        options = OpenAICompletionsOptions(
+            session_id="session-123",
+            cache_retention=CacheRetention.SHORT,
+        )
+        params = build_params(model, ctx, options)
+
+        extra = params.get("extra_body") or {}
+        assert "prompt_cache_key" not in extra
+
+    def test_prompt_cache_key_mode_default_auto_unchanged(self):
+        """缺省 auto：非官方端点 + short 保留不发（旧启发式语义不回归）。"""
+        model = _make_model(
+            base_url="https://proxy.example.com/v1",
+            compat=OpenAICompletionsCompat(supports_long_cache_retention=False),
+        )
+        ctx = Context(messages=[UserMessage(content="hi")])
+        options = OpenAICompletionsOptions(
+            session_id="session-123",
+            cache_retention=CacheRetention.SHORT,
+        )
+        params = build_params(model, ctx, options)
+
+        extra = params.get("extra_body") or {}
+        assert "prompt_cache_key" not in extra
+
     def test_cache_retention_from_env(self):
         model = _make_model(
             compat=OpenAICompletionsCompat(supports_long_cache_retention=True),
@@ -321,74 +373,118 @@ class TestCreateClientSessionAffinity:
 
 
 class TestMidConvoToolAdditions:
-    def test_kimi_deferred_tools_adds_system_message(self):
-        from nova_protocol import TextContent, ToolResultMessage
+    """additions 模式（pi resolveTranscriptTools 对位）：SystemMessage 驱动。"""
+
+    def _model_kimi(self):
+        return _make_model(
+            compat=OpenAICompletionsCompat(
+                supports_mid_convo_system_messages=True,
+                supports_mid_convo_tool_additions=True,
+            )
+        )
+
+    @staticmethod
+    def _tool(name):
+        return Tool(
+            name=name,
+            description=f"{name} desc",
+            parameters={"type": "object", "properties": {}},
+        )
+
+    def test_system_message_tools_added_emits_kimi_message(self):
+        """中途 SystemMessage 的 toolsAdded → kimi 工具型 system 消息。"""
+        from nova_protocol import SystemMessage
 
         from nova_ai.api_impls.openai_completions import convert_messages
 
-        tool_def = Tool(
-            name="dynamic_tool",
-            description="dynamic",
-            parameters={"type": "object", "properties": {}},
-        )
-        model = _make_model(
-            compat=OpenAICompletionsCompat(
-                supports_mid_convo_system_messages=True,
-                supports_mid_convo_tool_additions=True,
-            ),
-        )
+        model = self._model_kimi()
         ctx = Context(
             messages=[
                 UserMessage(content="run"),
-                ToolResultMessage(
-                    tool_call_id="tc1",
-                    tool_name="t1",
-                    content=[TextContent(type="text", text="ok")],
-                    added_tool_names=["dynamic_tool"],
-                ),
+                SystemMessage(tools_added=[self._tool("dynamic_tool")], timestamp=1),
             ],
-            tools=[tool_def],
+            tools=[self._tool("static_tool")],
         )
         messages = convert_messages(model, ctx, model.compat)
 
-        # 找到 system 消息且包含 deferred tools
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        assert len(system_msgs) == 1
-        assert system_msgs[0].get("tools") is not None
-        assert system_msgs[0]["tools"][0]["function"]["name"] == "dynamic_tool"
+        kimi_msgs = [
+            m for m in messages if m.get("role") == "system" and m.get("tools")
+        ]
+        assert len(kimi_msgs) == 1
+        assert kimi_msgs[0]["tools"][0]["function"]["name"] == "dynamic_tool"
 
-    def test_kimi_deferred_tools_not_duplicated_in_top_level_tools(self):
-        """deferred tools 不应同时出现在顶层 tools 和 system 消息中。"""
-        from nova_protocol import TextContent, ToolResultMessage
+    def test_additions_not_duplicated_in_top_level(self):
+        """就地新增不进顶层列表（顶层 = 折叠段状态——仅初始工具）。"""
+        from nova_protocol import SystemMessage
 
-        tool_def = Tool(
-            name="dynamic_tool",
-            description="dynamic",
-            parameters={"type": "object", "properties": {}},
+        model = self._model_kimi()
+        ctx = Context(
+            messages=[
+                UserMessage(content="run"),
+                SystemMessage(tools_added=[self._tool("dynamic_tool")], timestamp=1),
+            ],
+            tools=[self._tool("static_tool")],
         )
-        model = _make_model(
-            compat=OpenAICompletionsCompat(
-                supports_mid_convo_system_messages=True,
-                supports_mid_convo_tool_additions=True,
-            ),
+        params = build_params(model, ctx)
+
+        top_level_names = {t["function"]["name"] for t in params.get("tools") or []}
+        assert top_level_names == {"static_tool"}
+
+    def test_removal_folds_state_into_top_level(self):
+        """移除是非增量变更：顶层取移除后状态，其后新增就地锚定。"""
+        from nova_protocol import SystemMessage, ToolReference
+
+        model = self._model_kimi()
+        ctx = Context(
+            messages=[
+                UserMessage(content="run"),
+                SystemMessage(
+                    tools_removed=[ToolReference(name="static_tool")], timestamp=1
+                ),
+                SystemMessage(tools_added=[self._tool("dynamic_tool")], timestamp=2),
+            ],
+            tools=[self._tool("static_tool")],
+        )
+        params = build_params(model, ctx)
+
+        # 折叠段（head + 移除）后工具为空 → 顶层无工具
+        assert not params.get("tools")
+        # 移除后的新增就地发 kimi 消息
+        kimi_msgs = [
+            m
+            for m in params["messages"]
+            if m.get("role") == "system" and m.get("tools")
+        ]
+        assert len(kimi_msgs) == 1
+        assert kimi_msgs[0]["tools"][0]["function"]["name"] == "dynamic_tool"
+
+    def test_redefinition_is_non_additive(self):
+        """同名重声明是非增量变更：顶层直接换血，不发 kimi 消息。"""
+        from nova_protocol import SystemMessage
+
+        model = self._model_kimi()
+        redefined = Tool(
+            name="static_tool",
+            description="v2 desc",
+            parameters={"type": "object", "properties": {}},
         )
         ctx = Context(
             messages=[
                 UserMessage(content="run"),
-                ToolResultMessage(
-                    tool_call_id="tc1",
-                    tool_name="t1",
-                    content=[TextContent(type="text", text="ok")],
-                    added_tool_names=["dynamic_tool"],
-                ),
+                SystemMessage(tools_added=[redefined], timestamp=1),
             ],
-            tools=[tool_def],
+            tools=[self._tool("static_tool")],
         )
         params = build_params(model, ctx)
 
-        top_level_tools = params.get("tools") or []
-        top_level_names = {t["function"]["name"] for t in top_level_tools}
-        assert "dynamic_tool" not in top_level_names
+        top = {t["function"]["name"]: t for t in params.get("tools") or []}
+        assert top["static_tool"]["function"]["description"] == "v2 desc"
+        kimi_msgs = [
+            m
+            for m in params["messages"]
+            if m.get("role") == "system" and m.get("tools")
+        ]
+        assert kimi_msgs == []
 
     def test_tool_result_empty_content_uses_no_output_placeholder(self):
         """无文本且无图片的 tool result 应使用 '(no tool output)' 占位。"""
@@ -437,9 +533,15 @@ class TestMidConvoToolAdditions:
         assert len(tool_msgs) == 1
         assert tool_msgs[0]["content"] == "(no tool output)"
 
-    def test_kimi_deferred_tools_inserted_after_image_blocks(self):
-        """deferred tools system 消息应紧跟在 imageBlocks 之后，对齐 TS。"""
-        from nova_protocol import ImageContent, TextContent, ToolResultMessage
+    def test_kimi_tool_message_anchors_at_system_message_position(self):
+        """kimi 工具消息锚在 SystemMessage 自己的转录位置（含图片工具结果
+        的用户块之后不窜位）。"""
+        from nova_protocol import (
+            ImageContent,
+            SystemMessage,
+            TextContent,
+            ToolResultMessage,
+        )
 
         from nova_ai.api_impls.openai_completions import convert_messages
 
@@ -469,15 +571,14 @@ class TestMidConvoToolAdditions:
                             data="aGVsbG8=",
                         ),
                     ],
-                    added_tool_names=["dynamic_tool"],
                 ),
+                SystemMessage(tools_added=[tool_def], timestamp=1),
             ],
-            tools=[tool_def],
         )
         messages = convert_messages(model, ctx, model.compat)
 
         roles = [m.get("role") for m in messages]
-        # 期望顺序: user(run) -> tool -> user(image) -> system(deferred tools)
+        # user(run) -> tool -> user(image) -> system(kimi 工具消息)
         assert roles == ["user", "tool", "user", "system"]
         assert messages[-1].get("tools") is not None
 

@@ -167,7 +167,6 @@ def _tool_call_to_item(block: ToolCall, result_message: Any, ts: int) -> ToolCal
     result = AgentToolResult(
         content=getattr(result_message, "content", []) or [],
         details=getattr(result_message, "details", None),
-        added_tool_names=getattr(result_message, "added_tool_names", None),
         is_error=is_error,
     )
     return ToolCallItem(

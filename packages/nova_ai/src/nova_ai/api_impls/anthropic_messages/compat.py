@@ -1,15 +1,12 @@
 """Anthropic 兼容性解析（对齐 TS ``getAnthropicCompat``）。
 
-无 host 检测（TS 侧同）：默认值 + ``model.compat`` 显式覆盖逐字段合并；
-``supports_tool_references`` 缺省按模型代际判定（TS
-``defaultSupportsToolReferences``：一方 Anthropic、非 Haiku、Claude 4.5+）。
+无 host 检测（TS 侧同）：默认值 + ``model.compat`` 显式覆盖逐字段合并。
 """
 
-import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
-from nova_protocol import AnthropicMessagesCompat, Model
+from nova_protocol import AnthropicAllowedFallbackModel, AnthropicMessagesCompat, Model
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -24,23 +21,12 @@ class ResolvedAnthropicCompat:
     supports_strict_tools: bool
     allow_empty_signature: bool
     force_adaptive_thinking: bool
-    supports_tool_references: bool
-
-
-def _default_supports_tool_references(model: Model) -> bool:
-    """tool_reference 的默认支持面（对齐 TS defaultSupportsToolReferences）：
-
-    一方 Anthropic 模型、非 Haiku（Haiku 拒绝客户端 tool_reference 块）、
-    Claude 4.5 起（更早的 3.x/4.0/4.1 先于工具搜索特性）。
-    """
-    if model.provider != "anthropic" or "haiku" in model.id:
-        return False
-    match = re.match(r"^claude-(?:opus|sonnet|fable)-(\d+)(?:-(\d+))?(?:-|$)", model.id)
-    if not match:
-        return False
-    major = int(match.group(1))
-    minor = int(match.group(2)) if match.group(2) and len(match.group(2)) < 8 else 0
-    return major > 4 or (major == 4 and minor >= 5)
+    supports_mid_convo_system_messages: bool
+    supports_mid_convo_tool_changes: bool
+    supports_mid_convo_effort: bool
+    supports_message_threads: bool
+    # 服务端 refusal fallback 许可名单（None/空 = 不发 fallbacks 字段）
+    allowed_fallback_models: Optional[List[AnthropicAllowedFallbackModel]]
 
 
 def get_compat(model: Model) -> ResolvedAnthropicCompat:
@@ -63,8 +49,20 @@ def get_compat(model: Model) -> ResolvedAnthropicCompat:
         supports_strict_tools=_pick("supports_strict_tools", False),
         allow_empty_signature=_pick("allow_empty_signature", False),
         force_adaptive_thinking=_pick("force_adaptive_thinking", False),
-        supports_tool_references=_pick(
-            "supports_tool_references", _default_supports_tool_references(model)
+        supports_mid_convo_system_messages=_pick(
+            "supports_mid_convo_system_messages", False
+        ),
+        supports_mid_convo_tool_changes=_pick("supports_mid_convo_tool_changes", False),
+        supports_mid_convo_effort=_pick("supports_mid_convo_effort", False),
+        # 默认限 Anthropic 自有端点（对齐 TS）：丢未知请求字段的网关会把
+        # continue 静默变成丢失前文的请求；转发 thread 字段的网关可显式开
+        supports_message_threads=_pick(
+            "supports_message_threads",
+            model.provider == "anthropic" and "api.anthropic.com" in model.base_url,
+        ),
+        # 名单直通（无检测默认——对齐 TS：缺省/空即省略 fallbacks 字段）
+        allowed_fallback_models=(
+            overrides.allowed_fallback_models if overrides is not None else None
         ),
     )
 

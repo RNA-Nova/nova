@@ -139,15 +139,16 @@ def _estimate_tools_tokens(tools: Optional[List[Tool]]) -> int:
 def estimate_context_tokens(context: Context) -> ContextUsageEstimate:
     """估算整个上下文的 token 数（对齐 TS estimateContextTokens）。
 
-    有 usage 锚点时，追加锚点之后 ``added_tool_names`` 对应的工具定义 tokens；
-    无锚点时估算全部消息 + system prompt + 工具定义。
+    有 usage 锚点时，追加锚点之后中途 system 消息 ``tools_added`` 声明的
+    工具定义 tokens；无锚点时估算全部消息 + system prompt + 工具定义。
     """
     estimate = _estimate_messages(context.messages)
     if estimate.last_usage_index is not None:
+        # 中途新增的工具定义也占上下文（SystemMessage 通道——pi 同款载体）
         added_names = set()
         for message in context.messages[estimate.last_usage_index + 1 :]:
-            if message.role == "toolResult":
-                added_names.update(message.added_tool_names or [])
+            for tool in getattr(message, "tools_added", None) or []:
+                added_names.add(tool.name)
         added_tools = [
             tool for tool in (context.tools or []) if tool.name in added_names
         ]

@@ -68,6 +68,7 @@ def build_base_options(
         transport=options.transport if options else None,
         cache_retention=options.cache_retention if options else None,
         session_id=options.session_id if options else None,
+        disable_continuation=options.disable_continuation if options else None,
         headers=options.headers if options else None,
         env=options.env if options else None,
         on_payload=options.on_payload if options else None,

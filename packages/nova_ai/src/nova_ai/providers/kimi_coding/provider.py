@@ -7,7 +7,7 @@ from nova_protocol import OAuthAuth, ProviderAuth
 
 from ...auth.helpers import env_api_key_auth, lazy_oauth
 from ...gateway import Provider, ProviderStreams, create_provider
-from .catalog import BASE_URL, kimi_coding_fetch_models
+from .catalog import BASE_URL, kimi_personalize
 from .models import KIMI_CODING_MODELS
 
 
@@ -20,12 +20,16 @@ async def _load_kimi_oauth() -> OAuthAuth:
 
 
 def kimi_coding_provider() -> "Provider":
-    """构造 Kimi Coding provider 实例（三件套刷新出生自带：OAuth → managed
-    订阅源，否则 → ``catalog_source="pi.dev"`` 公开站回落）。
+    """构造 Kimi Coding provider 实例。
 
-    协议随站：anthropic-messages（pi.dev 标注——方言换血已退役）。
+    personalized 刷新形态（``create_provider`` 装配）：pi.dev 公开站基底
+    + ``kimi_personalize`` 账户钩子（managed 订阅源覆盖层）；replace
+    读取——订阅筛掉的模型不被基线补回。
+
+    协议随站：openai-completions（pi.dev 标注——与官方 Kimi Code 客户端
+    同协议）。
     """
-    from ...api_impls import anthropic_messages
+    from ...api_impls import openai_completions
 
     return create_provider(
         id="kimi-coding",
@@ -33,12 +37,12 @@ def kimi_coding_provider() -> "Provider":
         base_url=BASE_URL,
         models=list(KIMI_CODING_MODELS.values()),
         # 模块结构上满足 ProviderStreams，cast 收口
-        api=cast(ProviderStreams, anthropic_messages),
+        api=cast(ProviderStreams, openai_completions),
         auth=ProviderAuth(
             api_key=env_api_key_auth("Kimi API key", ["KIMI_API_KEY"]),
             oauth=lazy_oauth("Kimi (Moonshot AI)", _load_kimi_oauth),
         ),
-        fetch_models=kimi_coding_fetch_models,
         catalog_source="pi.dev",
         catalog_knowledge=_knowledge,
+        personalize=kimi_personalize,
     )

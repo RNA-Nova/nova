@@ -86,24 +86,33 @@ def _chunk(
     reasoning_details: Optional[List[Any]] = None,
     usage: Optional[Any] = None,
 ):
-    """构造伪造的 ChatCompletionChunk。"""
-    delta_dict = {}
-    if reasoning:
-        delta_dict["reasoning_content"] = reasoning
-    if reasoning_details:
-        delta_dict["reasoning_details"] = reasoning_details
+    """构造 ChatCompletionChunk——线级 JSON 经真 SDK 解析（SimpleNamespace
+    假形状会骗过实现层，F1/F2 教训：假件一律 SDK model_validate 产出）。
 
-    delta = SimpleNamespace(
-        content=content,
-        tool_calls=tool_calls,
-        model_dump=lambda: delta_dict,
-    )
-    return SimpleNamespace(
-        id="chatcmpl-1",
-        model="test-model",
-        usage=usage,
-        choices=[SimpleNamespace(delta=delta, finish_reason=finish, usage=None)],
-    )
+    ``usage`` 传线级 dict（SDK 模型实例亦可——模型字段直通）。
+    """
+    from openai.types.chat import ChatCompletionChunk
+
+    delta: dict = {}
+    if content is not None:
+        delta["content"] = content
+    if reasoning:
+        delta["reasoning_content"] = reasoning
+    if reasoning_details:
+        delta["reasoning_details"] = reasoning_details
+    if tool_calls is not None:
+        delta["tool_calls"] = tool_calls
+
+    wire: dict = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion.chunk",
+        "created": 1700000000,
+        "model": "test-model",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+    }
+    if usage is not None:
+        wire["usage"] = usage
+    return ChatCompletionChunk.model_validate(wire)
 
 
 class _FakeStream:

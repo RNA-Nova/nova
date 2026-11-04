@@ -152,7 +152,7 @@ class TestToolCallIdNormalization:
         assert result[1].tool_call_id == "new_id"
 
     def test_tool_result_fields_preserved_on_id_normalization(self):
-        """规范化 tool_call_id 重建消息时，added_tool_names / details 等字段不丢（回归）。"""
+        """规范化 tool_call_id 重建消息时，details / is_error 等字段不丢（回归）。"""
         assistant = AssistantMessage(
             content=[ToolCall(id="old_id", name="search", arguments={})],
             api=KnownApi.OPENAI_COMPLETIONS,
@@ -165,7 +165,6 @@ class TestToolCallIdNormalization:
             content=[TextContent(text="result")],
             details={"k": "v"},
             is_error=True,
-            added_tool_names=["new_tool_a", "new_tool_b"],
         )
 
         def normalize(id, model, source):
@@ -175,7 +174,6 @@ class TestToolCallIdNormalization:
 
         rebuilt = result[1]
         assert rebuilt.tool_call_id == "new_id"
-        assert rebuilt.added_tool_names == ["new_tool_a", "new_tool_b"]
         assert rebuilt.details == {"k": "v"}
         assert rebuilt.is_error is True
 

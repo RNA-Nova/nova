@@ -59,8 +59,6 @@ class AgentToolResult(NovaBaseModel, Generic[TDetails]):
     （规则 3）；内容随工具事件上线、经转换进 ToolResultMessage 落盘。
 
     - ``details``：工具自定义的呈现/日志载荷（UI 按工具解释）；形状归工具；
-    - ``added_tool_names``：本次调用新注册的工具名（Kimi deferred tools）；
-      ``None`` = 无新增；
     - ``terminate``：提示 agent 在本批工具调用后停止——仅当批内全部终态
       结果都置 True 才提前终止；``None`` = 不终止。
     """
@@ -71,8 +69,6 @@ class AgentToolResult(NovaBaseModel, Generic[TDetails]):
     """Content blocks supporting text and images."""
     details: TDetails
     """Details to be displayed in a UI or logged."""
-    added_tool_names: Optional[List[str]] = None
-    """Names of tools introduced by this result and available from this transcript point onward."""
     terminate: Optional[bool] = None
     """
     Hint that the agent should stop after the current tool batch.

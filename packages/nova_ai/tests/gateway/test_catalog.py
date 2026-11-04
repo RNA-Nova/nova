@@ -5,9 +5,7 @@ TypedDict 声明镜像（规则 10：声明不校验，``Model(**fields)`` 在�
 校验）。枢纽模型加/改字段时，镜像键集必须同步——本文件机械执法。
 """
 
-from nova_protocol import Model, ModelCost
-
-from nova_protocol import ModelCostFields, ModelFields
+from nova_protocol import Model, ModelCost, ModelCostFields, ModelFields
 
 
 class TestModelFieldsDriftGuard:

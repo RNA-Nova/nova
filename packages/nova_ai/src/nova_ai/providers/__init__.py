@@ -4,8 +4,10 @@ Provider 定义包
 每个 provider 一个子目录，结构对齐 TS ``src/providers/*``：
 - ``<provider>/models.py``：静态模型目录
 - ``<provider>/provider.py``：provider 工厂函数
-- ``<provider>/catalog.py``（可选）：``fetch_models`` 回调（动态目录内容源）
-- ``<provider>/corrections.py``（可选）：修正知识模块（知识随行）
+- ``<provider>/catalog.py``（可选）：``personalize`` 账户层钩子（动态目录的
+  私活——kimi 订阅覆盖 / 火山 ark 筛选；治理归 ``gateway/strategies.py``）
+- 修正知识已迁 ``nova_catalog/providers/``（DEF）——运行期经
+  ``catalog_knowledge`` 字段消费，本包不再持有 corrections 模块
 """
 
 from ..gateway import Provider, ProviderStreams, RefreshModelsContext, create_provider

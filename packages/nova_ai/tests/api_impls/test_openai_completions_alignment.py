@@ -59,6 +59,55 @@ def _ctx(*messages) -> Context:
 
 
 # ---------------------------------------------------------------------------
+# mid-conversation system messages（pi resolveTranscript 对位）
+# ---------------------------------------------------------------------------
+
+
+def test_mid_convo_system_passthrough_when_supported():
+    """旗标为真：中途 system 消息逐条呈现为 system 条目（名化变更文本）。"""
+    from nova_protocol import OpenAICompletionsCompat, SystemMessage
+
+    from nova_ai.api_impls.openai_completions import convert_messages
+
+    ctx = _ctx(
+        UserMessage(content="q1"),
+        SystemMessage(sections={"mode": "只读"}, timestamp=2),
+        UserMessage(content="q2"),
+    )
+    ctx.system_prompt = "base prompt"
+    params = convert_messages(
+        _model(), ctx, OpenAICompletionsCompat(supports_mid_convo_system_messages=True)
+    )
+    roles = [m.get("role") for m in params]
+    assert roles[0] == "system"  # 头部（base prompt 折叠进首条）
+    assert roles.count("system") == 2
+    update_entry = params[2]
+    assert update_entry["role"] == "system"
+    assert 'Updated system prompt section "mode"' in update_entry["content"]
+
+
+def test_mid_convo_system_collapses_when_unsupported():
+    """旗标为假：中途变更折叠进头部，无多余 system 条目。"""
+    from nova_protocol import OpenAICompletionsCompat, SystemMessage
+
+    from nova_ai.api_impls.openai_completions import convert_messages
+
+    ctx = _ctx(
+        UserMessage(content="q1"),
+        SystemMessage(sections={"mode": "只读"}, timestamp=2),
+        UserMessage(content="q2"),
+    )
+    ctx.system_prompt = "base prompt"
+    params = convert_messages(
+        _model(), ctx, OpenAICompletionsCompat(supports_mid_convo_system_messages=False)
+    )
+    system_entries = [m for m in params if m.get("role") == "system"]
+    assert len(system_entries) == 1
+    assert "base prompt" in system_entries[0]["content"]
+    assert "只读" in system_entries[0]["content"]
+
+
+# ---------------------------------------------------------------------------
 # reasoning details
 # ---------------------------------------------------------------------------
 
@@ -251,6 +300,35 @@ def test_normalize_tool_call_id_truncates_over_40_with_hash():
 # ---------------------------------------------------------------------------
 # tool_choice / cache_control
 # ---------------------------------------------------------------------------
+
+
+def test_non_null_assistant_content_flag_rewrites_null():
+    """requiresNonNullAssistantContent：assistant 的 null content 改写空串
+    （对齐 TS 14b804d80）；缺省 false 时保持 null。"""
+    from nova_protocol import OpenAICompletionsCompat
+
+    from nova_ai.api_impls.openai_completions import convert_messages
+
+    assistant = AssistantMessage(
+        role="assistant",
+        content=[ToolCall(type="toolCall", id="c1", name="f", arguments={})],
+    )
+    ctx = Context(messages=[UserMessage(content="hi"), assistant])
+
+    # 缺省（false）：content 保持 None
+    model = _model()
+    params = convert_messages(model, ctx, OpenAICompletionsCompat())
+    assistant_param = next(m for m in params if m.get("role") == "assistant")
+    assert assistant_param["content"] is None
+
+    # 旗标为真：null → ""
+    params = convert_messages(
+        model,
+        ctx,
+        OpenAICompletionsCompat(requires_non_null_assistant_content=True),
+    )
+    assistant_param = next(m for m in params if m.get("role") == "assistant")
+    assert assistant_param["content"] == ""
 
 
 def test_tool_choice_omitted_without_tools():

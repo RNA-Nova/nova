@@ -42,7 +42,7 @@
 | Moonshot AI（国内） | `moonshotai-cn` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | Kimi Coding | `kimi-coding` | `https://api.kimi.com/coding/v1` | `KIMI_API_KEY` 或 OAuth 登录 |
 
-内置 provider 使用两个协议实现：`api_impls/anthropic_messages`（Anthropic 与 kimi-coding，基于官方 `anthropic` SDK）与 `api_impls/openai_completions`（其余三家，基于官方 `openai` SDK）。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
+内置 provider 使用两个协议实现：`api_impls/anthropic_messages`（Anthropic，基于官方 `anthropic` SDK）与 `api_impls/openai_completions`（其余四家——含 kimi-coding，与官方 Kimi Code 客户端同协议，基于官方 `openai` SDK）。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
 
 内置模型目录是构建期生成的静态数据（模型 id、上下文窗口、费率、思考级别表等），随包发布、离线可用。
 

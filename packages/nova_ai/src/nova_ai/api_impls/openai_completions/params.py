@@ -36,13 +36,13 @@ from .._shared.simple_options import (
     clamp_thinking_budget_to_answer_room,
     thinking_budget_for_level,
 )
-from .compat import get_compat
-from .messages import (
-    convert_messages,
-    convert_tools,
-    get_deferred_tool_names,
-    has_tool_history,
+from .._shared.transcript import (
+    normalize_context,
+    resolve_transcript,
+    resolve_transcript_tools,
 )
+from .compat import get_compat
+from .messages import convert_messages, convert_tools, has_tool_history
 from .options import ToolChoiceFunction
 
 _OMIT = object()
@@ -218,24 +218,31 @@ def build_params(
         # 旧单体遗漏修复：OpenAI store:true 场景的轨迹追踪 metadata
         params["metadata"] = metadata
 
-    deferred_tool_names = set()
-    if (
-        compat.supports_mid_convo_system_messages
-        and compat.supports_mid_convo_tool_additions
-    ):
-        deferred_tool_names = get_deferred_tool_names(context.messages)
-
     # extra_body 单点累积：非标准字段统一从这里上线
     extra_body: Dict[str, Any] = {}
 
-    active_tools = None
-    if context.tools:
-        active_tools = [
-            tool for tool in context.tools if tool.name not in deferred_tool_names
-        ]
+    # 工具声明分工（pi resolveTranscriptTools 对位）：additions 形态
+    # （中途 system + 工具新增双旗标，Kimi K3）下顶层列表取最后一次非
+    # 增量变更后的状态——移除/重定义无法就地表达，缓存前缀每次移除只
+    # 失效一次；其后的新增经 kimi 工具型 system 消息就地锚定（归
+    # convert_messages）。none 形态顶层即当前集。
+    support = (
+        "additions"
+        if (
+            compat.supports_mid_convo_system_messages
+            and compat.supports_mid_convo_tool_additions
+        )
+        else "none"
+    )
+    transcript_tools = resolve_transcript_tools(
+        resolve_transcript(
+            normalize_context(context), compat.supports_mid_convo_system_messages
+        ),
+        support,
+    )
 
-    if active_tools:
-        params["tools"] = convert_tools(active_tools, compat)
+    if transcript_tools.request_tools:
+        params["tools"] = convert_tools(transcript_tools.request_tools, compat)
         if compat.zai_tool_stream:
             extra_body["tool_stream"] = True
         parallel_tool_calls = getattr(options, "parallel_tool_calls", None)
@@ -271,12 +278,24 @@ def build_params(
 
     # prompt cache（对齐 TS 顶层 prompt_cache_key/retention——Python 侧经 extra_body 上线）
     session_id = options.session_id if options else None
-    use_prompt_cache_key = session_id is not None and (
-        ("api.openai.com" in model.base_url and cache_retention != CacheRetention.NONE)
-        or (
-            cache_retention == CacheRetention.LONG
-            and compat.supports_long_cache_retention
+    # 三态裁决（对齐 pi 0f4d5e960 promptCacheKeyMode）：enabled 缓存激活即
+    # 发（兼容代理）；disabled 永不；auto 维持启发式（openai 官方端点或
+    # long 保留 + supportsLongCacheRetention）
+    prompt_cache_key_mode = compat.prompt_cache_key_mode or "auto"
+    supports_prompt_cache_key = prompt_cache_key_mode == "enabled" or (
+        prompt_cache_key_mode == "auto"
+        and (
+            "api.openai.com" in model.base_url
+            or (
+                cache_retention == CacheRetention.LONG
+                and compat.supports_long_cache_retention
+            )
         )
+    )
+    use_prompt_cache_key = (
+        session_id is not None
+        and cache_retention != CacheRetention.NONE
+        and supports_prompt_cache_key
     )
     if use_prompt_cache_key:
         extra_body["prompt_cache_key"] = clamp_openai_prompt_cache_key(session_id)

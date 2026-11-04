@@ -66,6 +66,10 @@ class AssistantMessage(NovaBaseModel):
     # 提供商响应级 id / 实际服务模型（与请求 model 不同说明被网关改写）；None = 未上报
     response_id: Optional[str] = None
     response_model: Optional[str] = None
+    # 端点原生 effort 级（adaptive thinking 的生效档位——对齐 TS
+    # ``providerThinkingLevel``）：mid-convo effort 开启时记录在回复上，
+    # 后续请求经 effort 标记回放；``None`` = 未记录
+    provider_thinking_level: Optional[str] = None
     # 脱敏后的 provider/运行时诊断（失败与恢复路径，开放形状列表）；None = 无诊断
     diagnostics: Optional[List[Dict[str, Any]]] = None
     timestamp: int = 0
@@ -83,16 +87,19 @@ class ToolResultMessage(NovaBaseModel):
     # 任意 JSON 值（对齐 TS details: unknown）——工具自定义形态，渲染端按工具解释
     details: Optional[Any] = None
     is_error: bool = False
-    # 本次工具调用新增注册的工具名列表（Kimi deferred tools 模式使用）
-    added_tool_names: Optional[List[str]] = None
     timestamp: int = 0
 
 
-# 消息联合类型（判别键 ``role``——规则 6：Context.messages 走 model_validate）
-Message = Annotated[
-    Union[UserMessage, AssistantMessage, ToolResultMessage],
-    Field(discriminator="role"),
-]
+class ConstrainedSampling(NovaBaseModel):
+    """工具级约束采样声明（对位 pi ``Tool.constrainedSampling``）。
+
+    ``strict="prefer"``：schema 与端点 strict 子集兼容时启用 strict，不兼容
+    自动回落非严格；``"require"``：不兼容即请求期报错（不给模型次优）。
+    grammar 族（OpenAI lark/regex）随 OpenAI provider 落地再扩。
+    """
+
+    type: Literal["json_schema"]
+    strict: Literal["prefer", "require"]
 
 
 class Tool(NovaBaseModel):
@@ -107,6 +114,43 @@ class Tool(NovaBaseModel):
     name: str
     description: str
     parameters: Dict[str, Any]
+    # 工具级约束采样声明（``None`` = 不参与 strict——对位 pi 缺省）
+    constrained_sampling: Optional[ConstrainedSampling] = None
+
+
+class ToolReference(NovaBaseModel):
+    """工具引用（按名——对齐 pi ``ToolReference``）。"""
+
+    name: str
+
+
+class SystemMessage(NovaBaseModel):
+    """系统消息（转录中的提示词/工具变更事件——pi ``SystemMessage`` 对位）。
+
+    不再是"开头的固定起始条件"：``content`` 自该点起追加指令；
+    ``sections`` 按名替换提示词块（``None`` 值删除该块）；
+    ``tools_added``/``tools_removed`` 变更工具集。按序重放全部 system
+    消息即得当前提示词与工具集（折叠）；不支持中途 system 消息的协议
+    经折叠形态下发。
+    """
+
+    role: Literal["system"] = "system"
+    # 指令文本（首条为基础提示词，后续为追加指令）
+    content: Union[str, List[TextContent]] = ""
+    # 命名提示词块（后写覆盖先写，None 值删除）
+    sections: Optional[Dict[str, Optional[str]]] = None
+    # 该点起新增可用的工具（完整定义）
+    tools_added: Optional[List[Tool]] = None
+    # 该点起停用的工具（按名）
+    tools_removed: Optional[List[ToolReference]] = None
+    timestamp: int = 0
+
+
+# 消息联合类型（判别键 ``role``——规则 6：Context.messages 走 model_validate）
+Message = Annotated[
+    Union[UserMessage, AssistantMessage, ToolResultMessage, SystemMessage],
+    Field(discriminator="role"),
+]
 
 
 class Context(NovaBaseModel):

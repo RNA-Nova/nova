@@ -1,42 +1,47 @@
-"""Kimi Coding 目录内容源（``fetch_models`` 回调：公开站基底 + managed 鉴权修正）。
+"""Kimi Coding 账户私活（``personalize`` 钩子：managed 订阅源覆盖层）。
 
-统一形态（与火山同构）：**公开站基底先行**（``context.catalog_fetch``——
-manager 按 ``catalog_source="pi.dev"`` 发放，带价格与目录），**鉴权修正层
-可选叠加**：有 OAuth 凭据时调 managed ``/models``（订阅权威），以其
-清单与活字段（思考级别/context/输入类型）修正基底——价格字段保留基底
-的（managed 不提供价格，订阅也有成本提醒）。基底挂了且 managed 可用时
-退化为 managed 单独服务（价格落 0，可用性优先）。
+钩子经 ``create_provider(personalize=...)`` 装配进 personalized 刷新策略
+（``gateway/strategies.py``）——恢复/拉站/分流/持久化/发布全部归策略；
+本模块只含账户层三件事：**拉取**（managed ``/models`` 订阅源）、**翻译**
+（响应 → 活字段包）、**合并**（名单筛选 + 活字段覆盖）。
 
-协议随站：pi.dev 标 kimi-coding 为 anthropic-messages（无立场层——
-方言换血已随 anthropic 协议落地退役）。
+账户层零修正：compat/价格/协议戳/``max_tokens`` 整条继承已修正的基底；
+订阅源有而目录站未收录的模型 id **跳过+诊断**（目录站是"模型是什么"
+的唯一权威——pi openrouter 同款语义：不认的当作没有）。
+
+协议随站：pi.dev 标 kimi-coding 为 openai-completions（Chat Completions，
+与官方 Kimi Code 客户端同协议）。
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
-from nova_catalog.providers.kimi_coding import DEF as _knowledge
-from nova_protocol import (
-    Model,
-    ModelFields,
-    NovaDiagnostic,
-    NovaErrorKind,
-    WarningKind,
-    is_aborted,
-)
+from nova_protocol import Model, NovaDiagnostic, NovaErrorKind, WarningKind
 
 from ...gateway.catalog import CatalogError
+from ...gateway.diagnostics import DiagnosticsCollector
 from ...gateway.provider import RefreshModelsContext
-from ...model_catalog import finalize_catalog_models
 from ...utils.http import request_with_abort
 
-BASE_URL = "https://api.kimi.com/coding"
-"""本家 API endpoint 协议基址（SDK 自拼 /v1/messages；对齐 pi.dev 标注）。"""
+BASE_URL = "https://api.kimi.com/coding/v1"
+"""本家 API endpoint 协议基址（对齐 pi.dev 标注——Chat Completions）。"""
 
-_MANAGED_BASE_URL_DEFAULT = f"{BASE_URL}/v1"
-"""managed ``/models`` 订阅源的基址（与协议基址分层——该端点在 /v1 下）。"""
+_MANAGED_BASE_URL_DEFAULT = BASE_URL
+"""managed ``/models`` 订阅源的基址（与协议基址同根——端点为 {base}/models）。"""
 
 # managed /models 的 think_efforts.valid_efforts 到思考级别表的键序
 _KNOWN_LEVELS = ("minimal", "low", "medium", "high", "xhigh", "max")
+
+
+class ManagedOverlay(TypedDict):
+    """managed 活字段包（账户态覆盖层——纯翻译产物，不含修正知识）。"""
+
+    id: str
+    name: str
+    reasoning: bool
+    thinking_level_map: Dict[str, Optional[str]]
+    input_types: List[str]
+    context_window: int
 
 
 def _managed_base_url() -> str:
@@ -49,18 +54,14 @@ def _managed_base_url() -> str:
 def _thinking_level_map(valid_efforts: Optional[List[Any]]) -> Dict[str, Optional[str]]:
     """``think_efforts.valid_efforts`` → 思考级别表（缺席级别 = 不支持）。"""
     valid = {e for e in (valid_efforts or []) if isinstance(e, str)}
-    level_map: Dict[str, Optional[str]] = {"off": None}
-    for level in _KNOWN_LEVELS:
-        level_map[level] = level if level in valid else None
-    return level_map
+    return {
+        "off": None,
+        **{level: level if level in valid else None for level in _KNOWN_LEVELS},
+    }
 
 
-def _to_fields(item: Any) -> Optional["ModelFields"]:
-    """managed /models 单条目 → ModelFields（畸形条目跳过，不拖垮整批）。
-
-    纯翻译不盖戳——盖戳（协议戳/基址/compat 修正）统一归
-    ``finalize_catalog_models``（与公开站基底同一引擎）。
-    """
+def _to_overlay(item: Any) -> Optional[ManagedOverlay]:
+    """managed /models 单条目 → 活字段包（畸形条目跳过，不拖垮整批）。"""
     if not isinstance(item, dict):
         return None
     model_id = item.get("id")
@@ -85,21 +86,14 @@ def _to_fields(item: Any) -> Optional["ModelFields"]:
         "reasoning": bool(item.get("supports_reasoning")),
         "thinking_level_map": _thinking_level_map(valid_efforts),
         "input_types": input_types,
-        # 价格为零值占位：managed 不提供价格——与基底合并时被
-        # 基底的 pi.dev 价格替换；managed 单独服务时保持零值
-        "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
-        # managed 端点的协议族事实（源数据驱动需要字段包自带——
-        # kimi-code 的订阅端点即 anthropic 形态，pi.dev 同标注）
-        "api": "anthropic-messages",
         "context_window": context_length,
-        # managed /models 不提供输出上限，以 context 为界
-        # （对齐 kimi-code：不携带独立输出 cap）
-        "max_tokens": context_length,
     }
 
 
-async def _managed_fields(context: RefreshModelsContext) -> Optional[List[ModelFields]]:
-    """managed /models 订阅源 → 字段列表（鉴权修正层的活数据）。
+async def _managed_overlays(
+    context: RefreshModelsContext,
+) -> Optional[List[ManagedOverlay]]:
+    """managed /models 订阅源 → 活字段包列表（鉴权修正层的活数据）。
 
     凭据形状不限——coding plan 订阅制同时支持 OAuth 与 API key（Bearer
     都是 token，端点同样认）；无凭据才跳过。返回 ``None`` = managed 端点
@@ -154,100 +148,66 @@ async def _managed_fields(context: RefreshModelsContext) -> Optional[List[ModelF
         data = None
     if not isinstance(data, list):
         return None
-    return [f for f in (_to_fields(item) for item in data) if f is not None]
+    return [o for o in (_to_overlay(item) for item in data) if o is not None]
 
 
-def _merge_managed(base: List[Model], managed: List[Model]) -> List[Model]:
-    """以 managed 清单为准修正基底：活字段（思考级别/context/输入类型/名称）
-    覆盖基底条目，**价格保留基底**（managed 不提供价格）；基底有而
-    managed 没有的模型剔除（订阅可见性以 managed 为准）。"""
-    base_cost_by_id = {m.id: m.cost for m in base}
+def _merge_managed(
+    base: List[Model],
+    overlays: List[ManagedOverlay],
+    diagnostics: DiagnosticsCollector,
+) -> List[Model]:
+    """名单以 managed 为准（基底有而 managed 无的剔除）；基底已有的 id
+    只覆盖活字段（compat/价格/协议戳/``max_tokens`` 整条继承基底，零修正）；
+    基底未收录的 id 跳过+诊断（站不认的当作没有——pi openrouter 同款）。"""
+    base_by_id = {m.id: m for m in base}
     merged: List[Model] = []
-    for model in managed:
-        base_cost = base_cost_by_id.get(model.id)
-        if base_cost is not None:
-            model = model.model_copy(
+    skipped: List[str] = []
+    for overlay in overlays:
+        entry = base_by_id.get(overlay["id"])
+        if entry is None:
+            skipped.append(overlay["id"])
+            continue
+        merged.append(
+            entry.model_copy(
                 update={
-                    "cost": type(model.cost)(
-                        input=base_cost.input,
-                        output=base_cost.output,
-                        cache_read=base_cost.cache_read,
-                        cache_write=base_cost.cache_write,
-                    )
+                    "name": overlay["name"],
+                    "reasoning": overlay["reasoning"],
+                    "thinking_level_map": overlay["thinking_level_map"],
+                    "input_types": overlay["input_types"],
+                    "context_window": overlay["context_window"],
                 }
             )
-        merged.append(model)
-    return merged
-
-
-async def kimi_coding_fetch_models(
-    context: RefreshModelsContext,
-) -> Optional[List[Model]]:
-    """本家 ``fetch_models`` 回调（三件套治理归 ``_default_refresh_models``）。
-
-    公开站基底先行；OAuth 时叠加 managed 鉴权修正层（401/402/403 抛错，
-    未给出 200——含传输失败——不占层）。返回 ``None`` = 本次无发布
-    （无站且订阅源不可达——缓存保持现状，基线兜底）。
-    """
-    if is_aborted(context.signal):
-        return None
-
-    # 鉴权修正层（可选）：managed 订阅源
-    managed_fields = await _managed_fields(context)
-
-    # 基底：公开站（字段包经统一引擎修正+盖戳——协议随站标注）
-    fetch = context.catalog_fetch
-    outcome = await fetch(context.signal, None) if fetch is not None else None
-    if outcome is not None and outcome.status == 200:
-        base = finalize_catalog_models(
-            "kimi-coding",
-            BASE_URL,
-            outcome.models_fields,
-            knowledge=_knowledge,
         )
-        if managed_fields is None:
-            return base
-        managed = finalize_catalog_models(
-            "kimi-coding", BASE_URL, managed_fields, knowledge=_knowledge
-        )
-        return _merge_managed(base, managed)
-
-    # 基底不可用：managed 降级单独服务（价格落 0，可用性优先）
-    if managed_fields is not None:
-        context.diagnostics.append(
+    if skipped:
+        diagnostics.append(
             NovaDiagnostic(
                 severity="warning",
                 kind=WarningKind.CAPABILITY,
-                message="公开目录站不可用——kimi-coding 由订阅源单独供数（价格为订阅折算价）",
+                message=(
+                    f"kimi-coding 订阅源返回了目录站未收录的模型"
+                    f"（{', '.join(skipped)}）——已跳过，站数据更新后自动可见"
+                ),
             )
         )
-        return finalize_catalog_models(
-            "kimi-coding", BASE_URL, managed_fields, knowledge=_knowledge
-        )
-    if outcome is not None:
-        # 不再硬编 UPSTREAM_ERROR：真实非 200 由归一按 status_code 分类，
-        # status=0 的合成码场景沿 cause 链取传输层真 kind（分类一次在边界）
-        raise CatalogError(
-            f"Model catalog request failed for kimi-coding: {outcome.status}",
-            status_code=outcome.status or None,
-        ) from outcome.cause
-    # 无站兜底——None = 本次无发布：内存与落盘缓存保持现状，基线兜底
-    # （两类降级分讯：无凭据 / 订阅源不可达）
-    credential = context.credential
-    if credential is not None and credential.type == "oauth":
-        message = "kimi-coding 无公开目录站且订阅源不可达——回退内置基线目录"
-    else:
-        message = "kimi-coding 未配置公开目录站且无 OAuth 凭据——回退内置基线目录"
-    context.diagnostics.append(
-        NovaDiagnostic(
-            severity="warning",
-            kind=WarningKind.CAPABILITY,
-            message=message,
-        )
-    )
-    return None
+    return merged
+
+
+async def kimi_personalize(
+    base: List[Model],
+    context: RefreshModelsContext,
+) -> List[Model]:
+    """kimi 的 ``personalize`` 钩子：managed 订阅源覆盖层（名单+活字段）。
+
+    无凭据 / 订阅源未给出 200（含传输失败）→ 基底原样（不占层）；
+    401/402/403 → 抛错（重登录语义，refresh 记入 errors）。
+    """
+    overlays = await _managed_overlays(context)
+    if overlays is None:
+        return base
+    return _merge_managed(base, overlays, context.diagnostics)
 
 
 __all__ = [
-    "kimi_coding_fetch_models",
+    "BASE_URL",
+    "kimi_personalize",
 ]

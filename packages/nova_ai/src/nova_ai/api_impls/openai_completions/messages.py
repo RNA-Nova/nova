@@ -22,7 +22,17 @@ from openai.types.chat import (
 
 from ...utils.hash import short_hash
 from ...utils.surrogate import sanitize_surrogates
+from .._shared.transcript import (
+    get_initial_system_message,
+    get_system_message_text,
+    normalize_context,
+    render_system_message_update,
+    resolve_transcript,
+    resolve_transcript_tools,
+    without_initial_system_message,
+)
 from .._shared.transform_messages import transform_messages
+from .moonshot_schema import normalize_moonshot_flavored_schema
 from .reasoning import (
     is_reasoning_field,
     parse_legacy_encrypted_reasoning_detail,
@@ -56,24 +66,6 @@ def has_tool_history(messages: List[Message]) -> bool:
     return False
 
 
-def get_deferred_tool_names(messages: List[Message]) -> Set[str]:
-    """收集 toolResult 消息中新增注册的工具名（对齐 TS getDeferredToolNames）。"""
-    names: Set[str] = set()
-    for message in messages:
-        if message.role == "toolResult":
-            for name in message.added_tool_names or []:
-                names.add(name)
-    return names
-
-
-def get_tools_by_name(tools: Optional[List[Tool]], names: Set[str]) -> List[Tool]:
-    """按名称查找工具定义（对齐 TS getToolsByName）。"""
-    if not tools:
-        return []
-    tools_by_name = {tool.name: tool for tool in tools}
-    return [tools_by_name[name] for name in names if name in tools_by_name]
-
-
 def convert_messages(
     model: Model, context: Context, compat: OpenAICompletionsCompat
 ) -> List[ChatCompletionMessageParam]:
@@ -101,23 +93,50 @@ def convert_messages(
             return id[:40] if len(id) > 40 else id
         return id
 
+    # 提示词与工具声明经 normalize/resolve 归一（pi transcript.ts 对位）：
+    # system_prompt/tools 折成首条 system 消息；模型不接受中途 system
+    # 消息时全部折叠回这一条（compat.supports_mid_convo_system_messages 门控）
+    normalized = normalize_context(context)
+    resolved = resolve_transcript(normalized, compat.supports_mid_convo_system_messages)
+    head = get_initial_system_message(resolved)
+    rest = without_initial_system_message(resolved)
+
+    # 工具声明分工（pi resolveTranscriptTools）：additions 形态下顶层列表
+    # 取最后一次非增量变更后的状态，其后 system 消息就地携带新增
+    support = (
+        "additions"
+        if (
+            compat.supports_mid_convo_system_messages
+            and compat.supports_mid_convo_tool_additions
+        )
+        else "none"
+    )
+    transcript_tools = resolve_transcript_tools(resolved, support)
+
     transformed_messages = transform_messages(
-        context.messages, model, lambda id, m, src: normalize_tool_call_id(id)
+        rest, model, lambda id, m, src: normalize_tool_call_id(id)
     )
 
     params: List[ChatCompletionMessageParam] = []
 
-    if context.system_prompt:
-        use_developer_role = model.reasoning and compat.supports_developer_role
-        role: Literal["developer", "system"] = (
-            "developer" if use_developer_role else "system"
-        )
-        params.append(
-            cast(
-                ChatCompletionMessageParam,
-                {"role": role, "content": sanitize_surrogates(context.system_prompt)},
+    # system 消息序号（折叠计数含头消息）——就地工具声明只发给折叠前缀
+    # 之后的 system 消息（对齐 TS systemIndex 门控）
+    system_index = 0
+
+    if head is not None:
+        head_text = get_system_message_text(head)
+        if head_text:
+            use_developer_role = model.reasoning and compat.supports_developer_role
+            role: Literal["developer", "system"] = (
+                "developer" if use_developer_role else "system"
             )
-        )
+            params.append(
+                cast(
+                    ChatCompletionMessageParam,
+                    {"role": role, "content": sanitize_surrogates(head_text)},
+                )
+            )
+        system_index = 1
 
     last_role: Optional[str] = None
     i = 0
@@ -133,7 +152,45 @@ def convert_messages(
                 {"role": "assistant", "content": "I have processed the tool results."}
             )
 
-        if msg.role == "user":
+        if msg.role == "system":
+            # 中途 system 消息（穿过模式，对齐 TS）：
+            # ① toolsAdded → kimi 工具型 system 消息（role: system + tools
+            #    字段）——仅折叠前缀之后的消息（折叠段已进顶层列表）；
+            # ② 文本变更 → renderSystemMessageUpdate，角色随头消息的
+            #    instructionRole（reasoning 模型且支持时 developer，否则 system）
+            current_index = system_index
+            system_index += 1
+            if (
+                current_index >= transcript_tools.folded_system_messages
+                and msg.tools_added
+            ):
+                params.append(
+                    cast(
+                        ChatCompletionMessageParam,
+                        {
+                            "role": "system",
+                            "tools": convert_tools(list(msg.tools_added), compat),
+                        },
+                    )
+                )
+            update_text = render_system_message_update(msg)
+            if update_text.strip():
+                instruction_role: Literal["developer", "system"] = (
+                    "developer"
+                    if model.reasoning and compat.supports_developer_role
+                    else "system"
+                )
+                params.append(
+                    cast(
+                        ChatCompletionMessageParam,
+                        {
+                            "role": instruction_role,
+                            "content": sanitize_surrogates(update_text),
+                        },
+                    )
+                )
+
+        elif msg.role == "user":
             user_msg = msg
             if isinstance(user_msg.content, str):
                 params.append(
@@ -164,7 +221,16 @@ def convert_messages(
             assistant_msg = msg
             assistant_param: _AssistantMessageParam = {
                 "role": "assistant",
-                "content": "" if compat.requires_assistant_after_tool_result else None,
+                # 部分端点拒绝 null content（requiresNonNullAssistantContent——
+                # 对齐 TS），与 requiresAssistantAfterToolResult 共用空串改写
+                "content": (
+                    ""
+                    if (
+                        compat.requires_assistant_after_tool_result
+                        or compat.requires_non_null_assistant_content
+                    )
+                    else None
+                ),
             }
 
             text_blocks = [b for b in assistant_msg.content if b.type == "text"]
@@ -275,7 +341,6 @@ def convert_messages(
 
         elif msg.role == "toolResult":
             image_blocks = []
-            deferred_tool_names: Set[str] = set()
 
             j = i
             while j < len(transformed_messages):
@@ -305,13 +370,6 @@ def convert_messages(
                 if compat.requires_tool_result_name and curr.tool_name:
                     tool_result_param["name"] = curr.tool_name  # type: ignore[typeddict-unknown-key]
                 params.append(tool_result_param)
-
-                if (
-                    compat.supports_mid_convo_system_messages
-                    and compat.supports_mid_convo_tool_additions
-                ):
-                    for name in curr.added_tool_names or []:
-                        deferred_tool_names.add(name)
 
                 if has_images and "image" in model.input_types:
                     for block in curr.content:
@@ -352,24 +410,6 @@ def convert_messages(
             else:
                 last_role = "toolResult"
 
-            if (
-                compat.supports_mid_convo_system_messages
-                and compat.supports_mid_convo_tool_additions
-            ) and deferred_tool_names:
-                deferred_tools = get_tools_by_name(context.tools, deferred_tool_names)
-                if deferred_tools:
-                    # Kimi deferred tools 的 system+tools 形状是端点专有扩展，
-                    # 不在 SDK 消息类型里（SDK 透传未知键上线）
-                    params.append(
-                        cast(
-                            ChatCompletionMessageParam,
-                            {
-                                "role": "system",
-                                "tools": convert_tools(deferred_tools, compat),
-                            },
-                        )
-                    )
-
             i += 1
             continue
 
@@ -382,15 +422,23 @@ def convert_messages(
 def convert_tools(
     tools: List[Tool], compat: OpenAICompletionsCompat
 ) -> List[ChatCompletionToolParam]:
-    """转换工具定义为 OpenAI 格式（对齐 TS convertTools）。"""
+    """转换工具定义为 OpenAI 格式（对齐 TS convertTools）。
+
+    moonshot 系端点（``requires_moonshot_flavored_schema``）对 parameters
+    做 flavored 子集规范化——所有工具定义路径（顶层 tools / kimi 延迟组）
+    都过本函数，单点拦截（nova 特有，pi 无对应件）。
+    """
     result = []
     for tool in tools:
+        parameters = tool.parameters
+        if compat.requires_moonshot_flavored_schema:
+            parameters = normalize_moonshot_flavored_schema(parameters)
         tool_dict = {
             "type": "function",
             "function": {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": parameters,
             },
         }
         if compat.supports_strict_mode is not False:

@@ -19,9 +19,18 @@ from .._shared.copilot_headers import (
 )
 from .._shared.user_agent import get_nova_user_agent
 from .compat import ResolvedAnthropicCompat
+from .params import (
+    INLINE_TOOLS_BETA,
+    MID_CONVERSATION_OUTPUT_CONFIG_BETA,
+    THINKING_BINDING_CONTROLS_BETA,
+    resolve_native_tool_changes,
+)
+from .threads import MESSAGE_THREADS_BETA
 
 FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14"
 INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14"
+# 服务端 refusal fallback（对齐 TS——名单非空才发，无许可目标时端点拒收字段）
+SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 # Claude Code 身份（OAuth 令牌的强制身份头——对齐 TS claudeCodeVersion）
 _CLAUDE_CODE_VERSION = "2.1.75"
@@ -58,6 +67,41 @@ def is_oauth_token(api_key: str) -> bool:
     return "sk-ant-oat" in api_key
 
 
+def build_beta_features(
+    model: Model,
+    context: Context,
+    compat: ResolvedAnthropicCompat,
+    *,
+    interleaved_thinking: bool = True,
+    session_id: Optional[str] = None,
+) -> List[str]:
+    """beta 特征列表（对齐 TS getBetaFeatures——保序去重）。
+
+    线程指纹（``hash_thread_prefix``）与请求头共用同一份列表，两侧
+    必须同构——任何新增 beta 都进本函数。
+    """
+    beta_features: List[str] = []
+    if not compat.supports_eager_tool_input_streaming and context.tools:
+        beta_features.append(FINE_GRAINED_TOOL_STREAMING_BETA)
+    if interleaved_thinking and not compat.force_adaptive_thinking:
+        beta_features.append(INTERLEAVED_THINKING_BETA)
+    if compat.supports_mid_convo_effort:
+        beta_features.extend(
+            [MID_CONVERSATION_OUTPUT_CONFIG_BETA, THINKING_BINDING_CONTROLS_BETA]
+        )
+    # INLINE_TOOLS（对齐 TS）：nativeToolChanges 形态才发
+    if resolve_native_tool_changes(context, compat):
+        beta_features.append(INLINE_TOOLS_BETA)
+    # message threads（对齐 TS：会话线程激活即带——端点拒过（"off"）的
+    # 会话仍带，关停重发正是靠这个 beta 被接受）
+    if session_id is not None and compat.supports_message_threads:
+        beta_features.append(MESSAGE_THREADS_BETA)
+    # 服务端 refusal fallback（对齐 TS shouldUseServerSideFallbackBeta）
+    if compat.allowed_fallback_models:
+        beta_features.append(SERVER_SIDE_FALLBACK_BETA)
+    return list(dict.fromkeys(beta_features))
+
+
 def create_client(
     model: Model,
     context: Context,
@@ -73,25 +117,21 @@ def create_client(
     ``http_client``：httpx2 客户端注入缝（测试经 MockTransport 接管传输层；
     生产恒 None 由 SDK 自造）。
     """
-    # beta 头装配（对齐 TS）：fine-grained 工具流式（工具在场且端点不接受
-    # eager_input_streaming 时）+ interleaved thinking（adaptive 模型内置，
-    # 跳过 beta 头）
-    beta_features: List[str] = []
-    if compat is not None and not compat.supports_eager_tool_input_streaming:
-        if context.tools:
-            beta_features.append(FINE_GRAINED_TOOL_STREAMING_BETA)
-    needs_interleaved_beta = interleaved_thinking and not (
-        compat is not None and compat.force_adaptive_thinking
-    )
-    if needs_interleaved_beta:
-        beta_features.append(INTERLEAVED_THINKING_BETA)
-
     headers: ProviderHeaders = {
         "User-Agent": get_nova_user_agent(),
         "accept": "application/json",
     }
-    if beta_features:
-        headers["anthropic-beta"] = ",".join(beta_features)
+    beta_features: List[str] = []
+    if compat is not None:
+        beta_features = build_beta_features(
+            model,
+            context,
+            compat,
+            interleaved_thinking=interleaved_thinking,
+            session_id=session_id,
+        )
+        if beta_features:
+            headers["anthropic-beta"] = ",".join(beta_features)
 
     # Copilot：Bearer 鉴权 + 选择性 beta（对齐 TS copilot 分支）
     if model.provider == "github-copilot":

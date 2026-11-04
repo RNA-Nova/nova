@@ -59,6 +59,7 @@ from nova_protocol import (
 from ...stream_options import ModelIdentity, ProviderResponse, SimpleStreamOptions
 from ...streaming import AssistantMessageEventStream
 from ...utils import calculate_cost
+from ...utils.diagnostics import append_diagnostic
 from ...utils.errors import USAGE_LIMIT_PATTERNS, normalize_error
 from ...utils.http import filter_headers_for_hook
 from ...utils.json_parser import StreamingJsonParser, parse_streaming_json
@@ -75,13 +76,43 @@ from .._shared.timeouts import (
     idle_guarded,
     idle_timeout_of,
 )
-from .client import assert_request_auth, create_client
+from .client import assert_request_auth, build_beta_features, create_client
 from .compat import get_compat
+from .constrained import is_strict_tool_limit_error_message
 from .options import AnthropicEffort, AnthropicOptions
-from .params import build_params
+from .params import build_params, build_params_with_meta, resolve_active_effort
+from .threads import (
+    PreparedThreadRequest,
+    prepare_thread_request,
+    record_thread_reply,
+    send_thread_request,
+)
 
 # 流式期内的内容块（文档化的可变累积器——数据建模标准规则 1 例外）
 ContentBlock = Union[TextContent, ThinkingContent, ToolCall]
+
+# SDK ``AsyncMessages.create()`` 的声明命名参数（anthropic SDK 1.x——
+# 声明集外的请求字段经 extra_body 上线，见 ``_send``）
+_SDK_CREATE_KWARG_KEYS = frozenset(
+    [
+        "max_tokens",
+        "messages",
+        "model",
+        "cache_control",
+        "container",
+        "inference_geo",
+        "metadata",
+        "output_config",
+        "service_tier",
+        "stop_sequences",
+        "system",
+        "thinking",
+        "tool_choice",
+        "tools",
+        "user_profile_id",
+        "workspace_id",
+    ]
+)
 
 # Anthropic 错误体的 error.type → 归一分类（下划线形态不命中空格文案词表，
 # 必须结构映射——codex 的 SSE error.code 映射表对位）。
@@ -202,6 +233,13 @@ def stream(
             stop_reason=StopReason.PENDING,
             timestamp=int(time.time() * 1000),
         )
+        # mid-convo effort：记录当前档供后续请求回放（对齐 TS
+        # providerThinkingLevel——effort 标记发出时同步记录；失败/中断的
+        # 回复不落盘，维持"只记完整回复"的对齐不变量）
+        compat = get_compat(model)
+        active_effort = resolve_active_effort(model, options, compat)
+        if active_effort is not None:
+            output.provider_thinking_level = active_effort
         client = None
         owns_client = True
         anthropic_stream = None
@@ -211,6 +249,9 @@ def stream(
         positions: Dict[int, int] = {}
         tool_call_parsers: Dict[int, StreamingJsonParser] = {}
         finished_positions: Set[int] = set()
+        # 成本计费模型（服务端 fallback 应答时换 fallback 条目的本地定价——
+        # 对齐 TS usageModel；message_start 处改写）
+        usage_model = model
 
         def finish_block(position: int) -> None:
             if position in finished_positions:
@@ -297,41 +338,12 @@ def stream(
                     compat=compat,
                     interleaved_thinking=interleaved_thinking,
                 )
-            params = build_params(
-                model,
-                context,
-                options,
-                compat=compat,
-                cache_retention=cache_retention,
-                is_oauth=is_oauth,
-            )
-
-            if options and options.on_payload:
-                payload_result = options.on_payload(
-                    params, ModelIdentity.from_model(model)
-                )
-                if inspect.isawaitable(payload_result):
-                    payload_result = await payload_result
-                params = payload_result or params
-
             knob_s = options.timeout if options else None
             # connect/pool 恒工程上限；read/write 随旋钮（None=引擎默认，
             # 0=显式关闭）——超时治理见 _shared/timeouts.py
             request_kwargs: Dict[str, Any] = {
                 "timeout": build_request_timeout_httpx2(knob_s)
             }
-
-            # "stream" 是请求体语义（params 里带它供 on_payload 观测，对齐 TS
-            # buildParams），SDK 的 create 由位置参数表达——调用边界剥掉防撞键
-            create_kwargs = {k: v for k, v in params.items() if k != "stream"}
-
-            # SDK max_retries=0 + 本层重试：退避可被 signal 打断（对齐 TS）。
-            # with_raw_response.create 的协程 await 后直接拿到原始响应
-            # （status/headers 供 on_response），await parse() 得类型化事件流
-            async def _request():
-                return await client.messages.with_raw_response.create(
-                    stream=True, **create_kwargs, **request_kwargs
-                )
 
             retry_options: RetryOptions = {
                 "max_retries": (
@@ -343,13 +355,114 @@ def stream(
             }
             if options and options.max_retry_delay_ms is not None:
                 retry_options["max_retry_delay_ms"] = options.max_retry_delay_ms
+
+            # message threads 会话（对齐 pi threadSessionId）：缓存开启且
+            # 端点支持时激活；beta 列表与指纹同源（build_beta_features）
+            thread_session_id = (
+                cache_session_id if compat.supports_message_threads else None
+            )
+            betas = build_beta_features(
+                model,
+                context,
+                compat,
+                interleaved_thinking=interleaved_thinking,
+                session_id=thread_session_id,
+            )
+            disable_continuation = bool(
+                getattr(options, "disable_continuation", None) if options else False
+            )
+
+            async def _send(body: Dict[str, Any]) -> Any:
+                """单次发送（body = params 或线程请求体）。
+
+                边界纪律：SDK ``create()`` 只收声明命名参数（无 **kwargs，
+                未知键即 TypeError）——声明集内的键走 kwargs，其余
+                （``thread``/``fallbacks``/``temperature`` 等 beta 或
+                自由负载）统归 ``extra_body`` 合入线上 JSON 顶层；
+                ``stream`` 是请求体语义（params 里带它供 on_payload
+                观测），SDK 由位置参数表达——剥掉防撞键。
+                """
+                request_params: Dict[str, Any] = {}
+                extra_body: Dict[str, Any] = dict(body.get("extra_body") or {})
+                for key, value in body.items():
+                    if key == "stream":
+                        continue
+                    if key in _SDK_CREATE_KWARG_KEYS:
+                        request_params[key] = value
+                    elif key != "extra_body":
+                        extra_body[key] = value
+                if extra_body:
+                    request_params["extra_body"] = extra_body
+                return await client.messages.with_raw_response.create(
+                    stream=True, **request_params, **request_kwargs
+                )
+
+            async def _send_retried(body: Dict[str, Any]) -> Any:
+                return await retry_provider_request(lambda: _send(body), retry_options)
+
+            # 发送循环（对齐 pi stream 的 for(;;)）：strict 限量 400 → prefer
+            # 工具降级非严格重发一次；threads 的拒绝归 send_thread_request
+            disable_preferred_strict = False
+            thread: Optional[PreparedThreadRequest] = None
             # 取消治理（anyio 换轨）：signal 触发即取消 scope——connect→TTFB
             # 与逐事件消费等一切块内等待真死（codex drop 对位）。scope 在块边界
             # 吞取消，归因在块后翻译；清理段（关流/关 client）在块外 finally——
             # level-triggered 语义下块内 await 会持续抛取消，cleanup 不进块。
             abort_scope = AbortScope(signal)
             with abort_scope:
-                raw_response = await retry_provider_request(_request, retry_options)
+                while True:
+                    if is_aborted(signal):
+                        raise AbortedError("Request was aborted")
+                    params, has_preferred_strict = build_params_with_meta(
+                        model,
+                        context,
+                        options,
+                        compat=compat,
+                        cache_retention=cache_retention,
+                        is_oauth=is_oauth,
+                        disable_preferred_strict_tools=disable_preferred_strict,
+                    )
+                    if options and options.on_payload:
+                        payload_result = options.on_payload(
+                            params, ModelIdentity.from_model(model)
+                        )
+                        if inspect.isawaitable(payload_result):
+                            payload_result = await payload_result
+                        params = payload_result or params
+
+                    prepared = (
+                        prepare_thread_request(model, thread_session_id, params, betas)
+                        if thread_session_id is not None and not disable_continuation
+                        else None
+                    )
+                    try:
+                        if prepared is not None:
+                            raw_response, thread = await send_thread_request(
+                                prepared, params, _send_retried, output, signal
+                            )
+                        else:
+                            raw_response = await _send_retried(params)
+                            thread = None
+                        break
+                    except Exception as error:
+                        # 只降级被拒的请求，永不降级已开始的流（对齐 pi catch）
+                        if (
+                            is_aborted(signal)
+                            or disable_preferred_strict
+                            or not has_preferred_strict
+                            or getattr(error, "status_code", None) != 400
+                            or not is_strict_tool_limit_error_message(str(error))
+                        ):
+                            raise
+                        disable_preferred_strict = True
+                        append_diagnostic(
+                            output,
+                            {
+                                "type": "anthropic_strict_tools_fallback",
+                                "error": {"message": str(error)},
+                                "details": {"reason": "strict_tool_limits_exceeded"},
+                            },
+                        )
                 # 先建流再发钩子——钩子的 await 期间 abort/异常时 finally
                 # 必关流（raw_response 到手与流建成之间不允许存在无管护窗口：
                 # 注入 client（owns_client=False）的路径没有 client.close()
@@ -378,7 +491,29 @@ def stream(
                 ):
                     if event.type == "message_start":
                         output.response_id = event.message.id
-                        output.response_model = event.message.model
+                        # 仅当实际服务模型与请求不同才落（对齐 TS——
+                        # response_model 是"被改写"信号；threads 据其缺席
+                        # 判定回复可续接）
+                        if event.message.model != model.id:
+                            output.response_model = event.message.model
+                            # 服务端 fallback 应答：按 fallback 条目的本地
+                            # 定价计成本（对齐 TS usageModel 解析）
+                            fallback_entry = next(
+                                (
+                                    entry
+                                    for entry in (compat.allowed_fallback_models or [])
+                                    if entry.provider == model.provider
+                                    and entry.model == output.response_model
+                                ),
+                                None,
+                            )
+                            if fallback_entry is not None:
+                                usage_model = model.model_copy(
+                                    update={
+                                        "id": output.response_model,
+                                        "cost": fallback_entry.cost,
+                                    }
+                                )
                         usage = event.message.usage
                         output.usage.input = usage.input_tokens or 0
                         output.usage.output = usage.output_tokens or 0
@@ -398,10 +533,18 @@ def stream(
                             + output.usage.cache_read
                             + output.usage.cache_write
                         )
-                        calculate_cost(model, output.usage)
+                        calculate_cost(usage_model, output.usage)
 
                     elif event.type == "content_block_start":
                         block_param = event.content_block
+                        if block_param.type == "fallback":
+                            # 服务端 refusal fallback 的标记块（对齐 TS）：
+                            # 只许出现在输出开头——中途换模型不支持
+                            if blocks:
+                                raise Exception(
+                                    "Anthropic performed an unsupported mid-output model fallback"
+                                )
+                            continue
                         position = len(blocks)
                         positions[event.index] = position
                         if block_param.type == "text":
@@ -557,7 +700,7 @@ def stream(
                                 + output.usage.cache_read
                                 + output.usage.cache_write
                             )
-                            calculate_cost(model, output.usage)
+                            calculate_cost(usage_model, output.usage)
 
                 finish_all_blocks()
 
@@ -568,6 +711,10 @@ def stream(
                     raise Exception("Anthropic stream ended without a stop reason")
                 if output.stop_reason in (StopReason.ABORTED, StopReason.ERROR):
                     raise Exception(output.error_message or "An unknown error occurred")
+
+                # 干净回复落账：会话下一请求可从此续接（对齐 pi recordThreadReply）
+                if thread is not None:
+                    record_thread_reply(model, thread, params, output, compat, betas)
 
                 event_stream.push(DoneEvent(reason=output.stop_reason, message=output))
                 event_stream.end()

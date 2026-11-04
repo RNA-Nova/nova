@@ -33,16 +33,19 @@ def _dynamic_provider(
     captured: List[RefreshModelsContext],
     catalog_source: Optional[str] = None,
 ):
-    async def _fetch_models(context: RefreshModelsContext):
-        captured.append(context)
-        return []
+    """只捕获 context 的动态 provider（refresh_models 裸口袋直赋——
+    路由发放发生在 manager 的 ``_run_provider_refresh_phase``，与策略无关）。"""
 
-    return create_provider(
+    async def _refresh(context: RefreshModelsContext) -> None:
+        captured.append(context)
+
+    provider = create_provider(
         id=provider_id,
         name=provider_id,
         catalog_source=catalog_source,
-        fetch_models=_fetch_models,
     )
+    provider.refresh_models = _refresh
+    return provider
 
 
 class TestCatalogServiceRouting:

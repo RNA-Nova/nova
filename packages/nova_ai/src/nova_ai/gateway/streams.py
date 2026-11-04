@@ -16,19 +16,33 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
-from nova_protocol import AssistantMessage, ErrorEvent, Model, StopReason, Usage
+from nova_protocol import (
+    AbortSignal,
+    AssistantMessage,
+    ErrorEvent,
+    Model,
+    StopReason,
+    Usage,
+    is_aborted,
+)
 
 from ..streaming import AssistantMessageEventStream
 from ..utils.errors import normalize_error
 
 
-def create_setup_error_message(model: Model, error: BaseException) -> AssistantMessage:
+def create_setup_error_message(
+    model: Model,
+    error: BaseException,
+    *,
+    stop_reason: StopReason = StopReason.ERROR,
+) -> AssistantMessage:
     """构造装配阶段失败的终态消息（对齐 TS createSetupErrorMessage）。
 
     异常经归一单点分类（``error_kind``/``retry_after_ms`` 上消息，下游按
-    kind 分派）。
+    kind 分派）。``stop_reason`` 缺省 ERROR；装配期信号已 abort 时调用方
+    传 ABORTED（对齐 TS f3a64af07——中断不伪装成错误）。
     """
     normalized = normalize_error(error, domain="setup")
     return AssistantMessage(
@@ -38,7 +52,7 @@ def create_setup_error_message(model: Model, error: BaseException) -> AssistantM
         provider=model.provider,
         model=model.id,
         usage=Usage(),
-        stop_reason=StopReason.ERROR,
+        stop_reason=stop_reason,
         error_message=normalized.message,
         error_kind=normalized.kind,
         retry_after_ms=(
@@ -53,8 +67,13 @@ def create_setup_error_message(model: Model, error: BaseException) -> AssistantM
 def lazy_stream(
     model: Model,
     setup: Callable[[], Awaitable[AssistantMessageEventStream]],
+    signal: Optional[AbortSignal] = None,
 ) -> AssistantMessageEventStream:
-    """同步返回流，``setup`` 在后台异步执行；失败以 error 事件结束（对齐 TS lazyStream）。"""
+    """同步返回流，``setup`` 在后台异步执行；失败以 error 事件结束（对齐 TS lazyStream）。
+
+    ``signal`` 为请求级取消信号（对齐 TS f3a64af07）：装配失败时信号
+    已 abort → 终态报 ``aborted``（用户中断），否则报 ``error``。
+    """
     outer = AssistantMessageEventStream()
 
     async def _run() -> None:
@@ -68,11 +87,16 @@ def lazy_stream(
             # 取消语义归调用方：不把取消伪装成 ErrorEvent 终态
             raise
         except BaseException as exc:
-            message = create_setup_error_message(model, exc)
+            aborted = is_aborted(signal)
+            message = create_setup_error_message(
+                model,
+                exc,
+                stop_reason=StopReason.ABORTED if aborted else StopReason.ERROR,
+            )
             outer.push(
                 ErrorEvent(
                     type="error",
-                    reason="error",
+                    reason="aborted" if aborted else "error",
                     error=message,
                 )
             )

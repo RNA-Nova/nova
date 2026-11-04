@@ -52,6 +52,7 @@ from .auth import (
 )
 from .base_model import NovaBaseModel
 from .compat import (
+    AnthropicAllowedFallbackModel,
     AnthropicMessagesCompat,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
@@ -96,9 +97,12 @@ from .events import (
 from .ids import EntryId, RunId, SessionId, ToolCallId
 from .messages import (
     AssistantMessage,
+    ConstrainedSampling,
     Context,
     Message,
+    SystemMessage,
     Tool,
+    ToolReference,
     ToolResultMessage,
     UserMessage,
 )
@@ -170,7 +174,10 @@ __all__ = [
     "UserMessage",
     "ToolResultMessage",
     "Message",
+    "SystemMessage",
     "Tool",
+    "ToolReference",
+    "ConstrainedSampling",
     "Context",
     # Agent 消息与事件（批次 ②）
     "CustomAgentMessage",
@@ -204,6 +211,7 @@ __all__ = [
     "DoneEvent",
     "ErrorEvent",
     # 兼容性配置
+    "AnthropicAllowedFallbackModel",
     "AnthropicMessagesCompat",
     "OpenAICompletionsCompat",
     "OpenAIResponsesCompat",
