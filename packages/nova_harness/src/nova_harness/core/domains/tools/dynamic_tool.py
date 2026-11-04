@@ -42,6 +42,7 @@ class DynamicTool(AgentTool):
             description=definition.description,
             parameters=definition.parameters,
             label=definition.label or definition.name,
+            constrained_sampling=definition.constrained_sampling,
         )
         self._definition = definition
         self._context_provider: ToolContextProvider = context_provider or (

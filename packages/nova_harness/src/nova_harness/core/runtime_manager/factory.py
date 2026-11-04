@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from nova_agent import Agent
-from nova_ai import ProviderResponse
 from nova_harness.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
 from nova_harness.core.utils import resolve_api_key
@@ -32,6 +31,8 @@ from nova_harness.sessions import SessionManager
 from nova_harness.types.session.config import CreateAgentSessionOptions
 from nova_harness.types.ui import UIContext
 from nova_protocol import ImageContent, Model, ModelThinkingLevel, TextContent
+
+from nova_ai import ProviderResponse
 
 _BLOCK_IMAGE_PLACEHOLDER = "Image reading is disabled."
 

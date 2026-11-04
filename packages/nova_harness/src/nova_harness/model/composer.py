@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from nova_ai import Provider, RefreshModelsContext, create_provider
 from nova_harness.config.resolve import (
     get_config_value_env_var_names,
     is_command_config_value,
@@ -46,6 +45,8 @@ from nova_protocol import (
     ProviderAuth,
     is_aborted,
 )
+
+from nova_ai import Provider, RefreshModelsContext, create_provider
 
 # 协议实现注册表（模块路径，get_api_impl 惰性物化——SDK 重依赖
 # 按首次使用加载，对齐 nova_ai.api_impls 的惰性纪律）

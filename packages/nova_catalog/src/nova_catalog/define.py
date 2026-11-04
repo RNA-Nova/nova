@@ -36,7 +36,7 @@ class ProviderDefinition:
     - ``pinned_models``：数据源缺失但端点实测在售的整模型（先合并、
       源同 id 不覆盖）；
     - ``models_dev_key``：models.dev 键与 provider id 不同名时的别名
-      （如 kimi-coding → kimi-code-plan-cn）；
+      （如 kimi-coding → kimi-code-plan-global）；
     - 逃生口见模块 docstring（``derive_from``/``finalize``/``finalize_all``）。
     """
 

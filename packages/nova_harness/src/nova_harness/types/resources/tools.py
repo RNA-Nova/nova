@@ -144,6 +144,10 @@ class ToolDefinition:
     prompt_snippet: Optional[str] = None
     prompt_guidelines: Optional[List[str]] = None
 
+    # 工具级约束采样声明（pi ``Tool.constrainedSampling`` 对位——strict
+    # 是按工具裁决；``None`` = 不参与 strict）
+    constrained_sampling: Optional[Any] = None
+
     # 执行体（二选一）
     execute: Optional[Callable[..., Any]] = None
     executor_path: Optional[str] = None

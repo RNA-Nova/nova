@@ -54,7 +54,10 @@ def apply_corrections(
     # TypedDict→dict 为安全的 widening cast，非旁路）
     # ① compat 默认垫底（语义特殊——默认在下、字段包自带赢，不走合并助手）
     if knowledge.compat_defaults:
-        mutable["compat"] = {**knowledge.compat_defaults, **(mutable.get("compat") or {})}
+        mutable["compat"] = {
+            **knowledge.compat_defaults,
+            **(mutable.get("compat") or {}),
+        }
     # ② glob 模型级修正（语义表驱动）
     for pattern, override in knowledge.model_corrections.items():
         if not fnmatch.fnmatch(model_id, pattern):
@@ -92,7 +95,10 @@ def stamp_fields(
         )
     stamped = ModelFields(**corrected)
     stamped["id"] = model_id
-    stamped["base_url"] = base_url
+    # base_url 为 None 时保留源数据自带值（盖戳是补全不是清空；
+    # 现有调用方全传 str——None 仅理论路径）
+    if base_url is not None:
+        stamped["base_url"] = base_url
     stamped["api"] = api
     stamped["provider"] = provider_id
     return stamped

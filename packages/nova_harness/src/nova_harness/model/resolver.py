@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from nova_ai import clamp_thinking_level
 from nova_harness.config.defaults import DEFAULT_THINKING_LEVEL
 from nova_harness.types.session.model import ScopedModelConfig
 from nova_protocol import Model, ModelThinkingLevel
+
+from nova_ai import clamp_thinking_level
 
 # ---------------------------------------------------------------------------
 # Defaults

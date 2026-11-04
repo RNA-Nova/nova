@@ -22,12 +22,6 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from nova_ai import Provider, builtin_models, create_models_manager
-from nova_ai.auth.resolve import AuthResolutionOverrides
-from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
-from nova_ai.gateway.store import InMemoryModelsStore
-from nova_ai.model_catalog import builtin_catalog_generated_at
-from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 from nova_async import TaskTracker
 from nova_harness.config.auth.refresh_locks import file_refresh_locks
 from nova_harness.config.auth.storage import AuthStorage
@@ -44,7 +38,6 @@ from nova_harness.config.resolve import (
     resolve_headers_or_throw,
 )
 from nova_harness.core.utils.json import strip_json_comments
-from nova_harness.model.catalog import catalog_refresh_policy
 from nova_harness.model.composer import compose_provider, validate_extension_provider
 from nova_harness.model.store import FileModelsStore
 from nova_harness.package.utils import is_offline_mode_enabled
@@ -65,6 +58,12 @@ from nova_protocol import (
     Model,
     NovaDiagnostic,
 )
+
+from nova_ai import Provider, builtin_models, create_models_manager
+from nova_ai.auth.resolve import AuthResolutionOverrides
+from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
+from nova_ai.gateway.store import InMemoryModelsStore
+from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 
 
 class ModelRuntime:
@@ -91,20 +90,12 @@ class ModelRuntime:
         self.load_error: Optional[str] = None
 
         self._config: Optional[ModelsConfig] = None
-        # 内置 provider 的六件套刷新在组合根包装（对齐 pi ModelRuntime 的
-        # withRemoteCatalog）：nova_ai 出厂时 moonshotai×2 为静态（仅
-        # catalog_source 选配），kimi/火山自带三件套刷新——只包装
-        # "有选配且无刷新"者（radius 同款豁免）
+        # 内置 provider 的刷新策略归 nova_ai 出厂装配（治理唯一实现在
+        # nova_ai gateway/strategies.py）：有 catalog_source 的静态三家
+        # 自动挂 overlay，kimi/火山挂 personalized——本层不再包装，
+        # 只做基础设施注入（store/锁/站容器）
         self._builtins: Dict[str, Provider] = {}
-        _generated_at = builtin_catalog_generated_at()
         for _provider in builtin_models().get_providers():
-            if (
-                _provider.refresh_models is None
-                and _provider.catalog_source is not None
-            ):
-                _provider.refresh_models = catalog_refresh_policy(
-                    _provider, _generated_at
-                )
             self._builtins[_provider.id] = _provider
         self._extension_providers: Dict[str, ProviderConfigInput] = {}
         # 代码级配置（无法 JSON 化），与纯数据配置分开存储

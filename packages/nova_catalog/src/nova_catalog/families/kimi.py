@@ -6,14 +6,14 @@ K3 及其点发布（k3 / k3-256k / kimi-for-coding / kimi-k3 ……）跨宿主
 （``scripts/model_build`` 的 BUILD_EXTRAS）；运行期各家
 corrections.py 如需族事实亦从此引，不另立副本。
 
-注意：K3 的协议戳**不共享**——kimi-coding 侧走 anthropic-messages、
-moonshotai 侧走 openai-completions，协议归各家出厂声明，不进族层。
+注意：两侧现行协议同为 openai-completions（kimi-coding 已随 pi 切换，
+与官方 Kimi Code 客户端同协议）；协议戳归各家出厂声明，不进族层。
 """
 
 from typing import Dict, Optional
 
 # K3 族 openai-completions 协议侧 compat（pi.dev 实测：K3 走 openai 格式
-# + effort——不是 deepseek，k2.x 才是）；anthropic 侧协议差异归各家出厂
+# + effort——不是 deepseek，k2.x 才是）；k2.x 的 deepseek 基线归各家出厂
 K3_OPENAI_COMPAT: Dict[str, object] = {
     "thinking_format": "openai",
     "supports_reasoning_effort": True,

@@ -8,7 +8,6 @@ a summary of the branch being left so context isn't lost.
 import time
 from typing import List, Optional
 
-from nova_ai import SimpleStreamOptions
 from nova_harness.core.domains.compaction.compaction import (
     complete_summarization,
     estimate_tokens,
@@ -32,6 +31,8 @@ from nova_harness.types.compaction.branch_summary import (
 )
 from nova_harness.types.session.entries import SessionEntry
 from nova_protocol import AgentMessage, Context
+
+from nova_ai import SimpleStreamOptions
 
 # ============================================================================
 # Entry Collection

@@ -93,9 +93,11 @@ class TestBuildProviderModels:
         )
         ctx.set_raw(
             "volcengine",
-            {"deepseek-v4-flash-260425": _raw_entry("deepseek-v4-flash-260425"),
-             "m-x": _raw_entry("m-x"),
-             "m-ok": _raw_entry("m-ok")},
+            {
+                "deepseek-v4-flash-260425": _raw_entry("deepseek-v4-flash-260425"),
+                "m-x": _raw_entry("m-x"),
+                "m-ok": _raw_entry("m-ok"),
+            },
         )
         from nova_catalog.build import build_one
 
@@ -188,15 +190,15 @@ class TestSourceModelsFor:
     async def test_models_dev_key_alias(self, monkeypatch):
         """models_dev_key：provider id 与站键不同名时映射。"""
         ctx = await self._ctx(
-            monkeypatch, {"kimi-code-plan-cn": {"models": {"m1": {}}}}, [KIMI_CODING_DEF]
+            monkeypatch,
+            {"kimi-code-plan-global": {"models": {"m1": {}}}},
+            [KIMI_CODING_DEF],
         )
         assert ctx.raw_for(KIMI_CODING_DEF) == {"m1": {}}
 
     async def test_unknown_provider_returns_empty(self, monkeypatch):
         ctx = await self._ctx(monkeypatch, {}, [_DEF])
         assert ctx.raw_for(_DEF) == {}
-
-
 
 
 def test_registry_sorted_ids_cover_all_data_shards():
@@ -231,9 +233,9 @@ def test_k3_facts_come_from_family_layer():
             if provider.id == "volcengine" and pattern == "deepseek-v4-*":
                 continue  # 宿主实证 TLM（活探维护），合法住所
             tlm = override.get("thinking_level_map") or {}
-            assert set(tlm.keys()) <= {"off"}, (
-                f"{provider.id}/{pattern} 手写级别表残留（应归站推导）"
-            )
+            assert set(tlm.keys()) <= {
+                "off"
+            }, f"{provider.id}/{pattern} 手写级别表残留（应归站推导）"
 
     # moonshotai-cn 别名共享 moonshotai——族事实经别名同源
     from nova_catalog.providers.moonshotai_cn import DEF as MOONSHOTAI_CN_DEF
@@ -243,9 +245,47 @@ def test_k3_facts_come_from_family_layer():
 
 def test_kimi_coding_family_is_always_thinking():
     """kimi-coding 全家 always-thinking（pi 实测）——"*" 条目把 off 压 None。"""
-    assert KIMI_CODING_DEF.model_corrections["*"]["thinking_level_map"] == {
-        "off": None
+    assert KIMI_CODING_DEF.model_corrections["*"]["thinking_level_map"] == {"off": None}
+
+
+def test_anthropic_mid_convo_flag_rules():
+    """anthropic mid-convo 旗标规则（对位 pi supportsClaudeMidConvo*）：
+    system/toolChanges 覆盖 opus-4.8/5/5.5、sonnet-5.5、haiku-5.5、fable-5/5-1；
+    effort 仅 opus-5 系、sonnet/haiku-5-5、fable-5-1（不含 opus-4.8/fable-5.0）。"""
+    from nova_catalog.providers.anthropic import DEF
+
+    sys_models = {
+        pattern
+        for pattern, corr in DEF.model_corrections.items()
+        if (corr.get("compat") or {}).get("supports_mid_convo_system_messages")
     }
+    assert sys_models == {
+        "claude-opus-4-8*",
+        "claude-opus-5*",
+        "claude-sonnet-5-5*",
+        "claude-haiku-5-5*",
+        "claude-fable-5*",
+        "claude-fable-5-1*",
+    }
+    # effort 组独立于 system 组：fable-5-1 同时在两组，fable-5 只在 system 组
+    assert (
+        DEF.model_corrections["claude-fable-5*"]["compat"].get(
+            "supports_mid_convo_effort"
+        )
+        is None
+    )
+    assert (
+        DEF.model_corrections["claude-fable-5-1*"]["compat"][
+            "supports_mid_convo_effort"
+        ]
+        is True
+    )
+    assert (
+        DEF.model_corrections["claude-opus-4-8*"]["compat"].get(
+            "supports_mid_convo_effort"
+        )
+        is None
+    )
 
 
 class TestDeriveAndHooks:
@@ -255,7 +295,10 @@ class TestDeriveAndHooks:
         from nova_catalog.sources.models_dev import ModelsDevSource
 
         parent = ProviderDefinition(
-            id="parent", name="P", base_url="http://p/v1", api=KnownApi.OPENAI_COMPLETIONS
+            id="parent",
+            name="P",
+            base_url="http://p/v1",
+            api=KnownApi.OPENAI_COMPLETIONS,
         )
         child = ProviderDefinition(
             id="child",
@@ -270,8 +313,14 @@ class TestDeriveAndHooks:
             ModelsDevSource(),
         )
         ctx.set_raw("parent", {"m1": _raw_entry()})
-        ctx.register_build_fn(lambda p: __import__("nova_catalog.build", fromlist=["build_one"]).build_one(p, ctx))
-        models = __import__("nova_catalog.build", fromlist=["build_one"]).build_one(child, ctx)
+        ctx.register_build_fn(
+            lambda p: __import__(
+                "nova_catalog.build", fromlist=["build_one"]
+            ).build_one(p, ctx)
+        )
+        models = __import__("nova_catalog.build", fromlist=["build_one"]).build_one(
+            child, ctx
+        )
         assert len(models) == 1
         m = models[0]
         assert m["provider"] == "child"
@@ -283,9 +332,19 @@ class TestDeriveAndHooks:
         from nova_catalog.context import BuildContext
         from nova_catalog.sources.models_dev import ModelsDevSource
 
-        a = ProviderDefinition(id="a", name="a", base_url="x", api=KnownApi.OPENAI_COMPLETIONS, derive_from="a")
+        a = ProviderDefinition(
+            id="a",
+            name="a",
+            base_url="x",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            derive_from="a",
+        )
         ctx = BuildContext({"a": a}, ModelsDevSource())
-        ctx.register_build_fn(lambda p: __import__("nova_catalog.build", fromlist=["build_one"]).build_one(p, ctx))
+        ctx.register_build_fn(
+            lambda p: __import__(
+                "nova_catalog.build", fromlist=["build_one"]
+            ).build_one(p, ctx)
+        )
         import pytest as _pt
 
         with _pt.raises(ValueError, match="derive cycle"):

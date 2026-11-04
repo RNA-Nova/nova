@@ -743,21 +743,46 @@ def _make_model(model_id: str, provider: str = "dyn", max_tokens: int = 8192):
 
 
 def _make_dynamic_base(fetch):
-    from nova_protocol import ProviderAuth
+    from nova_protocol import ModelsStoreEntry, ProviderAuth
 
     from nova_ai import create_provider
     from nova_ai.api_impls import openai_completions
     from nova_ai.auth.helpers import env_api_key_auth
+    from nova_ai.gateway.provider import ModelsPublication
 
-    return create_provider(
+    provider = create_provider(
         id="dyn",
         name="dyn",
         base_url="http://dyn/v1",
         models=[_make_model("old-m")],
         api=openai_completions,
         auth=ProviderAuth(api_key=env_api_key_auth("Dyn key", ["NOVA_TEST_DYN_KEY"])),
-        fetch_models=fetch,
     )
+
+    async def _refresh(context):
+        # 回调式动态 provider 测试桩（生产侧 fetch_models 三件套已删——
+        # 治理归 nova_ai 策略工厂；本桩表达"恢复 + 拉到就发布"两段）
+        if context.stored is not None and context.publish is not None:
+            restored = [m for m in context.stored.models if m.provider == provider.id]
+            await context.publish(
+                ModelsPublication(
+                    update=lambda: setattr(provider, "_dynamic_models", restored)
+                )
+            )
+        if not context.allow_network:
+            return
+        models = await fetch(context)
+        if context.publish is None or models is None:
+            return
+        await context.publish(
+            ModelsPublication(
+                persist=ModelsStoreEntry(models=list(models), checked_at=1),
+                update=lambda: setattr(provider, "_dynamic_models", list(models)),
+            )
+        )
+
+    provider.refresh_models = _refresh
+    return provider
 
 
 @pytest.mark.asyncio

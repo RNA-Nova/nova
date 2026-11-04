@@ -4,8 +4,8 @@
 或 ``<name>/executor.py`` 目录（需要同目录资产时使用），暴露 ``Tool``
 类（与 ``UserTool`` 对仗）：元数据由类属性声明（``name``/``description``/
 ``parameters`` 必需；``label``/``execution_mode``/``prepare_arguments``/
-``prompt_snippet``/``prompt_guidelines`` 可选），执行由
-``execute`` 方法提供——没有独立的元数据文件。
+``prompt_snippet``/``prompt_guidelines``/``constrained_sampling`` 可选），
+执行由 ``execute`` 方法提供——没有独立的元数据文件。
 
 构造期注入 ``ToolContext``（cwd / settings 只读视图——不变量），工具实例
 随资源加载创建、随 reload 重建；执行期的会话可变状态（当前模型）不进
@@ -59,6 +59,7 @@ _OPTIONAL_ATTRS: Dict[str, Any] = {
     "prepare_arguments": None,
     "prompt_snippet": None,
     "prompt_guidelines": None,
+    "constrained_sampling": None,
 }
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,7 @@ def _load_tool(
         prepare_arguments=attrs["prepare_arguments"],
         prompt_snippet=attrs["prompt_snippet"],
         prompt_guidelines=attrs["prompt_guidelines"],
+        constrained_sampling=attrs["constrained_sampling"],
         executor_path=executor_path,
         tool_dir=tool_dir,
         source_info=source_info,

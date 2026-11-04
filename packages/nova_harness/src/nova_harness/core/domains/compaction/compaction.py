@@ -11,7 +11,6 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from nova_agent import StreamFn
-from nova_ai import SimpleStreamOptions, builtin_models, to_thinking_level
 from nova_harness.core.domains.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,
@@ -43,6 +42,8 @@ from nova_protocol import (
     ModelThinkingLevel,
     Usage,
 )
+
+from nova_ai import SimpleStreamOptions, builtin_models, to_thinking_level
 
 # ============================================================================
 # File Operation Tracking

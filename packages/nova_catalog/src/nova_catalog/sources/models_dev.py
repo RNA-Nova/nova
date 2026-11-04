@@ -11,7 +11,9 @@ provider 共享一次下载）。v2 的形状红利随翻译全量进来：能�
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
+
+from nova_protocol import ModelFields
 
 from ..reasoning import effort_to_thinking_level_map
 from .http import fetch_json
@@ -114,11 +116,12 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
 
 def models_dev_to_nova(
     provider_id: str, entry: Dict[str, Any], strict: bool = False
-) -> Optional[Dict[str, Any]]:
-    """models.dev v2 模型条目 → 字段 dict（不符合/缺字段返回 None）。
+) -> Optional[ModelFields]:
+    """models.dev v2 模型条目 → 字段包（不符合/缺字段返回 None）。
 
     过滤（pi 同款）：非 ``chat`` 类型、``deprecated``、不支持工具调用的
-    一律跳过；不携带 ``id``（盖戳时补）。
+    一律跳过；不携带 ``id``（盖戳时补）。形状按 ``ModelFields`` 键集构造
+    （dict 直转 TypedDict 静态不认，出口一次 cast——与 pi_dev 同款）。
     """
     if entry.get("type") != "chat":
         return None
@@ -164,7 +167,7 @@ def models_dev_to_nova(
     level_map = effort_to_thinking_level_map(reasoning)
     if level_map is not None:
         fields["thinking_level_map"] = level_map
-    return fields
+    return cast(ModelFields, fields)
 
 
 __all__ = ["MODELS_DEV_API", "ModelsDevSource", "models_dev_to_nova"]
