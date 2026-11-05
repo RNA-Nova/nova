@@ -11,7 +11,7 @@ from .models import ANTHROPIC_MODELS
 
 def anthropic_provider() -> "Provider":
     """构造 Anthropic provider 实例（nova_ai 静态出厂；``catalog_source="pi.dev"``
-    供 harness 组合时六件套包装刷新）。"""
+    ——overlay 刷新策略出生自带）。"""
     from ...api_impls import anthropic_messages
 
     return create_provider(
@@ -27,6 +27,6 @@ def anthropic_provider() -> "Provider":
             api_key=env_api_key_auth("Anthropic API key", ["ANTHROPIC_API_KEY"])
         ),
         # 运行时 pi.dev 全供（api/级别表/compat）——无运行时 corrections；
-        # 种子知识归 scripts 的 BUILD_EXTRAS
+        # 种子知识归 nova_catalog/providers/anthropic.py 的 DEF
         catalog_source="pi.dev",
     )

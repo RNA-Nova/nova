@@ -82,13 +82,13 @@ class TestConvertMessagesUser:
     def test_string_content_passthrough(self):
         model = _model()
         ctx = Context(messages=[UserMessage(content="hello")])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params == [{"role": "user", "content": "hello"}]
 
     def test_empty_text_blocks_dropped(self):
         model = _model()
         ctx = Context(messages=[UserMessage(content=[TextContent(text="  ")])])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params == []
 
     def test_image_block_base64_source(self):
@@ -103,7 +103,7 @@ class TestConvertMessagesUser:
                 )
             ]
         )
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params[0]["content"][1] == {
             "type": "image",
             "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"},
@@ -121,7 +121,7 @@ class TestConvertMessagesAssistant:
             ]
         )
         ctx = Context(messages=[UserMessage(content="q"), assistant])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assistant_param = params[1]
         assert assistant_param["content"][0] == {
             "type": "thinking",
@@ -135,14 +135,14 @@ class TestConvertMessagesAssistant:
         model = _model()
         assistant = _assistant([ThinkingContent(thinking="半截思考")])
         ctx = Context(messages=[UserMessage(content="q"), assistant])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params[1]["content"] == [{"type": "text", "text": "半截思考"}]
 
     def test_allow_empty_signature_keeps_thinking_block(self):
         model = _model(compat=AnthropicMessagesCompat(allow_empty_signature=True))
         assistant = _assistant([ThinkingContent(thinking="半截思考")])
         ctx = Context(messages=[UserMessage(content="q"), assistant])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params[1]["content"] == [
             {"type": "thinking", "thinking": "半截思考", "signature": ""}
         ]
@@ -160,7 +160,7 @@ class TestConvertMessagesAssistant:
             ]
         )
         ctx = Context(messages=[UserMessage(content="q"), assistant])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params[1]["content"] == [
             {"type": "redacted_thinking", "data": "opaque-blob"}
         ]
@@ -172,7 +172,7 @@ class TestConvertMessagesAssistant:
             stop_reason="toolUse",
         )
         ctx = Context(messages=[UserMessage(content="q"), assistant])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params[1]["content"] == [
             {
                 "type": "tool_use",
@@ -200,7 +200,7 @@ class TestConvertMessagesToolResult:
                 ),
             ]
         )
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         user = params[-1]
         assert user["role"] == "user"
         assert user["content"] == [
@@ -238,7 +238,7 @@ class TestConvertMessagesToolResult:
                 ),
             ]
         )
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         user = params[-1]
         assert user["content"][0] == {
             "type": "tool_result",
@@ -270,7 +270,7 @@ class TestConvertMessagesToolResult:
                 ),
             ]
         )
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         user = params[-1]
         assert user["content"][0]["type"] == "tool_result"
         blocks = user["content"][0]["content"]
@@ -286,7 +286,7 @@ class TestConvertMessagesToolResult:
             content=[TextContent(text="found search")],
         )
         ctx = Context(messages=[UserMessage(content="q"), result_msg])
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         assert params[-1]["content"][0] == {
             "type": "tool_result",
             "tool_use_id": "t1",
@@ -305,7 +305,9 @@ class TestCacheControlPlacement:
                 UserMessage(content="second"),
             ]
         )
-        params = convert_messages(model, ctx, get_compat(model), {"type": "ephemeral"})
+        params = convert_messages(
+            model, ctx, get_compat(model), {"type": "ephemeral"}
+        ).messages
         assert params[0]["content"] == "first"
         last = params[-1]
         assert last["content"][0]["cache_control"] == {"type": "ephemeral"}
@@ -315,7 +317,7 @@ class TestCacheControlPlacement:
         ctx = Context(messages=[UserMessage(content="hi")])
         params = convert_messages(
             model, ctx, get_compat(model), {"type": "ephemeral", "ttl": "1h"}
-        )
+        ).messages
         assert params[0]["content"] == [
             {
                 "type": "text",
@@ -474,7 +476,7 @@ class TestInlineToolChangeBlocks:
             get_compat(model),
             None,
             lambda tools: convert_tools(tools, get_compat(model)),
-        )
+        ).messages
         system = next(m for m in params if m["role"] == "system")
         types = [b["type"] for b in system["content"]]
         assert types == ["text", "tool_removal", "tool_addition", "tool_addition"]
@@ -495,6 +497,6 @@ class TestInlineToolChangeBlocks:
                 _assistant([TextContent(text="a1")]),
             ]
         )
-        params = convert_messages(model, ctx, get_compat(model), None)
+        params = convert_messages(model, ctx, get_compat(model), None).messages
         system = next(m for m in params if m["role"] == "system")
         assert [b["type"] for b in system["content"]] == ["text"]

@@ -99,6 +99,19 @@ def _transformation_field(entry: Any, name: str) -> Any:
     return getattr(entry, name, None)
 
 
+def _error_type_of(error: BaseException) -> Optional[str]:
+    """SDK 错误的 ``error.type``（body.error.type 优先，裸 ``type`` 属性兜底）。"""
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        inner = body.get("error")
+        if isinstance(inner, dict):
+            type_value = inner.get("type")
+            if isinstance(type_value, str):
+                return type_value
+    type_attr = getattr(error, "type", None)
+    return type_attr if isinstance(type_attr, str) else None
+
+
 # SDK ``AsyncMessages.create()`` 的声明命名参数（anthropic SDK 1.x——
 # 声明集外的请求字段经 extra_body 上线，见 ``_send``）
 _SDK_CREATE_KWARG_KEYS = frozenset(
@@ -307,7 +320,6 @@ def stream(
         try:
             api_key = options.api_key if options else None
             options_headers = options.headers if options else None
-            assert_request_auth(model.provider, api_key, options_headers)
 
             compat = get_compat(model)
             cache_retention = resolve_cache_retention(
@@ -333,13 +345,14 @@ def stream(
             injected_client = getattr(options, "client", None) if options else None
             if injected_client is not None:
                 # 注入的预建客户端（对齐 TS options.client）：跳过内部构造，
-                # 属主归调用方（finally 不关闭）。
-                # getattr 防御（TS ?. 对位）：高层路径传的可能是
-                # StreamOptions 通用基类，不带协议专属字段
+                # 属主归调用方（finally 不关闭）。注入路径不做鉴权断言
+                # （对齐 TS——客户端自带鉴权情形合法，如 Vertex 变体）
                 client = injected_client
                 is_oauth = False
                 owns_client = False
             else:
+                # 自建路径才断言鉴权（对齐 TS——assert 在 createClient 分支内）
+                assert_request_auth(model.provider, api_key, options_headers)
                 client, is_oauth = create_client(
                     model,
                     context,
@@ -348,6 +361,8 @@ def stream(
                     session_id=cache_session_id,
                     compat=compat,
                     interleaved_thinking=interleaved_thinking,
+                    # pi `thinkingEnabled === true` 严格语义（显式真才算）
+                    thinking_enabled=getattr(options, "thinking_enabled", None) is True,
                 )
             knob_s = options.timeout if options else None
             # connect/pool 恒工程上限；read/write 随旋钮（None=引擎默认，
@@ -391,7 +406,10 @@ def stream(
                 （``thread``/``fallbacks``/``temperature`` 等 beta 或
                 自由负载）统归 ``extra_body`` 合入线上 JSON 顶层；
                 ``stream`` 是请求体语义（params 里带它供 on_payload
-                观测），SDK 由位置参数表达——剥掉防撞键。
+                观测），SDK 由位置参数表达——剥掉防撞键。注入客户端
+                （非自建）时 beta 按请求级 ``extra_headers`` 下发——
+                注入客户端没有我们的 default_headers（pi 的 betas 本来就是
+                请求参数）。
                 """
                 request_params: Dict[str, Any] = {}
                 extra_body: Dict[str, Any] = dict(body.get("extra_body") or {})
@@ -404,6 +422,10 @@ def stream(
                         extra_body[key] = value
                 if extra_body:
                     request_params["extra_body"] = extra_body
+                if not owns_client and betas:
+                    request_params["extra_headers"] = {
+                        "anthropic-beta": ",".join(betas)
+                    }
                 return await client.messages.with_raw_response.create(
                     stream=True, **request_params, **request_kwargs
                 )
@@ -439,7 +461,10 @@ def stream(
                         )
                         if inspect.isawaitable(payload_result):
                             payload_result = await payload_result
-                        params = payload_result or params
+                        # 对齐 TS：仅 None 保留原 params（空 dict 等 falsy 也是合法替换）
+                        params = (
+                            payload_result if payload_result is not None else params
+                        )
 
                     prepared = (
                         prepare_thread_request(model, thread_session_id, params, betas)
@@ -456,12 +481,14 @@ def stream(
                             thread = None
                         break
                     except Exception as error:
-                        # 只降级被拒的请求，永不降级已开始的流（对齐 pi catch）
+                        # 只降级被拒的请求，永不降级已开始的流（对齐 pi catch——
+                        # 含 error.type == invalid_request_error 校验）
                         if (
                             is_aborted(signal)
                             or disable_preferred_strict
                             or not has_preferred_strict
                             or getattr(error, "status_code", None) != 400
+                            or _error_type_of(error) != "invalid_request_error"
                             or not is_strict_tool_limit_error_message(str(error))
                         ):
                             raise
@@ -532,24 +559,6 @@ def stream(
                         )
                         if isinstance(_start_transformations, list):
                             input_transformations = _start_transformations
-                            # 服务端 fallback 应答：按 fallback 条目的本地
-                            # 定价计成本（对齐 TS usageModel 解析）
-                            fallback_entry = next(
-                                (
-                                    entry
-                                    for entry in (compat.allowed_fallback_models or [])
-                                    if entry.provider == model.provider
-                                    and entry.model == output.response_model
-                                ),
-                                None,
-                            )
-                            if fallback_entry is not None:
-                                usage_model = model.model_copy(
-                                    update={
-                                        "id": output.response_model,
-                                        "cost": fallback_entry.cost,
-                                    }
-                                )
                         usage = event.message.usage
                         output.usage.input = usage.input_tokens or 0
                         output.usage.output = usage.output_tokens or 0
@@ -727,6 +736,17 @@ def stream(
                                 output.usage.cache_write = (
                                     event.usage.cache_creation_input_tokens
                                 )
+                            # 1h 缓存细分（对齐 TS——Vercel 网关在 delta 段报
+                            # ephemeral_1h_input_tokens；SDK extra 直通）
+                            _cache_creation = getattr(
+                                event.usage, "cache_creation", None
+                            )
+                            if _cache_creation is not None:
+                                _e1h = getattr(
+                                    _cache_creation, "ephemeral_1h_input_tokens", None
+                                )
+                                if _e1h is not None:
+                                    output.usage.cache_write_1h = _e1h
                             # thinking tokens 在 output_tokens_details.thinking_tokens
                             # （SDK 类型可能滞后——读 dump 视图，对齐 TS 的窄 cast）
                             details = (
@@ -899,6 +919,7 @@ def stream_simple(
         transport=base.transport,
         cache_retention=base.cache_retention,
         session_id=base.session_id,
+        disable_continuation=base.disable_continuation,
         headers=base.headers,
         env=base.env,
         on_payload=base.on_payload,

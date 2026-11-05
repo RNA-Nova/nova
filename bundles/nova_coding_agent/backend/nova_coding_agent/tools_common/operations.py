@@ -44,7 +44,7 @@ from nova_coding_agent.tools_common.truncate import (
     truncate_head,
     truncate_line,
 )
-from nova_protocol import AbortedError
+from nova_protocol import AbortedError, AbortSignal
 
 # ---------------------------------------------------------------------------
 # Read
@@ -96,24 +96,32 @@ class ReadOperations(Protocol):
 
     @abstractmethod
     async def read_text(
-        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> ReadResult:
         """读取文本文件。"""
 
     @abstractmethod
-    async def read_image(self, path: str, *, signal: Any = None) -> ReadResult:
+    async def read_image(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> ReadResult:
         """读取图片文件，返回原始字节与 MIME 类型。"""
 
     @abstractmethod
-    async def exists(self, path: str, *, signal: Any = None) -> bool:
+    async def exists(self, path: str, *, signal: Optional[AbortSignal] = None) -> bool:
         """路径是否存在。"""
 
     @abstractmethod
-    async def is_file(self, path: str, *, signal: Any = None) -> bool:
+    async def is_file(self, path: str, *, signal: Optional[AbortSignal] = None) -> bool:
         """是否是文件。"""
 
     @abstractmethod
-    async def is_image_file(self, path: str, *, signal: Any = None) -> bool:
+    async def is_image_file(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> bool:
         """是否是图片文件。"""
 
     @abstractmethod
@@ -132,7 +140,11 @@ class LocalReadOperations:
         self._fs = fs or get_local_file_system_layer()
 
     async def read_text(
-        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> ReadResult:
         try:
             raw = await self._fs.read_bytes(path, signal=signal)
@@ -143,7 +155,9 @@ class LocalReadOperations:
         except Exception as exc:
             return ReadResult(error=str(exc))
 
-    async def read_image(self, path: str, *, signal: Any = None) -> ReadResult:
+    async def read_image(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> ReadResult:
         try:
             data = await self._fs.read_bytes(path, signal=signal)
             # MIME 以魔数嗅探为准（对齐 pi detectSupportedImageMimeTypeFromFile）：
@@ -158,13 +172,15 @@ class LocalReadOperations:
         except Exception as exc:
             return ReadResult(error=str(exc))
 
-    async def exists(self, path: str, *, signal: Any = None) -> bool:
+    async def exists(self, path: str, *, signal: Optional[AbortSignal] = None) -> bool:
         return (await self._fs.metadata(path, signal=signal)).exists
 
-    async def is_file(self, path: str, *, signal: Any = None) -> bool:
+    async def is_file(self, path: str, *, signal: Optional[AbortSignal] = None) -> bool:
         return (await self._fs.metadata(path, signal=signal)).is_file
 
-    async def is_image_file(self, path: str, *, signal: Any = None) -> bool:
+    async def is_image_file(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> bool:
         ext = os.path.splitext(path)[1].lower().lstrip(".")
         if ext in SUPPORTED_IMAGE_TYPES:
             return True
@@ -206,16 +222,23 @@ class WriteOperations(Protocol):
 
     @abstractmethod
     async def write_file(
-        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        content: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> WriteResult:
         """写入文件。"""
 
     @abstractmethod
-    async def exists(self, path: str, *, signal: Any = None) -> bool:
+    async def exists(self, path: str, *, signal: Optional[AbortSignal] = None) -> bool:
         """路径是否存在。"""
 
     @abstractmethod
-    async def ensure_parent_dir(self, path: str, *, signal: Any = None) -> None:
+    async def ensure_parent_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         """确保父目录存在。"""
 
 
@@ -226,7 +249,12 @@ class LocalWriteOperations:
         self._fs = fs or get_local_file_system_layer()
 
     async def write_file(
-        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        content: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> WriteResult:
         try:
             existed = (await self._fs.metadata(path, signal=signal)).exists
@@ -239,10 +267,12 @@ class LocalWriteOperations:
         except Exception as exc:
             return WriteResult(error=str(exc))
 
-    async def exists(self, path: str, *, signal: Any = None) -> bool:
+    async def exists(self, path: str, *, signal: Optional[AbortSignal] = None) -> bool:
         return (await self._fs.metadata(path, signal=signal)).exists
 
-    async def ensure_parent_dir(self, path: str, *, signal: Any = None) -> None:
+    async def ensure_parent_dir(
+        self, path: str, *, signal: Optional[AbortSignal] = None
+    ) -> None:
         parent = os.path.dirname(path)
         if parent:
             await self._fs.create_dir(parent, signal=signal)
@@ -264,18 +294,27 @@ class EditOperations(Protocol):
     ``signal`` 取消词汇同 ReadOperations）。"""
 
     @abstractmethod
-    async def access(self, path: str, *, signal: Any = None) -> None:
+    async def access(self, path: str, *, signal: Optional[AbortSignal] = None) -> None:
         """检查文件存在且可读可写（不满足则抛异常，对齐 pi EditOperations.access）。"""
 
     @abstractmethod
     async def read_text(
-        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> str:
         """读取文本。"""
 
     @abstractmethod
     async def write_text(
-        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        content: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> None:
         """写入文本。"""
 
@@ -290,13 +329,17 @@ class LocalEditOperations:
     def __init__(self, fs: Optional[FileSystemLayer] = None) -> None:
         self._fs = fs or get_local_file_system_layer()
 
-    async def access(self, path: str, *, signal: Any = None) -> None:
+    async def access(self, path: str, *, signal: Optional[AbortSignal] = None) -> None:
         # 读前 fail-fast：不存在/只读在读与匹配之前就报错，而不是等写盘
         # 才暴露（本地带 R_OK|W_OK；远程写时自然报错，见 layer 文档）
         await self._fs.check_writable(path, signal=signal)
 
     async def read_text(
-        self, path: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> str:
         # 二进制读 + 显式 decode：保原字节（detect_line_ending 需要看到
         # 真实 CRLF，文本模式的 universal newlines 会抹掉）
@@ -304,7 +347,12 @@ class LocalEditOperations:
         return raw.decode(encoding)
 
     async def write_text(
-        self, path: str, content: str, encoding: str = "utf-8", *, signal: Any = None
+        self,
+        path: str,
+        content: str,
+        encoding: str = "utf-8",
+        *,
+        signal: Optional[AbortSignal] = None,
     ) -> None:
         # 显式 encode 落盘：restore_line_endings 恢复出的 \r\n 原样写出
         await self._fs.write_bytes(path, content.encode(encoding), signal=signal)
@@ -340,7 +388,9 @@ class GrepOptions:
     literal: bool = False
     context: int = 0
     limit: int = 100
-    signal: Any = None  # abort 信号：rg 子进程被 kill，Python 兜底步骤间检查
+    signal: Optional[AbortSignal] = (
+        None  # abort 信号：rg 子进程被 kill，Python 兜底步骤间检查
+    )
 
 
 @dataclass
@@ -710,7 +760,7 @@ class FindOptions:
     path: str = "."
     find_type: str = "file"  # "file" | "directory"
     limit: int = 1000
-    signal: Any = None  # abort 信号
+    signal: Optional[AbortSignal] = None  # abort 信号
 
 
 def _inside_git_repo(start: str) -> bool:
@@ -907,7 +957,9 @@ class LsOptions:
 
     path: str = "."
     limit: int = 500
-    signal: Any = None  # abort 信号（取消词汇，透传 layer——同 GrepOptions/FindOptions）
+    signal: Optional[AbortSignal] = (
+        None  # abort 信号（取消词汇，透传 layer——同 GrepOptions/FindOptions）
+    )
 
 
 class LsOperations(Protocol):

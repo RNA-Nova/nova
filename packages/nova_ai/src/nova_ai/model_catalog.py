@@ -4,7 +4,7 @@
   ``{api 分组: {模型 id: 字段}}`` 组织）拍平成 ``{模型 id: Model}``——分片文件由
   ``catalog/generate.py`` 生成，运行时只消费、不改写；
 - 运行时 finalize（``finalize_catalog_models``）：站拉取字段 → 盖戳 →
-  ``Model`` 列表，归各家 refresh 与 harness 六件套治理皮消费；
+  ``Model`` 列表，归刷新策略（``gateway/strategies.py``）消费；
 - **修正语义唯一定义点在 nova_catalog**（``nova_catalog.engine`` 的
   ``apply_corrections``——构建/运行同一台引擎，本模块直引不另立）；
   知识唯一定义点在 ``nova_catalog.providers``（各 DEF——

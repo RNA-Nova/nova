@@ -17,6 +17,7 @@ from .._shared.copilot_headers import (
     build_copilot_dynamic_headers,
     has_copilot_vision_input,
 )
+from .._shared.transcript import get_current_tools, normalize_context
 from .._shared.user_agent import get_nova_user_agent
 from .compat import ResolvedAnthropicCompat
 from .params import (
@@ -33,7 +34,7 @@ INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14"
 SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 # Claude Code 身份（OAuth 令牌的强制身份头——对齐 TS claudeCodeVersion）
-_CLAUDE_CODE_VERSION = "2.1.75"
+_CLAUDE_CODE_VERSION = "2.1.280"
 
 
 def _has_header(headers: Optional[ProviderHeaders], name: str) -> bool:
@@ -53,11 +54,16 @@ def assert_request_auth(
     headers: Optional[ProviderHeaders],
 ) -> None:
     """鉴权 fail-fast 守卫（对齐 TS assertRequestAuth）：api key 缺失且
-    headers 未自带鉴权（authorization / x-api-key）即报错——协议层不读
-    环境变量，key 必须由上游（ModelsManager.applyAuth / 调用方）注入。"""
+    headers 未自带鉴权（authorization / x-api-key / cf-aig-authorization）
+    即报错——协议层不读环境变量，key 必须由上游（ModelsManager.applyAuth /
+    调用方）注入。"""
     if api_key:
         return
-    if _has_header(headers, "authorization") or _has_header(headers, "x-api-key"):
+    if (
+        _has_header(headers, "authorization")
+        or _has_header(headers, "x-api-key")
+        or _has_header(headers, "cf-aig-authorization")
+    ):
         return
     raise LoginRequiredError(provider)
 
@@ -73,6 +79,7 @@ def build_beta_features(
     compat: ResolvedAnthropicCompat,
     *,
     interleaved_thinking: bool = True,
+    thinking_enabled: bool = False,
     session_id: Optional[str] = None,
 ) -> List[str]:
     """beta 特征列表（对齐 TS getBetaFeatures——保序去重）。
@@ -81,9 +88,21 @@ def build_beta_features(
     必须同构——任何新增 beta 都进本函数。
     """
     beta_features: List[str] = []
-    if not compat.supports_eager_tool_input_streaming and context.tools:
+    # fine-grained 门（对齐 TS shouldUseFineGrainedToolStreamingBeta）：
+    # 当前工具集非空（含中途 system 消息引入的——get_current_tools）
+    # 且端点不接受 eager_input_streaming
+    if not compat.supports_eager_tool_input_streaming and get_current_tools(
+        normalize_context(context)
+    ):
         beta_features.append(FINE_GRAINED_TOOL_STREAMING_BETA)
-    if interleaved_thinking and not compat.force_adaptive_thinking:
+    # interleaved 门（对齐 TS）：reasoning 模型 + 思考**显式**开启 +
+    # interleaved 未关 + 非 adaptive（adaptive 内置，跳过 beta 头）
+    if (
+        model.reasoning
+        and thinking_enabled
+        and interleaved_thinking
+        and not compat.force_adaptive_thinking
+    ):
         beta_features.append(INTERLEAVED_THINKING_BETA)
     if compat.supports_mid_convo_effort:
         beta_features.extend(
@@ -110,6 +129,7 @@ def create_client(
     session_id: Optional[str] = None,
     compat: Optional[ResolvedAnthropicCompat] = None,
     interleaved_thinking: bool = True,
+    thinking_enabled: bool = False,
     http_client=None,
 ) -> Tuple[AsyncAnthropic, bool]:
     """创建 Anthropic 客户端（对齐 TS createClient），返回 ``(client, is_oauth)``。
@@ -128,6 +148,7 @@ def create_client(
             context,
             compat,
             interleaved_thinking=interleaved_thinking,
+            thinking_enabled=thinking_enabled,
             session_id=session_id,
         )
         if beta_features:
@@ -172,8 +193,15 @@ def create_client(
             True,
         )
 
+    # SDK 隐式凭据链封堵（对齐 TS PiAnthropic 的默认凭据解析关闭）：
+    # api_key 为 None 时 SDK 会自读 ANTHROPIC_API_KEY env——头自带鉴权
+    # 的场景必须喂占位值，防 SDK 在背后附上另一份凭据
+    headers_carry_auth = _has_header(headers, "authorization") or _has_header(
+        headers, "x-api-key"
+    )
+    sdk_api_key = api_key or ("unused" if headers_carry_auth else None)
     client = AsyncAnthropic(
-        api_key=api_key,
+        api_key=sdk_api_key,
         base_url=model.base_url,
         default_headers={k: v for k, v in headers.items() if v is not None},
         http_client=http_client,
@@ -182,4 +210,9 @@ def create_client(
     return client, False
 
 
-__all__ = ["assert_request_auth", "create_client", "is_oauth_token"]
+__all__ = [
+    "assert_request_auth",
+    "build_beta_features",
+    "create_client",
+    "is_oauth_token",
+]

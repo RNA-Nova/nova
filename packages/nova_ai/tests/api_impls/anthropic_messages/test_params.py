@@ -163,6 +163,9 @@ class TestMidConvoEffort:
         return AssistantMessage(
             role="assistant",
             content=[TextContent(type="text", text="ok")],
+            # api/provider 必须属主本端——pi 同款三重过滤（跨源转录不回放档位）
+            api=KnownApi.ANTHROPIC_MESSAGES,
+            provider="anthropic",
             stop_reason=stop_reason,
             provider_thinking_level=effort,
             usage=Usage(),
@@ -204,6 +207,60 @@ class TestMidConvoEffort:
             _model(compat=AnthropicMessagesCompat(force_adaptive_thinking=True)), ctx
         )
         assert all(m["role"] != "system" for m in params["messages"])
+
+    def test_tool_use_reply_gets_marker(self):
+        """TOOL_USE 收尾的回复同样记档（pi wire 索引语义——无 stop 过滤；
+        且跨 provider 的档位不回放）。"""
+        from nova_protocol import ToolCall, ToolResultMessage
+
+        tool_use_reply = AssistantMessage(
+            role="assistant",
+            content=[ToolCall(id="t1", name="search", arguments={})],
+            api=KnownApi.ANTHROPIC_MESSAGES,
+            provider="anthropic",
+            stop_reason=StopReason.TOOL_USE,
+            provider_thinking_level="medium",
+            usage=Usage(),
+        )
+        ctx = Context(
+            messages=[
+                UserMessage(content="q1"),
+                tool_use_reply,
+                ToolResultMessage(
+                    tool_call_id="t1",
+                    tool_name="search",
+                    content=[TextContent(type="text", text="r")],
+                ),
+            ]
+        )
+        params = build_params(_model(compat=self._compat()), ctx)
+        markers = [
+            m
+            for m in params["messages"]
+            if m["role"] == "system" and "output_config" in m
+        ]
+        # tool_use 档（medium）+ 当前档收尾（缺省 high）
+        assert [m["output_config"]["effort"] for m in markers] == ["medium", "high"]
+
+    def test_foreign_provider_level_not_replayed(self):
+        """跨 provider 的 provider_thinking_level 不回放（pi 三重过滤）。"""
+        foreign = AssistantMessage(
+            role="assistant",
+            content=[TextContent(type="text", text="ok")],
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider="other",
+            stop_reason=StopReason.STOP,
+            provider_thinking_level="high",
+            usage=Usage(),
+        )
+        ctx = Context(messages=[UserMessage(content="q"), foreign])
+        params = build_params(_model(compat=self._compat()), ctx)
+        markers = [
+            m
+            for m in params["messages"]
+            if m["role"] == "system" and "output_config" in m
+        ]
+        assert [m["output_config"]["effort"] for m in markers] == ["high"]  # 仅当前档
 
     def test_explicit_effort_wins_and_disabled_suppresses(self):
         """options.effort 覆盖缺省 high；thinking_enabled=False 时标记全抑。"""

@@ -242,10 +242,12 @@ class TestBuildBaseOptions:
     def test_max_tokens_clamped_to_context_window(self):
         """max_tokens 钳制到上下文剩余窗口（对齐 TS clampMaxTokensToContext）"""
         model = self._model(max_tokens=100000, context_window=10000)
-        ctx = Context(messages=[UserMessage(content="x" * 4000)])  # ≈1000 tokens
+        ctx = Context(
+            messages=[UserMessage(content="x" * 4000)]
+        )  # ≈1143 tokens (3.5 比)
         opts = build_base_options(model, ctx)
-        # available = 10000 - 1000 - 4096 = 4904
-        assert opts.max_tokens == 4904
+        # available = 10000 - 1143 - 4096 = 4761
+        assert opts.max_tokens == 4761
 
     def test_api_key_override(self):
         simple = SimpleStreamOptions(api_key="key1")
@@ -295,9 +297,11 @@ class TestClampMaxTokensToContext:
 
     def test_normal_clamp(self):
         model = self._model(10000)
-        ctx = Context(messages=[UserMessage(content="x" * 4000)])  # ≈1000 tokens
-        # available = 10000 - 1000 - 4096 = 4904
-        assert clamp_max_tokens_to_context(model, ctx, 100000) == 4904
+        ctx = Context(
+            messages=[UserMessage(content="x" * 4000)]
+        )  # ≈1143 tokens (3.5 比)
+        # available = 10000 - 1143 - 4096 = 4761
+        assert clamp_max_tokens_to_context(model, ctx, 100000) == 4761
 
     def test_floor_when_window_exhausted(self):
         """剩余窗口不足时钳到下限 1，不为负"""

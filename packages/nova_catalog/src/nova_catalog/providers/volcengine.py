@@ -11,27 +11,26 @@ from nova_protocol import KnownApi, ModelFields
 from ..define import define_provider
 
 _PINNED_MODELS = {
-        # 数据源缺失，但端点实测在售——对齐 TS "authoritative values" 模式
-        "deepseek-v4-flash-260425": {
-            "id": "deepseek-v4-flash-260425",
-            "name": "Deepseek-V4-Flash",
-            "reasoning": True,
-            "input_types": ["text"],
-            "cost": {"input": 1, "output": 2, "cache_read": 0.2, "cache_write": 0.0},
-            "context_window": 1048576,
-            "max_tokens": 393216,
-        },
-        "deepseek-v4-pro-260425": {
-            "id": "deepseek-v4-pro-260425",
-            "name": "Deepseek-V4-Pro",
-            "reasoning": True,
-            "input_types": ["text"],
-            "cost": {"input": 12, "output": 24, "cache_read": 1, "cache_write": 0.0},
-            "context_window": 1048576,
-            "max_tokens": 393216,
-        },
-    }
-
+    # 数据源缺失，但端点实测在售——对齐 TS "authoritative values" 模式
+    "deepseek-v4-flash-260425": {
+        "id": "deepseek-v4-flash-260425",
+        "name": "Deepseek-V4-Flash",
+        "reasoning": True,
+        "input_types": ["text"],
+        "cost": {"input": 1, "output": 2, "cache_read": 0.2, "cache_write": 0.0},
+        "context_window": 1048576,
+        "max_tokens": 393216,
+    },
+    "deepseek-v4-pro-260425": {
+        "id": "deepseek-v4-pro-260425",
+        "name": "Deepseek-V4-Pro",
+        "reasoning": True,
+        "input_types": ["text"],
+        "cost": {"input": 12, "output": 24, "cache_read": 1, "cache_write": 0.0},
+        "context_window": 1048576,
+        "max_tokens": 393216,
+    },
+}
 
 
 def _ark_lifecycle_filter(models: List["ModelFields"], ctx) -> None:

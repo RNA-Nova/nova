@@ -147,33 +147,26 @@ def transform_messages(
                 if block.type == "thinking":
                     thinking_block = block
 
-                    # 被屏蔽的思考是加密的不透明内容，仅对同一模型有效
-                    # 跨模型时删除以避免API错误
-                    if thinking_block.redacted:
-                        if is_same_model:
-                            transformed_content.append(thinking_block)
+                    # 跨模型的 thinking 一律丢弃（对齐 pi 911309429 #11000）：
+                    # 签名与加密推理只对产出它的模型有效，而把可读思考当
+                    # 纯文本发会让新模型把它当成可见回答的一部分
+                    if not is_same_model:
                         continue
 
-                    # 对于同一模型：保留带有签名的思考块（用于重放）
-                    # 即使思考文本为空（OpenAI加密推理）
-                    if is_same_model and thinking_block.thinking_signature:
+                    # 同一模型：redacted 与带签名的块保留（重放必需——
+                    # 即使思考文本为空，OpenAI 加密推理也是如此）
+                    if thinking_block.redacted or thinking_block.thinking_signature:
                         transformed_content.append(thinking_block)
                         continue
 
-                    # 跳过空的思考块，其他转换为纯文本
+                    # 无签名的空思考块丢弃，其余保留
                     if (
                         not thinking_block.thinking
                         or thinking_block.thinking.strip() == ""
                     ):
                         continue
 
-                    if is_same_model:
-                        transformed_content.append(thinking_block)
-                    else:
-                        # 转换为文本块
-                        transformed_content.append(
-                            TextContent(type="text", text=thinking_block.thinking)
-                        )
+                    transformed_content.append(thinking_block)
 
                 elif block.type == "text":
                     text_block = block
@@ -224,30 +217,42 @@ def transform_messages(
     result: List[Message] = []
     pending_tool_calls: List[ToolCall] = []
     existing_tool_result_ids: Set[str] = set()
+    # system 消息对工具调用记账透明（对齐 TS heldSystemMessages）：落在
+    # 工具调用与其结果之间的 system 消息后移到结果（含合成结果）之后，
+    # 不插进 tool_calls → tool 结果的紧邻序列（OpenAI 系对此 400）
+    held_system_messages: List[Message] = []
+
+    def _close_pending_tool_calls() -> None:
+        """合成孤立工具调用的结果并放出 held system 消息（对齐 TS
+        closePendingToolCalls——held 的放出与是否真有 pending 无关）。"""
+        nonlocal pending_tool_calls, existing_tool_result_ids
+        if pending_tool_calls:
+            for tc in pending_tool_calls:
+                if tc.id not in existing_tool_result_ids:
+                    result.append(
+                        ToolResultMessage(
+                            role="toolResult",
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            content=[
+                                TextContent(type="text", text="No result provided")
+                            ],
+                            is_error=True,
+                            timestamp=int(time.time() * 1000),  # 当前时间戳（毫秒）
+                        )
+                    )
+            pending_tool_calls = []
+            existing_tool_result_ids = set()
+        result.extend(held_system_messages)
+        held_system_messages.clear()
 
     for i, msg in enumerate(transformed):
 
         if msg.role == "assistant":
             assistant_msg = msg
 
-            # 如果有待处理的孤立工具调用，现在插入合成结果
-            if pending_tool_calls:
-                for tc in pending_tool_calls:
-                    if tc.id not in existing_tool_result_ids:
-                        result.append(
-                            ToolResultMessage(
-                                role="toolResult",
-                                tool_call_id=tc.id,
-                                tool_name=tc.name,
-                                content=[
-                                    TextContent(type="text", text="No result provided")
-                                ],
-                                is_error=True,
-                                timestamp=int(time.time() * 1000),  # 当前时间戳（毫秒）
-                            )
-                        )
-                pending_tool_calls = []
-                existing_tool_result_ids = set()
+            # 孤立调用先合成结果（连带放出 held system）
+            _close_pending_tool_calls()
 
             # 跳过错误/中止的助手消息
             # 这些是不完整的历史记录，不应该重放：
@@ -273,42 +278,21 @@ def transform_messages(
             result.append(msg)
 
         elif msg.role == "user":
-            # 用户消息中断工具流 - 为孤立调用插入合成结果
-            if pending_tool_calls:
-                for tc in pending_tool_calls:
-                    if tc.id not in existing_tool_result_ids:
-                        result.append(
-                            ToolResultMessage(
-                                role="toolResult",
-                                tool_call_id=tc.id,
-                                tool_name=tc.name,
-                                content=[
-                                    TextContent(type="text", text="No result provided")
-                                ],
-                                is_error=True,
-                                timestamp=int(time.time() * 1000),
-                            )
-                        )
-                pending_tool_calls = []
-                existing_tool_result_ids = set()
+            # 用户消息中断工具流 - 为孤立调用插入合成结果（连带放出 held system）
+            _close_pending_tool_calls()
             result.append(msg)
+
+        elif msg.role == "system":
+            # 仅在有未决工具调用时后移（对齐 TS 条件持有——无 pending 原地放行）
+            if pending_tool_calls:
+                held_system_messages.append(msg)
+            else:
+                result.append(msg)
 
         else:
             result.append(msg)
 
-    # 对话结束时仍有未解析的工具调用：现在合成结果（对齐 TS）
-    if pending_tool_calls:
-        for tc in pending_tool_calls:
-            if tc.id not in existing_tool_result_ids:
-                result.append(
-                    ToolResultMessage(
-                        role="toolResult",
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        content=[TextContent(type="text", text="No result provided")],
-                        is_error=True,
-                        timestamp=int(time.time() * 1000),
-                    )
-                )
+    # 对话结束：合成残余孤立调用的结果并放出 held system（对齐 TS）
+    _close_pending_tool_calls()
 
     return result

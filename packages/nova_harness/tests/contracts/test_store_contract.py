@@ -6,13 +6,10 @@ tempdir 上的真 FileStore）；内存实现的同考见 ``nova_ai/tests/contra
 """
 
 import pytest
-
-from nova_ai.testkit.store_contracts import (
-    CredentialStoreContract,
-    ModelsStoreContract,
-)
 from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.model.store import FileModelsStore
+
+from nova_ai.testkit.store_contracts import CredentialStoreContract, ModelsStoreContract
 
 
 @pytest.fixture(params=[FileModelsStore], ids=lambda f: f.__name__)

@@ -108,6 +108,46 @@ class TestImageDowngrade:
         assert content[0].text == "(image omitted: model does not support images)"
 
 
+class TestHeldSystemMessages:
+    """system 消息对工具调用记账透明（对齐 pi heldSystemMessages）。"""
+
+    def test_system_between_call_and_result_moved_after_result(self):
+        """system 落在 toolCall 与 toolResult 之间 → 后移到结果之后
+        （OpenAI 系要求 tool 结果紧邻 tool_calls）。"""
+        from nova_protocol import SystemMessage
+
+        assistant = AssistantMessage(
+            content=[ToolCall(id="t1", name="search", arguments={})],
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider="other",
+            model="other",
+        )
+        system = SystemMessage(content="中途指令", timestamp=1)
+        tool_result = ToolResultMessage(
+            tool_call_id="t1",
+            tool_name="search",
+            content=[TextContent(text="r")],
+        )
+
+        result = transform_messages([assistant, system, tool_result], _model())
+
+        roles = [m.role for m in result]
+        assert roles == ["assistant", "toolResult", "system"]
+
+    def test_system_without_pending_calls_stays_in_place(self):
+        """无未决工具调用：system 原地放行（对齐 TS 条件持有）。"""
+        from nova_protocol import SystemMessage
+
+        system = SystemMessage(content="中途指令", timestamp=1)
+        user2 = UserMessage(content="q2")
+        result = transform_messages(
+            [UserMessage(content="q1"), system, user2], _model()
+        )
+
+        roles = [m.role for m in result]
+        assert roles == ["user", "system", "user"]
+
+
 class TestToolCallIdNormalization:
     def test_pipe_separated_id_normalized(self):
         assistant = AssistantMessage(
@@ -266,7 +306,9 @@ class TestThinkingBlocks:
         result = transform_messages([assistant], _model())
         assert result[0].content[0] == thinking
 
-    def test_thinking_converted_to_text_for_other_model(self):
+    def test_thinking_dropped_for_other_model(self):
+        """跨模型 thinking 一律丢弃（对齐 pi 911309429 #11000——转文本会
+        让新模型把旧推理当可见回答的一部分）。"""
         thinking = ThinkingContent(thinking="reasoning", thinking_signature="sig")
         assistant = AssistantMessage(
             content=[thinking],
@@ -275,8 +317,7 @@ class TestThinkingBlocks:
             model="other",
         )
         result = transform_messages([assistant], _model())
-        assert result[0].content[0].type == "text"
-        assert result[0].content[0].text == "reasoning"
+        assert len(result[0].content) == 0
 
     def test_redacted_thinking_removed_for_other_model(self):
         thinking = ThinkingContent(

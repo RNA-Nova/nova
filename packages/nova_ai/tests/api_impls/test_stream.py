@@ -283,6 +283,30 @@ class TestStreamToolCalls:
 class TestStreamReasoningDetails:
     @pytest.mark.asyncio
     @respx.mock
+    async def test_reasoning_precedes_content_in_same_delta(self):
+        """同一 delta 混合 reasoning + content：thinking 块先于文本块
+        （对齐 TS——LiteLLM 聚合场景的块序契约）。"""
+        capture = RequestCapture()
+        mount_openai_chat(
+            [
+                oai_chunk(reasoning="想", content="答"),
+                oai_chunk(finish="stop"),
+            ],
+            capture,
+        )
+        event_stream = stream(
+            _model(reasoning=True),
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(api_key="sk-test"),
+        )
+        events = await _collect(event_stream)
+        result = await event_stream.result()
+
+        types = [b.type for b in result.content]
+        assert types.index("thinking") < types.index("text")
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_reasoning_details_pending(self):
         """reasoning_details 在 toolCall 之前到达：归档进 thinking 块签名。
 

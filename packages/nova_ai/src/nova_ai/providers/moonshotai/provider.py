@@ -11,7 +11,7 @@ from .models import MOONSHOTAI_MODELS
 
 def moonshotai_provider() -> "Provider":
     """构造 Moonshot AI provider 实例（nova_ai 静态出厂；
-    ``catalog_source="pi.dev"`` 供 harness 组合时六件套包装刷新）。"""
+    ``catalog_source="pi.dev"``——overlay 刷新策略出生自带）。"""
     from ...api_impls import openai_completions
 
     return create_provider(

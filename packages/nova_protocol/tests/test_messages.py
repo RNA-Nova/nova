@@ -107,3 +107,87 @@ class TestContext:
         assert ctx.system_prompt == "You are helpful"
         assert len(ctx.messages) == 1
         assert len(ctx.tools) == 1
+
+
+class TestL2VocabularyRoundtrip:
+    """L2 词汇的序列化往返（数据建模 §十：契约类型至少一例
+    model_validate(model_dump())——判别联合成员是重点）。"""
+
+    def test_system_message_roundtrip_and_union_discrimination(self):
+        from nova_protocol import Message, SystemMessage, Tool, ToolReference
+        from pydantic import TypeAdapter
+
+        original = SystemMessage(
+            content="追加指令",
+            sections={"mode": "只读", "obsolete": None},
+            tools_added=[
+                Tool(name="search", description="d", parameters={"type": "object"})
+            ],
+            tools_removed=[ToolReference(name="write")],
+            timestamp=123,
+        )
+        rebuilt = SystemMessage.model_validate(original.model_dump())
+        assert rebuilt == original
+        # 判别联合成员：经 Message 联合回读仍是 SystemMessage（role 判别）
+        via_union = TypeAdapter(Message).validate_python(original.model_dump())
+        assert isinstance(via_union, SystemMessage)
+
+    def test_system_message_content_block_form(self):
+        """content 的块形态（TextContent 列表）同样往返。"""
+        from nova_protocol import SystemMessage, TextContent
+
+        original = SystemMessage(
+            content=[TextContent(text="块一"), TextContent(text="块二")],
+            timestamp=1,
+        )
+        rebuilt = SystemMessage.model_validate(original.model_dump())
+        assert rebuilt == original
+
+    def test_constrained_sampling_roundtrip(self):
+        from nova_protocol import ConstrainedSampling, Tool
+
+        tool = Tool(
+            name="read",
+            description="d",
+            parameters={"type": "object"},
+            constrained_sampling=ConstrainedSampling(
+                type="json_schema", strict="prefer"
+            ),
+        )
+        rebuilt = Tool.model_validate(tool.model_dump())
+        assert rebuilt.constrained_sampling == tool.constrained_sampling
+
+    def test_allowed_fallback_model_roundtrip_and_camel_alias(self):
+        """fallback 条目：cost 的 camelCase 别名（pi.dev 站形状）双收。"""
+        from nova_protocol import AnthropicAllowedFallbackModel, ModelCost
+
+        entry = AnthropicAllowedFallbackModel(
+            provider="anthropic",
+            model="claude-opus-4-8",
+            cost=ModelCost(input=1, output=5, cache_read=0.1, cache_write=0),
+        )
+        rebuilt = AnthropicAllowedFallbackModel.model_validate(entry.model_dump())
+        assert rebuilt == entry
+        # 站形状（camel 键）反序列化同值（populate_by_name 双收）
+        via_camel = AnthropicAllowedFallbackModel.model_validate(
+            {
+                "provider": "anthropic",
+                "model": "claude-opus-4-8",
+                "cost": {
+                    "input": 1,
+                    "output": 5,
+                    "cacheRead": 0.1,
+                    "cacheWrite": 0,
+                },
+            }
+        )
+        assert via_camel.cost.cache_read == 0.1
+
+    def test_prompt_cache_key_mode_literal(self):
+        from nova_protocol import OpenAICompletionsCompat
+
+        compat = OpenAICompletionsCompat.model_validate(
+            {"prompt_cache_key_mode": "enabled"}
+        )
+        assert compat.prompt_cache_key_mode == "enabled"
+        assert OpenAICompletionsCompat.model_validate(compat.model_dump()) == compat

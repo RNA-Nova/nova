@@ -16,6 +16,7 @@ from nova_protocol import (
     Model,
     ModelCost,
     OpenAICompletionsCompat,
+    TextContent,
     ThinkingContent,
     ToolCall,
     UserMessage,
@@ -224,7 +225,17 @@ class TestReasoningDetails:
         ctx = Context(
             messages=[
                 UserMessage(content="hi"),
-                AssistantMessage(role="assistant", content=[bad_block]),
+                # 属主本模型（跨模型 thinking 一律丢弃——pi 911309429；
+                # 本用例的护栏目标是回放路径，必须同模型才走得到）。
+                # 带一个文本块保底 assistant 上线——畸形签名的 thinking
+                # 块自身不进任何字段（恰是本用例断言点）
+                AssistantMessage(
+                    role="assistant",
+                    api=KnownApi.OPENAI_COMPLETIONS,
+                    provider=KnownProvider.OPENAI,
+                    model="test-model",
+                    content=[TextContent(type="text", text="ok"), bad_block],
+                ),
             ]
         )
         params = build_params(model, ctx)

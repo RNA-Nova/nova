@@ -23,7 +23,8 @@ from nova_protocol import (
     UserMessage,
 )
 
-CHARS_PER_TOKEN = 4
+# 字符/token 估算比（对齐 pi 27075fe07：4 → 3.5——多数语料更接近此值）
+CHARS_PER_TOKEN = 3.5
 ESTIMATED_IMAGE_CHARS = 4800
 # 预留的安全余量，避免 max_tokens 把上下文撑满
 CONTEXT_SAFETY_TOKENS = 4096

@@ -14,6 +14,7 @@ additionalProperties=false、可选且不可空属性包 ``anyOf: [prop, null]``
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
 from nova_protocol import Tool
@@ -194,8 +195,6 @@ def make_strict_json_schema(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     拷贝后递归净化；根必须是 ``type: "object"``。
     """
-    import copy
-
     cloned = copy.deepcopy(parameters)
     if not isinstance(cloned, dict):
         raise UnsupportedStrictJsonSchemaError("root schema must have type object")

@@ -9,7 +9,7 @@ from nova_agent import AgentToolCall, ToolExecutionMode
 from nova_harness.types.extensions.source import SourceInfo
 from nova_harness.types.ui.context import UIContext
 from nova_harness.types.ui.noop import NoOpUIContext
-from nova_protocol import AgentToolResult, Model, NovaBaseModel
+from nova_protocol import AgentToolResult, ConstrainedSampling, Model, NovaBaseModel
 
 if TYPE_CHECKING:
     # 仅类型检查视角（运行期不导入——agents.py 反向 import 本模块的 ToolInfo，
@@ -146,7 +146,7 @@ class ToolDefinition:
 
     # 工具级约束采样声明（pi ``Tool.constrainedSampling`` 对位——strict
     # 是按工具裁决；``None`` = 不参与 strict）
-    constrained_sampling: Optional[Any] = None
+    constrained_sampling: Optional[ConstrainedSampling] = None
 
     # 执行体（二选一）
     execute: Optional[Callable[..., Any]] = None

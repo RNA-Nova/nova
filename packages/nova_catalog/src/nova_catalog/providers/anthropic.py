@@ -7,7 +7,10 @@
 ``supportsClaudeMidConvoEffort`` 的 per-model 规则）。
 """
 
-from nova_protocol import KnownApi
+import fnmatch
+from typing import List
+
+from nova_protocol import KnownApi, ModelFields
 
 from ..define import define_provider
 
@@ -23,6 +26,59 @@ _MID_CONVO_SYSTEM = {
 # fable/mythos-5.0）
 _MID_CONVO_EFFORT = {"supports_mid_convo_effort": True}
 
+_MID_CONVO_EFFORT_GLOBS = (
+    "claude-opus-5*",
+    "claude-sonnet-5-5*",
+    "claude-haiku-5-5*",
+    "claude-fable-5-1*",
+    "claude-mythos-5-1*",
+)
+
+# 服务端 refusal fallback 链（pi ALLOWED_FALLBACK_MODELS 对位）
+_ALLOWED_FALLBACK_MODELS = {
+    "claude-fable-5": ["claude-opus-4-8", "claude-opus-5"],
+    "claude-opus-5": ["claude-opus-4-8"],
+}
+
+
+def _supports_mid_convo_effort(model_id: str) -> bool:
+    """mid-convo effort 支持面（pi ``supportsClaudeMidConvoEffort`` 对位）。"""
+    return any(fnmatch.fnmatch(model_id, glob) for glob in _MID_CONVO_EFFORT_GLOBS)
+
+
+def _wire_fallback_models(models: List["ModelFields"], ctx) -> None:
+    """fallback 链接线（跨模型逃生口，pi ``finalizeAll`` 对位）：
+
+    源模型支持 mid-convo effort 时，候选目标收窄到同支持该特性的
+    （转录里的 effort 标记需要目标端点也认）；目标须在目录内（带其
+    成本——fallback 应答按目标费率计）。"""
+    by_id = {m.get("id"): m for m in models}
+    for model_id, fallback_ids in _ALLOWED_FALLBACK_MODELS.items():
+        model = by_id.get(model_id)
+        if model is None:
+            continue
+        source_compat = model.get("compat") or {}
+        candidates = (
+            [fid for fid in fallback_ids if _supports_mid_convo_effort(fid)]
+            if source_compat.get("supports_mid_convo_effort")
+            else fallback_ids
+        )
+        entries = [
+            {
+                "provider": "anthropic",
+                "model": fid,
+                "cost": dict(by_id[fid].get("cost") or {}),
+            }
+            for fid in candidates
+            if fid in by_id
+        ]
+        if entries:
+            model["compat"] = {
+                **(model.get("compat") or {}),
+                "allowed_fallback_models": entries,
+            }
+
+
 DEF = define_provider(
     id="anthropic",
     name="Anthropic",
@@ -32,6 +88,7 @@ DEF = define_provider(
         "force_adaptive_thinking": True,
         "supports_strict_tools": True,
     },
+    finalize_all=_wire_fallback_models,
     model_corrections={
         "claude-opus-4-8*": {"compat": dict(_MID_CONVO_SYSTEM)},
         "claude-opus-5*": {"compat": {**_MID_CONVO_SYSTEM, **_MID_CONVO_EFFORT}},

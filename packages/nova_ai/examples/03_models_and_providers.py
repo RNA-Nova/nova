@@ -27,12 +27,7 @@ from nova_protocol import (
     UserMessage,
 )
 
-from nova_ai import (
-    EventStream,
-    builtin_models,
-    create_models_manager,
-    create_provider,
-)
+from nova_ai import EventStream, builtin_models, create_models_manager, create_provider
 
 
 def make_echo_api():

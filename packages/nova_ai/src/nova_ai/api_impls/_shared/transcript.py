@@ -233,6 +233,8 @@ def resolve_transcript(
 
 
 __all__ = [
+    "TranscriptTools",
+    "TranscriptToolSupport",
     "collapse_system_messages",
     "create_initial_system_message",
     "get_current_system_message",
@@ -242,5 +244,6 @@ __all__ = [
     "normalize_context",
     "render_system_message_update",
     "resolve_transcript",
+    "resolve_transcript_tools",
     "without_initial_system_message",
 ]

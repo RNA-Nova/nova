@@ -300,7 +300,9 @@ def record_thread_reply(
     # 尾部工具调用补占位结果）
     reply = [
         message
-        for message in convert_messages(model, Context(messages=[output]), compat, None)
+        for message in convert_messages(
+            model, Context(messages=[output]), compat, None
+        ).messages
         if message.get("role") == "assistant"
     ]
     prefix = list(params.get("messages") or []) + reply

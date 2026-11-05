@@ -1,4 +1,4 @@
-"""anthropic_messages/compat.py 测试（默认值合并 + 覆盖 + tool_reference 代际门）。"""
+"""anthropic_messages/compat.py 测试（默认值合并 + 显式覆盖 + 判别忽略）。"""
 
 from nova_protocol import AnthropicMessagesCompat, KnownApi, Model, ModelCost
 

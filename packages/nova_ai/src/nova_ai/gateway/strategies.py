@@ -285,7 +285,6 @@ def personalized_refresh_policy(
 
 __all__ = [
     "REMOTE_CATALOG_REFRESH_INTERVAL_MS",
-    "PersonalizeFn",
     "overlay_refresh_policy",
     "personalized_refresh_policy",
     "remote_models",

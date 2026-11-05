@@ -2,9 +2,9 @@
 
 K3 及其点发布（k3 / k3-256k / kimi-for-coding / kimi-k3 ……）跨宿主
 （kimi-coding / moonshotai / moonshotai-cn / 将来网关）共享同一份
-事实——一处定义，全链同引：当前消费方为构建期
-（``scripts/model_build`` 的 BUILD_EXTRAS）；运行期各家
-corrections.py 如需族事实亦从此引，不另立副本。
+事实——一处定义，全链同引：构建期消费方为各家 DEF
+（``nova_catalog/providers/``）；运行期经 pi.dev 站数据与
+``catalog_knowledge`` 送达，不另立副本。
 
 注意：两侧现行协议同为 openai-completions（kimi-coding 已随 pi 切换，
 与官方 Kimi Code 客户端同协议）；协议戳归各家出厂声明，不进族层。

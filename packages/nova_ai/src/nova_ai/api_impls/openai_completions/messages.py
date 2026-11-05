@@ -200,9 +200,12 @@ def convert_messages(
                 content = []
                 for item in user_msg.content:
                     if item.type == "text":
-                        content.append(
-                            {"type": "text", "text": sanitize_surrogates(item.text)}
-                        )
+                        # 空文本块不进（对齐 TS `text.length > 0` 过滤——
+                        # 部分端点 400；全空则整条消息跳过）
+                        if len(item.text) > 0:
+                            content.append(
+                                {"type": "text", "text": sanitize_surrogates(item.text)}
+                            )
                     elif item.type == "image":
                         content.append(
                             {

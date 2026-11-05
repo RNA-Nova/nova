@@ -822,10 +822,10 @@ async def test_composed_provider_preserves_dynamic_refresh(tmp_path, monkeypatch
 def test_composed_provider_preserves_catalog_source():
     """组合透传：base 的目录站选配（catalog_source）与修正知识
     （catalog_knowledge）随组合保留——manager 站路由不因组合而失效。"""
+    from nova_catalog.providers.moonshotai import DEF as knowledge
     from nova_harness.types.model import ProviderConfig
 
     from nova_ai import create_provider
-    from nova_catalog.providers.moonshotai import DEF as knowledge
 
     base = create_provider(
         id="p",

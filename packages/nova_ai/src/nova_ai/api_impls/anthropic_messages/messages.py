@@ -18,7 +18,7 @@ Anthropic 消息形态要点：
 """
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, TypeGuard
 
 from nova_protocol import (
     Context,
@@ -43,10 +43,34 @@ from .constrained import (
 # Anthropic 工具调用 id 的合法形状（对齐 TS normalizeToolCallId）
 _TOOL_CALL_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
 
+# pi ``AnthropicEffort`` 合法档（回放过滤——非法值不上线，防跨源转录 400）
+_ANTHROPIC_EFFORT_LEVELS = frozenset(["low", "medium", "high", "xhigh", "max"])
+
+
+def is_anthropic_effort(value: Any) -> TypeGuard[str]:
+    """合法 effort 档判定（对齐 TS ``isAnthropicEffort``）。"""
+    return value in _ANTHROPIC_EFFORT_LEVELS
+
+
+class ConvertedAnthropicMessages(NamedTuple):
+    """convert_messages 的产物（对齐 TS ``ConvertedAnthropicMessages``）。"""
+
+    messages: List[Dict[str, Any]]
+    # wire 序号 → 该条 assistant 回复的端点原生 effort 档（仅 managed
+    # effort 形态且 api/provider/合法性三重过滤通过时记录——pi 同款，
+    # **无 stop_reason 过滤**：TOOL_USE/LENGTH 回复同样记档）
+    assistant_levels: Dict[int, str]
+
 
 def normalize_tool_call_id(tool_call_id: str) -> str:
     """规范化工具调用 id（非法字符换下划线，截断到 64——对齐 TS）。"""
     return _TOOL_CALL_ID_PATTERN.sub("_", tool_call_id)[:64]
+
+
+def _api_value(message: Any) -> str:
+    """消息的 api 字段归一为字符串（KnownApi 枚举/裸字符串双形态）。"""
+    api = getattr(message, "api", None)
+    return getattr(api, "value", api) or ""
 
 
 def _convert_content_blocks(content: List[Any]) -> Any:
@@ -140,12 +164,17 @@ def convert_messages(
     convert_tool_definitions: Optional[
         Callable[[List[Tool]], List[Dict[str, Any]]]
     ] = None,
-) -> List[Dict[str, Any]]:
+    managed_provider: Optional[str] = None,
+) -> "ConvertedAnthropicMessages":
     """把内部消息列表转换为 Anthropic MessageParam 形状（对齐 TS convertMessages）。
 
     ``convert_tool_definitions``:INLINE_TOOLS 形态下把 SystemMessage 的
     ``tools_added`` 转成 ``tool_addition`` 定义块的转换器（对齐 TS 同名
     闭包参数）；``None`` = 非 INLINE 形态，中途 system 消息只发文本块。
+
+    ``managed_provider``:mid-convo effort 形态时传 ``model.provider``
+    （对齐 TS 同名参数）——开启 wire 索引 effort 档位记录
+    （``assistant_levels``），否则不记。
     """
     transformed = transform_messages(
         context.messages,
@@ -154,6 +183,8 @@ def convert_messages(
     )
 
     params: List[Dict[str, Any]] = []
+    # wire 序号 → effort 档（对齐 TS assistantLevels）
+    assistant_levels: Dict[int, str] = {}
     # 中途 system 消息的 held-back 队列（对齐 TS convertMessages）：渲染后
     # 先入队，在下一个**非空** assistant 入参前 flush——被丢弃的空 assistant
     # 不触发（防止更新落在上一条 user 消息之前）；末尾清空余量。
@@ -294,7 +325,18 @@ def convert_messages(
                     )
             if blocks:
                 _flush_pending_system()  # held-back：assistant 入参前发出
+                wire_index = len(params)
                 params.append({"role": "assistant", "content": blocks})
+                # effort 档位记录（对齐 TS assistantLevels）：managed 形态 +
+                # api/provider/合法档三重过滤——无 stop_reason 过滤，
+                # TOOL_USE/LENGTH 回复同样记档
+                if (
+                    managed_provider is not None
+                    and _api_value(message) == "anthropic-messages"
+                    and message.provider == managed_provider
+                    and is_anthropic_effort(message.provider_thinking_level)
+                ):
+                    assistant_levels[wire_index] = message.provider_thinking_level
 
         elif isinstance(message, ToolResultMessage):
             # 连续的 toolResult 合并进一条 user 消息（z.ai 同款端点要求，
@@ -334,7 +376,10 @@ def convert_messages(
         i += 1
 
     _flush_pending_system()  # held-back 余量收尾（对齐 TS 循环后 flush）
-    return _apply_cache_control(params, cache_control)
+    return ConvertedAnthropicMessages(
+        messages=_apply_cache_control(params, cache_control),
+        assistant_levels=assistant_levels,
+    )
 
 
 def convert_tools(

@@ -12,21 +12,35 @@ from ...utils.estimate import CONTEXT_SAFETY_TOKENS, estimate_context_tokens
 
 MIN_MAX_TOKENS = 1
 
+# OpenRouter 用自己的 tokenizer 计输入，input + max_tokens 超窗即拒——
+# 实测散文输入高估达 12%（对齐 pi 0a4fad548 #11712）
+CONTEXT_SAFETY_RATIO = 0.15
+# 比例余量仅在仍留出这么多输出时保留；否则（大窗快满/小窗本地模型）
+# 只留固定余量，输出封顶该值——高估也能撑到压缩前
+MIN_OUTPUT_WITH_RATIO_MARGIN = 32768
+
 
 def clamp_max_tokens_to_context(model: Model, context: Context, max_tokens: int) -> int:
-    """把 max_tokens 钳制到上下文剩余窗口内（对齐 TS clampMaxTokensToContext）。
+    """把 max_tokens 钳制到上下文剩余窗口内（对齐 TS clampMaxTokensToContext，
+    含 0a4fad548 的比例余量）。
 
-    剩余窗口 = context_window - 已用估算 - 安全余量；
+    余量 = max(固定 4096, 输入估算 × 15%)——给输入被高估留空间；
+    余量形态下输出不足 32768 时退固定余量并把输出封顶 32768；
     context_window 无效（<=0）时只做下限保护。
     """
     if model.context_window <= 0:
         return max(MIN_MAX_TOKENS, max_tokens)
-    available = (
-        model.context_window
-        - estimate_context_tokens(context).tokens
-        - CONTEXT_SAFETY_TOKENS
+    input_tokens = estimate_context_tokens(context).tokens
+    margin = max(
+        CONTEXT_SAFETY_TOKENS, int(-(-input_tokens * CONTEXT_SAFETY_RATIO // 1))
     )
-    return min(max_tokens, max(MIN_MAX_TOKENS, available))
+    room = model.context_window - input_tokens - margin
+    if room < MIN_OUTPUT_WITH_RATIO_MARGIN:
+        room = min(
+            MIN_OUTPUT_WITH_RATIO_MARGIN,
+            model.context_window - input_tokens - CONTEXT_SAFETY_TOKENS,
+        )
+    return min(max_tokens, max(MIN_MAX_TOKENS, room))
 
 
 def build_base_options(

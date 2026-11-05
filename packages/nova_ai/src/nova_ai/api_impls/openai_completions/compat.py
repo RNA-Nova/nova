@@ -145,11 +145,13 @@ def detect_compat(model: Model) -> OpenAICompletionsCompat:
         requires_moonshot_flavored_schema=is_moonshot or is_kimi_coding,
         supports_thinking_token_budget=False,
         thinking_token_budget_field=None,
-        supports_strict_mode=not (
-            is_moonshot or is_together or is_cloudflare_ai_gateway or is_nvidia
-        ),
+        # OpenAI 兼容不蕴含 strict JSON-schema 工具支持（对齐 TS——
+        # 检测默认 False，strict 键不进负载；端点声明支持时经
+        # model.compat 显式开启）
+        supports_strict_mode=False,
         cache_control_format=cache_control_format,
-        send_session_affinity_headers=False,
+        # 会话亲和头默认仅 openrouter 开启（对齐 TS detectCompat）
+        send_session_affinity_headers=is_openrouter,
         supports_mid_convo_system_messages=False,
         supports_mid_convo_tool_additions=False,
         session_affinity_format="openrouter" if is_openrouter else "openai",

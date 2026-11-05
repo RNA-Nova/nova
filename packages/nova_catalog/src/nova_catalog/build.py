@@ -115,7 +115,10 @@ async def prepare_sources(
         if provider.derive_from:
             continue
         key = provider.models_dev_key or provider.id
-        ctx.set_raw(provider.id, ((await ctx.source.payload()).get(key) or {}).get("models") or {})
+        ctx.set_raw(
+            provider.id,
+            ((await ctx.source.payload()).get(key) or {}).get("models") or {},
+        )
 
 
 __all__ = ["build_one", "build_provider_models", "prepare_sources"]

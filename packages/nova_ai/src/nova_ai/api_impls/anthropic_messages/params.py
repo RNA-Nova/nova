@@ -4,17 +4,9 @@
 声明（键名拼写静态执法），值在出货边界由 SDK 校验。
 """
 
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TypedDict
 
-from nova_protocol import (
-    CacheRetention,
-    Context,
-    Message,
-    Model,
-    StopReason,
-    SystemMessage,
-    Tool,
-)
+from nova_protocol import CacheRetention, Context, Model, Tool
 
 from ...stream_options import StreamOptions
 from ...utils.surrogate import sanitize_surrogates
@@ -29,7 +21,7 @@ from .._shared.transcript import (
 )
 from .compat import ResolvedAnthropicCompat, get_compat
 from .constrained import prefers_json_schema_strict_sampling
-from .messages import convert_messages, convert_tools
+from .messages import ConvertedAnthropicMessages, convert_messages, convert_tools
 from .options import AnthropicOptions
 
 # OAuth 令牌的强制身份系统提示（对齐 TS buildParams 的 isOAuthToken 分支）
@@ -104,40 +96,28 @@ def resolve_active_effort(
 
 
 def insert_thinking_level_messages(
-    messages: List[Dict[str, Any]],
-    context: Context,
+    converted: ConvertedAnthropicMessages,
     active_effort: str,
 ) -> List[Dict[str, Any]]:
-    """effort 标记注入（对齐 TS insertThinkingLevelMessages）：每条历史
-    assistant 前插一条 ``{role: system, output_config: {effort}}``（其
-    ``provider_thinking_level``），末尾追加当前档标记。
+    """effort 标记注入（对齐 TS insertThinkingLevelMessages）：wire 索引
+    命中的 assistant 前插一条 ``{role: system, output_config: {effort}}``
+    （其 ``provider_thinking_level``），末尾追加当前档标记。
 
-    历史档按次序与 wire 中的 assistant 条目共进（transform 丢弃的
-    ERROR/ABORTED 助手消息无 effort 记录，不进序列）。
+    档位记录归 ``convert_messages`` 的 wire 索引表（pi 同款——**无
+    stop_reason 过滤**：TOOL_USE/LENGTH 回复在线上就在记录序列里；
+    ERROR/ABORTED 被 transform 丢弃天然不上线）。
     """
-    # 历史 effort 序列（按转录次序）。对齐不变量：只取**完整回复**
-    # （stop_reason == STOP——错误/中断的回复会被 transform 丢弃，其 effort
-    # 若进序列会导致错位），所以记录序列与 wire 中的 assistant 条目按序对齐
-    historical: List[str] = [
-        m.provider_thinking_level
-        for m in context.messages
-        if m.role == "assistant"
-        and m.stop_reason == StopReason.STOP
-        and m.provider_thinking_level
-    ]
     result: List[Dict[str, Any]] = []
-    level_iter = iter(historical)
-    for message in messages:
-        if message.get("role") == "assistant":
-            effort = next(level_iter, None)
-            if effort is not None:
-                result.append(
-                    {
-                        "role": "system",
-                        "content": [],
-                        "output_config": {"effort": effort},
-                    }
-                )
+    for index, message in enumerate(converted.messages):
+        effort = converted.assistant_levels.get(index)
+        if effort is not None:
+            result.append(
+                {
+                    "role": "system",
+                    "content": [],
+                    "output_config": {"effort": effort},
+                }
+            )
         result.append(message)
     # 当前档收尾标记（对齐 TS activeEffort 末条）
     result.append(
@@ -243,7 +223,17 @@ def build_params_with_meta(
                 preferred_strict_seen = True
         return entries
 
-    messages = convert_messages(
+    # mid-convo effort 判定（对齐 TS buildParams 的次序：effortMessages
+    # 先于 convertMessages——档位记录由转换期 wire 索引承载）
+    thinking_disabled = is_thinking_disabled(model, options)
+    # effort 标记消息形态（对齐 TS effortMessages）：关闭时不可跨消息改
+    # effort，不发标记
+    effort_messages = (
+        resolved_compat.supports_mid_convo_effort and not thinking_disabled
+    )
+    active_effort = resolve_active_effort(model, options, resolved_compat)
+
+    converted = convert_messages(
         model,
         context.model_copy(update={"messages": rest}),
         resolved_compat,
@@ -251,6 +241,7 @@ def build_params_with_meta(
         # INLINE 形态才注入定义转换器（对齐 TS：cache_control 只给顶层
         # 工具，消息内 addition 不带）
         _convert_tools_tracked if native_tool_changes else None,
+        managed_provider=model.provider if effort_messages else None,
     )
     # 中途 system 消息：穿过模式时归 convert_messages 的 held-back 队列
     # 渲染（pi convertMessages 同款——下一个非空 assistant 前发出；折叠
@@ -258,7 +249,13 @@ def build_params_with_meta(
 
     params: _ParamsBag = {
         "model": model.id,
-        "messages": messages,
+        # effort 标记注入（对齐 TS：wire 索引表 + 当前档收尾——历史档含
+        # TOOL_USE/LENGTH 回复，pi 同款无 stop 过滤）
+        "messages": (
+            insert_thinking_level_messages(converted, active_effort)
+            if active_effort is not None
+            else converted.messages
+        ),
         # Anthropic 必填：缺省落模型上限（窗口钳制归 stream_simple）
         "max_tokens": (options.max_tokens if options and options.max_tokens else None)
         or model.max_tokens,
@@ -318,17 +315,12 @@ def build_params_with_meta(
             params["tools"] = _convert_tools_tracked(current_tools, tool_cache_control)
 
     # 思考（四分支互斥——对齐 TS buildParams 分支序：disabled /
-    # effortMessages / adaptive / 预算制）
+    # effortMessages / adaptive / 预算制；判定已前置——见 convert_messages
+    # 调用前）
     display = (
         (getattr(options, "thinking_display", None) or "summarized")
         if options
         else "summarized"
-    )
-    thinking_disabled = is_thinking_disabled(model, options)
-    # effort 标记消息形态（对齐 TS effortMessages）：关闭时不可跨消息改
-    # effort，不发标记
-    effort_messages = (
-        resolved_compat.supports_mid_convo_effort and not thinking_disabled
     )
 
     if thinking_disabled:
@@ -357,14 +349,6 @@ def build_params_with_meta(
                 or 1024,
                 "display": display,
             }
-
-    # mid-convo effort：effort 标记注入（历史档回放 + 当前档收尾——对齐
-    # TS insertThinkingLevelMessages；关闭思考时不发）
-    active_effort = resolve_active_effort(model, options, resolved_compat)
-    if active_effort is not None:
-        params["messages"] = insert_thinking_level_messages(
-            messages, context, active_effort
-        )
 
     metadata = options.metadata if options else None
     if metadata:

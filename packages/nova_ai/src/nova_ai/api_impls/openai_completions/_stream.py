@@ -104,15 +104,22 @@ def parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
     prompt_tokens = getattr(raw_usage, "prompt_tokens", 0) or 0
 
     prompt_tokens_details = getattr(raw_usage, "prompt_tokens_details", None)
-    cache_read_tokens = (
-        (getattr(prompt_tokens_details, "cached_tokens", 0) or 0)
+    # 三源兜底按 nullish 语义（对齐 TS `??`——显式 0 也算命中，不继续回落）
+    details_cached = (
+        getattr(prompt_tokens_details, "cached_tokens", None)
         if prompt_tokens_details
-        else 0
+        else None
     )
-    prompt_cache_hit = getattr(raw_usage, "prompt_cache_hit_tokens", 0) or 0
-    cache_read_tokens = cache_read_tokens or prompt_cache_hit
-    cache_read_tokens = cache_read_tokens or (
-        getattr(raw_usage, "cached_tokens", 0) or 0
+    prompt_cache_hit = getattr(raw_usage, "prompt_cache_hit_tokens", None)
+    top_cached = getattr(raw_usage, "cached_tokens", None)
+    cache_read_tokens = (
+        details_cached
+        if details_cached is not None
+        else (
+            prompt_cache_hit
+            if prompt_cache_hit is not None
+            else (top_cached if top_cached is not None else 0)
+        )
     )
 
     cache_write_tokens = (
@@ -374,7 +381,8 @@ def stream(
                 )
                 if inspect.isawaitable(payload_result):
                     payload_result = await payload_result
-                params = payload_result or params
+                # 对齐 TS：仅 None 保留原 params（空 dict 等 falsy 也是合法替换）
+                params = payload_result if payload_result is not None else params
 
             knob_s = options.timeout if options else None
             # connect/pool 恒工程上限；read/write 随旋钮（None=引擎默认，
@@ -466,18 +474,10 @@ def stream(
                     if choice.delta:
                         delta = choice.delta
 
-                        if delta.content and len(delta.content) > 0:
-                            block = ensure_text_block()
-                            block.text += delta.content
-                            event_stream.push(
-                                TextDeltaEvent(
-                                    content_index=get_content_index(block),
-                                    delta=delta.content,
-                                    partial=output,
-                                )
-                            )
-
                         delta_dict = delta.model_dump()
+                        # 先处理 reasoning 再处理 content（对齐 TS——LiteLLM
+                        # 等聚合代理同一 delta 携带两者时，thinking 块必须先
+                        # 于文本块）：
                         # 多字段 reasoning 兜底：取第一个非空字段避免重复
                         # （如 chutes.ai 同时返回 reasoning_content 与 reasoning）
                         reasoning_fields = [
@@ -506,6 +506,17 @@ def stream(
                                 ThinkingDeltaEvent(
                                     content_index=get_content_index(block),
                                     delta=delta_text,
+                                    partial=output,
+                                )
+                            )
+
+                        if delta.content and len(delta.content) > 0:
+                            block = ensure_text_block()
+                            block.text += delta.content
+                            event_stream.push(
+                                TextDeltaEvent(
+                                    content_index=get_content_index(block),
+                                    delta=delta.content,
                                     partial=output,
                                 )
                             )
