@@ -174,7 +174,8 @@ def convert_messages(
                     )
                 )
             update_text = render_system_message_update(msg)
-            if update_text.strip():
+            # 门控对齐 TS `text.length > 0`——纯空白更新也放行（strip 会误丢）
+            if len(update_text) > 0:
                 instruction_role: Literal["developer", "system"] = (
                     "developer"
                     if model.reasoning and compat.supports_developer_role
@@ -444,7 +445,8 @@ def convert_tools(
                 "parameters": parameters,
             },
         }
-        if compat.supports_strict_mode is not False:
+        # 解析后恒 bool（默认 False）——None（直造实例）不发 strict 键
+        if compat.supports_strict_mode:
             tool_dict["function"]["strict"] = False
         result.append(tool_dict)
     return result

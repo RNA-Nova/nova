@@ -370,11 +370,9 @@ def build_params_with_meta(
             for fallback in resolved_compat.allowed_fallback_models
         ]
 
-    final: Dict[str, Any] = dict(params)
-    if options and options.sampling_params:
-        # 出货边界合并模型级/请求级自由负载（对齐 TS）
-        final.update(options.sampling_params)
-    return final, preferred_strict_seen
+    # 对齐 TS：anthropic 的 buildParams 不消费 samplingParams（OpenAI 系
+    # 才有的合并——自由负载可绕过 temperature 等命名门，故不引入）
+    return dict(params), preferred_strict_seen
 
 
 def build_params(

@@ -16,6 +16,9 @@ class ResolvedAnthropicCompat:
     supports_eager_tool_input_streaming: bool
     supports_long_cache_retention: bool
     send_session_affinity_headers: bool
+    # 亲和头格式（None = x-session-affinity 兜底——对齐 TS 仅 openrouter
+    # 发 x-session-id）
+    session_affinity_format: Optional[str]
     supports_cache_control_on_tools: bool
     supports_temperature: bool
     supports_strict_tools: bool
@@ -43,7 +46,22 @@ def get_compat(model: Model) -> ResolvedAnthropicCompat:
             "supports_eager_tool_input_streaming", True
         ),
         supports_long_cache_retention=_pick("supports_long_cache_retention", True),
-        send_session_affinity_headers=_pick("send_session_affinity_headers", False),
+        # 亲和默认仅 openrouter 开启（对齐 TS getAnthropicCompat——
+        # pi 注释"无 host 检测"不含此项，此前误记）
+        send_session_affinity_headers=_pick(
+            "send_session_affinity_headers",
+            model.provider == "openrouter" or "openrouter.ai" in model.base_url,
+        ),
+        # 格式直通（默认 openrouter 形态——对齐 TS）
+        session_affinity_format=(
+            overrides.session_affinity_format
+            if overrides is not None and overrides.session_affinity_format is not None
+            else (
+                "openrouter"
+                if (model.provider == "openrouter" or "openrouter.ai" in model.base_url)
+                else None
+            )
+        ),
         supports_cache_control_on_tools=_pick("supports_cache_control_on_tools", True),
         supports_temperature=_pick("supports_temperature", True),
         supports_strict_tools=_pick("supports_strict_tools", False),

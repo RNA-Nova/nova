@@ -2,7 +2,7 @@
 
 锁定字段级契约：max_tokens 必填回落、system 顶层块与 OAuth 身份序、
 temperature 与思考互斥、思考三形态、工具即刻/延迟组、tool_choice、
-metadata、sampling_params 出货边界。
+metadata、sampling_params 不合入（anthropic 无自由负载通道——对齐 TS）。
 """
 
 from nova_protocol import (
@@ -607,11 +607,12 @@ class TestMisc:
         )
         assert params["metadata"] == {"user_id": "u1"}
 
-    def test_sampling_params_merge_at_boundary(self):
-        """sampling_params 出货边界合入（自由负载可覆盖命名字段——对齐 TS）。"""
+    def test_sampling_params_not_merged(self):
+        """sampling_params 不合入（对齐 TS——anthropic 的 buildParams 不消费
+        自由负载；可绕过 temperature 等命名门的通道不引入）。"""
         params = build_params(
             _model(),
             Context(messages=[UserMessage(content="hi")]),
             AnthropicOptions(sampling_params={"top_p": 0.9}),
         )
-        assert params["top_p"] == 0.9
+        assert "top_p" not in params

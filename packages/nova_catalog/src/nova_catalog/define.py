@@ -45,6 +45,9 @@ class ProviderDefinition:
     base_url: str
     api: KnownApi
     models_dev_key: Optional[str] = None
+    # deprecated 模型是否跳过（对齐 pi ``skipDeprecated``——缺省保留，
+    # 只有个别 provider 开启）
+    skip_deprecated: bool = False
     compat_defaults: Mapping[str, Any] = field(default_factory=dict)
     model_corrections: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     pinned_models: Mapping[str, ModelFields] = field(default_factory=dict)

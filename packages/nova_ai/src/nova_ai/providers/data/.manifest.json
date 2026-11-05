@@ -1,12 +1,12 @@
 {
   "files": {
-    "anthropic.json": "a1204f18514f8411c30ef4f042e1373afe31bcde4f6b0bf3fee7e2ce3ad27eb0",
+    "anthropic.json": "81b2ba3c67e2174e8d910d99ac7114dd677696971b63e25f5d3496c8a803612e",
     "kimi-coding.json": "79b49fee4c50acca0c3b81c4dac6f71960a58be421427f8a5b2a28611ab1ff02",
-    "moonshotai-cn.json": "c67b4bbaa9144be6d9ff6ce91300d47db8d6314509b27e9035648faa3b6a6544",
-    "moonshotai.json": "4cf39369a10009cbc72f1399465ceb1cec408941b5d0a9898885bfbde99c5a3e",
-    "volcengine.json": "9e42620c5e8ae0fc594e01de7e2a8bc2fb8f21fe9e175b9b156236eee0d1bdfd"
+    "moonshotai-cn.json": "4a485cd2df96c2ea00103f901162366f45772b2566dc481e203beef0d410b0f4",
+    "moonshotai.json": "a0c0182b1f48967d0e04f920d884a453405fc045ee47f99839dcd7e3b6128a01",
+    "volcengine.json": "c4c848ee3f24b4881feecccbf0ac2176cb26d76a510007a88fbb103e067ce1c4"
   },
-  "generatedAt": "2026-11-05T00:21:56+00:00",
+  "generatedAt": "2026-11-05T09:17:37+00:00",
   "schemaVersion": 1,
   "structureHash": "93fa29640c7e02727f2adefbd5a0612b7e2ebf735bb96a999b99f13e8ddc2a57"
 }

@@ -50,15 +50,15 @@ class ModelsDevSource:
 # ---------------------------------------------------------------------------
 
 
-def _first_price(value: Any) -> float:
-    """单值或 TTL 分档 dict 取首价（``{"5m": 3, "1h": 6}`` → 3）。"""
+def _first_price(value: Any) -> Optional[float]:
+    """单值或 TTL 分档 dict 取首价（``{"5m": 3, "1h": 6}`` → 3；无数值 None）。"""
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, dict):
         for v in value.values():
             if isinstance(v, (int, float)):
                 return float(v)
-    return 0.0
+    return None
 
 
 def _context_threshold(when: Any) -> Optional[float]:
@@ -70,18 +70,47 @@ def _context_threshold(when: Any) -> Optional[float]:
     return float(size) if isinstance(size, (int, float)) else None
 
 
+def _cache_write_price(cache: Any) -> Optional[float]:
+    """cache write 价（对位 pi ``cacheWritePrice``——``cache.write`` 优先，
+    ``cache.explicit.write`` 兜底）。"""
+    if not isinstance(cache, dict):
+        return None
+    price = _first_price(cache.get("write"))
+    if price is not None:
+        return price
+    explicit = cache.get("explicit")
+    if isinstance(explicit, dict):
+        return _first_price(explicit.get("write"))
+    return None
+
+
+def _per_token(unit: Any) -> bool:
+    """计价单位判定（对位 pi ``perToken``——缺席按 token 计）。"""
+    return unit is None or unit == "token"
+
+
 def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
     """v2 ``cost.text`` → ``{input, output, cache_read, cache_write, tiers?}``。
 
-    只有 context 分档的 overrides 映射为 tiers（其余维度无对应物，pi 同款）。
+    只有 context 分档的 overrides 映射为 tiers（其余维度无对应物，pi 同款）；
+    非 token 计价的条目返回全零（pi ``normalizeCost`` 的 perToken 闸——
+    按次/按张计费不是 token 价，不可冒充）；tier 字段缺省继承基线
+    （pi ``modelsDevCost`` 的 ``?? base.X``——稀疏 tier 不吞基线费率）。
     """
     text = (v2_cost or {}).get("text") or {}
     v_in, v_out = text.get("input") or {}, text.get("output") or {}
+    if (
+        not v_in
+        or not v_out
+        or not _per_token(v_in.get("unit"))
+        or not _per_token(v_out.get("unit"))
+    ):
+        return {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
     base: Dict[str, Any] = {
-        "input": v_in.get("price", 0),
-        "output": v_out.get("price", 0),
-        "cache_read": (v_in.get("cache") or {}).get("read", 0),
-        "cache_write": _first_price((v_in.get("cache") or {}).get("write")),
+        "input": v_in.get("price") or 0,
+        "output": v_out.get("price") or 0,
+        "cache_read": (v_in.get("cache") or {}).get("read") or 0,
+        "cache_write": _cache_write_price(v_in.get("cache")) or 0,
     }
     tiers: Dict[float, Dict[str, Any]] = {}
     for override in v_in.get("overrides") or []:
@@ -94,8 +123,8 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
         cache = override.get("cache") or {}
         if cache.get("read") is not None:
             tier["cache_read"] = cache["read"]
-        cache_write = _first_price(cache.get("write"))
-        if cache_write:
+        cache_write = _cache_write_price(cache)
+        if cache_write is not None:
             tier["cache_write"] = cache_write
     for override in v_out.get("overrides") or []:
         above = _context_threshold(override.get("when"))
@@ -105,7 +134,17 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
         if override.get("price") is not None:
             tier["output"] = override["price"]
     if tiers:
-        base["tiers"] = [tiers[k] for k in sorted(tiers)]
+        # tier 字段缺省继承基线（pi modelsDevCost 的 `?? base.X`）
+        base["tiers"] = [
+            {
+                "inputTokensAbove": tier["inputTokensAbove"],
+                "input": tier.get("input", base["input"]),
+                "output": tier.get("output", base["output"]),
+                "cache_read": tier.get("cache_read", base["cache_read"]),
+                "cache_write": tier.get("cache_write", base["cache_write"]),
+            }
+            for _, tier in sorted(tiers.items())
+        ]
     return base
 
 
@@ -115,38 +154,40 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
 
 
 def models_dev_to_nova(
-    provider_id: str, entry: Dict[str, Any], strict: bool = False
+    provider_id: str,
+    entry: Dict[str, Any],
+    strict: bool = False,
+    *,
+    skip_deprecated: bool = False,
 ) -> Optional[ModelFields]:
     """models.dev v2 模型条目 → 字段包（不符合/缺字段返回 None）。
 
-    过滤（pi 同款）：非 ``chat`` 类型、``deprecated``、不支持工具调用的
-    一律跳过；不携带 ``id``（盖戳时补）。形状按 ``ModelFields`` 键集构造
+    过滤（pi ``modelsDevModels`` 同款）：非 ``chat`` 类型、不支持工具
+    调用的一律跳过；``deprecated`` 仅在 ``skip_deprecated`` 时跳过
+    （pi 缺省保留——只有个别 provider 开启）。缺名字回落 id、缺窗口/
+    上限回落 4096（pi 同款兜底）。形状按 ``ModelFields`` 键集构造
     （dict 直转 TypedDict 静态不认，出口一次 cast——与 pi_dev 同款）。
     """
     if entry.get("type") != "chat":
         return None
-    if entry.get("status") == "deprecated":
+    if skip_deprecated and entry.get("status") == "deprecated":
         return None
     capabilities = entry.get("capabilities") or {}
     if (capabilities.get("tools") or {}).get("supported") is not True:
         return None
     model_id = entry.get("id")
-    name = entry.get("name")
-    if not model_id or not name:
+    if not model_id:
         if strict:
-            raise ValueError(f"{provider_id}: model entry missing id/name: {entry!r}")
+            raise ValueError(f"{provider_id}: model entry missing id: {entry!r}")
         return None
+    name = entry.get("name") or model_id
     limit = entry.get("limit") or {}
     context_window = limit.get("context")
-    max_tokens = limit.get("output")
     if not isinstance(context_window, (int, float)) or context_window <= 0:
-        if strict:
-            raise ValueError(f"{provider_id}/{model_id}: invalid limit.context")
-        return None
+        context_window = 4096
+    max_tokens = limit.get("output")
     if not isinstance(max_tokens, (int, float)) or max_tokens <= 0:
-        if strict:
-            raise ValueError(f"{provider_id}/{model_id}: invalid limit.output")
-        return None
+        max_tokens = 4096
     # modalities 可能是裸类型（"text"/"image"）或 MIME（"image/jpeg"…）——
     # image/* 前缀一并识别（对位 pi normalizeModelsDevModel）
     modalities = (entry.get("modalities") or {}).get("input") or ["text"]

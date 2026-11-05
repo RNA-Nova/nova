@@ -165,7 +165,11 @@ def create_client(
         headers.update(model.headers)
 
     if session_id and compat is not None and compat.send_session_affinity_headers:
-        headers["x-session-affinity"] = session_id
+        # 头名随格式（对齐 TS——openrouter 发 x-session-id，否则 x-session-affinity）
+        if compat.session_affinity_format == "openrouter":
+            headers["x-session-id"] = session_id
+        else:
+            headers["x-session-affinity"] = session_id
 
     if options_headers:
         headers.update(options_headers)
@@ -196,8 +200,10 @@ def create_client(
     # SDK 隐式凭据链封堵（对齐 TS PiAnthropic 的默认凭据解析关闭）：
     # api_key 为 None 时 SDK 会自读 ANTHROPIC_API_KEY env——头自带鉴权
     # 的场景必须喂占位值，防 SDK 在背后附上另一份凭据
-    headers_carry_auth = _has_header(headers, "authorization") or _has_header(
-        headers, "x-api-key"
+    headers_carry_auth = (
+        _has_header(headers, "authorization")
+        or _has_header(headers, "x-api-key")
+        or _has_header(headers, "cf-aig-authorization")
     )
     sdk_api_key = api_key or ("unused" if headers_carry_auth else None)
     client = AsyncAnthropic(

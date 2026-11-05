@@ -101,7 +101,8 @@ class OpenAICompletionsCompat(NovaBaseModel):
     # 的变量引用，由请求构建层（nova_ai params.py）按当前思考级别解析。默认：{}
     chat_template_kwargs: Optional[Dict[str, Any]] = None
 
-    # 是否支持工具定义中的 `strict` 字段。默认：true
+    # 是否支持工具定义中的 `strict` 字段。默认：false（对齐 pi——OpenAI
+    # 兼容不蕴含 strict JSON-schema 工具支持，声明支持时显式开启）
     supports_strict_mode: Optional[bool] = None
 
     # DeepSeek 是否要求在 assistant 消息上提供 reasoning_content 字段
@@ -227,8 +228,14 @@ class AnthropicMessagesCompat(NovaBaseModel):
     # 是否支持 Anthropic 长缓存保留（cache_control.ttl: "1h"）。默认：true
     supports_long_cache_retention: Optional[bool] = None
 
-    # 是否发送 x-session-affinity 头部。默认：false
+    # 是否发送会话亲和性头部（对齐 TS sendSessionAffinityHeaders）。
+    # 默认：OpenRouter 为 true，其余 false
     send_session_affinity_headers: Optional[bool] = None
+
+    # 会话亲和性头部格式（对齐 TS sessionAffinityFormat——openrouter 发
+    # x-session-id，否则 x-session-affinity）。默认：OpenRouter 为
+    # "openrouter"，否则 None
+    session_affinity_format: Optional[SessionAffinityFormat] = None
 
     # 是否支持 tool params 上的 cache_control。默认：true
     supports_cache_control_on_tools: Optional[bool] = None

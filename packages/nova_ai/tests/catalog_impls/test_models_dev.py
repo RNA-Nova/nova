@@ -139,21 +139,32 @@ class TestModelsDevToNovaDelegation:
     async def test_non_chat_type_dropped(self):
         assert models_dev_to_nova("p1", _v2_entry(type="image")) is None
 
-    async def test_deprecated_status_dropped(self):
-        assert models_dev_to_nova("p1", _v2_entry(status="deprecated")) is None
+    async def test_deprecated_kept_by_default_dropped_when_opted(self):
+        """deprecated 缺省保留（对齐 pi modelsDevModels——只有个别 provider
+        开启 skipDeprecated）；显式开启才剔除。"""
+        entry = _v2_entry(status="deprecated")
+        assert models_dev_to_nova("p1", entry) is not None
+        assert models_dev_to_nova("p1", entry, skip_deprecated=True) is None
 
     async def test_tools_unsupported_dropped(self):
         entry = _v2_entry(capabilities={"tools": {"supported": False}})
         assert models_dev_to_nova("p1", entry) is None
 
-    async def test_strict_raises_on_missing_name(self):
+    async def test_missing_name_falls_back_to_id(self):
         entry = _v2_entry()
         del entry["name"]
+        fields = models_dev_to_nova("p1", entry)
+        assert fields is not None
+        assert fields["name"] == entry["id"]
+
+    async def test_strict_raises_on_missing_id(self):
+        entry = _v2_entry()
+        del entry["id"]
         try:
             models_dev_to_nova("p1", entry, strict=True)
             raise AssertionError("should have raised")
         except ValueError as e:
-            assert "missing id/name" in str(e)
+            assert "missing id" in str(e)
 
     async def test_modalities_filtered_to_text_image(self):
         fields = models_dev_to_nova(

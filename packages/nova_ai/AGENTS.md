@@ -131,7 +131,9 @@ src/nova_ai/
     │                        #   + fetch_json（GET+重试+非 200 raise）+ json_headers
     ├── errors.py            # 错误归一枢纽（normalize_error 六级阶梯 + NormalizedError
     │                        #   + provider 错误体标准化，对位 codex error.rs）
-    ├── estimate.py          # 上下文 token 估算（usage 锚点 + 字符估算）
+    ├── estimate.py          # 上下文 token 估算（usage 锚点 + 字符估算——
+    │                        #   SystemMessage 按呈现文本+sections+工具变更
+    │                        #   完整 JSON 计，pi estimate.ts 对位）
     ├── model_utils.py       # calculate_cost、clamp/get_supported_thinking_levels 等
     ├── json_parser.py       # 流式 JSON 片段解析（json-repair 封装 + 增量解析器）
     ├── surrogate.py         # Unicode 代理项清理
@@ -169,7 +171,7 @@ src/nova_ai/
    - SDK 出货边界：`create()` 只收声明命名参数——声明集外的请求字段（`thread`/`fallbacks`/`temperature` 等）统归 `extra_body` 上线（`_stream._send` 单点）。
 
 4. **消息转换与跨模型兼容**  
-   `api_impls/_shared/transform_messages.py` 的 `transform_messages()` 两趟处理：思考块保留/转文本、跨模型删除 `thought_signature` 与工具调用 ID 规范化；为孤立工具调用插入合成 `ToolResultMessage`；跳过 `ERROR` / `ABORTED` 的不完整助手消息。重建消息一律用 `model_copy(update=...)` 保留未修改字段（如 `diagnostics`）。
+   `api_impls/_shared/transform_messages.py` 的 `transform_messages()` 两趟处理：同模型思考块保留（redacted/带签名/非空）、**跨模型 thinking 一律丢弃**（对齐 pi `911309429`——转成可见文本会让新模型把旧推理当自己回答的一部分）；跨模型删除 `thought_signature` 与工具调用 ID 规范化；为孤立工具调用插入合成 `ToolResultMessage`；`heldSystemMessages`——system 消息在有未决工具调用时后移到结果（含合成结果）之后，不插进 tool_calls → tool 结果的紧邻序列（OpenAI 系对此 400）；跳过 `ERROR` / `ABORTED` 的不完整助手消息。重建消息一律用 `model_copy(update=...)` 保留未修改字段（如 `diagnostics`）。
 
 5. **序列化层约定（选型结果速查）**  
    选型依据遵循根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项），住所规则见 `docs/crosscutting/data-modeling.md`。本包现有归类：

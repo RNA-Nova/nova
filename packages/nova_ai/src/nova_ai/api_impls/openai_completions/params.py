@@ -86,15 +86,22 @@ def _resolve_thinking_token_budget_field(
     return None
 
 
-def _map_level(level_map: ThinkingLevelMap, level: str) -> Optional[str]:
+def _map_level(
+    level_map: ThinkingLevelMap, level: str, *, null_falls_back: bool = False
+) -> Optional[str]:
     """映射思考级别。
 
-    两种"不映射"必须区分——键缺失回落原值；显式 ``None``（该级别不受支持）
-    返回 ``None``，由调用方省略字段（绝不能把 ``null`` 发上线）。
+    两种"不映射"必须区分——键缺失回落原值；显式 ``None`` 的语义按 format
+    分派（对齐 TS）：zai/baseten/chat-template 省略字段（``None`` = 不支持）；
+    qwen/deepseek/openrouter/together/string-thinking/openai-style 经
+    ``null_falls_back=True`` 回落原始级别串（pi 的 `?? level` 对位）。
     """
     if level not in level_map:
         return level
-    return level_map.get(level)
+    mapped = level_map[level]
+    if mapped is None and null_falls_back:
+        return level
+    return mapped
 
 
 def _resolve_clamped_thinking_budget(
@@ -330,7 +337,7 @@ def build_params(
         elif compat.thinking_format == ThinkingFormat.QWEN:
             extra_body["enable_thinking"] = bool(reasoning_effort)
             if reasoning_effort and compat.supports_reasoning_effort:
-                effort = _map_level(level_map, reasoning_effort)
+                effort = _map_level(level_map, reasoning_effort, null_falls_back=True)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
         elif compat.thinking_format == ThinkingFormat.QWEN_CHAT_TEMPLATE:
@@ -373,13 +380,13 @@ def build_params(
             elif not _off_is_explicitly_null():
                 extra_body["thinking"] = {"type": "disabled"}
             if reasoning_effort and compat.supports_reasoning_effort:
-                effort = _map_level(level_map, reasoning_effort)
+                effort = _map_level(level_map, reasoning_effort, null_falls_back=True)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
         elif compat.thinking_format == ThinkingFormat.OPENROUTER:
             # OpenRouter 用嵌套 reasoning 对象跨 provider 归一
             if reasoning_effort:
-                effort = _map_level(level_map, reasoning_effort)
+                effort = _map_level(level_map, reasoning_effort, null_falls_back=True)
                 if isinstance(effort, str):
                     extra_body["reasoning"] = {"effort": effort}
             elif not _off_is_explicitly_null():
@@ -392,19 +399,19 @@ def build_params(
         elif compat.thinking_format == ThinkingFormat.TOGETHER:
             extra_body["reasoning"] = {"enabled": bool(reasoning_effort)}
             if reasoning_effort and compat.supports_reasoning_effort:
-                effort = _map_level(level_map, reasoning_effort)
+                effort = _map_level(level_map, reasoning_effort, null_falls_back=True)
                 if isinstance(effort, str):
                     params["reasoning_effort"] = effort
         elif compat.thinking_format == ThinkingFormat.STRING_THINKING:
             if reasoning_effort:
-                effort = _map_level(level_map, reasoning_effort)
+                effort = _map_level(level_map, reasoning_effort, null_falls_back=True)
                 if isinstance(effort, str):
                     extra_body["thinking"] = effort
             elif not _off_is_explicitly_null():
                 extra_body["thinking"] = _off_value() or "none"
         elif reasoning_effort and compat.supports_reasoning_effort:
             # OpenAI 风格 reasoning_effort
-            effort = _map_level(level_map, reasoning_effort)
+            effort = _map_level(level_map, reasoning_effort, null_falls_back=True)
             if isinstance(effort, str):
                 params["reasoning_effort"] = effort
         elif not reasoning_effort and compat.supports_reasoning_effort:
@@ -441,9 +448,12 @@ def build_params(
         params["extra_body"] = extra_body
 
     # 出货边界：TypedDict 袋转自由 dict，再合并 sampling_params
-    # （模型级自由负载——自定义键可覆盖命名请求字段，对齐 TS）
+    # （对齐 TS resolveSamplingParams——模型级默认垫底、请求级覆盖；
+    # 按思考级别的分层归 build_base_options 对位项，本层双源）
     final: Dict[str, Any] = dict(params)
-    if options and options.sampling_params:
-        final.update(options.sampling_params)
+    base_sampling = model.sampling_params
+    override_sampling = options.sampling_params if options else None
+    if base_sampling or override_sampling:
+        final.update({**(base_sampling or {}), **(override_sampling or {})})
 
     return final

@@ -35,7 +35,6 @@ from nova_protocol import (
     DoneEvent,
     ErrorEvent,
     Model,
-    ModelThinkingLevel,
     NovaErrorKind,
     StartEvent,
     StopReason,
@@ -63,7 +62,6 @@ from ...utils.diagnostics import append_diagnostic
 from ...utils.errors import USAGE_LIMIT_PATTERNS, normalize_error
 from ...utils.http import filter_headers_for_hook
 from ...utils.json_parser import StreamingJsonParser, parse_streaming_json
-from ...utils.model_utils import clamp_thinking_level
 from .._shared.prompt_cache import resolve_cache_retention
 from .._shared.retry import RetryOptions, retry_provider_request
 from .._shared.simple_options import (
@@ -80,7 +78,7 @@ from .client import assert_request_auth, build_beta_features, create_client
 from .compat import get_compat
 from .constrained import is_strict_tool_limit_error_message
 from .options import AnthropicEffort, AnthropicOptions
-from .params import build_params, build_params_with_meta, resolve_active_effort
+from .params import build_params_with_meta, resolve_active_effort
 from .threads import (
     PreparedThreadRequest,
     prepare_thread_request,
@@ -392,6 +390,9 @@ def stream(
                 context,
                 compat,
                 interleaved_thinking=interleaved_thinking,
+                # 与 create_client 调用点同参（指纹与线上 beta 头同构——
+                # 漏传会让 interleaved 在注入 client 与指纹两侧同时缺位）
+                thinking_enabled=getattr(options, "thinking_enabled", None) is True,
                 session_id=thread_session_id,
             )
             disable_continuation = bool(
@@ -520,8 +521,6 @@ def stream(
                     if inspect.isawaitable(response_result):
                         await response_result
 
-                anthropic_stream = await raw_response.parse()
-
                 event_stream.push(StartEvent(partial=output))
 
                 async for event in idle_guarded(
@@ -568,8 +567,9 @@ def stream(
                         )
                         cache_creation = usage.cache_creation
                         if cache_creation is not None:
+                            # 1h 细分缺席落 0（对齐 TS `|| 0`——不产 None 歧义）
                             output.usage.cache_write_1h = (
-                                cache_creation.ephemeral_1h_input_tokens
+                                cache_creation.ephemeral_1h_input_tokens or 0
                             )
                         # Anthropic 不报 total_tokens——分量求和（对齐 TS）
                         output.usage.total_tokens = (

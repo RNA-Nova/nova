@@ -510,6 +510,33 @@ def stream(
                                 )
                             )
 
+                        # reasoning details 终态：拼接后归档进 thinking 块签名。
+                        # OpenRouter 以 delta 推送 details——相邻同类型 text/summary
+                        # 合并为逻辑条目，encrypted 保持离散不透明。
+                        # 位置对齐 TS：reasoning → reasoning_details → content →
+                        # tool_calls（thinking 块必先于文本/工具块创建）
+                        if (
+                            "reasoning_details" in delta_dict
+                            and delta_dict["reasoning_details"]
+                        ):
+                            reasoning_details = delta_dict["reasoning_details"]
+                            if isinstance(reasoning_details, list):
+                                for detail in reasoning_details:
+                                    if not is_openai_reasoning_detail(detail):
+                                        continue
+                                    block = ensure_thinking_block("")
+                                    # List 不变性：ReasoningDetail 归档形状在合并侧
+                                    # 作开放 dict 手术（运行时同为 dict），cast 收口
+                                    preserved = cast(
+                                        List[Dict[str, Any]],
+                                        parse_openai_reasoning_details(
+                                            block.thinking_signature
+                                        )
+                                        or [],
+                                    )
+                                    append_openai_reasoning_detail(preserved, detail)
+                                    block.thinking_signature = json.dumps(preserved)
+
                         if delta.content and len(delta.content) > 0:
                             block = ensure_text_block()
                             block.text += delta.content
@@ -554,31 +581,6 @@ def stream(
                                             partial=output,
                                         )
                                     )
-
-                        # reasoning details 终态：拼接后归档进 thinking 块签名。
-                        # OpenRouter 以 delta 推送 details——相邻同类型 text/summary
-                        # 合并为逻辑条目，encrypted 保持离散不透明。
-                        if (
-                            "reasoning_details" in delta_dict
-                            and delta_dict["reasoning_details"]
-                        ):
-                            reasoning_details = delta_dict["reasoning_details"]
-                            if isinstance(reasoning_details, list):
-                                for detail in reasoning_details:
-                                    if not is_openai_reasoning_detail(detail):
-                                        continue
-                                    block = ensure_thinking_block("")
-                                    # List 不变性：ReasoningDetail 归档形状在合并侧
-                                    # 作开放 dict 手术（运行时同为 dict），cast 收口
-                                    preserved = cast(
-                                        List[Dict[str, Any]],
-                                        parse_openai_reasoning_details(
-                                            block.thinking_signature
-                                        )
-                                        or [],
-                                    )
-                                    append_openai_reasoning_detail(preserved, detail)
-                                    block.thinking_signature = json.dumps(preserved)
 
                 finish_all_blocks()
 

@@ -61,17 +61,20 @@ class TestBuildProviderModels:
         assert fields["max_tokens"] == 8192
         assert fields["input_types"] == ["text", "image"]  # audio 被过滤
 
-    def test_bad_entry_skipped_by_default(self):
+    def test_missing_name_falls_back_to_id(self):
+        """缺 name 回落 id（对齐 pi modelsDevModels 的 `name || id`）。"""
         built = build_provider_models(
             _DEF, {"bad": _raw_entry("bad", name=None)}  # 缺 name
         )
+        assert built["bad"]["name"] == "bad"
+
+    def test_missing_id_skipped_by_default(self):
+        built = build_provider_models(_DEF, {"": _raw_entry("bad", id=None)})  # 缺 id
         assert built == {}
 
     def test_strict_raises_on_bad_entry(self):
-        with pytest.raises(ValueError, match="missing id/name"):
-            build_provider_models(
-                _DEF, {"bad": _raw_entry("bad", name=None)}, strict=True
-            )
+        with pytest.raises(ValueError, match="missing id"):
+            build_provider_models(_DEF, {"": _raw_entry("bad", id=None)}, strict=True)
 
     def test_static_entries_passthrough_with_stamp(self):
         fields = _full_fields()
@@ -266,6 +269,8 @@ def test_anthropic_mid_convo_flag_rules():
         "claude-haiku-5-5*",
         "claude-fable-5*",
         "claude-fable-5-1*",
+        "claude-mythos-5*",
+        "claude-mythos-5-1*",
     }
     # effort 组独立于 system 组：fable-5-1 同时在两组，fable-5 只在 system 组
     assert (

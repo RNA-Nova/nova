@@ -35,5 +35,9 @@ def volcengine_provider() -> "Provider":
         ),
         catalog_source="models.dev",
         catalog_knowledge=_knowledge,
-        personalize=ark_personalize,
+        # 钉住模型豁免名单随 DEF 注入（与构建期 _ark_lifecycle_filter
+        # 同一套规则——状态表误伤钉住模型时两侧行为一致）
+        personalize=lambda base, context: ark_personalize(
+            base, context, exempt_ids=set(_knowledge.pinned_models)
+        ),
     )

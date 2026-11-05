@@ -57,7 +57,9 @@ def build_provider_models(
         fields = (
             ModelFields(**entry)
             if static
-            else models_dev_to_nova(provider.id, entry, strict)
+            else models_dev_to_nova(
+                provider.id, entry, strict, skip_deprecated=provider.skip_deprecated
+            )
         )
         if fields is None:
             continue

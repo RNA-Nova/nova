@@ -51,6 +51,9 @@ DEF = define_provider(
     name="Volcengine",
     base_url="https://ark.cn-beijing.volces.com/api/v3/",
     api=KnownApi.OPENAI_COMPLETIONS,
+    # 方舟目录语义是"在售"——models.dev 标 deprecated 的条目与在售
+    # 语义矛盾，剔除（ark 生命周期源兜底，不同于 pi 各家的缺省保留）
+    skip_deprecated=True,
     # 方舟在售生命周期筛选（跨模型逃生口——私货归钩，不占公共字段）
     finalize_all=_ark_lifecycle_filter,
     model_corrections={

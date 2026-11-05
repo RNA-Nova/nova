@@ -8,7 +8,7 @@ usage 为锚点（其统计覆盖了此前全部前缀），只估算其后的�
 import json
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from nova_protocol import (
     Context,
@@ -77,9 +77,9 @@ def estimate_message_tokens(message: Message) -> int:
             _estimate_text_and_image_chars(message.content) / CHARS_PER_TOKEN
         )
     if isinstance(message, SystemMessage):
-        # 系统消息（L2 词汇）：content 可为字符串，sections 按值计入——
-        # 与上线时的呈现文本同口径（工具定义 tokens 归 estimate_context_tokens
-        # 的 tools_added 追加项，此处不重复计）
+        # 系统消息（L2 词汇）：content 可为字符串，sections 按值计入；
+        # 工具变更按完整 JSON 计入（对齐 pi estimate.ts——toolsAdded/
+        # toolsRemoved 与文本同口径，不经 context.tools 反查）
         text = (
             message.content
             if isinstance(message.content, str)
@@ -88,7 +88,10 @@ def estimate_message_tokens(message: Message) -> int:
         section_text = "\n".join(
             value for value in (message.sections or {}).values() if value
         )
-        return estimate_text_tokens(text + section_text)
+        tools_tokens = _estimate_tools_tokens(
+            (message.tools_added or []) + (message.tools_removed or [])
+        )
+        return estimate_text_tokens(text + section_text) + tools_tokens
 
     chars = 0
     for block in message.content:
@@ -145,7 +148,7 @@ def _estimate_messages(messages: List[Message]) -> ContextUsageEstimate:
     )
 
 
-def _estimate_tools_tokens(tools: Optional[List[Tool]]) -> int:
+def _estimate_tools_tokens(tools: Optional[List[Any]]) -> int:
     if not tools:
         return 0
     return estimate_text_tokens(_safe_json([t.model_dump() for t in tools]))
@@ -159,19 +162,12 @@ def estimate_context_tokens(context: Context) -> ContextUsageEstimate:
     """
     estimate = _estimate_messages(context.messages)
     if estimate.last_usage_index is not None:
-        # 中途新增的工具定义也占上下文（SystemMessage 通道——pi 同款载体）
-        added_names = set()
-        for message in context.messages[estimate.last_usage_index + 1 :]:
-            for tool in getattr(message, "tools_added", None) or []:
-                added_names.add(tool.name)
-        added_tools = [
-            tool for tool in (context.tools or []) if tool.name in added_names
-        ]
-        added_tool_tokens = _estimate_tools_tokens(added_tools)
+        # 锚点后尾量即消息估算（中途 system 消息的工具变更已在其
+        # 消息 tokens 内——对齐 pi，不再经 context.tools 反查补计）
         return ContextUsageEstimate(
-            tokens=estimate.tokens + added_tool_tokens,
+            tokens=estimate.tokens,
             usage_tokens=estimate.usage_tokens,
-            trailing_tokens=estimate.trailing_tokens + added_tool_tokens,
+            trailing_tokens=estimate.trailing_tokens,
             last_usage_index=estimate.last_usage_index,
         )
 
