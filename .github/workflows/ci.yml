@@ -92,7 +92,7 @@ jobs:
       # 则永久命中，不再重复下载。
       - name: Rust 构建缓存（GHA 腿；自建腿 cargo-target 常驻本地卷）
         if: ${{ !(matrix.os == 'ubuntu-latest' && github.event_name == 'push') }}
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: packages/nova-exec-server
 
