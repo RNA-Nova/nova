@@ -4,6 +4,9 @@
 （"发出去的"）——codex wiremock 层对位（设施在 tests/_helpers/fake_llm.py）。
 """
 
+import json
+from typing import Optional
+
 import httpx
 import pytest
 import respx
@@ -45,9 +48,9 @@ def _model() -> Model:
     )
 
 
-async def _run(context: Context):
+async def _run(context: Context, options: Optional[OpenAICompletionsOptions] = None):
     event_stream = stream(
-        _model(), context, OpenAICompletionsOptions(api_key="sk-test")
+        _model(), context, options or OpenAICompletionsOptions(api_key="sk-test")
     )
     async for _ in event_stream:
         pass
@@ -152,3 +155,180 @@ async def test_transport_error_maps_connection_failed():
     assert result.stop_reason == StopReason.ERROR
     assert result.error_kind is NovaErrorKind.HTTP_CONNECTION_FAILED
     assert len(capture) == 1
+
+
+@respx.mock
+async def test_custom_sampling_fields_use_request_body_not_sdk_kwargs():
+    capture = RequestCapture()
+    mount_openai_chat([oai_chunk(content="ok", finish="stop")], capture)
+    options = OpenAICompletionsOptions(
+        api_key="sk-test", sampling_params={"top_k": 0, "temperature": 0}
+    )
+    result = await _run(Context(messages=[UserMessage(content="hi")]), options)
+    assert result.stop_reason == StopReason.STOP
+    body = RequestCapture.body_json(capture.single())
+    assert body["top_k"] == 0
+    assert body["temperature"] == 0
+
+
+@respx.mock
+async def test_tool_calls_without_index_stay_separate():
+    capture = RequestCapture()
+    mount_openai_chat(
+        [
+            oai_chunk(
+                tool_calls=[
+                    oai_tool_call(None, id="a", name="first", arguments='{"x":1}')
+                ]
+            ),
+            oai_chunk(
+                tool_calls=[
+                    oai_tool_call(None, id="b", name="second", arguments='{"y":2}')
+                ],
+                finish="tool_calls",
+            ),
+        ],
+        capture,
+    )
+    result = await _run(Context(messages=[UserMessage(content="hi")]))
+    calls = [block for block in result.content if block.type == "toolCall"]
+    assert [(call.id, call.arguments) for call in calls] == [
+        ("a", {"x": 1}),
+        ("b", {"y": 2}),
+    ]
+
+
+@respx.mock
+async def test_tool_call_without_index_accepts_idless_continuation():
+    capture = RequestCapture()
+    mount_openai_chat(
+        [
+            oai_chunk(
+                tool_calls=[
+                    oai_tool_call(None, id="a", name="first", arguments='{"x":')
+                ]
+            ),
+            oai_chunk(tool_calls=[oai_tool_call(None, arguments="1}")]),
+            oai_chunk(finish="tool_calls"),
+        ],
+        capture,
+    )
+    result = await _run(Context(messages=[UserMessage(content="hi")]))
+    calls = [block for block in result.content if block.type == "toolCall"]
+    assert len(calls) == 1
+    assert calls[0].id == "a"
+    assert calls[0].arguments == {"x": 1}
+
+
+@respx.mock
+async def test_tool_call_without_index_explicit_id_selects_matching_call():
+    capture = RequestCapture()
+    mount_openai_chat(
+        [
+            oai_chunk(
+                tool_calls=[
+                    oai_tool_call(None, id="a", name="first", arguments='{"x":'),
+                    oai_tool_call(None, id="b", name="second", arguments='{"y":'),
+                ]
+            ),
+            oai_chunk(tool_calls=[oai_tool_call(None, id="a", arguments="1}")]),
+            oai_chunk(tool_calls=[oai_tool_call(None, id="b", arguments="2}")]),
+            oai_chunk(finish="tool_calls"),
+        ],
+        capture,
+    )
+    result = await _run(Context(messages=[UserMessage(content="hi")]))
+    calls = [block for block in result.content if block.type == "toolCall"]
+    assert [(call.id, call.arguments) for call in calls] == [
+        ("a", {"x": 1}),
+        ("b", {"y": 2}),
+    ]
+
+
+@respx.mock
+async def test_on_payload_deep_merges_extra_body_and_forwards_transport_options():
+    capture = RequestCapture()
+    content = (
+        f"data: {json.dumps(oai_chunk(content='ok', finish='stop'))}\n\n"
+        "data: [DONE]\n\n"
+    ).encode()
+    respx.post(url__regex=r".*/chat/completions(?:\?.*)?$").mock(
+        side_effect=lambda request: _recorded_sse(request, capture, content)
+    )
+
+    def on_payload(params, _identity):
+        return {
+            **params,
+            "vendor": {"from_top": 1, "shared": "top"},
+            "timeout": 7.0,
+            "extra_headers": {"X-Hook": "yes"},
+            "extra_query": {"trace": "1"},
+            "extra_body": {
+                "vendor": {"from_body": 2, "shared": "body"},
+            },
+        }
+
+    result = await _run(
+        Context(messages=[UserMessage(content="hi")]),
+        OpenAICompletionsOptions(api_key="sk-test", on_payload=on_payload),
+    )
+    assert result.stop_reason == StopReason.STOP, result.error_message
+    request = capture.single()
+    body = RequestCapture.body_json(request)
+    assert body["vendor"] == {"from_top": 1, "from_body": 2, "shared": "body"}
+    assert request.headers["x-hook"] == "yes"
+    assert request.url.params["trace"] == "1"
+
+
+@respx.mock
+async def test_cutoff_tool_arguments_are_marked_not_repaired():
+    capture = RequestCapture()
+    mount_openai_chat(
+        [
+            oai_chunk(
+                tool_calls=[
+                    oai_tool_call(0, id="a", name="write", arguments='{"path":"/tmp/x')
+                ],
+                finish="tool_calls",
+            )
+        ],
+        capture,
+    )
+    result = await _run(Context(messages=[UserMessage(content="hi")]))
+    call = next(block for block in result.content if block.type == "toolCall")
+    assert call.arguments == {}
+    assert call.arguments_error is not None
+
+
+@respx.mock
+async def test_null_chunk_is_ignored_and_observable():
+    capture = RequestCapture()
+    seen = []
+
+    def on_provider_stream_event(chunk, _identity):
+        seen.append(chunk)
+
+    chunks = [None, oai_chunk(content="ok", finish="stop")]
+    content = (
+        "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks)
+        + "data: [DONE]\n\n"
+    ).encode()
+    respx.post(url__regex=r".*/chat/completions$").mock(
+        side_effect=lambda request: _recorded_sse(request, capture, content)
+    )
+    options = OpenAICompletionsOptions(
+        api_key="sk-test", on_provider_stream_event=on_provider_stream_event
+    )
+    result = await _run(Context(messages=[UserMessage(content="hi")]), options)
+    assert result.stop_reason == StopReason.STOP
+    assert seen[0] is None
+    assert len(seen) == 2
+
+
+def _recorded_sse(
+    request: httpx.Request, capture: RequestCapture, content: bytes
+) -> httpx.Response:
+    capture.record(request)
+    return httpx.Response(
+        200, content=content, headers={"content-type": "text/event-stream"}
+    )

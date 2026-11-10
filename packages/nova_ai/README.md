@@ -52,7 +52,7 @@
 pip install nova-ai
 ```
 
-要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0`、`anthropic>=0.69`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。
+要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。
 
 在 monorepo 仓库内开发时，使用根目录的 pixi 统一环境（editable 安装全部子包）：
 

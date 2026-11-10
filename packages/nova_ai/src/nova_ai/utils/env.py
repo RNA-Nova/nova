@@ -3,40 +3,41 @@
 处理API密钥和认证信息的获取
 """
 
-import os
 from typing import Optional
 
+from nova_protocol import ProviderEnv
 
-def get_env_api_key(provider: str) -> Optional[str]:
-    """
-    从已知的环境变量获取提供商的 API 密钥（含 OAuth 类 token 环境变量——
-    如 ``ANTHROPIC_OAUTH_TOKEN``、Copilot 的 GH_TOKEN 系列也经此读取）。
+from .provider_env import get_provider_env_value
 
-    Args:
-        provider: 提供商名称
 
-    Returns:
-        API密钥或None
-    """
-    # GitHub Copilot 特殊处理
+def get_env_api_key(
+    provider: str, provider_env: Optional[ProviderEnv] = None
+) -> Optional[str]:
+    """读取 provider 的 API key；provider_env 覆盖进程环境。"""
     if provider == "github-copilot":
-        return (
-            os.environ.get("COPILOT_GITHUB_TOKEN")
-            or os.environ.get("GH_TOKEN")
-            or os.environ.get("GITHUB_TOKEN")
-        )
+        for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            value = get_provider_env_value(name, provider_env)
+            if value:
+                return value
+        return None
 
-    # Anthropic: ANTHROPIC_OAUTH_TOKEN 优先于 ANTHROPIC_API_KEY
     if provider == "anthropic":
-        return os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get(
-            "ANTHROPIC_API_KEY"
-        )
+        for name in ("ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+            value = get_provider_env_value(name, provider_env)
+            if value:
+                return value
+        return None
 
     # 标准API密钥映射（与 TS env-api-keys.ts 对齐；即使 Python 暂未内置
     # 某些 provider，自定义 models.json 也可能用到这些 provider id）
     env_map = {
         "ant-ling": "ANT_LING_API_KEY",
+        "qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
+        "qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
+        "qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
+        "qwen-token-plan-individual-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "azure": "AZURE_OPENAI_API_KEY",
         "azure-openai-responses": "AZURE_OPENAI_API_KEY",
         "nvidia": "NVIDIA_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
@@ -45,6 +46,7 @@ def get_env_api_key(provider: str) -> Optional[str]:
         "groq": "GROQ_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
         "xai": "XAI_API_KEY",
+        "typesafe": "TYPESAFE_API_KEY",
         "radius": "RADIUS_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
         "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
@@ -58,9 +60,11 @@ def get_env_api_key(provider: str) -> Optional[str]:
         "huggingface": "HF_TOKEN",
         "fireworks": "FIREWORKS_API_KEY",
         "together": "TOGETHER_API_KEY",
+        "baseten": "BASETEN_API_KEY",
         "opencode": "OPENCODE_API_KEY",
         "opencode-go": "OPENCODE_API_KEY",
         "kimi-coding": "KIMI_API_KEY",
+        "meta": "META_API_KEY",
         "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
         "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
         "xiaomi": "XIAOMI_API_KEY",
@@ -71,4 +75,4 @@ def get_env_api_key(provider: str) -> Optional[str]:
     }
 
     env_var = env_map.get(provider)
-    return os.environ.get(env_var) if env_var else None
+    return get_provider_env_value(env_var, provider_env) if env_var else None

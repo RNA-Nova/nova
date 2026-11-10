@@ -22,6 +22,10 @@ from openai.types.chat import (
 
 from ...utils.hash import short_hash
 from ...utils.surrogate import sanitize_surrogates
+from .._shared.constrained import (
+    get_json_schema_tool_parameters,
+    resolve_json_schema_strict_sampling,
+)
 from .._shared.transcript import (
     get_initial_system_message,
     get_system_message_text,
@@ -434,7 +438,10 @@ def convert_tools(
     """
     result = []
     for tool in tools:
-        parameters = tool.parameters
+        strict = resolve_json_schema_strict_sampling(
+            tool, compat.supports_strict_mode is True
+        )
+        parameters = get_json_schema_tool_parameters(tool, strict)
         if compat.requires_moonshot_flavored_schema:
             parameters = normalize_moonshot_flavored_schema(parameters)
         tool_dict = {
@@ -445,8 +452,7 @@ def convert_tools(
                 "parameters": parameters,
             },
         }
-        # 解析后恒 bool（默认 False）——None（直造实例）不发 strict 键
         if compat.supports_strict_mode:
-            tool_dict["function"]["strict"] = False
+            tool_dict["function"]["strict"] = strict if strict is not None else False
         result.append(tool_dict)
     return result

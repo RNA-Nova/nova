@@ -91,14 +91,15 @@ async def test_max_tokens_truncates(probe):
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)
 async def test_abort_before_start(probe):
-    """举旗进入：流以 aborted/error 收尾。"""
+    """举旗进入：流必须以 ABORTED 收尾，且不得携带错误分类。"""
     manager = await build_manager()
     controller = AbortController()
     ctx = Context(messages=[UserMessage(content="Tell me a very long story")])
     options = SimpleStreamOptions(signal=controller.signal)
     controller.abort()
     result = await manager.complete_simple(probe.model, ctx, options)
-    assert result.stop_reason in (StopReason.ABORTED, StopReason.ERROR)
+    assert result.stop_reason == StopReason.ABORTED
+    assert result.error_kind is None
 
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)
@@ -122,4 +123,5 @@ async def test_abort_after_first_chunk(probe):
 
     result = await stream.result()
     assert "text_delta" in events  # 确实进入了在飞状态
-    assert result.stop_reason in (StopReason.ABORTED, StopReason.ERROR)
+    assert result.stop_reason == StopReason.ABORTED
+    assert result.error_kind is None

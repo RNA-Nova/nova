@@ -18,6 +18,7 @@ import asyncio
 import time
 from typing import Awaitable, Callable, Optional
 
+from nova_async import await_with_abort
 from nova_protocol import (
     AbortSignal,
     AssistantMessage,
@@ -44,7 +45,12 @@ def create_setup_error_message(
     kind 分派）。``stop_reason`` 缺省 ERROR；装配期信号已 abort 时调用方
     传 ABORTED（对齐 TS f3a64af07——中断不伪装成错误）。
     """
-    normalized = normalize_error(error, domain="setup")
+    # 取消不是错误：aborted 终态保留可读原因，但绝不填错误分类或重试信息。
+    normalized = (
+        None
+        if stop_reason == StopReason.ABORTED
+        else normalize_error(error, domain="setup", provider=model.provider)
+    )
     return AssistantMessage(
         role="assistant",
         content=[],
@@ -53,11 +59,12 @@ def create_setup_error_message(
         model=model.id,
         usage=Usage(),
         stop_reason=stop_reason,
-        error_message=normalized.message,
-        error_kind=normalized.kind,
+        error_message=(str(error) if normalized is None else normalized.message)
+        or "Request was aborted",
+        error_kind=normalized.kind if normalized is not None else None,
         retry_after_ms=(
             int(normalized.retry_after_ms)
-            if normalized.retry_after_ms is not None
+            if normalized is not None and normalized.retry_after_ms is not None
             else None
         ),
         timestamp=int(time.time() * 1000),
@@ -78,7 +85,7 @@ def lazy_stream(
 
     async def _run() -> None:
         try:
-            inner = await setup()
+            inner = await await_with_abort(setup(), signal)
             async for event in inner:
                 outer.push(event)
             result = await inner.result()

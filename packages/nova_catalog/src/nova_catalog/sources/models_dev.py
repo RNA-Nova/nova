@@ -1,7 +1,7 @@
 """models.dev v2 源（对位 pi ``catalog/sources/models-dev.ts``）。
 
-构建期单次拉取：整包 payload（实例级 60s 去重——一轮构建内多家
-provider 共享一次下载）。v2 的形状红利随翻译全量进来：能力字段
+构建期单次拉取：一轮构建读取一次整包 payload。v2 的形状红利随翻译
+全量进来：能力字段
 （``capabilities``——tools/reasoning/structured_output）、按上下文
 分档的价格（``cost.text.*.overrides`` → cost tiers）、类型与生命周期
 （``type``/``status`` 过滤）、**站推导思考级别表**（``reasoning.effort``
@@ -10,39 +10,41 @@ provider 共享一次下载）。v2 的形状红利随翻译全量进来：能�
 
 from __future__ import annotations
 
-import time
-from typing import Any, Dict, List, Optional, cast
+import math
+from typing import Any, Dict, List, Optional, TypeGuard, cast
 
 from nova_protocol import ModelFields
 
-from ..reasoning import effort_to_thinking_level_map
 from .http import fetch_json
 
 MODELS_DEV_API = "https://models.dev/experimental/v2.0/api.json"
-_CACHE_TTL_S = 60.0
+
+
+def _object(value: Any) -> Dict[str, Any]:
+    """第三方 JSON 的嵌套对象归一；非对象按无字段处理。"""
+    return value if isinstance(value, dict) else {}
+
+
+def _finite_number(value: Any) -> TypeGuard[float | int]:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 class ModelsDevSource:
-    """models.dev v2 单体目录源（构建期用）。"""
+    """models.dev v2 单体目录源；每次构建调用即一次拉取。"""
 
     def __init__(self, url: str = MODELS_DEV_API) -> None:
         self._url = url
-        self._cached_at = 0.0
-        self._cached: Dict[str, Any] | None = None
 
     async def payload(self) -> Dict[str, Any]:
-        """整包目录（60 秒实例内去重）。失败不落缓存，下次真实重试。"""
-        now = time.monotonic()
-        if self._cached is not None and now - self._cached_at < _CACHE_TTL_S:
-            return self._cached
+        """拉取整包目录并校验顶层对象形状。"""
         data = await fetch_json(self._url)
-        self._cached = data
-        self._cached_at = time.monotonic()
+        if not isinstance(data, dict):
+            raise ValueError("models.dev payload must be a JSON object")
         return data
-
-    async def models_for(self, key: str) -> Dict[str, Dict[str, Any]]:
-        """取某 provider 键的模型切片（缺键/缺 models 返回空）。"""
-        return ((await self.payload()).get(key) or {}).get("models") or {}
 
 
 # ---------------------------------------------------------------------------
@@ -52,11 +54,11 @@ class ModelsDevSource:
 
 def _first_price(value: Any) -> Optional[float]:
     """单值或 TTL 分档 dict 取首价（``{"5m": 3, "1h": 6}`` → 3；无数值 None）。"""
-    if isinstance(value, (int, float)):
+    if _finite_number(value):
         return float(value)
     if isinstance(value, dict):
         for v in value.values():
-            if isinstance(v, (int, float)):
+            if _finite_number(v):
                 return float(v)
     return None
 
@@ -65,9 +67,9 @@ def _context_threshold(when: Any) -> Optional[float]:
     """``when: {context: {gt|gte: n}}`` → n；其余形态（region/tier/time）不支持。"""
     if not isinstance(when, dict) or set(when.keys()) != {"context"}:
         return None
-    ctx = when.get("context") or {}
+    ctx = _object(when.get("context"))
     size = ctx.get("gt", ctx.get("gte"))
-    return float(size) if isinstance(size, (int, float)) else None
+    return float(size) if _finite_number(size) else None
 
 
 def _cache_write_price(cache: Any) -> Optional[float]:
@@ -97,8 +99,9 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
     按次/按张计费不是 token 价，不可冒充）；tier 字段缺省继承基线
     （pi ``modelsDevCost`` 的 ``?? base.X``——稀疏 tier 不吞基线费率）。
     """
-    text = (v2_cost or {}).get("text") or {}
-    v_in, v_out = text.get("input") or {}, text.get("output") or {}
+    text = _object(_object(v2_cost).get("text"))
+    v_in = _object(text.get("input"))
+    v_out = _object(text.get("output"))
     if (
         not v_in
         or not v_out
@@ -107,32 +110,39 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
     ):
         return {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
     base: Dict[str, Any] = {
-        "input": v_in.get("price") or 0,
-        "output": v_out.get("price") or 0,
-        "cache_read": (v_in.get("cache") or {}).get("read") or 0,
+        "input": _first_price(v_in.get("price")) or 0,
+        "output": _first_price(v_out.get("price")) or 0,
+        "cache_read": _first_price(_object(v_in.get("cache")).get("read")) or 0,
         "cache_write": _cache_write_price(v_in.get("cache")) or 0,
     }
     tiers: Dict[float, Dict[str, Any]] = {}
-    for override in v_in.get("overrides") or []:
+    overrides = v_in.get("overrides")
+    for raw_override in (overrides if isinstance(overrides, list) else []):
+        override = _object(raw_override)
         above = _context_threshold(override.get("when"))
         if above is None:
             continue
         tier = tiers.setdefault(above, {"inputTokensAbove": above})
-        if override.get("price") is not None:
-            tier["input"] = override["price"]
-        cache = override.get("cache") or {}
-        if cache.get("read") is not None:
-            tier["cache_read"] = cache["read"]
+        price = _first_price(override.get("price"))
+        if price is not None:
+            tier["input"] = price
+        cache = _object(override.get("cache"))
+        cache_read = _first_price(cache.get("read"))
+        if cache_read is not None:
+            tier["cache_read"] = cache_read
         cache_write = _cache_write_price(cache)
         if cache_write is not None:
             tier["cache_write"] = cache_write
-    for override in v_out.get("overrides") or []:
+    overrides = v_out.get("overrides")
+    for raw_override in (overrides if isinstance(overrides, list) else []):
+        override = _object(raw_override)
         above = _context_threshold(override.get("when"))
         if above is None:
             continue
         tier = tiers.setdefault(above, {"inputTokensAbove": above})
-        if override.get("price") is not None:
-            tier["output"] = override["price"]
+        price = _first_price(override.get("price"))
+        if price is not None:
+            tier["output"] = price
     if tiers:
         # tier 字段缺省继承基线（pi modelsDevCost 的 `?? base.X`）
         base["tiers"] = [
@@ -168,46 +178,64 @@ def models_dev_to_nova(
     上限回落 4096（pi 同款兜底）。形状按 ``ModelFields`` 键集构造
     （dict 直转 TypedDict 静态不认，出口一次 cast——与 pi_dev 同款）。
     """
+
+    def _input_object(value: Any, label: str) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            if strict:
+                raise ValueError(f"{provider_id}: {label} must be an object")
+            return {}
+        return value
+
+    if not isinstance(entry, dict):
+        if strict:
+            raise ValueError(f"{provider_id}: model entry must be an object")
+        return None
     if entry.get("type") != "chat":
         return None
     if skip_deprecated and entry.get("status") == "deprecated":
         return None
-    capabilities = entry.get("capabilities") or {}
-    if (capabilities.get("tools") or {}).get("supported") is not True:
+    capabilities = _input_object(entry.get("capabilities"), "capabilities")
+    tools = _input_object(capabilities.get("tools"), "capabilities.tools")
+    if tools.get("supported") is not True:
         return None
     model_id = entry.get("id")
-    if not model_id:
+    if not isinstance(model_id, str) or not model_id:
         if strict:
             raise ValueError(f"{provider_id}: model entry missing id: {entry!r}")
         return None
-    name = entry.get("name") or model_id
-    limit = entry.get("limit") or {}
+    raw_name = entry.get("name")
+    name = raw_name if isinstance(raw_name, str) and raw_name else model_id
+    limit = _input_object(entry.get("limit"), "limit")
     context_window = limit.get("context")
-    if not isinstance(context_window, (int, float)) or context_window <= 0:
+    if not _finite_number(context_window) or context_window <= 0:
         context_window = 4096
     max_tokens = limit.get("output")
-    if not isinstance(max_tokens, (int, float)) or max_tokens <= 0:
+    if not _finite_number(max_tokens) or max_tokens <= 0:
         max_tokens = 4096
-    # modalities 可能是裸类型（"text"/"image"）或 MIME（"image/jpeg"…）——
-    # image/* 前缀一并识别（对位 pi normalizeModelsDevModel）
-    modalities = (entry.get("modalities") or {}).get("input") or ["text"]
+    # modalities 可能是裸类型（"text"/"image"）或 MIME（"image/jpeg"…）。
+    modalities = _input_object(entry.get("modalities"), "modalities")
+    raw_input = modalities.get("input")
+    if raw_input is not None and not isinstance(raw_input, list):
+        if strict:
+            raise ValueError(f"{provider_id}: modalities.input must be an array")
+        raw_input = None
+    input_modalities = raw_input or ["text"]
     input_types = ["text"]
-    if any(m == "image" or str(m).startswith("image/") for m in modalities):
+    if any(m == "image" or str(m).startswith("image/") for m in input_modalities):
         input_types.append("image")
 
-    reasoning = capabilities.get("reasoning")
+    reasoning = _input_object(capabilities.get("reasoning"), "capabilities.reasoning")
+    cost = _input_object(entry.get("cost"), "cost")
     fields: Dict[str, Any] = {
         "name": name,
-        "reasoning": isinstance(reasoning, dict) and reasoning.get("supported") is True,
+        "reasoning": reasoning.get("supported") is True,
         "input_types": input_types,
-        "cost": _normalize_cost(entry.get("cost")),
+        "cost": _normalize_cost(cost),
         "context_window": int(context_window),
         "max_tokens": int(max_tokens),
     }
-    # 站推导级别表（v2 红利：effort 值直通——手写表退为填缺兜底）
-    level_map = effort_to_thinking_level_map(reasoning)
-    if level_map is not None:
-        fields["thinking_level_map"] = level_map
     return cast(ModelFields, fields)
 
 

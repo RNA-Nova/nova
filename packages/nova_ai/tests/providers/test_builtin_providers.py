@@ -3,6 +3,7 @@
 对齐 TS 设计：拆分为 moonshotai、moonshotai-cn、kimi-coding 三个 provider。
 """
 
+import pytest
 from nova_protocol import Context, KnownApi, KnownProvider, ThinkingFormat, UserMessage
 
 from nova_ai.api_impls.openai_completions import (
@@ -10,6 +11,7 @@ from nova_ai.api_impls.openai_completions import (
     build_params,
     detect_compat,
 )
+from nova_ai.providers.anthropic import anthropic_provider
 from nova_ai.providers.kimi_coding import (
     KIMI_CODING_MODELS,
     get_kimi_coding_model,
@@ -179,3 +181,48 @@ class TestKimiBuildParams:
         assert "extra_body" not in params or "thinking" not in params.get(
             "extra_body", {}
         )
+
+
+class _EnvContext:
+    def __init__(self, values):
+        self.values = values
+
+    async def env(self, name):
+        return self.values.get(name)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_auth_token_is_bearer_and_precedes_api_key():
+    auth = anthropic_provider().auth.api_key
+    assert auth is not None
+    result = await auth.resolve(
+        {
+            "ctx": _EnvContext(
+                {
+                    "ANTHROPIC_AUTH_TOKEN": "bearer-token",
+                    "ANTHROPIC_API_KEY": "api-key",
+                }
+            ),
+            "credential": None,
+        }
+    )
+    assert result is not None
+    assert result.auth == {"headers": {"Authorization": "Bearer bearer-token"}}
+    assert result.source == "ANTHROPIC_AUTH_TOKEN"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_federation_is_returned_as_provider_env():
+    auth = anthropic_provider().auth.api_key
+    assert auth is not None
+    values = {
+        "ANTHROPIC_FEDERATION_RULE_ID": "rule",
+        "ANTHROPIC_ORGANIZATION_ID": "org",
+        "ANTHROPIC_IDENTITY_TOKEN_FILE": "/identity-token",
+        "ANTHROPIC_WORKSPACE_ID": "workspace",
+    }
+    result = await auth.resolve({"ctx": _EnvContext(values), "credential": None})
+    assert result is not None
+    assert result.auth == {}
+    assert result.env == values
+    assert result.source == "workload identity federation"

@@ -18,6 +18,13 @@ def _call(args: dict) -> ToolCall:
     return ToolCall(id="tc-1", name="t", arguments=args)
 
 
+def test_arguments_error_is_rejected_before_schema_validation():
+    tool = _tool({"type": "object"})
+    call = ToolCall(id="tc-1", name="t", arguments={}, arguments_error="cut-off JSON")
+    with pytest.raises(ValueError, match="cut-off JSON"):
+        validate_tool_arguments(tool, call)
+
+
 # ----------------------------------------------------------------------
 # 原始类型矫正
 # ----------------------------------------------------------------------

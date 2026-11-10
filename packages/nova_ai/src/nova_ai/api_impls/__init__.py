@@ -9,7 +9,13 @@
 ``__getattr__`` 首次访问时物化，之后缓存为普通模块属性。
 """
 
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
+
+if TYPE_CHECKING:
+    from .anthropic_messages import AnthropicOptions, stream, stream_simple
+    from .openai_completions import OpenAICompletionsOptions
+
+    ProviderStreamOptions = Union[OpenAICompletionsOptions, AnthropicOptions]
 
 _LAZY_MODULES = {
     "openai_completions": "nova_ai.api_impls.openai_completions",

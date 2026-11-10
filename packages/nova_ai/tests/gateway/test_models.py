@@ -203,6 +203,25 @@ class TestModelsAuth:
         store.write("test", ApiKeyCredential(key="sk-test"))
         available = await models.get_available()
         assert available == [model]
+        assert await models.get_available("missing") == []
+
+    async def test_provider_headers_feed_request_with_lowest_priority(self):
+        store = InMemoryCredentialStore()
+        store.write("test", ApiKeyCredential(key="sk-test"))
+        provider = create_provider(
+            id="test",
+            name="Test",
+            headers={"X-Provider": "yes", "X-Shared": "provider"},
+            auth=_make_auth(api_key_env="TEST_API_KEY"),
+        )
+        models = ModelsManager(credential_store=store)
+        models.set_provider(provider)
+        _, options = await models._apply_auth(
+            _make_model(),
+            StreamOptions(headers={"x-shared": "request"}),
+        )
+        assert options is not None
+        assert options.headers == {"X-Provider": "yes", "x-shared": "request"}
 
     async def test_get_available_with_filter_models(self):
         store = InMemoryCredentialStore()
@@ -313,7 +332,7 @@ class TestModelsRefresh:
         RequestTimeoutError（超时≠取消），result["aborted"] 为 False。"""
         import nova_ai.gateway.models as models_module
 
-        monkeypatch.setattr(models_module, "DEFAULT_OAUTH_REFRESH_TIMEOUT_MS", 50)
+        monkeypatch.setattr("nova_ai.auth.resolve.DEFAULT_OAUTH_REFRESH_TIMEOUT_MS", 50)
 
         store = InMemoryCredentialStore()
         store.write(

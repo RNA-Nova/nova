@@ -13,7 +13,12 @@ from .estimate import (
     estimate_message_tokens,
     estimate_text_tokens,
 )
-from .json_parser import StreamingJsonParser, parse_streaming_json
+from .json_parser import (
+    StreamingJsonParser,
+    ToolCallArgumentsResult,
+    parse_streaming_json,
+    parse_tool_call_arguments,
+)
 from .model_utils import (
     calculate_cost,
     clamp_thinking_level,
@@ -30,7 +35,9 @@ __all__ = [
     "get_env_api_key",
     # json_parser
     "StreamingJsonParser",
+    "ToolCallArgumentsResult",
     "parse_streaming_json",
+    "parse_tool_call_arguments",
     # surrogate
     "sanitize_surrogates",
     # estimate

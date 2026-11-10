@@ -2,16 +2,16 @@
 
 每 provider 选 1 个最便宜的当代模型（同价按 id 字典序保确定性）——
 e2e 验证行为契约，不做全模型扫描（可用性巡检归
-``scripts/check_live_providers.py``）。
+``tests/integration/check_live.py``）。
 """
 
+import os
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-from nova_protocol import Model
-
 from nova_ai.gateway.models import create_models_manager
 from nova_ai.providers.all import builtin_providers
+from nova_protocol import Model
 
 from .auth import has_credential
 
@@ -53,7 +53,12 @@ def probe_for(
 def collect_probes(
     require: Optional[Callable[[Model], bool]] = None,
 ) -> List[Probe]:
-    """汇总所有有凭据 provider 的探针（采集期同步：注册表 + 凭据存在性）。"""
+    """汇总探针；只有显式 integration 任务才允许读取真实环境/HOME。
+
+    默认套件在 deselect 前也会 import 本模块，因此必须在收集期硬闸住。
+    """
+    if os.environ.get("NOVA_RUN_INTEGRATION") != "1":
+        return []
     manager = create_models_manager()
     for provider in builtin_providers():
         manager.set_provider(provider)

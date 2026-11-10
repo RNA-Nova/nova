@@ -37,17 +37,18 @@ def _load_auth_json(path: Path) -> Dict[str, Any]:
 
 
 class AuthJsonCredentialStore:
-    """``CredentialStore`` 实现：以 ``auth.json`` 为后端的薄封装。
+    """``auth.json`` 凭据店：只回写本实例修改的条目。
 
-    行为语义（按 provider 串行化等）复用 ``InMemoryCredentialStore``；
-    ``modify``/``delete`` 后整体回写（0600），让 OAuth 刷新结果对
-    后续运行持续有效（pi 的测试凭据同款回写）。
+    未识别/未来版本条目原样保留；写前重读并合并最新文件，最后经临时文件
+    原子替换（0600）。畸形 JSON 不允许被当成空文件覆盖。
     """
 
     def __init__(self, path: Optional[Path] = None) -> None:
         self._path = path or AUTH_JSON_PATH
         self._inner = InMemoryCredentialStore()
         self._data: Dict[str, Credential] = {}
+        self._dirty: set[str] = set()
+        self._deleted: set[str] = set()
         self._loaded = False
 
     async def ensure_loaded(self) -> None:
@@ -58,29 +59,51 @@ class AuthJsonCredentialStore:
             try:
                 credential = _credential_adapter.validate_python(payload)
             except Exception:
-                continue  # 畸形条目跳过，不拖垮整份凭据
+                continue  # 不认识的条目不可执行，但原始数据会在回写时保留
             self._data[provider_id] = credential
             self._inner.write(provider_id, credential)
-        # env key 优先（对齐 pi e2e 调用点的 getEnvApiKey）：env 有 key 的
-        # provider 在内存店登记为 api_key 凭据——陈旧 OAuth（refresh 已被拒）
-        # 在测试里不再抢道。只写内存层：env 是进程级供给，不落盘（不回写
-        # auth.json）
-        from nova_protocol import ApiKeyCredential
+        # env key 只驻内存，不落盘；陈旧 OAuth 不再抢在显式 env key 前面。
+        from nova_protocol import ApiKeyCredential, RedactedString
 
         from nova_ai.providers.all import builtin_providers
 
         for provider in builtin_providers():
             env_key = get_env_api_key(provider.id)
             if env_key:
-                self._inner.write(provider.id, ApiKeyCredential(key=env_key))
+                self._inner.write(
+                    provider.id, ApiKeyCredential(key=RedactedString(env_key))
+                )
 
     def _persist(self) -> None:
-        payload = {
-            pid: cred.model_dump(exclude_none=True) for pid, cred in self._data.items()
-        }
+        if self._path.exists():
+            # 与读取侧不同：写侧不得把损坏/ unreadable 文件归一成 {}。
+            latest = json.loads(self._path.read_text("utf-8"))
+            if not isinstance(latest, dict):
+                raise TypeError("auth.json must contain a JSON object")
+            payload = latest
+        else:
+            payload = {}
+        for provider_id in self._deleted:
+            payload.pop(provider_id, None)
+        for provider_id in self._dirty:
+            credential = self._data.get(provider_id)
+            if credential is not None:
+                payload[provider_id] = credential.model_dump(exclude_none=True)
+
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(payload, indent=2) + "\n", "utf-8")
-        os.chmod(self._path, 0o600)
+        temporary = self._path.with_name(
+            f".{self._path.name}.{os.getpid()}.{id(self)}.tmp"
+        )
+        try:
+            temporary.write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False) + "\n", "utf-8"
+            )
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self._path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self._dirty.clear()
+        self._deleted.clear()
 
     def read(self, provider_id: str) -> Optional[Credential]:
         return self._inner.read(provider_id)
@@ -91,11 +114,15 @@ class AuthJsonCredentialStore:
     def write(self, provider_id: str, credential: Credential) -> None:
         self._inner.write(provider_id, credential)
         self._data[provider_id] = credential
+        self._dirty.add(provider_id)
+        self._deleted.discard(provider_id)
         self._persist()
 
     def delete(self, provider_id: str) -> None:
         self._inner.delete(provider_id)
         self._data.pop(provider_id, None)
+        self._dirty.discard(provider_id)
+        self._deleted.add(provider_id)
         self._persist()
 
 

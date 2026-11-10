@@ -34,6 +34,7 @@ from .._shared.prompt_cache import (
 )
 from .._shared.simple_options import (
     clamp_thinking_budget_to_answer_room,
+    resolve_sampling_params,
     thinking_budget_for_level,
 )
 from .._shared.transcript import (
@@ -268,10 +269,10 @@ def build_params(
             cache_control,
         )
 
-    # 双条件（对齐 TS）：tools 非空才发 tool_choice——严格端点对
-    # "有 choice 无 tools" 直接 400。
+    # tool_choice 是显式调用方指令（对齐 pi，无条件透传）：尤其 "none"
+    # 在无工具请求里也有明确语义，不能因 tools 缺席被静默丢弃。
     tool_choice = getattr(options, "tool_choice", None)
-    if tool_choice and params.get("tools"):
+    if tool_choice:
         params["tool_choice"] = tool_choice
 
     # vLLM 调度优先级（对齐 TS：compat.vllmPriority 非 None 才发顶层
@@ -447,13 +448,16 @@ def build_params(
     if extra_body:
         params["extra_body"] = extra_body
 
-    # 出货边界：TypedDict 袋转自由 dict，再合并 sampling_params
-    # （对齐 TS resolveSamplingParams——模型级默认垫底、请求级覆盖；
-    # 按思考级别的分层归 build_base_options 对位项，本层双源）
+    # 最后合并采样参数（对齐 pi resolveSamplingParams）：模型默认 <
+    # 吸附后的思考级别参数 < 请求级覆盖。direct stream() 与 stream_simple()
+    # 共用这一出货点，不能只在 simple 包装层应用级别分层。
     final: Dict[str, Any] = dict(params)
-    base_sampling = model.sampling_params
-    override_sampling = options.sampling_params if options else None
-    if base_sampling or override_sampling:
-        final.update({**(base_sampling or {}), **(override_sampling or {})})
+    sampling_params = resolve_sampling_params(
+        model,
+        reasoning_effort or "off",
+        options.sampling_params if options else None,
+    )
+    if sampling_params:
+        final.update(sampling_params)
 
     return final

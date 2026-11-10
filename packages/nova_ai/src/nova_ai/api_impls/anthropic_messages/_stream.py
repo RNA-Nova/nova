@@ -25,6 +25,8 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
+from anthropic import omit
+from anthropic.types import RawMessageStreamEvent
 from nova_async import AbortScope
 from nova_protocol import (
     AbortedError,
@@ -61,7 +63,8 @@ from ...utils import calculate_cost
 from ...utils.diagnostics import append_diagnostic
 from ...utils.errors import USAGE_LIMIT_PATTERNS, normalize_error
 from ...utils.http import filter_headers_for_hook
-from ...utils.json_parser import StreamingJsonParser, parse_streaming_json
+from ...utils.json_parser import StreamingJsonParser, parse_tool_call_arguments
+from .._shared.openrouter_cost import apply_openrouter_reported_cost
 from .._shared.prompt_cache import resolve_cache_retention
 from .._shared.retry import RetryOptions, retry_provider_request
 from .._shared.simple_options import (
@@ -74,24 +77,37 @@ from .._shared.timeouts import (
     idle_guarded,
     idle_timeout_of,
 )
-from .client import assert_request_auth, build_beta_features, create_client
+from .._shared.transcript import (
+    get_current_tools,
+    normalize_context,
+    resolve_transcript,
+)
+from .client import (
+    anthropic_federation_config,
+    assert_request_auth,
+    build_beta_features,
+    create_client,
+    resolve_beta_features,
+)
 from .compat import get_compat
 from .constrained import is_strict_tool_limit_error_message
 from .options import AnthropicEffort, AnthropicOptions
 from .params import build_params_with_meta, resolve_active_effort
+from .sse import AnthropicEventStream
 from .threads import (
     PreparedThreadRequest,
     prepare_thread_request,
     record_thread_reply,
     send_thread_request,
 )
+from .tool_names import from_claude_code_name
 
 # 流式期内的内容块（文档化的可变累积器——数据建模标准规则 1 例外）
 ContentBlock = Union[TextContent, ThinkingContent, ToolCall]
 
 
-def _transformation_field(entry: Any, name: str) -> Any:
-    """input_transformation 条目的字段读取（SDK 对象/dict 双形态——extra 直通）。"""
+def _extra_field(entry: Any, name: str) -> Any:
+    """SDK extra 残余的边界读取（dict/对象双形态；仅此归一口使用）。"""
     if isinstance(entry, dict):
         return entry.get(name)
     return getattr(entry, name, None)
@@ -175,6 +191,9 @@ def _remap_stream_error(error: Exception) -> Exception:
         return error
     error_type = err_obj.get("type")
     if not isinstance(error_type, str):
+        return error
+    if error_type == "invalid_request_error":
+        # 通用 400 不得压过更具体的 overflow/quota 文案分类。
         return error
     if error_type == "rate_limit_error":
         # 同型两种语义：文案命中限额词表 → 不声明（归一第 3 级接管）；
@@ -274,6 +293,8 @@ def stream(
         # 服务端对入参的改写留痕（对齐 TS inputTransformations——
         # message_start / message_delta 两处读，成功收尾落诊断）
         input_transformations: Optional[List[Any]] = None
+        saw_message_start = False
+        saw_message_stop = False
 
         def finish_block(position: int) -> None:
             if position in finished_positions:
@@ -293,14 +314,12 @@ def stream(
                     )
                 )
             elif block.type == "toolCall":
-                parser = tool_call_parsers.get(position)
-                parsed = (
-                    parser.finish()
-                    if parser is not None
-                    else parse_streaming_json(block.partial_args)
-                )
-                if isinstance(parsed, dict):
-                    block.arguments = parsed
+                # 起始 tool_use.input 是 SDK 担保的完整字典；只有实际收到
+                # input_json_delta 时才以累积文本的严格终值覆盖它。
+                if block.partial_args:
+                    parsed = parse_tool_call_arguments(block.partial_args)
+                    block.arguments = parsed.arguments
+                    block.arguments_error = parsed.arguments_error
                 # 瞬态缓冲清零——回放只携带解析后的 arguments
                 block.partial_args = None
                 block.stream_index = None
@@ -320,6 +339,12 @@ def stream(
             options_headers = options.headers if options else None
 
             compat = get_compat(model)
+            current_tools = get_current_tools(
+                resolve_transcript(
+                    normalize_context(context),
+                    compat.supports_mid_convo_system_messages,
+                )
+            )
             cache_retention = resolve_cache_retention(
                 options.cache_retention if options else None,
                 options.env if options else None,
@@ -345,12 +370,22 @@ def stream(
                 # 注入的预建客户端（对齐 TS options.client）：跳过内部构造，
                 # 属主归调用方（finally 不关闭）。注入路径不做鉴权断言
                 # （对齐 TS——客户端自带鉴权情形合法，如 Vertex 变体）
-                client = injected_client
+                # 与 pi 的 requestOptions.maxRetries=0 对位：派生客户端共享
+                # 原传输与凭据缓存，但关闭不可取消的 SDK 内建重试；所有权仍
+                # 归调用方，finally 不关闭它或原 client。
+                client = injected_client.with_options(max_retries=0)
                 is_oauth = False
                 owns_client = False
             else:
-                # 自建路径才断言鉴权（对齐 TS——assert 在 createClient 分支内）
-                assert_request_auth(model.provider, api_key, options_headers)
+                federation = anthropic_federation_config(
+                    model,
+                    api_key,
+                    options_headers,
+                    options.env if options else None,
+                )
+                # 自建路径才断言鉴权；完整 federation 配置本身就是凭据来源。
+                if federation is None:
+                    assert_request_auth(model.provider, api_key, options_headers)
                 client, is_oauth = create_client(
                     model,
                     context,
@@ -361,6 +396,7 @@ def stream(
                     interleaved_thinking=interleaved_thinking,
                     # pi `thinkingEnabled === true` 严格语义（显式真才算）
                     thinking_enabled=getattr(options, "thinking_enabled", None) is True,
+                    federation=federation,
                 )
             knob_s = options.timeout if options else None
             # connect/pool 恒工程上限；read/write 随旋钮（None=引擎默认，
@@ -385,16 +421,19 @@ def stream(
             thread_session_id = (
                 cache_session_id if compat.supports_message_threads else None
             )
-            betas = build_beta_features(
+            beta_resolution = resolve_beta_features(
                 model,
-                context,
-                compat,
-                interleaved_thinking=interleaved_thinking,
-                # 与 create_client 调用点同参（指纹与线上 beta 头同构——
-                # 漏传会让 interleaved 在注入 client 与指纹两侧同时缺位）
-                thinking_enabled=getattr(options, "thinking_enabled", None) is True,
-                session_id=thread_session_id,
+                options_headers,
+                build_beta_features(
+                    model,
+                    context,
+                    compat,
+                    interleaved_thinking=interleaved_thinking,
+                    thinking_enabled=getattr(options, "thinking_enabled", None) is True,
+                    session_id=thread_session_id,
+                ),
             )
+            betas = beta_resolution.values
             disable_continuation = bool(
                 getattr(options, "disable_continuation", None) if options else False
             )
@@ -423,7 +462,15 @@ def stream(
                         extra_body[key] = value
                 if extra_body:
                     request_params["extra_body"] = extra_body
-                if not owns_client and betas:
+                if not owns_client and beta_resolution.overridden:
+                    request_params["extra_headers"] = {
+                        "anthropic-beta": (
+                            omit
+                            if beta_resolution.raw_override is None
+                            else beta_resolution.raw_override
+                        )
+                    }
+                elif not owns_client and betas:
                     request_params["extra_headers"] = {
                         "anthropic-beta": ",".join(betas)
                     }
@@ -506,7 +553,11 @@ def stream(
                 # 必关流（raw_response 到手与流建成之间不允许存在无管护窗口：
                 # 注入 client（owns_client=False）的路径没有 client.close()
                 # 兜底，连接只能靠 GC）
-                anthropic_stream = await raw_response.parse()
+                anthropic_stream = AnthropicEventStream(
+                    cast_to=cast(Any, RawMessageStreamEvent),
+                    response=raw_response.http_response,
+                    client=client,
+                )
 
                 if options and options.on_response:
                     response_result = options.on_response(
@@ -526,6 +577,16 @@ def stream(
                 async for event in idle_guarded(
                     anthropic_stream, idle_timeout_of(knob_s)
                 ):
+                    if options and options.on_provider_stream_event:
+                        callback_result = options.on_provider_stream_event(
+                            event, ModelIdentity.from_model(model)
+                        )
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
+                    if event.type == "message_start":
+                        saw_message_start = True
+                    elif event.type == "message_stop":
+                        saw_message_stop = True
                     if event.type == "message_start":
                         output.response_id = event.message.id
                         # 仅当实际服务模型与请求不同才落（对齐 TS——
@@ -565,11 +626,13 @@ def stream(
                         output.usage.cache_write = (
                             usage.cache_creation_input_tokens or 0
                         )
-                        cache_creation = usage.cache_creation
+                        cache_creation = _extra_field(usage, "cache_creation")
                         if cache_creation is not None:
-                            # 1h 细分缺席落 0（对齐 TS `|| 0`——不产 None 歧义）
                             output.usage.cache_write_1h = (
-                                cache_creation.ephemeral_1h_input_tokens or 0
+                                _extra_field(
+                                    cache_creation, "ephemeral_1h_input_tokens"
+                                )
+                                or 0
                             )
                         # Anthropic 不报 total_tokens——分量求和（对齐 TS）
                         output.usage.total_tokens = (
@@ -579,6 +642,7 @@ def stream(
                             + output.usage.cache_write
                         )
                         calculate_cost(usage_model, output.usage)
+                        apply_openrouter_reported_cost(output.usage, usage, usage_model)
 
                     elif event.type == "content_block_start":
                         block_param = event.content_block
@@ -630,7 +694,13 @@ def stream(
                             block = ToolCall(
                                 type="toolCall",
                                 id=block_param.id,
-                                name=block_param.name,
+                                name=(
+                                    from_claude_code_name(
+                                        block_param.name, current_tools
+                                    )
+                                    if is_oauth
+                                    else block_param.name
+                                ),
                                 arguments=dict(block_param.input or {}),
                                 partial_args="",
                                 stream_index=event.index,
@@ -704,6 +774,10 @@ def stream(
                         position = positions.get(event.index)
                         if position is not None:
                             finish_block(position)
+                            # 已关闭的块不再接受晚到 delta；否则 text_end 与最终
+                            # 消息会分裂，tool 终值也可能被重写。
+                            positions.pop(event.index, None)
+                            tool_call_parsers.pop(position, None)
 
                     elif event.type == "message_delta":
                         # 服务端入参改写留痕（对齐 TS——message_delta 处覆盖式再读）
@@ -738,12 +812,12 @@ def stream(
                                 )
                             # 1h 缓存细分（对齐 TS——Vercel 网关在 delta 段报
                             # ephemeral_1h_input_tokens；SDK extra 直通）
-                            _cache_creation = getattr(
-                                event.usage, "cache_creation", None
+                            _cache_creation = _extra_field(
+                                event.usage, "cache_creation"
                             )
                             if _cache_creation is not None:
-                                _e1h = getattr(
-                                    _cache_creation, "ephemeral_1h_input_tokens", None
+                                _e1h = _extra_field(
+                                    _cache_creation, "ephemeral_1h_input_tokens"
                                 )
                                 if _e1h is not None:
                                     output.usage.cache_write_1h = _e1h
@@ -763,12 +837,16 @@ def stream(
                                 + output.usage.cache_write
                             )
                             calculate_cost(usage_model, output.usage)
+                            apply_openrouter_reported_cost(
+                                output.usage, event.usage, usage_model
+                            )
 
                 finish_all_blocks()
 
-                # 截断检测（有意分歧 TS：TS 手解 SSE 能看到 message_stop；SDK 的
-                # typed stream 不产出它）——stop_reason 是我们的终态信号：
-                # 提前断流必然没有 message_delta，stop_reason 停在 PENDING
+                # SDK typed stream 同样产出 message_stop。见过 start 却缺 stop
+                # 即传输截断；不得成功收尾，更不得写入 thread 台账。
+                if saw_message_start and not saw_message_stop:
+                    raise Exception("Anthropic stream ended before message_stop")
                 if output.stop_reason == StopReason.PENDING:
                     raise Exception("Anthropic stream ended without a stop reason")
                 if output.stop_reason in (StopReason.ABORTED, StopReason.ERROR):
@@ -776,7 +854,9 @@ def stream(
 
                 # 干净回复落账：会话下一请求可从此续接（对齐 pi recordThreadReply）
                 if thread is not None:
-                    record_thread_reply(model, thread, params, output, compat, betas)
+                    record_thread_reply(
+                        model, thread, params, output, compat, betas, is_oauth=is_oauth
+                    )
 
                 # 服务端入参改写留痕上诊断（对齐 TS anthropic_input_transformations）
                 if input_transformations:
@@ -787,9 +867,9 @@ def stream(
                             "details": {
                                 "transformations": [
                                     {
-                                        "type": _transformation_field(t, "type"),
-                                        "path": _transformation_field(t, "path"),
-                                        "reason": _transformation_field(t, "reason"),
+                                        "type": _extra_field(t, "type"),
+                                        "path": _extra_field(t, "path"),
+                                        "reason": _extra_field(t, "reason"),
                                     }
                                     for t in input_transformations
                                 ]
@@ -826,7 +906,7 @@ def stream(
                 # yield）——先经 _remap_stream_error 把 error.type 贴回自声明
                 # kind，再归一
                 normalized_error = normalize_error(
-                    _remap_stream_error(error), domain="stream"
+                    _remap_stream_error(error), domain="stream", provider=model.provider
                 )
                 output.error_message = normalized_error.message
                 if output.error_kind is None:
@@ -906,8 +986,14 @@ def stream_simple(
             options.thinking_budgets,
         )
         max_tokens = clamp_max_tokens_to_context(model, context, adjusted_max)
-        # 预算与答案共享 max_tokens——给答案留 1024（对齐 TS）
+        # 预算与答案共享 max_tokens；若窗口连最小合法预算都容不下，
+        # 响亮失败，绝不发 max_tokens=1/budget_tokens=1024 的非法组合。
         thinking_budget_tokens = min(adjusted_budget, max(0, max_tokens - 1024))
+        if thinking_budget_tokens < 1024:
+            raise ValueError(
+                "Not enough context room for Anthropic thinking: "
+                "budget_tokens must be at least 1024 and below max_tokens"
+            )
 
     anthropic_options = AnthropicOptions(
         # 逐字段拷贝有意为之（asdict 会 deepcopy signal——克隆取消信号是
@@ -924,6 +1010,7 @@ def stream_simple(
         env=base.env,
         on_payload=base.on_payload,
         on_response=base.on_response,
+        on_provider_stream_event=base.on_provider_stream_event,
         metadata=base.metadata,
         timeout=base.timeout,
         max_retries=base.max_retries,

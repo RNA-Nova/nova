@@ -84,6 +84,7 @@ export interface AssistantMessage {
   providerThinkingLevel: string | null;
   diagnostics: Record<string, unknown>[] | null;
   timestamp: number;
+  durationMs: number | null;
 }
 
 export interface AutoCompactionEndEvent {
@@ -252,6 +253,7 @@ export interface Cost {
   cacheRead: number;
   cacheWrite: number;
   total: number;
+  totalFromProvider: boolean | null;
 }
 
 export interface CreateSessionParams {
@@ -1105,6 +1107,7 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  argumentsError: string | null;
   thoughtSignature: string | null;
   partialArgs: string | null;
   streamIndex: number | null;

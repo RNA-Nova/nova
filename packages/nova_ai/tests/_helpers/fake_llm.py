@@ -150,14 +150,16 @@ def oai_chunk(
 
 
 def oai_tool_call(
-    index: int = 0,
+    index: Optional[int] = 0,
     *,
     id: Optional[str] = None,
     name: Optional[str] = None,
     arguments: Optional[str] = None,
 ) -> Dict[str, Any]:
     """构造 chunk 的 tool_calls delta 项（分片到达时逐字段一个 delta）。"""
-    item: Dict[str, Any] = {"index": index}
+    item: Dict[str, Any] = {}
+    if index is not None:
+        item["index"] = index
     if id is not None:
         item["id"] = id
     function: Dict[str, Any] = {}
@@ -377,9 +379,17 @@ def ant_redacted_thinking_block(index: int = 0, *, data: str) -> AntFrame:
     return ant_block_start(index, {"type": "redacted_thinking", "data": data})
 
 
-def ant_tool_use_block(index: int, *, id: str, name: str) -> AntFrame:
+def ant_tool_use_block(
+    index: int, *, id: str, name: str, input: Optional[Dict[str, Any]] = None
+) -> AntFrame:
     return ant_block_start(
-        index, {"type": "tool_use", "id": id, "name": name, "input": {}}
+        index,
+        {
+            "type": "tool_use",
+            "id": id,
+            "name": name,
+            "input": input if input is not None else {},
+        },
     )
 
 

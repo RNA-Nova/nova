@@ -35,7 +35,9 @@ _UTILS_MODULES = frozenset(
 
 _SHARED_MODULES = frozenset(
     {
+        "constrained.py",
         "copilot_headers.py",
+        "openrouter_cost.py",
         "prompt_cache.py",
         "retry.py",
         "simple_options.py",

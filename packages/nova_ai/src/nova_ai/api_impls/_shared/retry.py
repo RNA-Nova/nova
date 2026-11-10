@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Awaitable, Callable, Optional, TypedDict, TypeVar
 
+import anthropic
 import httpx
 import httpx2
 from nova_async import abortable_sleep, backoff_delay_ms
@@ -40,26 +41,22 @@ def _abort_error() -> AbortedError:
 
 
 def _is_retryable_provider_error(error: Exception) -> bool:
-    """镜像 OpenAI/Anthropic SDK 的固定重试判定；SDK 升级时需同步复核。"""
-    should_retry = get_header(headers_of(error), "x-should-retry")
-    if should_retry == "true":
-        return True
-    if should_retry == "false":
-        return False
-
-    status = status_code_of(error)
-    if status is not None:
-        return status == 408 or status == 409 or status == 429 or status >= 500
-    # 无状态码：仅连接层/超时错误可重试——编程错误（TypeError 等）
-    # 也无状态码，一律重试会把失败掩盖成慢失败
-    if isinstance(error, (ConnectionError, TimeoutError)):
-        return True
-    # 两个 SDK 的连接错误都不继承内建 ConnectionError（openai/anthropic 的
-    # APIConnectionError 把 httpx/httpx2 传输错误包进 __cause__ 链）——沿链找
-    # （iter_cause_chain 带环保护：respx SideEffectError 会造 A↔B 循环链）
+    """沿 cause 链镜像 OpenAI/Anthropic SDK 的固定重试判定。"""
+    # SDK 的包装错误可能把状态码/显式 RetryableError 放在内层；逐层按
+    # 离调用方最近的证据裁决（环保护防畸形异常链死循环）。
     for cause in iter_cause_chain(error):
-        if cause is error:
-            continue
+        if isinstance(cause, anthropic.RetryableError):
+            return True
+        should_retry = get_header(headers_of(cause), "x-should-retry")
+        if should_retry == "true":
+            return True
+        if should_retry == "false":
+            return False
+        status = status_code_of(cause)
+        if status is not None:
+            return status == 408 or status == 409 or status == 429 or status >= 500
+        if isinstance(cause, (ConnectionError, TimeoutError)):
+            return True
         if isinstance(cause, (httpx.TransportError, httpx2.TransportError)):
             return True
     return False

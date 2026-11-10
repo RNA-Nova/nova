@@ -8,11 +8,18 @@ from pydantic import ValidationError
 
 
 def oauth_http_kind(status_code: int) -> NovaErrorKind:
-    """OAuth 端点 HTTP 状态 → kind：4xx 多为授权拒绝/凭据失效
-    （``UNAUTHORIZED``——重登录语义），5xx 为对端故障（``UPSTREAM_ERROR``）。"""
+    """OAuth 端点 HTTP 状态 → 标准诊断分类；只有凭据失败才要求重登录。"""
+    if status_code in (401, 403):
+        return NovaErrorKind.UNAUTHORIZED
+    if status_code == 408:
+        return NovaErrorKind.REQUEST_TIMEOUT
+    if status_code in (409, 529):
+        return NovaErrorKind.OVERLOADED
+    if status_code == 429:
+        return NovaErrorKind.RATE_LIMITED
     if status_code >= 500:
         return NovaErrorKind.UPSTREAM_ERROR
-    return NovaErrorKind.UNAUTHORIZED
+    return NovaErrorKind.BAD_REQUEST
 
 
 class OAuthFlowError(RuntimeError):
@@ -83,5 +90,5 @@ def response_error_detail(response: httpx.Response) -> str:
         if isinstance(error, dict):
             code = error.get("code")
             if isinstance(code, str) and code:
-                return code
+                return redact_secrets(code)
     return response.reason_phrase or f"HTTP {response.status_code}"

@@ -5,6 +5,10 @@ temperature 与思考互斥、思考三形态、工具即刻/延迟组、tool_ch
 metadata、sampling_params 不合入（anthropic 无自由负载通道——对齐 TS）。
 """
 
+import pytest
+from nova_ai.api_impls.anthropic_messages.compat import get_compat
+from nova_ai.api_impls.anthropic_messages.options import AnthropicOptions
+from nova_ai.api_impls.anthropic_messages.params import build_params
 from nova_protocol import (
     AnthropicMessagesCompat,
     AssistantMessage,
@@ -17,14 +21,11 @@ from nova_protocol import (
     SystemMessage,
     TextContent,
     Tool,
+    ToolCall,
     ToolResultMessage,
     Usage,
     UserMessage,
 )
-
-from nova_ai.api_impls.anthropic_messages.compat import get_compat
-from nova_ai.api_impls.anthropic_messages.options import AnthropicOptions
-from nova_ai.api_impls.anthropic_messages.params import build_params
 
 
 def _model(compat=None, reasoning=True, thinking_level_map=None) -> Model:
@@ -616,3 +617,40 @@ class TestMisc:
             AnthropicOptions(sampling_params={"top_p": 0.9}),
         )
         assert "top_p" not in params
+
+    def test_explicit_zero_max_tokens_for_cache_warming(self):
+        params = build_params(
+            _model(),
+            Context(messages=[UserMessage(content="warm")]),
+            AnthropicOptions(max_tokens=0),
+        )
+        assert params["max_tokens"] == 0
+
+    def test_oauth_tool_names_cover_definitions_and_history(self):
+        assistant = AssistantMessage(
+            content=[ToolCall(id="t1", name="read", arguments={"path": "a"})]
+        )
+        params = build_params(
+            _model(),
+            Context(
+                messages=[UserMessage(content="hi"), assistant],
+                tools=[_tool("read")],
+            ),
+            AnthropicOptions(),
+            is_oauth=True,
+        )
+        assert params["tools"][0]["name"] == "Read"
+        assistant_param = next(
+            m for m in params["messages"] if m["role"] == "assistant"
+        )
+        assert assistant_param["content"][0]["name"] == "Read"
+
+    def test_invalid_thinking_budget_never_goes_on_wire(self):
+        with pytest.raises(ValueError, match="budget_tokens"):
+            build_params(
+                _model(),
+                Context(messages=[UserMessage(content="hi")]),
+                AnthropicOptions(
+                    max_tokens=1, thinking_enabled=True, thinking_budget_tokens=0
+                ),
+            )

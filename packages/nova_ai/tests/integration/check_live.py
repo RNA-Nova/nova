@@ -9,20 +9,18 @@
 
 用法::
 
-    pixi run -e dev check-live            # 全量巡检
-    python catalog/check_live_providers.py --provider volcengine
+    pixi run -e dev check-live  # 全量巡检
 """
 
 import argparse
 import asyncio
 import sys
-from pathlib import Path
 
-from nova_protocol import Context, UserMessage  # noqa: E402
+from nova_ai.stream_options import SimpleStreamOptions
+from nova_protocol import Context, UserMessage
 
-from nova_ai.stream_options import SimpleStreamOptions  # noqa: E402
-from tests.integration._helpers.auth import build_manager, has_credential  # noqa: E402
-from tests.integration._helpers.probes import E2E_PROVIDERS  # noqa: E402
+from ._helpers.auth import build_manager, has_credential
+from ._helpers.probes import E2E_PROVIDERS
 
 _TIMEOUT_S = 120
 
@@ -56,8 +54,12 @@ async def _check_model(manager, provider_id: str, model) -> list:
 
 
 async def _run(provider_filter) -> int:
+    if provider_filter and provider_filter not in E2E_PROVIDERS:
+        print(f"未知 provider: {provider_filter}", file=sys.stderr)
+        return 2
     manager = await build_manager()
     failures = 0
+    checked = 0
     for provider_id in E2E_PROVIDERS:
         if provider_filter and provider_id != provider_filter:
             continue
@@ -68,13 +70,17 @@ async def _run(provider_filter) -> int:
         print(f"== {provider_id}（{len(models)} 模型）")
         for model in models:
             results = await _check_model(manager, provider_id, model)
+            checked += len(results)
             bad = [r for r in results if not r[1]]
             status = "OK" if not bad else f"FAIL（{len(bad)}/{len(results)}）"
             print(f"  {model.id}: {status}")
             for name, ok, error in bad:
                 print(f"    - {name}: {error[:160]}")
             failures += len(bad)
-    print(f"\n巡检完成，失败 {failures} 例")
+    print(f"\n巡检完成，检查 {checked} 例，失败 {failures} 例")
+    if checked == 0:
+        print("没有实际执行任何巡检用例", file=sys.stderr)
+        return 2
     return 1 if failures else 0
 
 

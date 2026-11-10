@@ -8,20 +8,6 @@ baseten chat_template_args、streamSimple thinking_budgets 透传。
 import json
 
 import pytest
-from nova_protocol import (
-    AssistantMessage,
-    Context,
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
-    OpenAICompletionsCompat,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    UserMessage,
-)
-
 from nova_ai.api_impls._shared.simple_options import (
     clamp_thinking_budget_to_answer_room,
     thinking_budget_for_level,
@@ -36,6 +22,19 @@ from nova_ai.api_impls.openai_completions import (
     parse_openai_reasoning_details,
 )
 from nova_ai.stream_options import ThinkingBudgets
+from nova_protocol import (
+    AssistantMessage,
+    Context,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    OpenAICompletionsCompat,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    UserMessage,
+)
 
 
 def _model(**overrides) -> Model:
@@ -66,9 +65,8 @@ def _ctx(*messages) -> Context:
 
 def test_mid_convo_system_passthrough_when_supported():
     """旗标为真：中途 system 消息逐条呈现为 system 条目（名化变更文本）。"""
-    from nova_protocol import OpenAICompletionsCompat, SystemMessage
-
     from nova_ai.api_impls.openai_completions import convert_messages
+    from nova_protocol import OpenAICompletionsCompat, SystemMessage
 
     ctx = _ctx(
         UserMessage(content="q1"),
@@ -89,9 +87,8 @@ def test_mid_convo_system_passthrough_when_supported():
 
 def test_mid_convo_system_collapses_when_unsupported():
     """旗标为假：中途变更折叠进头部，无多余 system 条目。"""
-    from nova_protocol import OpenAICompletionsCompat, SystemMessage
-
     from nova_ai.api_impls.openai_completions import convert_messages
+    from nova_protocol import OpenAICompletionsCompat, SystemMessage
 
     ctx = _ctx(
         UserMessage(content="q1"),
@@ -316,9 +313,8 @@ def test_normalize_tool_call_id_truncates_over_40_with_hash():
 def test_non_null_assistant_content_flag_rewrites_null():
     """requiresNonNullAssistantContent：assistant 的 null content 改写空串
     （对齐 TS 14b804d80）；缺省 false 时保持 null。"""
-    from nova_protocol import OpenAICompletionsCompat
-
     from nova_ai.api_impls.openai_completions import convert_messages
+    from nova_protocol import OpenAICompletionsCompat
 
     assistant = AssistantMessage(
         role="assistant",
@@ -342,12 +338,12 @@ def test_non_null_assistant_content_flag_rewrites_null():
     assert assistant_param["content"] == ""
 
 
-def test_tool_choice_omitted_without_tools():
-    """tools 为空时不发 tool_choice（严格端点对"有 choice 无 tools"会 400）。"""
+def test_tool_choice_is_explicit_even_without_tools():
+    """显式 tool_choice 原样透传（对齐 pi），不由本地工具列表反推。"""
     model = _model()
     ctx = _ctx(UserMessage(content="hi"))
     params = build_params(model, ctx, OpenAICompletionsOptions(tool_choice="auto"))
-    assert "tool_choice" not in params
+    assert params["tool_choice"] == "auto"
 
 
 def test_cache_control_covers_tool_result_message():
@@ -536,3 +532,13 @@ def test_build_params_with_generic_base_options():
     # 无 options 对象
     params = build_params(model, ctx, None)
     assert params["model"] == "test-model"
+
+
+def test_reasoning_detail_merge_does_not_invent_null_fields():
+    from nova_ai.api_impls.openai_completions.reasoning import (
+        append_openai_reasoning_detail,
+    )
+
+    details = [{"type": "reasoning.text", "text": "a"}]
+    append_openai_reasoning_detail(details, {"type": "reasoning.text", "text": "b"})
+    assert details == [{"type": "reasoning.text", "text": "ab"}]

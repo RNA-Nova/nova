@@ -15,6 +15,7 @@ Provider 错误的归一（``docs/crosscutting/diagnostics-modeling.md`` 归一�
 """
 
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -164,9 +165,10 @@ def format_provider_error(
 # 错误分类词表（按家族集中——单一正典源，每条 pattern 注出处）
 # ---------------------------------------------------------------------------
 
-# 溢出错误模式：匹配输入超出模型上下文窗口时的错误消息（对齐 TS overflow 模式库）
+# 溢出错误模式：匹配输入超出模型上下文窗口时的错误消息（对齐 pi overflow 模式库）
 OVERFLOW_PATTERNS: List[re.Pattern] = [
-    re.compile(r"prompt is too long", re.IGNORECASE),  # Anthropic
+    re.compile(r"prompt (?:is )?too long", re.IGNORECASE),  # Anthropic / z.ai
+    re.compile(r"prompt exceeds max length", re.IGNORECASE),  # z.ai CN
     re.compile(r"request_too_large", re.IGNORECASE),  # Anthropic HTTP 413
     re.compile(r"input is too long for requested model", re.IGNORECASE),  # Bedrock
     re.compile(r"exceeds the context window", re.IGNORECASE),  # OpenAI
@@ -174,6 +176,7 @@ OVERFLOW_PATTERNS: List[re.Pattern] = [
         r"exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))",
         re.IGNORECASE,
     ),  # OpenAI-compatible proxies
+    re.compile(r"context window exceeded", re.IGNORECASE),  # LiteLLM 预检
     re.compile(r"input token count.*exceeds the maximum", re.IGNORECASE),  # Google
     re.compile(r"maximum prompt length is \d+", re.IGNORECASE),  # xAI
     re.compile(r"reduce the length of the messages", re.IGNORECASE),  # Groq
@@ -198,22 +201,26 @@ OVERFLOW_PATTERNS: List[re.Pattern] = [
         r"prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?",
         re.IGNORECASE,
     ),  # DS4
-    re.compile(
-        r"model_context_window_exceeded", re.IGNORECASE
-    ),  # z.ai non-standard finish_reason
+    re.compile(r"model_context_window_exceeded", re.IGNORECASE),  # z.ai finish_reason
     re.compile(
         r"prompt too long; exceeded (?:max )?context length", re.IGNORECASE
     ),  # Ollama
+    re.compile(r"range of input length should be", re.IGNORECASE),  # DashScope/Qwen
     re.compile(r"context[_ ]length[_ ]exceeded", re.IGNORECASE),  # Generic
     re.compile(r"too many tokens", re.IGNORECASE),  # Generic
     re.compile(r"token limit exceeded", re.IGNORECASE),  # Generic
+    re.compile(r"context[_ ]?window[_ ]?exceeded", re.IGNORECASE),  # LiteLLM 等
+    # HTTP 413 是请求大小溢出；只匹配消息前缀，不匹配正文里偶然提到的状态码。
     re.compile(
-        r"context[_ ]?window[_ ]?exceeded", re.IGNORECASE
-    ),  # LiteLLM 预检（ContextWindowExceededError："Context Window exceeded for given call"）
-    re.compile(
-        r"^4(?:00|13)\s*(?:status code)?\s*\(no body\)", re.IGNORECASE
-    ),  # Cerebras
+        r"^(?:[\w -]+ API error \(413\):|(?:Error code:\s*)?413(?:\s|:|-|$))",
+        re.IGNORECASE,
+    ),
 ]
+
+CEREBRAS_BODYLESS_OVERFLOW_PATTERN = re.compile(
+    r"^4(?:00|13)\s*(?:status code)?\s*\(no body\)", re.IGNORECASE
+)
+"""Cerebras 特有的无 body 400/413 溢出形状，不得全局套用。"""
 
 # 非溢出错误模式（限流、服务器错误等）——命中即否决溢出判定
 NON_OVERFLOW_PATTERNS: List[re.Pattern] = [
@@ -276,6 +283,14 @@ class RequestTimeoutError(TimeoutError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.nova_error_kind = NovaErrorKind.REQUEST_TIMEOUT
+
+
+class StreamDisconnectedError(RuntimeError):
+    """流在协议终态前断开（自声明 STREAM_DISCONNECTED，允许上层重试）。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.nova_error_kind = NovaErrorKind.STREAM_DISCONNECTED
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -357,22 +372,27 @@ def provider_error_metadata_raw(error: BaseException) -> Optional[str]:
 
 
 def extract_retry_after_ms(headers: Any) -> Optional[float]:
-    """``retry-after-ms`` / ``retry-after`` 头 → 毫秒（无法解析返回 None）。"""
+    """``retry-after-ms`` / ``retry-after`` 头 → 有限毫秒数；非法值落本地退避。"""
+
+    def _finite(value: float) -> Optional[float]:
+        return value if math.isfinite(value) else None
+
     retry_after_ms = get_header(headers, "retry-after-ms")
     if retry_after_ms:
         try:
-            return float(retry_after_ms)
+            return _finite(float(retry_after_ms))
         except ValueError:
             pass
     retry_after = get_header(headers, "retry-after")
     if retry_after:
         try:
-            return float(retry_after) * 1000
+            return _finite(float(retry_after) * 1000)
         except ValueError:
             try:
-                return (
-                    parsedate_to_datetime(retry_after).timestamp() - time.time()
-                ) * 1000
+                return _finite(
+                    (parsedate_to_datetime(retry_after).timestamp() - time.time())
+                    * 1000
+                )
             except Exception:
                 return None
     return None
@@ -500,10 +520,13 @@ def _matches_any(patterns: List[re.Pattern], text: str) -> bool:
     return any(pattern.search(text) for pattern in patterns)
 
 
-def _is_overflow_text(text: str) -> bool:
-    """溢出词表判定（NON_OVERFLOW 命中即否决——与 overflow.py 同语义）。"""
-    return not _matches_any(NON_OVERFLOW_PATTERNS, text) and _matches_any(
-        OVERFLOW_PATTERNS, text
+def _is_overflow_text(text: str, provider: Optional[str] = None) -> bool:
+    """溢出词表判定；Cerebras 无 body 特判只在该 provider 下生效。"""
+    if _matches_any(NON_OVERFLOW_PATTERNS, text):
+        return False
+    return _matches_any(OVERFLOW_PATTERNS, text) or (
+        provider == "cerebras"
+        and CEREBRAS_BODYLESS_OVERFLOW_PATTERN.search(text) is not None
     )
 
 
@@ -526,7 +549,9 @@ def _retry_after_ms_chain(error: BaseException) -> Optional[float]:
     return None
 
 
-def normalize_error(error: Any, *, domain: Optional[str] = None) -> NormalizedError:
+def normalize_error(
+    error: Any, *, domain: Optional[str] = None, provider: Optional[str] = None
+) -> NormalizedError:
     """任意异常 → ``NormalizedError``（六级阶梯，全栈唯一分类函数）。
 
     阶梯：**自声明**（``nova_error_kind``，沿 ``__cause__`` 链取最近一份
@@ -542,7 +567,8 @@ def normalize_error(error: Any, *, domain: Optional[str] = None) -> NormalizedEr
         return NormalizedError(
             kind=NovaErrorKind.INTERNAL,
             message=_truncate_error_text(
-                _safe_json_stringify(error), MAX_NORMALIZED_MESSAGE_CHARS
+                redact_secrets(_safe_json_stringify(error)),
+                MAX_NORMALIZED_MESSAGE_CHARS,
             ),
             retryable=False,
             domain=domain,
@@ -560,7 +586,7 @@ def normalize_error(error: Any, *, domain: Optional[str] = None) -> NormalizedEr
     kind: NovaErrorKind
     if declared_kind is not None:
         kind = declared_kind
-    elif _is_overflow_text(text):
+    elif _is_overflow_text(text, provider):
         kind = NovaErrorKind.CONTEXT_OVERFLOW
     elif _matches_any(USAGE_LIMIT_PATTERNS, text):
         kind = NovaErrorKind.USAGE_LIMIT_EXCEEDED

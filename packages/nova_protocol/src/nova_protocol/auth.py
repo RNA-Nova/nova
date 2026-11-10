@@ -392,6 +392,8 @@ class OAuthAuth:
         [OAuthCredential, Optional[AbortSignal]], Awaitable[OAuthCredential]
     ]
     to_auth: Callable[[OAuthCredential], Awaitable[ModelAuth]]
+    # 该登录方式是否由 provider 订阅套餐支撑（订阅计费/用量语义）。
+    is_subscription: Optional[bool] = None
     login_label: Optional[str] = None
 
 

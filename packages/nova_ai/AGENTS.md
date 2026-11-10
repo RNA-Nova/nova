@@ -30,7 +30,7 @@
 | 开发依赖 | `pytest`、`pytest-asyncio` |
 | 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（需同装） |
 
-**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `coding-agent-py` 腿覆盖（ubuntu 单平台；CI 仅 nova_protocol/nova_async/nova-exec-server-client 以 editable 安装，其余兄弟包非 editable）；尚无独立的 nova_ai 测试腿与三平台矩阵。
+**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `ai-catalog-py` 腿覆盖（ubuntu 单平台：nova_ai 非集成 + nova_catalog + 模型数据门禁）；尚无线级/真实 API 的集成腿与三平台矩阵。
 
 ---
 
@@ -86,6 +86,7 @@ src/nova_ai/
 ├── api_impls/               # API 协议实现
 │   ├── _shared/             # 实现层共享件（transform_messages / simple_options / retry /
 │   │                        #   prompt_cache / copilot_headers / user_agent / timeouts /
+│   │                        #   constrained.py（跨协议 strict 引擎）+ openrouter_cost.py +
 │   │                        #   transcript——转录折叠机：normalize/resolve/get_current_tools/
 │   │                        #   resolve_transcript_tools 三模式分工，pi transcript.ts 对位）
 │   ├── openai_completions/  # OpenAI Completions（模块即满足 ProviderStreams）
@@ -94,9 +95,10 @@ src/nova_ai/
 │   │                        #   anyOf 子项补型，nova 特有厂商收窄）
 │   └── anthropic_messages/  # Anthropic Messages（官方 anthropic SDK，httpx2 底座）
 │                            #   options / compat / client / params / messages / _stream 分件
-│                            #   + constrained.py（strict 工具按工具裁决 + schema 净化 +
-│                            #   限量降级词表——pi constrained-sampling.ts 对位）
-│                            #   + threads.py（message threads 服务端续接——台账/指纹/
+│                            #   + sse.py（SDK 流接缝的有限 JSON 转义修复）+
+│                            #   tool_names.py（Claude Code OAuth 工具名双向规范化）+
+│                            #   constrained.py（Anthropic 限制词表；共享引擎归 _shared）+
+│                            #   threads.py（message threads 服务端续接——台账/指纹/
 │                            #   建线-续接-拒回退三态，pi a758f3ae4 对位）
 ├── session_resources.py     # 会话级资源清理注册处（threads 台账等——pi
 │                            #   session-resources.ts 对位）
@@ -115,7 +117,7 @@ src/nova_ai/
 │   │                        #   运行时零修正文件）
 │   ├── moonshotai_cn/       # 同上（DEF 共享 moonshotai 定义件）
 │   └── volcengine/          # models.py + provider.py + catalog.py（personalize 钩子：
-│                            #   ark 在售状态拉取+筛选——行为与旧回调一致）
+│                            #   ark 在售筛选；有凭据时失败保留旧成品，公共种子不读账户态）
 ├── auth/                    # 鉴权行为层（类型词汇住 nova_protocol.auth）
 │   ├── resolve.py           # resolve_provider_auth + ModelsError（ModelsErrorCode
 │   │                        #   六域 code + nova_error_kind 自声明）+ AuthResolutionOverrides
@@ -135,7 +137,7 @@ src/nova_ai/
     │                        #   SystemMessage 按呈现文本+sections+工具变更
     │                        #   完整 JSON 计，pi estimate.ts 对位）
     ├── model_utils.py       # calculate_cost、clamp/get_supported_thinking_levels 等
-    ├── json_parser.py       # 流式 JSON 片段解析（json-repair 封装 + 增量解析器）
+    ├── json_parser.py       # 流中容错预览 + 完整工具参数严格解析（arguments_error）
     ├── surrogate.py         # Unicode 代理项清理
     ├── overflow.py          # 上下文溢出检测（多厂商错误模式）
     ├── diagnostics.py       # append_diagnostic（AssistantMessage 诊断追加单点——
@@ -151,7 +153,7 @@ src/nova_ai/
    不存在全局注册表。`ModelsManager`（`gateway/models.py`）持有按 id 注册的 `Provider` 实例，负责鉴权解析（`getAuth`）、动态模型刷新（`refresh`）、登录/登出（`login`/`logout`）与 stream 派发（`_apply_auth` 合并 auth/model/options 的 apiKey、headers、env 后调用 `provider.stream*()`）。`stream*()` 同步返回事件流，auth 在后台异步解析，失败以 error 事件结束（`lazy_stream`）。Provider 找不到 API 实现时同样返回 error 流而非抛异常（StreamFunction 契约）。动态性为能力字段：`Provider.refresh_models` 为 None 即静态，注入策略闭包即动态——**刷新治理只有一份**（`gateway/strategies.py` 的策略工厂，两形态：overlay 纯站六件套 / personalized 站+账户钩子，pi `withRemoteCatalog`/`withPersonalizedCatalog` 对位），`create_provider` 装配链：`personalize` → personalized 策略（+replace 读取位）；仅 `catalog_source` → overlay 策略出生自带；皆无 → 静态（要自定义刷新就实现 `refresh_models` 裸口袋，pi 同款）。目录站为运行时共享资源：manager 持有 `CatalogServices` 容器（单站/dict 双形态，对位 `ApiImpl`），按 `Provider.catalog_source` 路由并经 `partial(service.fetch, provider.id)` 绑定后发放进 `RefreshModelsContext.catalog_fetch`——refresh 实现的可选能力；kimi/火山的私有鉴权拉取（managed 订阅源、ark 在售筛选）是各家目录的 `personalize` 钩子（装配参数，类型无痕），凭据与公开站都经 context 获取。
 
 2. **事件流模型**  
-   所有流式调用返回 `AssistantMessageEventStream`（`streaming.py`）。生产者 `push(event)`，消费者 `async for` 迭代；收到 `DoneEvent` / `ErrorEvent` 时解析出最终 `AssistantMessage`，可用 `await stream.result()` 获取。`end()` 后不可再迭代。
+   所有流式调用返回 `AssistantMessageEventStream`（`streaming.py`）。生产者 `push(event)`，消费者 `async for` 迭代；收到 `DoneEvent` / `ErrorEvent` 时解析出最终 `AssistantMessage`，可用 `await stream.result()` 获取。多个 result 等待者经 `asyncio.shield` 共享终值，单个等待者取消不毒化 Future；本流见证的响应由流写入 `duration_ms`，旧/延迟消息不盖戳。`end()` 后不可再迭代。
 
 3. **协议实现（当前两个）**  
    `api_impls/openai_completions/`（官方 `openai.AsyncOpenAI`）与 `api_impls/anthropic_messages/`（官方 `anthropic.AsyncAnthropic`，httpx2 底座）——模块即满足 `ProviderStreams` 契约；分件同构（compat / messages / client / params / _stream，openai 另有 reasoning）。openai_completions 的实现要点：
@@ -180,7 +182,7 @@ src/nova_ai/
    - **TypedDict / Protocol**：`ModelAuth` / `ApiKeyAuthInput`（dict 形状透传——声明不校验）、`ModelFields`/`ModelCostFields`（目录字段包形状，`Model(**fields)` 在目录边界一次性校验）、`AuthContext`/`CredentialStore`/`AuthInteraction`/`ProviderStreams`/`ModelsStore`/`CatalogService`（公开目录站契约；`CatalogServices` 容器形状与 `FetchCatalogFn` 为签名别名）。
 
 6. **Auth 解析链**  
-   `auth/resolve.py` 的优先级：调用方 apiKey override → 已存储 credential（OAuth 过期时在 per-provider 刷新锁内复查→刷新→写，防并发双刷）→ 环境变量等 ambient 来源。`ModelsManager.get_auth(model)` 额外合并 model 静态 headers；`transform_headers` 选项（`StreamOptions.transform_headers`）在 headers 合并完成后、provider 派发前最后运行，且不会派发给 provider。
+   `auth/resolve.py` 的优先级：调用方 apiKey override → 已存储 credential（OAuth 进入五分钟提前刷新窗时在 per-provider 刷新锁内复查→刷新→写，防并发双刷）→ 环境变量等 ambient 来源；`AuthResolutionOverrides.min_oauth_validity_ms` 可提高最小剩余有效期，刷新后仍不满足显式要求即报错。锁等待与尚未开始的刷新可取消；一旦进入轮转刷新，独立受管任务必须完成写盘，调用方取消只取消自己的等待（防丢失唯一新 refresh token）。请求头顺序为 provider 默认 < auth < model 静态/动态 < 调用方 options；`transform_headers` 最后运行且不派发给 provider。
 
 ---
 
@@ -229,8 +231,9 @@ tests/
 │                    #   双方言 SSE 构造器，codex wiremock 对位，见 testing-modeling §四.3）
 ├── integration/     # 特性契约 e2e（一特性一文件 + 探针矩阵（每 provider 一个最便宜
 │                    #   模型）+ `_helpers/` 凭据链/选型/提取件；`integration` 标记 +
-│                    #   enable_socket 解禁 + timeout 300s——默认套件密封不跑；
-│                    #   全模型可用性巡检归 nova_catalog/scripts/check_live_providers.py）
+│                    #   enable_socket 解禁 + timeout 300s；test-integration 任务额外
+│                    #   设 NOVA_RUN_INTEGRATION=1，默认收集期也不读真实 env/HOME；
+│                    #   全模型可用性巡检归 integration/check_live.py（python -m 模块入口））
 ├── fixtures/        # 测试图片等资源
 └── （根级）          # src 根模块（streaming / model_catalog / stream_options）+ 包级 meta（imports /
                      #   task_hygiene / placement 住所审计 / examples 保鲜 / model_data_freshness 门禁）
@@ -250,7 +253,7 @@ pixi run -e dev check-live                          # 全模型可用性巡检�
 ## 安全注意事项
 
 1. **API Key 来源**  
-   本包不在磁盘持久化密钥（credential 持久化由上层注入的 `CredentialStore` 实现负责，如 nova_harness 的 `~/.nova/agent/auth.json`）。环境变量映射在 `utils/env.py`（与 TS `env-api-keys.ts` 全量对齐）；GitHub Copilot 依次尝试 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`；Anthropic 优先 `ANTHROPIC_OAUTH_TOKEN`。
+   本包不在磁盘持久化密钥（credential 持久化由上层注入的 `CredentialStore` 实现负责，如 nova_harness 的 `~/.nova/agent/auth.json`）。环境变量映射在 `utils/env.py`（与 TS `env-api-keys.ts` 全量对齐）；GitHub Copilot 依次尝试 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`；Anthropic 顺序为存储 key → `ANTHROPIC_AUTH_TOKEN`（Bearer）→ `ANTHROPIC_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` → workload identity federation（配置经 env 交给官方 SDK 交换/刷新短期令牌）。
 2. **OAuth 流程**  
    `auth/oauth/` 实现 Kimi device code 与 OpenAI Codex（browser + device code）登录；回调页面模板在 `auth/oauth/oauth_page.py`。client_id 等常量硬编码在各自模块内，属公开客户端。
 3. **字符串安全**  

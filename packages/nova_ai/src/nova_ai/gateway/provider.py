@@ -111,6 +111,8 @@ class RefreshModelsContext:
 
     credential: Optional[Credential] = None
     """本次刷新生效的凭据（OAuth 已提前刷新）。"""
+    base_url: Optional[str] = None
+    """当前注册 provider 的生效 API 基址；私有目录源必须使用同一端点身份。"""
     stored: Optional[ModelsStoreEntry] = None
     """刷新开始前捕获的持久化目录只读快照（深拷贝，可安全持有）。"""
     publish: Optional[PublishFn] = None
@@ -183,6 +185,7 @@ class Provider:
     声明式 provider 的常态）。"""
     _baseline_models: List[Model] = field(default_factory=list)
     _dynamic_models: List[Model] = field(default_factory=list)
+    _dynamic_published: bool = False
     _api_impl: Optional[ApiImpl] = None
     _dynamic_replaces_baseline: bool = False
     """目录读取模式（装配置位——personalized 形态专属，pi
@@ -198,14 +201,17 @@ class Provider:
     def get_models(self) -> List[Model]:
         """返回该 provider 的模型列表（对齐 TS Provider.getModels）。
 
-        模型列表的唯一读取口——直读 ``_baseline_models`` 会漏掉动态
-        overlay/replace。两种形态：replace（``_dynamic_replaces_baseline``
-        且动态非空）整取代——账户个性化目录是全部真相（pi personalized
-        同款：空动态回退基线）；否则 merge（基线 ∪ 动态，同 id 动态胜）。
+        模型列表的唯一读取口。replace 形态以“是否发布过动态目录”为状态，
+        不以列表长度代替状态：合法空目录也必须整取代基线。
         """
-        if self._dynamic_replaces_baseline and self._dynamic_models:
+        if self._dynamic_replaces_baseline and self._dynamic_published:
             return list(self._dynamic_models)
         return merge_models(self._baseline_models, self._dynamic_models)
+
+    def _set_dynamic_models(self, models: List[Model]) -> None:
+        """发布动态目录（含合法空集）；恢复无缓存时不得调用本方法。"""
+        self._dynamic_models = list(models)
+        self._dynamic_published = True
 
     def get_model(self, model_id: str) -> Optional[Model]:
         """按 model id 查找模型。"""

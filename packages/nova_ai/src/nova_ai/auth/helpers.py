@@ -64,6 +64,7 @@ def lazy_oauth(
     name: str,
     load: Callable[[], Awaitable[OAuthAuth]],
     login_label: Optional[str] = None,
+    is_subscription: Optional[bool] = None,
 ) -> OAuthAuth:
     """延迟加载 OAuth 实现（首次使用时才加载完整流程代码）。
 
@@ -103,6 +104,7 @@ def lazy_oauth(
 
     return OAuthAuth(
         name=name,
+        is_subscription=is_subscription,
         login_label=login_label,
         login=login,
         refresh=refresh,

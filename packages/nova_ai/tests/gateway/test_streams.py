@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from nova_ai.gateway.streams import lazy_stream
 from nova_protocol import (
     AbortController,
     KnownApi,
@@ -11,8 +12,6 @@ from nova_protocol import (
     ModelCost,
     StopReason,
 )
-
-from nova_ai.gateway.streams import lazy_stream
 
 
 def _model() -> Model:
@@ -104,3 +103,34 @@ async def test_setup_failure_reports_error_without_abort():
     result = await stream.result()
 
     assert result.stop_reason == StopReason.ERROR
+
+
+@pytest.mark.asyncio
+async def test_aborted_setup_failure_has_no_error_kind():
+    controller = AbortController()
+
+    async def failing_setup():
+        controller.abort()
+        raise RuntimeError("auth exploded")
+
+    stream = lazy_stream(_model(), failing_setup, signal=controller.signal)
+    result = await stream.result()
+    assert result.stop_reason == StopReason.ABORTED
+    assert result.error_kind is None
+
+
+@pytest.mark.asyncio
+async def test_signal_interrupts_hanging_setup():
+    controller = AbortController()
+    started = asyncio.Event()
+
+    async def hanging_setup():
+        started.set()
+        await asyncio.Event().wait()
+
+    stream = lazy_stream(_model(), hanging_setup, signal=controller.signal)
+    await started.wait()
+    controller.abort()
+    result = await asyncio.wait_for(stream.result(), timeout=1.0)
+    assert result.stop_reason == StopReason.ABORTED
+    assert result.error_kind is None

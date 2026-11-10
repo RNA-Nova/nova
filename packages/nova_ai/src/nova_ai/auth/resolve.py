@@ -17,11 +17,12 @@ OAuth 刷新语义（对齐 TS ``resolveStoredOAuth`` 的双重检查锁）：
 
 import asyncio
 import time
-from dataclasses import dataclass
-from typing import Literal, Optional
+from dataclasses import dataclass, field
+from typing import Callable, Literal, Optional
 
 from nova_async import (
     KeyedLockFactory,
+    TaskTracker,
     await_with_abort,
     default_keyed_locks,
     operation_signal,
@@ -59,13 +60,16 @@ class AuthResolutionOverrides:
 
     - ``api_key``：调用方显式 key（最高优先级）；``None`` = 不覆盖；
     - ``env``：provider 级环境变量覆盖；``None`` = 用进程环境；
+    - ``min_oauth_validity_ms``：调用方要求的 OAuth 最小剩余有效期；
+      低于默认值仍按默认五分钟窗口，刷新后仍不满足显式要求则报错；
     - ``signal``：取消信号；``None`` = 不取消；
     - ``refresh_locks``：per-provider 刷新锁工厂（编排去重）；
       ``None`` = 用进程内缺省锁（多进程部署由 harness 注入文件锁）。
     """
 
-    api_key: Optional[str] = None
-    env: Optional[ProviderEnv] = None
+    api_key: Optional[str] = field(default=None, repr=False)
+    env: Optional[ProviderEnv] = field(default=None, repr=False)
+    min_oauth_validity_ms: Optional[int] = None
     signal: Optional[AbortSignal] = None
     refresh_locks: Optional[KeyedLockFactory] = None
 
@@ -156,6 +160,9 @@ async def _resolve_provider_auth_inner(
                     if overrides and overrides.refresh_locks
                     else default_keyed_locks
                 ),
+                min_oauth_validity_ms=(
+                    overrides.min_oauth_validity_ms if overrides else None
+                ),
             )
         if stored.type == "api_key" and auth.api_key:
             credential = stored
@@ -195,53 +202,58 @@ def _overlay_env_auth_context(base: AuthContext, env: ProviderEnv) -> AuthContex
     return _OverlayContext()
 
 
-async def _resolve_stored_oauth(
+_OAUTH_REFRESH_TASKS = TaskTracker(name="oauth-refresh")
+"""已开始的轮转刷新任务——调用方取消后仍由台账强持有直到写盘收尾。"""
+
+
+async def refresh_stored_oauth_credential(
     credentials: CredentialStore,
     provider_id: str,
     oauth: OAuthAuth,
-    stored: OAuthCredential,
+    needs_refresh: Callable[[OAuthCredential], bool],
     signal: AbortSignal,
     refresh_locks: KeyedLockFactory = default_keyed_locks,
-) -> Optional[AuthResult]:
-    """解析存储的 OAuth credential，必要时刷新（per-provider 锁编排，见模块 docstring）。
+) -> Optional[OAuthCredential]:
+    """在 per-provider 锁内复查、刷新并写回 OAuth 凭据（pi 同名函数对位）。
 
-    刷新序列（复查 → 网络 → 写）在 per-provider 锁内原子执行——网络已挪出
-    store（store 同步化），去重锁只挡同 provider；锁等待与网络都可被外层
-    AbortScope 真杀。
+    锁等待与尚未开始的刷新可随调用方取消；一旦进入刷新，调用方只取消自己的
+    等待，独立任务仍完成刷新与同步写盘。否则服务端已轮转的旧 refresh token
+    可能失效，而本地又丢掉唯一的新 token。
     """
-    minimum_validity_ms = DEFAULT_OAUTH_MINIMUM_VALIDITY_MS
+    if signal.aborted:
+        raise AbortedError("OAuth refresh aborted")
 
-    def _expires_soon(credential: OAuthCredential) -> bool:
-        return int(time.time() * 1000) + minimum_validity_ms >= credential.expires
+    # 锁等待仍归调用方取消；只有确认需要刷新后才把“刷新+写盘+放锁”
+    # 移交给独立任务。这样取消等待不会积累无主任务。
+    lock = refresh_locks(provider_id)
+    acquired = False
+    handed_off = False
+    try:
+        await await_with_abort(lock.__aenter__(), signal)
+        acquired = True
+        try:
+            current = credentials.read(provider_id)
+        except Exception as error:
+            raise ModelsError(
+                "auth", f"Credential store read failed for {provider_id}", error
+            )
+        if current is None or current.type != "oauth":
+            return None
+        if not needs_refresh(current):
+            return current
+        if signal.aborted:
+            raise AbortedError("OAuth refresh aborted")
 
-    credential: Credential = stored
-
-    if _expires_soon(credential):
-        # 乐观检查判定需刷新；权威检查在 per-provider 锁内复查
-        async with refresh_locks(provider_id):
+        async def _refresh_and_release() -> OAuthCredential:
             try:
-                current = credentials.read(provider_id)
-            except Exception as error:
-                raise ModelsError(
-                    "auth", f"Credential store read failed for {provider_id}", error
-                )
-            if current is None or current.type != "oauth":
-                return None  # 期间已登出
-            if not _expires_soon(current):
-                credential = current  # 另一请求/进程刚刷新过——复用（落到 to_auth）
-            else:
                 try:
-                    # 15s 硬超时走 asyncio.timeout 独立通道（RequestTimeoutError），
-                    # 不再借 timeout-signal 伪装成用户取消；用户 signal 原样透传
                     async with asyncio.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS / 1000):
-                        refreshed = await oauth.refresh(current, signal)
+                        refreshed = await oauth.refresh(current, None)
                 except TimeoutError as error:
                     raise RequestTimeoutError(
                         f"OAuth refresh timed out for {provider_id}"
                     ) from error
                 except Exception as error:
-                    # 取消不落泛型兜底（codex 纪律：每层显式匹配取消分支）——
-                    # AbortedError 直通，不包装成 ModelsError 误报
                     if isinstance(error, AbortedError):
                         raise
                     raise ModelsError(
@@ -255,7 +267,58 @@ async def _resolve_stored_oauth(
                         f"Credential store write failed for {provider_id}",
                         error,
                     )
-                credential = refreshed
+                return refreshed
+            finally:
+                await lock.__aexit__(None, None, None)
+
+        task = _OAUTH_REFRESH_TASKS.spawn(
+            _refresh_and_release(), name=f"oauth-refresh:{provider_id}"
+        )
+        assert task is not None
+        handed_off = True
+        return await asyncio.shield(task)
+    finally:
+        if acquired and not handed_off:
+            await lock.__aexit__(None, None, None)
+
+
+async def _resolve_stored_oauth(
+    credentials: CredentialStore,
+    provider_id: str,
+    oauth: OAuthAuth,
+    stored: OAuthCredential,
+    signal: AbortSignal,
+    refresh_locks: KeyedLockFactory = default_keyed_locks,
+    min_oauth_validity_ms: Optional[int] = None,
+) -> Optional[AuthResult]:
+    """解析存储的 OAuth credential，必要时经受管关键段刷新并落盘。"""
+    minimum_validity_ms = max(
+        DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, min_oauth_validity_ms or 0
+    )
+
+    def _expires_soon(credential: OAuthCredential) -> bool:
+        return int(time.time() * 1000) + minimum_validity_ms >= credential.expires
+
+    credential: Credential = stored
+    if _expires_soon(stored):
+        refreshed = await refresh_stored_oauth_credential(
+            credentials,
+            provider_id,
+            oauth,
+            _expires_soon,
+            signal,
+            refresh_locks,
+        )
+        if refreshed is None:
+            return None
+        credential = refreshed
+        # 默认窗口只是刷新策略；显式最小有效期是调用方契约，刷新后仍短
+        # 于要求必须报错（pi bearer-token export 场景同款）。
+        if min_oauth_validity_ms is not None and _expires_soon(credential):
+            raise ModelsError(
+                "oauth",
+                f"OAuth refresh returned a token that expires too soon for {provider_id}",
+            )
     try:
         auth_result = await oauth.to_auth(credential)
         return AuthResult(auth=auth_result, source="OAuth")

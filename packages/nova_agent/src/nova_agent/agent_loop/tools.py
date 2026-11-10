@@ -73,8 +73,8 @@ async def fail_tool_calls_from_truncated_message(
 ) -> ExecutedToolCallBatch:
     """Fail all tool calls from an assistant message truncated by the token limit.
 
-    流式 tool-call 参数由 salvage JSON 解析收尾，被 ``length`` 截断的消息可能产生
-    "能解析但悄悄不完整"的参数。这样的调用执行起来不安全：全部标记为错误，
+    即使严格终态解析标出 ``arguments_error``，被 ``length`` 截断的消息仍需
+    整批拒执行并明确要求重发。这样的调用执行起来不安全：全部标记为错误，
     让模型在下一轮重新发起完整调用。
     """
     messages: List[ToolResultMessage] = []

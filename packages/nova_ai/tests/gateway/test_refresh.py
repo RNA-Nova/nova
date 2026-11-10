@@ -273,7 +273,7 @@ class TestDynamicProvider:
 
         # supersede 生效：后到的刷新废弃先到的（先者在网络阶段前即收场，
         # 不再 fetch），终态由后到者发布——不会出现目录混合
-        assert call_count == 1
+        assert call_count == 2  # manager 不做半共享；两轮独立进入网络段
         final = provider.get_models()
         assert len(final) == 1
         assert final[0].id == "d1"
@@ -304,40 +304,34 @@ class TestProviderFilterModels:
 
 
 @pytest.mark.asyncio
-async def test_inflight_dedup_survives_follower_cancellation():
-    """在途去重的旁观者被取消不传染主刷新（shield）——主刷新照常发布；
-    此前裸 await inflight：旁观者取消传染杀死共享网络往返、发起方静默
-    假成功。"""
-    store = InMemoryModelsStore()
+async def test_offline_refresh_never_swallows_online_follower():
+    """offline 在途调用不与 online 共享；follower 必须真实进入网络阶段。"""
     started = asyncio.Event()
-    proceed = asyncio.Event()
+    release = asyncio.Event()
+    online_calls = 0
+    provider = create_provider(id="test", name="Test", auth=_resolving_auth())
 
-    async def fetch_models(context: RefreshModelsContext) -> List[Model]:
-        started.set()
-        await proceed.wait()
-        return [_make_model("d1")]
+    async def refresh(context: RefreshModelsContext) -> None:
+        nonlocal online_calls
+        if not context.allow_network:
+            # 每次 refresh 都先做离线恢复；只让首个 leader 卡在离线段。
+            if not started.is_set():
+                started.set()
+                await release.wait()
+        else:
+            online_calls += 1
 
-    provider = create_provider(
-        id="test",
-        name="Test",
-        auth=_resolving_auth(),
-    )
-    provider.refresh_models = callback_refresh(provider, fetch_models)
-    models = ModelsManager(models_store=store)
+    provider.refresh_models = refresh
+    models = ModelsManager(models_store=InMemoryModelsStore())
     models.set_provider(provider)
 
-    leader = asyncio.ensure_future(models.refresh())
-    await started.wait()  # 主刷新进入网络段
-    follower = asyncio.ensure_future(models.refresh())  # 同 provider → 去重等待
-    await asyncio.sleep(0)  # 引导：follower 落到 shield 等待点
-    follower.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await follower  # 旁观者取消落定
-
-    proceed.set()
-    result = await leader
-    assert result["errors"] == {}
-    assert [m.id for m in provider.get_models()] == ["d1"]
+    leader = asyncio.ensure_future(models.refresh(allow_network=False))
+    await started.wait()
+    follower = models.refresh(allow_network=True)
+    await follower
+    assert online_calls == 1
+    release.set()
+    await leader
 
 
 @pytest.mark.asyncio
@@ -370,3 +364,73 @@ async def test_refresh_deadline_covers_credential_resolution():
     result = await models.refresh(deadline_ms=50)
     error = result["errors"]["test"]
     assert type(error) is RequestTimeoutError
+
+
+@pytest.mark.asyncio
+async def test_refresh_deadline_also_covers_offline_store_read():
+    from nova_ai.utils.errors import RequestTimeoutError
+
+    class _HangingReadStore(InMemoryModelsStore):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+
+        async def read(self, provider_id):
+            self.started.set()
+            await asyncio.Event().wait()
+
+    store = _HangingReadStore()
+    provider = create_provider(id="test", name="Test")
+
+    async def refresh(_context: RefreshModelsContext) -> None:
+        return None
+
+    provider.refresh_models = refresh
+    models = ModelsManager(models_store=store)
+    models.set_provider(provider)
+    result = await models.refresh(allow_network=False, deadline_ms=20)
+    assert store.started.is_set()
+    assert type(result["errors"]["test"]) is RequestTimeoutError
+
+
+@pytest.mark.asyncio
+async def test_refresh_preserves_diagnostics_when_network_phase_raises():
+    provider = create_provider(id="test", name="Test", auth=_resolving_auth())
+
+    async def refresh(context: RefreshModelsContext) -> None:
+        if not context.allow_network:
+            return
+        context.diagnostics.append(
+            NovaDiagnostic(
+                severity="warning", kind=WarningKind.CAPABILITY, message="degraded"
+            )
+        )
+        raise RuntimeError("station failed")
+
+    provider.refresh_models = refresh
+    models = ModelsManager(models_store=InMemoryModelsStore())
+    models.set_provider(provider)
+    result = await models.refresh()
+    assert isinstance(result["errors"]["test"], RuntimeError)
+    assert [item.message for item in result["diagnostics"]["test"]] == ["degraded"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_previous_publication_does_not_poison_next_publish():
+    from nova_ai.gateway import ModelsPublication
+
+    store = InMemoryModelsStore()
+    models = ModelsManager(models_store=store)
+    generation, controller = models._begin_provider_refresh("test")
+    previous = asyncio.get_running_loop().create_future()
+    previous.cancel()
+    models._publication_chains["test"] = previous
+    updated = []
+    published = await models._publish_provider_models(
+        "test",
+        generation,
+        controller.signal,
+        ModelsPublication(update=lambda: updated.append(True)),
+    )
+    assert published is True
+    assert updated == [True]

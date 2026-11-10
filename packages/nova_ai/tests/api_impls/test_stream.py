@@ -660,6 +660,7 @@ class TestStreamError:
         errors = [e for e in events if isinstance(e, ErrorEvent)]
         assert len(errors) == 1
         assert "finish_reason" in errors[0].error.error_message
+        assert errors[0].error.error_kind is NovaErrorKind.STREAM_DISCONNECTED
 
         body = RequestCapture.body_json(capture.single())
         assert body["model"] == "test-model"

@@ -371,6 +371,32 @@ class TestCreateClientSessionAffinity:
         assert headers.get("Authorization") == "Bearer caller-auth"
         assert headers.get("cf-aig-authorization") == "Bearer cf-key"
 
+    def test_header_overrides_are_case_insensitive(self):
+        model = _make_model().model_copy(
+            update={"headers": {"X-Trace": "model", "X-Model": "yes"}}
+        )
+        client = create_client(
+            model,
+            Context(messages=[UserMessage(content="hi")]),
+            api_key="sk",
+            options_headers={"x-trace": "options"},
+        )
+        trace_keys = [key for key in client.default_headers if key.lower() == "x-trace"]
+        assert trace_keys == ["x-trace"]
+        assert client.default_headers["x-trace"] == "options"
+        assert client.default_headers["X-Model"] == "yes"
+
+    def test_none_header_uses_sdk_omit_sentinel(self):
+        from openai import Omit
+
+        client = create_client(
+            _make_model(),
+            Context(messages=[UserMessage(content="hi")]),
+            api_key="sk",
+            options_headers={"User-Agent": None},
+        )
+        assert isinstance(client.default_headers["User-Agent"], Omit)
+
 
 class TestMidConvoToolAdditions:
     """additions 模式（pi resolveTranscriptTools 对位）：SystemMessage 驱动。"""

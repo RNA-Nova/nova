@@ -40,7 +40,9 @@ def kimi_coding_provider() -> "Provider":
         api=cast(ProviderStreams, openai_completions),
         auth=ProviderAuth(
             api_key=env_api_key_auth("Kimi API key", ["KIMI_API_KEY"]),
-            oauth=lazy_oauth("Kimi (Moonshot AI)", _load_kimi_oauth),
+            oauth=lazy_oauth(
+                "Kimi (Moonshot AI)", _load_kimi_oauth, is_subscription=True
+            ),
         ),
         catalog_source="pi.dev",
         catalog_knowledge=_knowledge,

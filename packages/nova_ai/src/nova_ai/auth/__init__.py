@@ -5,6 +5,12 @@
 本命名空间只保留鉴权行为（流程/存储/解析）。
 """
 
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .oauth import kimi_oauth, openai_codex_oauth
+
 from .context import DefaultAuthContext, default_provider_auth_context
 from .credential_store import InMemoryCredentialStore
 from .helpers import env_api_key_auth, lazy_oauth
@@ -14,8 +20,6 @@ from .oauth import (
     DeviceCodePollStatus,
     PkceCodes,
     generate_pkce,
-    kimi_oauth,
-    openai_codex_oauth,
     poll_oauth_device_code_flow,
 )
 from .oauth.oauth_page import oauth_error_html, oauth_success_html
@@ -53,3 +57,11 @@ __all__ = [
     "ModelsErrorCode",
     "resolve_provider_auth",
 ]
+
+
+def __getattr__(name: str):
+    if name in ("kimi_oauth", "openai_codex_oauth"):
+        value = getattr(import_module(".oauth", __name__), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

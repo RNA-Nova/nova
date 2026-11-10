@@ -20,6 +20,7 @@ Event Stream（v2：``asyncio.Queue`` 底座）
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, AsyncIterator, Callable, Coroutine, Generic, Optional, TypeVar
 
 from nova_protocol import AssistantMessage, AssistantMessageEvent
@@ -267,7 +268,8 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
             Exception
         """
         future = self._ensure_result_future()
-        return await future
+        # 等待者取消只取消自己的等待，不得取消共享终值 Future。
+        return await asyncio.shield(future)
 
 
 class AssistantMessageEventStream(
@@ -277,6 +279,8 @@ class AssistantMessageEventStream(
     ]
 ):
     def __init__(self):
+        self._started_at = int(time.time() * 1000)
+        self._started_at_monotonic = time.monotonic()
 
         def is_complete(
             event: AssistantMessageEvent,
@@ -299,6 +303,34 @@ class AssistantMessageEventStream(
             is_complete,
             extract_result,
         )
+
+    def _time_response(self, message: AssistantMessage) -> None:
+        """只给本流见证其开始的响应盖耗时；旧消息/延迟结果保持缺席。"""
+        if (
+            self.done
+            or message.duration_ms is not None
+            or message.timestamp < self._started_at
+        ):
+            return
+        message.duration_ms = max(
+            0, round((time.monotonic() - self._started_at_monotonic) * 1000)
+        )
+
+    def push(self, event: AssistantMessageEvent) -> None:
+        if event.type == "done":
+            self._time_response(event.message)
+        elif event.type == "error":
+            self._time_response(event.error)
+        super().push(event)
+
+    def end(
+        self,
+        result: Optional[AssistantMessage] = None,
+        exc: Optional[BaseException] = None,
+    ) -> None:
+        if result is not None:
+            self._time_response(result)
+        super().end(result=result, exc=exc)
 
 
 def create_assistant_message_event_stream() -> AssistantMessageEventStream:

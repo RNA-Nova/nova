@@ -1,16 +1,16 @@
 """Volcengine 的构建期知识（以真实 API 实测为准）。
 
-deepseek 系思考映射与回放语义 + 钉住模型（数据源缺失但端点实测在售）+
-方舟在售生命周期筛选（Shutdown/Retiring 剔除）。
+deepseek 系思考映射与回放语义 + 钉住模型（数据源缺失但端点实测在售）。
+账户/区域生命周期筛选只住运行时 personalize，不进入公共种子。
 """
 
-from typing import Dict, List
+from typing import Dict
 
 from nova_protocol import KnownApi, ModelFields
 
 from ..define import define_provider
 
-_PINNED_MODELS = {
+_PINNED_MODELS: Dict[str, ModelFields] = {
     # 数据源缺失，但端点实测在售——对齐 TS "authoritative values" 模式
     "deepseek-v4-flash-260425": {
         "id": "deepseek-v4-flash-260425",
@@ -33,19 +33,6 @@ _PINNED_MODELS = {
 }
 
 
-def _ark_lifecycle_filter(models: List["ModelFields"], ctx) -> None:
-    """ark 生命周期筛选（跨模型逃生口）：显式坏状态（Shutdown/Retiring）
-    整行剔除；**钉住模型豁免**（数据源缺失但端点实测在售——对齐
-    TS "authoritative values" 模式，ark 状态表误伤它们）。无状态表
-    （无 key）照常放行——构建期与运行期同一套规则。"""
-    if ctx.ark_status:
-        models[:] = [
-            m
-            for m in models
-            if m.get("id") not in ctx.ark_status or m.get("id") in _PINNED_MODELS
-        ]
-
-
 DEF = define_provider(
     id="volcengine",
     name="Volcengine",
@@ -54,8 +41,6 @@ DEF = define_provider(
     # 方舟目录语义是"在售"——models.dev 标 deprecated 的条目与在售
     # 语义矛盾，剔除（ark 生命周期源兜底，不同于 pi 各家的缺省保留）
     skip_deprecated=True,
-    # 方舟在售生命周期筛选（跨模型逃生口——私货归钩，不占公共字段）
-    finalize_all=_ark_lifecycle_filter,
     model_corrections={
         "deepseek-v4-*": {
             # 活探（2026-11-02，ark 真机）：v4 系 minimal~max 全档 + off

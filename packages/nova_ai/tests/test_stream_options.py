@@ -1,9 +1,13 @@
 """StreamOptions 家族（stream_options.py）测试——dataclass 选型与构造纪律。"""
 
 import pytest
-from nova_protocol import CacheRetention, ThinkingLevel, Transport
-
-from nova_ai.stream_options import SimpleStreamOptions, StreamOptions, ThinkingBudgets
+from nova_ai.stream_options import (
+    ModelIdentity,
+    SimpleStreamOptions,
+    StreamOptions,
+    ThinkingBudgets,
+)
+from nova_protocol import CacheRetention, Model, ThinkingLevel, Transport
 
 
 class TestStreamOptions:
@@ -66,7 +70,23 @@ def test_options_repr_hides_api_key_and_headers():
     options = StreamOptions(
         api_key="sk-test-SECRETKEY",
         headers={"Authorization": "Bearer sk-live-SECRETKEY"},
+        env={"PROVIDER_TOKEN": "sk-env-SECRETKEY"},
     )
     text = repr(options)
     assert "sk-test-SECRETKEY" not in text
     assert "sk-live-SECRETKEY" not in text
+    assert "sk-env-SECRETKEY" not in text
+
+
+def test_model_identity_strips_url_credentials_query_and_fragment():
+    model = Model.model_construct(
+        provider="p",
+        id="m",
+        base_url=(
+            "https://user:pass@example.com/v1?api_key=sk-query-secret#refresh-secret"
+        ),
+    )
+    identity = ModelIdentity.from_model(model)
+    assert identity.base_url == "https://example.com/v1"
+    assert "secret" not in repr(identity)
+    assert "user:pass" not in repr(identity)

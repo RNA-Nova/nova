@@ -1,12 +1,13 @@
-"""Moonshot AI CN 的构建期知识（与 moonshotai 同构，仅 id/base_url 不同）。
-
-目录历史上派生自 moonshotai——定义件直接共享（别名同源，防两处漂移）。
-"""
+"""Moonshot AI CN：与全球站共享定义和源映射，仅 id/base_url 不同。"""
 
 from nova_protocol import KnownApi
 
 from ..define import define_provider
-from .moonshotai import MOONSHOTAI_COMPAT_DEFAULTS, MOONSHOTAI_MODEL_CORRECTIONS
+from .moonshotai import (
+    MOONSHOTAI_COMPAT_DEFAULTS,
+    MOONSHOTAI_MODEL_CORRECTIONS,
+    map_moonshot_model,
+)
 
 DEF = define_provider(
     id="moonshotai-cn",
@@ -15,4 +16,5 @@ DEF = define_provider(
     api=KnownApi.OPENAI_COMPLETIONS,
     compat_defaults=MOONSHOTAI_COMPAT_DEFAULTS,
     model_corrections=MOONSHOTAI_MODEL_CORRECTIONS,
+    map_model=map_moonshot_model,
 )

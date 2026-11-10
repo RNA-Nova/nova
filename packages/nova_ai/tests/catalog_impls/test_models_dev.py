@@ -8,7 +8,6 @@ sources 测试；本文件只钉运行期适配层的行为承诺与"用的就�
 import time
 
 import pytest
-
 from nova_ai.catalog_impls.models_dev import ModelsDevCatalog, models_dev_to_nova
 
 pytestmark = pytest.mark.asyncio
@@ -65,6 +64,30 @@ class TestModelsDevCatalog:
         )
         outcome = await ModelsDevCatalog().fetch("nope", None, None)
         assert outcome.status == 404
+
+    async def test_empty_models_is_200_not_missing_provider(self, monkeypatch):
+        async def fake_fetch_json(url, **kwargs):
+            return {"volcengine": {"models": {}}}
+
+        monkeypatch.setattr(
+            "nova_ai.catalog_impls.models_dev.fetch_json", fake_fetch_json
+        )
+        outcome = await ModelsDevCatalog().fetch("volcengine", None, None)
+        assert outcome.status == 200
+        assert outcome.models_fields == []
+
+    async def test_skip_deprecated_reaches_translation(self, monkeypatch):
+        async def fake_fetch_json(url, **kwargs):
+            return {"volcengine": {"models": {"old": _v2_entry(status="deprecated")}}}
+
+        monkeypatch.setattr(
+            "nova_ai.catalog_impls.models_dev.fetch_json", fake_fetch_json
+        )
+        outcome = await ModelsDevCatalog().fetch(
+            "volcengine", None, None, skip_deprecated=True
+        )
+        assert outcome.status == 200
+        assert outcome.models_fields == []
 
     async def test_instance_cache_dedups_downloads(self, monkeypatch):
         calls = []

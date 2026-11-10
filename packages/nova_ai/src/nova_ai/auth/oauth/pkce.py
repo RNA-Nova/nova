@@ -6,14 +6,14 @@
 import base64
 import hashlib
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, kw_only=True)
 class PkceCodes:
     """PKCE code verifier 与 challenge（S256）——不可变值对象（规则 5）。"""
 
-    verifier: str
+    verifier: str = field(repr=False)
     challenge: str
 
 

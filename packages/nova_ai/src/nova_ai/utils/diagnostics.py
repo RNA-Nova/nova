@@ -21,8 +21,8 @@ def _redact_value(value: Any) -> Any:
         return redact_secrets(value)
     if isinstance(value, dict):
         return {key: _redact_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redact_value(item) for item in value]
+    if isinstance(value, (list, tuple)):
+        return type(value)(_redact_value(item) for item in value)
     return value
 
 

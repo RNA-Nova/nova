@@ -10,8 +10,13 @@ from nova_protocol import (
     WarningKind,
 )
 
+from nova_ai.gateway.catalog import CatalogError
 from nova_ai.gateway.provider import RefreshModelsContext
-from nova_ai.providers.volcengine.catalog import BASE_URL, ark_personalize
+from nova_ai.providers.volcengine.catalog import (
+    BASE_URL,
+    ark_personalize,
+    fetch_ark_status,
+)
 from nova_ai.providers.volcengine.provider import volcengine_provider
 
 pytestmark = pytest.mark.asyncio
@@ -41,7 +46,7 @@ def _context(credential=None) -> RefreshModelsContext:
 
 
 def _patch_ark(monkeypatch, status_map, seen=None):
-    async def fake_ark(api_key, signal=None):
+    async def fake_ark(api_key, signal=None, base_url=None):
         if seen is not None:
             seen.append(api_key)
         return status_map
@@ -72,14 +77,13 @@ async def test_credential_applies_ark_filter(monkeypatch):
     assert [m.id for m in result] == ["m2"]
 
 
-async def test_ark_none_keeps_all(monkeypatch):
-    """ark 拉取失败（返回 None）→ 不筛选（best-effort，基底原样）。"""
+async def test_ark_invalid_payload_raises(monkeypatch):
+    """ark 载荷无效即失败，不把未筛选基底冒充 personalized 成品。"""
     _patch_ark(monkeypatch, None)
-    result = await ark_personalize(
-        _base("m1", "m2"),
-        _context(credential=ApiKeyCredential(key="k")),
-    )
-    assert [m.id for m in result] == ["m1", "m2"]
+    with pytest.raises(CatalogError, match="payload"):
+        await ark_personalize(
+            _base("m1", "m2"), _context(credential=ApiKeyCredential(key="k"))
+        )
 
 
 async def test_oauth_credential_uses_access_token_for_ark(monkeypatch):
@@ -98,20 +102,33 @@ async def test_oauth_credential_uses_access_token_for_ark(monkeypatch):
     assert [m.id for m in result] == ["m2"]
 
 
-async def test_ark_failure_emits_capability_diagnostic(monkeypatch):
-    """ark 拉取失败：不静默——基底原样（未筛选）+ CAPABILITY 诊断。"""
+async def test_ark_failure_raises_and_keeps_cause(monkeypatch):
+    """ark 失败沿 cause 保留真因；策略层据此保留旧 personalized 成品。"""
 
-    async def _boom(api_key, signal=None):
+    async def _boom(api_key, signal=None, base_url=None):
         raise TimeoutError("read timed out")
 
     monkeypatch.setattr("nova_ai.providers.volcengine.catalog.fetch_ark_status", _boom)
-    context = _context(credential=ApiKeyCredential(key="k"))
-    result = await ark_personalize(_base("m1"), context)
-    assert [m.id for m in result] == ["m1"]
-    assert any(
-        d.kind is WarningKind.CAPABILITY and "ark" in d.message
-        for d in context.diagnostics
+    with pytest.raises(CatalogError, match="lifecycle") as exc_info:
+        await ark_personalize(
+            _base("m1"), _context(credential=ApiKeyCredential(key="k"))
+        )
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
+
+
+async def test_ark_models_url_derives_from_effective_provider_base_url(monkeypatch):
+    seen = []
+
+    async def fake_fetch_json(url, *, api_key, signal):
+        seen.append(url)
+        return {"data": []}
+
+    monkeypatch.setattr(
+        "nova_ai.providers.volcengine.catalog.fetch_json", fake_fetch_json
     )
+    result = await fetch_ark_status("k", base_url="https://ark.example.com/custom/v3/")
+    assert result == {}
+    assert seen == ["https://ark.example.com/custom/v3/models"]
 
 
 async def test_factory_wires_personalized_strategy():

@@ -52,15 +52,21 @@ from nova_protocol import (
     is_aborted,
     redact_secrets,
 )
+from openai.resources.chat.completions import AsyncCompletions
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
 
 from ...stream_options import ModelIdentity, ProviderResponse, SimpleStreamOptions
 from ...streaming import AssistantMessageEventStream
 from ...utils import calculate_cost
-from ...utils.errors import normalize_error, provider_error_metadata_raw
+from ...utils.errors import (
+    StreamDisconnectedError,
+    normalize_error,
+    provider_error_metadata_raw,
+)
 from ...utils.http import filter_headers_for_hook
-from ...utils.json_parser import StreamingJsonParser, parse_streaming_json
+from ...utils.json_parser import StreamingJsonParser, parse_tool_call_arguments
 from ...utils.model_utils import clamp_thinking_level
+from .._shared.openrouter_cost import apply_openrouter_reported_cost
 from .._shared.prompt_cache import resolve_cache_retention
 from .._shared.retry import RetryOptions, retry_provider_request
 from .._shared.simple_options import build_base_options
@@ -77,6 +83,26 @@ from .reasoning import (
 
 # 流式期内的内容块（文档化的可变累积器——数据建模标准规则 1 例外）
 ContentBlock = Union[TextContent, ThinkingContent, ToolCall]
+
+# 以 SDK 当前签名为参数边界；未声明的线上字段必须经 extra_body，不能进 kwargs。
+_SDK_CREATE_KWARG_KEYS = frozenset(
+    inspect.signature(AsyncCompletions.create).parameters
+)
+_SDK_TRANSPORT_KEYS = frozenset({"timeout", "extra_headers", "extra_query"})
+
+
+def _merge_extra_body(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """递归合并开放 JSON 对象；与 SDK 对命名 body + extra_body 的规则一致，
+    嵌套 dict 合并，其余值由后层覆盖。输入不被原地修改。"""
+    merged = dict(base)
+    for key, value in overlay.items():
+        previous = merged.get(key)
+        merged[key] = (
+            _merge_extra_body(previous, value)
+            if isinstance(previous, dict) and isinstance(value, dict)
+            else value
+        )
+    return merged
 
 
 def _namespace(obj: Any) -> Any:
@@ -154,6 +180,7 @@ def parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
         cost=Cost(),
     )
     calculate_cost(model, usage)
+    apply_openrouter_reported_cost(usage, raw_usage, model)
     return usage
 
 
@@ -256,14 +283,9 @@ def stream(
                     )
                 )
             elif block.type == "toolCall":
-                parser = tool_call_parsers.get(id(block))
-                parsed = (
-                    parser.finish()
-                    if parser
-                    else parse_streaming_json(block.partial_args)
-                )
-                if isinstance(parsed, dict):
-                    block.arguments = parsed
+                parsed = parse_tool_call_arguments(block.partial_args)
+                block.arguments = parsed.arguments
+                block.arguments_error = parsed.arguments_error
                 block.partial_args = None
                 block.stream_index = None
                 event_stream.push(
@@ -312,12 +334,37 @@ def stream(
         def ensure_tool_call_block(tool_call_delta: ChoiceDeltaToolCall) -> ToolCall:
             # SDK 已声明字段直读（规则 3：声明字段不过归一层）——
             # ChoiceDeltaToolCall.index/id/function 均为声明属性
-            stream_index = tool_call_delta.index
-            block = tool_call_blocks_by_index.get(stream_index)
+            stream_index = (
+                tool_call_delta.index
+                if isinstance(tool_call_delta.index, int)
+                and not isinstance(tool_call_delta.index, bool)
+                else None
+            )
+            block = (
+                tool_call_blocks_by_index.get(stream_index)
+                if stream_index is not None
+                else None
+            )
 
             tool_call_id = tool_call_delta.id
             if not block and tool_call_id:
                 block = tool_call_blocks_by_id.get(tool_call_id)
+            if not block and stream_index is None:
+                # 无 index 的后续分片可能连 id 也省略；只在最近的未完成无索
+                # 引块上续接。id 明确换名/换号时绝不粘连。
+                for candidate in reversed(blocks):
+                    if (
+                        candidate.type != "toolCall"
+                        or candidate.stream_index is not None
+                    ):
+                        continue
+                    candidate_index = get_content_index(candidate)
+                    if candidate_index in finished_content_indexes:
+                        continue
+                    if tool_call_id and candidate.id and candidate.id != tool_call_id:
+                        continue
+                    block = candidate
+                    break
 
             if not block:
                 func = tool_call_delta.function
@@ -329,7 +376,8 @@ def stream(
                     partial_args="",
                     stream_index=stream_index,
                 )
-                tool_call_blocks_by_index[stream_index] = block
+                if stream_index is not None:
+                    tool_call_blocks_by_index[stream_index] = block
                 if tool_call_id:
                     tool_call_blocks_by_id[tool_call_id] = block
                 blocks.append(block)
@@ -341,7 +389,7 @@ def stream(
                     )
                 )
 
-            if block.stream_index is None:
+            if block.stream_index is None and stream_index is not None:
                 block.stream_index = stream_index
                 tool_call_blocks_by_index[stream_index] = block
             if tool_call_id:
@@ -395,10 +443,26 @@ def stream(
 
             # SDK max_retries=0 + 本层重试：退避可被 signal 打断（对齐 TS）
             async def _request() -> Any:
-                raw = await client.chat.completions.with_raw_response.create(
-                    **params, timeout=request_timeout
+                request_params: Dict[str, Any] = {}
+                inline_extra_body: Dict[str, Any] = {}
+                caller_extra_body: Dict[str, Any] = dict(params.get("extra_body") or {})
+                for key, value in params.items():
+                    if key == "extra_body":
+                        continue
+                    if key in _SDK_TRANSPORT_KEYS or key in _SDK_CREATE_KWARG_KEYS:
+                        # 包含 SDK 传输旋钮；尤其 timeout 只能传一次。
+                        request_params[key] = value
+                    else:
+                        inline_extra_body[key] = value
+                # on_payload 可混用顶层自由字段与 extra_body；与 SDK 一样
+                # 深合并，而非让其中一路静默覆盖另一路。
+                extra_body = _merge_extra_body(inline_extra_body, caller_extra_body)
+                if extra_body:
+                    request_params["extra_body"] = extra_body
+                request_params.setdefault("timeout", request_timeout)
+                return await client.chat.completions.with_raw_response.create(
+                    **request_params
                 )
-                return raw
 
             retry_options: RetryOptions = {
                 "max_retries": (
@@ -434,8 +498,16 @@ def stream(
                 event_stream.push(StartEvent(partial=output))
 
                 async for chunk in idle_guarded(openai_stream, idle_timeout_of(knob_s)):
-                    # chunk 恒为 SDK 校验后的 ChatCompletionChunk 模型实例
-                    # （缺 choices 的脏 JSON 在 SDK 解析边界已炸）——不做 hasattr 防御
+                    if options and options.on_provider_stream_event:
+                        callback_result = options.on_provider_stream_event(
+                            chunk, ModelIdentity.from_model(model)
+                        )
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
+                    # SSE `data: null` 经 SDK 会成为 None；这是可忽略空帧，
+                    # 不是内部错误。其余脏形状仍由 SDK/后续访问响亮失败。
+                    if chunk is None:
+                        continue
                     if chunk.id and not output.response_id:
                         output.response_id = chunk.id
 
@@ -598,7 +670,7 @@ def stream(
                 if (compat.supports_finish_reason and not has_finish_reason) or (
                     output.stop_reason == StopReason.PENDING
                 ):
-                    raise Exception("Stream ended without finish_reason")
+                    raise StreamDisconnectedError("Stream ended without finish_reason")
 
                 event_stream.push(DoneEvent(reason=output.stop_reason, message=output))
                 event_stream.end()
@@ -627,7 +699,9 @@ def stream(
                 # 不直挂）；kind/retry_after 永不上（aborted 无分类学）
                 output.error_message = redact_secrets(str(e) or "Request was aborted")
             else:
-                normalized_error = normalize_error(e, domain="stream")
+                normalized_error = normalize_error(
+                    e, domain="stream", provider=model.provider
+                )
                 output.error_message = normalized_error.message
                 # finish_reason 预标（network_error→STREAM_DISCONNECTED）优先
                 if output.error_kind is None:
@@ -712,6 +786,7 @@ def stream_simple(
         env=base.env,
         on_payload=base.on_payload,
         on_response=base.on_response,
+        on_provider_stream_event=base.on_provider_stream_event,
         metadata=base.metadata,
         timeout=base.timeout,
         max_retries=base.max_retries,

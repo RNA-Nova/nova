@@ -220,6 +220,7 @@ async def _request_device_authorization(
     if (
         not isinstance(interval, (int, float))
         or isinstance(interval, bool)
+        or not math.isfinite(interval)
         or interval <= 0
     ):
         interval = _DEFAULT_POLL_INTERVAL_SECONDS
@@ -227,6 +228,7 @@ async def _request_device_authorization(
     if (
         not isinstance(expires_in, (int, float))
         or isinstance(expires_in, bool)
+        or not math.isfinite(expires_in)
         or expires_in <= 0
     ):
         expires_in = _DEVICE_CODE_TIMEOUT_SECONDS
@@ -278,6 +280,7 @@ async def _poll_once(
             status="failed",
             message=f"Kimi token polling server error ({response.status_code}): "
             f"{response_error_detail(response)}",
+            error_kind=oauth_http_kind(response.status_code),
         )
 
     error_code = (
@@ -308,29 +311,30 @@ async def _poll_once(
         return DeviceCodePollResult(
             status="failed",
             message="Kimi device authorization expired",
+            error_kind=NovaErrorKind.UNAUTHORIZED,
         )
     if error_code == "access_denied":
         detail = redact_secrets(description) if description else "authorization denied"
-        return DeviceCodePollResult(status="failed", message=detail)
+        return DeviceCodePollResult(
+            status="failed", message=detail, error_kind=NovaErrorKind.UNAUTHORIZED
+        )
 
     detail = redact_secrets(description) if description else f"{error_code}"
     return DeviceCodePollResult(
         status="failed",
         message=f"Kimi token polling failed ({response.status_code}): {detail}",
+        error_kind=(
+            NovaErrorKind.UPSTREAM_ERROR
+            if response.status_code == 200
+            else oauth_http_kind(response.status_code)
+        ),
     )
 
 
 async def _login_device_code(
     interaction: AuthInteraction, signal: Optional[AbortSignal] = None
 ) -> OAuthCredential:
-    """完整的 device code 登录流程。
-
-    与 TS OAuthManager.login() 对齐：只请求一次 device code，然后在本地 15 分钟
-    超时内轮询；遇到 expired_token / 超时 / denied 即结束，不会自动重新申请新
-    设备码（避免对 UI 重复弹窗）。
-
-    轮询复用 ``poll_oauth_device_code_flow``，slow_down / 超时有统一处理。
-    """
+    """完整的 device code 登录流程；有效期与首 poll 等待均服从服务器响应。"""
     if is_aborted(signal):
         raise AbortedError("Login cancelled")
 
@@ -354,7 +358,8 @@ async def _login_device_code(
         DeviceCodePollOptions(
             poll=_poll,
             interval_seconds=device.interval,
-            expires_in_seconds=_DEVICE_CODE_TIMEOUT_SECONDS,
+            expires_in_seconds=device.expires_in,
+            wait_before_first_poll=True,
             signal=signal,
         )
     )
@@ -371,9 +376,9 @@ async def _refresh(
     oauth_host = _get_oauth_host()
     url = f"{oauth_host}{_TOKEN_PATH}"
 
-    max_retries = 3
+    max_retries = 3  # 首次 + 三次重试，对齐 pi
     last_error: Optional[Exception] = None
-    for attempt in range(max_retries):
+    for attempt in range(max_retries + 1):
         if is_aborted(signal):
             raise AbortedError("Kimi token refresh aborted")
 
@@ -388,17 +393,13 @@ async def _refresh(
                 signal=signal,
             )
         except RuntimeError as error:
-            # 传输失败（_post_form 已将 httpx.TransportError 包装为 RuntimeError）：
-            # 可重试；状态码类失败走下方响应处理，不进本分支
             last_error = error
-            if attempt < max_retries - 1:
-                # 退避序列走 nova_async 单点；cap 取自然上界（末次退避值），
-                # 与原无 cap 手写公式逐字等价（jitter=0 保持无抖动）
+            if attempt < max_retries:
                 await abortable_sleep(
                     backoff_delay_ms(
                         attempt + 1,
                         base_ms=1000,
-                        cap_ms=1000 * 2 ** (max_retries - 2),
+                        cap_ms=1000 * 2 ** (max_retries - 1),
                         jitter=0,
                     ),
                     signal,
@@ -406,8 +407,6 @@ async def _refresh(
                 continue
             raise
 
-        # 响应体只解析一次；非 JSON/非对象错误体（网关 HTML/空体）按无错误码
-        # 处理，让状态码重试逻辑先行——不得让 JSONDecodeError 逃逸出本流程。
         data: Dict[str, Any] = {}
         try:
             parsed = response.json()
@@ -433,22 +432,20 @@ async def _refresh(
                 status_code=response.status_code,
             )
 
-        # 429/5xx 重试耗尽：不传 kind——归一按 status_code 标准映射判定
+        # 429/全部 5xx 重试耗尽：不传 kind——归一按 status_code 标准映射。
         last_error = OAuthFlowError(
             f"Kimi token refresh failed ({response.status_code}): "
             f"{response_error_detail(response)}",
             status_code=response.status_code,
         )
         if (
-            response.status_code in (429, 500, 502, 503, 504)
-            and attempt < max_retries - 1
-        ):
-            # 退避序列走 nova_async 单点；cap 取自然上界，jitter=0 保持原行为
+            response.status_code == 429 or response.status_code >= 500
+        ) and attempt < max_retries:
             await abortable_sleep(
                 backoff_delay_ms(
                     attempt + 1,
                     base_ms=1000,
-                    cap_ms=1000 * 2 ** (max_retries - 2),
+                    cap_ms=1000 * 2 ** (max_retries - 1),
                     jitter=0,
                 ),
                 signal,
@@ -469,6 +466,7 @@ async def _to_auth(credential: OAuthCredential) -> ModelAuth:
 
 kimi_oauth = OAuthAuth(
     name="Kimi (Moonshot AI)",
+    is_subscription=True,
     login=_login,
     refresh=_refresh,
     to_auth=_to_auth,

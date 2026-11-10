@@ -2,7 +2,7 @@
 
 from nova_protocol import AssistantMessage, KnownApi, NovaErrorKind, StopReason, Usage
 
-from nova_ai.utils.overflow import is_context_overflow
+from nova_ai.utils.overflow import is_context_overflow, is_recoverable_length
 
 
 def _message(
@@ -113,6 +113,7 @@ class TestErrorPatterns:
             stop_reason=StopReason.ERROR,
             error_message="400 status code (no body)",
         )
+        msg.provider = "cerebras"
         assert is_context_overflow(msg) is True
 
     def test_cerebras_413_no_body(self):
@@ -120,7 +121,15 @@ class TestErrorPatterns:
             stop_reason=StopReason.ERROR,
             error_message="413 status code (no body)",
         )
+        msg.provider = "cerebras"
         assert is_context_overflow(msg) is True
+
+    def test_bodyless_400_is_not_globally_overflow(self):
+        msg = _message(
+            stop_reason=StopReason.ERROR,
+            error_message="400 status code (no body)",
+        )
+        assert is_context_overflow(msg) is False
 
     def test_generic_too_many_tokens(self):
         msg = _message(
@@ -261,3 +270,14 @@ class TestErrorKindPriority:
         )
         assert msg.error_kind is None
         assert is_context_overflow(msg) is True
+
+
+def test_recoverable_length_requires_output_below_original_limit():
+    message = _message(stop_reason=StopReason.LENGTH, output=64)
+    assert is_recoverable_length(message, 128000) is True
+    assert is_recoverable_length(message, 64) is False
+    assert is_recoverable_length(message, 0) is False
+    assert (
+        is_recoverable_length(_message(stop_reason=StopReason.STOP, output=64), 128000)
+        is False
+    )

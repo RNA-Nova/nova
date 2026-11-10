@@ -26,6 +26,35 @@ def _camel_to_snake(key: str) -> str:
     return _CAMEL_BOUNDARY.sub("_", key).lower()
 
 
+def _pi_dev_cost(cost: Dict[str, Any]) -> Dict[str, Any]:
+    """pi.dev 成本成品 → Nova 字段（含长上下文分层价）。"""
+    result: Dict[str, Any] = {
+        "input": cost.get("input", 0) or 0,
+        "output": cost.get("output", 0) or 0,
+        "cache_read": cost.get("cacheRead", 0) or 0,
+        "cache_write": cost.get("cacheWrite", 0) or 0,
+    }
+    tiers = []
+    for tier in cost.get("tiers") or []:
+        if not isinstance(tier, dict):
+            continue
+        above = tier.get("inputTokensAbove")
+        if not isinstance(above, int) or isinstance(above, bool):
+            continue
+        tiers.append(
+            {
+                "input_tokens_above": above,
+                "input": tier.get("input", 0) or 0,
+                "output": tier.get("output", 0) or 0,
+                "cache_read": tier.get("cacheRead", 0) or 0,
+                "cache_write": tier.get("cacheWrite", 0) or 0,
+            }
+        )
+    if tiers:
+        result["tiers"] = tiers
+    return result
+
+
 def _pi_dev_entry_to_fields(entry: Dict[str, Any]) -> Optional[ModelFields]:
     """pi.dev 单条目（camelCase 成品）→ 字段包（snake_case，待修正+盖戳）。"""
     model_id = entry.get("id")
@@ -41,15 +70,16 @@ def _pi_dev_entry_to_fields(entry: Dict[str, Any]) -> Optional[ModelFields]:
         "name": entry.get("name") or model_id,
         "reasoning": bool(entry.get("reasoning")),
         "input_types": entry.get("input") or ["text"],
-        "cost": {
-            "input": cost.get("input", 0) or 0,
-            "output": cost.get("output", 0) or 0,
-            "cache_read": cost.get("cacheRead", 0) or 0,
-            "cache_write": cost.get("cacheWrite", 0) or 0,
-        },
+        "cost": _pi_dev_cost(cost),
         "context_window": context_window,
         "max_tokens": max_tokens if isinstance(max_tokens, int) else context_window,
     }
+    if isinstance(entry.get("samplingParams"), dict):
+        fields["sampling_params"] = entry["samplingParams"]
+    if isinstance(entry.get("samplingParamsByThinkingLevel"), dict):
+        fields["sampling_params_by_thinking_level"] = entry[
+            "samplingParamsByThinkingLevel"
+        ]
     # 源数据驱动（三级解析第二级）：携带源的协议标注，盖戳时由 api_for
     # 裁决（本家立场优先，零立场时它说了算）
     if isinstance(entry.get("api"), str) and entry["api"]:
@@ -125,6 +155,7 @@ class PiDevCatalog:
         key: str,
         signal: Optional[AbortSignal],
         validator: Optional[str],
+        skip_deprecated: bool = False,
     ) -> CatalogOutcome:
         """拉取 ``key``（provider id）的 per-provider 目录（带条件请求）。"""
         if is_aborted(signal):
@@ -177,9 +208,8 @@ class PiDevCatalog:
             status=200,
             models_fields=fields,
             etag=response.headers.get("etag"),
-            last_modified=(
-                last_modified if last_modified is not None else int(time.time() * 1000)
-            ),
+            # 缺失/坏头保持未知（0 等效），不能用“现在”冒充远端新鲜度。
+            last_modified=last_modified,
         )
 
 

@@ -51,6 +51,7 @@ class ModelsDevCatalog:
         key: str,
         signal: Optional[AbortSignal],
         validator: Optional[str],
+        skip_deprecated: bool = False,
     ) -> CatalogOutcome:
         """按 ``key``（provider id 或 models.dev 目录键）切片并翻译。"""
         if is_aborted(signal):
@@ -63,22 +64,37 @@ class ModelsDevCatalog:
         except Exception as error:
             return CatalogOutcome(status=0, cause=error)
 
-        provider_slice = (payload.get(key) or {}).get("models")
-        if not provider_slice:
+        provider = payload.get(key)
+        if not isinstance(provider, dict):
             return CatalogOutcome(status=404)
+        provider_slice = provider.get("models")
+        if not isinstance(provider_slice, dict):
+            return CatalogOutcome(status=404)
+        # 空 models 是合法空目录（200），可与 provider 不存在（404）区分。
 
         fields: List[ModelFields] = []
+        source_reasoning: Dict[str, Dict[str, Any]] = {}
         for model_id, entry in provider_slice.items():
-            mapped = models_dev_to_nova(key, entry)
+            mapped = models_dev_to_nova(key, entry, skip_deprecated=skip_deprecated)
             if mapped is not None:
                 # 翻译件不携带 id（构建期 id 是 dict key）——运行时 finalize
                 # 需要它在字段包里，在此补回。出口一次 cast（与引擎同款纪律：
                 # 翻译件的键集即 ModelFields 形状，静态推导不认 dict 直转）
                 mapped["id"] = model_id
                 fields.append(cast(ModelFields, mapped))
+            if isinstance(entry, dict):
+                capabilities = entry.get("capabilities") or {}
+                reasoning = (
+                    capabilities.get("reasoning")
+                    if isinstance(capabilities, dict)
+                    else None
+                )
+                if isinstance(reasoning, dict):
+                    source_reasoning[model_id] = reasoning
         return CatalogOutcome(
             status=200,
             models_fields=fields,
+            source_reasoning=source_reasoning,
             last_modified=int(time.time() * 1000),
         )
 

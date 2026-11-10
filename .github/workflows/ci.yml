@@ -192,6 +192,34 @@ jobs:
           python -m pip install -e ../nova_protocol -e ../nova_async -e . pytest pytest-asyncio
           python -m pytest tests -q -m "not integration"
 
+  # nova_ai + nova_catalog 默认密封测试与生成物门禁
+  ai-catalog-py:
+    name: ai-catalog-py / ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -e packages/nova_protocol -e packages/nova_async -e packages/nova_catalog -e packages/nova_ai
+          python -m pip install pytest pytest-asyncio pytest-timeout pytest-socket respx hypothesis json-repair
+
+      - name: nova_ai 非集成测试
+        working-directory: packages/nova_ai
+        run: python -m pytest tests -q -m "not integration"
+
+      - name: nova_catalog 测试
+        working-directory: packages/nova_catalog
+        run: python -m pytest tests -q
+
+      - name: 模型生成物一致性门禁
+        run: python packages/nova_catalog/scripts/check_model_data.py
+
   # nova_coding_agent 单元测试（bash 引擎/工具链/executor 接入/策略面）
   coding-agent-py:
     name: coding-agent-py / ubuntu-latest

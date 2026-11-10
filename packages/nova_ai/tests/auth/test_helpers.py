@@ -3,9 +3,8 @@
 import asyncio
 
 import pytest
-from nova_protocol import ModelAuth, OAuthAuth, OAuthCredential
-
 from nova_ai.auth.helpers import lazy_oauth
+from nova_protocol import ModelAuth, OAuthAuth, OAuthCredential
 
 pytestmark = pytest.mark.asyncio
 
@@ -21,6 +20,11 @@ def _fake_oauth(name: str = "fake") -> OAuthAuth:
         return ModelAuth(api_key=credential.access)
 
     return OAuthAuth(name=name, login=login, refresh=refresh, to_auth=to_auth)
+
+
+async def test_lazy_oauth_forwards_subscription_metadata():
+    oauth = lazy_oauth("Fake", _fake_oauth, is_subscription=True)
+    assert oauth.is_subscription is True
 
 
 async def test_lazy_oauth_loads_once_and_is_reawaitable():

@@ -58,6 +58,8 @@ class ToolCall(NovaBaseModel):
     id: str = ""
     name: str = ""
     arguments: Dict[str, Any] = Field(default_factory=dict)
+    # 完整参数文本非法/截断时的结构化错误；有值时禁止执行工具。
+    arguments_error: Optional[str] = None
     thought_signature: Optional[str] = None
     partial_args: Optional[str] = Field(
         default=None, exclude=True

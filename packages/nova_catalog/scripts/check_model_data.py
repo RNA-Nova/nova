@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
-"""模型数据保鲜检查（对齐 TS ``scripts/check-model-data.ts``）。
-
-离线校验生成的数据分片与 manifest 的一致性——不访问网络。
-漂移/缺失时 exit 1 并提示重新生成；pytest 保鲜测试也走同一条路径。
-"""
+"""模型数据保鲜检查：离线对账聚合器、shard、JSON 与 manifest。"""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
+from typing import Optional
 
-# 产物目标：nova_ai 包根（默认 monorepo 兄弟目录约定，NOVA_AI_PACKAGE_ROOT 可覆盖）
-NOVA_AI_ROOT = Path(
-    os.environ.get("NOVA_AI_PACKAGE_ROOT")
-    or str(Path(__file__).resolve().parents[2] / "nova_ai")
-)
-
-from nova_catalog import model_data as mdata  # noqa: E402
+from nova_catalog import model_data as mdata
 
 
-def main() -> int:
+def main(*, package_root: Optional[Path] = None) -> int:
+    root = package_root or mdata.default_package_root()
     try:
-        mdata.validate_generated_model_data(NOVA_AI_ROOT)
+        mdata.validate_generated_model_data(root)
     except Exception as error:
         print(error, file=sys.stderr)
         print(

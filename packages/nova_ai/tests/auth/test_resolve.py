@@ -128,6 +128,47 @@ async def test_resolve_stored_oauth_refreshes_when_expired():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("refreshed_validity_ms", "succeeds"),
+    [(60 * 60 * 1000, True), (10 * 60 * 1000, False)],
+)
+async def test_min_oauth_validity_refreshes_and_enforces_postcondition(
+    refreshed_validity_ms, succeeds
+):
+    now = int(time.time() * 1000)
+    store = InMemoryCredentialStore()
+    store.write(
+        "test",
+        OAuthCredential(access="old", refresh="refresh", expires=now + 10 * 60 * 1000),
+    )
+
+    async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
+        return OAuthCredential(
+            access="new",
+            refresh=credential.refresh,
+            expires=int(time.time() * 1000) + refreshed_validity_ms,
+        )
+
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
+        return ModelAuth(api_key=credential.access)
+
+    auth = ProviderAuth(
+        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+    )
+    overrides = AuthResolutionOverrides(min_oauth_validity_ms=30 * 60 * 1000)
+    if succeeds:
+        result = await resolve_provider_auth(
+            "test", auth, store, default_provider_auth_context(), overrides
+        )
+        assert result is not None and result.auth["api_key"] == "new"
+    else:
+        with pytest.raises(ModelsError, match="expires too soon"):
+            await resolve_provider_auth(
+                "test", auth, store, default_provider_auth_context(), overrides
+            )
+
+
+@pytest.mark.asyncio
 async def test_refresh_aborted_inside_refresh_lock_propagates_aborted_error():
     """刷新在 per-provider 刷新锁内因 signal 抛 AbortedError：直通，不得包成 ModelsError
     （取消不落泛型兜底——否则 abort 会被误报成"OAuth 刷新失败"）。"""
@@ -190,25 +231,19 @@ async def test_refresh_timeout_raises_request_timeout_not_aborted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refresh_receives_user_signal_unmodified():
-    """刷新拿到调用方 signal 本体（不再与 timeout-signal 合并）。"""
+async def test_started_refresh_does_not_receive_caller_signal():
+    """轮转关键段只受超时约束，不再消费调用方取消信号。"""
     store = InMemoryCredentialStore()
-    expired = OAuthCredential(
-        access="old-access",
-        refresh="refresh-token",
-        expires=int(time.time() * 1000) - 1000,
+    store.write(
+        "test",
+        OAuthCredential(access="old-access", refresh="refresh-token", expires=0),
     )
-    store.write("test", expired)
-
-    controller = AbortController()
     seen = []
 
     async def refresh(credential: OAuthCredential, signal=None) -> OAuthCredential:
         seen.append(signal)
         return OAuthCredential(
-            access="new-access",
-            refresh=credential.refresh,
-            expires=int(time.time() * 1000) + 60000,
+            access="new-access", refresh=credential.refresh, expires=60_000
         )
 
     async def to_auth(credential: OAuthCredential) -> ModelAuth:
@@ -217,14 +252,56 @@ async def test_refresh_receives_user_signal_unmodified():
     auth = ProviderAuth(
         oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
     )
-    await resolve_provider_auth(
-        "test",
-        auth,
-        store,
-        default_provider_auth_context(),
-        overrides=AuthResolutionOverrides(signal=controller.signal),
+    await resolve_provider_auth("test", auth, store, default_provider_auth_context())
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_still_persists_rotated_refresh_token():
+    """调用方取消只取消等待；已开始的轮转结果必须继续写回。"""
+    write_observed = asyncio.Event()
+
+    class _Store(InMemoryCredentialStore):
+        def write(self, provider_id, credential):
+            super().write(provider_id, credential)
+            if credential.type == "oauth" and credential.refresh == "new-refresh":
+                write_observed.set()
+
+    store = _Store()
+    store.write("test", OAuthCredential(access="old", refresh="old-refresh", expires=0))
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    controller = AbortController()
+
+    async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
+        started.set()
+        await finish.wait()
+        return OAuthCredential(access="new", refresh="new-refresh", expires=60_000)
+
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
+        return ModelAuth(api_key=credential.access)
+
+    auth = ProviderAuth(
+        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
     )
-    assert seen == [controller.signal]
+    request = asyncio.create_task(
+        resolve_provider_auth(
+            "test",
+            auth,
+            store,
+            default_provider_auth_context(),
+            AuthResolutionOverrides(signal=controller.signal),
+        )
+    )
+    await started.wait()
+    controller.abort()
+    with pytest.raises(AbortedError):
+        await request
+    assert store.read("test").refresh == "old-refresh"
+
+    finish.set()
+    await asyncio.wait_for(write_observed.wait(), timeout=1.0)
+    assert store.read("test").refresh == "new-refresh"
 
 
 @pytest.mark.asyncio
@@ -356,3 +433,12 @@ def test_models_error_includes_cause_detail():
     # 原因已在 message 中时不重复拼接
     err2 = ModelsError("auth", "failed: boom detail", cause)
     assert str(err2).count("boom detail") == 1
+
+
+def test_auth_overrides_repr_hides_key_and_env():
+    overrides = AuthResolutionOverrides(
+        api_key="sk-override-secret", env={"TOKEN": "sk-env-secret"}
+    )
+    text = repr(overrides)
+    assert "sk-override-secret" not in text
+    assert "sk-env-secret" not in text

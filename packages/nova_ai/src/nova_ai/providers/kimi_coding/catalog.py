@@ -44,11 +44,13 @@ class ManagedOverlay(TypedDict):
     context_window: int
 
 
-def _managed_base_url() -> str:
-    """managed 端点 base URL（``KIMI_CODE_BASE_URL`` 可覆盖，对齐 kimi-code）。"""
-    return (os.environ.get("KIMI_CODE_BASE_URL") or _MANAGED_BASE_URL_DEFAULT).rstrip(
-        "/"
-    )
+def _managed_base_url(context: RefreshModelsContext) -> str:
+    """私有源基址：显式 env 覆盖 → 当前 provider 生效基址 → 官方默认。"""
+    return (
+        os.environ.get("KIMI_CODE_BASE_URL")
+        or context.base_url
+        or _MANAGED_BASE_URL_DEFAULT
+    ).rstrip("/")
 
 
 def _thinking_level_map(valid_efforts: Optional[List[Any]]) -> Dict[str, Optional[str]]:
@@ -96,9 +98,8 @@ async def _managed_overlays(
     """managed /models 订阅源 → 活字段包列表（鉴权修正层的活数据）。
 
     凭据形状不限——coding plan 订阅制同时支持 OAuth 与 API key（Bearer
-    都是 token，端点同样认）；无凭据才跳过。返回 ``None`` = managed 端点
-    未给出 200（不占修正层，基底照常）；401/402/403 = 凭据失效，抛错
-    （refresh 记入 errors，不静默）。
+    都是 token，端点同样认）。只有无凭据才跳过；有凭据时传输失败、非 200、
+    坏载荷都抛错，旧 personalized 成品由策略层保留。401/402/403 为凭据失效。
     """
     credential = context.credential
     if credential is None:
@@ -109,7 +110,7 @@ async def _managed_overlays(
     try:
         response = await request_with_abort(
             "GET",
-            f"{_managed_base_url()}/models",
+            f"{_managed_base_url(context)}/models",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
@@ -117,21 +118,9 @@ async def _managed_overlays(
             timeout=4.0,
             signal=context.signal,
         )
-    except RuntimeError:
-        # 传输失败（超时/连接失败）：不占修正层、基底照常，但发诊断——
-        # 订阅可见性修正悄悄缺失不该无感知（CAPABILITY 降级）。
-        # （AbortedError 非 RuntimeError——取消照常传播，不误吞）
-        context.diagnostics.append(
-            NovaDiagnostic(
-                severity="warning",
-                kind=WarningKind.CAPABILITY,
-                message=(
-                    "kimi-coding 订阅源拉取失败（传输层）——本次刷新的"
-                    "订阅可见性修正缺失，目录以公开站基底为准"
-                ),
-            )
-        )
-        return None
+    except RuntimeError as error:
+        # 有凭据时私有源失败不是“无个性化”：必须保留旧 personalized 成品。
+        raise CatalogError("Kimi Code subscription catalog transport failed") from error
 
     if response.status_code in (401, 402, 403):
         raise CatalogError(
@@ -140,14 +129,19 @@ async def _managed_overlays(
             status_code=response.status_code,
         )
     if response.status_code != 200:
-        return None
+        raise CatalogError(
+            f"Kimi Code subscription catalog failed ({response.status_code})",
+            status_code=response.status_code,
+        )
     try:
         payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
-    except Exception:
-        data = None
+    except Exception as error:
+        raise CatalogError(
+            "Kimi Code subscription catalog returned invalid JSON"
+        ) from error
     if not isinstance(data, list):
-        return None
+        raise CatalogError("Kimi Code subscription catalog payload has no data list")
     return [o for o in (_to_overlay(item) for item in data) if o is not None]
 
 
@@ -198,8 +192,8 @@ async def kimi_personalize(
 ) -> List[Model]:
     """kimi 的 ``personalize`` 钩子：managed 订阅源覆盖层（名单+活字段）。
 
-    无凭据 / 订阅源未给出 200（含传输失败）→ 基底原样（不占层）；
-    401/402/403 → 抛错（重登录语义，refresh 记入 errors）。
+    仅无凭据时使用基底；有凭据时私有源失败抛错，旧 personalized 成品保留。
+    401/402/403 使用重登录语义并记入 refresh errors。
     """
     overlays = await _managed_overlays(context)
     if overlays is None:

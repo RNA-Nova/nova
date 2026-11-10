@@ -10,7 +10,7 @@ import json
 import math
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 from urllib.parse import quote, urlencode
 
@@ -307,6 +307,7 @@ async def _poll_openai_codex_device_auth(
                 return DeviceCodePollResult(
                     status="failed",
                     message=validation_message("OpenAI Codex device auth token", error),
+                    error_kind=NovaErrorKind.UPSTREAM_ERROR,
                 )
             return DeviceCodePollResult(
                 status="complete",
@@ -341,6 +342,7 @@ async def _poll_openai_codex_device_auth(
                 f"OpenAI Codex device auth failed with status "
                 f"{response.status_code}: {response_error_detail(response)}"
             ),
+            error_kind=oauth_http_kind(response.status_code),
         )
 
     return await poll_oauth_device_code_flow(
@@ -357,9 +359,9 @@ async def _poll_openai_codex_device_auth(
 class AuthorizationFlow:
     """浏览器授权流的初始参数（不可变值对象——规则 5）。"""
 
-    verifier: str
-    state: str
-    url: str
+    verifier: str = field(repr=False)
+    state: str = field(repr=False)
+    url: str = field(repr=False)  # URL 携带 state/code_challenge，不进默认 repr
 
 
 async def create_authorization_flow(originator: str = "nova") -> AuthorizationFlow:
@@ -490,6 +492,7 @@ async def _to_auth(credential: OAuthCredential) -> ModelAuth:
 
 openai_codex_oauth = OAuthAuth(
     name="OpenAI (ChatGPT Plus/Pro)",
+    is_subscription=True,
     login=_login,
     refresh=_refresh,
     to_auth=_to_auth,

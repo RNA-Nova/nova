@@ -47,18 +47,16 @@ class ModelIdentity:
     def from_model(cls, model: Model) -> "ModelIdentity":
         """从完整 ``Model`` 构造归因摘要（钩子调用点的唯一构造通道）。
 
-        base_url 剥 userinfo（``https://user:pass@host`` 的内嵌凭据不出
-        钩子面——白名单三字段的最后一个泄漏缝）。
+        base_url 只保留 scheme/host/port/path；userinfo、query、fragment 均可能
+        携带凭据或会话秘密，一律不出钩子面。
         """
-        base_url = model.base_url
-        parts = urlsplit(base_url)
+        parts = urlsplit(model.base_url)
+        netloc = parts.netloc
         if parts.username or parts.password:
             netloc = parts.hostname or ""
             if parts.port is not None:
                 netloc = f"{netloc}:{parts.port}"
-            base_url = urlunsplit(
-                (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
-            )
+        base_url = urlunsplit((parts.scheme, netloc, parts.path, "", ""))
         return cls(provider=model.provider, id=model.id, base_url=base_url)
 
 
@@ -91,7 +89,7 @@ class StreamOptions:
     headers: Optional[ProviderHeaders] = field(default=None, repr=False)
     metadata: Optional[Dict[str, Any]] = None
     # Provider 级环境变量，优先级高于进程环境变量
-    env: Optional[ProviderEnv] = None
+    env: Optional[ProviderEnv] = field(default=None, repr=False)
     # 请求超时（秒）：连接建立后的 read/idle 相耐心——connect/pool 相归
     # 引擎上限（api_impls/_shared/timeouts.CONNECT_TIMEOUT_S），本字段管不到。
     # None = 引擎默认（DEFAULT_STREAM_TIMEOUT_S=300s）；0 = 显式关闭 read 相
@@ -108,6 +106,8 @@ class StreamOptions:
     # 采样参数透传（合并进请求体顶层，自定义键覆盖命名请求字段；
     # 对齐 TS samplingParams）
     sampling_params: Optional[Dict[str, Any]] = None
+    # 工具选择；provider 特定的自由负载（具体子类可收窄为自家 TypedDict）。
+    tool_choice: Optional[Any] = None
 
     # 运行时回调/信号，不参与任何序列化
     signal: Optional[AbortSignal] = None
@@ -117,6 +117,8 @@ class StreamOptions:
     # Any = 可同步返回或返回 awaitable（实现侧 isawaitable 兼容）
     on_payload: Optional[Callable[[Any, ModelIdentity], Any]] = None
     on_response: Optional[Callable[[ProviderResponse, ModelIdentity], Any]] = None
+    # 每个 provider 原始流事件的观察口；第一参为自由负载，返回可为 awaitable。
+    on_provider_stream_event: Optional[Callable[[Any, ModelIdentity], Any]] = None
     # ModelsManager 层专属（对齐 TS ModelsStreamTransforms.transformHeaders）：
     # 在 auth/model/options headers 合并完成后、provider 派发前运行一次，
     # 可同步或异步返回新的 headers；``ModelsManager`` 负责消费并在派发前移除，

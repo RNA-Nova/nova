@@ -65,6 +65,8 @@ class CatalogOutcome:
     # frozen 只锁重绑不锁内容——纪律：构造后不再 mutate（现网调用点全部
     # 是先构建再传入；需要可变累加请新建实例）
     models_fields: List[ModelFields] = field(default_factory=list)
+    # models.dev 原始 reasoningOptions 按模型 id 携带，供 finalize 的 native 门控。
+    source_reasoning: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     etag: Optional[str] = None
     last_modified: Optional[int] = None
     # 拉取失败时的原始异常（status=0 的合成码场景——传输/解析错误的分类
@@ -86,6 +88,7 @@ class CatalogService(Protocol):
         key: str,
         signal: Optional[AbortSignal],
         validator: Optional[str],
+        skip_deprecated: bool = False,
     ) -> CatalogOutcome:
         """拉取 ``key``（provider id）对应的目录切片。
 

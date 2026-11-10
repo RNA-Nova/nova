@@ -73,6 +73,8 @@ class AssistantMessage(NovaBaseModel):
     # 脱敏后的 provider/运行时诊断（失败与恢复路径，开放形状列表）；None = 无诊断
     diagnostics: Optional[List[Dict[str, Any]]] = None
     timestamp: int = 0
+    # 本流所见响应的毫秒耗时（monotonic 计量）；None = 旧消息或延迟结果。
+    duration_ms: Optional[int] = None
 
 
 class ToolResultMessage(NovaBaseModel):

@@ -2,7 +2,11 @@
 
 import json
 
-from nova_ai.utils import StreamingJsonParser, parse_streaming_json
+from nova_ai.utils import (
+    StreamingJsonParser,
+    parse_streaming_json,
+    parse_tool_call_arguments,
+)
 
 
 class TestParseStreamingJson:
@@ -116,25 +120,33 @@ class TestStreamingJsonParser:
         parser.feed("not json at all")
         assert parser.value == {}
 
-    def test_finish_matches_parse_streaming_json(self):
-        """终值语义与 parse_streaming_json 完全一致"""
-        cases = [
-            '{"query": "hello wor',
-            '{"a": {"b": [1, 2',
-            json.dumps({"content": "x = 1\n" * 100}),
-            "not json at all {",
-            "",
-            "[1, 2, 3]",
-        ]
-        for text in cases:
-            parser = self._feed_all(text)
-            assert parser.finish() == parse_streaming_json(text), text
+    def test_final_arguments_parse_complete_json_and_repair_invalid_escapes(self):
+        result = parse_tool_call_arguments(r'{"kind":"seek","note":"\url"}')
+        assert result.arguments == {"kind": "seek", "note": "\\url"}
+        assert result.arguments_error is None
 
-    def test_finish_after_dangling_key_completes_via_repair(self):
-        """finish 走 json_repair 兜底：悬空 token 也能得到修复终值"""
-        parser = StreamingJsonParser()
-        parser.feed('{"a": ')
-        assert parser.finish() == parse_streaming_json('{"a": ')
+    def test_final_arguments_do_not_complete_cutoff_json(self):
+        raw = '{"kind":"seek","clipId":"clip-fl'
+        result = parse_tool_call_arguments(raw)
+        assert result.arguments == {}
+        assert result.arguments_error is not None
+        assert result.arguments_error.endswith(raw)
+
+    def test_final_arguments_reject_malformed_and_non_object_json(self):
+        cases = [
+            '{"action":"apply","actions":[{"kind":"seek","time":.5}]}',
+            "[1,2]",
+            "5",
+        ]
+        for raw in cases:
+            result = parse_tool_call_arguments(raw)
+            assert result.arguments == {}
+            assert result.arguments_error is not None
+
+    def test_final_arguments_empty_text_is_empty_object(self):
+        result = parse_tool_call_arguments("  ")
+        assert result.arguments == {}
+        assert result.arguments_error is None
 
     def test_large_args_perf_smoke(self):
         """线性成本实证：规模 ×3 → 耗时近线性（~3x）而非平方（~9x）。
@@ -150,7 +162,9 @@ class TestStreamingJsonParser:
             t0 = time.perf_counter()
             for i in range(0, len(full), delta):
                 parser.feed(full[i : i + delta])
-            assert parser.finish() == {"content": "x = 1\n" * n_lines}
+            assert parse_tool_call_arguments(full).arguments == {
+                "content": "x = 1\n" * n_lines
+            }
             return time.perf_counter() - t0
 
         base = _run(3000, 40)  # ~24KB × 600 delta
@@ -287,24 +301,20 @@ class TestStreamingJsonParserDifferentialFuzz:
                         piece,
                         value,
                     )
-                assert parser.finish() == doc, (case, text)
+                assert parser.value == doc, (case, text)
 
-    def test_fuzz_truncated_finish_matches_old_implementation(self):
-        """截断终值差分：任意截断点上 finish() 必须与旧实现一致"""
+    def test_fuzz_truncated_final_arguments_never_execute_partial_json(self):
+        """任意截断点的终态都必须报错，不能经修复变成貌似正常的工具参数。"""
         import random
 
         rng = random.Random(20260902)
-        for case in range(300):
+        for _ in range(300):
             doc = self._gen_doc(rng)
             text = json.dumps(doc)
-            parser = StreamingJsonParser()
-            for piece in self._split(rng, text):
-                parser.feed(piece)
-            cut = rng.randint(0, len(text))
-            resumed = StreamingJsonParser()
-            for piece in self._split(rng, text[:cut]):
-                resumed.feed(piece)
-            assert resumed.finish() == parse_streaming_json(text[:cut]), (case, cut)
+            cut = rng.randint(1, len(text) - 1)
+            result = parse_tool_call_arguments(text[:cut])
+            assert result.arguments == {}
+            assert result.arguments_error is not None
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +358,8 @@ class TestParseStreamingJsonProperties:
 class TestStreamingJsonParserProperties:
     @given(value=_json_containers, data=st.data())
     @settings(max_examples=100)
-    def test_arbitrary_chunking_finishes_to_full_value(self, value, data):
-        """任意合法 JSON 按任意 delta 切分喂入，finish() 恒等于完整解析。"""
+    def test_arbitrary_chunking_preserves_strict_final_value(self, value, data):
+        """任意合法 JSON 按任意 delta 切分后，严格终值恒等于完整解析。"""
         full = json.dumps(value)
         parser = StreamingJsonParser()
         pos = 0
@@ -359,4 +369,26 @@ class TestStreamingJsonParserProperties:
             )
             parser.feed(full[pos : pos + step])
             pos += step
-        assert parser.finish() == value
+        assert parser.value == value
+
+
+def test_large_open_array_snapshot_copying_is_budgeted(monkeypatch):
+    """开放大数组不得每次 delta 都全量浅拷；闭合后仍给出精确终值。"""
+    parser = StreamingJsonParser()
+    copy_calls = 0
+    original = parser._make_snapshot
+
+    def counted_snapshot():
+        nonlocal copy_calls
+        copy_calls += 1
+        return original()
+
+    monkeypatch.setattr(parser, "_make_snapshot", counted_snapshot)
+    parser.feed("[")
+    for index in range(2000):
+        parser.feed(f"{index},")
+        snapshot = parser.value
+        assert isinstance(snapshot, list)
+    parser.feed("]")
+    assert parser.value == list(range(2000))
+    assert copy_calls < 1000

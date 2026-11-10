@@ -71,9 +71,9 @@ from nova_protocol import (
 from ..auth.context import default_provider_auth_context
 from ..auth.credential_store import InMemoryCredentialStore
 from ..auth.resolve import (
-    DEFAULT_OAUTH_REFRESH_TIMEOUT_MS,
     AuthResolutionOverrides,
     ModelsError,
+    refresh_stored_oauth_credential,
     resolve_provider_auth,
 )
 from ..stream_options import SimpleStreamOptions, StreamOptions
@@ -178,7 +178,6 @@ class ModelsManager:
         # 刷新世代机制：世代号 / 在飞 controller / 每 provider 发布链
         self._refresh_generations: Dict[str, int] = {}
         self._refresh_controllers: Dict[str, AbortController] = {}
-        self._inflight_refreshes: Dict[str, "asyncio.Task[None]"] = {}
         self._publication_chains: Dict[str, asyncio.Future] = {}
 
     # -----------------------------------------------------------------------
@@ -287,6 +286,11 @@ class ModelsManager:
             if previous is not None:
                 try:
                     await previous
+                except asyncio.CancelledError:
+                    # 只吸收“前序自身已取消”的链毒化；若当前等待者被取消，
+                    # previous 并未取消，必须继续抛出本次取消。
+                    if not previous.cancelled():
+                        raise
                 except Exception:
                     pass
             if (
@@ -330,8 +334,9 @@ class ModelsManager:
         force: Optional[bool],
         generation: int,
         signal: AbortSignal,
+        collector: DiagnosticsCollector,
     ) -> List[NovaDiagnostic]:
-        """跑一个刷新阶段（离线恢复或网络拉取）；返回本阶段收集的诊断。"""
+        """跑一个刷新阶段；诊断写入本轮共享收集器，异常时也不丢失。"""
         # 能力字段探测（refresh() 的 refreshable 过滤保证只会走到动态
         # provider，这里再守一道是双保险）
         refresh_models = provider.refresh_models
@@ -341,9 +346,9 @@ class ModelsManager:
         # 目录站发放：按选配解析站并绑定 provider id（partial 技巧——
         # ctx.catalog_fetch 对 refresh 实现只剩 (signal, validator) 两参）
         service = self._catalog_service_for(provider)
-        collector = DiagnosticsCollector(on_diagnostic=self._on_diagnostic)
         context = RefreshModelsContext(
             credential=credential,
+            base_url=provider.base_url,
             stored=stored.model_copy(deep=True) if stored is not None else None,
             publish=lambda publication: self._publish_provider_models(
                 provider.id, generation, signal, publication
@@ -352,7 +357,18 @@ class ModelsManager:
             force=bool(force) if allow_network else False,
             signal=signal,
             catalog_fetch=(
-                partial(service.fetch, provider.id) if service is not None else None
+                partial(
+                    service.fetch,
+                    provider.id,
+                    **(
+                        {"skip_deprecated": True}
+                        if provider.catalog_knowledge is not None
+                        and provider.catalog_knowledge.skip_deprecated
+                        else {}
+                    ),
+                )
+                if service is not None
+                else None
             ),
             diagnostics=collector,
         )
@@ -393,33 +409,10 @@ class ModelsManager:
             if p.refresh_models is not None and (selected is None or p.id in selected)
         ]
 
-        async def _refresh_one(provider: Provider) -> None:
-            inflight = self._inflight_refreshes.get(provider.id)
-            if inflight is not None and not inflight.done():
-                # 在途去重：同 provider 的并发刷新共享一次网络往返
-                # （否则两边互相 bump 世代 supersede，先完成者的发布被拦下）
-                try:
-                    # shield：旁观者（去重等待方）被取消不得传染在途刷新——
-                    # 取消传染会杀死共享的网络往返并让发起方静默假成功
-                    await asyncio.shield(inflight)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    pass  # 错误归属发起方调用的 errors 字典
-                return
-            task = asyncio.current_task()
-            assert task is not None
-            self._inflight_refreshes[provider.id] = task
-            try:
-                await _refresh_one_uncached(provider)
-            finally:
-                if self._inflight_refreshes.get(provider.id) is task:
-                    self._inflight_refreshes.pop(provider.id, None)
-
         async def _refresh_one_uncached(provider: Provider) -> None:
             generation, controller = self._begin_provider_refresh(provider.id)
             phase_signal = any_signal([caller_signal, controller.signal])
-            collected: List[NovaDiagnostic] = []
+            collector = DiagnosticsCollector(on_diagnostic=self._on_diagnostic)
 
             async def _operation() -> None:
                 stored_credential: Optional[Credential] = None
@@ -429,68 +422,65 @@ class ModelsManager:
                 except Exception as exc:
                     credential_error = exc
 
-                # 先恢复缓存（离线阶段），auth 解析与网络访问之前
-                collected.extend(
-                    await self._run_provider_refresh_phase(
-                        provider,
-                        stored_credential,
-                        allow_network=False,
-                        force=None,
-                        generation=generation,
-                        signal=phase_signal,
-                    )
+                # 先恢复缓存（离线阶段），auth 解析与网络访问之前。离线恢复
+                # 也在同一 deadline 内，慢存储不能绕过整轮预算。
+                await self._run_provider_refresh_phase(
+                    provider,
+                    stored_credential,
+                    allow_network=False,
+                    force=None,
+                    generation=generation,
+                    signal=phase_signal,
+                    collector=collector,
                 )
                 if credential_error is not None:
                     raise credential_error
                 if not allow_network or phase_signal.aborted:
                     return
 
-                try:
-                    # 无凭据不再一刀切跳过（有意分歧 pi）：匿名源（models.dev）
-                    # 无凭据也应刷新——凭据是"筛选输入"不是"刷新门禁"；
-                    # 需要凭据的源由各家 fetch 自己裁决（缺凭据如何收场）。
-                    #
-                    # 整轮预算的剩余时间下发**凭据解析 + 网络阶段**（deadline
-                    # 预算制覆盖全链——解析将来走网络（密钥管理服务）也不破
-                    # 预算语义；耗尽即 RequestTimeoutError，不冒名用户取消）
-                    async with asyncio.timeout(deadline.remaining_s):
-                        credential = await self._resolve_refresh_credential(
-                            provider, stored_credential, phase_signal
-                        )
-                        collected.extend(
-                            await self._run_provider_refresh_phase(
-                                provider,
-                                credential,
-                                allow_network=True,
-                                force=force,
-                                generation=generation,
-                                signal=phase_signal,
-                            )
-                        )
-                except RequestTimeoutError:
-                    raise  # 更具体的超时（如 OAuth 帽）原样上浮
-                except TimeoutError as error:
-                    raise RequestTimeoutError(
-                        f"Models refresh deadline exceeded for {provider.id}"
-                    ) from error
+                # 无凭据不再一刀切跳过（有意分歧 pi）：匿名源（models.dev）
+                # 无凭据也应刷新——凭据是"筛选输入"不是"刷新门禁"。
+                credential = await self._resolve_refresh_credential(
+                    provider, stored_credential, phase_signal
+                )
+                await self._run_provider_refresh_phase(
+                    provider,
+                    credential,
+                    allow_network=True,
+                    force=force,
+                    generation=generation,
+                    signal=phase_signal,
+                    collector=collector,
+                )
 
             try:
-                await await_with_abort(_operation(), phase_signal)
+                # 同一预算覆盖恢复、凭据解析和网络，不逐阶段重新计时。
+                async with asyncio.timeout(deadline.remaining_s):
+                    await await_with_abort(_operation(), phase_signal)
+            except RequestTimeoutError as exc:
+                if not phase_signal.aborted:
+                    errors[provider.id] = exc
+            except TimeoutError as error:
+                if not phase_signal.aborted:
+                    errors[provider.id] = RequestTimeoutError(
+                        f"Models refresh deadline exceeded for {provider.id}"
+                    )
+                    errors[provider.id].__cause__ = error
             except Exception as exc:
                 if not phase_signal.aborted:
                     errors[provider.id] = exc
             finally:
-                # 诊断即数据：网络阶段抛错也保留已收集条目（与 errors 并列呈现）
-                if collected:
-                    diagnostics[provider.id] = collected
+                # 共享收集器让网络阶段 append 后抛错也不丢诊断。
+                if collector.items:
+                    diagnostics[provider.id] = list(collector.items)
                 if self._refresh_controllers.get(provider.id) is controller:
                     self._refresh_controllers.pop(provider.id, None)
 
-        # TaskGroup（3.11+ 结构化并发）：_refresh_one 内部已按 provider
-        # 收集错误，正常不外抛；若外抛（如取消）则整组等待收尾后传播。
+        # 每个调用独立运行；共享只发生在上层有完整结果传播与独立取消的
+        # 编排器。manager 不做半共享（pi Models 同款）。
         async with asyncio.TaskGroup() as tg:
             for provider in refreshable:
-                tg.create_task(_refresh_one(provider))
+                tg.create_task(_refresh_one_uncached(provider))
 
         return {
             "aborted": bool(caller_signal.aborted),
@@ -514,36 +504,14 @@ class ModelsManager:
             if signal.aborted:
                 return None
 
-            async with self._refresh_locks(provider.id):
-                # 与 auth/resolve 的刷新路径同构：复查 → 网络（15s 帽）→ 写
-                try:
-                    current = self._credential_store.read(provider.id)
-                except Exception as error:
-                    raise ModelsError(
-                        "auth", f"Credential store read failed for {provider.id}", error
-                    )
-                if current is None or current.type != "oauth":
-                    return None  # 期间已登出
-                if current.expires > int(time.time() * 1000):
-                    return current  # 另一请求/进程刚刷新过——直接复用
-                try:
-                    # 15s 硬超时走独立通道（RequestTimeoutError——超时≠取消），
-                    # signal 原样透传
-                    async with asyncio.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS / 1000):
-                        refreshed = await oauth.refresh(current, signal)
-                except TimeoutError as error:
-                    raise RequestTimeoutError(
-                        f"OAuth refresh timed out for {provider.id}"
-                    ) from error
-                try:
-                    self._credential_store.write(provider.id, refreshed)
-                except Exception as error:
-                    raise ModelsError(
-                        "auth",
-                        f"Credential store write failed for {provider.id}",
-                        error,
-                    )
-                return refreshed
+            return await refresh_stored_oauth_credential(
+                self._credential_store,
+                provider.id,
+                oauth,
+                lambda current: current.expires <= int(time.time() * 1000),
+                signal,
+                self._refresh_locks,
+            )
 
         api_key = provider.auth.api_key if provider.auth else None
         if api_key is None:
@@ -715,7 +683,7 @@ class ModelsManager:
         providers = (
             [self._providers[provider_id]]
             if provider_id is not None and provider_id in self._providers
-            else list(self._providers.values())
+            else ([] if provider_id is not None else list(self._providers.values()))
         )
 
         async def _check_one(
@@ -857,7 +825,7 @@ class ModelsManager:
         options: Optional[StreamOptions],
     ) -> tuple[Model, Optional[StreamOptions]]:
         """解析 auth 并合并到 model/options（对齐 TS Models.applyAuth）。"""
-        self._require_provider(model)
+        provider = self._require_provider(model)
         resolution = await self.get_auth(
             model,
             AuthResolutionOverrides(
@@ -882,7 +850,10 @@ class ModelsManager:
             else auth.get("api_key")
         )
         options_headers = options.headers if options else None
-        headers = _merge_headers(auth.get("headers"), options_headers)
+        # provider 默认头垫底，auth 头居中，请求级 options 最后覆盖。
+        headers = _merge_headers(
+            provider.headers, _merge_headers(auth.get("headers"), options_headers)
+        )
         # ModelsManager 层 transform_headers 最后运行（对齐 TS applyAuth），
         # 并在派发给 provider 前从 options 中移除。
         transform = options.transform_headers if options else None

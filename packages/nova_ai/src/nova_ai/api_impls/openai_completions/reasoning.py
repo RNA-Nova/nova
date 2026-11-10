@@ -73,7 +73,13 @@ def _has_valid_common_fields(candidate: Dict[str, Any]) -> bool:
         and (
             candidate.get("format") is None or isinstance(candidate.get("format"), str)
         )
-        and (candidate.get("index") is None or isinstance(candidate.get("index"), int))
+        and (
+            candidate.get("index") is None
+            or (
+                isinstance(candidate.get("index"), int)
+                and not isinstance(candidate.get("index"), bool)
+            )
+        )
     )
 
 
@@ -134,12 +140,11 @@ def parse_legacy_encrypted_reasoning_detail(
 
 
 def _fill_missing_common_fields(target: Dict[str, Any], source: Dict[str, Any]) -> None:
-    if target.get("id") is None:
-        target["id"] = source.get("id")
-    if not target.get("format"):
-        target["format"] = source.get("format")
-    if target.get("index") is None:
-        target["index"] = source.get("index")
+    # JS undefined 键在 JSON 出货时省略；Python 不得用 source.get() 制造 null 键。
+    for key in ("id", "format", "index"):
+        value = source.get(key)
+        if target.get(key) is None and value is not None:
+            target[key] = value
 
 
 def append_openai_reasoning_detail(
@@ -159,8 +164,8 @@ def append_openai_reasoning_detail(
         and last.get("type") == "reasoning.text"
     ):
         last["text"] += detail["text"]
-        if not last.get("signature"):
-            last["signature"] = detail.get("signature")
+        if not last.get("signature") and detail.get("signature") is not None:
+            last["signature"] = detail["signature"]
         _fill_missing_common_fields(last, detail)
         return
     if (

@@ -14,13 +14,19 @@ from nova_ai.auth.oauth.errors import (
 
 
 class TestOAuthHttpKind:
-    def test_4xx_unauthorized(self):
-        for status in (400, 401, 403, 404, 422):
-            assert oauth_http_kind(status) is NovaErrorKind.UNAUTHORIZED
+    def test_auth_and_client_errors_are_distinct(self):
+        assert oauth_http_kind(401) is NovaErrorKind.UNAUTHORIZED
+        assert oauth_http_kind(403) is NovaErrorKind.UNAUTHORIZED
+        for status in (400, 404, 422):
+            assert oauth_http_kind(status) is NovaErrorKind.BAD_REQUEST
 
-    def test_5xx_upstream(self):
-        for status in (500, 502, 503, 529):
+    def test_timeout_rate_limit_and_server_errors(self):
+        assert oauth_http_kind(408) is NovaErrorKind.REQUEST_TIMEOUT
+        assert oauth_http_kind(409) is NovaErrorKind.OVERLOADED
+        assert oauth_http_kind(429) is NovaErrorKind.RATE_LIMITED
+        for status in (500, 502, 503):
             assert oauth_http_kind(status) is NovaErrorKind.UPSTREAM_ERROR
+        assert oauth_http_kind(529) is NovaErrorKind.OVERLOADED
 
 
 class TestOAuthFlowError:
@@ -101,6 +107,11 @@ class TestResponseErrorDetail:
     def test_json_error_object_code(self):
         resp = httpx.Response(400, json={"error": {"code": "bad_request"}})
         assert response_error_detail(resp) == "bad_request"
+
+    def test_json_error_object_code_is_redacted(self):
+        secret = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sigpart"
+        resp = httpx.Response(400, json={"error": {"code": secret}})
+        assert secret not in response_error_detail(resp)
 
     def test_non_json_body_falls_back_to_reason_phrase(self):
         """网关 HTML/空体：reason_phrase 兜底，原始 body 不进消息。"""

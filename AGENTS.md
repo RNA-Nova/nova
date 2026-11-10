@@ -53,7 +53,7 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 pixi install -e dev        # 环境初始化（dev 含 black/isort/pytest）
 pixi run -e dev test-all   # 八个测试套件全量（各包独立跑，避免 conftest 冲突）
 pixi run -e dev format     # black + isort 全仓
-pixi run -e dev typecheck  # pyright（覆盖 nova_protocol/nova_ai/nova_agent）
+pixi run -e dev typecheck  # pyright（protocol/ai/agent + catalog 源码与脚本）
 cd packages/nova_client && npm run build   # TS 前端编译
 ```
 

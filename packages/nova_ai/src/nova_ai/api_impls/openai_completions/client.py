@@ -5,10 +5,10 @@ abort；真正的重试由 ``_shared/retry.py`` 的 ``retry_provider_request``
 在请求层接管（可被 signal 打断）。
 """
 
-from typing import Optional
+from typing import Mapping, Optional, cast
 
 from nova_protocol import Context, Model, OpenAICompletionsCompat, ProviderHeaders
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, Omit
 
 from ...utils.errors import LoginRequiredError
 from .._shared.copilot_headers import (
@@ -36,6 +36,18 @@ def _has_header(headers: Optional[ProviderHeaders], name: str) -> bool:
     return _get_header_value(headers, name) is not None
 
 
+def _merge_headers(
+    headers: ProviderHeaders, updates: Optional[Mapping[str, Optional[str]]]
+) -> None:
+    """按 HTTP 大小写不敏感语义覆盖；None 保留到 SDK 边界表示删头。"""
+    for key, value in (updates or {}).items():
+        lowered = key.lower()
+        for existing in list(headers):
+            if existing.lower() == lowered:
+                del headers[existing]
+        headers[key] = value
+
+
 def create_client(
     model: Model,
     context: Context,
@@ -52,13 +64,12 @@ def create_client(
     resolved_compat = compat or get_compat(model)
 
     headers: ProviderHeaders = {"User-Agent": get_nova_user_agent()}
-    if model.headers:
-        headers.update(model.headers)
+    _merge_headers(headers, model.headers)
 
     if model.provider == "github-copilot":
         has_images = has_copilot_vision_input(context.messages)
         copilot_headers = build_copilot_dynamic_headers(context.messages, has_images)
-        headers.update(copilot_headers)
+        _merge_headers(headers, copilot_headers)
 
     if session_id and resolved_compat.send_session_affinity_headers:
         fmt = resolved_compat.session_affinity_format or "openai"
@@ -70,8 +81,7 @@ def create_client(
             headers["x-client-request-id"] = session_id
             headers["x-session-affinity"] = session_id
 
-    if options_headers:
-        headers.update(options_headers)
+    _merge_headers(headers, options_headers)
 
     if (
         not api_key
@@ -88,18 +98,23 @@ def create_client(
     # 仅在 api_key 非空时构造；为空说明调用方自带鉴权头（上方放行路径已
     # 保证存在），原样保留，不得覆盖。
     if model.provider == "cloudflare-ai-gateway" and api_key:
-        default_headers: ProviderHeaders = {
-            **headers,
-            "Authorization": _get_header_value(headers, "authorization") or "",
-            "cf-aig-authorization": f"Bearer {api_key}",
-        }
-    else:
-        default_headers = headers
+        _merge_headers(
+            headers,
+            {
+                "Authorization": _get_header_value(headers, "authorization") or "",
+                "cf-aig-authorization": f"Bearer {api_key}",
+            },
+        )
 
     return AsyncOpenAI(
         api_key=api_key or "unused",
         base_url=model.base_url,
-        default_headers={k: v for k, v in default_headers.items() if v is not None},
+        # Omit 是 Python SDK 的删头哨兵；None 若直交 httpx 会变成非法头值。
+        # SDK 注解漏掉了它自身支持的 Omit 值，cast 仅限此 SDK 边界。
+        default_headers=cast(
+            Mapping[str, str],
+            {key: Omit() if value is None else value for key, value in headers.items()},
+        ),
         # 恒为 0：SDK 内建重试不可被 abort 打断，重试归 retry_provider_request
         max_retries=0,
     )

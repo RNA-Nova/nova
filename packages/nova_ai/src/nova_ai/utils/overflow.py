@@ -9,7 +9,11 @@ from typing import Optional
 
 from nova_protocol import AssistantMessage, NovaErrorKind, StopReason
 
-from .errors import NON_OVERFLOW_PATTERNS, OVERFLOW_PATTERNS
+from .errors import (
+    CEREBRAS_BODYLESS_OVERFLOW_PATTERN,
+    NON_OVERFLOW_PATTERNS,
+    OVERFLOW_PATTERNS,
+)
 
 
 def is_context_overflow(
@@ -31,8 +35,16 @@ def is_context_overflow(
                 pattern.search(message.error_message)
                 for pattern in NON_OVERFLOW_PATTERNS
             )
-            and any(
-                pattern.search(message.error_message) for pattern in OVERFLOW_PATTERNS
+            and (
+                any(
+                    pattern.search(message.error_message)
+                    for pattern in OVERFLOW_PATTERNS
+                )
+                or (
+                    message.provider == "cerebras"
+                    and CEREBRAS_BODYLESS_OVERFLOW_PATTERN.search(message.error_message)
+                    is not None
+                )
             )
         ):
             return True
@@ -55,3 +67,15 @@ def is_context_overflow(
             return True
 
     return False
+
+
+def is_recoverable_length(message: AssistantMessage, desired_max_output: int) -> bool:
+    """length 终态是否低于调用方原始输出上限，可有界压缩重试一次。
+
+    ``desired_max_output`` 必须是上下文钳制前的原始上限（pi 同名函数对位）。
+    """
+    return (
+        message.stop_reason == StopReason.LENGTH
+        and desired_max_output > 0
+        and message.usage.output < desired_max_output
+    )

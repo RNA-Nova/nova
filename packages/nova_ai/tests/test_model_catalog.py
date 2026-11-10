@@ -5,15 +5,14 @@ dogfood；修正引擎直引 ``nova_catalog.engine``（构建/运行同一台）
 """
 
 import pytest
-from nova_catalog.define import ProviderDefinition
-from nova_catalog.engine import apply_corrections
-from nova_protocol import KnownApi
-
 from nova_ai.model_catalog import (
     builtin_catalog_generated_at,
     finalize_catalog_models,
     flatten_model_catalog,
 )
+from nova_catalog.define import ProviderDefinition
+from nova_catalog.engine import apply_corrections
+from nova_protocol import KnownApi
 
 
 def _knowledge(**overrides):
@@ -214,9 +213,11 @@ class TestFlattenModelCatalog:
         assert models["m1"].api == "openai-completions"
         assert models["m1"].provider == "p1"
 
-    def test_unknown_api_group_raises(self):
-        with pytest.raises(ValueError, match="Unknown api group"):
-            flatten_model_catalog("p1", {"no-such-api": {"m1": _fields("m1")}})
+    def test_custom_api_group_is_preserved(self):
+        models = flatten_model_catalog(
+            "p1", {"custom-api": {"m1": _fields("m1", api="custom-api")}}
+        )
+        assert models["m1"].api == "custom-api"
 
     def test_id_mismatch_raises(self):
         fields = _fields("other-id")

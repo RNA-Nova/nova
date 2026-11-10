@@ -5,14 +5,13 @@ import httpx
 import httpx2
 import openai
 import pytest
-from nova_protocol import NovaErrorKind
-
 from nova_ai.utils.errors import (
     extract_retry_after_ms,
     get_header,
     headers_of,
     normalize_error,
 )
+from nova_protocol import NovaErrorKind
 
 
 class _StatusError(Exception):
@@ -424,6 +423,15 @@ class TestMessageRedaction:
     def test_plain_message_unchanged(self):
         result = normalize_error(RuntimeError("plain failure, nothing secret"))
         assert result.message == "plain failure, nothing secret"
+
+    def test_non_exception_input_is_also_redacted(self):
+        secret = "sk-live-nonexception-1234567890"
+        result = normalize_error({"message": f"Bearer {secret}"})
+        assert secret not in result.message
+
+    def test_non_finite_retry_after_falls_back(self):
+        assert extract_retry_after_ms({"retry-after": "NaN"}) is None
+        assert extract_retry_after_ms({"retry-after": "Infinity"}) is None
 
 
 class TestChainWalking:

@@ -7,12 +7,13 @@ abort；重试归 ``_shared/retry.py`` 的 ``retry_provider_request`` 接管。
 → Bearer + Claude Code 身份头）/ Copilot（Bearer + 选择性 beta）。
 """
 
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, cast
 
-from anthropic import AsyncAnthropic
-from nova_protocol import Context, Model, ProviderHeaders
+from anthropic import AsyncAnthropic, omit
+from nova_protocol import Context, Model, ProviderEnv, ProviderHeaders
 
 from ...utils.errors import LoginRequiredError
+from ...utils.provider_env import get_provider_env_value
 from .._shared.copilot_headers import (
     build_copilot_dynamic_headers,
     has_copilot_vision_input,
@@ -35,6 +36,26 @@ SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 # Claude Code 身份（OAuth 令牌的强制身份头——对齐 TS claudeCodeVersion）
 _CLAUDE_CODE_VERSION = "2.1.280"
+
+
+def _sdk_headers(headers: ProviderHeaders):
+    """None → SDK omit：显式抑制同名默认头，而非删除后让 SDK 再补回。"""
+    # SDK 运行时支持 Omit，但其 default_headers 注解仍写纯 str（上游已知 fudge）。
+    return cast(
+        "dict[str, str]",
+        {key: (omit if value is None else value) for key, value in headers.items()},
+    )
+
+
+def _suppress_transport_defaults(
+    client: AsyncAnthropic, headers: ProviderHeaders
+) -> AsyncAnthropic:
+    """同时移除底层 httpx2 client 的同名默认头（SDK omit 管不到这一层）。"""
+    for key, value in headers.items():
+        if value is None:
+            # SDK 没有公开 transport-headers 写口；这是 httpx2 默认头的唯一落点。
+            client._client.headers.pop(key.lower(), None)
+    return client
 
 
 def _has_header(headers: Optional[ProviderHeaders], name: str) -> bool:
@@ -71,6 +92,48 @@ def assert_request_auth(
 def is_oauth_token(api_key: str) -> bool:
     """Anthropic OAuth token 识别（对齐 TS isOAuthToken）。"""
     return "sk-ant-oat" in api_key
+
+
+def anthropic_federation_config(
+    model: Model,
+    api_key: Optional[str],
+    headers: Optional[ProviderHeaders],
+    env: Optional[ProviderEnv],
+) -> Optional[Dict[str, Any]]:
+    """读取 Anthropic workload identity federation 配置（pi 同名能力对位）。
+
+    仅在 anthropic 本家且没有任何显式凭据时启用；三个必需变量缺一即不
+    启用，让调用方继续走普通的缺凭据报错。
+    """
+    if (
+        model.provider != "anthropic"
+        or api_key
+        or _has_header(headers, "authorization")
+        or _has_header(headers, "x-api-key")
+        or _has_header(headers, "cf-aig-authorization")
+    ):
+        return None
+    rule_id = get_provider_env_value("ANTHROPIC_FEDERATION_RULE_ID", env)
+    organization_id = get_provider_env_value("ANTHROPIC_ORGANIZATION_ID", env)
+    token_file = get_provider_env_value("ANTHROPIC_IDENTITY_TOKEN_FILE", env)
+    if not rule_id or not organization_id or not token_file:
+        return None
+    authentication: Dict[str, Any] = {
+        "type": "oidc_federation",
+        "federation_rule_id": rule_id,
+        "identity_token": {"source": "file", "path": token_file},
+    }
+    service_account_id = get_provider_env_value("ANTHROPIC_SERVICE_ACCOUNT_ID", env)
+    if service_account_id:
+        authentication["service_account_id"] = service_account_id
+    config: Dict[str, Any] = {
+        "organization_id": organization_id,
+        "authentication": authentication,
+    }
+    workspace_id = get_provider_env_value("ANTHROPIC_WORKSPACE_ID", env)
+    if workspace_id:
+        config["workspace_id"] = workspace_id
+    return config
 
 
 def build_beta_features(
@@ -121,6 +184,37 @@ def build_beta_features(
     return list(dict.fromkeys(beta_features))
 
 
+class BetaResolution(NamedTuple):
+    """最终 beta 列表及注入 client 需要下发的显式头覆盖。"""
+
+    values: List[str]
+    overridden: bool
+    raw_override: Optional[str]
+
+
+def resolve_beta_features(
+    model: Model,
+    options_headers: Optional[ProviderHeaders],
+    generated: List[str],
+) -> BetaResolution:
+    """model/options 中的 anthropic-beta 可替换或清空生成列表（后者覆盖前者）。"""
+    overridden = False
+    raw: Optional[str] = None
+    for headers in (model.headers, options_headers):
+        if not headers:
+            continue
+        for key, value in headers.items():
+            if key.lower() == "anthropic-beta":
+                overridden = True
+                raw = value
+    values = (
+        generated
+        if not overridden
+        else ([] if raw is None else [v.strip() for v in raw.split(",") if v.strip()])
+    )
+    return BetaResolution(values=values, overridden=overridden, raw_override=raw)
+
+
 def create_client(
     model: Model,
     context: Context,
@@ -131,6 +225,7 @@ def create_client(
     interleaved_thinking: bool = True,
     thinking_enabled: bool = False,
     http_client=None,
+    federation: Optional[Dict[str, Any]] = None,
 ) -> Tuple[AsyncAnthropic, bool]:
     """创建 Anthropic 客户端（对齐 TS createClient），返回 ``(client, is_oauth)``。
 
@@ -174,6 +269,17 @@ def create_client(
     if options_headers:
         headers.update(options_headers)
 
+    if model.provider == "github-copilot":
+        client = AsyncAnthropic(
+            api_key=None,
+            auth_token=api_key,
+            base_url=model.base_url,
+            default_headers=_sdk_headers(headers),
+            http_client=http_client,
+            max_retries=0,
+        )
+        return _suppress_transport_defaults(client, headers), False
+
     if api_key and is_oauth_token(api_key):
         # OAuth：Bearer + Claude Code 身份头（对齐 TS OAuth 分支）
         headers.update(
@@ -185,17 +291,34 @@ def create_client(
                 "x-app": "cli",
             }
         )
-        return (
-            AsyncAnthropic(
-                api_key=None,
-                auth_token=api_key,
-                base_url=model.base_url,
-                default_headers={k: v for k, v in headers.items() if v is not None},
-                http_client=http_client,
-                max_retries=0,
-            ),
-            True,
+        # 显式 model/options 头最后生效（对齐 pi mergeHeaders 顺序）：
+        # 可替换/清空 beta，也可覆盖 CLI UA；OAuth 身份只提供默认值。
+        if model.headers:
+            headers.update(model.headers)
+        if options_headers:
+            headers.update(options_headers)
+        client = AsyncAnthropic(
+            api_key=None,
+            auth_token=api_key,
+            base_url=model.base_url,
+            default_headers=_sdk_headers(headers),
+            http_client=http_client,
+            max_retries=0,
         )
+        return _suppress_transport_defaults(client, headers), True
+
+    if federation is not None:
+        # 显式 config 阻断 SDK 的其他环境凭据；token 交换与刷新由 SDK 负责。
+        client = AsyncAnthropic(
+            api_key=None,
+            auth_token=None,
+            config=federation,
+            base_url=model.base_url,
+            default_headers=_sdk_headers(headers),
+            http_client=http_client,
+            max_retries=0,
+        )
+        return _suppress_transport_defaults(client, headers), False
 
     # SDK 隐式凭据链封堵（对齐 TS PiAnthropic 的默认凭据解析关闭）：
     # api_key 为 None 时 SDK 会自读 ANTHROPIC_API_KEY env——头自带鉴权
@@ -209,16 +332,18 @@ def create_client(
     client = AsyncAnthropic(
         api_key=sdk_api_key,
         base_url=model.base_url,
-        default_headers={k: v for k, v in headers.items() if v is not None},
+        default_headers=_sdk_headers(headers),
         http_client=http_client,
         max_retries=0,
     )
-    return client, False
+    return _suppress_transport_defaults(client, headers), False
 
 
 __all__ = [
+    "anthropic_federation_config",
     "assert_request_auth",
     "build_beta_features",
     "create_client",
     "is_oauth_token",
+    "resolve_beta_features",
 ]

@@ -92,9 +92,9 @@ test-protocol = { cmd = "pytest tests", cwd = "packages/nova_protocol" }
 test-executor-client = { cmd = "pytest tests -m 'not integration'", cwd = "packages/nova-exec-server-client" }
 test-coding = { cmd = "pytest tests", cwd = "bundles/nova_coding_agent/backend" }
 test-all = { depends-on = ["test-ai", "test-agent", "test-async", "test-catalog", "test-harness", "test-server", "test-protocol", "test-executor-client", "test-coding"] }
-generate-models = { cmd = "python packages/nova_catalog/scripts/generate.py" }
+generate-models = { cmd = "python packages/nova_catalog/scripts/generate.py --strict" }
 check-model-data = { cmd = "python packages/nova_catalog/scripts/check_model_data.py" }
-check-live = { cmd = "python ../nova_catalog/scripts/check_live_providers.py", cwd = "packages/nova_ai" }
-test-integration = { cmd = "pytest tests/integration", cwd = "packages/nova_ai" }
-format = "black packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src bundles/nova_coding_agent/backend && isort packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src bundles/nova_coding_agent/backend"
-typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent"
+check-live = { cmd = "python -m tests.integration.check_live", cwd = "packages/nova_ai" }
+test-integration = { cmd = "NOVA_RUN_INTEGRATION=1 pytest tests/integration", cwd = "packages/nova_ai" }
+format = "black packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src packages/nova_catalog bundles/nova_coding_agent/backend && isort packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src packages/nova_catalog bundles/nova_coding_agent/backend"
+typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent packages/nova_catalog/src packages/nova_catalog/scripts"

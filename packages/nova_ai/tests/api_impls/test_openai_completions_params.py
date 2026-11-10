@@ -2,6 +2,7 @@
 OpenAI Completions 协议参数构建测试（detect_compat / get_compat / build_params / convert_messages）
 """
 
+import pytest
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -1033,3 +1034,135 @@ class TestConvertMessages:
 
         assert messages[0]["role"] == "tool"
         assert messages[0]["tool_call_id"] == "tc1"
+
+
+class TestOpenAIStrictTools:
+    def _tool(self, strict: str) -> Tool:
+        return Tool(
+            name="write",
+            description="write",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            },
+            constrained_sampling={"type": "json_schema", "strict": strict},
+        )
+
+    def test_prefer_enables_and_transforms_strict_schema(self):
+        params = build_params(
+            Model(
+                id="gpt",
+                name="gpt",
+                api=KnownApi.OPENAI_COMPLETIONS,
+                provider=KnownProvider.OPENAI,
+                base_url="https://api.openai.com/v1",
+                reasoning=False,
+                input_types=["text"],
+                cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
+                context_window=128000,
+                max_tokens=4096,
+                compat=OpenAICompletionsCompat(supports_strict_mode=True),
+            ),
+            Context(messages=[UserMessage(content="hi")], tools=[self._tool("prefer")]),
+            OpenAICompletionsOptions(),
+        )
+        function = params["tools"][0]["function"]
+        assert function["strict"] is True
+        assert function["parameters"]["required"] == ["path"]
+        assert function["parameters"]["additionalProperties"] is False
+
+    def test_require_rejects_unsupported_endpoint(self):
+        with pytest.raises(ValueError, match="strict tools are unsupported"):
+            build_params(
+                Model(
+                    id="k",
+                    name="k",
+                    api=KnownApi.OPENAI_COMPLETIONS,
+                    provider="kimi-coding",
+                    base_url="https://api.kimi.com/coding/v1",
+                    reasoning=False,
+                    input_types=["text"],
+                    cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
+                    context_window=128000,
+                    max_tokens=4096,
+                    compat=OpenAICompletionsCompat(supports_strict_mode=False),
+                ),
+                Context(
+                    messages=[UserMessage(content="hi")], tools=[self._tool("require")]
+                ),
+                OpenAICompletionsOptions(),
+            )
+
+
+def _request_model(**updates) -> Model:
+    fields = {
+        "id": "gpt",
+        "name": "gpt",
+        "api": KnownApi.OPENAI_COMPLETIONS,
+        "provider": KnownProvider.OPENAI,
+        "base_url": "https://api.openai.com/v1",
+        "reasoning": True,
+        "input_types": ["text"],
+        "cost": ModelCost(input=0, output=0, cache_read=0, cache_write=0),
+        "context_window": 128000,
+        "max_tokens": 4096,
+    }
+    fields.update(updates)
+    return Model(**fields)
+
+
+def test_direct_params_merge_sampling_for_effective_thinking_level():
+    params = build_params(
+        _request_model(
+            sampling_params={"temperature": 0.2, "top_k": 1},
+            sampling_params_by_thinking_level={
+                "high": {"temperature": 0.1, "top_k": 8}
+            },
+        ),
+        Context(messages=[UserMessage(content="hi")]),
+        OpenAICompletionsOptions(reasoning_effort="high", sampling_params={"top_k": 4}),
+    )
+    assert params["temperature"] == 0.1
+    assert params["top_k"] == 4
+
+
+def test_tool_choice_none_survives_without_tools():
+    params = build_params(
+        _request_model(reasoning=False),
+        Context(messages=[UserMessage(content="hi")]),
+        OpenAICompletionsOptions(tool_choice="none"),
+    )
+    assert params["tool_choice"] == "none"
+
+
+@pytest.mark.parametrize(
+    "schema_update",
+    [
+        {"anyOf": None},
+        {"items": None},
+        {"properties": None},
+        {"required": None},
+        {"additionalProperties": None},
+    ],
+)
+def test_explicit_null_structural_schema_keys_cannot_enable_strict(schema_update):
+    parameters = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        **schema_update,
+    }
+    tool = Tool(
+        name="write",
+        description="write",
+        parameters=parameters,
+        constrained_sampling={"type": "json_schema", "strict": "require"},
+    )
+    with pytest.raises(ValueError, match="requires JSON-schema"):
+        build_params(
+            _request_model(
+                reasoning=False,
+                compat=OpenAICompletionsCompat(supports_strict_mode=True),
+            ),
+            Context(messages=[UserMessage(content="hi")], tools=[tool]),
+            OpenAICompletionsOptions(),
+        )

@@ -287,6 +287,7 @@ def record_thread_reply(
     output: AssistantMessage,
     compat: ResolvedAnthropicCompat,
     betas: List[str],
+    is_oauth: bool = False,
 ) -> None:
     """记录会话下一请求的续接位置（对齐 pi recordThreadReply）：
 
@@ -301,7 +302,7 @@ def record_thread_reply(
     reply = [
         message
         for message in convert_messages(
-            model, Context(messages=[output]), compat, None
+            model, Context(messages=[output]), compat, None, is_oauth=is_oauth
         ).messages
         if message.get("role") == "assistant"
     ]

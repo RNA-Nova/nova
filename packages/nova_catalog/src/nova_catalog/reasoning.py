@@ -1,36 +1,25 @@
-"""思考级别推导（对位 pi ``catalog/reasoning.ts``）。
-
-models.dev v2 的 ``capabilities.reasoning``（官方验证的 effort 值）→
-``ThinkingLevelMap``——**站推导级别表**：数据自己能说的不再手写，
-手写表（``families/``）退为站未覆盖时的填缺兜底。
-"""
+"""models.dev 思考级别推导与 native-effort 门控（pi catalog/reasoning.ts + build.ts）。"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
-from nova_protocol import ThinkingLevelMap
+from nova_protocol import ModelFields, ThinkingLevelMap
 
-# 已知级别（与 ThinkingLevelMap 的键序一致；off 由 "none" 值推导）
 _KNOWN_LEVELS = ("minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def effort_to_thinking_level_map(
     reasoning: Optional[Dict[str, Any]],
 ) -> Optional[ThinkingLevelMap]:
-    """``capabilities.reasoning`` → 思考级别表（缺席级别 = 不支持）。
-
-    - ``effort`` 列表中的值直通（``low`` → ``"low"``），缺席 → ``None``；
-    - ``off`` 由 ``"none"`` 推导（可关思考）；无 effort 数据 → ``None``
-      （纯 toggle 模型，无级别表可推）。
-    """
+    """官方 effort 值 → 级别表；default/bogus-only 不等于“全级别不支持”。"""
     if not isinstance(reasoning, dict) or reasoning.get("supported") is not True:
         return None
     effort = reasoning.get("effort")
     if not isinstance(effort, list):
         return None
     supported = {v for v in effort if isinstance(v, str)}
-    if not supported:
+    if not supported.intersection({*_KNOWN_LEVELS, "none"}):
         return None
     level_map: ThinkingLevelMap = {"off": "none" if "none" in supported else None}
     for level in _KNOWN_LEVELS:
@@ -38,4 +27,69 @@ def effort_to_thinking_level_map(
     return level_map
 
 
-__all__ = ["effort_to_thinking_level_map"]
+def sends_native_effort(fields: ModelFields) -> bool:
+    """该模型的最终 API/compat 是否把 models.dev effort 原样发给宿主。"""
+    api = fields.get("api")
+    api_value = getattr(api, "value", api)
+    compat = fields.get("compat") or {}
+    if api_value == "anthropic-messages":
+        return compat.get("force_adaptive_thinking") is True
+    if api_value in {
+        "openai-responses",
+        "azure-openai-responses",
+        "openai-codex-responses",
+    }:
+        return True
+    if api_value != "openai-completions":
+        return False
+    return (
+        compat.get("thinking_format", "openai") == "openai"
+        and compat.get("supports_reasoning_effort", True) is not False
+    )
+
+
+def apply_models_dev_effort(
+    fields: ModelFields, reasoning: Optional[Dict[str, Any]]
+) -> None:
+    """在 compat/family 已定稿后应用源 effort；已声明的家族值覆盖源值。"""
+    if not isinstance(reasoning, dict):
+        return
+    api = fields.get("api")
+    existing = dict(fields.get("thinking_level_map") or {})
+    is_anthropic = getattr(api, "value", api) == "anthropic-messages"
+    if (
+        is_anthropic
+        and "off" not in existing
+        and (
+            reasoning.get("toggle") is True or isinstance(reasoning.get("budget"), dict)
+        )
+    ):
+        # legacy toggle/budget 制不需要 native effort 也能关思考。
+        existing["off"] = "disabled"
+    if not sends_native_effort(fields):
+        if existing:
+            fields["thinking_level_map"] = cast("ThinkingLevelMap", existing)
+        return
+    level_map = effort_to_thinking_level_map(reasoning)
+    if level_map is None:
+        if existing:
+            fields["thinking_level_map"] = cast("ThinkingLevelMap", existing)
+        return
+    merged = {**level_map, **existing}
+    if (
+        is_anthropic
+        and "off" not in existing
+        and merged.get("off") is None
+        and (
+            reasoning.get("toggle") is True or isinstance(reasoning.get("budget"), dict)
+        )
+    ):
+        merged["off"] = "disabled"
+    fields["thinking_level_map"] = cast("ThinkingLevelMap", merged)
+
+
+__all__ = [
+    "apply_models_dev_effort",
+    "effort_to_thinking_level_map",
+    "sends_native_effort",
+]

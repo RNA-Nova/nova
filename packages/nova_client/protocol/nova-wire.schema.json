@@ -336,6 +336,16 @@
             }
           ]
         },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "endTurn": {
           "anyOf": [
             {
@@ -518,7 +528,8 @@
         "responseModel",
         "providerThinkingLevel",
         "diagnostics",
-        "timestamp"
+        "timestamp",
+        "durationMs"
       ],
       "title": "AssistantMessage",
       "type": "object"
@@ -1358,6 +1369,16 @@
         },
         "total": {
           "type": "number"
+        },
+        "totalFromProvider": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1365,7 +1386,8 @@
         "output",
         "cacheRead",
         "cacheWrite",
-        "total"
+        "total",
+        "totalFromProvider"
       ],
       "title": "Cost",
       "type": "object"
@@ -5554,6 +5576,16 @@
         "arguments": {
           "type": "object"
         },
+        "argumentsError": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -5602,6 +5634,7 @@
         "id",
         "name",
         "arguments",
+        "argumentsError",
         "thoughtSignature",
         "partialArgs",
         "streamIndex"

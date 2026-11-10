@@ -3,12 +3,13 @@
 处理模型请求的选项配置
 """
 
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
-from nova_protocol import Context, Model, ThinkingLevel
+from nova_protocol import Context, Model, ModelThinkingLevel, ThinkingLevel
 
 from ...stream_options import SimpleStreamOptions, StreamOptions, ThinkingBudgets
 from ...utils.estimate import CONTEXT_SAFETY_TOKENS, estimate_context_tokens
+from ...utils.model_utils import clamp_thinking_level
 
 MIN_MAX_TOKENS = 1
 
@@ -43,31 +44,41 @@ def clamp_max_tokens_to_context(model: Model, context: Context, max_tokens: int)
     return min(max_tokens, max(MIN_MAX_TOKENS, room))
 
 
+def resolve_sampling_params(
+    model: Model,
+    thinking_level: Union[ThinkingLevel, str, None],
+    request_params: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """模型默认 < 吸附后的思考级别参数 < 请求参数（pi 同名函数对位）。"""
+    raw_level = (
+        thinking_level.value
+        if isinstance(thinking_level, ThinkingLevel)
+        else thinking_level
+    )
+    effective = clamp_thinking_level(
+        model, ModelThinkingLevel(raw_level or ModelThinkingLevel.OFF.value)
+    )
+    level_params = (model.sampling_params_by_thinking_level or {}).get(effective.value)
+    if model.sampling_params or level_params or request_params:
+        return {
+            **(model.sampling_params or {}),
+            **(level_params or {}),
+            **(request_params or {}),
+        }
+    return None
+
+
 def build_base_options(
     model: Model,
     context: Context,
     options: Optional[SimpleStreamOptions] = None,
     api_key: Optional[str] = None,
 ) -> StreamOptions:
-    """
-    构建基础流式选项
-
-    Args:
-        model: 模型对象
-        context: 上下文（用于 max_tokens 的窗口钳制）
-        options: 简单选项
-        api_key: API密钥
-
-    Returns:
-        流式选项对象
-    """
-    # 对齐 pi buildBaseOptions：模型默认与请求级采样参数按键合并，请求级优先
-    base_sampling = model.sampling_params
-    override_sampling = options.sampling_params if options else None
-    sampling_params = (
-        {**(base_sampling or {}), **(override_sampling or {})}
-        if base_sampling or override_sampling
-        else None
+    """构建 provider-neutral 基础选项。"""
+    sampling_params = resolve_sampling_params(
+        model,
+        options.reasoning if options else None,
+        options.sampling_params if options else None,
     )
     requested_max_tokens = (
         options.max_tokens
@@ -87,11 +98,15 @@ def build_base_options(
         env=options.env if options else None,
         on_payload=options.on_payload if options else None,
         on_response=options.on_response if options else None,
+        on_provider_stream_event=(
+            options.on_provider_stream_event if options else None
+        ),
         metadata=options.metadata if options else None,
         timeout=options.timeout if options else None,
         max_retries=options.max_retries if options else None,
         max_retry_delay_ms=options.max_retry_delay_ms if options else None,
         sampling_params=sampling_params,
+        tool_choice=options.tool_choice if options else None,
     )
 
 

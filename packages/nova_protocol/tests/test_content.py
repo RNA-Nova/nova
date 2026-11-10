@@ -41,3 +41,11 @@ class TestToolCall:
         data = tc.model_dump()
         assert "partial_args" not in data
         assert "stream_index" not in data
+
+    def test_arguments_error_roundtrip(self):
+        tc = ToolCall(
+            id="tc1", name="write", arguments={}, arguments_error="invalid JSON"
+        )
+        restored = ToolCall.model_validate(tc.model_dump())
+        assert restored == tc
+        assert restored.arguments_error == "invalid JSON"

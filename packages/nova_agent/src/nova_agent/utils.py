@@ -304,6 +304,12 @@ def validate_tool_arguments(tool: Tool, tool_call: ToolCall) -> Any:
     Raises:
         ValueError: 如果验证失败，包含格式化的错误信息
     """
+    if tool_call.arguments_error:
+        raise ValueError(
+            f'Invalid arguments for tool "{tool_call.name}": '
+            f"{tool_call.arguments_error}"
+        )
+
     schema = tool.parameters
     if schema is None:
         # 无 schema 直通（防御 construct 路径绕过校验构造出的实例；

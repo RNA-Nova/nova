@@ -5,6 +5,16 @@
 ``complete_simple`` API。架构对齐 TypeScript ``pi/packages/ai``。
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .api_impls import (
+        AnthropicOptions,
+        OpenAICompletionsOptions,
+        ProviderStreamOptions,
+    )
+    from .auth import kimi_oauth, openai_codex_oauth
+
 # 实现层共享件（轻，不含重依赖）
 from .api_impls._shared import (
     build_base_options,
@@ -28,11 +38,9 @@ from .auth import (
     default_provider_auth_context,
     env_api_key_auth,
     generate_pkce,
-    kimi_oauth,
     lazy_oauth,
     oauth_error_html,
     oauth_success_html,
-    openai_codex_oauth,
     poll_oauth_device_code_flow,
     resolve_provider_auth,
 )
@@ -218,6 +226,12 @@ def __getattr__(name: str):
         from . import api_impls as _api_impls
 
         value = getattr(_api_impls, name)
+        globals()[name] = value
+        return value
+    if name in ("kimi_oauth", "openai_codex_oauth"):
+        from . import auth as _auth
+
+        value = getattr(_auth, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

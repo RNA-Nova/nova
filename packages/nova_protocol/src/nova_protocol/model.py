@@ -36,6 +36,7 @@ class ModelCostFields(TypedDict, total=False):
     output: float
     cache_read: float
     cache_write: float
+    tiers: List[ModelCostTier]
 
 
 class ModelFields(TypedDict, total=False):
@@ -66,6 +67,8 @@ class ModelFields(TypedDict, total=False):
     input_limits: Dict[str, Any]
     # prompt cache 各保留档寿命秒（pi ``Model.promptCache``）
     prompt_cache: Dict[str, int]
+    sampling_params: Dict[str, Any]
+    sampling_params_by_thinking_level: Dict[str, Dict[str, Any]]
 
 
 class ModelImageResizeOptions(NovaBaseModel):
@@ -131,6 +134,8 @@ class Model(NovaBaseModel):
         Union[OpenAICompletionsCompat, OpenAIResponsesCompat, AnthropicMessagesCompat]
     ] = None
     sampling_params: Optional[Dict[str, Any]] = None
+    # 按生效思考级别覆盖的采样参数；级别参数高于模型默认、低于请求覆盖。
+    sampling_params_by_thinking_level: Optional[Dict[str, Dict[str, Any]]] = None
     # provider 输入限制与缓存安全预处理元数据（对齐 pi ``Model.inputLimits``）；
     # ``None`` = 无已知限制
     input_limits: Optional[ModelInputLimits] = None
@@ -185,6 +190,8 @@ class Cost(NovaBaseModel):
     cache_read: float = 0.0
     cache_write: float = 0.0
     total: float = 0.0
+    # True = 总额来自 provider 账单字段；False/None = 按目录费率估算。
+    total_from_provider: Optional[bool] = None
 
 
 class Usage(NovaBaseModel):

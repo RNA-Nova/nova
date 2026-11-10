@@ -3,8 +3,10 @@
 """
 
 import asyncio
+import time
 
 import pytest
+from nova_ai.streaming import AssistantMessageEventStream, EventStream
 from nova_protocol import (
     AssistantMessage,
     DoneEvent,
@@ -15,8 +17,6 @@ from nova_protocol import (
     TextStartEvent,
     Usage,
 )
-
-from nova_ai.streaming import AssistantMessageEventStream, EventStream
 
 
 @pytest.mark.asyncio
@@ -222,3 +222,37 @@ async def test_drive_cancel_before_first_step_terminates_stream():
     assert stream.done is True
     with pytest.raises(RuntimeError, match="ended without result"):
         await stream.result()
+
+
+@pytest.mark.asyncio
+async def test_result_waiter_cancellation_does_not_poison_shared_future():
+    stream: EventStream[str, str] = EventStream(
+        is_complete=lambda event: event == "done", extract_result=lambda event: "ok"
+    )
+    waiter = asyncio.create_task(stream.result())
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    stream.end(result="ok")
+    assert await stream.result() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_response_duration_is_timed_only_for_current_stream():
+    message = AssistantMessage(content=[], timestamp=int(time.time() * 1000))
+    stream = AssistantMessageEventStream()
+    stream.push(DoneEvent(reason=StopReason.STOP, message=message))
+    assert message.duration_ms is not None and message.duration_ms >= 0
+
+    old = AssistantMessage(content=[], timestamp=1)
+    deferred = AssistantMessageEventStream()
+    deferred.end(result=old)
+    assert old.duration_ms is None
+
+    existing = AssistantMessage(
+        content=[], timestamp=int(time.time() * 1000), duration_ms=42
+    )
+    forwarded = AssistantMessageEventStream()
+    forwarded.end(result=existing)
+    assert existing.duration_ms == 42

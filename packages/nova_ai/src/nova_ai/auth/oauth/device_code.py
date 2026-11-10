@@ -34,6 +34,7 @@ class DeviceCodePollResult(Generic[T]):
     value: Optional[T] = None
     message: Optional[str] = None
     interval_seconds: Optional[float] = None
+    error_kind: Optional[NovaErrorKind] = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -102,7 +103,7 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
         if result.status == "failed":
             raise OAuthFlowError(
                 result.message or "Device code flow failed",
-                kind=NovaErrorKind.UNAUTHORIZED,
+                kind=result.error_kind or NovaErrorKind.UNAUTHORIZED,
             )
         if result.status == "slow_down":
             slow_down_count += 1

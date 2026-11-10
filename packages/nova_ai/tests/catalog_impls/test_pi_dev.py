@@ -4,9 +4,8 @@ import time
 
 import httpx
 import pytest
-from nova_protocol import AbortController
-
 from nova_ai.catalog_impls.pi_dev import PiDevCatalog
+from nova_protocol import AbortController
 
 pytestmark = pytest.mark.asyncio
 
@@ -20,7 +19,23 @@ def _pi_payload():
             "maxTokens": 32768,
             "reasoning": True,
             "input": ["text"],
-            "cost": {"input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 0},
+            "cost": {
+                "input": 3,
+                "output": 15,
+                "cacheRead": 0.3,
+                "cacheWrite": 0,
+                "tiers": [
+                    {
+                        "inputTokensAbove": 200000,
+                        "input": 6,
+                        "output": 30,
+                        "cacheRead": 0.6,
+                        "cacheWrite": 0,
+                    }
+                ],
+            },
+            "samplingParams": {"temperature": 0.2},
+            "samplingParamsByThinkingLevel": {"high": {"top_k": 8}},
         },
         "bad": {"name": "missing-id"},
     }
@@ -56,6 +71,15 @@ class TestPiDevCatalog:
         assert fields["id"] == "kimi-k3"
         assert fields["context_window"] == 262144
         assert fields["cost"]["cache_read"] == 0.3
+        assert fields["cost"]["tiers"][0] == {
+            "input_tokens_above": 200000,
+            "input": 6,
+            "output": 30,
+            "cache_read": 0.6,
+            "cache_write": 0,
+        }
+        assert fields["sampling_params"] == {"temperature": 0.2}
+        assert fields["sampling_params_by_thinking_level"] == {"high": {"top_k": 8}}
 
     async def test_no_validator_no_conditional_header(self, monkeypatch):
         seen = {}
@@ -143,18 +167,16 @@ class TestPiDevCatalog:
         outcome = await PiDevCatalog().fetch("nope", None, None)
         assert outcome.status == 501
 
-    async def test_missing_last_modified_falls_back_to_now(self, monkeypatch):
+    async def test_missing_last_modified_stays_unknown(self, monkeypatch):
         async def fake_request(method, url, **kwargs):
             return httpx.Response(200, json={}, headers={"etag": '"v1"'})
 
         monkeypatch.setattr(
             "nova_ai.catalog_impls.pi_dev.request_with_abort", fake_request
         )
-        before = int(time.time() * 1000)
         outcome = await PiDevCatalog().fetch("kimi-coding", None, None)
         assert outcome.status == 200
-        assert outcome.last_modified is not None
-        assert before <= outcome.last_modified <= int(time.time() * 1000)
+        assert outcome.last_modified is None
 
     async def test_optional_fields_and_max_tokens_fallback(self, monkeypatch):
         payload = {

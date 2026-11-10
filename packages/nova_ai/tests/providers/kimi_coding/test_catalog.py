@@ -2,6 +2,10 @@
 
 import httpx
 import pytest
+from nova_ai.gateway.catalog import CatalogError
+from nova_ai.gateway.provider import RefreshModelsContext
+from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
+from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
 from nova_protocol import (
     ApiKeyCredential,
     KnownApi,
@@ -11,11 +15,6 @@ from nova_protocol import (
     OAuthCredential,
     WarningKind,
 )
-
-from nova_ai.gateway.catalog import CatalogError
-from nova_ai.gateway.provider import RefreshModelsContext
-from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
-from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
 
 pytestmark = pytest.mark.asyncio
 
@@ -165,8 +164,8 @@ async def test_managed_auth_failure_raises(monkeypatch):
         assert e.status_code == 401
 
 
-async def test_managed_transport_error_returns_base_with_diagnostic(monkeypatch):
-    """managed 传输失败 → 基底原样（不占层）+ 诊断（不静默）。"""
+async def test_managed_transport_error_raises_instead_of_publishing_base(monkeypatch):
+    """有凭据的 managed 传输失败必须报错，不能发布未过滤基底。"""
 
     async def fake_request(method, url, **kwargs):
         raise RuntimeError("connect timeout")
@@ -174,15 +173,15 @@ async def test_managed_transport_error_returns_base_with_diagnostic(monkeypatch)
     monkeypatch.setattr(
         "nova_ai.providers.kimi_coding.catalog.request_with_abort", fake_request
     )
-    base = [_model("kimi-for-coding")]
-    context = _context(credential=_oauth())
-    result = await kimi_personalize(base, context)
-    assert result is base
-    assert any("订阅源拉取失败" in d.message for d in context.diagnostics)
+    with pytest.raises(CatalogError, match="transport failed") as exc_info:
+        await kimi_personalize(
+            [_model("kimi-for-coding")], _context(credential=_oauth())
+        )
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
-async def test_managed_non_200_returns_base(monkeypatch):
-    """managed 端点非 200（非鉴权错误）→ 基底原样，不视为失败。"""
+async def test_managed_non_200_raises(monkeypatch):
+    """managed 非 200 是本次个性化失败，旧成品由策略层继续服役。"""
 
     async def fake_request(method, url, **kwargs):
         return httpx.Response(503)
@@ -190,9 +189,11 @@ async def test_managed_non_200_returns_base(monkeypatch):
     monkeypatch.setattr(
         "nova_ai.providers.kimi_coding.catalog.request_with_abort", fake_request
     )
-    base = [_model("kimi-for-coding")]
-    result = await kimi_personalize(base, _context(credential=_oauth()))
-    assert result is base
+    with pytest.raises(CatalogError) as exc_info:
+        await kimi_personalize(
+            [_model("kimi-for-coding")], _context(credential=_oauth())
+        )
+    assert exc_info.value.status_code == 503
 
 
 async def test_factory_wires_personalized_strategy():

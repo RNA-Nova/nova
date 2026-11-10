@@ -3,6 +3,8 @@
 """
 
 import importlib
+import subprocess
+import sys
 
 
 class TestRootImports:
@@ -129,3 +131,15 @@ class TestRootImports:
     def test_volcengine_imports(self):
         mod = importlib.import_module("nova_ai.providers.volcengine")
         assert hasattr(mod, "VOLCENGINE_MODELS")
+
+
+def test_oauth_flow_modules_are_not_eagerly_imported():
+    code = (
+        "import sys; import nova_ai; "
+        "assert 'nova_ai.auth.oauth.kimi' not in sys.modules; "
+        "assert 'nova_ai.auth.oauth.openai_codex' not in sys.modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr

@@ -5,9 +5,98 @@ JSON解析工具
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 from json_repair import repair_json
+
+
+@dataclass(frozen=True, kw_only=True)
+class ToolCallArgumentsResult:
+    """完整工具参数的严格解析结果；非法输入以错误返回，不伪造可执行参数。"""
+
+    arguments: Dict[str, Any]
+    arguments_error: Optional[str] = None
+
+
+def _repair_invalid_escapes(text: str) -> str:
+    """只修复字符串内的非法反斜杠转义，不补全结构或修改数字等语法。"""
+    result: List[str] = []
+    in_string = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if not in_string:
+            result.append(char)
+            if char == '"':
+                in_string = True
+            index += 1
+            continue
+        if char == '"':
+            result.append(char)
+            in_string = False
+            index += 1
+            continue
+        if char != "\\":
+            # 字符串内原始控制字符必须转义（pi 同规则）；不碰 JSON 结构。
+            if ord(char) < 0x20:
+                escapes = {
+                    "\b": "\\b",
+                    "\f": "\\f",
+                    "\n": "\\n",
+                    "\r": "\\r",
+                    "\t": "\\t",
+                }
+                result.append(escapes.get(char, f"\\u{ord(char):04x}"))
+            else:
+                result.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(text):
+            result.append(char)
+            index += 1
+            continue
+        escaped = text[index + 1]
+        if escaped in _SIMPLE_ESCAPES:
+            result.extend((char, escaped))
+            index += 2
+            continue
+        if (
+            escaped == "u"
+            and index + 6 <= len(text)
+            and all(_is_hex(digit) for digit in text[index + 2 : index + 6])
+        ):
+            result.append(text[index : index + 6])
+            index += 6
+            continue
+        # JSON 不认识该转义：把单个反斜杠改成字面反斜杠，其余文本不动。
+        result.extend(("\\", "\\"))
+        index += 1
+    return "".join(result)
+
+
+def parse_json_with_repair(text: str) -> Any:
+    """完整 JSON 解析；仅对非法字符串转义做有限修复（pi 同名函数对位）。"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_repair_invalid_escapes(text))
+
+
+def parse_tool_call_arguments(json_str: Optional[str]) -> ToolCallArgumentsResult:
+    """解析已结束的工具调用；仅接受完整 JSON object（pi 同名函数对位）。"""
+    if not json_str or not json_str.strip():
+        return ToolCallArgumentsResult(arguments={})
+    try:
+        parsed = parse_json_with_repair(json_str)
+        if not isinstance(parsed, dict):
+            raise ValueError("Tool arguments must be a JSON object")
+        return ToolCallArgumentsResult(arguments=parsed)
+    except (ValueError, TypeError) as error:
+        return ToolCallArgumentsResult(
+            arguments={},
+            arguments_error=f"{error}\n\nReceived arguments:\n{json_str}",
+        )
 
 
 def parse_streaming_json(json_str: Optional[str]) -> Union[Dict[str, Any], List[Any]]:
@@ -65,6 +154,9 @@ _SIMPLE_ESCAPES = {
 _NUMBER_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\Z")
 _LITERALS = {"true": True, "false": False, "null": None}
 _MISSING = object()  # 不显示标记（半截字面量/非法数字）
+_CREDIT_PER_FEED = 256
+_CREDIT_PER_CHARACTER = 8
+_MAX_PENDING_SCALAR_LENGTH = 64
 
 
 def _is_delimiter(char: str) -> bool:
@@ -93,13 +185,14 @@ def _pending_scalar_value(token: str) -> Any:
 class _Frame:
     """一个开放容器（栈帧）。"""
 
-    __slots__ = ("container", "slot", "phase", "key")
+    __slots__ = ("container", "slot", "phase", "key", "size")
 
     def __init__(self, container: Union[Dict[str, Any], List[Any]], slot: Any):
         self.container = container
         self.slot = slot  # 本容器在父里的槽位（快照拷贝路径用）
         self.phase = "key" if isinstance(container, dict) else "value"
         self.key: Optional[str] = None
+        self.size = 0  # 成员/元素数——快照复制成本与 copy credit 共用
 
 
 def _set_slot(
@@ -123,18 +216,20 @@ class StreamingJsonParser:
     O(n²)，C 级常数在 MB 级参数/千 delta 量级会疼）。
 
     快照纪律：开放容器沿栈拷贝、已完成子树共享——发放后的快照不再变。
+    每次 feed 累积复制预算；开放路径过贵时暂返上一份快照，保证总复制量
+    随输入线性增长（pi copy-credit 对位），大容器预览允许轻微滞后。
     行为契约（与旧实现逐条对齐，测试钉死）：
     - 截断字符串显示已读字符；悬空反斜杠（delta 尾单个 ``\\``）显示字面
       反斜杠（旧伪影同款）；半截 ``\\uXXXX`` 不显示（保留到转义完成）；
     - 开放容器显示已读成员；悬空 token（key 写完值没开始）不进快照；
     - 数字中途显示截断值；半截字面量（``tru``）不显示；
-    - 非法输入不炸、快照保持容器形状；
-    - ``finish()`` = 全文精确 parse + json_repair 兜底（与
-      ``parse_streaming_json`` 一致）。
+    - 非法输入不炸、快照保持容器形状。
+
+    本类只负责流中预览；块结束后的严格解析归 ``parse_tool_call_arguments``，
+    不把截断参数补全成可执行调用。
     """
 
     def __init__(self) -> None:
-        self._text = ""
         self._stack: List[_Frame] = []
         self._root: Any = None
         self._has_root = False
@@ -146,6 +241,8 @@ class StreamingJsonParser:
         self._scalar_slot: Any = None
         self._value: Any = {}
         self._dirty = False
+        self._path_cost = 0
+        self._credit = 0
 
     # ------------------------------------------------------------------
     # 公开面
@@ -153,16 +250,21 @@ class StreamingJsonParser:
 
     @property
     def value(self) -> Any:
-        """当前最新解析结果（发放的快照不再变——开放路径拷贝、完成子树共享）。"""
+        """当前快照；大容器的开放路径复制须由已累计的 copy credit 支付。"""
         if not self._dirty:
             return self._value
+        pending = self._pending()
+        cost = self._path_cost + (1 if pending is not None else 0)
+        if cost > self._credit:
+            return self._value
+        self._credit -= cost
         self._value = self._make_snapshot()
         self._dirty = False
         return self._value
 
     def feed(self, delta: str) -> None:
-        """追加一段 delta 并刷新解析快照（每 delta 成本 O(delta)）。"""
-        self._text += delta
+        """追加一段 delta；读取与 credit 累积均为 O(delta)（pi 同机制）。"""
+        self._credit += _CREDIT_PER_FEED + _CREDIT_PER_CHARACTER * len(delta)
         for char in delta:
             if self._done:
                 break
@@ -176,14 +278,6 @@ class StreamingJsonParser:
                     self._scalar += char
             else:
                 self._read_structural(char)
-
-    def finish(self) -> Any:
-        """终态精确解析（块收尾时调用）。终值语义与 parse_streaming_json 一致。"""
-        try:
-            self._value = json.loads(self._text)
-        except ValueError:
-            self._value = parse_streaming_json(self._text)
-        return self._value
 
     # ------------------------------------------------------------------
     # 结构层
@@ -218,6 +312,18 @@ class StreamingJsonParser:
             return
         frame = self._top()
         if frame is not None:
+            is_new_slot = (
+                slot[0] == "element"
+                and isinstance(frame.container, list)
+                and slot[1] == len(frame.container)
+            ) or (
+                slot[0] == "member"
+                and isinstance(frame.container, dict)
+                and slot[1] not in frame.container
+            )
+            if is_new_slot:
+                frame.size += 1
+                self._path_cost += 1
             _set_slot(frame.container, slot, value)
 
     def _read_structural(self, char: str) -> None:
@@ -257,12 +363,14 @@ class StreamingJsonParser:
         if slot is not None:
             self._place(slot, container)
         self._stack.append(_Frame(container, slot))
+        self._path_cost += 1
         self._dirty = True
 
     def _close_container(self) -> None:
         if not self._stack:
             return  # 游离闭合忽略
-        self._stack.pop()
+        frame = self._stack.pop()
+        self._path_cost -= frame.size + 1
         self._dirty = True
         self._value_ended()
 
@@ -419,7 +527,11 @@ class StreamingJsonParser:
                     text += "\\"  # 悬空反斜杠伪影（旧实现同款）
                 return (s["slot"], text)
             return None
-        if self._scalar and self._scalar_slot is not None:
+        if (
+            self._scalar
+            and len(self._scalar) <= _MAX_PENDING_SCALAR_LENGTH
+            and self._scalar_slot is not None
+        ):
             value = _pending_scalar_value(self._scalar)
             if value is not _MISSING:
                 return (self._scalar_slot, value)

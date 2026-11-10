@@ -9,8 +9,6 @@ import asyncio
 import time
 
 import pytest
-from nova_protocol import AbortController, KnownApi, Model, ModelCost, ModelsStoreEntry
-
 from nova_ai.gateway.catalog import CatalogError, CatalogOutcome
 from nova_ai.gateway.diagnostics import DiagnosticsCollector
 from nova_ai.gateway.provider import ModelsPublication, Provider, merge_models
@@ -19,6 +17,7 @@ from nova_ai.gateway.strategies import (
     personalized_refresh_policy,
     remote_models,
 )
+from nova_protocol import AbortController, KnownApi, Model, ModelCost, ModelsStoreEntry
 
 GENERATED_AT = 1000
 
@@ -474,6 +473,41 @@ class TestPersonalizedRefreshPolicy:
 
         asyncio.run(main())
 
+    def test_personalize_failure_preserves_stored_and_skips_publish(self):
+        async def main():
+            cached = ModelsStoreEntry(models=[_model("cached", provider="kimi-coding")])
+            provider = _personal_provider()
+
+            async def hook(base, context):
+                raise CatalogError("private source unavailable")
+
+            policy = self._policy(provider, hook)
+            context = _Context(
+                stored=cached, catalog_fetch=_make_fetcher(200, models={})
+            )
+            with pytest.raises(CatalogError, match="private source"):
+                await policy(context)
+            assert [m.id for m in provider.get_models()] == ["cached"]
+            # 只有恢复动作，没有任何新成品写入。
+            assert len(context.publications) == 1
+
+        asyncio.run(main())
+
+    def test_personalized_empty_list_is_published_as_empty(self):
+        async def main():
+            provider = _personal_provider()
+
+            async def hook(base, context):
+                return []
+
+            policy = self._policy(provider, hook)
+            context = _Context(catalog_fetch=_make_fetcher(200, models={}))
+            await policy(context)
+            assert provider.get_models() == []
+            assert context.publications[-1].persist.models == []
+
+        asyncio.run(main())
+
     def test_404_runs_hook_over_baseline(self):
         """404/501（站无此目录）：remote 为空——钩子作用于纯基线（pi 同款）。"""
 
@@ -544,13 +578,15 @@ class TestPersonalizedRefreshPolicy:
         asyncio.run(main())
 
     def test_replace_read_mode_and_empty_dynamic_fallback(self):
-        """replace：dynamic 非空整取代；空 dynamic 回退基线（pi 同款）。"""
+        """replace 以发布状态而非列表长度裁决；合法空集同样整取代。"""
         provider = _personal_provider()
         # 空 dynamic：基线兜底
         assert [m.id for m in provider.get_models()] == ["kimi-k2.5"]
         # 非空 dynamic：整取代（baseline 中被筛掉的不重现）
-        provider._dynamic_models = [_model("managed-only", provider="kimi-coding")]
+        provider._set_dynamic_models([_model("managed-only", provider="kimi-coding")])
         assert [m.id for m in provider.get_models()] == ["managed-only"]
+        provider._set_dynamic_models([])
+        assert provider.get_models() == []  # 合法空目录同样整取代
         # overlay 对照组：merge（baseline ∪ dynamic）
         overlay = _provider()
         overlay._dynamic_models = [_model("kimi-k3")]

@@ -1,12 +1,12 @@
 {
   "files": {
-    "anthropic.json": "81b2ba3c67e2174e8d910d99ac7114dd677696971b63e25f5d3496c8a803612e",
-    "kimi-coding.json": "79b49fee4c50acca0c3b81c4dac6f71960a58be421427f8a5b2a28611ab1ff02",
-    "moonshotai-cn.json": "4a485cd2df96c2ea00103f901162366f45772b2566dc481e203beef0d410b0f4",
-    "moonshotai.json": "a0c0182b1f48967d0e04f920d884a453405fc045ee47f99839dcd7e3b6128a01",
-    "volcengine.json": "c4c848ee3f24b4881feecccbf0ac2176cb26d76a510007a88fbb103e067ce1c4"
+    "anthropic.json": "629a7cbab4d566c4ac54844025915e1e744880d94bf767207afb524abfb34edf",
+    "kimi-coding.json": "f9097769ea3cddb3a27a1e54b37cb58eed62b123ae794b75effea1c1e2dcf17e",
+    "moonshotai-cn.json": "dc509773eccd5780851a9212eac87cbec896911cda763cf54aa50ab9286cc328",
+    "moonshotai.json": "b843d8d3d9075cc87bb21c765db2602c9ab8de29672cc8e351348ca9d68fa5b0",
+    "volcengine.json": "fc7c9b75df23d45459011ef22050cc8f28147a64345cb6de0eba992c5462c464"
   },
-  "generatedAt": "2026-11-05T09:17:37+00:00",
+  "generatedAt": "2026-11-10T10:57:20+00:00",
   "schemaVersion": 1,
-  "structureHash": "93fa29640c7e02727f2adefbd5a0612b7e2ebf735bb96a999b99f13e8ddc2a57"
+  "structureHash": "525337125c7ef4e116545f70d0a14fbbf584a6ea5c0590e80059b877f3140c66"
 }

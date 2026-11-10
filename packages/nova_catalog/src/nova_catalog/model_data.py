@@ -1,6 +1,6 @@
 """模型数据管线的共享库（对齐 TS ``scripts/model-data.ts``）。
 
-生成器（``generate_models.py``）与保鲜检查（``check_model_data.py``）
+生成器（``scripts/generate.py``）与保鲜检查（``check_model_data.py``）
 共用这里的数据结构定义、manifest 读写与四方对账校验：
 
     聚合器（models_generated.py 的 PROVIDER_IDS）
@@ -16,7 +16,9 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -28,6 +30,31 @@ _DATA_DIR_REL = Path("src") / "nova_ai" / "providers" / "data"
 _PROVIDER_IDS_LITERAL = re.compile(
     r"PROVIDER_IDS(?::\s*list)?\s*=\s*(\[.*?\])", re.DOTALL
 )
+
+
+def default_package_root() -> Path:
+    """monorepo 源码树中的 nova_ai 包根；仅生成/校验工具使用。"""
+    return Path(__file__).resolve().parents[3] / "nova_ai"
+
+
+def generated_aggregator_path(package_root: Path) -> Path:
+    return package_root / _AGGREGATOR_REL
+
+
+def generated_providers_dir(package_root: Path) -> Path:
+    return package_root / _DATA_DIR_REL.parent
+
+
+def generated_data_dir(package_root: Path) -> Path:
+    return package_root / _DATA_DIR_REL
+
+
+def generated_shard_path(package_root: Path, provider_id: str) -> Path:
+    return (
+        generated_providers_dir(package_root)
+        / provider_id.replace("-", "_")
+        / "models.py"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +99,17 @@ def assert_exact_model_ids(
     )
 
 
+def _reject_non_finite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON number: {value}")
+
+
 def read_json_object(
     path: Path, description: str, errors: List[str]
 ) -> Optional[Dict[str, Any]]:
     try:
-        parsed = json.loads(path.read_text("utf-8"))
+        parsed = json.loads(
+            path.read_text("utf-8"), parse_constant=_reject_non_finite_json
+        )
     except Exception as error:
         errors.append(f"{description} is not valid JSON: {error}")
         return None
@@ -93,19 +126,25 @@ def read_json_object(
 
 def read_provider_ids(package_root: Path) -> List[str]:
     """从生成的聚合器读取 provider id 清单（对齐 TS readModelDataProviderIds）。"""
-    aggregator = package_root / _AGGREGATOR_REL
+    aggregator = generated_aggregator_path(package_root)
     text = aggregator.read_text("utf-8")
     match = _PROVIDER_IDS_LITERAL.search(text)
     if not match:
         raise ValueError(f"No PROVIDER_IDS literal found in {aggregator}")
     ids = ast.literal_eval(match.group(1))
-    if not ids:
-        raise ValueError(f"Generated aggregator contains no provider ids: {aggregator}")
+    if (
+        not isinstance(ids, list)
+        or not ids
+        or any(not isinstance(id, str) or not id for id in ids)
+    ):
+        raise ValueError(
+            f"Generated aggregator contains no valid provider ids: {aggregator}"
+        )
     if len(set(ids)) != len(ids):
         raise ValueError(
             f"Generated aggregator contains duplicate provider ids: {aggregator}"
         )
-    return list(ids)
+    return sorted(ids)
 
 
 def read_provider_structure(data_dir: Path, provider_id: str) -> Dict[str, str]:
@@ -131,9 +170,22 @@ def read_provider_structure(data_dir: Path, provider_id: str) -> Dict[str, str]:
 
 
 def read_model_data_structure(package_root: Path) -> Dict[str, Dict[str, str]]:
-    """全部 provider 的结构：``{provider_id: {模型 id: api}}``。"""
+    """对账聚合器、shard 与数据分片，并返回模型/API 结构。"""
     provider_ids = read_provider_ids(package_root)
-    data_dir = package_root / _DATA_DIR_REL
+    providers_dir = generated_providers_dir(package_root)
+    expected_shards = sorted(
+        f"{provider_id.replace('-', '_')}/models.py" for provider_id in provider_ids
+    )
+    actual_shards = sorted(
+        path.relative_to(providers_dir).as_posix()
+        for path in providers_dir.glob("*/models.py")
+    )
+    if not same_strings(expected_shards, actual_shards):
+        raise ValueError(
+            "Generated model aggregator and provider shards do not match "
+            f"({describe_set_difference(expected_shards, actual_shards)})"
+        )
+    data_dir = generated_data_dir(package_root)
     return {pid: read_provider_structure(data_dir, pid) for pid in provider_ids}
 
 
@@ -178,6 +230,14 @@ def _throw_validation_errors(errors: List[str]) -> None:
     )
 
 
+def _is_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 def _validate_model_value(
     value: Any,
     provider_id: str,
@@ -214,19 +274,47 @@ def _validate_model_value(
     ):
         errors.append(f"{label} has invalid input modalities")
     context_window = value.get("context_window")
-    if not isinstance(context_window, (int, float)) or context_window <= 0:
+    if (
+        not isinstance(context_window, (int, float))
+        or isinstance(context_window, bool)
+        or not math.isfinite(context_window)
+        or context_window <= 0
+    ):
         errors.append(f"{label} has invalid context_window")
     max_tokens = value.get("max_tokens")
-    if not isinstance(max_tokens, (int, float)) or max_tokens <= 0:
+    if (
+        not isinstance(max_tokens, (int, float))
+        or isinstance(max_tokens, bool)
+        or not math.isfinite(max_tokens)
+        or max_tokens <= 0
+    ):
         errors.append(f"{label} has invalid max_tokens")
     cost = value.get("cost")
     if not isinstance(cost, dict):
         errors.append(f"{label} has invalid cost metadata")
     else:
         for field in ("input", "output", "cache_read", "cache_write"):
-            entry = cost.get(field)
-            if not isinstance(entry, (int, float)) or isinstance(entry, bool):
+            if not _is_finite_number(cost.get(field)):
                 errors.append(f"{label} has invalid cost.{field}")
+        tiers = cost.get("tiers")
+        if tiers is not None and not isinstance(tiers, list):
+            errors.append(f"{label} has invalid cost.tiers")
+        elif isinstance(tiers, list):
+            for index, tier in enumerate(tiers):
+                if not isinstance(tier, dict):
+                    errors.append(f"{label} has invalid cost.tiers[{index}]")
+                    continue
+                for field in (
+                    "inputTokensAbove",
+                    "input",
+                    "output",
+                    "cache_read",
+                    "cache_write",
+                ):
+                    if not _is_finite_number(tier.get(field)):
+                        errors.append(
+                            f"{label} has invalid cost.tiers[{index}].{field}"
+                        )
 
 
 def validate_model_data_directory(
@@ -253,14 +341,26 @@ def validate_model_data_directory(
     manifest = read_json_object(manifest_path, "model data manifest", errors)
     manifest_files: Optional[Dict[str, Any]] = None
     if manifest is not None:
-        if manifest.get("schemaVersion") != MODEL_DATA_SCHEMA_VERSION:
+        schema_version = manifest.get("schemaVersion")
+        if (
+            not isinstance(schema_version, int)
+            or isinstance(schema_version, bool)
+            or schema_version != MODEL_DATA_SCHEMA_VERSION
+        ):
             errors.append(
-                f"model data schema is {manifest.get('schemaVersion')!r}, "
+                f"model data schema is {schema_version!r}, "
                 f"expected {MODEL_DATA_SCHEMA_VERSION}"
             )
         generated_at = manifest.get("generatedAt")
         if not isinstance(generated_at, str):
             errors.append("model data manifest has an invalid generation timestamp")
+        else:
+            try:
+                parsed = datetime.fromisoformat(generated_at)
+                if parsed.tzinfo is None:
+                    raise ValueError("timestamp must include a timezone")
+            except ValueError:
+                errors.append("model data manifest has an invalid generation timestamp")
         if manifest.get("structureHash") != model_data_structure_hash(structure):
             errors.append(
                 "model data generation stamp does not match the generated catalog"
@@ -320,6 +420,6 @@ def validate_model_data_directory(
 
 
 def validate_generated_model_data(package_root: Path) -> None:
-    """入口校验：聚合器 ↔ shard ↔ 数据分片 ↔ manifest 四方对账。"""
+    """聚合器、shard、数据分片与 manifest 的完整对账。"""
     structure = read_model_data_structure(package_root)
-    validate_model_data_directory(structure, package_root / _DATA_DIR_REL)
+    validate_model_data_directory(structure, generated_data_dir(package_root))

@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 import respx
+from nova_ai.auth.oauth.kimi import kimi_oauth
 from nova_protocol import (
     AbortedError,
     AuthEvent,
@@ -18,8 +19,6 @@ from nova_protocol import (
     AuthPrompt,
     OAuthCredential,
 )
-
-from nova_ai.auth.oauth.kimi import kimi_oauth
 
 pytestmark = pytest.mark.asyncio
 
@@ -202,6 +201,39 @@ async def test_refresh_retries_on_non_json_error_body(monkeypatch):
     new = await kimi_oauth.refresh(old)
     assert new.access == "a"
     assert route.call_count == 2
+
+
+@respx.mock
+async def test_refresh_uses_initial_plus_three_retries_for_all_5xx(monkeypatch):
+    monkeypatch.setattr(
+        "nova_ai.auth.oauth.kimi.abortable_sleep", _noop_abortable_sleep
+    )
+    route = respx.post(_TOKEN_URL).mock(
+        return_value=httpx.Response(501, json={"error": "server_error"})
+    )
+    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+    with pytest.raises(RuntimeError, match="501"):
+        await kimi_oauth.refresh(old)
+    assert route.call_count == 4
+
+
+@respx.mock
+async def test_device_flow_uses_server_expiry_and_waits_before_first_poll(monkeypatch):
+    captured = {}
+
+    async def fake_poll(options):
+        captured["expires"] = options.expires_in_seconds
+        captured["wait"] = options.wait_before_first_poll
+        return OAuthCredential(access="a", refresh="r", expires=1)
+
+    monkeypatch.setattr(
+        "nova_ai.auth.oauth.kimi.poll_oauth_device_code_flow", fake_poll
+    )
+    payload = _device_auth_payload()
+    payload["expires_in"] = 42
+    respx.post(_DEVICE_AUTH_URL).mock(return_value=httpx.Response(200, json=payload))
+    await kimi_oauth.login(_FakeInteraction())
+    assert captured == {"expires": 42, "wait": True}
 
 
 @respx.mock

@@ -10,7 +10,7 @@
 - ``personalized_refresh_policy``：站 + 账户钩子形态（目录随凭据变）。
   跳 TTL/ETag（凭据易变每次真拉）；finalize 出基底后调 ``personalize``
   钩子（账户层：kimi 订阅覆盖 / 火山 ark 筛选），持久化钩子返回的成品；
-  读取 replace（动态非空整取代——``create_provider`` 装配时置位
+  读取 replace（已发布动态目录整取代，含合法空集——``create_provider`` 置位
   ``provider._dynamic_replaces_baseline``）。
 
 pi 对位：``withRemoteCatalog`` / ``withPersonalizedCatalog``（openrouter）。
@@ -66,11 +66,18 @@ def remote_models(
 
 
 def _restore(
-    provider: Provider,
-    restored: List[Model],
+    provider: Provider, restored: List[Model], *, has_entry: bool
 ) -> "Callable[[], None]":
-    """恢复段发布动作（update 闭包——持久化不涉，仅内存目录）。"""
-    return lambda: setattr(provider, "_dynamic_models", restored)
+    """恢复段发布动作；无缓存条目只清空，不伪装成已发布的空目录。"""
+
+    def _update() -> None:
+        if has_entry:
+            provider._set_dynamic_models(restored)
+        else:
+            provider._dynamic_models = []
+            provider._dynamic_published = False
+
+    return _update
 
 
 def _no_station_diagnostic(provider: Provider, context: RefreshModelsContext) -> None:
@@ -106,7 +113,11 @@ def overlay_refresh_policy(
             for m in remote_models(stored, local_generated_at)
             if m.provider == provider.id
         ]
-        if not await publish(ModelsPublication(update=_restore(provider, restored))):
+        if not await publish(
+            ModelsPublication(
+                update=_restore(provider, restored, has_entry=stored is not None)
+            )
+        ):
             return
 
         if not context.allow_network or is_aborted(signal):
@@ -177,24 +188,22 @@ def overlay_refresh_policy(
             provider.base_url,
             outcome.models_fields,
             knowledge=provider.catalog_knowledge,
+            source_reasoning=outcome.source_reasoning,
         )
         if is_aborted(signal):
             return
         entry = ModelsStoreEntry(
             models=refreshed,
             checked_at=checked_at,
-            last_modified=(
-                outcome.last_modified
-                if outcome.last_modified is not None
-                else checked_at
-            ),
+            # 缺失/坏头保持未知；remote_models 会将其视为不新于烤入基线。
+            last_modified=outcome.last_modified,
             etag=outcome.etag,
         )
         published = remote_models(entry, local_generated_at)
         await publish(
             ModelsPublication(
                 persist=entry,
-                update=lambda: setattr(provider, "_dynamic_models", published),
+                update=lambda: provider._set_dynamic_models(published),
             )
         )
 
@@ -229,7 +238,11 @@ def personalized_refresh_policy(
             for m in (stored.models if stored is not None else [])
             if m.provider == provider.id
         ]
-        if not await publish(ModelsPublication(update=_restore(provider, restored))):
+        if not await publish(
+            ModelsPublication(
+                update=_restore(provider, restored, has_entry=stored is not None)
+            )
+        ):
             return
 
         if not context.allow_network or is_aborted(signal):
@@ -254,9 +267,11 @@ def personalized_refresh_policy(
         remote_fields = outcome.models_fields if outcome.status == 200 else []
         if (
             outcome.status == 200
-            and outcome.last_modified is not None
             and local_generated_at is not None
-            and outcome.last_modified <= local_generated_at
+            and (
+                outcome.last_modified is None
+                or outcome.last_modified <= local_generated_at
+            )
         ):
             remote_fields = []
         base = merge_models(
@@ -266,6 +281,7 @@ def personalized_refresh_policy(
                 provider.base_url,
                 remote_fields,
                 knowledge=provider.catalog_knowledge,
+                source_reasoning=outcome.source_reasoning,
             ),
         )
         personalized = await personalize(base, context)
@@ -276,7 +292,7 @@ def personalized_refresh_policy(
         await publish(
             ModelsPublication(
                 persist=entry,
-                update=lambda: setattr(provider, "_dynamic_models", list(personalized)),
+                update=lambda: provider._set_dynamic_models(list(personalized)),
             )
         )
 

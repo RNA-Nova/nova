@@ -85,13 +85,13 @@ def estimate_message_tokens(message: Message) -> int:
             if isinstance(message.content, str)
             else "\n".join(block.text for block in message.content or [])
         )
-        section_text = "\n".join(
-            value for value in (message.sections or {}).values() if value
-        )
+        parts = [text] if text else []
+        parts.extend(value for value in (message.sections or {}).values() if value)
+        rendered = "\n\n".join(parts)
         tools_tokens = _estimate_tools_tokens(
             (message.tools_added or []) + (message.tools_removed or [])
         )
-        return estimate_text_tokens(text + section_text) + tools_tokens
+        return estimate_text_tokens(rendered) + tools_tokens
 
     chars = 0
     for block in message.content:

@@ -164,7 +164,7 @@
 ## 十四、CI 门禁与套件预算
 
 - **目标态**：七套件 pytest 腿（protocol/ai/agent/harness/server/executor-client/bundle）+ ruff check + ruff format --check + pyright + 非集成矩阵；integration 不上 CI；lock 一致性（`pixi install --locked`）与生成物漂移门禁保留。
-- **现状缺口**：`ci.yml` 只有 executor(rs/py) + bundle + blob 门禁——五包 pytest 腿与静态门禁未上，补腿第一优先。
+- **现状缺口**：`ci.yml` 已有 executor(rs/py) + bundle + ai/catalog + blob 门禁；harness/server/protocol 独立 pytest 腿与全仓静态门禁仍未上，补腿第一优先。
 - **套件时长预算**：单包非集成套件目标 <60s（当前 nova_ai ~18s / harness ~7s）；超预算先查测试分层错位（集成混入默认套件），再谈分片。
 - **资源调度**（codex nextest test-groups 对位）：进程级/资源争抢型测试用 marker 分组（如 `process_heavy`），CI 侧限流或串行（`-m`/`-k` 分片），不与库单测抢并发。
 

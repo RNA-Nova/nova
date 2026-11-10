@@ -22,7 +22,9 @@ from typing import Any, Dict, List, Optional, cast
 
 from nova_catalog.define import ProviderDefinition
 from nova_catalog.engine import stamp_fields
-from nova_protocol import KnownApi, Model, ModelFields
+from nova_catalog.input_limits import apply_image_resize_defaults
+from nova_catalog.reasoning import apply_models_dev_effort
+from nova_protocol import Model, ModelFields
 
 __all__ = [
     "builtin_catalog_generated_at",
@@ -46,10 +48,6 @@ def flatten_model_catalog(
     """
     models: Dict[str, Model] = {}
     for api, group in groups.items():
-        try:
-            KnownApi(api)
-        except ValueError:
-            raise ValueError(f"Unknown api group: {api!r}") from None
         for model_id, fields in group.items():
             fields = dict(fields)
             if fields.get("id") != model_id:
@@ -78,6 +76,7 @@ def finalize_catalog_models(
     models_fields: List[ModelFields],
     *,
     knowledge: Optional[ProviderDefinition] = None,
+    source_reasoning: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[Model]:
     """站拉取字段 → 修正 → 盖戳 → ``Model`` 列表（运行时 finalize 单点）。
 
@@ -102,15 +101,16 @@ def finalize_catalog_models(
         # 修正+盖戳归 nova_catalog.engine.stamp_fields（单一实现点）；
         # 本层只补 Model 构造（运行期产物形态——model_validate 即目录边界
         # 一次性校验入口，TypedDict 声明形状在此验收）
-        return Model.model_validate(
-            stamp_fields(
-                knowledge,
-                model_id,
-                fields,
-                provider_id=provider_id,
-                base_url=base_url,
-            )
+        stamped = stamp_fields(
+            knowledge,
+            model_id,
+            fields,
+            provider_id=provider_id,
+            base_url=base_url,
         )
+        apply_models_dev_effort(stamped, (source_reasoning or {}).get(model_id))
+        apply_image_resize_defaults(stamped)
+        return Model.model_validate(stamped)
 
     for model_id, fields in raw.items():
         models.append(_finalize(model_id, fields))

@@ -215,6 +215,7 @@ def build_params_with_meta(
             resolved_compat,
             tool_cache_control,
             disable_preferred_strict_tools,
+            is_oauth=is_oauth,
         )
         for tool, entry in zip(tools, entries):
             if entry.get("strict") is True and prefers_json_schema_strict_sampling(
@@ -242,6 +243,7 @@ def build_params_with_meta(
         # 工具，消息内 addition 不带）
         _convert_tools_tracked if native_tool_changes else None,
         managed_provider=model.provider if effort_messages else None,
+        is_oauth=is_oauth,
     )
     # 中途 system 消息：穿过模式时归 convert_messages 的 held-back 队列
     # 渲染（pi convertMessages 同款——下一个非空 assistant 前发出；折叠
@@ -256,9 +258,12 @@ def build_params_with_meta(
             if active_effort is not None
             else converted.messages
         ),
-        # Anthropic 必填：缺省落模型上限（窗口钳制归 stream_simple）
-        "max_tokens": (options.max_tokens if options and options.max_tokens else None)
-        or model.max_tokens,
+        # Anthropic 必填：缺省落模型上限；显式 0 是合法的 cache pre-warming。
+        "max_tokens": (
+            options.max_tokens
+            if options and options.max_tokens is not None
+            else model.max_tokens
+        ),
         "stream": True,
     }
 
@@ -343,10 +348,16 @@ def build_params_with_meta(
             if effort:
                 params["output_config"] = {"effort": effort}
         else:
+            requested_budget = getattr(options, "thinking_budget_tokens", None)
+            budget = requested_budget if requested_budget is not None else 1024
+            if budget < 1024 or budget >= params["max_tokens"]:
+                raise ValueError(
+                    "Anthropic thinking budget_tokens must be at least 1024 "
+                    "and below max_tokens"
+                )
             params["thinking"] = {
                 "type": "enabled",
-                "budget_tokens": getattr(options, "thinking_budget_tokens", None)
-                or 1024,
+                "budget_tokens": budget,
                 "display": display,
             }
 

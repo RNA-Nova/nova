@@ -34,3 +34,9 @@ def test_generate_pkce_challenge_matches_verifier():
 def test_generate_pkce_produces_unique_verifiers():
     verifiers = {generate_pkce().verifier for _ in range(10)}
     assert len(verifiers) == 10
+
+
+def test_pkce_verifier_never_enters_repr():
+    pkce = generate_pkce()
+    assert pkce.verifier not in repr(pkce)
+    assert pkce.challenge in repr(pkce)

@@ -8,7 +8,9 @@ anthropic SDK 的传输底座是 httpx2，请求构造/事件解析全真跑）�
 """
 
 import asyncio
+import json
 
+import httpx2
 import pytest
 from nova_protocol import (
     AbortController,
@@ -24,8 +26,10 @@ from nova_protocol import (
     UserMessage,
 )
 
+import nova_ai.api_impls.anthropic_messages._stream as stream_module
 from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
 from tests._helpers.fake_llm import (
+    AnthropicScriptedStream,
     RequestCapture,
     ant_block_start,
     ant_block_stop,
@@ -45,6 +49,7 @@ from tests._helpers.fake_llm import (
     ant_thinking_block,
     ant_thinking_delta,
     ant_tool_use_block,
+    ant_tool_use_turn,
     anthropic_client,
     anthropic_client_scripted,
     anthropic_stream_client,
@@ -119,6 +124,7 @@ class TestStreamHappyPath:
             ant_signature_delta("-2", 0),
             ant_block_stop(0),
             ant_message_delta("end_turn", 3),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -153,6 +159,7 @@ class TestStreamHappyPath:
             ant_input_json_delta(': "bj"}', 0),
             ant_block_stop(0),
             ant_message_delta("tool_use", 2),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -196,6 +203,7 @@ class TestStreamHappyPath:
             ant_redacted_thinking_block(0, data="opaque"),
             ant_block_stop(0),
             ant_message_delta("end_turn", 1),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -208,6 +216,7 @@ class TestStreamHappyPath:
         async for _ in es:
             pass
         result = await es.result()
+        assert result.stop_reason == StopReason.STOP
         block = result.content[0]
         assert block.redacted is True
         assert block.thinking_signature == "opaque"
@@ -225,6 +234,7 @@ class TestStreamHappyPath:
             ant_block_start(0, {"type": "text", "text": "x"}),
             ant_block_stop(0),
             ant_message_delta("end_turn", 1),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -236,7 +246,9 @@ class TestStreamHappyPath:
         )
         async for _ in es:
             pass
-        usage = (await es.result()).usage
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        usage = result.usage
         assert usage.cache_read == 7
         assert usage.cache_write == 5
         assert usage.cache_write_1h == 5
@@ -251,6 +263,7 @@ class TestStreamStopReasons:
             ant_block_start(0, {"type": "text", "text": "x"}),
             ant_block_stop(0),
             ant_message_delta("max_tokens", 1),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -271,6 +284,7 @@ class TestStreamStopReasons:
             ant_message_delta(
                 "refusal", 0, stop_details={"explanation": "不合适的内容"}
             ),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -292,6 +306,7 @@ class TestStreamStopReasons:
         frames = [
             ant_message_start(input_tokens=1),
             ant_message_delta("brand_new", 0),
+            ant_message_stop(),
         ]
         capture = RequestCapture()
         es = stream(
@@ -311,8 +326,7 @@ class TestStreamStopReasons:
 
 class TestStreamFailurePaths:
     async def test_truncated_stream_fails_loud(self):
-        """有头无 stop_reason：截断响亮失败（SDK 不产出 message_stop——
-        终态信号即 stop_reason，见 _stream.py 注释）。"""
+        """见过 message_start 但缺 message_stop：传输截断必须失败。"""
         frames = [
             ant_message_start(input_tokens=1),
             ant_block_start(0, {"type": "text", "text": "半截"}),
@@ -328,18 +342,13 @@ class TestStreamFailurePaths:
         events = [e.type async for e in es]
         result = await es.result()
         assert result.stop_reason == StopReason.ERROR
-        assert "without a stop reason" in (result.error_message or "")
+        assert "before message_stop" in (result.error_message or "")
         # 未闭合的块在异常路径也补发 end（不重不漏）
         assert "text_end" in events
         assert len(capture) == 1
 
     async def test_429_retried_then_succeeds(self):
-        """429（可重试状态）经本层重试后成功——响应带 retry-after-ms: 1 头。
-
-        （注：anthropic SDK 的错误对象不暴露 ``headers`` 属性——只有
-        ``response.headers``——本层重试读取 ``error.headers`` 落不到头，
-        实际走指数退避；与 openai 侧 retry_after_ms 上消息同属已知缺口。）
-        """
+        """429 经本层重试后成功；响应头经 SDK response.headers 正常读取。"""
         capture = RequestCapture()
         client = anthropic_client_scripted(
             [
@@ -386,6 +395,83 @@ class TestStreamFailurePaths:
         # 归一上 kind：overloaded_error 帧 → OVERLOADED（可重试类）
         assert result.error_kind is NovaErrorKind.OVERLOADED
         assert len(capture) == 1
+
+    async def test_unknown_non_json_sse_frames_are_ignored(self):
+        capture = RequestCapture()
+        payloads = [
+            b"event: proxy.stats\ndata: not-json\n\n",
+            b"data: [DONE]\n\n",
+            *[
+                f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+                for event, data in _text_flow_frames()
+            ],
+        ]
+        client = anthropic_stream_client(AnthropicScriptedStream(payloads), capture)
+        es = stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(client=client),
+        )
+        async for _ in es:
+            pass
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        assert result.content[0].text == "你好"
+
+    async def test_raw_control_character_in_known_json_event_is_repaired(self):
+        capture = RequestCapture()
+        frames = [
+            ant_message_start(input_tokens=1),
+            ant_text_block(0),
+            ant_text_delta("a\tb", 0),
+            ant_block_stop(0),
+            ant_message_delta("end_turn", 2),
+            ant_message_stop(),
+        ]
+        payloads = []
+        for event, data in frames:
+            payload = f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+            if event == "content_block_delta":
+                # SSE 的原始换行会切帧；用 tab 覆盖 JSON 字符串控制字符。
+                payload = payload.replace(b"\\t", b"\t")
+            payloads.append(payload)
+        client = anthropic_stream_client(AnthropicScriptedStream(payloads), capture)
+        es = stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(client=client),
+        )
+        async for _ in es:
+            pass
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        assert result.content[0].text == "a\tb"
+
+    async def test_delta_after_content_block_stop_cannot_rewrite_finished_block(self):
+        capture = RequestCapture()
+        client = anthropic_client(
+            [
+                ant_message_start(input_tokens=1),
+                ant_text_block(0),
+                ant_text_delta("accepted", 0),
+                ant_block_stop(0),
+                ant_text_delta("late", 0),
+                ant_message_delta("end_turn", 2),
+                ant_message_stop(),
+            ],
+            capture,
+        )
+        es = stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            AnthropicOptions(client=client),
+        )
+        events = [event async for event in es]
+        result = await es.result()
+        assert result.stop_reason == StopReason.STOP
+        assert result.content[0].text == "accepted"
+        text_end = next(event for event in events if event.type == "text_end")
+        assert text_end.content == "accepted"
 
     async def test_pre_aborted_signal(self):
         """举旗进入：aborted 终态，不发请求。"""
@@ -461,6 +547,10 @@ class TestStreamFailurePaths:
         class _FakeClient:
             def __init__(self) -> None:
                 self.messages = _FakeMessages()
+
+            def with_options(self, *, max_retries):
+                assert max_retries == 0
+                return self
 
             async def close(self):
                 client_close_calls.append(1)
@@ -833,3 +923,167 @@ class TestServerSideFallback:
             d.get("type") == "anthropic_input_transformations"
             for d in (result.diagnostics or [])
         )
+
+
+async def test_message_delta_without_message_stop_is_truncated():
+    frames = [
+        ant_message_start(input_tokens=1),
+        ant_text_block(0),
+        ant_text_delta("complete-looking", 0),
+        ant_block_stop(0),
+        ant_message_delta("end_turn", 1),
+    ]
+    capture = RequestCapture()
+    es = stream(
+        _model(),
+        Context(messages=[UserMessage(content="hi")]),
+        AnthropicOptions(api_key="sk-test", client=anthropic_client(frames, capture)),
+    )
+    async for _ in es:
+        pass
+    result = await es.result()
+    assert result.stop_reason == StopReason.ERROR
+    assert "before message_stop" in (result.error_message or "")
+
+
+async def test_initial_tool_input_without_delta_is_preserved():
+    frames = [
+        ant_message_start(),
+        ant_tool_use_block(0, id="toolu_1", name="read", input={"path": "README.md"}),
+        ant_block_stop(0),
+        ant_message_delta("tool_use", 1),
+        ant_message_stop(),
+    ]
+    capture = RequestCapture()
+    es = stream(
+        _model(),
+        Context(messages=[UserMessage(content="hi")]),
+        AnthropicOptions(api_key="sk-test", client=anthropic_client(frames, capture)),
+    )
+    result = await es.result()
+    call = next(block for block in result.content if block.type == "toolCall")
+    assert call.arguments == {"path": "README.md"}
+    assert call.arguments_error is None
+
+
+async def test_cutoff_tool_arguments_carry_error():
+    frames = [
+        ant_message_start(),
+        ant_tool_use_block(0, id="toolu_1", name="write"),
+        ant_input_json_delta('{"path":"/tmp/cut', 0),
+        ant_block_stop(0),
+        ant_message_delta("tool_use", 1),
+        ant_message_stop(),
+    ]
+    capture = RequestCapture()
+    es = stream(
+        _model(),
+        Context(messages=[UserMessage(content="hi")]),
+        AnthropicOptions(api_key="sk-test", client=anthropic_client(frames, capture)),
+    )
+    result = await es.result()
+    call = next(block for block in result.content if block.type == "toolCall")
+    assert call.arguments == {}
+    assert call.arguments_error is not None
+
+
+async def test_delta_cache_creation_dict_and_provider_cost_are_consumed():
+    frames = [
+        ant_message_start(input_tokens=0),
+        ant_text_block(0),
+        ant_text_delta("ok", 0),
+        ant_block_stop(0),
+        (
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {
+                    "output_tokens": 1,
+                    "cache_creation": {"ephemeral_1h_input_tokens": 100},
+                    "cost": 0.25,
+                    "is_byok": False,
+                },
+            },
+        ),
+        ant_message_stop(),
+    ]
+    capture = RequestCapture()
+    model = _model().model_copy(
+        update={"provider": "openrouter", "base_url": "https://openrouter.ai/api"}
+    )
+    es = stream(
+        model,
+        Context(messages=[UserMessage(content="hi")]),
+        AnthropicOptions(api_key="sk-test", client=anthropic_client(frames, capture)),
+    )
+    result = await es.result()
+    assert result.usage.cache_write_1h == 100
+    assert result.usage.cost.total == 0.25
+    assert result.usage.cost.total_from_provider is True
+
+
+async def test_provider_stream_event_observes_message_stop():
+    seen = []
+    capture = RequestCapture()
+    client = anthropic_client(_text_flow_frames(), capture)
+    es = stream(
+        _model(),
+        Context(messages=[UserMessage(content="hi")]),
+        AnthropicOptions(
+            api_key="sk-test",
+            client=client,
+            on_provider_stream_event=lambda event, _identity: seen.append(event.type),
+        ),
+    )
+    async for _ in es:
+        pass
+    assert seen[-1] == "message_stop"
+
+
+async def test_oauth_tool_name_is_normalized_to_registered_name(monkeypatch):
+    capture = RequestCapture()
+    client = anthropic_client(
+        ant_tool_use_turn(id="toolu_1", name="Read", arguments='{"path":"a"}'),
+        capture,
+    )
+
+    # 本用例只替换 client/provider 装配缝；HTTP 与 OAuth 名称转换仍全真跑。
+    def _create_client(*_args, **_kwargs):
+        return client, True
+
+    monkeypatch.setattr(stream_module, "create_client", _create_client)
+    es = stream(
+        _model(),
+        Context(
+            messages=[UserMessage(content="hi")],
+            tools=[Tool(name="read", description="r", parameters={"type": "object"})],
+        ),
+        AnthropicOptions(api_key="sk-ant-oat-test"),
+    )
+    result = await es.result()
+    call = next(block for block in result.content if block.type == "toolCall")
+    assert call.name == "read"
+
+
+async def test_invalid_sse_escape_is_repaired_before_sdk_decode():
+    capture = RequestCapture()
+    raw = ant_sse_response(ant_text_turn("ok")).text.replace('"ok"', r'"\Hok"')
+    client = anthropic_client_scripted(
+        [
+            httpx2.Response(
+                200,
+                content=raw.encode(),
+                headers={"content-type": "text/event-stream"},
+            )
+        ],
+        capture,
+    )
+    es = stream(
+        _model(),
+        Context(messages=[UserMessage(content="hi")]),
+        AnthropicOptions(api_key="sk-test", client=client),
+    )
+    result = await es.result()
+    assert result.stop_reason == StopReason.STOP
+    assert result.content[0].text == "\\Hok"

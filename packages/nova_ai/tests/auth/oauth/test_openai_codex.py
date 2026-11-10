@@ -11,7 +11,13 @@ from typing import Any, Dict, List
 import httpx
 import pytest
 import respx
-from nova_protocol import AuthEvent, AuthInteraction, AuthPrompt, OAuthCredential
+from nova_protocol import (
+    AuthEvent,
+    AuthInteraction,
+    AuthPrompt,
+    NovaErrorKind,
+    OAuthCredential,
+)
 
 from nova_ai.auth.oauth.openai_codex import (
     create_authorization_flow,
@@ -64,6 +70,15 @@ async def test_create_authorization_flow_url_encodes_query():
     assert "response_type=code" in url
     assert "code_challenge=" in url
     assert "state=" in url
+
+
+@pytest.mark.asyncio
+async def test_authorization_flow_repr_hides_verifier_state_and_url():
+    flow = await create_authorization_flow()
+    text = repr(flow)
+    assert flow.verifier not in text
+    assert flow.state not in text
+    assert flow.url not in text
 
 
 class TestTokenResponseBoundary:
@@ -215,6 +230,7 @@ class TestDeviceCodeBoundary:
         with pytest.raises(RuntimeError) as exc_info:
             await openai_codex_oauth.login(_FakeInteraction())
         message = str(exc_info.value)
+        assert exc_info.value.nova_error_kind is NovaErrorKind.UPSTREAM_ERROR
         assert "authorization_code" in message
         assert "verifier-secret-456" not in message
 

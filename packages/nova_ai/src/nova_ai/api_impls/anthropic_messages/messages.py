@@ -39,6 +39,7 @@ from .constrained import (
     prefers_json_schema_strict_sampling,
     resolve_json_schema_strict_sampling,
 )
+from .tool_names import to_claude_code_name
 
 # Anthropic 工具调用 id 的合法形状（对齐 TS normalizeToolCallId）
 _TOOL_CALL_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
@@ -165,6 +166,7 @@ def convert_messages(
         Callable[[List[Tool]], List[Dict[str, Any]]]
     ] = None,
     managed_provider: Optional[str] = None,
+    is_oauth: bool = False,
 ) -> "ConvertedAnthropicMessages":
     """把内部消息列表转换为 Anthropic MessageParam 形状（对齐 TS convertMessages）。
 
@@ -216,7 +218,14 @@ def convert_messages(
                     blocks.append(
                         {
                             "type": "tool_removal",
-                            "tool": {"type": "tool_reference", "name": ref.name},
+                            "tool": {
+                                "type": "tool_reference",
+                                "name": (
+                                    to_claude_code_name(ref.name)
+                                    if is_oauth
+                                    else ref.name
+                                ),
+                            },
                         }
                     )
                 for definition in convert_tool_definitions(added):
@@ -319,7 +328,11 @@ def convert_messages(
                         {
                             "type": "tool_use",
                             "id": block.id,
-                            "name": block.name,
+                            "name": (
+                                to_claude_code_name(block.name)
+                                if is_oauth
+                                else block.name
+                            ),
                             "input": block.arguments or {},
                         }
                     )
@@ -387,6 +400,7 @@ def convert_tools(
     compat: ResolvedAnthropicCompat,
     cache_control: Optional[CacheControl] = None,
     disable_preferred_strict_tools: bool = False,
+    is_oauth: bool = False,
 ) -> List[Dict[str, Any]]:
     """转换工具定义为 Anthropic 形状（对齐 TS convertTools）。
 
@@ -429,7 +443,7 @@ def convert_tools(
                 legacy_input_schema["definitions"] = parameters["definitions"]
             input_schema = legacy_input_schema
         entry: Dict[str, Any] = {
-            "name": tool.name,
+            "name": to_claude_code_name(tool.name) if is_oauth else tool.name,
             "description": tool.description,
             "input_schema": input_schema,
         }

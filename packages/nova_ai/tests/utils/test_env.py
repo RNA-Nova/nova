@@ -28,3 +28,10 @@ class TestGetEnvApiKey:
     def test_not_set(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         assert get_env_api_key("openai") is None
+
+    def test_provider_scoped_env_wins(self, monkeypatch):
+        monkeypatch.setenv("BASETEN_API_KEY", "process-key")
+        assert (
+            get_env_api_key("baseten", {"BASETEN_API_KEY": "scoped-key"})
+            == "scoped-key"
+        )

@@ -6,8 +6,8 @@
     ① compat 默认垫底（模型自带值赢）
     ② glob 模型级修正（语义表驱动：填缺/硬覆盖/合并）
 
-语义表（``_FILL_ONLY``/``_HARD_OVERRIDE``/``_MERGE_DICT``）即文档——
-新增修正键在此登记，不散装 if。
+语义表（``_REPLACE_FIELDS``/``_MERGE_DICT``）即文档——新增修正键
+在此登记，不散装 if。
 """
 
 from __future__ import annotations
@@ -20,8 +20,18 @@ from nova_protocol import ModelFields
 from .define import ProviderDefinition
 
 # 修正键语义表（ModelFields 子集；新增键在此登记）
-_HARD_OVERRIDE = {"context_window", "max_tokens"}
-"""硬修正：端点实测上限等，覆盖优先。"""
+_REPLACE_FIELDS = {
+    "context_window",
+    "max_tokens",
+    "reasoning",
+    "headers",
+    "input_types",
+    "input_limits",
+    "prompt_cache",
+    "sampling_params",
+    "sampling_params_by_thinking_level",
+}
+"""整值替换的修正字段（与 define.py 的合法键集一致）。"""
 _MERGE_DICT = {"compat", "cost", "thinking_level_map"}
 """按键合并：修正键覆盖源键（``thinking_level_map`` 含 ``None``——
 ``None`` = 该级别不支持，显式压站值），未覆盖键保留源值。站推导级别表
@@ -35,8 +45,28 @@ def _merge_dict_field(
     fields[key] = {**(fields.get(key) or {}), **override}
 
 
+def apply_compat_defaults(
+    knowledge: Optional[ProviderDefinition], fields: ModelFields
+) -> None:
+    """按成品 API 应用 compat 默认；模型已声明的值始终优先。"""
+    if knowledge is None:
+        return
+    api = fields.get("api") or knowledge.api.value
+    api_value = getattr(api, "value", api)
+    defaults = {
+        **knowledge.compat_defaults,
+        **(knowledge.compat_defaults_by_api.get(api_value) or {}),
+    }
+    if defaults:
+        fields["compat"] = {**defaults, **(fields.get("compat") or {})}
+
+
 def apply_corrections(
-    knowledge: Optional[ProviderDefinition], model_id: str, fields: ModelFields
+    knowledge: Optional[ProviderDefinition],
+    model_id: str,
+    fields: ModelFields,
+    *,
+    include_compat_defaults: bool = True,
 ) -> ModelFields:
     """套用 provider compat 默认 + 模型级修正（glob 匹配）。
 
@@ -52,12 +82,9 @@ def apply_corrections(
         return fields
     mutable = cast(Dict[str, Any], fields)  # 同一对象的可变视图（原地语义；
     # TypedDict→dict 为安全的 widening cast，非旁路）
-    # ① compat 默认垫底（语义特殊——默认在下、字段包自带赢，不走合并助手）
-    if knowledge.compat_defaults:
-        mutable["compat"] = {
-            **knowledge.compat_defaults,
-            **(mutable.get("compat") or {}),
-        }
+    # ① compat 默认垫底；混合协议按成品 API 隔离。
+    if include_compat_defaults:
+        apply_compat_defaults(knowledge, fields)
     # ② glob 模型级修正（语义表驱动）
     for pattern, override in knowledge.model_corrections.items():
         if not fnmatch.fnmatch(model_id, pattern):
@@ -66,7 +93,7 @@ def apply_corrections(
             value = override.get(key)
             if value:
                 _merge_dict_field(mutable, key, value)
-        for key in _HARD_OVERRIDE:
+        for key in _REPLACE_FIELDS:
             if key in override:
                 mutable[key] = override[key]
     return cast(ModelFields, mutable)
@@ -79,14 +106,15 @@ def stamp_fields(
     *,
     provider_id: str,
     base_url: Optional[str],
+    include_compat_defaults: bool = True,
 ) -> ModelFields:
-    """修正 + 盖戳（构建期与运行期 finalize 同一实现）。
-
-    步骤（顺序即语义）：``apply_corrections`` → api 解析（源字段包自带
-    优先，否则本家 ``knowledge.api``；两者皆无即响亮失败）→ 盖戳
-    ``id``/``base_url``/``api``/``provider``（注解赋值，静态检查全程在线）。
-    """
-    corrected = apply_corrections(knowledge, model_id, ModelFields(**fields))
+    """修正 + 盖戳；stage-one 可显式跳过 compat 默认值相位。"""
+    corrected = apply_corrections(
+        knowledge,
+        model_id,
+        ModelFields(**fields),
+        include_compat_defaults=include_compat_defaults,
+    )
     api = corrected.get("api") or (knowledge.api.value if knowledge else None)
     if not isinstance(api, str) or not api:
         raise ValueError(
@@ -104,4 +132,4 @@ def stamp_fields(
     return stamped
 
 
-__all__ = ["apply_corrections", "stamp_fields"]
+__all__ = ["apply_compat_defaults", "apply_corrections", "stamp_fields"]
