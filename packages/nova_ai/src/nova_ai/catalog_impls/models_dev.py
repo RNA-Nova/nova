@@ -14,7 +14,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, cast
 
-from nova_catalog.sources.models_dev import MODELS_DEV_API, models_dev_to_nova
+from nova_catalog.sources.models_dev import MODELS_DEV_API
+from nova_catalog.sources.models_dev import models_dev_to_nova as _models_dev_to_nova
 from nova_protocol import AbortedError, AbortSignal, ModelFields, is_aborted
 
 from ..gateway.catalog import CatalogOutcome
@@ -42,6 +43,8 @@ class ModelsDevCatalog:
         if self._cached is not None and now - self._cached_at < _MODELS_DEV_CACHE_TTL_S:
             return self._cached
         data = await fetch_json(self._url, signal=signal)
+        if not isinstance(data, dict):
+            raise ValueError("models.dev payload must be a JSON object")
         self._cached = data
         self._cached_at = time.monotonic()
         return data
@@ -51,7 +54,6 @@ class ModelsDevCatalog:
         key: str,
         signal: Optional[AbortSignal],
         validator: Optional[str],
-        skip_deprecated: bool = False,
     ) -> CatalogOutcome:
         """按 ``key``（provider id 或 models.dev 目录键）切片并翻译。"""
         if is_aborted(signal):
@@ -74,33 +76,37 @@ class ModelsDevCatalog:
 
         fields: List[ModelFields] = []
         source_reasoning: Dict[str, Dict[str, Any]] = {}
-        for model_id, entry in provider_slice.items():
-            mapped = models_dev_to_nova(key, entry, skip_deprecated=skip_deprecated)
-            if mapped is not None:
-                # 翻译件不携带 id（构建期 id 是 dict key）——运行时 finalize
-                # 需要它在字段包里，在此补回。出口一次 cast（与引擎同款纪律：
-                # 翻译件的键集即 ModelFields 形状，静态推导不认 dict 直转）
-                mapped["id"] = model_id
-                fields.append(cast(ModelFields, mapped))
-            if isinstance(entry, dict):
-                capabilities = entry.get("capabilities") or {}
-                reasoning = (
-                    capabilities.get("reasoning")
-                    if isinstance(capabilities, dict)
-                    else None
-                )
-                if isinstance(reasoning, dict):
-                    source_reasoning[model_id] = reasoning
+        source_status: Dict[str, str] = {}
+        seen: set[str] = set()
+        for _model_key, entry in provider_slice.items():
+            mapped = _models_dev_to_nova(key, entry)
+            if mapped is None:
+                continue
+            # 与构建期及 pi 一致：条目内 id 是模型身份，外层 key 仅为索引。
+            model_id = entry.get("id")
+            if not isinstance(model_id, str) or not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            mapped["id"] = model_id
+            fields.append(cast(ModelFields, mapped))
+            capabilities = entry.get("capabilities") or {}
+            reasoning = (
+                capabilities.get("reasoning")
+                if isinstance(capabilities, dict)
+                else None
+            )
+            if isinstance(reasoning, dict):
+                source_reasoning[model_id] = reasoning
+            status = entry.get("status")
+            if isinstance(status, str):
+                source_status[model_id] = status
         return CatalogOutcome(
             status=200,
             models_fields=fields,
             source_reasoning=source_reasoning,
+            source_status=source_status,
             last_modified=int(time.time() * 1000),
         )
 
 
-__all__ = [
-    "MODELS_DEV_API",
-    "ModelsDevCatalog",
-    "models_dev_to_nova",
-]
+__all__ = ["MODELS_DEV_API", "ModelsDevCatalog"]

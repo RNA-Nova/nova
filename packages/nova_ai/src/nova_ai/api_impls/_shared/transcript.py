@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, NamedTuple, Optional, Sequence, TypeGuard
 
-from nova_protocol import Context, Message, SystemMessage, TextContent, Tool
+from nova_protocol import Context, Message, SystemMessage, Tool
 
 
 def _content_text(content: object) -> str:

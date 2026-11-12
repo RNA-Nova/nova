@@ -1,8 +1,8 @@
 """Provider 运行时单元（对齐 TS ``src/models.ts`` 的 ``createProvider`` 部分）。
 
-Provider 是独立的运行时单元：持有 auth 配置、模型目录与 stream 调度能力
-（``model.api`` → 协议实现的路由），不做 auth 解析（那是 ``ModelsManager``
-的职责）。
+Provider 是独立的运行时单元：持有 auth 配置、chat/image/classifier 混合目录与
+stream/generate_images/classify 调度能力（``model.api`` → 协议实现的路由），不做
+auth 解析（那是 ``ModelsManager`` 的职责）。
 
 能力即字段（对齐 TS ``refreshModels`` 的函数口袋形态）：``refresh_models``
 为 ``None`` 是静态 provider（目录仅基线）；注入策略闭包即为动态 provider。
@@ -30,31 +30,42 @@ Provider 是独立的运行时单元：持有 auth 配置、模型目录与 stre
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Dict, List, Optional, Protocol, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Union
 
-from nova_catalog.define import ProviderDefinition
 from nova_protocol import (
     AbortSignal,
+    AnyModel,
+    AssistantImages,
+    ClassifierContext,
+    ClassifierModel,
+    ClassifierResult,
     Context,
     Credential,
-    KnownApi,
+    ImageModel,
+    ImagesContext,
     Model,
     ModelsStoreEntry,
+    ModelType,
     ProviderAuth,
     ProviderHeaders,
-    is_aborted,
 )
 
 from ..auth.resolve import ModelsError
-from ..stream_options import SimpleStreamOptions, StreamOptions
+from ..stream_options import (
+    ClassifierOptions,
+    ImagesOptions,
+    SimpleStreamOptions,
+    StreamOptions,
+)
 from ..streaming import AssistantMessageEventStream
+from ..utils.model_operations import api_value, get_model_type
 from .catalog import FetchCatalogFn
 from .diagnostics import DiagnosticsCollector
 from .streams import lazy_stream
 
 
 class ProviderStreams(Protocol):
-    """API 实现模块的统一契约（stream / stream_simple）。"""
+    """聊天 API 实现模块的统一契约（stream / stream_simple）。"""
 
     def stream(
         self,
@@ -71,8 +82,54 @@ class ProviderStreams(Protocol):
     ) -> AssistantMessageEventStream: ...
 
 
+class ProviderImages(Protocol):
+    """图像 API 实现模块的统一契约（非流式 generate_images）。"""
+
+    async def generate_images(
+        self,
+        model: ImageModel,
+        context: ImagesContext,
+        options: Optional[ImagesOptions] = None,
+    ) -> AssistantImages: ...
+
+
+class ProviderClassifier(Protocol):
+    """分类 API 实现模块的统一契约（非流式 classify）。"""
+
+    async def classify(
+        self,
+        model: ClassifierModel,
+        context: ClassifierContext,
+        options: Optional[ClassifierOptions] = None,
+    ) -> ClassifierResult: ...
+
+
 # api_impl 可以是单个实现，也可以按 model.api 分发（对齐 TS Provider.api）
 ApiImpl = Union[ProviderStreams, Dict[str, ProviderStreams]]
+ImagesImpl = Dict[str, ProviderImages]
+ClassifiersImpl = Dict[str, ProviderClassifier]
+
+
+class GenerateImagesFn(Protocol):
+    """Provider 图像能力回调；options 可像真实闭包一样省略。"""
+
+    def __call__(
+        self,
+        model: ImageModel,
+        context: ImagesContext,
+        options: Optional[ImagesOptions] = None,
+    ) -> Awaitable[AssistantImages]: ...
+
+
+class ClassifyFn(Protocol):
+    """Provider 分类能力回调；options 可像真实闭包一样省略。"""
+
+    def __call__(
+        self,
+        model: ClassifierModel,
+        context: ClassifierContext,
+        options: Optional[ClassifierOptions] = None,
+    ) -> Awaitable[ClassifierResult]: ...
 
 
 class _UnsetType:
@@ -138,20 +195,37 @@ class RefreshModelsContext:
 RefreshModelsFn = Callable[[RefreshModelsContext], Awaitable[None]]
 """刷新策略签名（``Provider.refresh_models`` 能力字段的类型）。"""
 
-PersonalizeFn = Callable[[List[Model], RefreshModelsContext], Awaitable[List[Model]]]
-"""账户层钩子签名（pi ``PersonalizeCatalog`` 对位）：已修正基底 + 上下文
-→ 个性化目录。``create_provider(personalize=...)`` 装配进 personalized
-刷新策略，在"基底备好、发布之前"被调用——kimi 订阅覆盖 / 火山 ark 筛选。"""
+PersonalizeFn = Callable[
+    [Sequence[AnyModel], RefreshModelsContext], Awaitable[Sequence[AnyModel]]
+]
+"""账户层钩子签名：混合目录在基底备好、发布之前按凭据个性化。"""
 
 
-def merge_models(baseline: List[Model], dynamic: List[Model]) -> List[Model]:
-    """基线 ∪ overlay：同 id overlay 胜，新 id 追加（对齐 TS mergeModels）。
+def assert_chat_model(model: AnyModel) -> Model:
+    """运行时收窄聊天模型；图像/其他操作不得进入 ProviderStreams。"""
+    if not isinstance(model, Model):
+        raise ModelsError(
+            "provider", f"Model {model.provider}/{model.id} is not a chat model"
+        )
+    return model
 
-    全包唯一的目录合并点（``Provider.get_models`` 与远程目录恢复共用）。
+
+def merge_models(baseline: List[AnyModel], dynamic: List[AnyModel]) -> List[AnyModel]:
+    """基线 ∪ overlay：同 ``(type,id)`` overlay 胜，新条目追加。
+
+    类型参与键是因为同一 id 可以分别支持聊天与图像生成（pi mergeModels）。
     """
     merged = list(baseline)
     for model in dynamic:
-        index = next((i for i, m in enumerate(merged) if m.id == model.id), -1)
+        index = next(
+            (
+                i
+                for i, entry in enumerate(merged)
+                if entry.id == model.id
+                and get_model_type(entry) == get_model_type(model)
+            ),
+            -1,
+        )
         if index >= 0:
             merged[index] = model
         else:
@@ -178,57 +252,60 @@ class Provider:
     catalog_source: Optional[str] = None
     """目录站选配 key（对位 ``Model.api``）：manager 持有站容器为 dict 形态时
     按本 key 路由；为 None 表示本 provider 不选配公开站。"""
-    catalog_knowledge: Optional[ProviderDefinition] = None
-    """目录修正知识（**知识唯一定义点在 nova_catalog**——工厂装配时挂
-    nova_catalog 的对应 DEF（``ProviderDefinition``，引擎直读字段）——
-    无注册表、无查找）。None = 无修正（pi.dev 已覆盖或 models.json
-    声明式 provider 的常态）。"""
-    _baseline_models: List[Model] = field(default_factory=list)
-    _dynamic_models: List[Model] = field(default_factory=list)
+    _baseline_models: List[AnyModel] = field(default_factory=list)
+    _dynamic_models: List[AnyModel] = field(default_factory=list)
     _dynamic_published: bool = False
     _api_impl: Optional[ApiImpl] = None
+    _images_impl: Optional[ImagesImpl] = None
+    _classifiers_impl: Optional[ClassifiersImpl] = None
     _dynamic_replaces_baseline: bool = False
-    """目录读取模式（装配置位——personalized 形态专属，pi
-    ``withPersonalizedCatalog`` 对位）：True 且动态目录非空时
-    ``get_models()`` 整取代基线（账户个性化目录是"全部真相"）；
-    False = merge（基线 ∪ 动态——公共事实的增量覆盖）。"""
-    # 能力字段（非构造面）：None = 静态 provider；策略闭包由 create_provider
-    # 装配（personalize → personalized 策略；catalog_source → overlay 策略）。
-    # init=False：子类以同名方法覆写兼容（TS 的"方法在不在"探测在 Python
-    # 落到"字段是不是 None"）。
+    """目录读取模式：True 且已发布动态目录时整取代基线；False = merge。"""
+    # 能力字段（非构造面）：策略与一次性操作分派闭包均由 create_provider 装配。
     refresh_models: Optional[RefreshModelsFn] = field(default=None, init=False)
+    generate_images: Optional[GenerateImagesFn] = field(default=None, init=False)
+    classify: Optional[ClassifyFn] = field(default=None, init=False)
 
-    def get_models(self) -> List[Model]:
-        """返回该 provider 的模型列表（对齐 TS Provider.getModels）。
-
-        模型列表的唯一读取口。replace 形态以“是否发布过动态目录”为状态，
-        不以列表长度代替状态：合法空目录也必须整取代基线。
-        """
+    def get_all_models(self) -> List[AnyModel]:
+        """返回全类型目录；replace 以“发布过”而非列表长度判定。"""
         if self._dynamic_replaces_baseline and self._dynamic_published:
             return list(self._dynamic_models)
         return merge_models(self._baseline_models, self._dynamic_models)
 
-    def _set_dynamic_models(self, models: List[Model]) -> None:
+    def get_models(self) -> List[Model]:
+        """既有读取面保持 chat-only；图像/分类条目经 get_all/类型接口读取。"""
+        return [model for model in self.get_all_models() if isinstance(model, Model)]
+
+    def _set_dynamic_models(self, models: List[AnyModel]) -> None:
         """发布动态目录（含合法空集）；恢复无缓存时不得调用本方法。"""
         self._dynamic_models = list(models)
         self._dynamic_published = True
 
     def get_model(self, model_id: str) -> Optional[Model]:
-        """按 model id 查找模型。"""
+        """按 model id 查找聊天模型。"""
         for model in self.get_models():
             if model.id == model_id:
                 return model
         return None
+
+    def get_model_of_type(
+        self, model_type: ModelType, model_id: str
+    ) -> Optional[AnyModel]:
+        """按操作类型 + id 查找目录条目。"""
+        return next(
+            (
+                model
+                for model in self.get_all_models()
+                if model.id == model_id and get_model_type(model) == model_type
+            ),
+            None,
+        )
 
     def _api_for(self, model: Model) -> Optional[ProviderStreams]:
         """根据 model.api 找到对应的 API 实现。"""
         if self._api_impl is None:
             return None
         if isinstance(self._api_impl, dict):
-            api_key = (
-                model.api.value if isinstance(model.api, KnownApi) else str(model.api)
-            )
-            return self._api_impl.get(api_key)
+            return self._api_impl.get(api_value(model.api))
         return self._api_impl
 
     def _dispatch(
@@ -241,17 +318,27 @@ class Provider:
 
         ``StreamFunction`` 契约：调用后的失败一律编码进流，而不是抛出。
         """
-        impl = self._api_for(model)
-        if impl is None:
+        try:
+            assert_chat_model(model)
+            impl = self._api_for(model)
+            if impl is None:
 
-            async def _missing() -> AssistantMessageEventStream:
-                raise ModelsError(
-                    "stream",
-                    f'Provider {self.id} has no API implementation for "{model.api}"',
-                )
+                async def _missing() -> AssistantMessageEventStream:
+                    raise ModelsError(
+                        "stream",
+                        f'Provider {self.id} has no API implementation for "{model.api}"',
+                    )
 
-            return lazy_stream(model, _missing, signal=signal)
-        return run(impl)
+                return lazy_stream(model, _missing, signal=signal)
+            return run(impl)
+        except Exception as error:
+            # 类型守卫与实现装配期的同步失败都经 lazy_stream 终止。
+            failure = error
+
+            async def _failed() -> AssistantMessageEventStream:
+                raise failure
+
+            return lazy_stream(model, _failed, signal=signal)
 
     def stream(
         self,
@@ -280,78 +367,20 @@ class Provider:
         )
 
 
-def create_provider(
-    id: str,
-    name: str,
-    base_url: Optional[str] = None,
-    headers: Optional[ProviderHeaders] = None,
-    models: Optional[List[Model]] = None,
-    api: Optional[ApiImpl] = None,
-    auth: Optional[ProviderAuth] = None,
-    filter_models: Optional[
-        Callable[[List[Model], Optional[Credential]], List[Model]]
-    ] = None,
-    catalog_source: Optional[str] = None,
-    catalog_knowledge: Optional[ProviderDefinition] = None,
-    personalize: Optional[PersonalizeFn] = None,
-) -> Provider:
-    """构造 Provider 实例（对齐 TS ``createProvider``）。
-
-    Args:
-        id: provider 唯一标识
-        name: 展示名称
-        base_url: API 基础 URL
-        headers: 默认请求头
-        models: 静态模型列表（baseline）
-        api: API 实现（单个实现或按 ``model.api`` 分发的字典）
-        auth: provider 鉴权配置
-        filter_models: 凭据级模型过滤策略
-        catalog_source: 目录站选配 key（manager 站容器为 dict 形态时的
-            路由键）；None 表示不选配公开站
-        catalog_knowledge: 目录修正知识（nova_catalog 的 DEF，
-            ``ProviderDefinition``）；None = 无修正
-        personalize: 账户层钩子（pi ``PersonalizeCatalog`` 对位）——传入即
-            装配 personalized 刷新策略（站 + 钩子、replace 读取形态）；
-            None 且配了 ``catalog_source`` 时装配 overlay 策略（纯站）
-
-    Returns:
-        可独立调度的 Provider 实例
-    """
-    provider = Provider(
-        id=id,
-        name=name,
-        base_url=base_url,
-        headers=headers,
-        auth=auth,
-        filter_models=filter_models,
-        catalog_source=catalog_source,
-        catalog_knowledge=catalog_knowledge,
-        _baseline_models=list(models) if models is not None else [],
-        _api_impl=api,
-    )
-    if personalize is not None:
-        # 账户个性化形态（kimi 订阅覆盖 / 火山 ark 筛选）：replace 读取
-        from .strategies import personalized_refresh_policy
-
-        provider.refresh_models = personalized_refresh_policy(provider, personalize)
-        provider._dynamic_replaces_baseline = True
-    elif catalog_source is not None:
-        # 纯站形态（公共事实目录）：六件套治理出生自带
-        from .strategies import overlay_refresh_policy
-
-        provider.refresh_models = overlay_refresh_policy(provider)
-    return provider
-
-
 __all__ = [
     "ApiImpl",
+    "ClassifyFn",
+    "ClassifiersImpl",
+    "GenerateImagesFn",
+    "ImagesImpl",
     "ModelsPublication",
     "PersonalizeFn",
     "Provider",
+    "ProviderClassifier",
+    "ProviderImages",
     "ProviderStreams",
     "RefreshModelsContext",
     "RefreshModelsFn",
     "UNSET",
-    "create_provider",
     "merge_models",
 ]

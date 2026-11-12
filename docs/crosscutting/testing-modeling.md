@@ -47,7 +47,7 @@
 
 ### helper 与 e2e 设施
 
-- **helper 就近**：单文件专用 helper 住文件内；跨文件共用件住 `tests/_helpers/` 或目录级 conftest；**生产包内不写 test_support 模块**（测试设施只住 `tests/`；发布 testing 子路径等第三方契约套件需求出现再议）。
+- **helper 就近**：单文件专用 helper 住文件内；跨文件共用件住 `tests/_helpers/` 或目录级 conftest；**生产包内不写 test_support 模块**。唯一例外是正式发布、供其他包实例化的契约套件，例如已登记的 `nova_ai.testkit.store_contracts`（被 nova_harness 的 store 契约测试真实消费）；普通测试设施仍只住 `tests/`。
 - **e2e harness 是一等设施**：撑起多个 e2e 用例的装配代码（会话/存储/假服务器的组合构建器）当基础设施养在 `tests/_helpers/`（codex `core/tests/common/` 对位），不散落各测试文件。
 
 ## 三、分层与力度（写多少）
@@ -118,8 +118,9 @@
 ## 十、测试代码质量（测试也是代码）
 
 - **DAMP 优先于 DRY**：测试代码重可读与自明，重复优于错误抽象；但公共构造走 builder/fixture（第五节），语义复制（整段流程复制）禁止。
+- **类型契约同构**：测试基建与被测代码共享同一类型契约，不在测试里另养一套松类型世界；合法数据经类型化 builder 构造，畸形数据只在负例边界显式越型；观察优先经真实对象的注入回调完成，不伪造同名字段或方法。
 - **测试体内无业务逻辑**：无分支、无条件断言、无 try/except 吞断言——分支需求转参数化或拆用例。
-- **同门禁**：测试与生产同 lint/format（ruff）；**新增测试文件过 pyright 基础档**（存量棘轮——类型漂移在测试 helper 里同样是债）。
+- **同门禁**：测试与生产同 lint/format（ruff）；**新增或重写的测试文件整体过 pyright 基础档**，存量按明确批次清偿；不得靠 blanket `cast`、`type: ignore` 或降低既有类型约束来换绿——类型漂移在测试 helper 里同样是债。
 - **评审即验收**：测试评审看三件事——行为破坏时它红不红（变异心态）、断言是否锁在契约上、环境是否密封。
 
 ## 十一、回归、变异、flaky 与重试
@@ -163,7 +164,7 @@
 
 ## 十四、CI 门禁与套件预算
 
-- **目标态**：七套件 pytest 腿（protocol/ai/agent/harness/server/executor-client/bundle）+ ruff check + ruff format --check + pyright + 非集成矩阵；integration 不上 CI；lock 一致性（`pixi install --locked`）与生成物漂移门禁保留。
+- **目标态**：九套件 pytest 腿（protocol/async/ai/catalog/agent/harness/server/executor-client/bundle）+ ruff check + ruff format --check + pyright + 非集成矩阵；integration 不上 CI；lock 一致性（`pixi install --locked`）与生成物漂移门禁保留。
 - **现状缺口**：`ci.yml` 已有 executor(rs/py) + bundle + ai/catalog + blob 门禁；harness/server/protocol 独立 pytest 腿与全仓静态门禁仍未上，补腿第一优先。
 - **套件时长预算**：单包非集成套件目标 <60s（当前 nova_ai ~18s / harness ~7s）；超预算先查测试分层错位（集成混入默认套件），再谈分片。
 - **资源调度**（codex nextest test-groups 对位）：进程级/资源争抢型测试用 marker 分组（如 `process_heavy`），CI 侧限流或串行（`-m`/`-k` 分片），不与库单测抢并发。

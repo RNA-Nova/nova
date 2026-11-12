@@ -27,6 +27,8 @@
 | 工具错误（喂模型） | 模型 | `ToolResultMessage`（`is_error`） | 文本即词汇 | ✓ 随消息树 |
 | 工具致命错误 | 用户 | `FatalToolError` → 终态错误消息 | `NovaErrorKind` | ✓ 随消息树 |
 | 取消终态 | 用户 | `AssistantMessage`（`stop_reason=aborted`） | 三海拔（§七） | ✓ 随消息树 |
+| 图像生成终态（含错误/取消） | 用户 | `AssistantImages`（`stop_reason` + `error_message`） | `ImagesStopReason` | ✗（调用结果） |
+| 分类终态（含错误/取消） | 用户 | `ClassifierResult`（`stop_reason` + `error_message`） | `ClassifierStopReason` | ✗（调用结果） |
 | 重试进行中（will_retry） | 用户 | `AutoRetryStartEvent` / `AutoRetryEndEvent`（既有） | — | ✗ |
 | 警告 | 用户 | `WarningEvent`（事件总线） | `WarningKind` | ✗（禁 `append_entry`） |
 | 弃用通知 | 用户 | `WarningEvent(kind=DEPRECATION)` | — | ✗ |

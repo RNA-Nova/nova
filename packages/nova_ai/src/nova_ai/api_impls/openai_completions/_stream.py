@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
 import openai
-from nova_async import AbortScope
+from nova_async import AbortScope, await_with_abort
 from nova_protocol import (
     AbortedError,
     AssistantMessage,
@@ -52,9 +52,9 @@ from nova_protocol import (
     is_aborted,
     redact_secrets,
 )
-from openai.resources.chat.completions import AsyncCompletions
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
 
+from ...gateway.streams import lazy_stream
 from ...stream_options import ModelIdentity, ProviderResponse, SimpleStreamOptions
 from ...streaming import AssistantMessageEventStream
 from ...utils import calculate_cost
@@ -66,6 +66,10 @@ from ...utils.errors import (
 from ...utils.http import filter_headers_for_hook
 from ...utils.json_parser import StreamingJsonParser, parse_tool_call_arguments
 from ...utils.model_utils import clamp_thinking_level
+from .._shared.openai_request import (
+    build_chat_completion_kwargs,
+    collect_omitted_headers,
+)
 from .._shared.openrouter_cost import apply_openrouter_reported_cost
 from .._shared.prompt_cache import resolve_cache_retention
 from .._shared.retry import RetryOptions, retry_provider_request
@@ -83,26 +87,6 @@ from .reasoning import (
 
 # 流式期内的内容块（文档化的可变累积器——数据建模标准规则 1 例外）
 ContentBlock = Union[TextContent, ThinkingContent, ToolCall]
-
-# 以 SDK 当前签名为参数边界；未声明的线上字段必须经 extra_body，不能进 kwargs。
-_SDK_CREATE_KWARG_KEYS = frozenset(
-    inspect.signature(AsyncCompletions.create).parameters
-)
-_SDK_TRANSPORT_KEYS = frozenset({"timeout", "extra_headers", "extra_query"})
-
-
-def _merge_extra_body(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
-    """递归合并开放 JSON 对象；与 SDK 对命名 body + extra_body 的规则一致，
-    嵌套 dict 合并，其余值由后层覆盖。输入不被原地修改。"""
-    merged = dict(base)
-    for key, value in overlay.items():
-        previous = merged.get(key)
-        merged[key] = (
-            _merge_extra_body(previous, value)
-            if isinstance(previous, dict) and isinstance(value, dict)
-            else value
-        )
-    return merged
 
 
 def _namespace(obj: Any) -> Any:
@@ -428,7 +412,9 @@ def stream(
                     params, ModelIdentity.from_model(model)
                 )
                 if inspect.isawaitable(payload_result):
-                    payload_result = await payload_result
+                    payload_result = await await_with_abort(
+                        payload_result, options.signal
+                    )
                 # 对齐 TS：仅 None 保留原 params（空 dict 等 falsy 也是合法替换）
                 params = payload_result if payload_result is not None else params
 
@@ -443,22 +429,19 @@ def stream(
 
             # SDK max_retries=0 + 本层重试：退避可被 signal 打断（对齐 TS）
             async def _request() -> Any:
-                request_params: Dict[str, Any] = {}
-                inline_extra_body: Dict[str, Any] = {}
-                caller_extra_body: Dict[str, Any] = dict(params.get("extra_body") or {})
-                for key, value in params.items():
-                    if key == "extra_body":
-                        continue
-                    if key in _SDK_TRANSPORT_KEYS or key in _SDK_CREATE_KWARG_KEYS:
-                        # 包含 SDK 传输旋钮；尤其 timeout 只能传一次。
-                        request_params[key] = value
-                    else:
-                        inline_extra_body[key] = value
-                # on_payload 可混用顶层自由字段与 extra_body；与 SDK 一样
-                # 深合并，而非让其中一路静默覆盖另一路。
-                extra_body = _merge_extra_body(inline_extra_body, caller_extra_body)
-                if extra_body:
-                    request_params["extra_body"] = extra_body
+                # 签名外字段与调用方 extra_body 的合并归共享出货边界；
+                # timeout 等 SDK 传输旋钮也只能传一次。
+                request_params = build_chat_completion_kwargs(params)
+                # 显式 None 的头必须在请求级 Omit：仅放 default_headers 会被
+                # SDK 的鉴权校验抢先拒绝；on_payload 的显式头覆盖仍最后生效。
+                omitted_headers = collect_omitted_headers(
+                    model.headers, options.headers if options else None
+                )
+                if omitted_headers:
+                    request_params["extra_headers"] = {
+                        **omitted_headers,
+                        **(request_params.get("extra_headers") or {}),
+                    }
                 request_params.setdefault("timeout", request_timeout)
                 return await client.chat.completions.with_raw_response.create(
                     **request_params
@@ -663,6 +646,8 @@ def stream(
                         if any(b.type == "toolCall" for b in blocks)
                         else StopReason.STOP
                     )
+                if output.stop_reason == StopReason.ABORTED:
+                    raise AbortedError(output.error_message or "Request was aborted")
                 if output.stop_reason == StopReason.ERROR:
                     raise Exception(
                         output.error_message or "Provider returned an error stop reason"
@@ -720,7 +705,7 @@ def stream(
                     # （词表盖不住的形状靠它兜底；绕过截断是既有行为，不动）
                     output.error_message += f"\n{redact_secrets(raw_metadata)}"
 
-            event_stream.push(ErrorEvent(reason=output.stop_reason.value, error=output))
+            event_stream.push(ErrorEvent(reason=output.stop_reason, error=output))
             event_stream.end()
         finally:
             # 关闭序：流 → 客户端（anthropic_messages 同款纪律）——别让流
@@ -745,6 +730,17 @@ def stream(
 
 
 def stream_simple(
+    model: Model, context: Context, options: Optional[SimpleStreamOptions] = None
+) -> AssistantMessageEventStream:
+    """简化入口；装配与鉴权失败同样经事件流收尾，不同步抛出。"""
+
+    async def _setup() -> AssistantMessageEventStream:
+        return _stream_simple(model, context, options)
+
+    return lazy_stream(model, _setup, options.signal if options else None)
+
+
+def _stream_simple(
     model: Model, context: Context, options: Optional[SimpleStreamOptions] = None
 ) -> AssistantMessageEventStream:
     """简化的 OpenAI Completions 流式处理（对齐 TS streamSimple 终态）。"""

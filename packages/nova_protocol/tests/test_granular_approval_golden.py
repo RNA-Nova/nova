@@ -12,10 +12,6 @@
   UnsupportedUntrustedApprovalPolicyError 文案）与
   `core/src/config/config_tests.rs:11584-11606`（
   explicit_untrusted_approval_policy_is_rejected）。
-
-注：本文件从 `nova_protocol.exec_server_config` 子模块直引——
-`GranularApprovalConfig` / `ApprovalPolicySetting` 的门面（`nova_protocol
-__init__`）导出不在 A2a 许可改动清单内，留待主任务补挂。
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ from __future__ import annotations
 from itertools import product
 
 import pytest
-from nova_protocol.exec_server_config import (
+from nova_protocol import (
     ApprovalPolicy,
     ExecutorConfig,
     GranularApprovalConfig,

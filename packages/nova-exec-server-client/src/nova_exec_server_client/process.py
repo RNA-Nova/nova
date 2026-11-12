@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from nova_protocol import (
     PROCESS_READ,
@@ -28,6 +28,7 @@ from nova_protocol import (
     ProcessTerminateResponse,
     ProcessWriteParams,
     ProcessWriteResponse,
+    RemoteNetworkProxyLaunchConfig,
     ShellSnapshotRequest,
 )
 
@@ -98,7 +99,9 @@ class ProcessHandle:
         """终止进程"""
         await self.client.terminate(self.process_id, signal=signal)
 
-    async def signal(self, sig: str, *, signal: AbortSignal | None = None) -> None:
+    async def signal(
+        self, sig: Literal["interrupt"], *, signal: AbortSignal | None = None
+    ) -> None:
         """发送信号（`sig` 为 POSIX 信号名——取消词汇占用 `signal` 形参名）"""
         await self.client.signal(self.process_id, sig, signal=signal)
 
@@ -172,12 +175,12 @@ class ProcessManager:
         *,
         arg0: str | None = None,
         metadata: ExecMetadata | None = None,
-        env_policy: ExecEnvPolicy | dict[str, Any] | None = None,
-        shell_snapshot: ShellSnapshotRequest | dict[str, Any] | None = None,
-        sandbox: FileSystemSandboxContext | dict[str, Any] | None = None,
+        env_policy: ExecEnvPolicy | None = None,
+        shell_snapshot: ShellSnapshotRequest | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         enforce_managed_network: bool = False,
-        managed_network: ManagedNetworkSandboxContext | dict[str, Any] | None = None,
-        network_proxy: dict[str, Any] | None = None,
+        managed_network: ManagedNetworkSandboxContext | None = None,
+        network_proxy: RemoteNetworkProxyLaunchConfig | None = None,
         signal: AbortSignal | None = None,
     ) -> ProcessHandle:
         """启动进程（pipe_stdin=True 才可用 write 写 stdin，否则服务端 stdinClosed）
@@ -405,10 +408,14 @@ class ProcessManager:
             self._live_processes.pop(process_id, None)
 
     async def signal(
-        self, process_id: str, sig: str, *, signal: AbortSignal | None = None
+        self,
+        process_id: str,
+        sig: Literal["interrupt"],
+        *,
+        signal: AbortSignal | None = None,
     ) -> None:
-        """发送信号（`sig` 为 POSIX 信号名，线上字段仍是 `signal`——取消
-        词汇占用本方法的 `signal` 形参名，与全 SDK 取消面一致）"""
+        """发送信号（`sig` 当前仅支持 `interrupt`；取消词汇占用本方法的
+        `signal` 形参名，与全 SDK 取消面一致）"""
         params = ProcessSignalParams(processId=process_id, signal=sig)
         await self._transport.send_request(
             PROCESS_SIGNAL,

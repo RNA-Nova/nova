@@ -8,7 +8,8 @@ sources 测试；本文件只钉运行期适配层的行为承诺与"用的就�
 import time
 
 import pytest
-from nova_ai.catalog_impls.models_dev import ModelsDevCatalog, models_dev_to_nova
+
+from nova_ai.catalog_impls.models_dev import ModelsDevCatalog
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,7 +48,7 @@ class TestModelsDevCatalog:
         assert outcome.status == 200
         assert len(outcome.models_fields) == 1
         fields = outcome.models_fields[0]
-        assert fields["id"] == "deepseek-v4"  # id 由切片键补回
+        assert fields["id"] == "deepseek-v4"  # id 由条目内 source.id 补回
         assert fields["context_window"] == 1048576
         assert fields["max_tokens"] == 393216
         assert fields["reasoning"] is True
@@ -76,18 +77,31 @@ class TestModelsDevCatalog:
         assert outcome.status == 200
         assert outcome.models_fields == []
 
-    async def test_skip_deprecated_reaches_translation(self, monkeypatch):
+    async def test_source_status_is_preserved_for_materialize(self, monkeypatch):
         async def fake_fetch_json(url, **kwargs):
-            return {"volcengine": {"models": {"old": _v2_entry(status="deprecated")}}}
+            return {
+                "volcengine": {
+                    "models": {"old": _v2_entry(id="old", status="deprecated")}
+                }
+            }
 
         monkeypatch.setattr(
             "nova_ai.catalog_impls.models_dev.fetch_json", fake_fetch_json
         )
-        outcome = await ModelsDevCatalog().fetch(
-            "volcengine", None, None, skip_deprecated=True
-        )
+        outcome = await ModelsDevCatalog().fetch("volcengine", None, None)
         assert outcome.status == 200
-        assert outcome.models_fields == []
+        assert len(outcome.models_fields) == 1
+        assert outcome.source_status == {"old": "deprecated"}
+
+    async def test_entry_id_wins_over_outer_dictionary_key(self, monkeypatch):
+        async def fake_fetch_json(url, **kwargs):
+            return {"volcengine": {"models": {"alias-key": _v2_entry(id="canonical")}}}
+
+        monkeypatch.setattr(
+            "nova_ai.catalog_impls.models_dev.fetch_json", fake_fetch_json
+        )
+        outcome = await ModelsDevCatalog().fetch("volcengine", None, None)
+        assert outcome.models_fields[0]["id"] == "canonical"
 
     async def test_instance_cache_dedups_downloads(self, monkeypatch):
         calls = []
@@ -134,6 +148,24 @@ class TestModelsDevCatalog:
         assert second.status == 200
         assert len(calls) == 2
 
+    async def test_non_object_payload_is_status_0_and_not_cached(self, monkeypatch):
+        calls = []
+
+        async def fake_fetch_json(url, **kwargs):
+            calls.append(url)
+            return [] if len(calls) == 1 else _models_dev_payload()
+
+        monkeypatch.setattr(
+            "nova_ai.catalog_impls.models_dev.fetch_json", fake_fetch_json
+        )
+        catalog = ModelsDevCatalog()
+        first = await catalog.fetch("volcengine", None, None)
+        second = await catalog.fetch("volcengine", None, None)
+        assert first.status == 0
+        assert isinstance(first.cause, ValueError)
+        assert second.status == 200
+        assert len(calls) == 2
+
     async def test_cache_expires_after_ttl(self, monkeypatch):
         """60s 窗口后缓存失效，重新下载。"""
         now = [1000.0]
@@ -154,50 +186,3 @@ class TestModelsDevCatalog:
         now[0] += 61  # 超窗：重新下载
         await catalog.fetch("volcengine", None, None)
         assert len(calls) == 2
-
-
-class TestModelsDevToNovaDelegation:
-    """运行期消费的就是构建管线的 v2 翻译件（过滤语义为证——v1 不过滤）。"""
-
-    async def test_non_chat_type_dropped(self):
-        assert models_dev_to_nova("p1", _v2_entry(type="image")) is None
-
-    async def test_deprecated_kept_by_default_dropped_when_opted(self):
-        """deprecated 缺省保留（对齐 pi modelsDevModels——只有个别 provider
-        开启 skipDeprecated）；显式开启才剔除。"""
-        entry = _v2_entry(status="deprecated")
-        assert models_dev_to_nova("p1", entry) is not None
-        assert models_dev_to_nova("p1", entry, skip_deprecated=True) is None
-
-    async def test_tools_unsupported_dropped(self):
-        entry = _v2_entry(capabilities={"tools": {"supported": False}})
-        assert models_dev_to_nova("p1", entry) is None
-
-    async def test_missing_name_falls_back_to_id(self):
-        entry = _v2_entry()
-        del entry["name"]
-        fields = models_dev_to_nova("p1", entry)
-        assert fields is not None
-        assert fields["name"] == entry["id"]
-
-    async def test_strict_raises_on_missing_id(self):
-        entry = _v2_entry()
-        del entry["id"]
-        try:
-            models_dev_to_nova("p1", entry, strict=True)
-            raise AssertionError("should have raised")
-        except ValueError as e:
-            assert "missing id" in str(e)
-
-    async def test_modalities_filtered_to_text_image(self):
-        fields = models_dev_to_nova(
-            "p1", _v2_entry(modalities={"input": ["text", "image", "audio"]})
-        )
-        assert fields is not None
-        assert fields["input_types"] == ["text", "image"]
-
-        only_audio = models_dev_to_nova(
-            "p1", _v2_entry(modalities={"input": ["audio"]})
-        )
-        assert only_audio is not None
-        assert only_audio["input_types"] == ["text"]  # 无有效模态回落 text

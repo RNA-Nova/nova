@@ -73,6 +73,120 @@ async def test_copilot_uses_bearer_not_x_api_key():
 
 
 @pytest.mark.asyncio
+async def test_copilot_header_only_auth_never_reads_ambient_anthropic_credentials(
+    monkeypatch,
+):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-key")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "ambient-token")
+    capture = RequestCapture()
+    client, _ = create_client(
+        _model("github-copilot"),
+        Context(messages=[]),
+        options_headers={"Authorization": "Bearer custom"},
+        http_client=_http_client(capture),
+    )
+    await _run(_model("github-copilot"), client)
+    headers = capture.single().headers
+    assert headers["authorization"] == "Bearer custom"
+    assert "x-api-key" not in headers
+
+
+@pytest.mark.asyncio
+async def test_stream_simple_missing_auth_returns_error_stream(monkeypatch):
+    for name in (
+        "ANTHROPIC_FEDERATION_RULE_ID",
+        "ANTHROPIC_ORGANIZATION_ID",
+        "ANTHROPIC_IDENTITY_TOKEN_FILE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    from nova_ai.api_impls.anthropic_messages import stream_simple
+
+    events = stream_simple(_model(), Context(messages=[UserMessage(content="hi")]))
+    result = await events.result()
+    assert result.stop_reason is StopReason.ERROR
+    assert "No API key" in (result.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_stream_simple_allows_complete_federation_config(monkeypatch):
+    for name in (
+        "ANTHROPIC_FEDERATION_RULE_ID",
+        "ANTHROPIC_ORGANIZATION_ID",
+        "ANTHROPIC_IDENTITY_TOKEN_FILE",
+        "ANTHROPIC_SERVICE_ACCOUNT_ID",
+        "ANTHROPIC_WORKSPACE_ID",
+    ):
+        monkeypatch.setenv(name, "dummy")
+    from nova_ai.api_impls.anthropic_messages import stream_simple
+    from nova_ai.stream_options import SimpleStreamOptions
+
+    event_stream = stream_simple(_model(), Context(messages=[]), SimpleStreamOptions())
+    # 入口成功即证明未被普通 key 守卫误拒；不让真实 token 交换起跑。
+    task = event_stream.task
+    if task is not None:
+        task.cancel()
+
+
+def test_federation_clients_share_token_cache_and_transport(monkeypatch):
+    from nova_ai.api_impls.anthropic_messages import client as client_module
+
+    monkeypatch.setattr(client_module, "_FEDERATION_CLIENT", None)
+    federation = {
+        "organization_id": "org",
+        "authentication": {
+            "type": "oidc_federation",
+            "federation_rule_id": "rule",
+            "identity_token": {"source": "file", "path": "/dummy"},
+        },
+    }
+    transport = _http_client(RequestCapture())
+    first, _ = create_client(
+        _model(), Context(messages=[]), http_client=transport, federation=federation
+    )
+    second, _ = create_client(
+        _model(), Context(messages=[]), http_client=transport, federation=federation
+    )
+    # SDK 的 cache/transport 是内部接缝；这里验证 copy 语义而非再发请求。
+    assert first is not second
+    assert first._token_cache is second._token_cache
+    assert first._client is second._client
+
+
+@pytest.mark.asyncio
+async def test_federation_header_suppression_does_not_pollute_next_request(monkeypatch):
+    from nova_ai.api_impls.anthropic_messages import client as client_module
+
+    monkeypatch.setattr(client_module, "_FEDERATION_CLIENT", None)
+    federation = {
+        "organization_id": "org",
+        "authentication": {
+            "type": "oidc_federation",
+            "federation_rule_id": "rule",
+            "identity_token": {"source": "file", "path": "/dummy"},
+        },
+    }
+    transport = _http_client(RequestCapture())
+    first, _ = create_client(
+        _model(),
+        Context(messages=[]),
+        options_headers={"Accept-Encoding": None},
+        http_client=transport,
+        federation=federation,
+    )
+    second, _ = create_client(
+        _model(),
+        Context(messages=[]),
+        http_client=transport,
+        federation=federation,
+    )
+    assert first._token_cache is second._token_cache
+    assert first._client is not second._client
+    assert "accept-encoding" not in first._client.headers
+    assert "accept-encoding" in second._client.headers
+    await first.close()
+
+
+@pytest.mark.asyncio
 async def test_none_header_suppresses_sdk_default_user_agent():
     capture = RequestCapture()
     client, _ = create_client(
@@ -189,3 +303,55 @@ def test_federation_config_matches_sdk_shape_and_explicit_auth_wins():
     incomplete = dict(env)
     del incomplete["ANTHROPIC_ORGANIZATION_ID"]
     assert anthropic_federation_config(_model(), None, None, incomplete) is None
+
+
+@pytest.mark.asyncio
+async def test_authorization_only_never_emits_placeholder_or_ambient_api_key(
+    monkeypatch,
+):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ambient")
+    capture = RequestCapture()
+    client, _ = create_client(
+        _model(),
+        Context(messages=[]),
+        options_headers={"Authorization": "Bearer custom"},
+        http_client=_http_client(capture),
+    )
+    await _run(_model(), client)
+    headers = capture.single().headers
+    assert headers["authorization"] == "Bearer custom"
+    assert "x-api-key" not in headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("api_key", "options_headers", "expected_key", "expected_authorization"),
+    [
+        ("sk-real", {}, "sk-real", None),
+        (None, {"x-api-key": "custom-key"}, "custom-key", None),
+        (None, {"cf-aig-authorization": "Bearer cf"}, None, None),
+        (
+            "sk-real",
+            {"Authorization": "Bearer custom"},
+            "sk-real",
+            "Bearer custom",
+        ),
+        ("", {"Authorization": "Bearer custom"}, None, "Bearer custom"),
+        ("", {"cf-aig-authorization": "Bearer cf"}, None, None),
+    ],
+)
+async def test_explicit_auth_header_matrix(
+    api_key, options_headers, expected_key, expected_authorization
+):
+    capture = RequestCapture()
+    client, _ = create_client(
+        _model(),
+        Context(messages=[]),
+        api_key=api_key,
+        options_headers=options_headers,
+        http_client=_http_client(capture),
+    )
+    await _run(_model(), client)
+    headers = capture.single().headers
+    assert headers.get("x-api-key") == expected_key
+    assert headers.get("authorization") == expected_authorization

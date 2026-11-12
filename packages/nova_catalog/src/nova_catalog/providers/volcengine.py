@@ -1,17 +1,29 @@
-"""Volcengine 的构建期知识（以真实 API 实测为准）。
+"""Volcengine 的目录构建与 models.dev 原料修正（以真实 API 实测为准）。"""
 
-deepseek 系思考映射与回放语义 + 钉住模型（数据源缺失但端点实测在售）。
-账户/区域生命周期筛选只住运行时 personalize，不进入公共种子。
-"""
+import copy
+from typing import Any, Dict, List, Mapping, Optional, cast
 
-from typing import Dict
+from nova_protocol import KnownApi, MaterializedCatalog, ModelFields, ThinkingLevelMap
 
-from nova_protocol import KnownApi, ModelFields
+from ..define import ProviderContext, define_provider, models_dev_models, stamp_fields
 
-from ..define import define_provider
+BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/"
+_DEEPSEEK_V4_COMPAT = {
+    "requires_reasoning_content_on_assistant_messages": True,
+    "thinking_format": "deepseek",
+}
+_DEEPSEEK_V4_LEVELS = {
+    "off": "none",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+}
 
+# pinned 是完整作者事实：修正直接写入条目，不依赖后续 map 补全。
 _PINNED_MODELS: Dict[str, ModelFields] = {
-    # 数据源缺失，但端点实测在售——对齐 TS "authoritative values" 模式
     "deepseek-v4-flash-260425": {
         "id": "deepseek-v4-flash-260425",
         "name": "Deepseek-V4-Flash",
@@ -20,6 +32,8 @@ _PINNED_MODELS: Dict[str, ModelFields] = {
         "cost": {"input": 1, "output": 2, "cache_read": 0.2, "cache_write": 0.0},
         "context_window": 1048576,
         "max_tokens": 393216,
+        "compat": dict(_DEEPSEEK_V4_COMPAT),
+        "thinking_level_map": cast("ThinkingLevelMap", dict(_DEEPSEEK_V4_LEVELS)),
     },
     "deepseek-v4-pro-260425": {
         "id": "deepseek-v4-pro-260425",
@@ -29,42 +43,76 @@ _PINNED_MODELS: Dict[str, ModelFields] = {
         "cost": {"input": 12, "output": 24, "cache_read": 1, "cache_write": 0.0},
         "context_window": 1048576,
         "max_tokens": 393216,
+        "compat": dict(_DEEPSEEK_V4_COMPAT),
+        "thinking_level_map": cast("ThinkingLevelMap", dict(_DEEPSEEK_V4_LEVELS)),
     },
 }
+PINNED_MODEL_IDS = frozenset(_PINNED_MODELS)
 
 
-DEF = define_provider(
-    id="volcengine",
-    name="Volcengine",
-    base_url="https://ark.cn-beijing.volces.com/api/v3/",
-    api=KnownApi.OPENAI_COMPLETIONS,
-    # 方舟目录语义是"在售"——models.dev 标 deprecated 的条目与在售
-    # 语义矛盾，剔除（ark 生命周期源兜底，不同于 pi 各家的缺省保留）
-    skip_deprecated=True,
-    model_corrections={
-        "deepseek-v4-*": {
-            # 活探（2026-11-02，ark 真机）：v4 系 minimal~max 全档 + off
-            # （"none"）全通；bogus/off 报错——models.dev 的列表
-            # [minimal,low,medium,high] 不全，以实测为准
-            "thinking_level_map": {
-                "off": "none",
-                "minimal": "minimal",
-                "low": "low",
-                "medium": "medium",
-                "high": "high",
-                "xhigh": "xhigh",
-                "max": "max",
+def map_volcengine_model(
+    fields: ModelFields, _source: Optional[Dict[str, Any]] = None
+) -> ModelFields:
+    """应用有真实端点证据的火山静态修正；构建/运行时共用。"""
+    model_id = fields.get("id") or ""
+    if model_id.startswith("deepseek-v4-"):
+        fields["compat"] = {**(fields.get("compat") or {}), **_DEEPSEEK_V4_COMPAT}
+        fields["thinking_level_map"] = cast(
+            "ThinkingLevelMap",
+            {
+                **(fields.get("thinking_level_map") or {}),
+                **_DEEPSEEK_V4_LEVELS,
             },
-            "compat": {
-                "requires_reasoning_content_on_assistant_messages": True,
-                "thinking_format": "deepseek",
-            },
-        },
-        # doubao-seed-character：models.dev 的 output 上限（256000）超出方舟真实
-        # 上限 32768（实测 400："expected a value <= 32768"），修正为实测值
-        "doubao-seed-character-*": {
-            "max_tokens": 32768,
-        },
-    },
-    pinned_models=_PINNED_MODELS,
-)
+        )
+    if model_id.startswith("doubao-seed-character-"):
+        fields["max_tokens"] = 32768
+    return fields
+
+
+def materialize_volcengine_fields(
+    remote_fields: List[ModelFields],
+    source_status: Mapping[str, str],
+) -> MaterializedCatalog:
+    """models.dev 原料 → 火山字段 + 显式淘汰集；pinned 永远采用作者事实。"""
+    materialized: List[ModelFields] = []
+    remove_ids: set[str] = set()
+    for fields in remote_fields:
+        model_id = fields.get("id")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        pinned = _PINNED_MODELS.get(model_id)
+        if pinned is not None:
+            # 与静态构建的 pinned 优先完全一致：上游后来收录同 ID 时，
+            # 也不得用其价格/窗口覆盖经过端点验证的作者事实。
+            fields = copy.deepcopy(pinned)
+        elif source_status.get(model_id) == "deprecated":
+            remove_ids.add(model_id)
+            continue
+        stamped = stamp_fields(
+            model_id,
+            fields,
+            provider_id="volcengine",
+            base_url=BASE_URL,
+            api=KnownApi.OPENAI_COMPLETIONS.value,
+        )
+        materialized.append(
+            stamped if pinned is not None else map_volcengine_model(stamped)
+        )
+    return MaterializedCatalog(
+        models_fields=materialized, remove_ids=frozenset(remove_ids)
+    )
+
+
+def _models(ctx: ProviderContext) -> List[ModelFields]:
+    return models_dev_models(
+        ctx,
+        "volcengine",
+        api=KnownApi.OPENAI_COMPLETIONS,
+        base_url=BASE_URL,
+        skip_deprecated=True,
+        map_model=map_volcengine_model,
+        pinned_models=_PINNED_MODELS,
+    )
+
+
+DEF = define_provider(id="volcengine", models=_models)

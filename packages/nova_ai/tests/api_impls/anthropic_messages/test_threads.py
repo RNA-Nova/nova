@@ -354,3 +354,84 @@ class TestStrictToolsFallback:
             d.get("type") == "anthropic_strict_tools_fallback"
             for d in (result.diagnostics or [])
         )
+
+    @pytest.mark.parametrize(
+        ("strict", "status", "error_type", "message"),
+        [
+            ("require", 400, "invalid_request_error", "Too many strict tools"),
+            ("prefer", 400, "invalid_request_error", "unrelated request error"),
+            ("prefer", 400, "api_error", "Too many strict tools"),
+            ("prefer", 500, "invalid_request_error", "Too many strict tools"),
+        ],
+    )
+    async def test_non_limit_or_required_strict_never_resends(
+        self, strict, status, error_type, message
+    ):
+        from nova_protocol import AnthropicMessagesCompat, ConstrainedSampling, Tool
+
+        tool = Tool(
+            name="search",
+            description="d",
+            parameters={"type": "object", "properties": {}},
+        )
+        tool.constrained_sampling = ConstrainedSampling(
+            type="json_schema", strict=strict
+        )
+        capture = RequestCapture()
+        client = anthropic_client_scripted(
+            [
+                ant_error_response(
+                    status,
+                    {
+                        "type": "error",
+                        "error": {"type": error_type, "message": message},
+                    },
+                )
+            ],
+            capture,
+        )
+        model = _model().model_copy(
+            update={"compat": AnthropicMessagesCompat(supports_strict_tools=True)}
+        )
+        result = await stream(
+            model,
+            Context(messages=[UserMessage(content="hi")], tools=[tool]),
+            AnthropicOptions(api_key="sk-test", client=client),
+        ).result()
+        assert result.stop_reason is StopReason.ERROR
+        assert len(capture) == 1
+
+    async def test_second_strict_rejection_returns_second_error(self):
+        from nova_protocol import AnthropicMessagesCompat, ConstrainedSampling, Tool
+
+        tool = Tool(
+            name="search",
+            description="d",
+            parameters={"type": "object", "properties": {}},
+        )
+        tool.constrained_sampling = ConstrainedSampling(
+            type="json_schema", strict="prefer"
+        )
+        response = ant_error_response(
+            400,
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Too many strict tools (21 > 20)",
+                },
+            },
+        )
+        capture = RequestCapture()
+        client = anthropic_client_scripted([response, response], capture)
+        model = _model().model_copy(
+            update={"compat": AnthropicMessagesCompat(supports_strict_tools=True)}
+        )
+        result = await stream(
+            model,
+            Context(messages=[UserMessage(content="hi")], tools=[tool]),
+            AnthropicOptions(api_key="sk-test", client=client),
+        ).result()
+        assert result.stop_reason is StopReason.ERROR
+        assert len(capture) == 2
+        assert "strict" not in _bodies(capture)[1]["tools"][0]

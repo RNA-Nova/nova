@@ -17,7 +17,6 @@ from .._shared.copilot_headers import (
 )
 from .._shared.user_agent import get_nova_user_agent
 from .compat import get_compat
-from .options import api
 
 
 def _get_header_value(headers: Optional[ProviderHeaders], name: str) -> Optional[str]:
@@ -105,6 +104,18 @@ def create_client(
                 "cf-aig-authorization": f"Bearer {api_key}",
             },
         )
+
+    # CF-only 时 SDK 仍会因占位 api_key 自动生成 Bearer unused。沿用 CF 的
+    # 空 Authorization 约定覆盖它（SDK 不允许在 bearer 端点完全 omit 该头），
+    # 保留调用方 CF 凭据。真实 api_key 或显式 Authorization 不受影响。
+    if (
+        model.provider == "cloudflare-ai-gateway"
+        and not api_key
+        and _has_header(headers, "cf-aig-authorization")
+        # 键缺席才补空值；显式 None 留给请求级 Omit，不覆盖删除意图。
+        and not any(name.lower() == "authorization" for name in headers)
+    ):
+        headers["Authorization"] = ""
 
     return AsyncOpenAI(
         api_key=api_key or "unused",

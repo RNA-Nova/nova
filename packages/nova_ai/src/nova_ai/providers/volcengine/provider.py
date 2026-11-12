@@ -2,7 +2,10 @@
 
 from typing import cast
 
-from nova_catalog.providers.volcengine import DEF as _knowledge
+from nova_catalog.providers.volcengine import (
+    PINNED_MODEL_IDS,
+    materialize_volcengine_fields,
+)
 from nova_protocol import ProviderAuth
 
 from ...auth.helpers import env_api_key_auth
@@ -34,10 +37,8 @@ def volcengine_provider() -> "Provider":
             ),
         ),
         catalog_source="models.dev",
-        catalog_knowledge=_knowledge,
-        # 钉住模型豁免名单随 DEF 注入（与构建期 _ark_lifecycle_filter
-        # 同一套规则——状态表误伤钉住模型时两侧行为一致）
+        catalog_materialize=materialize_volcengine_fields,
         personalize=lambda base, context: ark_personalize(
-            base, context, exempt_ids=set(_knowledge.pinned_models)
+            base, context, exempt_ids=set(PINNED_MODEL_IDS)
         ),
     )

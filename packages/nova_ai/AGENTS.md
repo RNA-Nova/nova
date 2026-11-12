@@ -6,7 +6,7 @@
 
 ## 项目概览
 
-`nova_ai` 是 Nova monorepo 的最底层子包，职责是为上层（`nova_agent`、`nova_harness` 等）提供**多厂商统一的流式调用接口**。架构与 TypeScript 端 `pi/packages/ai` 对齐：以 `ModelsManager` 集合（TS 侧名 `Models`——改名消歧：集合名与 `Provider.models` 字段同词）+ `Provider` 运行时单元 + API 协议实现（`api_impls/`）三层组织，对外暴露 `stream` / `complete` / `stream_simple` / `complete_simple` API。
+`nova_ai` 是 Nova monorepo 的最底层子包，职责是为上层（`nova_agent`、`nova_harness` 等）提供**多厂商统一的聊天、图像与结构化分类调用接口**。架构与 TypeScript 端 `pi/packages/ai` 目标态对齐：以 `ModelsManager` 集合（TS 侧名 `Models`——改名消歧：集合名与 `Provider.models` 字段同词）+ `Provider` 运行时单元 + API 协议实现（`api_impls/`）三层组织。完整调用统一经 ModelsManager；低层直调显式使用具体协议模块，不再维护全局直调注册表或根门面历史别名。
 
 - **源码包名**：`nova_ai`
 - **版本**：`0.1.5`
@@ -28,7 +28,7 @@
 | 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pytest`、`pytest-asyncio` |
-| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（需同装） |
+| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog` 为运行时硬依赖（需同装） |
 
 **未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `ai-catalog-py` 腿覆盖（ubuntu 单平台：nova_ai 非集成 + nova_catalog + 模型数据门禁）；尚无线级/真实 API 的集成腿与三平台矩阵。
 
@@ -47,16 +47,15 @@ nova_protocol 共用）：
 src/nova_ai/
 ├── __init__.py              # 本包门面（行为层 / gateway / providers / stream_options / utils；
 │                            #   跨组件类型词汇一律住 nova_protocol，本包不再导出）
-├── stream_options.py        # StreamOptions、SimpleStreamOptions、ThinkingBudgets、ProviderResponse、
-│                            #   ModelIdentity（dataclass；钩子面模型归因白名单摘要）
+├── stream_options.py        # StreamOptions、ImagesOptions、ClassifierOptions、SimpleStreamOptions、
+│                            #   ThinkingBudgets、ProviderResponse、ModelIdentity（dataclass；钩子面模型归因白名单摘要）
 ├── streaming.py             # EventStream、AssistantMessageEventStream（异步迭代器 + result Future）
-├── model_catalog.py         # 模型目录运行时机器：flatten_model_catalog（数据分片拍平）+
+├── model_catalog.py         # 模型目录运行时机器：flatten_chat/image/classifier_model_catalog（typed key 拍平）+
 │                            #   finalize_catalog_models（运行时盖戳单点）+
 │                            #   builtin_catalog_generated_at（新鲜度竞速锚点）；
-│                            #   修正引擎单实现在 nova_catalog.engine（构建/运行同一台），
-│                            #   知识归 nova_catalog.providers 各 DEF——工厂装配时挂
-│                            #   Provider.catalog_knowledge 送达（无注册表无查找；
-│                            #   provider 独有裁决归各家回调）
+│                            #   字段盖戳辅助归 nova_catalog.define（构建/运行复用）；
+│                            #   pi.dev 成品不重复修正，models.dev 原料经
+│                            #   刷新策略闭包持有 materialize 回调（火山）
 ├── models_generated.py      # 生成的模型目录聚合器
 ├── testkit/                 # 跨包共享契约测试设施（store_contracts；各包 tests/contracts/ 实例化）
 ├── gateway/                 # ModelsManager 网关层（对齐 TS models.ts + models-store.ts）
@@ -64,13 +63,13 @@ src/nova_ai/
 │   │                        #   刷新世代 + 目录站容器路由——CatalogServices 单站/dict 双形态，
 │   │                        #   按 provider.catalog_source 路由 + partial 绑定发放 ctx.catalog_fetch +
 │   │                        #   on_diagnostic 诊断实时缝——组合根注入，refresh 诊断双通道外发）
-│   ├── provider.py          # Provider / create_provider（模型目录宿主 + 协议路由 +
-│   │                        #   ModelsPublication 发布契约 + merge_models 单点 +
-│   │                        #   replace 读取位（personalized 形态）；装配链：
+│   ├── provider.py          # Provider（模型目录宿主 + 协议路由 +
+│   │                        #   ModelsPublication 发布契约 + merge_models 单点 + replace 读取位）
+│   ├── factory.py           # create_provider（组合 Provider 与刷新策略；装配链：
 │   │                        #   personalize → personalized 策略；catalog_source →
-│   │                        #   overlay 策略出生自带；皆无 → 静态（裸 refresh_models
-│   │                        #   口袋自定义，pi 同款））
+│   │                        #   overlay 策略出生自带；皆无 → 静态，裸 refresh_models 口袋自定义）
 │   ├── strategies.py        # 刷新策略工厂（治理唯一实现——恢复/拉站/分流/
+│   │                        #   可选 materialize（共享 MaterializedCatalog：字段+删除集）/
 │   │                        #   finalize/persist+publish 只此一份）：
 │   │                        #   overlay_refresh_policy（纯站六件套：isNewer 守卫 +
 │   │                        #   4h TTL + ETag/304/404·501/瞬时分流）+
@@ -87,19 +86,22 @@ src/nova_ai/
 │   ├── _shared/             # 实现层共享件（transform_messages / simple_options / retry /
 │   │                        #   prompt_cache / copilot_headers / user_agent / timeouts /
 │   │                        #   constrained.py（跨协议 strict 引擎）+ openrouter_cost.py +
+│   │                        #   openai_request.py（OpenAI SDK kwargs/extra_body 出货边界）+
 │   │                        #   transcript——转录折叠机：normalize/resolve/get_current_tools/
 │   │                        #   resolve_transcript_tools 三模式分工，pi transcript.ts 对位）
 │   ├── openai_completions/  # OpenAI Completions（模块即满足 ProviderStreams）
 │   │                        #   compat / messages / client / options / params / reasoning / _stream 分件
 │   │                        #   + moonshot_schema.py（moonshot-flavored 子集规范化——
 │   │                        #   anyOf 子项补型，nova 特有厂商收窄）
-│   └── anthropic_messages/  # Anthropic Messages（官方 anthropic SDK，httpx2 底座）
-│                            #   options / compat / client / params / messages / _stream 分件
-│                            #   + sse.py（SDK 流接缝的有限 JSON 转义修复）+
-│                            #   tool_names.py（Claude Code OAuth 工具名双向规范化）+
-│                            #   constrained.py（Anthropic 限制词表；共享引擎归 _shared）+
-│                            #   threads.py（message threads 服务端续接——台账/指纹/
-│                            #   建线-续接-拒回退三态，pi a758f3ae4 对位）
+│   ├── anthropic_messages/  # Anthropic Messages（官方 anthropic SDK，httpx2 底座）
+│   │                        #   options / compat / client / params / messages / _stream 分件
+│   │                        #   + sse.py（SDK 流接缝的有限 JSON 转义修复）+
+│   │                        #   tool_names.py（Claude Code OAuth 工具名双向规范化）+
+│   │                        #   constrained.py（Anthropic 限制词表；共享引擎归 _shared）+
+│   │                        #   threads.py（message threads 服务端续接——台账/指纹/
+│   │                        #   建线-续接-拒回退三态，pi a758f3ae4 对位）
+│   ├── openrouter_images.py # OpenRouter 非流式图像生成（ProviderImages / AssistantImages）
+│   └── typesafe_system_one.py # System One 非流式分类（ProviderClassifier / ClassifierResult）
 ├── session_resources.py     # 会话级资源清理注册处（threads 台账等——pi
 │                            #   session-resources.ts 对位）
 ├── catalog_impls/           # 目录站策略枚举（CatalogService 内置实现，对位 api_impls/）
@@ -107,7 +109,7 @@ src/nova_ai/
 │   │                        #   翻译委托 nova_catalog.sources.models_dev，全仓单点）
 │   └── pi_dev.py            # PiDevCatalog（per-provider 目录 + 真条件请求 ETag/304）
 ├── providers/               # 内置 provider 工厂与静态模型目录（纯装配层：数据 + 工厂 + 知识 + 私活）
-│   ├── all.py               # builtin_providers() / builtin_models()
+│   ├── all.py               # builtin_providers() / builtin_models() + chat/image/classifier 目录读取
 │   ├── anthropic/           # models.py + provider.py（pi.dev 全供，零运行时 corrections——
 │   │                        #   种子知识归 nova_catalog/providers/）
 │   ├── kimi_coding/         # models.py + provider.py + catalog.py（personalize 钩子：
@@ -116,8 +118,10 @@ src/nova_ai/
 │   ├── moonshotai/          # models.py + provider.py（知识全归 nova_catalog DEF；
 │   │                        #   运行时零修正文件）
 │   ├── moonshotai_cn/       # 同上（DEF 共享 moonshotai 定义件）
-│   └── volcengine/          # models.py + provider.py + catalog.py（personalize 钩子：
-│                            #   ark 在售筛选；有凭据时失败保留旧成品，公共种子不读账户态）
+│   ├── openrouter/          # models.py + provider.py（图像与分类目录 + 两类非流式调用）
+│   └── volcengine/          # models.py + provider.py + catalog.py（models.dev 原料
+│                            #   经 catalog_materialize 修正后 ark 在售筛选；有凭据时
+│                            #   失败保留旧成品，公共种子不读账户态）
 ├── auth/                    # 鉴权行为层（类型词汇住 nova_protocol.auth）
 │   ├── resolve.py           # resolve_provider_auth + ModelsError（ModelsErrorCode
 │   │                        #   六域 code + nova_error_kind 自声明）+ AuthResolutionOverrides
@@ -137,6 +141,7 @@ src/nova_ai/
     │                        #   SystemMessage 按呈现文本+sections+工具变更
     │                        #   完整 JSON 计，pi estimate.ts 对位）
     ├── model_utils.py       # calculate_cost、clamp/get_supported_thinking_levels 等
+    ├── model_operations.py    # 模型类型/API 键判别 + 图像/分类输入守卫与错误结果出口
     ├── json_parser.py       # 流中容错预览 + 完整工具参数严格解析（arguments_error）
     ├── surrogate.py         # Unicode 代理项清理
     ├── overflow.py          # 上下文溢出检测（多厂商错误模式）
@@ -150,13 +155,13 @@ src/nova_ai/
 ### 运行时架构要点
 
 1. **ModelsManager 集合 + Provider 单元**  
-   不存在全局注册表。`ModelsManager`（`gateway/models.py`）持有按 id 注册的 `Provider` 实例，负责鉴权解析（`getAuth`）、动态模型刷新（`refresh`）、登录/登出（`login`/`logout`）与 stream 派发（`_apply_auth` 合并 auth/model/options 的 apiKey、headers、env 后调用 `provider.stream*()`）。`stream*()` 同步返回事件流，auth 在后台异步解析，失败以 error 事件结束（`lazy_stream`）。Provider 找不到 API 实现时同样返回 error 流而非抛异常（StreamFunction 契约）。动态性为能力字段：`Provider.refresh_models` 为 None 即静态，注入策略闭包即动态——**刷新治理只有一份**（`gateway/strategies.py` 的策略工厂，两形态：overlay 纯站六件套 / personalized 站+账户钩子，pi `withRemoteCatalog`/`withPersonalizedCatalog` 对位），`create_provider` 装配链：`personalize` → personalized 策略（+replace 读取位）；仅 `catalog_source` → overlay 策略出生自带；皆无 → 静态（要自定义刷新就实现 `refresh_models` 裸口袋，pi 同款）。目录站为运行时共享资源：manager 持有 `CatalogServices` 容器（单站/dict 双形态，对位 `ApiImpl`），按 `Provider.catalog_source` 路由并经 `partial(service.fetch, provider.id)` 绑定后发放进 `RefreshModelsContext.catalog_fetch`——refresh 实现的可选能力；kimi/火山的私有鉴权拉取（managed 订阅源、ark 在售筛选）是各家目录的 `personalize` 钩子（装配参数，类型无痕），凭据与公开站都经 context 获取。
+   不存在全局注册表。`ModelsManager`（`gateway/models.py`）持有按 id 注册的 `Provider` 实例，负责鉴权解析（`getAuth`）、动态模型刷新（`refresh`）、登录/登出（`login`/`logout`）与 stream/generate_images/classify 派发（`_apply_auth` 合并 auth/model/options 的 apiKey、headers、env 后调用 `provider.stream*()`）。`stream*()` 同步返回事件流，auth 在后台异步解析，失败以 error 事件结束（`lazy_stream`）。Provider 找不到 API 实现时同样返回 error 流而非抛异常（StreamFunction 契约）。动态性为能力字段：`Provider.refresh_models` 为 None 即静态，注入策略闭包即动态——**刷新治理只有一份**（`gateway/strategies.py` 的策略工厂，两形态：overlay 纯站六件套 / personalized 站+账户钩子，pi `withRemoteCatalog`/`withPersonalizedCatalog` 对位），`create_provider` 装配链：`personalize` → personalized 策略（+replace 读取位）；仅 `catalog_source` → overlay 策略出生自带；皆无 → 静态（要自定义刷新就实现 `refresh_models` 裸口袋，pi 同款）。目录站为运行时共享资源：manager 持有 `CatalogServices` 容器（单站/dict 双形态，对位 `ApiImpl`），按 `Provider.catalog_source` 路由并经 `partial(service.fetch, provider.id)` 绑定后发放进 `RefreshModelsContext.catalog_fetch`——refresh 实现的可选能力；kimi/火山的私有鉴权拉取（managed 订阅源、ark 在售筛选）是各家目录的 `personalize` 钩子（装配参数，类型无痕），凭据与公开站都经 context 获取。
 
 2. **事件流模型**  
    所有流式调用返回 `AssistantMessageEventStream`（`streaming.py`）。生产者 `push(event)`，消费者 `async for` 迭代；收到 `DoneEvent` / `ErrorEvent` 时解析出最终 `AssistantMessage`，可用 `await stream.result()` 获取。多个 result 等待者经 `asyncio.shield` 共享终值，单个等待者取消不毒化 Future；本流见证的响应由流写入 `duration_ms`，旧/延迟消息不盖戳。`end()` 后不可再迭代。
 
-3. **协议实现（当前两个）**  
-   `api_impls/openai_completions/`（官方 `openai.AsyncOpenAI`）与 `api_impls/anthropic_messages/`（官方 `anthropic.AsyncAnthropic`，httpx2 底座）——模块即满足 `ProviderStreams` 契约；分件同构（compat / messages / client / params / _stream，openai 另有 reasoning）。openai_completions 的实现要点：
+3. **协议实现（聊天两个 + 非流式图像/分类）**
+   `api_impls/openai_completions/`（官方 `openai.AsyncOpenAI`）与 `api_impls/anthropic_messages/`（官方 `anthropic.AsyncAnthropic`，httpx2 底座）——模块即满足 `ProviderStreams` 契约；分件同构（compat / messages / client / params / _stream，openai 另有 reasoning）。非流式操作由 `openrouter_images.py` 与 `typesafe_system_one.py` 分别满足 `ProviderImages` / `ProviderClassifier`，错误与取消直接落在 `AssistantImages` / `ClassifierResult`。openai_completions 的实现要点：
    - `detect_compat` / `get_compat` 按 provider/base_url 自动检测兼容标志（`store`、`developer` 角色、`reasoning_effort`、max_tokens 字段名、strict 模式等），`model.compat` 显式配置优先。
    - 流式 thinking/text 采用**双槽位合并**（整条流复用一个 thinking 块 + 一个 text 块，对齐 TS）。
    - reasoning 参数按 `thinking_format` 分派（openai / deepseek / zai / together / openrouter / ant-ling / qwen / qwen-chat-template / chat-template / baseten / string-thinking），支持 `thinking_level_map` 映射与 `off` 显式 null 语义。
@@ -222,7 +227,8 @@ tests/
 ├── gateway/         # ModelsManager 集合 / Provider 单元 / 刷新机器 / 刷新策略
 │                    #   （test_strategies.py：overlay 六件套 + personalized 钩子形态）/ 站路由
 ├── catalog_impls/   # 公开站实现（pi_dev / models_dev）+ HTTP 级用例（respx）
-├── api_impls/       # 协议实现（openai_completions / anthropic_messages 各切面 + _shared）
+├── api_impls/       # 协议实现（openai_completions / anthropic_messages 各切面 + _shared +
+│                    #   openrouter_images / typesafe_system_one 非流式操作）
 ├── auth/            # 鉴权链（resolve / credential store / helpers；oauth/ 子包同构）
 ├── providers/       # 内置 provider（kimi_coding/ volcengine/ 子目录同构 + 跨 provider）
 ├── utils/           # 工具函数（json_parser / http / env / errors 等；abort 测试随机制件迁 nova_async）

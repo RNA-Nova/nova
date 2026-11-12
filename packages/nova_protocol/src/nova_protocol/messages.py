@@ -8,7 +8,7 @@ from pydantic import ConfigDict, Field
 
 from .base_model import NovaBaseModel
 from .content import ImageContent, TextContent, ThinkingContent, ToolCall
-from .enums import Api, NovaErrorKind, ProviderId, StopReason
+from .enums import Api, ImagesStopReason, NovaErrorKind, ProviderId, StopReason
 from .model import Usage
 
 
@@ -153,6 +153,7 @@ Message = Annotated[
     Union[UserMessage, AssistantMessage, ToolResultMessage, SystemMessage],
     Field(discriminator="role"),
 ]
+"""上下文消息的 role 判别联合。"""
 
 
 class Context(NovaBaseModel):
@@ -165,3 +166,31 @@ class Context(NovaBaseModel):
     system_prompt: Optional[str] = None
     messages: List[Message] = Field(default_factory=list)
     tools: Optional[List[Tool]] = None
+
+
+class ImagesContext(NovaBaseModel):
+    """一次图像生成的输入；只含文本与 base64 图像块，不是聊天转录。"""
+
+    input: List[
+        Annotated[Union[TextContent, ImageContent], Field(discriminator="type")]
+    ]
+
+
+class AssistantImages(NovaBaseModel):
+    """非流式图像生成结果（pi ``AssistantImages``）。
+
+    ``usage``/``response_id`` 为 None = provider 未上报；``error_message``
+    只在 error/aborted 终态携带诊断原文。图像数据仍在 ImageContent.data。
+    """
+
+    api: Api
+    provider: ProviderId
+    model: str
+    output: List[
+        Annotated[Union[TextContent, ImageContent], Field(discriminator="type")]
+    ] = Field(default_factory=list)
+    response_id: Optional[str] = None
+    usage: Optional[Usage] = None
+    stop_reason: ImagesStopReason = ImagesStopReason.STOP
+    error_message: Optional[str] = None
+    timestamp: int = 0

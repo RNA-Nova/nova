@@ -128,8 +128,8 @@ def parse_shell_lc_literal_commands(
     """dangerous 路径：从 `bash -lc` 脚本提取全部字面命令（含嵌套替换/控制流）。
 
     对位 codex `parse_shell_lc_literal_commands`：解析失败（语法错误/未闭合）
-    整体返回 None（fail-open 边界——不可解析不产命令）；动态词（变量展开等）
-    从词表省略但不否决整条命令。
+    整体返回 None；含变量展开等动态词的脚本同样整体返回 None，不产出
+    可能误作字面命令的半份结果。
     """
     extracted = extract_bash_command(command)
     if extracted is None:

@@ -3,7 +3,6 @@
 import asyncio
 
 import pytest
-from nova_ai.gateway.streams import lazy_stream
 from nova_protocol import (
     AbortController,
     KnownApi,
@@ -12,6 +11,8 @@ from nova_protocol import (
     ModelCost,
     StopReason,
 )
+
+from nova_ai.gateway.streams import lazy_stream
 
 
 def _model() -> Model:
@@ -106,6 +107,21 @@ async def test_setup_failure_reports_error_without_abort():
 
 
 @pytest.mark.asyncio
+async def test_infrastructure_base_exception_is_not_converted_to_model_error():
+    class InfrastructureError(BaseException):
+        pass
+
+    async def failing_setup():
+        raise InfrastructureError("process control")
+
+    stream = lazy_stream(_model(), failing_setup)
+    task = stream.task
+    assert task is not None
+    with pytest.raises(InfrastructureError, match="process control"):
+        await task
+
+
+@pytest.mark.asyncio
 async def test_aborted_setup_failure_has_no_error_kind():
     controller = AbortController()
 
@@ -127,6 +143,7 @@ async def test_signal_interrupts_hanging_setup():
     async def hanging_setup():
         started.set()
         await asyncio.Event().wait()
+        raise AssertionError("unreachable")
 
     stream = lazy_stream(_model(), hanging_setup, signal=controller.signal)
     await started.wait()
@@ -134,3 +151,17 @@ async def test_signal_interrupts_hanging_setup():
     result = await asyncio.wait_for(stream.result(), timeout=1.0)
     assert result.stop_reason == StopReason.ABORTED
     assert result.error_kind is None
+
+
+@pytest.mark.asyncio
+async def test_aborted_exception_is_cancellation_even_without_signal_flag():
+    from nova_protocol import AbortedError
+
+    async def failing_setup():
+        raise AbortedError("Bearer sk-live-FAKE-REVIEW-SECRET")
+
+    result = await lazy_stream(_model(), failing_setup).result()
+    assert result.stop_reason == StopReason.ABORTED
+    assert result.error_kind is None
+    assert result.retry_after_ms is None
+    assert "sk-live-FAKE-REVIEW-SECRET" not in (result.error_message or "")

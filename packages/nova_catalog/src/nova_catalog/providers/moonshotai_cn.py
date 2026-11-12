@@ -1,20 +1,12 @@
-"""Moonshot AI CN：与全球站共享定义和源映射，仅 id/base_url 不同。"""
-
-from nova_protocol import KnownApi
+"""Moonshot AI CN：与全球站共享构建，仅 source/base_url 不同。"""
 
 from ..define import define_provider
-from .moonshotai import (
-    MOONSHOTAI_COMPAT_DEFAULTS,
-    MOONSHOTAI_MODEL_CORRECTIONS,
-    map_moonshot_model,
-)
+from .moonshotai import MOONSHOTAI_COMPAT, moonshot_models
+
+BASE_URL = "https://api.moonshot.cn/v1"
 
 DEF = define_provider(
     id="moonshotai-cn",
-    name="Moonshot AI CN",
-    base_url="https://api.moonshot.cn/v1",
-    api=KnownApi.OPENAI_COMPLETIONS,
-    compat_defaults=MOONSHOTAI_COMPAT_DEFAULTS,
-    model_corrections=MOONSHOTAI_MODEL_CORRECTIONS,
-    map_model=map_moonshot_model,
+    models=lambda ctx: moonshot_models(ctx, "moonshotai-cn", BASE_URL),
+    compat={"openai-completions": MOONSHOTAI_COMPAT},
 )

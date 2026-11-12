@@ -106,11 +106,13 @@ asyncio.run(main())
 接入真实模型时 `stream_fn` 有两级解析（对齐 pi）：**构造参数 → `set_default_stream_fn()` 注册的全局函数**。两级都缺席时构造即抛错（fail-fast，无静默兜底——避免"忘了配"变成悄悄用环境变量凭据发真实请求）：
 
 ```python
-from nova_ai import builtin_models, get_volcengine_model
+from nova_ai import builtin_models, get_builtin_model
 
 # 库消费者：显式注入（推荐示范）
 agent = Agent(stream_fn=builtin_models().stream_simple)
-agent.set_model(get_volcengine_model("deepseek-v4-flash-260425"))
+model = get_builtin_model("volcengine", "deepseek-v4-flash-260425")
+assert model is not None
+agent.set_model(model)
 await agent.prompt("你好")  # 需要 VOLCENGINE_API_KEY 环境变量
 ```
 

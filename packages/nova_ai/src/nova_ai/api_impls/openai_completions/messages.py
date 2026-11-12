@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Dict, List, Literal, Optional, Set, cast
+from typing import Any, Dict, List, Literal, Optional, cast
 
 from nova_protocol import (
     Context,

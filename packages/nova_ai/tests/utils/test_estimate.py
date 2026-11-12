@@ -1,6 +1,5 @@
 """estimate_context_tokens 测试（对齐 TS estimateContextTokens）。"""
 
-from nova_ai.utils.estimate import estimate_context_tokens
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -14,6 +13,8 @@ from nova_protocol import (
     Usage,
     UserMessage,
 )
+
+from nova_ai.utils.estimate import estimate_context_tokens
 
 
 def _model() -> Model:
@@ -195,8 +196,9 @@ class TestEstimateContextTokens:
 
 
 def test_system_message_estimate_uses_rendered_separators():
-    from nova_ai.utils.estimate import estimate_message_tokens, estimate_text_tokens
     from nova_protocol import SystemMessage
+
+    from nova_ai.utils.estimate import estimate_message_tokens, estimate_text_tokens
 
     message = SystemMessage(content="a", sections={"x": "bc"})
     assert estimate_message_tokens(message) == estimate_text_tokens("a\n\nbc")

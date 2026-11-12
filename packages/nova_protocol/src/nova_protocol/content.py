@@ -82,3 +82,4 @@ ContentUnion = Annotated[
     Union[TextContent, ThinkingContent, ToolCall, ImageContent],
     Field(discriminator="type"),
 ]
+"""文本、思考、工具调用与图像内容的判别联合。"""

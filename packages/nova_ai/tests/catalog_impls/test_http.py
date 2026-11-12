@@ -42,6 +42,7 @@ async def test_pi_dev_request_line_and_conditional_headers():
     request = route.calls[0].request
     assert request.headers["if-none-match"] == '"v8"'
     assert request.headers["accept"] == "application/json"
+    assert request.url.params["types"] == "chat,image,classifier"
     assert outcome.status == 200
     assert outcome.etag == '"v9"'
     assert outcome.models_fields[0]["id"] == "kimi-k3"

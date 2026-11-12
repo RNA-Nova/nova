@@ -7,8 +7,10 @@ abort；重试归 ``_shared/retry.py`` 的 ``retry_provider_request`` 接管。
 → Bearer + Claude Code 身份头）/ Copilot（Bearer + 选择性 beta）。
 """
 
+import json
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple, cast
 
+import httpx2
 from anthropic import AsyncAnthropic, omit
 from nova_protocol import Context, Model, ProviderEnv, ProviderHeaders
 
@@ -215,6 +217,28 @@ def resolve_beta_features(
     return BetaResolution(values=values, overridden=overridden, raw_override=raw)
 
 
+_FEDERATION_CLIENT: Optional[Tuple[Tuple[str, str, Any], AsyncAnthropic]] = None
+
+
+def _federation_base_client(
+    model: Model, federation: Dict[str, Any], http_client: Any
+) -> AsyncAnthropic:
+    """按配置保留 federation 基座；请求级 client 只共享其 token cache。"""
+    global _FEDERATION_CLIENT
+    key = (model.base_url, json.dumps(federation, sort_keys=True), http_client)
+    if _FEDERATION_CLIENT is None or _FEDERATION_CLIENT[0] != key:
+        client = AsyncAnthropic(
+            api_key=None,
+            auth_token=None,
+            config=federation,
+            base_url=model.base_url,
+            http_client=http_client,
+            max_retries=0,
+        )
+        _FEDERATION_CLIENT = (key, client)
+    return _FEDERATION_CLIENT[1]
+
+
 def create_client(
     model: Model,
     context: Context,
@@ -270,14 +294,32 @@ def create_client(
         headers.update(options_headers)
 
     if model.provider == "github-copilot":
-        client = AsyncAnthropic(
-            api_key=None,
-            auth_token=api_key,
-            base_url=model.base_url,
-            default_headers=_sdk_headers(headers),
-            http_client=http_client,
-            max_retries=0,
-        )
+        if api_key:
+            client = AsyncAnthropic(
+                api_key=None,
+                auth_token=api_key,
+                base_url=model.base_url,
+                default_headers=_sdk_headers(headers),
+                http_client=http_client,
+                max_retries=0,
+            )
+        else:
+            # header-owned Copilot 鉴权也必须显式封堵 SDK 的 env/default
+            # 凭据链，否则 Anthropic 的 ambient key 会被发到另一端点。
+            has_authorization = _has_header(headers, "authorization")
+            has_x_api_key = _has_header(headers, "x-api-key")
+            if not has_authorization:
+                headers["authorization"] = None
+            if not has_x_api_key:
+                headers["x-api-key"] = None
+            client = AsyncAnthropic(
+                api_key="unused",
+                auth_token="unused",
+                base_url=model.base_url,
+                default_headers=_sdk_headers(headers),
+                http_client=http_client,
+                max_retries=0,
+            )
         return _suppress_transport_defaults(client, headers), False
 
     if api_key and is_oauth_token(api_key):
@@ -308,26 +350,37 @@ def create_client(
         return _suppress_transport_defaults(client, headers), True
 
     if federation is not None:
-        # 显式 config 阻断 SDK 的其他环境凭据；token 交换与刷新由 SDK 负责。
+        # 显式 config 阻断其他环境凭据。请求级 client 只共享基座的 token
+        # cache，不再 with_options 共享底层 headers——否则一次请求的 suppress
+        # 会永久污染后续请求。测试注入 client 且需要删头时，仅复用其 transport。
+        base = _federation_base_client(model, federation, http_client)
+        request_http_client = http_client
+        if http_client is not None and any(value is None for value in headers.values()):
+            request_http_client = httpx2.AsyncClient(transport=http_client._transport)
         client = AsyncAnthropic(
             api_key=None,
             auth_token=None,
             config=federation,
             base_url=model.base_url,
             default_headers=_sdk_headers(headers),
-            http_client=http_client,
+            http_client=request_http_client,
             max_retries=0,
         )
+        client._token_cache = base._token_cache
         return _suppress_transport_defaults(client, headers), False
 
-    # SDK 隐式凭据链封堵（对齐 TS PiAnthropic 的默认凭据解析关闭）：
-    # api_key 为 None 时 SDK 会自读 ANTHROPIC_API_KEY env——头自带鉴权
-    # 的场景必须喂占位值，防 SDK 在背后附上另一份凭据
-    headers_carry_auth = (
-        _has_header(headers, "authorization")
-        or _has_header(headers, "x-api-key")
-        or _has_header(headers, "cf-aig-authorization")
-    )
+    # SDK 隐式凭据链封堵：占位值只用于阻断环境读取，绝不能实际过线。
+    # 只有未传真实 api_key 时，才为 Bearer/CF 自定义路径抑制 SDK 自动
+    # 生成的 x-api-key；双显式凭据保持调用方组合，不做静默删除。
+    has_authorization = _has_header(headers, "authorization")
+    has_x_api_key = _has_header(headers, "x-api-key")
+    has_cf_auth = _has_header(headers, "cf-aig-authorization")
+    # 与占位生成共用真值语义：空字符串同样不是真实 key。
+    if not api_key and (has_authorization or has_cf_auth) and not has_x_api_key:
+        headers["x-api-key"] = None
+    if (has_x_api_key or has_cf_auth) and not has_authorization:
+        headers["authorization"] = None
+    headers_carry_auth = has_authorization or has_x_api_key or has_cf_auth
     sdk_api_key = api_key or ("unused" if headers_carry_auth else None)
     client = AsyncAnthropic(
         api_key=sdk_api_key,

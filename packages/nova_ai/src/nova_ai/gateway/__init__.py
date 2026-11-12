@@ -1,12 +1,12 @@
 """gateway：Provider 运行时单元 + ModelsManager 集合 + 模型目录存储。
 
 对齐 TS ``src/models.ts`` 与 ``src/models-store.ts``：
-- ``provider.py``：Provider / create_provider（模型目录宿主 + 协议路由 +
-  ``ModelsPublication`` 发布契约）
+- ``provider.py``：Provider（模型目录宿主 + 协议路由 + ModelsPublication 契约）
+- ``factory.py``：create_provider（组合 Provider 与刷新策略，解除模块环）
 - ``models.py``：ModelsManager / create_models_manager（auth 网关 + provider
   注册表 + 刷新世代机制 + 目录站容器路由）
-- ``catalog.py``：目录契约词汇（ModelFields / CatalogOutcome /
-  CatalogService 站契约 / CatalogServices 容器形状 / FetchCatalogFn）
+- ``catalog.py``：目录契约词汇（CatalogOutcome / CatalogService 站契约 /
+  CatalogServices 容器形状 / FetchCatalogFn）
 - ``streams.py``：``lazy_stream`` —— ProviderStreams 契约原语
   （同步签名 + 异步装配 + 错误即流终态）
 - ``diagnostics.py``：``DiagnosticsCollector``——诊断批模式标准装置
@@ -16,15 +16,19 @@
 
 from .catalog import CatalogOutcome, CatalogService, CatalogServices, FetchCatalogFn
 from .diagnostics import DiagnosticsCollector
+from .factory import create_provider
 from .models import ModelsManager, create_models_manager
 from .provider import (
     UNSET,
     ApiImpl,
+    ClassifiersImpl,
+    ImagesImpl,
     ModelsPublication,
     Provider,
+    ProviderClassifier,
+    ProviderImages,
     ProviderStreams,
     RefreshModelsContext,
-    create_provider,
     merge_models,
 )
 from .store import InMemoryModelsStore, ModelsStore
@@ -35,13 +39,17 @@ __all__ = [
     "CatalogOutcome",
     "CatalogService",
     "CatalogServices",
+    "ClassifiersImpl",
     "DiagnosticsCollector",
     "FetchCatalogFn",
+    "ImagesImpl",
     "InMemoryModelsStore",
     "ModelsManager",
     "ModelsPublication",
     "ModelsStore",
     "Provider",
+    "ProviderClassifier",
+    "ProviderImages",
     "ProviderStreams",
     "RefreshModelsContext",
     "UNSET",

@@ -1,13 +1,14 @@
 """StreamOptions 家族（stream_options.py）测试——dataclass 选型与构造纪律。"""
 
 import pytest
+from nova_protocol import CacheRetention, Model, ThinkingLevel, Transport
+
 from nova_ai.stream_options import (
     ModelIdentity,
     SimpleStreamOptions,
     StreamOptions,
     ThinkingBudgets,
 )
-from nova_protocol import CacheRetention, Model, ThinkingLevel, Transport
 
 
 class TestStreamOptions:

@@ -9,6 +9,7 @@
 （`exec_server_config`/`environment`/`intent`/`policy`/`verdict`/`wire`——execpolicy
 裁决引擎与安全白名单的 Python 移植住所）、出口清洗器（`sanitize.py` 的
 `redact_secrets`）、语义 id、共享别名（`aliases.py`）、取消原语（`signal.py`）。
+模型目录另有 `Model`/`ImageModel`/`ClassifierModel` 的 `AnyModel` 判别联合与 `ModelType`；独立图像与分类结果词汇分别为 `ImagesContext`/`AssistantImages`/`ImagesStopReason` 与 `classifier.py` 的 `ClassifierContext`/`ClassifierResult`/`ClassifierStopReason`。
 按迁移路线待迁入：session 落盘 entries、线上 item 正典、共享 config 形状。
 
 ## 收录标准（唯一一条）
@@ -25,8 +26,9 @@
    （取消原语词汇，允许 import asyncio；取消/等待**机制件**——竞速等待、真杀
    scope、任务台账——已升格迁出归 `nova_async` 叶子包）；② **纯函数算法件**——
    零 I/O、仅 stdlib、输入输出都是本包词汇的随行算法，当前成员
-   `exec_server_intent.py`（shell 解析/危险命令判定）、`exec_server_policy.py`
-   （策略规则求值）、`sanitize.py`（`redact_secrets`）。登记成员持续增多时升格
+   `exec_server_intent.py`（shell 解析/危险命令判定）、`exec_server_policy/`
+   （策略规则求值）、`exec_server_permissions/`（权限套餐继承解析、编译、选择、
+   路径与网络配置纯算法）、`sanitize.py`（`redact_secrets`）。登记成员持续增多时升格
    为独立叶子包，枢纽恢复绝对纯形状；
 3. **单一正典源**：每个类型在本包有且只有一个定义点。消费方一律
    `from nova_protocol import X`（`__init__.py` 全量门面再导出，内部文件布局自由）。

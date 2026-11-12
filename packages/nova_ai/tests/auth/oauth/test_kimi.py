@@ -11,14 +11,16 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 import respx
-from nova_ai.auth.oauth.kimi import kimi_oauth
 from nova_protocol import (
     AbortedError,
     AuthEvent,
     AuthInteraction,
     AuthPrompt,
+    NovaErrorKind,
     OAuthCredential,
 )
+
+from nova_ai.auth.oauth.kimi import kimi_oauth
 
 pytestmark = pytest.mark.asyncio
 
@@ -383,3 +385,35 @@ class TestResponseValidationNoLeak:
         message = str(exc_info.value)
         assert "backend exploded" in message
         assert "sk-ant" not in message
+
+    @respx.mock
+    async def test_device_auth_non_json_is_safe_upstream_error(self):
+        respx.post(_DEVICE_AUTH_URL).mock(
+            return_value=httpx.Response(200, content=b"not-json")
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            await kimi_oauth.login(_FakeInteraction())
+        assert exc_info.value.nova_error_kind is NovaErrorKind.UPSTREAM_ERROR
+        assert "not-json" not in str(exc_info.value)
+
+    async def test_temporary_oauth_values_are_redacted_from_repr(self):
+        from nova_ai.auth.oauth.kimi import _DeviceAuthorizationResponse, _TokenResponse
+
+        token = _TokenResponse(
+            access_token="synthetic-access",
+            refresh_token="synthetic-refresh",
+            expires_in=60,
+        )
+        device = _DeviceAuthorizationResponse(
+            user_code="synthetic-user-code",
+            device_code="synthetic-device-code",
+            verification_uri_complete="https://example.com?code=synthetic-user-code",
+        )
+        for secret in (
+            "synthetic-access",
+            "synthetic-refresh",
+            "synthetic-user-code",
+            "synthetic-device-code",
+        ):
+            assert secret not in repr(token)
+            assert secret not in repr(device)

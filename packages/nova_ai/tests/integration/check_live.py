@@ -16,8 +16,9 @@ import argparse
 import asyncio
 import sys
 
-from nova_ai.stream_options import SimpleStreamOptions
 from nova_protocol import Context, UserMessage
+
+from nova_ai.stream_options import SimpleStreamOptions
 
 from ._helpers.auth import build_manager, has_credential
 from ._helpers.probes import E2E_PROVIDERS

@@ -22,6 +22,8 @@ from .base_model import NovaBaseModel
 from .exec_server_permissions import PermissionsToml
 from .exec_server_wire import (
     ExecFileSystemPath,
+    ExecManagedPermissionProfile,
+    ExecRestrictedFileSystemPermissions,
     FileSystemSandboxContext,
     NetworkDomainPermission,
     NetworkDomainPermissionEntry,
@@ -288,8 +290,15 @@ class ExecutorConfig(BaseModel):
         if knobs.exclude_tmpdir_env_var:
             excluded.append(ExecFileSystemPath.tmpdir())
         if excluded:
-            entries = context.permissions.file_system.entries
-            context.permissions.file_system.entries = [
+            permissions = context.permissions
+            if not isinstance(
+                permissions, ExecManagedPermissionProfile
+            ) or not isinstance(
+                permissions.file_system, ExecRestrictedFileSystemPermissions
+            ):
+                raise TypeError("workspace_write 必须产生 restricted managed 权限")
+            entries = permissions.file_system.entries
+            permissions.file_system.entries = [
                 entry for entry in entries if entry.path not in excluded
             ]
         return context

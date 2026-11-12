@@ -17,6 +17,7 @@ from nova_protocol import (
     Message,
     Model,
     ModelCost,
+    NovaErrorKind,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     StartEvent,
@@ -81,7 +82,7 @@ class TestMessageUnion:
             model="gpt-4",
             stop_reason=StopReason.ERROR,
             error_message="boom",
-            error_kind="rateLimited",
+            error_kind=NovaErrorKind.RATE_LIMITED,
         )
         rebuilt = _message_adapter.validate_python(m.model_dump())
         assert rebuilt == m
@@ -213,3 +214,16 @@ class TestModelCompatDiscrimination:
         assert model.compat is not None
         rebuilt = Model.model_validate(model.model_dump())
         assert rebuilt.compat == model.compat
+
+    @pytest.mark.parametrize(
+        "api", ["openai-responses", "azure-openai-responses", "openai-codex-responses"]
+    )
+    @pytest.mark.parametrize("compat", [{}, {"supports_developer_role": False}])
+    def test_all_responses_variants_share_explicit_compat_discrimination(
+        self, api, compat
+    ):
+        model = Model.model_validate(_model_dict(api, compat))
+        assert isinstance(model.compat, OpenAIResponsesCompat)
+        rebuilt = Model.model_validate(model.model_dump())
+        assert isinstance(rebuilt.compat, OpenAIResponsesCompat)
+        assert rebuilt == model

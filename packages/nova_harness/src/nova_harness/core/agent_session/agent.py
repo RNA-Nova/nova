@@ -125,6 +125,8 @@ from nova_protocol import (
     WarningEvent,
 )
 
+from nova_ai.session_resources import cleanup_session_resources
+
 # ============================================================================
 # Extension action 具体实现（替代 SimpleNamespace，提供类型安全）
 # ============================================================================
@@ -1446,6 +1448,9 @@ class AgentSession:
 
         self._disconnect_from_agent()
         self._event_listeners = []
+        # nova_ai 的会话级资源（Anthropic message threads 台账等）与
+        # AgentSession 同寿命；统一在 dispose 终点按 session id 释放。
+        cleanup_session_resources(str(self.session_id))
 
     # -------------------------------------------------------------------------
     # Prompting

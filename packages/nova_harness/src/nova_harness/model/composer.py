@@ -29,14 +29,18 @@ from nova_harness.types.model import (
     ProviderConfigInput,
 )
 from nova_protocol import (
+    AnyModel,
     ApiKeyAuth,
     ApiKeyAuthInput,
     ApiKeyCredential,
+    AssistantImages,
     AuthCheck,
     AuthInteraction,
     AuthPrompt,
     AuthResult,
     Context,
+    ImageModel,
+    ImagesContext,
     KnownApi,
     Model,
     ModelCost,
@@ -46,7 +50,7 @@ from nova_protocol import (
     is_aborted,
 )
 
-from nova_ai import Provider, RefreshModelsContext, create_provider
+from nova_ai import ImagesOptions, Provider, RefreshModelsContext, create_provider
 
 # 协议实现注册表（模块路径，get_api_impl 惰性物化——SDK 重依赖
 # 按首次使用加载，对齐 nova_ai.api_impls 的惰性纪律）
@@ -680,9 +684,19 @@ class _ComposedProvider(Provider):
             auth=auth,
             filter_models=base.filter_models if base is not None else None,
             catalog_source=base.catalog_source if base is not None else None,
-            catalog_knowledge=(base.catalog_knowledge if base is not None else None),
         )
         self._base = base
+        base_generate_images = base.generate_images if base is not None else None
+        if base_generate_images is not None:
+
+            async def _generate_images(
+                model: ImageModel,
+                context: ImagesContext,
+                options: Optional[ImagesOptions] = None,
+            ) -> AssistantImages:
+                return await base_generate_images(model, context, options)
+
+            self.generate_images = _generate_images
         self._config = config
         self._extension = extension
         self._refresh_models_fn = refresh_models_fn
@@ -715,6 +729,17 @@ class _ComposedProvider(Provider):
         )
         if self._extension_oauth_credential is not None and self._modify_models:
             models = self._modify_models(models, self._extension_oauth_credential)
+        return models
+
+    def get_all_models(self) -> List[AnyModel]:
+        """聊天走三层合成；图像等非聊天目录由 base 原样透传。"""
+        models: List[AnyModel] = list(self.get_models())
+        if self._base is not None:
+            models.extend(
+                model
+                for model in self._base.get_all_models()
+                if not isinstance(model, Model)
+            )
         return models
 
     async def refresh_models(self, context: RefreshModelsContext) -> None:

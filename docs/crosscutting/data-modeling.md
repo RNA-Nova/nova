@@ -30,6 +30,8 @@
 | **边界协议包**（一条边界一个） | `nova_server/protocol`：方法表 + 信封 + 握手 + 错误码（对外契约的版本面）；`nova-exec-server/PROTOCOL.md`：执行器线（Rust 宇宙独立演进） | 线上唯一海关；枢纽形状可经 `reduction`/`shapes` 引用上线，组件内部类型永不直接上线 |
 | **组件内部类型** | `nova_ai`：provider 内部形状 + `stream_options`（AI 调用面参数包）；`nova_agent`：`AgentState`/`AgentContext`/hook 上下文（可变容器，规则 1/4）；`nova_harness`：services/manager 中间态；UI：`UIContext` transport | 留在组件内绝不外溢；出了边界就搬家，不留副本 |
 
+模型目录使用 `Model` / `ImageModel` / `ClassifierModel` 的判别联合 `AnyModel`（`ModelType=chat|image|classifier`），旧 chat 缺省 `type` 在联合入口归一；非流式图像与分类结果分别使用独立的 `AssistantImages` / `ClassifierResult`，不混入 `AssistantMessage` 的聊天流。
+
 **两种正典形态并列（终点，非过渡）**：消息形（LLM 上下文 + 落盘）与 item 形（呈现 + 线上通信）是并列的两种正典表示，都住枢纽；`reduction` 是翻译**行为**，住 `nova_server`——两种正典形状都住枢纽，翻译集中一处。
 
 **迁移路线（原子批次，无 shim——主分支未发布，零兼容包袱）**：每批 = 挪文件（`git mv` 保历史）+ 全仓 import 一次改完 + 五套件全绿。不留 re-export 过渡产物，历史无 shim 遗址。批次序：① LLM 词汇（已完成）→ ② agent 事件（已完成——含 AgentMessage 开放集升格：框架判别联合 + `CustomAgentMessage` 兜底 + `union_mode="left_to_right"`，基座补 `role: str = "custom"` 与 `extra="allow"`；`AgentToolResult` 同迁；nova_agent 门面不再中转枢纽类型）→ ③ session entries + 事件联合 → ④ harness 其余类型 → ⑤ items + notifications（bundle 开放集基座换挂枢纽，放最后）。【待补】每批的完成验收判定（除"五套件全绿"外的批次特有断言）需在动工时成文。
@@ -118,7 +120,7 @@
 **行为登记制**（枢纽主体零行为；缓冲带三处同步登记：此处 + 审计测试白名单 + 包 README；登记成员持续增多时升格为独立叶子包，枢纽恢复绝对纯形状）。两类成员：
 
 1. **基础原语**——全仓签名通用、零业务语义、只依赖 stdlib 的极小机制：`signal.py`（取消原语词汇，允许 import asyncio）；
-2. **纯函数算法件**——零 I/O、仅 stdlib、输入输出都是枢纽词汇的随行算法：`exec_server_intent.py`（shell 解析/危险命令判定）、`exec_server_policy.py`（策略规则求值）、`sanitize.py`（`redact_secrets` 出口清洗）。
+2. **纯函数算法件**——零 I/O、仅 stdlib、输入输出都是枢纽词汇的随行算法：`exec_server_intent.py`（shell 解析/危险命令判定）、`exec_server_policy/`（策略规则求值）、`exec_server_permissions/`（权限套餐继承解析、编译、选择、路径与网络配置纯算法）、`sanitize.py`（`redact_secrets` 出口清洗）。
 
 `types/protocols.py`（nova_harness）是防循环导入的反向依赖契约（typing.Protocol），随枢纽迁移逐个评估消解；`types/ui/` 的 UIContext 家族是历史选址，归位到行为区，新代码勿效仿。
 

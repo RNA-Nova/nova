@@ -48,6 +48,8 @@ from nova_harness.types.model import (
 )
 from nova_protocol import (
     AbortSignal,
+    AnyModel,
+    AssistantImages,
     AssistantMessage,
     AuthCheck,
     AuthResult,
@@ -55,15 +57,19 @@ from nova_protocol import (
     Context,
     Credential,
     CredentialInfo,
+    ImagesContext,
     Model,
+    ModelBase,
+    ModelType,
     NovaDiagnostic,
+    ProviderHeaders,
 )
 
 from nova_ai import Provider, builtin_models, create_models_manager
 from nova_ai.auth.resolve import AuthResolutionOverrides
 from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
 from nova_ai.gateway.store import InMemoryModelsStore
-from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
+from nova_ai.stream_options import ImagesOptions, SimpleStreamOptions, StreamOptions
 
 
 class ModelRuntime:
@@ -224,13 +230,13 @@ class ModelRuntime:
     # per-model headers 请求时解析（对齐 TS resolveConfiguredModelHeaders）
     # ------------------------------------------------------------------
 
-    def _raw_model_headers(self, model: Model) -> Optional[Dict[str, str]]:
+    def _raw_model_headers(self, model: ModelBase) -> Optional[ProviderHeaders]:
         """按优先级收集 per-model 原始 header 模板（不解析）。
 
         优先级（后者覆盖前者）：models.json model_overrides <
         models.json models[] 定义 < 扩展注册的 models[] 定义。
         """
-        headers: Dict[str, str] = {}
+        headers: ProviderHeaders = {}
         config = self._provider_config(model.provider)
         if config is not None:
             override = (config.model_overrides or {}).get(model.id)
@@ -247,8 +253,8 @@ class ModelRuntime:
         return headers or None
 
     async def _resolve_model_headers(
-        self, model: Model, env: Optional[Dict[str, str]] = None
-    ) -> Optional[Dict[str, str]]:
+        self, model: ModelBase, env: Optional[Dict[str, str]] = None
+    ) -> Optional[ProviderHeaders]:
         """nova_ai ``model_headers_resolver`` 钩子：请求时解析 per-model headers。"""
         raw = self._raw_model_headers(model)
         if raw is None:
@@ -455,6 +461,17 @@ class ModelRuntime:
     def get_provider(self, provider_id: str) -> Optional[Provider]:
         return self._models.get_provider(provider_id)
 
+    def get_models_of_type(
+        self, model_type: ModelType, provider_id: Optional[str] = None
+    ) -> List[AnyModel]:
+        """按 chat/image 类型读取；既有 get_all/get_available 仍为聊天。"""
+        return self._models.get_models_of_type(model_type, provider_id)
+
+    def get_model_of_type(
+        self, model_type: ModelType, provider_id: str, model_id: str
+    ) -> Optional[AnyModel]:
+        return self._models.get_model_of_type(model_type, provider_id, model_id)
+
     # ------------------------------------------------------------------
     # 鉴权解析（async，请求时链路）
     # ------------------------------------------------------------------
@@ -532,6 +549,15 @@ class ModelRuntime:
     ) -> AssistantMessage:
         """简化非流式补全。"""
         return await self._models.complete_simple(model, context, options)
+
+    async def generate_images(
+        self,
+        model: AnyModel,
+        context: ImagesContext,
+        options: Optional[ImagesOptions] = None,
+    ) -> AssistantImages:
+        """图像生成透传内部 ModelsManager，不进入聊天流。"""
+        return await self._models.generate_images(model, context, options)
 
     # ------------------------------------------------------------------
     # 登录/登出（OAuth 链路）

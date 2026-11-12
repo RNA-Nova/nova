@@ -7,14 +7,14 @@ per-provider 目录（``GET /api/models/providers/<id>``）+ 真条件请求
 from __future__ import annotations
 
 import re
-import time
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, cast
+from urllib.parse import quote
 
 from nova_protocol import AbortedError, AbortSignal, ModelFields, is_aborted
 
 from ..gateway.catalog import CatalogOutcome
-from ..utils.http import json_headers, request_with_abort
+from ..utils.http import get_with_retry, json_headers
 
 PI_DEV_CATALOG_BASE_URL = "https://pi.dev"
 
@@ -43,7 +43,7 @@ def _pi_dev_cost(cost: Dict[str, Any]) -> Dict[str, Any]:
             continue
         tiers.append(
             {
-                "input_tokens_above": above,
+                "inputTokensAbove": above,
                 "input": tier.get("input", 0) or 0,
                 "output": tier.get("output", 0) or 0,
                 "cache_read": tier.get("cacheRead", 0) or 0,
@@ -56,40 +56,79 @@ def _pi_dev_cost(cost: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _pi_dev_entry_to_fields(entry: Dict[str, Any]) -> Optional[ModelFields]:
-    """pi.dev 单条目（camelCase 成品）→ 字段包（snake_case，待修正+盖戳）。"""
+    """pi.dev typed 条目 → 字段包；仅真正缺省 type 的旧条目按 chat。"""
+    if not isinstance(entry, dict):
+        return None
     model_id = entry.get("id")
     if not isinstance(model_id, str) or not model_id:
         return None
-    context_window = entry.get("contextWindow")
-    if not isinstance(context_window, int) or context_window <= 0:
+    model_type = entry["type"] if "type" in entry else "chat"
+    if model_type not in ("chat", "image", "classifier"):
         return None
-    max_tokens = entry.get("maxTokens")
-    cost = entry.get("cost") or {}
+
     fields: Dict[str, Any] = {
+        "type": model_type,
         "id": model_id,
         "name": entry.get("name") or model_id,
-        "reasoning": bool(entry.get("reasoning")),
         "input_types": entry.get("input") or ["text"],
-        "cost": _pi_dev_cost(cost),
-        "context_window": context_window,
-        "max_tokens": max_tokens if isinstance(max_tokens, int) else context_window,
+        "cost": _pi_dev_cost(entry.get("cost") or {}),
     }
-    if isinstance(entry.get("samplingParams"), dict):
+    if model_type == "chat":
+        context_window = entry.get("contextWindow")
+        if (
+            not isinstance(context_window, int)
+            or isinstance(context_window, bool)
+            or context_window <= 0
+        ):
+            return None
+        max_tokens = entry.get("maxTokens")
+        fields.update(
+            {
+                "reasoning": bool(entry.get("reasoning")),
+                "context_window": context_window,
+                "max_tokens": (
+                    max_tokens
+                    if isinstance(max_tokens, int)
+                    and not isinstance(max_tokens, bool)
+                    and max_tokens > 0
+                    else context_window
+                ),
+            }
+        )
+    elif model_type == "image":
+        output_types = entry.get("output")
+        if not isinstance(output_types, list) or "image" not in output_types:
+            return None
+        fields["output_types"] = output_types
+    else:
+        context_window = entry.get("contextWindow")
+        if (
+            not isinstance(context_window, int)
+            or isinstance(context_window, bool)
+            or context_window <= 0
+        ):
+            return None
+        fields["context_window"] = context_window
+
+    if isinstance(entry.get("samplingParams"), dict) and model_type == "chat":
         fields["sampling_params"] = entry["samplingParams"]
-    if isinstance(entry.get("samplingParamsByThinkingLevel"), dict):
+    if (
+        isinstance(entry.get("samplingParamsByThinkingLevel"), dict)
+        and model_type == "chat"
+    ):
         fields["sampling_params_by_thinking_level"] = entry[
             "samplingParamsByThinkingLevel"
         ]
-    # 源数据驱动（三级解析第二级）：携带源的协议标注，盖戳时由 api_for
-    # 裁决（本家立场优先，零立场时它说了算）
+    # 协议与 per-model 端点都随源，不能在后续盖戳时抹掉。
     if isinstance(entry.get("api"), str) and entry["api"]:
         fields["api"] = entry["api"]
-    if entry.get("thinkingLevelMap") is not None:
+    if isinstance(entry.get("baseUrl"), str) and entry["baseUrl"]:
+        fields["base_url"] = entry["baseUrl"]
+    if entry.get("thinkingLevelMap") is not None and model_type == "chat":
         fields["thinking_level_map"] = entry["thinkingLevelMap"]
     if entry.get("headers"):
         fields["headers"] = entry["headers"]
-    # 输入限制与缓存档寿命（pi Model.inputLimits/promptCache——键集小且
-    # 固定，显式逐键翻译；未知键不进）
+    # 输入限制对三种操作都有意义；缓存只归聊天，compat 按具体操作验收。
     input_limits = entry.get("inputLimits")
     if isinstance(input_limits, dict):
         images = input_limits.get("images")
@@ -121,7 +160,7 @@ def _pi_dev_entry_to_fields(entry: Dict[str, Any]) -> Optional[ModelFields]:
         if translated_limits:
             fields["input_limits"] = translated_limits
     prompt_cache = entry.get("promptCache")
-    if isinstance(prompt_cache, dict):
+    if isinstance(prompt_cache, dict) and model_type == "chat":
         translated_cache = {
             tier: seconds
             for tier, seconds in prompt_cache.items()
@@ -129,16 +168,23 @@ def _pi_dev_entry_to_fields(entry: Dict[str, Any]) -> Optional[ModelFields]:
         }
         if translated_cache:
             fields["prompt_cache"] = translated_cache
-    # compat 键统一 camelCase → snake_case（边界归一：pi.dev 的 TS 形状
-    # 在此翻译成我们的字段形状——compat 类的字段名与 pi 同名仅大小写差异，
-    # 机械下划线化即可；未知键同样转换后落 extra，不阻塞）
-    if entry.get("compat"):
+    if entry.get("compat") and model_type in ("chat", "classifier"):
         fields["compat"] = {
             _camel_to_snake(key): value for key, value in entry["compat"].items()
         }
-    # 形状由本函数按 ModelFields 键集构造（dict 直转 TypedDict 静态不认，
-    # cast 收口——与 build 的边界校验同款）
     return cast(ModelFields, fields)
+
+
+def _pi_dev_payload_entries(payload: Any) -> Optional[List[Any]]:
+    """接受 typed 数组、``{models: [...]}`` 包装与 legacy keyed object。"""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        if "models" in payload:
+            models = payload["models"]
+            return models if isinstance(models, list) else None
+        return list(payload.values())
+    return None
 
 
 class PiDevCatalog:
@@ -155,7 +201,6 @@ class PiDevCatalog:
         key: str,
         signal: Optional[AbortSignal],
         validator: Optional[str],
-        skip_deprecated: bool = False,
     ) -> CatalogOutcome:
         """拉取 ``key``（provider id）的 per-provider 目录（带条件请求）。"""
         if is_aborted(signal):
@@ -164,9 +209,9 @@ class PiDevCatalog:
         headers = json_headers({"if-none-match": validator} if validator else None)
 
         try:
-            response = await request_with_abort(
-                "GET",
-                f"{self._base_url}/api/models/providers/{key}",
+            response = await get_with_retry(
+                f"{self._base_url}/api/models/providers/{quote(key, safe='')}"
+                "?types=chat,image,classifier",
                 headers=headers,
                 signal=signal,
             )
@@ -186,12 +231,13 @@ class PiDevCatalog:
             payload = response.json()
         except Exception as error:
             return CatalogOutcome(status=0, cause=error)
-        if not isinstance(payload, dict):
+        entries = _pi_dev_payload_entries(payload)
+        if entries is None:
             return CatalogOutcome(status=0, cause=None)
 
         fields: List[ModelFields] = [
             f
-            for f in (_pi_dev_entry_to_fields(entry) for entry in payload.values())
+            for f in (_pi_dev_entry_to_fields(entry) for entry in entries)
             if f is not None
         ]
         last_modified_header = response.headers.get("last-modified")

@@ -14,9 +14,9 @@
 """
 
 import os
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
-from nova_protocol import Model, NovaDiagnostic, NovaErrorKind, WarningKind
+from nova_protocol import AnyModel, NovaDiagnostic, NovaErrorKind, WarningKind
 
 from ...gateway.catalog import CatalogError
 from ...gateway.diagnostics import DiagnosticsCollector
@@ -62,21 +62,52 @@ def _thinking_level_map(valid_efforts: Optional[List[Any]]) -> Dict[str, Optiona
     }
 
 
-def _to_overlay(item: Any) -> Optional[ManagedOverlay]:
-    """managed /models 单条目 → 活字段包（畸形条目跳过，不拖垮整批）。"""
+def _to_overlay(item: Any) -> ManagedOverlay:
+    """managed /models 单条目 → 活字段包；畸形载荷使本轮个性化整体失败。
+
+    名单具有 replace 语义，静默跳过会把一个仍在订阅中的模型误删；因此
+    坏条目必须抛错，让策略层保留上一份完整成品，而不是发布残缺目录。
+    """
     if not isinstance(item, dict):
-        return None
+        raise CatalogError("Kimi Code subscription catalog entry must be an object")
     model_id = item.get("id")
     if not isinstance(model_id, str) or not model_id:
-        return None
+        raise CatalogError("Kimi Code subscription catalog entry has an invalid id")
     context_length = item.get("context_length")
-    if not isinstance(context_length, int) or context_length <= 0:
-        return None
+    if (
+        not isinstance(context_length, int)
+        or isinstance(context_length, bool)
+        or context_length <= 0
+    ):
+        raise CatalogError(
+            f"Kimi Code subscription catalog entry {model_id} has an invalid context_length"
+        )
+    display_name = item.get("display_name")
+    if display_name is not None and not isinstance(display_name, str):
+        raise CatalogError(
+            f"Kimi Code subscription catalog entry {model_id} has an invalid display_name"
+        )
+    for key in ("supports_reasoning", "supports_image_in"):
+        if key in item and not isinstance(item[key], bool):
+            raise CatalogError(
+                f"Kimi Code subscription catalog entry {model_id} has an invalid {key}"
+            )
 
     think_efforts = item.get("think_efforts")
+    if think_efforts is not None and not isinstance(think_efforts, dict):
+        raise CatalogError(
+            f"Kimi Code subscription catalog entry {model_id} has invalid think_efforts"
+        )
     valid_efforts = (
         think_efforts.get("valid_efforts") if isinstance(think_efforts, dict) else None
     )
+    if valid_efforts is not None and (
+        not isinstance(valid_efforts, list)
+        or any(not isinstance(value, str) for value in valid_efforts)
+    ):
+        raise CatalogError(
+            f"Kimi Code subscription catalog entry {model_id} has invalid valid_efforts"
+        )
 
     input_types = ["text"]
     if item.get("supports_image_in"):
@@ -84,8 +115,8 @@ def _to_overlay(item: Any) -> Optional[ManagedOverlay]:
 
     return {
         "id": model_id,
-        "name": item.get("display_name") or model_id,
-        "reasoning": bool(item.get("supports_reasoning")),
+        "name": display_name or model_id,
+        "reasoning": item.get("supports_reasoning", False),
         "thinking_level_map": _thinking_level_map(valid_efforts),
         "input_types": input_types,
         "context_window": context_length,
@@ -142,19 +173,19 @@ async def _managed_overlays(
         ) from error
     if not isinstance(data, list):
         raise CatalogError("Kimi Code subscription catalog payload has no data list")
-    return [o for o in (_to_overlay(item) for item in data) if o is not None]
+    return [_to_overlay(item) for item in data]
 
 
 def _merge_managed(
-    base: List[Model],
+    base: Sequence[AnyModel],
     overlays: List[ManagedOverlay],
     diagnostics: DiagnosticsCollector,
-) -> List[Model]:
+) -> List[AnyModel]:
     """名单以 managed 为准（基底有而 managed 无的剔除）；基底已有的 id
     只覆盖活字段（compat/价格/协议戳/``max_tokens`` 整条继承基底，零修正）；
     基底未收录的 id 跳过+诊断（站不认的当作没有——pi openrouter 同款）。"""
     base_by_id = {m.id: m for m in base}
-    merged: List[Model] = []
+    merged: List[AnyModel] = []
     skipped: List[str] = []
     for overlay in overlays:
         entry = base_by_id.get(overlay["id"])
@@ -178,8 +209,9 @@ def _merge_managed(
                 severity="warning",
                 kind=WarningKind.CAPABILITY,
                 message=(
-                    f"kimi-coding 订阅源返回了目录站未收录的模型"
-                    f"（{', '.join(skipped)}）——已跳过，站数据更新后自动可见"
+                    "Kimi Code subscription catalog returned models not present "
+                    f"in the public catalog ({', '.join(skipped)}); skipped until "
+                    "the public catalog includes them"
                 ),
             )
         )
@@ -187,9 +219,9 @@ def _merge_managed(
 
 
 async def kimi_personalize(
-    base: List[Model],
+    base: Sequence[AnyModel],
     context: RefreshModelsContext,
-) -> List[Model]:
+) -> Sequence[AnyModel]:
     """kimi 的 ``personalize`` 钩子：managed 订阅源覆盖层（名单+活字段）。
 
     仅无凭据时使用基底；有凭据时私有源失败抛错，旧 personalized 成品保留。

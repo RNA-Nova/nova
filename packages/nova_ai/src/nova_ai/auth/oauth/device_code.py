@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Literal, Optional, TypeVar
 
-from nova_async import abortable_sleep
+from nova_async import abortable_sleep, await_with_abort
 from nova_protocol import AbortedError, AbortSignal, NovaErrorKind, is_aborted
 
 from .errors import OAuthFlowError
@@ -77,10 +77,12 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
         if options.expires_in_seconds is not None
         else float("inf")
     )
-    interval_ms = max(
-        _MINIMUM_INTERVAL_MS,
-        (options.interval_seconds or _DEFAULT_POLL_INTERVAL_SECONDS) * 1000,
+    initial_interval = (
+        _DEFAULT_POLL_INTERVAL_SECONDS
+        if options.interval_seconds is None
+        else options.interval_seconds
     )
+    interval_ms = max(_MINIMUM_INTERVAL_MS, initial_interval * 1000)
 
     slow_down_count = 0
     if options.wait_before_first_poll:
@@ -92,7 +94,8 @@ async def poll_oauth_device_code_flow(options: DeviceCodePollOptions[T]) -> T:
         if is_aborted(options.signal):
             raise AbortedError(_CANCEL_MESSAGE)
 
-        result = await options.poll()
+        # 自定义 poll 的非 HTTP 等待也必须可被 signal 真杀。
+        result = await await_with_abort(options.poll(), options.signal)
         if result.status == "complete":
             if result.value is None:
                 raise OAuthFlowError(

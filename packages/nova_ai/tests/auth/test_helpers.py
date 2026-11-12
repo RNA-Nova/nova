@@ -3,8 +3,9 @@
 import asyncio
 
 import pytest
-from nova_ai.auth.helpers import lazy_oauth
 from nova_protocol import ModelAuth, OAuthAuth, OAuthCredential
+
+from nova_ai.auth.helpers import lazy_oauth
 
 pytestmark = pytest.mark.asyncio
 

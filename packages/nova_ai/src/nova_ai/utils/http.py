@@ -5,8 +5,8 @@
 - ``request_with_abort``：async 单次请求，**在飞真杀**——``await_with_abort``
   （``AbortScope``）包住请求，举旗即杀断在飞连接抛 ``AbortedError``；
 - ``fetch_json``：async GET + 重试 + 非 200 raise + ``.json()``
-  （目录拉取/构建脚本共用；每次尝试走 ``request_with_abort``，尝试之间
-  检查 abort 并可中断退避）。
+  （运行期目录拉取；每次尝试走 ``request_with_abort``，尝试之间检查 abort
+  并可中断退避）。构建期单次 GET 归 ``nova_catalog``，不反向复用本模块。
 
 传输错误统一包装为 ``RuntimeError``——调用方按 RuntimeError 识别传输
 失败并重试，无需感知 httpx 异常族。
@@ -29,6 +29,7 @@ __all__ = [
     "HttpFetchError",
     "fetch_json",
     "filter_headers_for_hook",
+    "get_with_retry",
     "json_headers",
     "request_with_abort",
 ]
@@ -65,9 +66,17 @@ class HttpFetchError(RuntimeError):
     文案解析——"GET … returned 429" 式文案嵌码已废弃。
     """
 
-    def __init__(self, message: str, *, status_code: int) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        # 重试与错误归一需要 Retry-After / x-should-retry 等响应元数据。
+        self.headers = dict(headers) if headers is not None else None
 
 
 def json_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -93,7 +102,7 @@ async def request_with_abort(
     data: Optional[Dict[str, str]] = None,
     json_body: Optional[Dict[str, Any]] = None,
     headers: Optional[Dict[str, str]] = None,
-    timeout: float = _ATTEMPT_TIMEOUT_S,
+    timeout: float | httpx.Timeout = _ATTEMPT_TIMEOUT_S,
 ) -> httpx.Response:
     """发送一次 HTTP 请求；``signal`` 中断即取消在飞请求并抛 ``AbortedError``。
 
@@ -103,21 +112,54 @@ async def request_with_abort(
     if is_aborted(signal):
         raise AbortedError("The operation was aborted")
 
-    async def _do_request() -> httpx.Response:
-        try:
-            async with httpx.AsyncClient() as client:
-                return await client.request(
-                    method,
-                    url,
-                    data=data,
-                    json=json_body,
-                    headers=headers,
-                    timeout=timeout,
-                )
-        except httpx.TransportError as error:
-            raise RuntimeError(f"HTTP {method} {url} failed: {error}") from error
+    client = httpx.AsyncClient()
+    try:
+        # 仅请求等待进入取消作用域；client 的异步关闭必须在 scope 外，
+        # 否则 level-triggered 取消会让 __aexit__/close 的 await 立即再死。
+        return await await_with_abort(
+            client.request(
+                method,
+                url,
+                data=data,
+                json=json_body,
+                headers=headers,
+                timeout=timeout,
+            ),
+            signal,
+        )
+    except httpx.TransportError as error:
+        raise RuntimeError(f"HTTP {method} {url} failed: {error}") from error
+    finally:
+        await client.aclose()
 
-    return await await_with_abort(_do_request(), signal)
+
+async def get_with_retry(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    signal: Optional[AbortSignal] = None,
+) -> httpx.Response:
+    """GET + 有界重试，保留最终响应状态供调用方分流（pi fetchWithRetry）。
+
+    传输失败及 408/425/429/500/502/503/504 至多额外重试两次；404、501、
+    304 等非重试状态原样返回。abort 在请求与退避期间都直通。
+    """
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = await request_with_abort(
+                "GET", url, headers=headers, signal=signal, timeout=_ATTEMPT_TIMEOUT_S
+            )
+        except RuntimeError:
+            if attempt >= _MAX_RETRIES:
+                raise
+        else:
+            if response.status_code not in _RETRYABLE_STATUS or attempt >= _MAX_RETRIES:
+                return response
+        await abortable_sleep(
+            backoff_delay_ms(attempt + 1, base_ms=500, cap_ms=2000, jitter=0),
+            signal,
+        )
+    raise RuntimeError("unreachable")
 
 
 async def fetch_json(
@@ -126,45 +168,13 @@ async def fetch_json(
     api_key: Optional[str] = None,
     signal: Optional[AbortSignal] = None,
 ) -> Any:
-    """GET + 有界重试 + 非 200 raise + ``.json()``（对齐 pi fetchWithRetry 主干）。
-
-    每次尝试单发 4s 超时，可重试状态码（408/425/429/5xx）与传输错误重试
-    至多 2 次（指数退避，退避可中断）；abort 在每次尝试前后与退避期间生效。
-    """
+    """重试 GET + 非 200 raise + ``.json()``；HTTP 错误保留响应头。"""
     headers = json_headers({"Authorization": f"Bearer {api_key}"} if api_key else None)
-
-    last_error: Optional[Exception] = None
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            response = await request_with_abort(
-                "GET", url, headers=headers, signal=signal, timeout=_ATTEMPT_TIMEOUT_S
-            )
-        except RuntimeError as error:
-            # 传输失败重试（对齐 pi：transport failures are retryable）
-            last_error = error
-            if attempt >= _MAX_RETRIES:
-                raise
-            # 退避机制件（nova_async backoff）：attempt 0-based 转正 1-indexed；
-            # jitter=0 保持现行为（旧公式本无抖动）
-            await abortable_sleep(
-                backoff_delay_ms(attempt + 1, base_ms=500, cap_ms=2000, jitter=0),
-                signal,
-            )
-            continue
-        if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
-            last_error = HttpFetchError(
-                f"GET {url} returned {response.status_code}",
-                status_code=response.status_code,
-            )
-            await abortable_sleep(
-                backoff_delay_ms(attempt + 1, base_ms=500, cap_ms=2000, jitter=0),
-                signal,
-            )
-            continue
-        if response.status_code != 200:
-            raise HttpFetchError(
-                f"GET {url} returned {response.status_code}",
-                status_code=response.status_code,
-            )
-        return response.json()
-    raise last_error if last_error else RuntimeError("unreachable")
+    response = await get_with_retry(url, headers=headers, signal=signal)
+    if response.status_code != 200:
+        raise HttpFetchError(
+            f"GET {url} returned {response.status_code}",
+            status_code=response.status_code,
+            headers=dict(response.headers),
+        )
+    return response.json()

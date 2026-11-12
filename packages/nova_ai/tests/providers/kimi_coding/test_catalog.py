@@ -2,10 +2,6 @@
 
 import httpx
 import pytest
-from nova_ai.gateway.catalog import CatalogError
-from nova_ai.gateway.provider import RefreshModelsContext
-from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
-from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
 from nova_protocol import (
     ApiKeyCredential,
     KnownApi,
@@ -15,6 +11,11 @@ from nova_protocol import (
     OAuthCredential,
     WarningKind,
 )
+
+from nova_ai.gateway.catalog import CatalogError
+from nova_ai.gateway.provider import RefreshModelsContext
+from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
+from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
 
 pytestmark = pytest.mark.asyncio
 
@@ -140,7 +141,7 @@ async def test_managed_only_id_skipped_with_diagnostic(monkeypatch):
     diagnostic = context.diagnostics[0]
     assert diagnostic.kind is WarningKind.CAPABILITY
     assert "brand-new" in diagnostic.message
-    assert "未收录" in diagnostic.message
+    assert "not present in the public catalog" in diagnostic.message
 
 
 async def test_managed_auth_failure_raises(monkeypatch):
@@ -202,3 +203,32 @@ async def test_factory_wires_personalized_strategy():
     assert provider.refresh_models is not None
     assert provider.catalog_source == "pi.dev"
     assert provider._dynamic_replaces_baseline is True
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {**_managed_payload("kimi-for-coding")["data"][0], "context_length": True},
+        {**_managed_payload("kimi-for-coding")["data"][0], "display_name": 123},
+        {
+            **_managed_payload("kimi-for-coding")["data"][0],
+            "supports_reasoning": "yes",
+        },
+        {
+            **_managed_payload("kimi-for-coding")["data"][0],
+            "supports_image_in": "yes",
+        },
+        {**_managed_payload("kimi-for-coding")["data"][0], "think_efforts": []},
+        {
+            **_managed_payload("kimi-for-coding")["data"][0],
+            "think_efforts": {"valid_efforts": "high"},
+        },
+    ],
+)
+async def test_malformed_managed_entries_fail_whole_refresh(monkeypatch, entry):
+    """replace 名单中的坏条目不得被静默删掉；整轮失败以保留旧成品。"""
+    _patch_managed(monkeypatch, {"data": [entry]})
+    with pytest.raises(CatalogError):
+        await kimi_personalize(
+            [_model("kimi-for-coding")], _context(credential=_oauth())
+        )

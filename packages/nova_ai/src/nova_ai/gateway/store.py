@@ -11,7 +11,12 @@ from nova_protocol import ModelsStoreEntry
 
 
 class ModelsStore(Protocol):
-    """按 provider id 持久化模型目录的抽象。"""
+    """按 provider id 持久化模型目录的抽象。
+
+    ``write``/``delete`` 必须满足**取消原子性**：方法返回或取消落定后，
+    不得再在后台提交本次变更。当前内存与文件实现均为同步提交；未来接入
+    远程非原子写存储时需要独立的条件写协议，不能直接套用本契约。
+    """
 
     async def read(self, provider_id: str) -> Optional[ModelsStoreEntry]:
         """读取 provider 的模型目录。"""

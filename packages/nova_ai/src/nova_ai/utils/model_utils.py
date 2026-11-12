@@ -3,15 +3,23 @@
 与模型相关的业务逻辑
 """
 
-from typing import List, Optional
+from typing import List, Optional, TypeGuard
 
-from nova_protocol import Cost, Model, ModelThinkingLevel, ThinkingLevel, Usage
+from nova_protocol import (
+    AnyModel,
+    Cost,
+    Model,
+    ModelBase,
+    ModelThinkingLevel,
+    ThinkingLevel,
+    Usage,
+)
 
 EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 
 def to_thinking_level(
-    level: Optional[ModelThinkingLevel],
+    level: Optional[ModelThinkingLevel | ThinkingLevel | str],
 ) -> Optional[ThinkingLevel]:
     """把状态侧级别转换为请求侧级别。
 
@@ -98,19 +106,19 @@ def clamp_thinking_level(model: Model, level: ModelThinkingLevel) -> ModelThinki
     return available[0] if available else ModelThinkingLevel.OFF
 
 
-def models_are_equal(a: Optional[Model], b: Optional[Model]) -> bool:
-    """按 provider + id 判断两个模型是否等价（对齐 TS modelsAreEqual）。"""
+def models_are_equal(a: Optional[AnyModel], b: Optional[AnyModel]) -> bool:
+    """按 type + provider + id 判断模型等价性（对齐 TS modelsAreEqual）。"""
     if a is None or b is None:
         return False
-    return a.id == b.id and a.provider == b.provider
+    return a.type == b.type and a.id == b.id and a.provider == b.provider
 
 
-def has_api(model: Model, api: str) -> bool:
-    """运行时检查 model.api 是否为指定 API（对齐 TS hasApi）。"""
-    return model.api == api
+def has_api(model: AnyModel, api: str) -> TypeGuard[Model]:
+    """仅当模型是 chat 且 API 匹配时成立（对齐 TS hasApi）。"""
+    return isinstance(model, Model) and model.api == api
 
 
-def calculate_cost(model: Model, usage: Usage) -> Cost:
+def calculate_cost(model: ModelBase, usage: Usage) -> Cost:
     """
     根据模型和用量计算成本（对齐 TS calculateCost，支持分层定价）。
 
@@ -148,5 +156,7 @@ def calculate_cost(model: Model, usage: Usage) -> Cost:
         + usage.cost.cache_read
         + usage.cost.cache_write
     )
+    # 本函数永远按目录费率重算，不得保留上一次 provider 账单的来源戳。
+    usage.cost.total_from_provider = False
 
     return usage.cost

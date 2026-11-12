@@ -65,8 +65,6 @@ class AuthJsonCredentialStore:
         # env key 只驻内存，不落盘；陈旧 OAuth 不再抢在显式 env key 前面。
         from nova_protocol import ApiKeyCredential, RedactedString
 
-        from nova_ai.providers.all import builtin_providers
-
         for provider in builtin_providers():
             env_key = get_env_api_key(provider.id)
             if env_key:

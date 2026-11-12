@@ -496,8 +496,10 @@ def merge_permission_profiles(
         and child.network is not None
         and child.network.domains is not None
     )
-    parent = parent.model_copy(update={"description": None, "extends": None})
+    parent = parent.model_copy(update={"description": None, "extends": None}, deep=True)
     if merges_network_domains:
+        # 纯合并不得经浅拷贝共享的 domains 改写调用方输入。
+        child = child.model_copy(deep=True)
         _normalize_profile_network_domains(parent)
         _normalize_profile_network_domains(child)
     # 对位 TomlValue::try_from + merge_toml_values + try_into：None 字段在

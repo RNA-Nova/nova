@@ -20,6 +20,7 @@ from typing import Awaitable, Callable, Optional
 
 from nova_async import await_with_abort
 from nova_protocol import (
+    AbortedError,
     AbortSignal,
     AssistantMessage,
     ErrorEvent,
@@ -27,6 +28,7 @@ from nova_protocol import (
     StopReason,
     Usage,
     is_aborted,
+    redact_secrets,
 )
 
 from ..streaming import AssistantMessageEventStream
@@ -59,7 +61,9 @@ def create_setup_error_message(
         model=model.id,
         usage=Usage(),
         stop_reason=stop_reason,
-        error_message=(str(error) if normalized is None else normalized.message)
+        error_message=(
+            redact_secrets(str(error)) if normalized is None else normalized.message
+        )
         or "Request was aborted",
         error_kind=normalized.kind if normalized is not None else None,
         retry_after_ms=(
@@ -93,8 +97,10 @@ def lazy_stream(
         except asyncio.CancelledError:
             # 取消语义归调用方：不把取消伪装成 ErrorEvent 终态
             raise
-        except BaseException as exc:
-            aborted = is_aborted(signal)
+        except Exception as exc:
+            # 类型与旗标双通道：scope/竞速边界可能只交回 AbortedError。
+            # KeyboardInterrupt/SystemExit 等基础设施异常不属于模型错误，直通。
+            aborted = isinstance(exc, AbortedError) or is_aborted(signal)
             message = create_setup_error_message(
                 model,
                 exc,
@@ -103,7 +109,7 @@ def lazy_stream(
             outer.push(
                 ErrorEvent(
                     type="error",
-                    reason="aborted" if aborted else "error",
+                    reason=StopReason.ABORTED if aborted else StopReason.ERROR,
                     error=message,
                 )
             )

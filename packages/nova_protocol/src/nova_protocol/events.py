@@ -101,7 +101,8 @@ class DoneEvent(NovaBaseModel):
     """完成事件"""
 
     type: Literal["done"] = "done"
-    reason: StopReason
+    # 仅成功终态；error/aborted 走 ErrorEvent，pending 不是终态。
+    reason: Literal[StopReason.STOP, StopReason.LENGTH, StopReason.TOOL_USE]
     message: AssistantMessage
 
 
@@ -109,7 +110,7 @@ class ErrorEvent(NovaBaseModel):
     """错误事件"""
 
     type: Literal["error"] = "error"
-    reason: Literal["aborted", "error"]
+    reason: Literal[StopReason.ABORTED, StopReason.ERROR]
     error: AssistantMessage
 
 
@@ -131,3 +132,4 @@ AssistantMessageEvent = Annotated[
     ],
     Field(discriminator="type"),
 ]
+"""助手流式事件的显式判别联合。"""

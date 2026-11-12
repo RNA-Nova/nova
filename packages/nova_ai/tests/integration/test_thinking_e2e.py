@@ -79,6 +79,7 @@ async def test_thinking_off_completes_with_text_only(probe):
         result = await manager.complete_simple(probe.model, ctx, SimpleStreamOptions())
     assert result.error_message is None
     assert len(extract_text(result)) > 0
+    assert extract_thinking(result) == ""
 
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)

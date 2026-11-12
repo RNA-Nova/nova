@@ -303,7 +303,7 @@ nova_harness/
 - `runtime.py`：模型与鉴权的运行时（对齐 TS `core/model-runtime.ts` 的终态设计；TS 侧的 `ModelRegistry` 薄 facade 未移植，如需扩展只读视图再议）。
 - provider 经 `composer.py` 三层合成（内置 → `models.json` → 扩展注册）；无覆盖时内置 provider 原样进入集合，保留其 OAuth/stream 行为。
 - **credential-blind**：api_key 与 `Authorization` 头不写入 `Model`，请求时经内部 `ModelsManager.get_auth` 解析（runtime override → stored credential → models.json/extension key → 环境变量链 → OAuth 刷新）。
-- `stream` / `stream_simple` / `complete` / `login` / `logout` / `check_auth` 等 ModelsManager 表面直接透传内部集合，调用方不触碰底层 `ModelsManager` 实例。
+- `stream` / `stream_simple` / `complete` / `generate_images` / `login` / `logout` / `check_auth` 等 ModelsManager 表面直接透传内部集合，调用方不触碰底层 `ModelsManager` 实例；聊天仍走三层合成，图像目录与实现由 base 原样透传，聊天选择器只读 chat。
 - **动态模型刷新**：组合 provider 保留 base 的 `refresh_models` 与扩展 `refresh_models_fn`；`refresh()`（async）做网络刷新并联动可用性快照，`AgentSessionServices.create()` 启动时以 15s 上限调用；`NOVA_OFFLINE` 时只读 `models-store.json` 缓存（`store.py` 的 `FileModelsStore`）。
 - **扩展 OAuth**：`register_provider(..., oauth=ExtensionOAuthConfig)` 经 `adapt_oauth` 接入 auth 链，支持 `modify_models` 按 credential 改写模型列表。
 - `get_available` / `has_configured_auth` 为同步快照；`refresh_availability()`（async）用 nova_ai auth 链精确刷新。

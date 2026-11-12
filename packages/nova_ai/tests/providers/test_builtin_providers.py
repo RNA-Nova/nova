@@ -12,21 +12,9 @@ from nova_ai.api_impls.openai_completions import (
     detect_compat,
 )
 from nova_ai.providers.anthropic import anthropic_provider
-from nova_ai.providers.kimi_coding import (
-    KIMI_CODING_MODELS,
-    get_kimi_coding_model,
-    kimi_coding_provider,
-)
-from nova_ai.providers.moonshotai import (
-    MOONSHOTAI_MODELS,
-    get_moonshotai_model,
-    moonshotai_provider,
-)
-from nova_ai.providers.moonshotai_cn import (
-    MOONSHOTAI_CN_MODELS,
-    get_moonshotai_cn_model,
-    moonshotai_cn_provider,
-)
+from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, kimi_coding_provider
+from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, moonshotai_provider
+from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS, moonshotai_cn_provider
 
 
 class TestMoonshotaiProvider:
@@ -98,7 +86,7 @@ class TestKimiCodingProvider:
 
 class TestMoonshotaiModels:
     def test_kimi_k3_model_attributes(self):
-        model = get_moonshotai_model("kimi-k3")
+        model = MOONSHOTAI_MODELS["kimi-k3"]
         assert model.api == KnownApi.OPENAI_COMPLETIONS
         assert model.provider == KnownProvider.MOONSHOTAI
         assert model.base_url == "https://api.moonshot.ai/v1"
@@ -106,7 +94,7 @@ class TestMoonshotaiModels:
         assert model.reasoning is True
 
     def test_kimi_k3_thinking_level_map(self):
-        model = get_moonshotai_model("kimi-k3")
+        model = MOONSHOTAI_MODELS["kimi-k3"]
         # k3 当前支持 low/high/max
         assert model.thinking_level_map["max"] == "max"
         assert model.thinking_level_map["low"] == "low"
@@ -116,14 +104,14 @@ class TestMoonshotaiModels:
         assert model.thinking_level_map["off"] is None
 
     def test_compat_detected_as_openai_format(self):
-        model = get_moonshotai_model("kimi-k3")
+        model = MOONSHOTAI_MODELS["kimi-k3"]
         compat = detect_compat(model)
         assert compat.thinking_format == ThinkingFormat.OPENAI
 
 
 class TestMoonshotaiCnModels:
     def test_kimi_k3_model_attributes(self):
-        model = get_moonshotai_cn_model("kimi-k3")
+        model = MOONSHOTAI_CN_MODELS["kimi-k3"]
         assert model.api == KnownApi.OPENAI_COMPLETIONS
         assert model.provider == KnownProvider.MOONSHOTAI_CN
         assert model.base_url == "https://api.moonshot.cn/v1"
@@ -131,7 +119,7 @@ class TestMoonshotaiCnModels:
         assert model.reasoning is True
 
     def test_kimi_k3_thinking_level_map(self):
-        model = get_moonshotai_cn_model("kimi-k3")
+        model = MOONSHOTAI_CN_MODELS["kimi-k3"]
         # k3 当前支持 low/high/max
         assert model.thinking_level_map["max"] == "max"
         assert model.thinking_level_map["low"] == "low"
@@ -140,14 +128,14 @@ class TestMoonshotaiCnModels:
         assert model.thinking_level_map["off"] is None
 
     def test_compat_is_openai_format(self):
-        model = get_moonshotai_cn_model("kimi-k3")
+        model = MOONSHOTAI_CN_MODELS["kimi-k3"]
         compat = detect_compat(model)
         assert compat.thinking_format == ThinkingFormat.OPENAI
 
 
 class TestKimiCodingModels:
     def test_k3_model_attributes(self):
-        model = get_kimi_coding_model("k3")
+        model = KIMI_CODING_MODELS["k3"]
         assert model.api == KnownApi.OPENAI_COMPLETIONS
         assert model.provider == KnownProvider.KIMI_CODING
         assert model.base_url == "https://api.kimi.com/coding/v1"
@@ -155,14 +143,14 @@ class TestKimiCodingModels:
         assert model.reasoning is True
 
     def test_k3_thinking_level_map(self):
-        model = get_kimi_coding_model("k3")
+        model = KIMI_CODING_MODELS["k3"]
         assert model.thinking_level_map["max"] == "max"
         assert model.thinking_level_map["high"] == "high"
         assert model.thinking_level_map["low"] == "low"
         assert model.thinking_level_map["off"] is None
 
     def test_kimi_for_coding_supports_thinking_toggle(self):
-        model = get_kimi_coding_model("kimi-for-coding")
+        model = KIMI_CODING_MODELS["kimi-for-coding"]
         assert model.thinking_level_map["off"] is None
         assert model.thinking_level_map["low"] == "low"
         assert model.thinking_level_map["max"] == "max"
@@ -172,7 +160,7 @@ class TestKimiBuildParams:
     def test_moonshotai_kimi_k3_reasoning_uses_openai_format(self):
         # pi.dev 实测：moonshot 目录的 k3 走 openai 格式 + effort 映射
         # （thinking_level_map 把 max 映射为 max 直发——k2.x 才是 deepseek）
-        model = get_moonshotai_cn_model("kimi-k3")
+        model = MOONSHOTAI_CN_MODELS["kimi-k3"]
         ctx = Context(messages=[UserMessage(content="hello")])
         options = OpenAICompletionsOptions(reasoning_effort="max")
         params = build_params(model, ctx, options)

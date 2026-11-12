@@ -1,6 +1,7 @@
 """ModelsManager 网关（对齐 TS ``src/models.ts`` 的 ``ModelsImpl``）。
 
-Provider 运行时集合 + auth 应用 + stream 便捷入口。本模块的并发纪律：
+Provider 运行时集合 + auth 应用 + stream/generate_images 便捷入口。
+本模块的并发与结果纪律：
 
 - **世代守卫**：每个 provider 的刷新带递增世代；``set/delete/clear_provider``
   会 supersede 在飞刷新（bump 世代 + abort controller），旧刷新的发布在
@@ -22,7 +23,6 @@ import time
 from dataclasses import replace as _dataclass_replace
 from functools import partial
 from typing import (
-    Any,
     Awaitable,
     Callable,
     Dict,
@@ -32,6 +32,7 @@ from typing import (
     Sequence,
     Tuple,
     TypedDict,
+    TypeVar,
     Union,
     cast,
 )
@@ -48,24 +49,33 @@ from nova_protocol import (
     AbortController,
     AbortedError,
     AbortSignal,
+    AnyModel,
     ApiKeyCredential,
+    AssistantImages,
     AssistantMessage,
     AuthCheck,
     AuthContext,
     AuthInteraction,
     AuthResult,
     AuthType,
+    ClassifierContext,
+    ClassifierModel,
+    ClassifierResult,
     Context,
     Credential,
     CredentialStore,
+    ImageModel,
+    ImagesContext,
     Model,
+    ModelBase,
     ModelsStoreEntry,
+    ModelType,
     NovaDiagnostic,
     NovaErrorKind,
-    ProviderAuth,
     ProviderEnv,
     ProviderHeaders,
     RedactedString,
+    is_aborted,
 )
 
 from ..auth.context import default_provider_auth_context
@@ -76,18 +86,36 @@ from ..auth.resolve import (
     refresh_stored_oauth_credential,
     resolve_provider_auth,
 )
-from ..stream_options import SimpleStreamOptions, StreamOptions
+from ..stream_options import (
+    ClassifierOptions,
+    ImagesOptions,
+    SimpleStreamOptions,
+    StreamOptions,
+)
 from ..streaming import AssistantMessageEventStream
 from ..utils.errors import RequestTimeoutError
+from ..utils.model_operations import (
+    assert_classifier_input_supported,
+    assert_classifier_model,
+    classifier_error_result,
+    image_error_result,
+)
 from .catalog import CatalogService, CatalogServices
 from .diagnostics import DiagnosticsCollector
-from .provider import ModelsPublication, Provider, RefreshModelsContext
+from .provider import (
+    ModelsPublication,
+    Provider,
+    RefreshModelsContext,
+    assert_chat_model,
+)
 from .store import InMemoryModelsStore, ModelsStore
 from .streams import lazy_stream
 
 #: refresh 整轮预算缺省（毫秒）——防多阶段（缓存恢复/凭据解析/网络拉取）
 #: 各自为政、累积成无穷等待（策略件留消费方；机制件 Deadline 住 nova_async）
 DEFAULT_REFRESH_DEADLINE_MS = 90_000
+
+_ModelT = TypeVar("_ModelT", bound=ModelBase)
 
 
 class ModelsRefreshResult(TypedDict):
@@ -122,7 +150,7 @@ class _ApplyAuthPatch(TypedDict, total=False):
 
 # per-model headers 请求时解析钩子的签名：(model, env) → headers（可异步返回）
 ModelHeadersResolver = Callable[
-    [Model, Optional[ProviderEnv]],
+    [ModelBase, Optional[ProviderEnv]],
     Union[Optional[ProviderHeaders], Awaitable[Optional[ProviderHeaders]]],
 ]
 
@@ -227,6 +255,44 @@ class ModelsManager:
                 pass
         return models
 
+    def get_all_models(self, provider_id: Optional[str] = None) -> List[AnyModel]:
+        """返回全类型目录；既有 get_models() 始终保持 chat-only。"""
+        if provider_id is None:
+            providers = list(self._providers.values())
+        else:
+            provider = self._providers.get(provider_id)
+            providers = [provider] if provider is not None else []
+        models: List[AnyModel] = []
+        for provider in providers:
+            try:
+                models.extend(provider.get_all_models())
+            except Exception:
+                pass
+        return models
+
+    def get_models_of_type(
+        self, model_type: ModelType, provider_id: Optional[str] = None
+    ) -> List[AnyModel]:
+        """按 chat/image/classifier 操作类型读取目录。"""
+        return [
+            model
+            for model in self.get_all_models(provider_id)
+            if model.type == model_type
+        ]
+
+    def get_model_of_type(
+        self, model_type: ModelType, provider_id: str, model_id: str
+    ) -> Optional[AnyModel]:
+        """按类型、provider 与 id 查找一个目录条目。"""
+        return next(
+            (
+                model
+                for model in self.get_models_of_type(model_type, provider_id)
+                if model.id == model_id
+            ),
+            None,
+        )
+
     def get_model(self, provider_id: str, model_id: str) -> Optional[Model]:
         """按 provider id + model id 查找模型。"""
         return next(
@@ -277,8 +343,9 @@ class ModelsManager:
     ) -> bool:
         """世代校验的串行发布（对齐 TS publishProviderModels）。
 
-        同 provider 的发布按链串行；持久化前后各做一次世代/中断校验——
-        被 supersede 的旧刷新在此处被拦下，存储与内存目录都不会被污染。
+        同 provider 的发布按链串行；持久化前后各做一次世代/中断校验。
+        在 ModelsStore 的取消原子性契约内，被 supersede 的旧刷新不会污染
+        存储或内存目录；非原子后台提交不属于本接口支持范围。
         """
         previous = self._publication_chains.get(provider_id)
 
@@ -357,18 +424,7 @@ class ModelsManager:
             force=bool(force) if allow_network else False,
             signal=signal,
             catalog_fetch=(
-                partial(
-                    service.fetch,
-                    provider.id,
-                    **(
-                        {"skip_deprecated": True}
-                        if provider.catalog_knowledge is not None
-                        and provider.catalog_knowledge.skip_deprecated
-                        else {}
-                    ),
-                )
-                if service is not None
-                else None
+                partial(service.fetch, provider.id) if service is not None else None
             ),
             diagnostics=collector,
         )
@@ -542,7 +598,7 @@ class ModelsManager:
 
     async def get_auth(
         self,
-        provider_or_model: Union[str, Model],
+        provider_or_model: Union[str, ModelBase],
         overrides: Optional[AuthResolutionOverrides] = None,
     ) -> Optional[AuthResult]:
         """解析 provider 或 model 的鉴权（对齐 TS Models.getAuth）。"""
@@ -579,7 +635,7 @@ class ModelsManager:
         if self._model_headers_resolver is not None:
             resolved = self._model_headers_resolver(provider_or_model, result.env)
             if inspect.isawaitable(resolved):
-                resolved = await resolved
+                resolved = await await_with_abort(resolved, signal)
             if resolved:
                 headers = _merge_headers(headers, resolved)
         if not headers:
@@ -812,19 +868,24 @@ class ModelsManager:
     # Stream dispatch
     # -----------------------------------------------------------------------
 
-    def _require_provider(self, model: Model) -> Provider:
+    def _require_provider(self, model: ModelBase) -> Provider:
         """根据 ``model.provider`` 查找 provider，找不到则抛错。"""
         provider = self._providers.get(model.provider)
         if provider is None:
             raise ModelsError("provider", f"Unknown provider: {model.provider}")
         return provider
 
-    async def _apply_auth(
+    async def _resolve_request_auth(
         self,
-        model: Model,
-        options: Optional[StreamOptions],
-    ) -> tuple[Model, Optional[StreamOptions]]:
-        """解析 auth 并合并到 model/options（对齐 TS Models.applyAuth）。"""
+        model: _ModelT,
+        options: Optional[Union[StreamOptions, ImagesOptions, ClassifierOptions]],
+    ) -> tuple[
+        _ModelT,
+        Optional[str],
+        Optional[ProviderHeaders],
+        Optional[ProviderEnv],
+    ]:
+        """聊天/图像/分类共享的 auth、base_url、headers 与环境装配。"""
         provider = self._require_provider(model)
         resolution = await self.get_auth(
             model,
@@ -843,24 +904,22 @@ class ModelsManager:
             )
 
         auth = resolution.auth
-        # 对齐 TS ??：仅当显式传入的 api_key 为 None 时才回落到 auth 解析结果
         api_key = (
             options.api_key
             if options is not None and options.api_key is not None
             else auth.get("api_key")
         )
         options_headers = options.headers if options else None
-        # provider 默认头垫底，auth 头居中，请求级 options 最后覆盖。
         headers = _merge_headers(
             provider.headers, _merge_headers(auth.get("headers"), options_headers)
         )
-        # ModelsManager 层 transform_headers 最后运行（对齐 TS applyAuth），
-        # 并在派发给 provider 前从 options 中移除。
         transform = options.transform_headers if options else None
         if transform is not None:
             transformed = transform(headers or {})
             if inspect.isawaitable(transformed):
-                transformed = await transformed
+                transformed = await await_with_abort(
+                    transformed, options.signal if options else None
+                )
             headers = transformed
         options_env = options.env if options else None
         env = (
@@ -868,12 +927,25 @@ class ModelsManager:
             if resolution.env or options_env
             else None
         )
-
         request_model = model
         base_url_override = auth.get("base_url")
         if base_url_override:
             request_model = model.model_copy(update={"base_url": base_url_override})
+        if headers is not None:
+            # Manager 已完成 provider/auth/model/options/transform 全量合并；
+            # 清空模型副本上的静态头，防协议客户端再次叠加、让删键复活。
+            request_model = request_model.model_copy(update={"headers": None})
+        return request_model, api_key, headers, env
 
+    async def _apply_auth(
+        self,
+        model: Model,
+        options: Optional[StreamOptions],
+    ) -> tuple[Model, Optional[StreamOptions]]:
+        """把共享鉴权结果写回聊天模型与 StreamOptions。"""
+        request_model, api_key, headers, env = await self._resolve_request_auth(
+            model, options
+        )
         if options is None:
             request_options = SimpleStreamOptions(
                 api_key=api_key,
@@ -901,6 +973,8 @@ class ModelsManager:
         """流式调用模型（同步返回；provider 查找与 auth 解析在 setup 闭包内）。"""
 
         async def _setup() -> AssistantMessageEventStream:
+            # 类型错误先于凭据读取、OAuth 刷新和 header 钩子副作用。
+            assert_chat_model(model)
             provider = self._require_provider(model)
             request_model, request_options = await self._apply_auth(model, options)
             return provider.stream(request_model, context, request_options)
@@ -925,6 +999,8 @@ class ModelsManager:
         """简化的流式调用（同步返回；provider 查找与 auth 解析在 setup 闭包内）。"""
 
         async def _setup() -> AssistantMessageEventStream:
+            # 类型错误先于凭据读取、OAuth 刷新和 header 钩子副作用。
+            assert_chat_model(model)
             provider = self._require_provider(model)
             request_model, request_options = await self._apply_auth(model, options)
             # _apply_auth 的不变量：None → 新造 SimpleStreamOptions；
@@ -945,6 +1021,81 @@ class ModelsManager:
     ) -> AssistantMessage:
         """简化的非流式完成调用。"""
         return await self.stream_simple(model, context, options).result()
+
+    async def generate_images(
+        self,
+        model: AnyModel,
+        context: ImagesContext,
+        options: Optional[ImagesOptions] = None,
+    ) -> AssistantImages:
+        """经所属 provider 生成图像；鉴权/分派失败以结果返回，不抛出。"""
+        try:
+            if not isinstance(model, ImageModel):
+                raise ModelsError(
+                    "provider",
+                    f"Model {model.provider}/{model.id} is not an image model",
+                )
+            provider = self._require_provider(model)
+            generate = provider.generate_images
+            if generate is None:
+                raise ModelsError(
+                    "provider",
+                    f"Provider {model.provider} does not support image generation",
+                )
+            options = options or ImagesOptions()
+            request_model, api_key, headers, env = await self._resolve_request_auth(
+                model, options
+            )
+            update: _ApplyAuthPatch = {"transform_headers": None}
+            if api_key is not None:
+                update["api_key"] = api_key
+            if headers is not None:
+                update["headers"] = headers
+            if env is not None:
+                update["env"] = env
+            request_options = _dataclass_replace(options, **update)
+            return await generate(request_model, context, request_options)
+        except Exception as error:
+            aborted = isinstance(error, AbortedError) or is_aborted(
+                options.signal if options else None
+            )
+            return image_error_result(model, error, aborted=aborted)
+
+    async def classify(
+        self,
+        model: AnyModel,
+        context: ClassifierContext,
+        options: Optional[ClassifierOptions] = None,
+    ) -> ClassifierResult:
+        """经所属 provider 分类；类型、鉴权与分派失败以结果返回。"""
+        try:
+            classifier = assert_classifier_model(model)
+            assert_classifier_input_supported(classifier, context)
+            provider = self._require_provider(classifier)
+            classify = provider.classify
+            if classify is None:
+                raise ModelsError(
+                    "provider",
+                    f"Provider {classifier.provider} does not support classification",
+                )
+            options = options or ClassifierOptions()
+            request_model, api_key, headers, env = await self._resolve_request_auth(
+                classifier, options
+            )
+            update: _ApplyAuthPatch = {"transform_headers": None}
+            if api_key is not None:
+                update["api_key"] = api_key
+            if headers is not None:
+                update["headers"] = headers
+            if env is not None:
+                update["env"] = env
+            request_options = _dataclass_replace(options, **update)
+            return await classify(request_model, context, request_options)
+        except Exception as error:
+            aborted = isinstance(error, AbortedError) or is_aborted(
+                options.signal if options else None
+            )
+            return classifier_error_result(model, error, aborted=aborted)
 
 
 def create_models_manager(

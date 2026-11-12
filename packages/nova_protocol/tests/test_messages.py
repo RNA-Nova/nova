@@ -191,3 +191,32 @@ class TestL2VocabularyRoundtrip:
         )
         assert compat.prompt_cache_key_mode == "enabled"
         assert OpenAICompletionsCompat.model_validate(compat.model_dump()) == compat
+
+
+class TestImagesVocabulary:
+    def test_images_context_and_result_roundtrip(self):
+        from nova_protocol import (
+            AssistantImages,
+            ImageContent,
+            ImagesContext,
+            ImagesStopReason,
+            TextContent,
+        )
+
+        image = ImageContent(mime_type="image/png", data="QQ==")
+        context = ImagesContext(input=[TextContent(text="draw"), image])
+        result = AssistantImages(
+            api="openrouter-images",
+            provider="openrouter",
+            model="example/image",
+            output=[TextContent(text="done"), image],
+            response_id="img-1",
+            stop_reason=ImagesStopReason.STOP,
+            timestamp=123,
+        )
+        assert ImagesContext.model_validate(context.model_dump()) == context
+        assert AssistantImages.model_validate(result.model_dump()) == result
+        wire = result.dump_wire()
+        assert wire["responseId"] == "img-1"
+        assert wire["stopReason"] == "stop"
+        assert isinstance(result.output[1], ImageContent)

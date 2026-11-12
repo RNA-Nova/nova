@@ -13,7 +13,13 @@ from nova_harness.core.utils.model_utils import (
     models_are_equal,
     to_thinking_level,
 )
-from nova_protocol import Model, ModelCost, ModelThinkingLevel, ThinkingLevel
+from nova_protocol import (
+    ImageModel,
+    Model,
+    ModelCost,
+    ModelThinkingLevel,
+    ThinkingLevel,
+)
 
 
 def _model(
@@ -63,6 +69,21 @@ def test_models_are_equal_different_provider():
     a = _model(provider="openai")
     b = _model(provider="anthropic")
     assert models_are_equal(a, b) is False
+
+
+def test_models_are_equal_distinguishes_chat_and_image_with_same_id():
+    image = ImageModel(
+        id="gpt-4",
+        name="gpt-4",
+        type="image",
+        api="openrouter-images",
+        provider="openai",
+        base_url="",
+        input_types=["text"],
+        output_types=["image"],
+        cost=ModelCost(),
+    )
+    assert models_are_equal(_model(), image) is False
 
 
 def test_get_supported_thinking_levels_no_reasoning():

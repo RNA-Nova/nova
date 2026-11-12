@@ -14,6 +14,19 @@ from .enums import ThinkingFormat, ThinkingTokenBudgetField
 SessionAffinityFormat = Literal["openai", "openai-nosession", "openrouter"]
 
 
+class SystemOneCompat(NovaBaseModel):
+    """System One 分类 API 的图像输入兼容配置。
+
+    ``image_input``：``assets`` 为 TypeSafe 资产表，``images`` 为 Clef
+    图片列表，``state-image-urls`` 为 OpenRouter 的 state 内图片块；
+    None = 按 provider/端点自动检测。``send_image_opt_in_header`` 为 None
+    时同样走端点默认值。
+    """
+
+    image_input: Optional[Literal["assets", "images", "state-image-urls"]] = None
+    send_image_opt_in_header: Optional[bool] = None
+
+
 class OpenRouterRouting(NovaBaseModel):
     """
     OpenRouter 提供商路由偏好设置

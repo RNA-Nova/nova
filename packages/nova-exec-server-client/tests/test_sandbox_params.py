@@ -2,15 +2,18 @@
 
 import pytest
 from nova_protocol import (
+    ExecExternalPermissionProfile,
     ExecFileSystemPath,
+    ExecManagedPermissionProfile,
     ExecPermissionProfile,
     FileSystemAccessMode,
     FileSystemSandboxContext,
+    ManagedNetworkSandboxContext,
     NetworkSandboxPolicy,
     ProcessStartParams,
     WindowsSandboxLevel,
 )
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 
 def test_read_only_sandbox_serializes_wire_shape():
@@ -60,8 +63,8 @@ def test_policy_context_is_the_only_directory_carrier():
     from nova_protocol.exec_server_wire import (
         ExecFileSystemPath,
         ExecFileSystemSandboxEntry,
-        ExecManagedFileSystemPermissions,
-        ExecPermissionProfile,
+        ExecManagedPermissionProfile,
+        ExecRestrictedFileSystemPermissions,
         FileSystemAccessMode,
         WireFileSystemPolicyContext,
     )
@@ -73,9 +76,9 @@ def test_policy_context_is_the_only_directory_carrier():
         "file://server/share/checkout",
     ]:
         ctx = FileSystemSandboxContext(
-            policy_context=WireFileSystemPolicyContext(cwd=cwd, workspaceRoots=[cwd]),
-            permissions=ExecPermissionProfile(
-                file_system=ExecManagedFileSystemPermissions(
+            policyContext=WireFileSystemPolicyContext(cwd=cwd, workspaceRoots=[cwd]),
+            permissions=ExecManagedPermissionProfile(
+                file_system=ExecRestrictedFileSystemPermissions(
                     entries=[
                         ExecFileSystemSandboxEntry(
                             path=ExecFileSystemPath.glob("*.secret"),
@@ -130,11 +133,14 @@ def test_workspace_write_network_enabled_opt_in():
     ctx = FileSystemSandboxContext.workspace_write(
         "/tmp/proj", network=NetworkSandboxPolicy.ENABLED
     )
-    assert ctx.permissions.network == NetworkSandboxPolicy.ENABLED
-    assert (
-        FileSystemSandboxContext.workspace_write("/tmp/proj").permissions.network
-        == NetworkSandboxPolicy.RESTRICTED
-    )
+    permissions = ctx.permissions
+    assert isinstance(permissions, ExecManagedPermissionProfile)
+    assert permissions.network == NetworkSandboxPolicy.ENABLED
+    default_permissions = FileSystemSandboxContext.workspace_write(
+        "/tmp/proj"
+    ).permissions
+    assert isinstance(default_permissions, ExecManagedPermissionProfile)
+    assert default_permissions.network == NetworkSandboxPolicy.RESTRICTED
 
 
 def test_start_params_sandbox_passes_through_camel_case():
@@ -147,9 +153,11 @@ def test_start_params_sandbox_passes_through_camel_case():
         # exclude_none 对齐生产出货路径（process.py 的 process/start dump）：
         # None 键不上线——尤其 sandboxOverride: null 会被 Rust 服务端拒
         # （非 Option 兜底的 skip_serializing_if 字段不消化显式 null）
-        sandbox=ctx.model_dump(by_alias=True, exclude_none=True),
+        sandbox=ctx,
         enforceManagedNetwork=True,
-        managedNetwork={"loopbackPorts": [8080], "allowLocalBinding": True},
+        managedNetwork=ManagedNetworkSandboxContext(
+            loopbackPorts=[8080], allowLocalBinding=True
+        ),
         arg0="bash",
     )
     wire = params.model_dump(by_alias=True, exclude_none=True)
@@ -170,27 +178,17 @@ def test_windows_sandbox_level_kebab_case():
 
 
 def test_exec_permission_profile_external_variant():
-    profile = ExecPermissionProfile(
-        type="external", network=NetworkSandboxPolicy.ENABLED
-    )
+    profile = ExecExternalPermissionProfile(network=NetworkSandboxPolicy.ENABLED)
     wire = profile.model_dump(by_alias=True)
-    # external 变体带默认 file_system 字段（pydantic 含默认值字段照常序列化）
-    assert wire == {
-        "type": "external",
-        "file_system": {
-            "type": "restricted",
-            "entries": [],
-            "glob_scan_max_depth": None,
-        },
-        "network": "enabled",
-    }
+    # external 只有网络策略；文件系统隔离由外部调用方负责。
+    assert wire == {"type": "external", "network": "enabled"}
 
 
 def test_invalid_profile_type_rejected():
     with pytest.raises(ValidationError):
-        ExecFileSystemPath(type="bogus")
+        ExecFileSystemPath.model_validate({"type": "bogus"})
     with pytest.raises(ValidationError):
-        ExecPermissionProfile(type="bogus")
+        TypeAdapter(ExecPermissionProfile).validate_python({"type": "bogus"})
 
 
 def test_sandbox_override_wire_round_trip():

@@ -13,7 +13,7 @@
 |------|------|
 | `01_quickstart.py` | 最小用法：mock 协议模块 + `builtin_models()` 真实调用 |
 | `02_stream_events.py` | 流式事件类型详解：text / thinking / toolcall 事件的消费顺序 |
-| `03_models_and_providers.py` | Models 注册表：内置 provider、自定义 provider 注册、动态模型目录（`fetch_models`） |
+| `03_models_and_providers.py` | ModelsManager 注册表：内置 provider、自定义 provider 注册、动态模型目录（`refresh_models`） |
 | `04_auth.py` | Auth 解析链：环境变量、`options.api_key` 覆盖、动态 key 注入 |
 
 ## 运行方式

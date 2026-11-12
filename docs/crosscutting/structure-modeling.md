@@ -34,7 +34,7 @@
 
 ## 三、依赖方向
 
-- **分层拓扑**：`nova_protocol`（形状 + 登记原语）< `nova_async`（取消/等待机制族——消费枢纽词汇，零业务语义）< `nova_ai` < `nova_agent` < `nova_harness` < `nova_server` < `nova_coding_agent`（bundle）；`nova-exec-server-client` 与 `nova_ai` 平级；`nova_client` 在 Node 侧仅经线上契约消费，不进 Python 依赖图；executor Rust 宇宙独立演进。
+- **分层拓扑**：`nova_protocol`（形状 + 登记原语）< `nova_async` / `nova_catalog`（两个独立叶子：取消/等待机制族、模型目录构建与纯算法）< `nova_ai` < `nova_agent` < `nova_harness` < `nova_server` < `nova_coding_agent`（bundle）；`nova-exec-server-client` 与 `nova_ai` 平级；`nova_client` 在 Node 侧仅经线上契约消费，不进 Python 依赖图；executor Rust 宇宙独立演进。`nova_catalog` 不得 import `nova_ai`，由 `packages/nova_catalog/tests/test_structure.py` 机械执法。
 - **只许向下**：任何模块不得 import 上层（如 `utils/` 不得 import `gateway/`、`providers/`）；族文件之间避免互引，必须互引时族内也按向下排序。
 - **破环归位**：循环依赖是设计错误；合法破环走 `typing.Protocol` 反向契约或事件通道（形状纪律归 `docs/crosscutting/data-modeling.md`），不靠局部 import 苟过去。
 

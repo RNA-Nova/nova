@@ -58,14 +58,15 @@ def mock_demo():
 # 2. 真实调用：builtin_models() + 环境变量 key
 # ----------------------------------------------------------------------
 async def real_demo():
-    from nova_ai import builtin_models, get_volcengine_model
+    from nova_ai import builtin_models, get_builtin_model
 
     if not os.environ.get("VOLCENGINE_API_KEY"):
         print("[real] VOLCENGINE_API_KEY 未设置，跳过真实调用")
         return
 
     models = builtin_models()
-    model = get_volcengine_model("doubao-seed-2-0-mini-260428")
+    model = get_builtin_model("volcengine", "doubao-seed-2-0-mini-260428")
+    assert model is not None
     context = Context(messages=[UserMessage(role="user", content="用一句话介绍你自己")])
     message = await models.stream_simple(model, context).result()
     if message.stop_reason != StopReason.STOP or not message.content:

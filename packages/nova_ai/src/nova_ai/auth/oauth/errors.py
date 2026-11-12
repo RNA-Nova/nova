@@ -1,6 +1,6 @@
 """OAuth 流程错误（用户登录面——自声明 kind，归一阶梯第 1 级消费）。"""
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import httpx
 from nova_protocol import NovaErrorKind, redact_secrets
@@ -65,6 +65,26 @@ def validation_error(what: str, error: ValidationError) -> OAuthFlowError:
     return OAuthFlowError(
         validation_message(what, error), kind=NovaErrorKind.UPSTREAM_ERROR
     )
+
+
+def response_json_object(response: httpx.Response, what: str) -> Dict[str, Any]:
+    """读取成功响应的 JSON object；解码与形状失败都归一为上游错误。
+
+    不回显原始 body，也不保留可能携带响应内容的 JSON 解码异常链。
+    """
+    try:
+        data = response.json()
+    except Exception:
+        raise OAuthFlowError(
+            f"{what} response was not valid JSON",
+            kind=NovaErrorKind.UPSTREAM_ERROR,
+        ) from None
+    if not isinstance(data, dict):
+        raise OAuthFlowError(
+            f"{what} response must be a JSON object",
+            kind=NovaErrorKind.UPSTREAM_ERROR,
+        )
+    return data
 
 
 def response_error_detail(response: httpx.Response) -> str:

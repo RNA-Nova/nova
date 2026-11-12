@@ -36,10 +36,12 @@ export VOLCENGINE_API_KEY="<your-key>"
 ```
 
 ```python
-from nova_ai import builtin_models, get_volcengine_model
+from nova_ai import builtin_models, get_builtin_model
 
 agent = Agent(stream_fn=builtin_models().stream_simple)  # auth 从环境变量解析
-agent.set_model(get_volcengine_model("deepseek-v4-flash-260425"))
+model = get_builtin_model("volcengine", "deepseek-v4-flash-260425")
+assert model is not None
+agent.set_model(model)
 await agent.prompt("你好")
 ```
 

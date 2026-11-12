@@ -10,8 +10,9 @@ from typing import List, Optional
 import pytest
 
 from nova_ai.gateway.catalog import CatalogOutcome
+from nova_ai.gateway.factory import create_provider
 from nova_ai.gateway.models import create_models_manager
-from nova_ai.gateway.provider import RefreshModelsContext, create_provider
+from nova_ai.gateway.provider import RefreshModelsContext
 
 pytestmark = pytest.mark.asyncio
 

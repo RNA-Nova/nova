@@ -136,6 +136,8 @@ class TestRootImports:
 def test_oauth_flow_modules_are_not_eagerly_imported():
     code = (
         "import sys; import nova_ai; "
+        "assert 'kimi_oauth' in dir(nova_ai); "
+        "assert 'openai_codex_oauth' in dir(nova_ai); "
         "assert 'nova_ai.auth.oauth.kimi' not in sys.modules; "
         "assert 'nova_ai.auth.oauth.openai_codex' not in sys.modules"
     )
@@ -143,3 +145,47 @@ def test_oauth_flow_modules_are_not_eagerly_imported():
         [sys.executable, "-c", code], capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_image_public_surface_imports():
+    import nova_protocol
+
+    import nova_ai
+
+    for name in ("ImageModel", "ImagesContext", "AssistantImages", "ImagesStopReason"):
+        assert hasattr(nova_protocol, name)
+    for name in ("ImagesOptions", "ProviderImages", "get_builtin_image_models"):
+        assert hasattr(nova_ai, name)
+    from nova_ai.api_impls import openrouter_images
+
+    assert hasattr(openrouter_images, "generate_images")
+
+
+def test_api_impls_dir_includes_lazy_option_union():
+    import nova_ai.api_impls as api_impls
+
+    assert "ProviderStreamOptions" in dir(api_impls)
+
+
+def test_classifier_public_surface_imports():
+    import nova_protocol
+
+    import nova_ai
+
+    for name in (
+        "ClassifierModel",
+        "ClassifierContext",
+        "ClassifierResult",
+        "ClassifierStopReason",
+    ):
+        assert hasattr(nova_protocol, name)
+    for name in (
+        "ClassifierOptions",
+        "ProviderClassifier",
+        "get_builtin_classifier_models",
+        "OPENROUTER_CLASSIFIER_MODELS",
+    ):
+        assert hasattr(nova_ai, name)
+    from nova_ai.api_impls import typesafe_system_one
+
+    assert hasattr(typesafe_system_one, "classify")

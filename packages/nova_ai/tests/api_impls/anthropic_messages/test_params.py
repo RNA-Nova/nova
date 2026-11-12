@@ -6,9 +6,6 @@ metadata、sampling_params 不合入（anthropic 无自由负载通道——对�
 """
 
 import pytest
-from nova_ai.api_impls.anthropic_messages.compat import get_compat
-from nova_ai.api_impls.anthropic_messages.options import AnthropicOptions
-from nova_ai.api_impls.anthropic_messages.params import build_params
 from nova_protocol import (
     AnthropicMessagesCompat,
     AssistantMessage,
@@ -26,6 +23,10 @@ from nova_protocol import (
     Usage,
     UserMessage,
 )
+
+from nova_ai.api_impls.anthropic_messages.compat import get_compat
+from nova_ai.api_impls.anthropic_messages.options import AnthropicOptions
+from nova_ai.api_impls.anthropic_messages.params import build_params
 
 
 def _model(compat=None, reasoning=True, thinking_level_map=None) -> Model:

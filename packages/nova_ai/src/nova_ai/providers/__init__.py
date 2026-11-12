@@ -6,47 +6,31 @@ Provider 定义包
 - ``<provider>/provider.py``：provider 工厂函数
 - ``<provider>/catalog.py``（可选）：``personalize`` 账户层钩子（动态目录的
   私活——kimi 订阅覆盖 / 火山 ark 筛选；治理归 ``gateway/strategies.py``）
-- 修正知识已迁 ``nova_catalog/providers/``（DEF）——运行期经
-  ``catalog_knowledge`` 字段消费，本包不再持有 corrections 模块
+- 构建知识归 ``nova_catalog/providers/``；models.dev 原料经
+  ``catalog_materialize`` 回调物化，pi.dev 成品不重复修正
 """
 
 from ..gateway import Provider, ProviderStreams, RefreshModelsContext, create_provider
 from .all import (
     builtin_models,
     builtin_providers,
+    get_builtin_classifier_model,
+    get_builtin_classifier_models,
+    get_builtin_image_model,
+    get_builtin_image_models,
     get_builtin_model,
     get_builtin_models,
 )
-from .anthropic import (
-    ANTHROPIC_MODELS,
-    anthropic_provider,
-    get_anthropic_model,
-    list_anthropic_models,
+from .anthropic import ANTHROPIC_MODELS, anthropic_provider
+from .kimi_coding import KIMI_CODING_MODELS, kimi_coding_provider
+from .moonshotai import MOONSHOTAI_MODELS, moonshotai_provider
+from .moonshotai_cn import MOONSHOTAI_CN_MODELS, moonshotai_cn_provider
+from .openrouter import (
+    OPENROUTER_CLASSIFIER_MODELS,
+    OPENROUTER_IMAGE_MODELS,
+    openrouter_provider,
 )
-from .kimi_coding import (
-    KIMI_CODING_MODELS,
-    get_kimi_coding_model,
-    kimi_coding_provider,
-    list_kimi_coding_models,
-)
-from .moonshotai import (
-    MOONSHOTAI_MODELS,
-    get_moonshotai_model,
-    list_moonshotai_models,
-    moonshotai_provider,
-)
-from .moonshotai_cn import (
-    MOONSHOTAI_CN_MODELS,
-    get_moonshotai_cn_model,
-    list_moonshotai_cn_models,
-    moonshotai_cn_provider,
-)
-from .volcengine import (
-    VOLCENGINE_MODELS,
-    get_volcengine_model,
-    list_volcengine_models,
-    volcengine_provider,
-)
+from .volcengine import VOLCENGINE_MODELS, volcengine_provider
 
 __all__ = [
     "Provider",
@@ -55,26 +39,23 @@ __all__ = [
     "create_provider",
     "builtin_providers",
     "builtin_models",
+    "get_builtin_classifier_model",
+    "get_builtin_classifier_models",
+    "get_builtin_image_model",
+    "get_builtin_image_models",
     "get_builtin_model",
     "get_builtin_models",
     "ANTHROPIC_MODELS",
     "anthropic_provider",
-    "get_anthropic_model",
-    "list_anthropic_models",
     "KIMI_CODING_MODELS",
-    "get_kimi_coding_model",
-    "list_kimi_coding_models",
     "kimi_coding_provider",
     "MOONSHOTAI_MODELS",
-    "get_moonshotai_model",
-    "list_moonshotai_models",
     "moonshotai_provider",
     "MOONSHOTAI_CN_MODELS",
-    "get_moonshotai_cn_model",
-    "list_moonshotai_cn_models",
     "moonshotai_cn_provider",
+    "OPENROUTER_CLASSIFIER_MODELS",
+    "OPENROUTER_IMAGE_MODELS",
+    "openrouter_provider",
     "VOLCENGINE_MODELS",
-    "get_volcengine_model",
-    "list_volcengine_models",
     "volcengine_provider",
 ]

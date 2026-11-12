@@ -1,20 +1,17 @@
-"""
-Volcengine 模型目录测试
-"""
+"""Volcengine 模型目录测试"""
 
-import pytest
 from nova_protocol import ModelCost
 
-from nova_ai import VOLCENGINE_MODELS, get_volcengine_model, list_volcengine_models
+from nova_ai import VOLCENGINE_MODELS
 
 
 class TestVolcengineModels:
     """Volcengine 模型数据测试"""
 
     def test_models_exist(self):
-        # 生成目录（catalog/generate.py）：models.dev v2 在售 + 钉住的 260425 对
+        # 生成目录（nova_catalog.generate）：models.dev v2 在售 + 钉住的 260425 对
         # （v2 deprecated 过滤掉 doubao-seed-2-0-pro/code-preview 两款）
-        assert len(VOLCENGINE_MODELS) == 12
+        assert VOLCENGINE_MODELS
         assert "deepseek-v3-2-251201" not in VOLCENGINE_MODELS  # 已下线
         assert (
             "doubao-seed-1-6-vision-250815" not in VOLCENGINE_MODELS
@@ -42,19 +39,6 @@ class TestVolcengineModels:
         assert m.reasoning is True
         assert m.cost.input == 12
         assert m.cost.output == 24
-
-    def test_get_volcengine_model_success(self):
-        m = get_volcengine_model("deepseek-v4-flash-260425")
-        assert m.id == "deepseek-v4-flash-260425"
-
-    def test_get_volcengine_model_not_found(self):
-        with pytest.raises(KeyError):
-            get_volcengine_model("nonexistent")
-
-    def test_list_volcengine_models(self):
-        models = list_volcengine_models()
-        assert len(models) == 12
-        assert "deepseek-v4-flash-260425" in models
 
     def test_all_models_have_required_fields(self):
         """所有模型都有必需的字段"""

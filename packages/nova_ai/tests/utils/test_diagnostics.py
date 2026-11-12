@@ -1,7 +1,8 @@
 """utils/diagnostics.py 测试——诊断追加单点（时间戳 + 出口脱敏）。"""
 
-from nova_ai.utils.diagnostics import append_diagnostic
 from nova_protocol import AssistantMessage, Usage
+
+from nova_ai.utils.diagnostics import append_diagnostic
 
 
 def _message() -> AssistantMessage:

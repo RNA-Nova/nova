@@ -1,122 +1,191 @@
-"""模型目录管线的词汇层（对位 pi ``catalog/define.ts``）。
+"""模型目录构建词汇与 models.dev 辅助函数（对位 pi ``catalog/define.ts``）。
 
-provider 以声明式修正为主，并保留派生与两个 finalize 逃生口。构建状态不
-在本层保存；hook 只接收 ``ProviderContext`` 的只读能力视图。
+provider 通过 ``models`` / ``images`` 钩子完整构造目录；公共构建器只负责
+共享阶段。本模块不持有派生、通用修正器或其他中央表单机制。
 """
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from nova_protocol import KnownApi, ModelFields
 
+from .sources.load import CatalogSources
+from .sources.models_dev import models_dev_to_nova
+
+MapModelFn = Callable[[ModelFields, Dict[str, Any]], ModelFields]
+FinalizeModelFn = Callable[[ModelFields, "ProviderContext"], None]
+FinalizeAllFn = Callable[[List[ModelFields], "ProviderContext"], None]
+ApiCompatDefaults = Mapping[str, Mapping[str, Any]]
+
 
 @dataclass(frozen=True)
 class ProviderContext:
-    """provider hook 的只读构建能力（行为容器，故用 dataclass）。"""
+    """provider hook 的构建能力（行为容器，故用 dataclass）。"""
 
     provider_id: str
+    sources: CatalogSources
     strict: bool
-    provider_models: Callable[[str], List[ModelFields]]
-    """取另一家 stage-one 模型的深拷贝。"""
-    models_dev_source: Callable[[str], Optional[Dict[str, Any]]]
-    """按本 provider 的模型 id 取原始 models.dev 条目；无来源返回 None。"""
+    models_dev_source: Callable[[ModelFields], Optional[Dict[str, Any]]]
+    record_models_dev_source: Callable[[ModelFields, Dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
 class ProviderDefinition:
-    """一家 provider 的构建期知识全集。"""
+    """一家 provider 的构建定义（对位 pi ProviderDefinition）。"""
 
     id: str
-    name: str
-    base_url: str
-    api: KnownApi
-    models_dev_key: Optional[str] = None
-    skip_deprecated: bool = False
-    compat_defaults: Mapping[str, Any] = field(default_factory=dict)
-    compat_defaults_by_api: Mapping[str, Mapping[str, Any]] = field(
-        default_factory=dict
-    )
-    """混合协议 provider 的 per-API compat 默认；覆盖通用默认的同名键。"""
-    model_corrections: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
-    pinned_models: Mapping[str, ModelFields] = field(default_factory=dict)
-    map_model: Optional[Callable[[str, ModelFields, Dict[str, Any]], None]] = None
-    """源条目映射缝：stage-one 内运行，参数为 id、fields、原始 models.dev 条目。"""
-    derive_from: Optional[str] = None
-    finalize: Optional[Callable[[str, ModelFields, ProviderContext], None]] = None
-    """per-model 逃生口：共享规则之后、图像默认之前原地修改 fields。"""
-    finalize_all: Optional[Callable[[List[ModelFields], ProviderContext], None]] = None
-    """跨模型逃生口：整表定稿前原地修改列表。"""
-
-
-_CORRECTION_KEYS = frozenset(
-    {
-        "compat",
-        "cost",
-        "thinking_level_map",
-        "context_window",
-        "max_tokens",
-        "reasoning",
-        "headers",
-        "input_types",
-        "input_limits",
-        "prompt_cache",
-        "sampling_params",
-        "sampling_params_by_thinking_level",
-    }
-)
+    models: Optional[Callable[[ProviderContext], List[ModelFields]]] = None
+    images: Optional[Callable[[ProviderContext], List[ModelFields]]] = None
+    classifiers: Optional[Callable[[ProviderContext], List[ModelFields]]] = None
+    compat: ApiCompatDefaults = field(default_factory=dict)
+    finalize: Optional[FinalizeModelFn] = None
+    finalize_all: Optional[FinalizeAllFn] = None
 
 
 def define_provider(
     *,
     id: str,
-    name: str,
-    base_url: str,
-    api: KnownApi,
-    models_dev_key: Optional[str] = None,
-    skip_deprecated: bool = False,
-    compat_defaults: Optional[Mapping[str, Any]] = None,
-    compat_defaults_by_api: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    model_corrections: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    pinned_models: Optional[Mapping[str, ModelFields]] = None,
-    map_model: Optional[Callable[[str, ModelFields, Dict[str, Any]], None]] = None,
-    derive_from: Optional[str] = None,
-    finalize: Optional[Callable[[str, ModelFields, ProviderContext], None]] = None,
-    finalize_all: Optional[Callable[[List[ModelFields], ProviderContext], None]] = None,
+    models: Optional[Callable[[ProviderContext], List[ModelFields]]] = None,
+    images: Optional[Callable[[ProviderContext], List[ModelFields]]] = None,
+    classifiers: Optional[Callable[[ProviderContext], List[ModelFields]]] = None,
+    compat: Optional[ApiCompatDefaults] = None,
+    finalize: Optional[FinalizeModelFn] = None,
+    finalize_all: Optional[FinalizeAllFn] = None,
 ) -> ProviderDefinition:
-    """构造 provider 定义；修正包出现未知键即构建期响亮失败。"""
-    for pattern, override in (model_corrections or {}).items():
-        if not isinstance(override, Mapping):
-            raise TypeError(f"Correction for {pattern!r} must be a mapping")
-        unknown = set(override) - _CORRECTION_KEYS
-        if unknown:
-            raise ValueError(
-                f"Unknown correction keys for {pattern!r}: {sorted(unknown)}"
-            )
-    for api_key in compat_defaults_by_api or {}:
-        try:
-            KnownApi(api_key)
-        except ValueError:
-            raise ValueError(
-                f"Unknown compat_defaults_by_api key: {api_key!r}"
-            ) from None
+    """构造 provider 定义；models/images/classifiers 分操作构建。"""
     return ProviderDefinition(
         id=id,
-        name=name,
-        base_url=base_url,
-        api=api,
-        models_dev_key=models_dev_key,
-        skip_deprecated=skip_deprecated,
-        compat_defaults=compat_defaults or {},
-        compat_defaults_by_api=compat_defaults_by_api or {},
-        model_corrections=model_corrections or {},
-        pinned_models=pinned_models or {},
-        map_model=map_model,
-        derive_from=derive_from,
+        models=models,
+        images=images,
+        classifiers=classifiers,
+        compat=compat or {},
         finalize=finalize,
         finalize_all=finalize_all,
     )
 
 
-__all__ = ["ProviderContext", "ProviderDefinition", "define_provider"]
+def stamp_fields(
+    model_id: str,
+    fields: ModelFields,
+    *,
+    provider_id: str,
+    base_url: Optional[str],
+    api: Optional[str] = None,
+) -> ModelFields:
+    """补齐身份：源 API 优先；base_url 非 None 时按 provider 端点覆盖。"""
+    stamped = ModelFields(**fields)
+    resolved_api = stamped.get("api") or api
+    if not isinstance(resolved_api, str) or not resolved_api:
+        raise ValueError(
+            f"Cannot determine catalog API for {provider_id}/{model_id}: "
+            "the source has no api and the provider definition declares none"
+        )
+    stamped["id"] = model_id
+    if base_url is not None:
+        stamped["base_url"] = base_url
+    stamped["api"] = resolved_api
+    stamped["provider"] = provider_id
+    return stamped
+
+
+def _api_value(api: str | KnownApi) -> str:
+    return api.value if isinstance(api, KnownApi) else api
+
+
+def validate_pinned_model_type(
+    provider_id: str, model_id: str, fields: ModelFields
+) -> str:
+    """验收作者侧 pinned 类型；仅键缺席按 chat 解释。"""
+    model_type = fields["type"] if "type" in fields else "chat"
+    if model_type not in ("chat", "image"):
+        raise ValueError(
+            f"{provider_id}: unknown pinned model type {model_type!r} for {model_id}"
+        )
+    return model_type
+
+
+def models_dev_models(
+    ctx: ProviderContext,
+    source_provider: str,
+    *,
+    api: str | KnownApi,
+    base_url: str,
+    skip_deprecated: bool = False,
+    map_model: Optional[MapModelFn] = None,
+    pinned_models: Optional[Mapping[str, ModelFields]] = None,
+    record_reasoning: bool = True,
+) -> List[ModelFields]:
+    """用 models.dev 构建聊天目录；pinned 优先，map 可改写模型。"""
+    models: List[ModelFields] = []
+    seen: set[str] = set()
+    for model_id, fields in (pinned_models or {}).items():
+        if validate_pinned_model_type(ctx.provider_id, model_id, fields) != "chat":
+            continue
+        models.append(
+            stamp_fields(
+                model_id,
+                copy.deepcopy(fields),
+                provider_id=ctx.provider_id,
+                base_url=base_url,
+                api=_api_value(api),
+            )
+        )
+        seen.add(model_id)
+
+    provider_slice = ctx.sources.models_dev.get(source_provider)
+    source_models = (
+        provider_slice.get("models") if isinstance(provider_slice, dict) else None
+    )
+    if not isinstance(source_models, dict):
+        if ctx.strict:
+            raise ValueError(
+                f"models.dev source is missing a valid models slice for {source_provider}"
+            )
+        source_models = {}
+
+    for _model_key, entry in source_models.items():
+        fields = models_dev_to_nova(
+            ctx.provider_id, entry, ctx.strict, skip_deprecated=skip_deprecated
+        )
+        if fields is None:
+            continue
+        # pi 以条目内已校验的 source.id 为准；外层字典 key 只是索引，
+        # 不得在键值漂移时冒充发往厂商的模型 ID。
+        source_id = entry.get("id")
+        if not isinstance(source_id, str) or not source_id or source_id in seen:
+            continue
+        fields["id"] = source_id
+        stamped = stamp_fields(
+            source_id,
+            fields,
+            provider_id=ctx.provider_id,
+            base_url=base_url,
+            api=_api_value(api),
+        )
+        mapped = map_model(stamped, copy.deepcopy(entry)) if map_model else stamped
+        final_id = mapped.get("id")
+        if not isinstance(final_id, str) or not final_id:
+            raise ValueError(f"{ctx.provider_id}: mapped model is missing id")
+        if final_id in seen:
+            # 与 build 的去重一致：第一个条目连同其 provenance 完整获胜，
+            # 不得让后条目的 reasoning 来源盖到前条目的字段上。
+            continue
+        models.append(mapped)
+        seen.add(final_id)
+        if record_reasoning:
+            ctx.record_models_dev_source(mapped, entry)
+    return models
+
+
+__all__ = [
+    "ApiCompatDefaults",
+    "ProviderContext",
+    "ProviderDefinition",
+    "define_provider",
+    "models_dev_models",
+    "stamp_fields",
+    "validate_pinned_model_type",
+]

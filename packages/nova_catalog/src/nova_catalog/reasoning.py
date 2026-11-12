@@ -51,8 +51,8 @@ def sends_native_effort(fields: ModelFields) -> bool:
 def apply_models_dev_effort(
     fields: ModelFields, reasoning: Optional[Dict[str, Any]]
 ) -> None:
-    """在 compat/family 已定稿后应用源 effort；已声明的家族值覆盖源值。"""
-    if not isinstance(reasoning, dict):
+    """在 compat/family 已定稿后应用受支持模型的源 effort。"""
+    if not isinstance(reasoning, dict) or reasoning.get("supported") is not True:
         return
     api = fields.get("api")
     existing = dict(fields.get("thinking_level_map") or {})
@@ -76,15 +76,6 @@ def apply_models_dev_effort(
             fields["thinking_level_map"] = cast("ThinkingLevelMap", existing)
         return
     merged = {**level_map, **existing}
-    if (
-        is_anthropic
-        and "off" not in existing
-        and merged.get("off") is None
-        and (
-            reasoning.get("toggle") is True or isinstance(reasoning.get("budget"), dict)
-        )
-    ):
-        merged["off"] = "disabled"
     fields["thinking_level_map"] = cast("ThinkingLevelMap", merged)
 
 

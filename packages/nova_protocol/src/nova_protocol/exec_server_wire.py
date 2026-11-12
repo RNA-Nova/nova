@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import base64
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     field_serializer,
     field_validator,
     model_serializer,
@@ -78,6 +79,8 @@ MAX_WRITE_STREAM_CHUNK_BYTES = 4 * 1024 * 1024
 
 
 class JsonRpcRequest(BaseModel):
+    """JSON-RPC 请求信封（id、方法名与可选参数）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     id: int | None = None
     method: str
@@ -85,6 +88,8 @@ class JsonRpcRequest(BaseModel):
 
 
 class JsonRpcResponse(BaseModel):
+    """JSON-RPC 响应信封（结果与错误互斥由线上协议约束）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     id: int | None = None
     result: Any | None = None
@@ -92,12 +97,16 @@ class JsonRpcResponse(BaseModel):
 
 
 class JsonRpcError(BaseModel):
+    """JSON-RPC 错误对象（服务端错误码与消息）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     code: int
     message: str
 
 
 class JsonRpcNotification(BaseModel):
+    """JSON-RPC 通知信封（无响应 id 的方法调用）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     method: str
     params: dict[str, Any] | None = None
@@ -121,7 +130,7 @@ class ByteChunk(BaseModel):
     @classmethod
     def decode_base64(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
 
     @model_serializer
@@ -136,6 +145,8 @@ class ByteChunk(BaseModel):
 
 
 class InitializeParams(BaseModel):
+    """initialize 请求（客户端身份与可选会话恢复 id）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     client_name: str = Field(..., alias="clientName")
     #: 恢复既有会话（进程/文件句柄随会话存活）；None = 不下发，开新会话
@@ -143,8 +154,11 @@ class InitializeParams(BaseModel):
 
 
 class InitializeResponse(BaseModel):
+    """initialize 响应（会话 id、协议版本与可选环境快照）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     session_id: str = Field(..., alias="sessionId")
+    #: None = 旧服务端未报告协议版本，客户端跳过版本匹配。
     protocol_version: str | None = Field(default=None, alias="protocolVersion")
     #: 初始化捎带的执行端环境元数据（形状同 environment/info，省一次往返；
     #: 旧服务端无此字段 → None，客户端回退单次 environment/info 调用）
@@ -154,6 +168,8 @@ class InitializeResponse(BaseModel):
 
 
 class EnvironmentInfo(BaseModel):
+    """执行端环境描述（shell、目录、平台与能力位）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     shell: ShellInfo
     #: executor 发布版本（版本化兼容决策用；旧 executor 缺席时默认 "0.0.0"）
@@ -174,12 +190,16 @@ class EnvironmentInfo(BaseModel):
 
 
 class ShellInfo(BaseModel):
+    """执行端默认 shell 的名称与可执行路径。"""
+
     model_config = ConfigDict(populate_by_name=True)
     name: str
     path: str
 
 
 class EnvironmentCapabilities(BaseModel):
+    """执行端能力位集合（缺席字段按不支持处理）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     network_proxy_launch: bool = Field(default=False, alias="networkProxyLaunch")
     environment_config_read: bool = Field(default=False, alias="environmentConfigRead")
@@ -203,6 +223,8 @@ class EnvironmentCapabilities(BaseModel):
 
 
 class EnvironmentStatus(BaseModel):
+    """environment/status 响应（执行端就绪状态文本）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     status: str
 
@@ -213,21 +235,21 @@ class EnvironmentStatus(BaseModel):
 
 
 class EnvironmentConfigReadParams(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
     """代读请求：cwd 定位 project 层，config_paths 为键路径选择器
 
     （每条路径至少一个键段，如 [["sandbox"], ["network", "mode"]]；
     至少一条路径，否则服务端 invalid_params——不允许整文档读取）。
     """
 
+    model_config = ConfigDict(populate_by_name=True)
     cwd: str
     config_paths: list[list[str]] = Field(..., alias="configPaths")
 
 
 class EnvironmentConfigLayer(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """一个已选的 executor 本机配置层"""
+    """一个已选的 executor 本机配置层。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     #: 层来源标记（不透明诊断串，形如 user:<绝对路径> / project:<绝对路径>）
     source: str
     #: 解释层内相对路径的基准目录（user 层 = executor home；project 层 = <cwd>/.nova）
@@ -241,18 +263,18 @@ class EnvironmentConfigLayer(BaseModel):
 
 
 class EnvironmentConfigLayerStack(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """有序配置层栈（从低到高优先级：user 层在前、project 层在后，两层恒在）"""
+    """有序配置层栈（从低到高优先级：user 层在前、project 层在后，两层恒在）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     layers: list[EnvironmentConfigLayer]
     #: 预留对位字段（云托管层插入位）；nova 无云配置层，恒等于 len(layers)
     cloud_insertion_index: int = Field(..., alias="cloudInsertionIndex")
 
 
 class EnvironmentConfigReadResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """executor 本机配置层栈与环境信息"""
+    """executor 本机配置层栈与环境信息。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     #: executor 用户家目录（客户端展开 ~ 的目标）
     user_home_dir: str | None = Field(default=None, alias="userHomeDir")
     #: executor 家目录（~/.nova/exec-server，或 NOVA_EXEC_SERVER_HOME 覆盖）
@@ -276,6 +298,8 @@ class ExecMetadata(BaseModel):
 
 
 class ProcessStartParams(BaseModel):
+    """process/start 请求（argv、执行环境与沙箱配置）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
     #: 可选归因元数据（对位 ExecParams.metadata）
@@ -288,60 +312,80 @@ class ProcessStartParams(BaseModel):
     #: arg0 覆盖（真实 argv[0] 与可执行路径分离）
     arg0: str | None = Field(default=None, alias="arg0")
     #: 子进程环境策略（wire：ExecEnvPolicy）
-    env_policy: ExecEnvPolicy | dict[str, Any] | None = Field(
-        default=None, alias="envPolicy"
-    )
+    env_policy: ExecEnvPolicy | None = Field(default=None, alias="envPolicy")
     #: shell 快照请求（wire：ShellSnapshotRequest {scopeId, shell}）
-    shell_snapshot: ShellSnapshotRequest | dict[str, Any] | None = Field(
+    shell_snapshot: ShellSnapshotRequest | None = Field(
         default=None, alias="shellSnapshot"
     )
     #: 文件系统沙箱上下文（wire：FileSystemSandboxContext，编译后权限档形态）
-    sandbox: FileSystemSandboxContext | dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
     #: 托管网络强制（fail-closed：无 managedNetwork 细节时拒绝放行）
     enforce_managed_network: bool = Field(default=False, alias="enforceManagedNetwork")
     #: 托管网络细节（loopback 代理端口 + 本地绑定许可）
-    managed_network: ManagedNetworkSandboxContext | dict[str, Any] | None = Field(
+    managed_network: ManagedNetworkSandboxContext | None = Field(
         default=None, alias="managedNetwork"
     )
     #: executor 本地代理启动配置（wire：RemoteNetworkProxyLaunchConfig；
-    #: 历史透传 dict 会被 pydantic 按模型校验——畸形配置尽早报错）
+    #: 嵌套 dict 也会经模型校验——畸形配置尽早报错）
     network_proxy: RemoteNetworkProxyLaunchConfig | None = Field(
         default=None, alias="networkProxy"
     )
 
 
 class ProcessStartResponse(BaseModel):
+    """process/start 响应（进程 id 与实际沙箱类型）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
-    sandbox_type: str | None = Field(default=None, alias="sandboxType")
+    #: None = 对端未报告；none 则表示显式未使用沙箱。
+    sandbox_type: (
+        Literal[
+            "none",
+            "macosSeatbelt",
+            "linuxSeccomp",
+            "windowsRestrictedToken",
+            "windowsMxc",
+        ]
+        | None
+    ) = Field(default=None, alias="sandboxType")
 
 
 class ProcessReadParams(BaseModel):
+    """process/read 请求（增量游标、字节上限与等待时长）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
-    after_seq: int | None = Field(default=None, alias="afterSeq")
-    max_bytes: int | None = Field(default=None, alias="maxBytes")
-    wait_ms: int | None = Field(default=None, alias="waitMs")
+    after_seq: int | None = Field(default=None, alias="afterSeq", ge=0)
+    max_bytes: int | None = Field(default=None, alias="maxBytes", ge=0)
+    wait_ms: int | None = Field(default=None, alias="waitMs", ge=0)
 
 
 class ProcessOutputChunk(BaseModel):
+    """一段带序号与流通道的 base64 进程输出。"""
+
     model_config = ConfigDict(populate_by_name=True)
-    seq: int
-    stream: str
+    seq: int = Field(ge=0)
+    stream: Literal["stdout", "stderr", "pty"]
     chunk: bytes
 
     @field_validator("chunk", mode="before")
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
+
+    @field_serializer("chunk")
+    def encode_chunk(self, v: bytes) -> str:
+        return base64.b64encode(v).decode()
 
 
 class ProcessReadResponse(BaseModel):
+    """process/read 响应（输出块、下一游标与进程终态）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     chunks: list[ProcessOutputChunk]
-    next_seq: int = Field(..., alias="nextSeq")
+    next_seq: int = Field(..., alias="nextSeq", ge=0)
     exited: bool
     exit_code: int | None = Field(default=None, alias="exitCode")
     closed: bool
@@ -350,6 +394,8 @@ class ProcessReadResponse(BaseModel):
 
 
 class ProcessWriteParams(BaseModel):
+    """process/write 请求（向进程 stdin 写入一段字节）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
     chunk: bytes
@@ -359,7 +405,7 @@ class ProcessWriteParams(BaseModel):
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
 
     @field_serializer("chunk")
@@ -370,27 +416,37 @@ class ProcessWriteParams(BaseModel):
 
 
 class ProcessWriteResponse(BaseModel):
+    """process/write 响应（写入受理状态）。"""
+
     model_config = ConfigDict(populate_by_name=True)
-    status: str
+    status: Literal["accepted", "unknownProcess", "stdinClosed", "starting"]
 
 
 class ProcessSignalParams(BaseModel):
+    """process/signal 请求（向指定进程发送信号）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
-    signal: str
+    signal: Literal["interrupt"]
 
 
 class ProcessTerminateParams(BaseModel):
+    """process/terminate 请求（终止指定进程）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
 
 
 class ProcessTerminateResponse(BaseModel):
+    """process/terminate 响应（终止后是否仍在运行）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     running: bool
 
 
 class ProcessExitedNotification(BaseModel):
+    """process/exited 通知（退出码、序号与可选沙箱拒绝标记）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     process_id: str = Field(..., alias="processId")
     seq: int
@@ -410,15 +466,19 @@ class ProcessOutputDeltaNotification(BaseModel):
     process_id: str = Field(..., alias="processId")
     seq: int
     # RS 端为 ExecOutputStream 枚举（值集 "stdout"/"stderr"/"pty" 已对拍一致）
-    stream: str
+    stream: Literal["stdout", "stderr", "pty"]
     chunk: bytes
 
     @field_validator("chunk", mode="before")
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
+
+    @field_serializer("chunk")
+    def encode_chunk(self, v: bytes) -> str:
+        return base64.b64encode(v).decode()
 
 
 class ProcessClosedNotification(BaseModel):
@@ -435,20 +495,24 @@ class ProcessClosedNotification(BaseModel):
 
 
 class FsReadFileParams(BaseModel):
+    """fs/readFile 请求（读取整个文件，可选符号链接与沙箱策略）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     #: 是否跟随符号链接；None = 不下发（服务端默认 true，保持旧行为）
     follow_symlinks: bool | None = Field(default=None, alias="followSymlinks")
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsReadFileResponse(BaseModel):
+    """fs/readFile 响应（完整文件内容的 base64 载体）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     data_base64: str = Field(..., alias="dataBase64")
 
     @property
     def data(self) -> bytes:
-        return base64.b64decode(self.data_base64)
+        return base64.b64decode(self.data_base64, validate=True)
 
 
 class FsOpenMode(str, Enum):
@@ -460,27 +524,35 @@ class FsOpenMode(str, Enum):
 
 
 class FsOpenParams(BaseModel):
+    """fs/open 请求（按只读或创建/截断模式打开文件句柄）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     path: str
     #: 打开模式：read 读既有文件（缺省）；replace 写打开（创建/截断）
     mode: FsOpenMode = FsOpenMode.READ
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsOpenResponse(BaseModel):
+    """fs/open 响应（服务端确认的文件句柄 id）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
 
 
 class FsReadBlockParams(BaseModel):
+    """fs/readBlock 请求（从句柄的指定偏移读取定长字节）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
-    offset: int
-    len: int
+    offset: int = Field(ge=0)
+    len: int = Field(ge=0)
 
 
 class FsReadBlockResponse(BaseModel):
+    """fs/readBlock 响应（字节块与文件结束标记）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     chunk: bytes
     eof: bool
@@ -489,11 +561,17 @@ class FsReadBlockResponse(BaseModel):
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
+
+    @field_serializer("chunk")
+    def encode_chunk(self, v: bytes) -> str:
+        return base64.b64encode(v).decode()
 
 
 class FsCloseParams(BaseModel):
+    """fs/close 请求（关闭并释放文件句柄）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
 
@@ -512,7 +590,7 @@ class FsWriteBlockParams(BaseModel):
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
 
     @field_serializer("chunk")
@@ -527,22 +605,28 @@ class FsWriteBlockResponse(BaseModel):
 
 
 class FsReadStreamParams(BaseModel):
+    """fs/readStream 请求（打开服务端分片推送的读取流）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     path: str
     offset: int = 0
     len: int | None = None
     block_size: int | None = Field(default=None, alias="blockSize")
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsReadStreamResponse(BaseModel):
+    """fs/readStream 响应（读取句柄与可选总字节数）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     total_size: int | None = Field(default=None, alias="totalSize")
 
 
 class FsReadStreamChunkNotification(BaseModel):
+    """fs/readStream/chunk 通知（有序字节块与结束标记）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     seq: int
@@ -553,11 +637,17 @@ class FsReadStreamChunkNotification(BaseModel):
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
+
+    @field_serializer("chunk")
+    def encode_chunk(self, v: bytes) -> str:
+        return base64.b64encode(v).decode()
 
 
 class FsReadStreamDoneNotification(BaseModel):
+    """fs/readStream/done 通知（总读取字节数与可选错误）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     total_bytes: int = Field(..., alias="totalBytes")
@@ -570,26 +660,28 @@ class FsReadStreamDoneNotification(BaseModel):
 
 
 class FsWriteStreamParams(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """流式写入开句柄请求（缺省打开即创建/截断，与 fs/writeFile 语义一致）"""
+    """流式写入开句柄请求（缺省打开即创建/截断，与 fs/writeFile 语义一致）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     path: str
     #: 断点续传起点（v1.12）：Some(n) = 不截断、从 n 续写（n 不得超当前文件
     #: 长度——不许隔洞写；文件不存在时 n>0 拒绝）；None = 创建/截断
     offset: int | None = None
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsWriteStreamResponse(BaseModel):
+    """fs/writeStream 响应（服务端接受的写入句柄 id）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
 
 
 class FsWriteStreamChunkNotification(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """流式写入数据块（客户端 → 服务端通知，无回执）"""
+    """流式写入数据块（客户端 → 服务端通知，无回执）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     #: 从 0 开始的连续序号，服务端严格按序落盘（乱序记为流终态错误，
     #: 由随后的 done 回报——v1.12 起失败/中止不再删半成品）
@@ -602,7 +694,7 @@ class FsWriteStreamChunkNotification(BaseModel):
     @classmethod
     def decode_chunk(cls, v: Any) -> bytes:
         if isinstance(v, str):
-            return base64.b64decode(v)
+            return base64.b64decode(v, validate=True)
         return v
 
     @field_serializer("chunk")
@@ -612,11 +704,15 @@ class FsWriteStreamChunkNotification(BaseModel):
 
 
 class FsWriteStreamDoneParams(BaseModel):
+    """fs/writeStream/done 请求（结束分片推送并请求最终确认）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
 
 
 class FsWriteStreamDoneResponse(BaseModel):
+    """fs/writeStream/done 响应（确认句柄与实际落盘字节数）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     handle_id: str = Field(..., alias="handleId")
     #: 实际落盘的总字节数
@@ -624,32 +720,40 @@ class FsWriteStreamDoneResponse(BaseModel):
 
 
 class FsWriteFileParams(BaseModel):
+    """fs/writeFile 请求（以完整 base64 内容创建或覆盖文件）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     data_base64: str = Field(..., alias="dataBase64")
     #: 是否跟随符号链接；None = 不下发（服务端默认 true，保持旧行为）
     follow_symlinks: bool | None = Field(default=None, alias="followSymlinks")
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsCreateDirectoryParams(BaseModel):
+    """fs/createDirectory 请求（创建目录，可选递归与沙箱策略）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     recursive: bool | None = None
     #: 是否跟随符号链接；None = 不下发（服务端默认 true，保持旧行为）
     follow_symlinks: bool | None = Field(default=None, alias="followSymlinks")
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsGetMetadataParams(BaseModel):
+    """fs/getMetadata 请求（读取文件类型、大小与时间戳）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     #: 是否跟随符号链接；None = 不下发（服务端默认 true，保持旧行为）
     follow_symlinks: bool | None = Field(default=None, alias="followSymlinks")
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FileMetadata(BaseModel):
+    """文件元数据（类型标记、字节大小与毫秒时间戳）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     is_directory: bool = Field(..., alias="isDirectory")
     is_file: bool = Field(..., alias="isFile")
@@ -660,23 +764,31 @@ class FileMetadata(BaseModel):
 
 
 class FsCanonicalizeParams(BaseModel):
+    """fs/canonicalize 请求（解析为执行端规范绝对路径）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsCanonicalizeResponse(BaseModel):
+    """fs/canonicalize 响应（规范化后的路径）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
 
 
 class FsReadDirectoryParams(BaseModel):
+    """fs/readDirectory 请求（列出目录的直接子项）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class DirEntry(BaseModel):
+    """目录子项（文件名与文件/目录类型标记）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     file_name: str = Field(..., alias="fileName")
     is_directory: bool = Field(..., alias="isDirectory")
@@ -684,26 +796,32 @@ class DirEntry(BaseModel):
 
 
 class FsReadDirectoryResponse(BaseModel):
+    """fs/readDirectory 响应（目录直接子项列表）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     entries: list[DirEntry]
 
 
 class FsRemoveParams(BaseModel):
+    """fs/remove 请求（删除文件或目录，可选递归与强制）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     recursive: bool | None = None
     force: bool | None = None
     #: 是否跟随符号链接；None = 不下发（服务端默认 true，保持旧行为）
     follow_symlinks: bool | None = Field(default=None, alias="followSymlinks")
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 class FsCopyParams(BaseModel):
+    """fs/copy 请求（复制文件或目录树）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     source_path: str = Field(..., alias="sourcePath")
     destination_path: str = Field(..., alias="destinationPath")
     recursive: bool
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -712,10 +830,10 @@ class FsCopyParams(BaseModel):
 
 
 class WalkOptions(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
     """遍历界限（对齐 executor-file-system WalkOptions；缺省值不超服务端
     上限 depth=64/directories=10000/entries=50000，超限整请求被拒）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     max_depth: int = Field(default=64, alias="maxDepth")
     max_directories: int = Field(default=10_000, alias="maxDirectories")
     max_entries: int = Field(default=50_000, alias="maxEntries")
@@ -728,18 +846,24 @@ class WalkOptions(BaseModel):
 
 
 class WalkEntry(BaseModel):
+    """目录遍历条目（路径与 file/directory 类型）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
-    kind: str  # "file" | "directory"
+    kind: Literal["file", "directory"]
 
 
 class WalkError(BaseModel):
+    """目录遍历错误（失败路径与诊断消息）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     message: str
 
 
 class WalkOutcome(BaseModel):
+    """目录遍历结果（条目、非致命错误与截断标记）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     entries: list[WalkEntry] = []
     errors: list[WalkError] = []
@@ -747,10 +871,12 @@ class WalkOutcome(BaseModel):
 
 
 class FsWalkParams(BaseModel):
+    """fs/walk 请求（按界限遍历目录并收集条目与错误）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     options: WalkOptions
-    sandbox: dict[str, Any] | None = None
+    sandbox: FileSystemSandboxContext | None = None
 
 
 # =============================================================================
@@ -762,6 +888,8 @@ HTTP_REQUEST_BODY_DELTA = "http/request/bodyDelta"
 
 
 class HttpRedirectPolicy(str, Enum):
+    """HTTP 重定向策略（跟随或由执行端停止）。"""
+
     FOLLOW = "follow"
     STOP = "stop"
 
@@ -776,6 +904,8 @@ class HttpHeader(BaseModel):
 
 
 class HttpRequestParams(BaseModel):
+    """http/request 请求（方法、URL、头、正文与传输策略）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     method: str
     url: str
@@ -790,6 +920,8 @@ class HttpRequestParams(BaseModel):
 
 
 class HttpRequestResponse(BaseModel):
+    """http/request 非流式响应（状态码、响应头与完整正文）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     status: int
     headers: list[HttpHeader] = Field(default_factory=list)
@@ -797,6 +929,8 @@ class HttpRequestResponse(BaseModel):
 
 
 class HttpRequestBodyDeltaNotification(BaseModel):
+    """http/request/bodyDelta 通知（有序响应正文块与终态）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     request_id: str = Field(..., alias="requestId")
     seq: int
@@ -812,6 +946,8 @@ class HttpRequestBodyDeltaNotification(BaseModel):
 
 
 class NetworkSandboxPolicy(str, Enum):
+    """网络沙箱策略（受限拦截或显式启用网络）。"""
+
     RESTRICTED = "restricted"
     ENABLED = "enabled"
 
@@ -827,12 +963,16 @@ class WindowsSandboxLevel(str, Enum):
 
 
 class FileSystemAccessMode(str, Enum):
+    """文件系统条目的读、写或拒绝访问模式。"""
+
     READ = "read"
     WRITE = "write"
     DENY = "deny"
 
 
 class WindowsSandboxProxySettingsMode(str, Enum):
+    """Windows 沙箱代理设置的处理模式（协调或保留）。"""
+
     RECONCILE = "reconcile"
     PRESERVE = "preserve"
 
@@ -846,12 +986,17 @@ class SandboxOverride(str, Enum):
     BYPASS_SANDBOX_FIRST_ATTEMPT = "bypassSandboxFirstAttempt"
 
 
+_SpecialPathKind = Literal[
+    "root", "minimal", "project_roots", "tmpdir", "slash_tmp", "unknown"
+]
+
+
 class ExecFileSystemSpecialPath(BaseModel):
     """沙箱符号路径（wire：tag "kind"，snake_case——对位 executor-protocol-core
     FileSystemSpecialPath；执法时由服务端按 cwd 解析，不进套餐展开的具体路径）"""
 
     model_config = ConfigDict(populate_by_name=True)
-    kind: Literal["root", "minimal", "project_roots", "tmpdir", "slash_tmp", "unknown"]
+    kind: _SpecialPathKind
     subpath: str | None = None
     #: kind=unknown 时的原始 token（前向兼容——新配置的旧运行时降级而非拒载）
     path: str | None = None
@@ -885,7 +1030,10 @@ class ExecFileSystemPath(BaseModel):
         return cls(type="path", path=_file_url(path))
 
     @classmethod
-    def of_special(cls, kind: str, subpath: str | None = None) -> "ExecFileSystemPath":
+    def of_special(
+        cls, kind: _SpecialPathKind, subpath: str | None = None
+    ) -> "ExecFileSystemPath":
+        """构造服务端按执法上下文解析的符号路径。"""
         return cls(
             type="special", value=ExecFileSystemSpecialPath(kind=kind, subpath=subpath)
         )
@@ -912,6 +1060,8 @@ class ExecFileSystemPath(BaseModel):
 
 
 class ExecFileSystemSandboxEntry(BaseModel):
+    """一条文件系统沙箱规则（目标路径与访问模式）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: ExecFileSystemPath
     access: FileSystemAccessMode
@@ -921,27 +1071,64 @@ class ExecFileSystemSandboxEntry(BaseModel):
     missing_path_behavior: Literal["skip"] | None = None
 
 
-class ExecManagedFileSystemPermissions(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """wire：internally-tagged "type"（restricted/unrestricted）"""
+class ExecRestrictedFileSystemPermissions(BaseModel):
+    """托管文件系统受限变体（按 entries 逐条执法）。"""
 
-    type: Literal["restricted", "unrestricted"] = "restricted"
+    model_config = ConfigDict(populate_by_name=True)
+    type: Literal["restricted"] = "restricted"
     entries: list[ExecFileSystemSandboxEntry] = Field(default_factory=list)
-    # 线上键 snake_case（同 codex；alias 历史误配见上）
-    glob_scan_max_depth: int | None = None
+    # 线上键 snake_case；None = 未声明 glob 扫描深度限制。
+    glob_scan_max_depth: int | None = Field(default=None, gt=0)
 
 
-class ExecPermissionProfile(BaseModel):
+class ExecUnrestrictedFileSystemPermissions(BaseModel):
+    """托管文件系统不受限变体（unit variant，不携带 entries）。"""
+
     model_config = ConfigDict(populate_by_name=True)
-    """wire：internally-tagged "type"（managed/disabled/external）"""
+    type: Literal["unrestricted"] = "unrestricted"
 
-    type: Literal["managed", "disabled", "external"] = "managed"
-    # 线上键 snake_case `file_system`（codex 原版即此——py 曾误配 `fileSystem`
-    # alias，带沙箱的 process/start 与 fs 请求在 RS 端全部反序列化失败）
+
+ExecManagedFileSystemPermissions = Annotated[
+    ExecRestrictedFileSystemPermissions | ExecUnrestrictedFileSystemPermissions,
+    Field(discriminator="type"),
+]
+"""托管文件系统权限的显式判别联合。"""
+
+
+class ExecManagedPermissionProfile(BaseModel):
+    """由 executor 构造文件系统与网络沙箱的 managed 权限套餐。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    type: Literal["managed"] = "managed"
+    # 线上键 snake_case `file_system`（与 Rust serde 正典一致）。
     file_system: ExecManagedFileSystemPermissions = Field(
-        default_factory=ExecManagedFileSystemPermissions,
+        default_factory=ExecRestrictedFileSystemPermissions,
     )
     network: NetworkSandboxPolicy = NetworkSandboxPolicy.RESTRICTED
+
+
+class ExecDisabledPermissionProfile(BaseModel):
+    """不施加外层沙箱的 disabled 权限套餐（unit variant）。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    type: Literal["disabled"] = "disabled"
+
+
+class ExecExternalPermissionProfile(BaseModel):
+    """由外部调用方负责文件系统隔离的 external 权限套餐。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+    type: Literal["external"] = "external"
+    network: NetworkSandboxPolicy = NetworkSandboxPolicy.RESTRICTED
+
+
+ExecPermissionProfile = Annotated[
+    ExecManagedPermissionProfile
+    | ExecDisabledPermissionProfile
+    | ExecExternalPermissionProfile,
+    Field(discriminator="type"),
+]
+"""执行权限套餐的显式判别联合。"""
 
 
 class WireFileSystemPolicyContext(BaseModel):
@@ -954,18 +1141,41 @@ class WireFileSystemPolicyContext(BaseModel):
 
 
 class FileSystemSandboxContext(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
     """文件系统沙箱上下文（process/start 的 sandbox 参数的 wire 形态）。
 
     v1.11 终态形状：策略目录只经 `policyContext` 承载——codex 为老客户端
     保留的平铺 `cwd`/`workspaceRoots` 双形状字段已删（nova 从未对外发布，
     没有老客户端存在）。客户端整个省略 policyContext 时 executor 入口
-    回退为自身 cwd（人机工学，保留）。"""
+    回退为自身 cwd（人机工学，保留）。
+    """
 
-    permissions: ExecPermissionProfile = Field(default_factory=ExecPermissionProfile)
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_none(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """嵌套进其他请求模型时也沿用同一 absent 语义，不做双道 dump。"""
+
+        def drop_none(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    key: drop_none(item)
+                    for key, item in value.items()
+                    if item is not None
+                }
+            if isinstance(value, list):
+                return [drop_none(item) for item in value]
+            return value
+
+        return drop_none(handler(self))
+
+    permissions: ExecPermissionProfile = Field(
+        default_factory=ExecManagedPermissionProfile
+    )
     #: 控制面选定的沙箱覆盖决策（v1.13，对位 codex 622e9e3696 线上顶层字段——
-    #: 不进 policyContext）。None ≡ RS 缺省 NoOverride：出货路径 exclude_none
-    #: 负责省略，对位 RS 的 skip_serializing_if = "SandboxOverride::is_no_override"；
+    #: 不进 policyContext）。None ≡ RS 缺省 NoOverride：由本模型序列化器省略，
+    #: 对位 RS 的 skip_serializing_if = "SandboxOverride::is_no_override"；
     #: 显式 NO_OVERRIDE 与 None 在线上同义（服务端反序列化缺省即 NoOverride）。
     sandbox_override: SandboxOverride | None = Field(
         default=None, alias="sandboxOverride"
@@ -1005,10 +1215,10 @@ class FileSystemSandboxContext(BaseModel):
         `:root`，不把路径烤进条目。
         """
         return cls(
-            policy_context=cls._policy_context(cwd),
-            permissions=ExecPermissionProfile(
+            policyContext=cls._policy_context(cwd),
+            permissions=ExecManagedPermissionProfile(
                 type="managed",
-                file_system=ExecManagedFileSystemPermissions(
+                file_system=ExecRestrictedFileSystemPermissions(
                     type="restricted",
                     entries=[
                         ExecFileSystemSandboxEntry(
@@ -1067,10 +1277,10 @@ class FileSystemSandboxContext(BaseModel):
             for name in (".git", ".nova")
         )
         return cls(
-            policy_context=cls._policy_context(cwd),
-            permissions=ExecPermissionProfile(
+            policyContext=cls._policy_context(cwd),
+            permissions=ExecManagedPermissionProfile(
                 type="managed",
-                file_system=ExecManagedFileSystemPermissions(
+                file_system=ExecRestrictedFileSystemPermissions(
                     type="restricted", entries=entries
                 ),
                 network=network,
@@ -1079,9 +1289,9 @@ class FileSystemSandboxContext(BaseModel):
 
 
 class ExecEnvPolicy(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """子进程环境策略（wire：ExecEnvPolicy）"""
+    """子进程环境策略（继承、排除、显式设置与白名单）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     inherit: str = "all"
     ignore_default_excludes: bool = Field(default=True, alias="ignoreDefaultExcludes")
     exclude: list[str] = Field(default_factory=list)
@@ -1090,15 +1300,17 @@ class ExecEnvPolicy(BaseModel):
 
 
 class ShellSnapshotRequest(BaseModel):
+    """shell 快照请求（作用域 id 与待快照的 shell）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     scope_id: str = Field(..., alias="scopeId")
     shell: ShellInfo
 
 
 class ManagedNetworkSandboxContext(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    """托管网络上下文（loopback 代理端口 + 本地绑定许可 + Unix socket 许可）"""
+    """托管网络上下文（loopback 代理端口 + 本地绑定许可 + Unix socket 许可）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
     loopback_ports: list[int] = Field(default_factory=list, alias="loopbackPorts")
     allow_local_binding: bool = Field(default=False, alias="allowLocalBinding")
     #: 有效托管网络策略放行的 Unix socket 路径
@@ -1112,19 +1324,31 @@ class ManagedNetworkSandboxContext(BaseModel):
 
 
 def _file_url(path: str) -> str:
-    """本地路径 → file:// URL（SDK 侧 PathUri wire 形态）。
+    """POSIX/Windows 原生绝对路径 → file:// URL（SDK PathUri wire 形态）。
 
-    纯字符串构造（枢纽纪律：禁 pathlib/urllib——前者带文件系统 I/O）。
-    调用方传入的已是绝对路径；仅对 URL path 保留集之外的字符做百分号编码。
+    纯字符串构造（枢纽纪律：禁 pathlib/urllib）。支持 POSIX、驱动器与 UNC；
+    仅对 URL path 保留集之外的字符做百分号编码。
     """
     if path.startswith("file://"):
         return path
-    if not path.startswith("/"):
+    normalized = path.replace("\\", "/")
+    if normalized.startswith("//"):
+        # UNC 的 server 是 URL host，不能保留成路径开头的双斜杠。
+        normalized = normalized[2:]
+    elif (
+        len(normalized) >= 3
+        and normalized[0].isascii()
+        and normalized[0].isalpha()
+        and normalized[1] == ":"
+        and normalized[2] == "/"
+    ):
+        normalized = "/" + normalized
+    elif not normalized.startswith("/"):
         raise ValueError(f"路径须为绝对路径：{path}")
     safe = "/:@-._~!$&'()*+,;="
     encoded = "".join(
         ch if (ch.isascii() and (ch.isalnum() or ch in safe)) else f"%{b:02X}"
-        for ch in path
+        for ch in normalized
         for b in ch.encode("utf-8")
     )
     return "file://" + encoded
@@ -1233,28 +1457,38 @@ class NetworkMode(str, Enum):
 
 
 class NetworkDomainPermission(str, Enum):
+    """网络目标的允许或拒绝决策。"""
+
     ALLOW = "allow"
     DENY = "deny"
 
 
 class NetworkDomainPermissionEntry(BaseModel):
+    """一条域名权限规则（域名与允许/拒绝决策）。"""
+
     model_config = ConfigDict(populate_by_name=True)
     domain: str
     permission: NetworkDomainPermission
 
 
 class NetworkDomainPermissions(BaseModel):
+    """域名权限规则列表。"""
+
     model_config = ConfigDict(populate_by_name=True)
     entries: list[NetworkDomainPermissionEntry] = Field(default_factory=list)
 
 
 class NetworkUnixSocketPermissionEntry(BaseModel):
+    """一条 Unix socket 路径权限规则。"""
+
     model_config = ConfigDict(populate_by_name=True)
     path: str
     permission: NetworkDomainPermission
 
 
 class NetworkUnixSocketPermissions(BaseModel):
+    """Unix socket 路径权限规则列表。"""
+
     model_config = ConfigDict(populate_by_name=True)
     entries: list[NetworkUnixSocketPermissionEntry] = Field(default_factory=list)
 
@@ -1279,7 +1513,9 @@ class RemoteNetworkProxyConfig(BaseModel):
         default=False, alias="dangerouslyAllowAllUnixSockets"
     )
     mode: NetworkMode = NetworkMode.NONE
+    #: None = 未配置域名名单，不主动放行任何域名。
     domains: NetworkDomainPermissions | None = None
+    #: None = 未配置 Unix socket 名单，不主动放行任何 socket。
     unix_sockets: NetworkUnixSocketPermissions | None = Field(
         default=None, alias="unixSockets"
     )

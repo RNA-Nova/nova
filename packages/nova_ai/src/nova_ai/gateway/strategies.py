@@ -5,7 +5,7 @@
 
 - ``overlay_refresh_policy``：纯站形态（公共事实目录）。六件套：恢复
   （isNewer 守卫）→ 4h TTL → ETag 条件请求（有缓存体才带 validator）→
-  304/404·501/瞬时分流 → finalize（读 ``provider.catalog_knowledge``）→
+  304/404·501/瞬时分流 → 原料 materialize（可选）→ finalize →
   persist+publish；读取 merge（基线 ∪ 动态）。
 - ``personalized_refresh_policy``：站 + 账户钩子形态（目录随凭据变）。
   跳 TTL/ETag（凭据易变每次真拉）；finalize 出基底后调 ``personalize``
@@ -21,10 +21,12 @@ pi 对位：``withRemoteCatalog`` / ``withPersonalizedCatalog``（openrouter）�
 from __future__ import annotations
 
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Mapping, Optional, cast
 
 from nova_protocol import (
-    Model,
+    AnyModel,
+    MaterializedCatalog,
+    ModelFields,
     ModelsStoreEntry,
     NovaDiagnostic,
     WarningKind,
@@ -42,6 +44,11 @@ from .provider import (
     merge_models,
 )
 
+MaterializeCatalogFn = Callable[
+    [List[ModelFields], Mapping[str, str]], MaterializedCatalog
+]
+"""原料站物化回调（字段 + 显式删除集）；由策略闭包持有，不进 Provider 类型。"""
+
 REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
 """距上次成功校验在该窗口内则跳过网络（对齐 pi REMOTE_CATALOG_REFRESH_INTERVAL_MS）。"""
 
@@ -49,7 +56,7 @@ REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
 def remote_models(
     entry: Optional[ModelsStoreEntry],
     local_generated_at: Optional[int],
-) -> List[Model]:
+) -> List[AnyModel]:
     """取持久化 overlay，带新鲜度竞速守卫（对齐 pi ``remoteModels``）。
 
     - 无缓存 → 空；
@@ -66,7 +73,7 @@ def remote_models(
 
 
 def _restore(
-    provider: Provider, restored: List[Model], *, has_entry: bool
+    provider: Provider, restored: List[AnyModel], *, has_entry: bool
 ) -> "Callable[[], None]":
     """恢复段发布动作；无缓存条目只清空，不伪装成已发布的空目录。"""
 
@@ -86,7 +93,10 @@ def _no_station_diagnostic(provider: Provider, context: RefreshModelsContext) ->
         NovaDiagnostic(
             severity="warning",
             kind=WarningKind.CAPABILITY,
-            message=f"{provider.id} 未配置公开目录站——回退缓存/基线目录",
+            message=(
+                f"No public catalog service configured for {provider.id}; "
+                "using cached/baseline models"
+            ),
         )
     )
 
@@ -95,6 +105,7 @@ def overlay_refresh_policy(
     provider: Provider,
     *,
     local_generated_at: Optional[int] = None,
+    materialize: Optional[MaterializeCatalogFn] = None,
 ) -> RefreshModelsFn:
     """纯站刷新策略（六件套治理；公共事实目录——overlay 读取形态）。"""
     if local_generated_at is None:
@@ -164,7 +175,10 @@ def overlay_refresh_policy(
                             "last_modified": 0,
                             "etag": None,
                         }
-                    )
+                    ),
+                    # 站方撤目录是即时退场语义；不能只清下次启动的缓存，
+                    # 却让当前进程继续展示旧 overlay。
+                    update=lambda: provider._set_dynamic_models([]),
                 )
             )
             return
@@ -183,12 +197,24 @@ def overlay_refresh_policy(
                 status_code=outcome.status or None,
             ) from outcome.cause
 
-        refreshed = finalize_catalog_models(
-            provider.id,
-            provider.base_url,
-            outcome.models_fields,
-            knowledge=provider.catalog_knowledge,
-            source_reasoning=outcome.source_reasoning,
+        remote_fields = outcome.models_fields
+        if materialize is not None:
+            materialized = materialize(remote_fields, outcome.source_status)
+            if materialized.remove_ids:
+                # overlay 的缺席不是删除；没有 replace 基底就不能安全消费
+                # 删除集，宁可配置响亮失败，也不能悄悄复活已淘汰模型。
+                raise CatalogError(
+                    f"Catalog deletions require personalized refresh for {provider.id}"
+                )
+            remote_fields = materialized.models_fields
+        refreshed = cast(
+            List[AnyModel],
+            finalize_catalog_models(
+                provider.id,
+                provider.base_url,
+                remote_fields,
+                source_reasoning=outcome.source_reasoning,
+            ),
         )
         if is_aborted(signal):
             return
@@ -215,6 +241,7 @@ def personalized_refresh_policy(
     personalize: PersonalizeFn,
     *,
     local_generated_at: Optional[int] = None,
+    materialize: Optional[MaterializeCatalogFn] = None,
 ) -> RefreshModelsFn:
     """账户个性化刷新策略（站 + 钩子；replace 读取形态）。
 
@@ -274,16 +301,27 @@ def personalized_refresh_policy(
             )
         ):
             remote_fields = []
+        remove_ids = frozenset()
+        if materialize is not None:
+            materialized = materialize(remote_fields, outcome.source_status)
+            remote_fields = materialized.models_fields
+            remove_ids = materialized.remove_ids
         base = merge_models(
             list(provider._baseline_models),
-            finalize_catalog_models(
-                provider.id,
-                provider.base_url,
-                remote_fields,
-                knowledge=provider.catalog_knowledge,
-                source_reasoning=outcome.source_reasoning,
+            cast(
+                List[AnyModel],
+                finalize_catalog_models(
+                    provider.id,
+                    provider.base_url,
+                    remote_fields,
+                    source_reasoning=outcome.source_reasoning,
+                ),
             ),
         )
+        if remove_ids:
+            # 公开生命周期淘汰作用于 merge 后的完整基底；否则被远程删除的
+            # 条目会被静态基线立即补回。账户筛选仍在此之后的 personalize。
+            base = [model for model in base if model.id not in remove_ids]
         personalized = await personalize(base, context)
         if is_aborted(signal):
             return

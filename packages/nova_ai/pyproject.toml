@@ -33,12 +33,19 @@ anyio = ">=4.11"
 pydantic = ">=2.0"
 json-repair = ">=0.58.4"
 httpx = ">=0.27.0"
+# Anthropic 1.x 的 HTTP 底座；本包在 retry/timeouts/errors 中直接消费。
+httpx2 = ">=2.0,<3"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"
 isort = "^5.12.0"
 pre-commit = "^3.5.0"
-pytest = "^7.4.0"
+pytest = ">=8.2"
+pytest-asyncio = ">=1.3"
+pytest-timeout = ">=2.3.1"
+pytest-socket = ">=0.7.0"
+respx = ">=0.22.0"
+hypothesis = ">=6.100.0"
 sniffio = "^1.3.0"
 
 [build-system]
@@ -48,7 +55,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.black]
 target-version = ['py313']
 # 生成物由 nova-catalog 管线产出，格式以生成器为准——排除出 black/isort
-extend-exclude = 'src/nova_ai/(models_generated\.py|providers/data|providers/(anthropic|kimi_coding|moonshotai|moonshotai_cn|volcengine)/models\.py)'
+extend-exclude = 'src/nova_ai/(models_generated\.py|providers/data|providers/(anthropic|kimi_coding|moonshotai|moonshotai_cn|openrouter|volcengine)/models\.py)'
 
 [tool.isort]
 skip_gitignore = false
@@ -59,6 +66,7 @@ extend_skip = [
     "src/nova_ai/providers/kimi_coding/models.py",
     "src/nova_ai/providers/moonshotai/models.py",
     "src/nova_ai/providers/moonshotai_cn/models.py",
+    "src/nova_ai/providers/openrouter/models.py",
     "src/nova_ai/providers/volcengine/models.py",
 ]
 profile = "black"

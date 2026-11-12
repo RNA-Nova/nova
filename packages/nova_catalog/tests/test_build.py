@@ -1,42 +1,59 @@
-"""公开 build_catalog 的完整数据流测试。"""
+"""公开 build_catalog 的数据流与 provider 钩子测试。"""
 
 import pytest
 from nova_catalog.build import build_catalog
-from nova_catalog.define import define_provider
-from nova_protocol import KnownApi
-from tests._helpers import FakeSource, model_fields, raw_model
+from nova_catalog.define import define_provider, models_dev_models
+from nova_catalog.providers.openrouter import DEF as OPENROUTER
+from nova_protocol import KnownApi, ModelFields
+
+from tests._helpers import (
+    catalog_sources,
+    image_fields,
+    model_fields,
+    raw_model,
+    raw_openrouter_image,
+)
+
+
+def _models(ctx, provider_id="test", base_url="https://example.com/v1", **kwargs):
+    return models_dev_models(
+        ctx,
+        provider_id,
+        api=kwargs.pop("api", KnownApi.OPENAI_COMPLETIONS),
+        base_url=base_url,
+        **kwargs,
+    )
 
 
 def _definition(**overrides):
-    fields = {
-        "id": "test",
-        "name": "Test",
-        "base_url": "https://example.com/v1",
-        "api": KnownApi.OPENAI_COMPLETIONS,
-    }
-    fields.update(overrides)
-    return define_provider(**fields)
+    provider_id = overrides.pop("id", "test")
+    base_url = overrides.pop("base_url", "https://example.com/v1")
+    models = overrides.pop("models", None)
+    if models is None:
+        models = lambda ctx: _models(ctx, provider_id, base_url)
+    return define_provider(id=provider_id, models=models, **overrides)
 
 
-@pytest.mark.asyncio
-async def test_translation_stamp_and_source_effort():
-    provider = _definition()
-    source = FakeSource({"test": {"models": {"model-a": raw_model()}}})
-    result = await build_catalog([provider], source)
-    model = result["test"][0]
-    assert model["id"] == "model-a"
-    assert model["provider"] == "test"
-    assert model["base_url"] == "https://example.com/v1"
-    assert model["api"] == "openai-completions"
-    assert model["context_window"] == 128000
-    assert model["thinking_level_map"]["high"] == "high"
+def test_translation_stamp_and_source_effort():
+    result = build_catalog(
+        [_definition()], catalog_sources({"test": {"models": {"model-a": raw_model()}}})
+    )
+    model = result["test"].chat[0]
+    assert model.get("id") == "model-a"
+    assert model.get("provider") == "test"
+    assert model.get("base_url") == "https://example.com/v1"
+    assert model.get("api") == "openai-completions"
+    assert model.get("context_window") == 128000
+    assert model.get("thinking_level_map", {}).get("high") == "high"
 
 
-@pytest.mark.asyncio
-async def test_pinned_models_win_and_strict_rejects_bad_ids():
-    pinned = model_fields(name="Pinned")
-    provider = _definition(pinned_models={"model-a": pinned})
-    source = FakeSource(
+def test_pinned_models_win_and_strict_rejects_bad_ids():
+    provider = _definition(
+        models=lambda ctx: _models(
+            ctx, pinned_models={"model-a": model_fields(name="Pinned")}
+        )
+    )
+    source = catalog_sources(
         {
             "test": {
                 "models": {
@@ -46,112 +63,64 @@ async def test_pinned_models_win_and_strict_rejects_bad_ids():
             }
         }
     )
-    result = await build_catalog([provider], source)
-    assert result["test"][0]["name"] == "Pinned"
+    assert build_catalog([provider], source)["test"].chat[0].get("name") == "Pinned"
     with pytest.raises(ValueError, match="missing id"):
-        await build_catalog([provider], source, strict=True)
+        build_catalog([provider], source, strict=True)
 
 
-@pytest.mark.asyncio
-async def test_strict_missing_slice_and_transport_failure():
-    provider = _definition()
+def test_strict_missing_slice_fails():
     with pytest.raises(ValueError, match="missing a valid models slice"):
-        await build_catalog([provider], FakeSource(), strict=True)
-    with pytest.raises(RuntimeError, match="offline"):
-        await build_catalog(
-            [provider], FakeSource(error=RuntimeError("offline")), strict=True
-        )
+        build_catalog([_definition()], catalog_sources(), strict=True)
 
 
-@pytest.mark.asyncio
-async def test_non_strict_failed_source_keeps_pinned_models():
-    provider = _definition(pinned_models={"model-a": model_fields()})
-    result = await build_catalog([provider], FakeSource(error=RuntimeError("offline")))
-    assert [model["id"] for model in result["test"]] == ["model-a"]
-
-
-@pytest.mark.asyncio
-async def test_compat_defaults_are_isolated_by_api():
+def test_compat_defaults_are_isolated_by_api():
     provider = _definition(
-        compat_defaults={"shared": True},
-        compat_defaults_by_api={
+        models=lambda ctx: models_dev_models(
+            ctx,
+            "unused",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            base_url="https://example.com/v1",
+            pinned_models={
+                "chat": model_fields("chat", api="openai-completions"),
+                "message": model_fields("message", api="anthropic-messages"),
+            },
+        ),
+        compat={
             "openai-completions": {"dialect": "openai"},
             "anthropic-messages": {"dialect": "anthropic"},
         },
-        pinned_models={
-            "chat": model_fields("chat", api="openai-completions"),
-            "message": model_fields("message", api="anthropic-messages"),
-        },
     )
-    result = await build_catalog([provider], FakeSource())
-    assert result["test"][0]["compat"] == {"shared": True, "dialect": "openai"}
-    assert result["test"][1]["compat"] == {
-        "shared": True,
-        "dialect": "anthropic",
-    }
+    result = build_catalog([provider], catalog_sources())
+    assert result["test"].chat[0].get("compat") == {"dialect": "openai"}
+    assert result["test"].chat[1].get("compat") == {"dialect": "anthropic"}
 
 
-@pytest.mark.asyncio
-async def test_finalize_runs_after_shared_effort_and_before_finalize_all():
+def test_finalize_runs_after_shared_effort_and_before_finalize_all():
     calls = []
 
-    def finalize(model_id, fields, _ctx):
-        assert fields["thinking_level_map"]["high"] == "high"
-        fields["custom"] = True
-        calls.append(("finalize", model_id))
+    def finalize(fields, _ctx):
+        assert fields.get("thinking_level_map", {}).get("high") == "high"
+        fields["name"] = "finalized"
+        calls.append(("finalize", fields.get("id")))
 
     def finalize_all(models, _ctx):
-        assert all(model.get("custom") for model in models)
+        assert all(model.get("name") == "finalized" for model in models)
         calls.append(("finalize_all", len(models)))
 
     provider = _definition(finalize=finalize, finalize_all=finalize_all)
-    source = FakeSource({"test": {"models": {"model-a": raw_model()}}})
-    result = await build_catalog([provider], source)
-    assert result["test"][0]["custom"] is True
+    result = build_catalog(
+        [provider], catalog_sources({"test": {"models": {"model-a": raw_model()}}})
+    )
+    assert result["test"].chat[0].get("name") == "finalized"
     assert calls == [("finalize", "model-a"), ("finalize_all", 1)]
 
 
-@pytest.mark.asyncio
-async def test_derive_copies_models_and_preserves_source_provenance():
-    parent = _definition(id="parent", name="Parent")
-    child = _definition(
-        id="child",
-        name="Child",
-        base_url="https://child.example.com/v1",
-        api=KnownApi.ANTHROPIC_MESSAGES,
-        derive_from="parent",
-    )
-    source = FakeSource(
-        {"parent": {"models": {"claude-opus-5": raw_model("claude-opus-5")}}}
-    )
-    result = await build_catalog([parent, child], source)
-    derived = result["child"][0]
-    assert derived["id"] == "claude-opus-5"
-    assert derived["provider"] == "child"
-    assert derived["base_url"] == "https://child.example.com/v1"
-    assert derived["api"] == "anthropic-messages"
-    assert derived["thinking_level_map"]["high"] == "high"
-    assert result["parent"][0]["api"] == "openai-completions"
-
-
-@pytest.mark.asyncio
-async def test_derive_cycle_and_unknown_parent_fail():
-    first = _definition(id="a", name="A", derive_from="b")
-    second = _definition(id="b", name="B", derive_from="a")
-    with pytest.raises(ValueError, match="derive cycle"):
-        await build_catalog([first, second], FakeSource())
-    orphan = _definition(id="child", name="Child", derive_from="missing")
-    with pytest.raises(ValueError, match="Unknown provider"):
-        await build_catalog([orphan], FakeSource())
-
-
-@pytest.mark.asyncio
-async def test_image_defaults_apply_after_provider_finalize():
-    def finalize(_model_id, fields, _ctx):
+def test_image_defaults_apply_after_provider_finalize():
+    def finalize(fields, _ctx):
         assert "input_limits" not in fields
 
     provider = _definition(finalize=finalize)
-    source = FakeSource(
+    source = catalog_sources(
         {
             "test": {
                 "models": {
@@ -162,35 +131,144 @@ async def test_image_defaults_apply_after_provider_finalize():
             }
         }
     )
-    result = await build_catalog([provider], source)
-    resize = result["test"][0]["input_limits"]["images"]["resize"]
+    result = build_catalog([provider], source)
+    resize = result["test"].chat[0].get("input_limits", {})["images"]["resize"]
     assert resize["max_width"] == 2000
     assert resize["max_bytes"] == int(4.5 * 1024 * 1024)
 
 
-@pytest.mark.asyncio
-async def test_finalize_all_cannot_mutate_stage_one_seen_by_other_providers():
-    def clear_first(models, _ctx):
-        models.clear()
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("model_type", ["imgae", ""])
+def test_unknown_pinned_model_type_fails_regardless_of_strictness(strict, model_type):
+    provider = _definition(
+        models=lambda ctx: _models(
+            ctx, pinned_models={"typo": image_fields("typo", type=model_type)}
+        )
+    )
+    with pytest.raises(ValueError, match="unknown pinned model type"):
+        build_catalog([provider], catalog_sources(), strict=strict)
 
-    seen = []
 
-    def observe_second(_model_id, _fields, ctx):
-        seen.append(len(ctx.provider_models("first")))
+def test_image_only_provider_builds_separate_catalog():
+    result = build_catalog(
+        [OPENROUTER], catalog_sources(openrouter_images=[raw_openrouter_image()])
+    )
+    catalog = result["openrouter"]
+    assert catalog.chat == []
+    image = catalog.images[0]
+    assert image.get("type") == "image"
+    assert image.get("api") == "openrouter-images"
+    assert image.get("output_types") == ["image"]
+    assert image.get("cost", {}).get("input") == 1
+    assert image.get("input_limits", {})["images"]["resize"]["max_width"] == 2000
+    with pytest.raises(ValueError, match="no usable image models"):
+        build_catalog([OPENROUTER], catalog_sources(), strict=True)
 
-    first = _definition(id="first", name="First", finalize_all=clear_first)
-    second = _definition(id="second", name="Second", finalize=observe_second)
-    source = FakeSource(
+
+def test_map_model_rename_moves_source_provenance_to_final_id():
+    observed = []
+
+    def rename(fields, _source):
+        result = ModelFields(**fields)
+        result["id"] = "renamed"
+        return result
+
+    def finalize(fields, ctx):
+        observed.append(ctx.models_dev_source(fields))
+
+    raw = raw_model("source-id")
+    provider = _definition(
+        models=lambda ctx: _models(ctx, map_model=rename), finalize=finalize
+    )
+    result = build_catalog(
+        [provider], catalog_sources({"test": {"models": {"source-id": raw}}})
+    )
+    assert result["test"].chat[0].get("id") == "renamed"
+    assert observed == [raw]
+    assert result["test"].chat[0].get("thinking_level_map", {}).get("high") == "high"
+
+
+def test_entry_id_wins_over_outer_dictionary_key():
+    result = build_catalog(
+        [_definition()],
+        catalog_sources({"test": {"models": {"alias-key": raw_model("canonical")}}}),
+        strict=True,
+    )
+    assert result["test"].chat[0].get("id") == "canonical"
+
+
+def test_mapped_id_collision_keeps_first_model_and_its_provenance():
+    def rename(fields, _source):
+        return ModelFields(**{**fields, "id": "same"})
+
+    def raw_with_effort(model_id, name, effort):
+        return raw_model(
+            model_id,
+            name=name,
+            capabilities={
+                "tools": {"supported": True},
+                "reasoning": {"supported": True, "effort": [effort]},
+            },
+        )
+
+    provider = _definition(models=lambda ctx: _models(ctx, map_model=rename))
+    result = build_catalog(
+        [provider],
+        catalog_sources(
+            {
+                "test": {
+                    "models": {
+                        "a": raw_with_effort("a", "A", "low"),
+                        "b": raw_with_effort("b", "B", "high"),
+                    }
+                }
+            }
+        ),
+        strict=True,
+    )
+    assert len(result["test"].chat) == 1
+    model = result["test"].chat[0]
+    assert model.get("name") == "A"
+    assert model.get("thinking_level_map", {}).get("low") == "low"
+    assert model.get("thinking_level_map", {}).get("high") is None
+
+
+def test_custom_models_hook_filters_and_rewrites_without_builder_special_cases():
+    """NVIDIA 风格：provider 自行组合在线 ID 过滤与 ID 改写。"""
+
+    def custom(ctx):
+        assert "test" in ctx.sources.models_dev
+        built = models_dev_models(
+            ctx,
+            "test",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            base_url="https://example.com/v1",
+        )
+        result = []
+        for fields in built:
+            if fields.get("id") == "source-model":
+                fields["id"] = "live-model"
+                result.append(fields)
+        return result
+
+    source = catalog_sources(
         {
-            "first": {"models": {"model-a": raw_model()}},
-            "second": {"models": {"model-b": raw_model("model-b")}},
+            "test": {
+                "models": {
+                    "offline-model": raw_model("offline-model"),
+                    "source-model": raw_model("source-model"),
+                }
+            }
         }
     )
-    result = await build_catalog([first, second], source)
-    assert result["first"] == []
-    assert seen == [1]
+    provider = define_provider(id="test", models=custom)
+    result = build_catalog([provider], source)
+    assert [model.get("id") for model in result["test"].chat] == ["live-model"]
 
 
-def test_compat_defaults_by_api_rejects_unknown_api_key():
-    with pytest.raises(ValueError, match="Unknown compat_defaults_by_api"):
-        _definition(compat_defaults_by_api={"openai-completion": {}})
+def test_provider_cannot_stamp_models_for_another_provider():
+    provider = define_provider(
+        id="test", models=lambda _ctx: [model_fields(provider="other")]
+    )
+    with pytest.raises(ValueError, match="another provider"):
+        build_catalog([provider], catalog_sources())

@@ -14,13 +14,22 @@
 
 from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar, Union
 
-from pydantic import ConfigDict, Field, field_serializer
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    TypeAdapter,
+    model_validator,
+)
 
 from .base_model import NovaBaseModel
 from .content import ImageContent, TextContent
 from .enums import WarningKind
 from .events import AssistantMessageEvent
 from .messages import Message, ToolResultMessage
+
+_FRAMEWORK_MESSAGE_ROLES = frozenset({"user", "assistant", "toolResult", "system"})
 
 
 class CustomAgentMessage(NovaBaseModel):
@@ -38,13 +47,29 @@ class CustomAgentMessage(NovaBaseModel):
 
     role: str = "custom"
 
+    @model_validator(mode="after")
+    def _reject_framework_role(self) -> "CustomAgentMessage":
+        if self.role in _FRAMEWORK_MESSAGE_ROLES:
+            raise ValueError(f"role {self.role!r} is reserved for framework messages")
+        return self
 
-# AgentMessage 可以是标准框架消息或任意自定义消息。
-# ``left_to_right``：框架判别联合（``role`` 判别）优先匹配；未知/畸形变体
-# 落兜底成员吸收——前向兼容是契约义务（旧代码读新数据不炸、数据不丢）。
+
+_MESSAGE_ADAPTER = TypeAdapter(Message)
+
+
+def _validate_known_agent_message(value: Any) -> Any:
+    """已知框架 role 必须先通过完整契约校验；只有未知 role 可落自定义兜底。"""
+    if isinstance(value, dict) and value.get("role") in _FRAMEWORK_MESSAGE_ROLES:
+        return _MESSAGE_ADAPTER.validate_python(value)
+    return value
+
+
+# AgentMessage 可以是标准框架消息或任意自定义消息。已知 role 的畸形输入
+# 由前置校验响亮拒绝，未知 role 才由 CustomAgentMessage 吸收并保留额外字段。
 AgentMessage = Annotated[
     Union[Message, CustomAgentMessage],
     Field(union_mode="left_to_right"),
+    BeforeValidator(_validate_known_agent_message),
 ]
 """Agent 循环流动的消息类型（框架消息 ∪ 包级自定义消息）。"""
 
@@ -67,7 +92,7 @@ class AgentToolResult(NovaBaseModel, Generic[TDetails]):
         Annotated[Union[TextContent, ImageContent], Field(discriminator="type")]
     ]
     """Content blocks supporting text and images."""
-    details: TDetails
+    details: SerializeAsAny[TDetails]
     """Details to be displayed in a UI or logged."""
     terminate: Optional[bool] = None
     """
@@ -82,20 +107,33 @@ class AgentToolResult(NovaBaseModel, Generic[TDetails]):
     """
 
 
-def dump_agent_message(value: Any) -> Any:
-    """按**运行时类型**序列化一条 agent 消息（纯转换——``to_*`` 类平凡行为）。
+def dump_agent_message(
+    value: Any,
+    *,
+    wire: bool = True,
+    mode: Literal["python", "json"] = "json",
+    exclude_none: bool = False,
+    exclude_unset: bool = False,
+    exclude_defaults: bool = False,
+) -> Any:
+    """按运行时类型和调用方序列化参数输出一条 agent 消息。
 
-    ``AgentMessage = Union[Message, CustomAgentMessage]``——pydantic 按声明
-    联合序列化时，兜底基座会把 ``BashExecutionMessage`` 等子类剥成基座字段
-    （线上 custom 消息全灭：扩展注入消息、bash 用户工具终态卡都到不了前端）。
-    任何序列化 ``AgentMessage`` 字段的地方都必须经本函数。
+    运行时子类字段必须保留；``wire`` 选择 camelCase 线上或 snake_case
+    持久化形态，其余参数与 Pydantic 的出口语义一致。
     """
-    dump_wire = getattr(value, "dump_wire", None)
-    if callable(dump_wire):
-        return dump_wire()
+    options = {
+        "mode": mode,
+        "exclude_none": exclude_none,
+        "exclude_unset": exclude_unset,
+        "exclude_defaults": exclude_defaults,
+    }
+    if wire:
+        dump_wire = getattr(value, "dump_wire", None)
+        if callable(dump_wire):
+            return dump_wire(**options)
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        return model_dump(mode="json")
+        return model_dump(**options)
     return value
 
 
@@ -103,12 +141,6 @@ class _AgentEventBase(NovaBaseModel):
     """Agent 事件公共基座：事件是不可变值对象。"""
 
     model_config = ConfigDict(frozen=True)
-
-    @field_serializer("message", "messages", check_fields=False)
-    def _ser_messages(self, value: Any) -> Any:
-        if isinstance(value, list):
-            return [dump_agent_message(item) for item in value]
-        return dump_agent_message(value)
 
 
 class AgentStartEvent(_AgentEventBase):
@@ -121,7 +153,7 @@ class AgentEndEvent(_AgentEventBase):
     """一轮 agent 运行结束（``messages`` 为本轮新增消息）。"""
 
     type: Literal["agent_end"] = "agent_end"
-    messages: List[AgentMessage]
+    messages: List[SerializeAsAny[AgentMessage]]
 
 
 class TurnStartEvent(_AgentEventBase):
@@ -134,7 +166,7 @@ class TurnEndEvent(_AgentEventBase):
     """一个 turn 结束（``message`` 为助手消息，``tool_results`` 为本轮工具结果）。"""
 
     type: Literal["turn_end"] = "turn_end"
-    message: AgentMessage
+    message: SerializeAsAny[AgentMessage]
     tool_results: List[ToolResultMessage]
 
 
@@ -142,14 +174,14 @@ class MessageStartEvent(_AgentEventBase):
     """一条消息开始进入上下文。"""
 
     type: Literal["message_start"] = "message_start"
-    message: AgentMessage
+    message: SerializeAsAny[AgentMessage]
 
 
 class MessageUpdateEvent(_AgentEventBase):
     """助手消息流式更新（``assistant_message_event`` 携带底层增量事件）。"""
 
     type: Literal["message_update"] = "message_update"
-    message: AgentMessage
+    message: SerializeAsAny[AgentMessage]
     assistant_message_event: AssistantMessageEvent
 
 
@@ -157,7 +189,7 @@ class MessageEndEvent(_AgentEventBase):
     """一条消息终态落入上下文。"""
 
     type: Literal["message_end"] = "message_end"
-    message: AgentMessage
+    message: SerializeAsAny[AgentMessage]
 
 
 class ToolExecutionStartEvent(_AgentEventBase):

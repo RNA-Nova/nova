@@ -15,18 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Dict,
-    List,
-    Mapping,
-    Optional,
-    Protocol,
-    Union,
-    runtime_checkable,
-)
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
 from nova_protocol import AbortSignal, ModelFields, NovaErrorKind
 
@@ -67,6 +56,8 @@ class CatalogOutcome:
     models_fields: List[ModelFields] = field(default_factory=list)
     # models.dev 原始 reasoningOptions 按模型 id 携带，供 finalize 的 native 门控。
     source_reasoning: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # models.dev 原始 lifecycle 状态；供原料物化回调按 provider 语义过滤。
+    source_status: Dict[str, str] = field(default_factory=dict)
     etag: Optional[str] = None
     last_modified: Optional[int] = None
     # 拉取失败时的原始异常（status=0 的合成码场景——传输/解析错误的分类
@@ -88,7 +79,6 @@ class CatalogService(Protocol):
         key: str,
         signal: Optional[AbortSignal],
         validator: Optional[str],
-        skip_deprecated: bool = False,
     ) -> CatalogOutcome:
         """拉取 ``key``（provider id）对应的目录切片。
 

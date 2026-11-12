@@ -5,11 +5,7 @@
 ``utils/http.py``（跨域共享）。站只拉只翻——修正/盖戳/治理不归这里。
 """
 
-from .models_dev import ModelsDevCatalog, models_dev_to_nova
+from .models_dev import ModelsDevCatalog
 from .pi_dev import PiDevCatalog
 
-__all__ = [
-    "ModelsDevCatalog",
-    "PiDevCatalog",
-    "models_dev_to_nova",
-]
+__all__ = ["ModelsDevCatalog", "PiDevCatalog"]

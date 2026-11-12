@@ -1,11 +1,13 @@
 """volcengine ark_personalize 钩子测试（ark 在售筛选——账户生命周期事实）。"""
 
 import pytest
+from nova_catalog.providers.volcengine import materialize_volcengine_fields
 from nova_protocol import (
     ApiKeyCredential,
     KnownApi,
     Model,
     ModelCost,
+    ModelFields,
     OAuthCredential,
     WarningKind,
 )
@@ -137,3 +139,57 @@ async def test_factory_wires_personalized_strategy():
     assert provider.refresh_models is not None
     assert provider.catalog_source == "models.dev"
     assert provider._dynamic_replaces_baseline is True
+
+
+async def test_materialize_applies_only_evidence_based_volcengine_corrections():
+    fields = [
+        ModelFields(
+            id="deepseek-v4-flash-test",
+            name="DeepSeek",
+            reasoning=True,
+            input_types=["text"],
+            cost={"input": 1, "output": 2, "cache_read": 0, "cache_write": 0},
+            context_window=1000000,
+            max_tokens=1000000,
+        ),
+        ModelFields(
+            id="doubao-seed-character-test",
+            name="Character",
+            reasoning=True,
+            input_types=["text", "image"],
+            cost={"input": 1, "output": 2, "cache_read": 0, "cache_write": 0},
+            context_window=256000,
+            max_tokens=256000,
+        ),
+    ]
+    result = materialize_volcengine_fields(fields, {})
+    deepseek, character = result.models_fields
+    assert deepseek["provider"] == "volcengine"
+    assert deepseek["api"] == "openai-completions"
+    assert deepseek["thinking_level_map"]["off"] == "none"
+    assert deepseek["thinking_level_map"]["xhigh"] == "xhigh"
+    assert deepseek["compat"]["thinking_format"] == "deepseek"
+    assert character["max_tokens"] == 32768
+
+    filtered = materialize_volcengine_fields(fields, {fields[0]["id"]: "deprecated"})
+    assert [field["id"] for field in filtered.models_fields] == [fields[1]["id"]]
+    assert filtered.remove_ids == frozenset({fields[0]["id"]})
+
+
+async def test_materialize_preserves_complete_pinned_facts_over_upstream():
+    pinned_id = "deepseek-v4-flash-260425"
+    upstream = ModelFields(
+        id=pinned_id,
+        name="Upstream",
+        reasoning=False,
+        input_types=["text"],
+        cost={"input": 99, "output": 99, "cache_read": 99, "cache_write": 99},
+        context_window=4096,
+        max_tokens=4096,
+    )
+    result = materialize_volcengine_fields([upstream], {})
+    model = result.models_fields[0]
+    assert model["name"] == "Deepseek-V4-Flash"
+    assert model["cost"]["input"] == 1
+    assert model["context_window"] == 1048576
+    assert model["max_tokens"] == 393216

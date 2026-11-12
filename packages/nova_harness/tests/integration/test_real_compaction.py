@@ -15,7 +15,7 @@ import pytest
 from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
 from nova_harness.types.session.config import CreateAgentSessionOptions
 
-from nova_ai.providers import get_volcengine_model
+from nova_ai import get_builtin_model
 
 pytestmark = pytest.mark.integration
 
@@ -45,7 +45,9 @@ async def _make_session(cwd: str):
     runtime = await create_agent_session_runtime(
         CreateAgentSessionOptions(cwd=cwd, agent_name="coding_agent")
     )
-    ok = await runtime.session.set_model(get_volcengine_model(MODEL_ID))
+    model = get_builtin_model("volcengine", MODEL_ID)
+    assert model is not None
+    ok = await runtime.session.set_model(model)
     assert ok
     return runtime
 

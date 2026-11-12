@@ -1,5 +1,6 @@
-"""anthropic_messages/compat.py 测试（默认值合并 + 显式覆盖 + 判别忽略）。"""
+"""anthropic_messages/compat.py 测试（默认值合并 + 显式覆盖 + 判别拒绝）。"""
 
+import pytest
 from nova_protocol import AnthropicMessagesCompat, KnownApi, Model, ModelCost
 
 from nova_ai.api_impls.anthropic_messages.compat import get_compat
@@ -55,11 +56,9 @@ class TestOverrides:
         # 未覆盖字段保持默认
         assert compat.supports_strict_tools is False
 
-    def test_foreign_api_compat_ignored(self):
-        """别的协议的 compat 对象不构成覆盖（判别归 Model.api）。"""
+    def test_foreign_api_compat_rejected(self):
+        """别的协议的 compat 实例在模型边界响亮失败。"""
         from nova_protocol import OpenAICompletionsCompat
 
-        compat = get_compat(
+        with pytest.raises(ValueError, match="compat"):
             _model(compat=OpenAICompletionsCompat(supports_store=False))
-        )
-        assert compat.supports_temperature is True

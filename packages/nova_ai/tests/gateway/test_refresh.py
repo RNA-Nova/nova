@@ -248,12 +248,17 @@ class TestDynamicProvider:
 
     async def test_refresh_models_concurrent_calls(self):
         call_count = 0
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
 
         async def fetch_models(context: RefreshModelsContext) -> List[Model]:
             nonlocal call_count
             call_count += 1
-            await asyncio.sleep(0.05)
-            return [_make_model("d1")]
+            if call_count == 1:
+                first_started.set()
+                await release_first.wait()
+                return [_make_model("old")]
+            return [_make_model("new")]
 
         provider = create_provider(
             id="test",
@@ -262,21 +267,23 @@ class TestDynamicProvider:
         )
         provider.refresh_models = callback_refresh(provider, fetch_models)
 
-        # 并发经 ModelsManager 刷新：supersede 语义（对齐 pi）——各轮独立运行，
-        # 世代校验保证终态一致（后发布者胜出，不会出现目录混合）
+        # 两轮返回不同目录：旧轮次即使最后才结束，也不能覆盖新轮次。
         from nova_ai.gateway import ModelsManager
 
         store = InMemoryModelsStore()
         models = ModelsManager(models_store=store)
         models.set_provider(provider)
-        await asyncio.gather(models.refresh(), models.refresh())
+        first = asyncio.create_task(models.refresh())
+        await first_started.wait()
+        await models.refresh()
+        release_first.set()
+        await first
 
-        # supersede 生效：后到的刷新废弃先到的（先者在网络阶段前即收场，
-        # 不再 fetch），终态由后到者发布——不会出现目录混合
-        assert call_count == 2  # manager 不做半共享；两轮独立进入网络段
-        final = provider.get_models()
-        assert len(final) == 1
-        assert final[0].id == "d1"
+        assert call_count == 2
+        assert [model.id for model in provider.get_models()] == ["new"]
+        persisted = await store.read("test")
+        assert persisted is not None
+        assert [model.id for model in persisted.models] == ["new"]
 
 
 class TestProviderFilterModels:

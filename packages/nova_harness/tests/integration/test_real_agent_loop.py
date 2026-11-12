@@ -19,12 +19,18 @@ from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
 from nova_harness.types.session.config import CreateAgentSessionOptions
 
-from nova_ai.providers import get_kimi_coding_model, get_volcengine_model
+from nova_ai import get_builtin_model
 
 pytestmark = pytest.mark.integration
 
 VOLCENGINE_ID = "deepseek-v4-flash-260425"
 KIMI_ID = "k2p7"
+
+
+def _require_model(provider_id: str, model_id: str):
+    model = get_builtin_model(provider_id, model_id)
+    assert model is not None
+    return model
 
 
 async def _has_credential(provider: str) -> bool:
@@ -89,7 +95,7 @@ async def test_volcengine_basic_conversation():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             await runtime.session.prompt("用一个词回答：pong")
             await runtime.session.agent.wait_for_idle()
@@ -108,7 +114,7 @@ async def test_kimi_basic_conversation():
     if not await _has_credential("kimi-coding"):
         pytest.skip("无 kimi-coding 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_kimi_coding_model(KIMI_ID))
+        runtime = await _make_session(cwd, _require_model("kimi-coding", KIMI_ID))
         try:
             await runtime.session.prompt("用一个词回答：pong")
             await runtime.session.agent.wait_for_idle()
@@ -154,7 +160,7 @@ async def test_tool_call_full_cycle_volcengine():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             await _tool_cycle_assert(runtime, "volcengine")
         finally:
@@ -166,7 +172,7 @@ async def test_tool_call_full_cycle_kimi():
     if not await _has_credential("kimi-coding"):
         pytest.skip("无 kimi-coding 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_kimi_coding_model(KIMI_ID))
+        runtime = await _make_session(cwd, _require_model("kimi-coding", KIMI_ID))
         try:
             await _tool_cycle_assert(runtime, "kimi-coding")
         finally:
@@ -184,7 +190,7 @@ async def test_streaming_events_and_thinking_blocks():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             await session.set_thinking_level("high")
@@ -212,13 +218,13 @@ async def test_model_switch_provenance():
     if not all(creds):
         pytest.skip("需要双 provider 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_kimi_coding_model(KIMI_ID))
+        runtime = await _make_session(cwd, _require_model("kimi-coding", KIMI_ID))
         try:
             session = runtime.session
             await session.prompt("用一个词回答：你好")
             await session.agent.wait_for_idle()
 
-            assert await session.set_model(get_volcengine_model(VOLCENGINE_ID))
+            assert await session.set_model(_require_model("volcengine", VOLCENGINE_ID))
             await session.prompt("再用一个词回答：再见")
             await session.agent.wait_for_idle()
 
@@ -240,7 +246,7 @@ async def test_follow_up_idle_starts_new_turn():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             events = _subscribe_events(session)
@@ -263,7 +269,7 @@ async def test_user_tool_injects_context():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             await session.invoke_user_tool(
@@ -298,7 +304,7 @@ async def test_skill_injection_marker_real():
         )
         try:
             session = runtime.session
-            assert await session.set_model(get_volcengine_model(VOLCENGINE_ID))
+            assert await session.set_model(_require_model("volcengine", VOLCENGINE_ID))
             await session.prompt("/skill:marker 一句话：1+1=?")
             await session.agent.wait_for_idle()
             assert "[marker 生效]" in _text_of(_assistant_messages(session)[-1])
@@ -317,7 +323,7 @@ async def test_multi_tool_calls():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             await session.prompt(
@@ -340,7 +346,7 @@ async def test_abort_mid_turn_and_recover():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             prompt_task = asyncio.create_task(
@@ -371,7 +377,7 @@ async def test_session_persisted_jsonl():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             await session.prompt("用一个词回答：存证")
@@ -404,7 +410,7 @@ async def test_compact_boundary_real():
     if not await _has_credential("volcengine"):
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
-        runtime = await _make_session(cwd, get_volcengine_model(VOLCENGINE_ID))
+        runtime = await _make_session(cwd, _require_model("volcengine", VOLCENGINE_ID))
         try:
             session = runtime.session
             await session.prompt("用一个词回答：短")

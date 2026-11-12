@@ -4,25 +4,63 @@ import json
 
 import pytest
 from nova_catalog import model_data as mdata
-from nova_catalog.define import define_provider
+from nova_catalog.define import define_provider, models_dev_models, stamp_fields
 from nova_catalog.generate import main
+from nova_catalog.sources.openrouter import openrouter_images_to_nova
 from nova_protocol import KnownApi
-from tests._helpers import FakeSource, model_fields, raw_model, write_generated_fixture
+
+from tests._helpers import (
+    catalog_sources,
+    classifier_fields,
+    model_fields,
+    raw_model,
+    raw_openrouter_image,
+    write_generated_fixture,
+)
 
 
 def _definition(provider_id="test", **overrides):
-    fields = {
-        "id": provider_id,
-        "name": provider_id,
-        "base_url": "https://example.com/v1",
-        "api": KnownApi.OPENAI_COMPLETIONS,
-    }
-    fields.update(overrides)
-    return define_provider(**fields)
+    base_url = overrides.pop("base_url", "https://example.com/v1")
+    api = overrides.pop("api", KnownApi.OPENAI_COMPLETIONS)
+    include_chat = overrides.pop("include_chat", True)
+    image_source = overrides.pop("image_source", None)
+    pinned = overrides.pop("pinned_models", None)
+
+    def models(ctx):
+        return models_dev_models(
+            ctx,
+            provider_id,
+            api=api,
+            base_url=base_url,
+            pinned_models=pinned,
+            **overrides,
+        )
+
+    def images(ctx):
+        sourced = openrouter_images_to_nova(
+            ctx.provider_id, ctx.sources.openrouter_images
+        )
+        if ctx.strict and not sourced:
+            raise ValueError("OpenRouter returned no usable image models")
+        return [
+            stamp_fields(
+                fields.get("id") or "",
+                fields,
+                provider_id=provider_id,
+                base_url=base_url,
+            )
+            for fields in sourced
+        ]
+
+    return define_provider(
+        id=provider_id,
+        models=models if include_chat else None,
+        images=images if image_source == "openrouter" else None,
+    )
 
 
 def _source(*provider_ids):
-    return FakeSource(
+    return catalog_sources(
         {
             provider_id: {"models": {"model-a": raw_model()}}
             for provider_id in provider_ids
@@ -38,12 +76,18 @@ def _tree_bytes(root):
     }
 
 
+def _tree_directories(root):
+    return {
+        path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()
+    }
+
+
 def test_full_cli_generates_and_validates_minimal_tree(tmp_path):
     result = main(
         [],
         package_root=tmp_path,
         provider_definitions=[_definition()],
-        source=_source("test"),
+        sources=_source("test"),
     )
     assert result == 0
     mdata.validate_generated_model_data(tmp_path)
@@ -51,7 +95,12 @@ def test_full_cli_generates_and_validates_minimal_tree(tmp_path):
     data = json.loads(
         (mdata.generated_data_dir(tmp_path) / "test.json").read_text("utf-8")
     )
-    assert data["openai-completions"]["model-a"]["provider"] == "test"
+    assert data["openai-completions"]["chat:model-a"]["provider"] == "test"
+    shard = mdata.generated_shard_path(tmp_path, "test").read_text("utf-8")
+    assert shard.count(".read_text(") == 1
+    assert shard.count("json.loads(") == 1
+    assert "def get_" not in shard
+    assert "def list_" not in shard
 
 
 def test_data_only_excludes_new_provider_from_existing_aggregator(tmp_path):
@@ -60,7 +109,7 @@ def test_data_only_excludes_new_provider_from_existing_aggregator(tmp_path):
         ["--data-only"],
         package_root=tmp_path,
         provider_definitions=[_definition(), _definition("new")],
-        source=_source("test", "new"),
+        sources=_source("test", "new"),
     )
     assert result == 0
     assert not (mdata.generated_data_dir(tmp_path) / "new.json").exists()
@@ -79,7 +128,7 @@ def test_full_generation_removes_deleted_provider_outputs(tmp_path):
         [],
         package_root=tmp_path,
         provider_definitions=[_definition("keep")],
-        source=_source("keep"),
+        sources=_source("keep"),
     )
     assert result == 0
     assert not (mdata.generated_data_dir(tmp_path) / "old.json").exists()
@@ -94,7 +143,7 @@ def test_data_only_rejects_provider_missing_from_definitions(tmp_path):
             ["--data-only"],
             package_root=tmp_path,
             provider_definitions=[],
-            source=FakeSource(),
+            sources=catalog_sources(),
         )
 
 
@@ -107,6 +156,7 @@ def test_post_commit_validation_failure_rolls_back_everything(monkeypatch, tmp_p
         },
     )
     before = _tree_bytes(tmp_path)
+    before_directories = _tree_directories(tmp_path)
     original = mdata.validate_generated_model_data
     calls = 0
 
@@ -123,7 +173,34 @@ def test_post_commit_validation_failure_rolls_back_everything(monkeypatch, tmp_p
             [],
             package_root=tmp_path,
             provider_definitions=[_definition(), _definition("new")],
-            source=_source("test", "new"),
+            sources=_source("test", "new"),
+        )
+    assert _tree_bytes(tmp_path) == before
+    assert _tree_directories(tmp_path) == before_directories
+
+
+def test_keyboard_interrupt_during_commit_rolls_back_everything(monkeypatch, tmp_path):
+    write_generated_fixture(tmp_path)
+    before = _tree_bytes(tmp_path)
+    original = mdata.validate_generated_model_data
+    calls = 0
+
+    def interrupt_second_validation(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt()
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        mdata, "validate_generated_model_data", interrupt_second_validation
+    )
+    with pytest.raises(KeyboardInterrupt):
+        main(
+            [],
+            package_root=tmp_path,
+            provider_definitions=[_definition(), _definition("new")],
+            sources=_source("test", "new"),
         )
     assert _tree_bytes(tmp_path) == before
 
@@ -141,7 +218,25 @@ def test_staging_validation_failure_never_touches_formal_tree(monkeypatch, tmp_p
             [],
             package_root=tmp_path,
             provider_definitions=[_definition()],
-            source=_source("test"),
+            sources=_source("test"),
+        )
+    assert _tree_bytes(tmp_path) == before
+
+
+def test_invalid_model_schema_never_touches_formal_tree(tmp_path):
+    write_generated_fixture(tmp_path)
+    before = _tree_bytes(tmp_path)
+    provider = _definition(
+        pinned_models={
+            "model-a": model_fields(compat={"supports_strict_mode": "not-a-bool"})
+        }
+    )
+    with pytest.raises(ValueError, match="Model schema"):
+        main(
+            [],
+            package_root=tmp_path,
+            provider_definitions=[provider],
+            sources=catalog_sources(),
         )
     assert _tree_bytes(tmp_path) == before
 
@@ -154,26 +249,29 @@ def test_mixed_api_models_are_grouped_per_model(tmp_path):
         }
     )
     result = main(
-        [], package_root=tmp_path, provider_definitions=[provider], source=FakeSource()
+        [],
+        package_root=tmp_path,
+        provider_definitions=[provider],
+        sources=catalog_sources(),
     )
     assert result == 0
     data = json.loads(
         (mdata.generated_data_dir(tmp_path) / "test.json").read_text("utf-8")
     )
     assert set(data) == {"openai-completions", "anthropic-messages"}
-    assert set(data["openai-completions"]) == {"chat"}
-    assert set(data["anthropic-messages"]) == {"message"}
+    assert set(data["openai-completions"]) == {"chat:chat"}
+    assert set(data["anthropic-messages"]) == {"chat:message"}
 
 
-def test_strict_upstream_failure_never_touches_formal_tree(tmp_path):
+def test_strict_missing_source_never_touches_formal_tree(tmp_path):
     write_generated_fixture(tmp_path)
     before = _tree_bytes(tmp_path)
-    with pytest.raises(RuntimeError, match="offline"):
+    with pytest.raises(ValueError, match="missing a valid models slice"):
         main(
             ["--strict"],
             package_root=tmp_path,
             provider_definitions=[_definition()],
-            source=FakeSource(error=RuntimeError("offline")),
+            sources=catalog_sources(),
         )
     assert _tree_bytes(tmp_path) == before
 
@@ -187,7 +285,7 @@ def test_full_generation_removes_orphan_shard_not_in_old_aggregator(tmp_path):
         [],
         package_root=tmp_path,
         provider_definitions=[_definition()],
-        source=_source("test"),
+        sources=_source("test"),
     )
     assert result == 0
     assert not orphan.exists()
@@ -201,7 +299,7 @@ def test_data_only_removes_stale_json(tmp_path):
         ["--data-only"],
         package_root=tmp_path,
         provider_definitions=[_definition()],
-        source=_source("test"),
+        sources=_source("test"),
     )
     assert result == 0
     assert not stale.exists()
@@ -210,10 +308,56 @@ def test_data_only_removes_stale_json(tmp_path):
 def test_custom_api_is_preserved_in_generated_data(tmp_path):
     provider = _definition(pinned_models={"model-a": model_fields(api="custom-api")})
     result = main(
-        [], package_root=tmp_path, provider_definitions=[provider], source=FakeSource()
+        [],
+        package_root=tmp_path,
+        provider_definitions=[provider],
+        sources=catalog_sources(),
     )
     assert result == 0
     data = json.loads(
         (mdata.generated_data_dir(tmp_path) / "test.json").read_text("utf-8")
     )
-    assert data["custom-api"]["model-a"]["api"] == "custom-api"
+    assert data["custom-api"]["chat:model-a"]["api"] == "custom-api"
+
+
+def test_chat_and_image_entries_can_share_an_id(tmp_path):
+    provider = _definition(
+        image_source="openrouter",
+        pinned_models={"model-a": model_fields()},
+    )
+    result = main(
+        [],
+        package_root=tmp_path,
+        provider_definitions=[provider],
+        sources=catalog_sources(openrouter_images=[raw_openrouter_image("model-a")]),
+    )
+    assert result == 0
+    data = json.loads(
+        (mdata.generated_data_dir(tmp_path) / "test.json").read_text("utf-8")
+    )
+    assert data["openai-completions"]["chat:model-a"]["type"] == "chat"
+    assert data["openrouter-images"]["image:model-a"]["type"] == "image"
+    mdata.validate_generated_model_data(tmp_path)
+
+
+def test_chat_and_classifier_entries_can_share_an_id(tmp_path):
+    provider = define_provider(
+        id="test",
+        models=lambda _ctx: [model_fields()],
+        classifiers=lambda _ctx: [classifier_fields()],
+    )
+    result = main(
+        [],
+        package_root=tmp_path,
+        provider_definitions=[provider],
+        sources=catalog_sources(),
+    )
+    assert result == 0
+    data = json.loads(
+        (mdata.generated_data_dir(tmp_path) / "test.json").read_text("utf-8")
+    )
+    assert data["openai-completions"]["chat:model-a"]["type"] == "chat"
+    classifier = data["typesafe-system-one"]["classifier:model-a"]
+    assert classifier["type"] == "classifier"
+    assert classifier["context_window"] == 32000
+    mdata.validate_generated_model_data(tmp_path)

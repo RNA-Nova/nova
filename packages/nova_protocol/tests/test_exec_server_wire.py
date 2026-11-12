@@ -2,11 +2,17 @@
 
 import base64
 
+import pytest
 from nova_protocol import (
     FileMetadata,
+    FileSystemSandboxContext,
+    FsReadBlockResponse,
+    FsReadFileResponse,
+    FsReadStreamChunkNotification,
     FsReadStreamParams,
     InitializeParams,
     ProcessOutputChunk,
+    ProcessOutputDeltaNotification,
     ProcessReadResponse,
     ProcessStartParams,
 )
@@ -147,10 +153,12 @@ def test_process_start_params():
 
 def test_process_output_chunk_decode():
     """测试进程输出块 base64 解码"""
-    chunk = ProcessOutputChunk(
-        seq=1,
-        stream="stdout",
-        chunk=base64.b64encode(b"hello").decode(),
+    chunk = ProcessOutputChunk.model_validate(
+        {
+            "seq": 1,
+            "stream": "stdout",
+            "chunk": base64.b64encode(b"hello").decode(),
+        }
     )
     assert chunk.chunk == b"hello"
 
@@ -434,14 +442,16 @@ def test_permission_profile_wire_shape_matches_codex_golden():
         ExecFileSystemPath,
         ExecFileSystemSandboxEntry,
         ExecManagedFileSystemPermissions,
+        ExecManagedPermissionProfile,
         ExecPermissionProfile,
+        ExecRestrictedFileSystemPermissions,
         FileSystemAccessMode,
         NetworkSandboxPolicy,
     )
 
-    profile = ExecPermissionProfile(
+    profile = ExecManagedPermissionProfile(
         type="managed",
-        file_system=ExecManagedFileSystemPermissions(
+        file_system=ExecRestrictedFileSystemPermissions(
             type="restricted",
             entries=[
                 ExecFileSystemSandboxEntry(
@@ -478,8 +488,10 @@ def test_permission_profile_wire_shape_matches_codex_golden():
         "network": "restricted",
     }
     # 同一字面量 roundtrip 不丢字段
+    from pydantic import TypeAdapter
+
     assert (
-        ExecPermissionProfile.model_validate(
+        TypeAdapter(ExecPermissionProfile).validate_python(
             profile.model_dump(by_alias=True, exclude_none=True)
         )
         == profile
@@ -700,3 +712,103 @@ def test_network_policy_request_port_is_u16():
             ExecServerNetworkPolicyRequest.model_validate(
                 {"protocol": "https_connect", "host": "example.com", "port": port}
             )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda value: ProcessOutputChunk(seq=1, stream="stdout", chunk=value),
+        lambda value: ProcessOutputDeltaNotification(
+            processId="p", seq=1, stream="stdout", chunk=value
+        ),
+        lambda value: FsReadBlockResponse(chunk=value, eof=False),
+        lambda value: FsReadStreamChunkNotification(
+            handleId="h", seq=1, chunk=value, eof=False
+        ),
+    ],
+)
+def test_binary_chunks_have_symmetric_base64_roundtrip(factory):
+    encoded = base64.b64encode(b"\xff\x00").decode()
+    model = factory(encoded)
+    dumped = model.model_dump(mode="json")
+    assert dumped["chunk"] == encoded
+    assert type(model).model_validate(dumped).chunk == b"\xff\x00"
+
+
+def test_binary_wire_rejects_invalid_base64():
+    with pytest.raises(ValueError):
+        ProcessOutputChunk.model_validate(
+            {"seq": 1, "stream": "stdout", "chunk": "!!!!"}
+        )
+    with pytest.raises(ValueError):
+        FsReadFileResponse(dataBase64="!!!!").data
+
+
+def test_process_and_fs_fields_reject_out_of_contract_scalars():
+    from nova_protocol import (
+        FsReadBlockParams,
+        ProcessStartResponse,
+        ProcessWriteResponse,
+        WalkEntry,
+    )
+
+    with pytest.raises(ValueError):
+        FsReadBlockParams.model_validate({"handleId": "h", "offset": -1, "len": 1})
+    with pytest.raises(ValueError):
+        ProcessOutputChunk.model_validate({"seq": 1, "stream": "invalid", "chunk": ""})
+    with pytest.raises(ValueError):
+        ProcessWriteResponse.model_validate({"status": "unknown"})
+    with pytest.raises(ValueError):
+        ProcessStartResponse.model_validate(
+            {"processId": "p", "sandboxType": "unknown"}
+        )
+    with pytest.raises(ValueError):
+        WalkEntry.model_validate({"path": "file:///a", "kind": "unknown"})
+
+
+def test_permission_variants_match_rust_literal_shapes():
+    from nova_protocol import ExecManagedFileSystemPermissions, ExecPermissionProfile
+    from pydantic import TypeAdapter
+
+    profiles = TypeAdapter(ExecPermissionProfile)
+    disabled = profiles.validate_python({"type": "disabled"})
+    assert disabled.model_dump(exclude_none=True) == {"type": "disabled"}
+    external = profiles.validate_python({"type": "external", "network": "enabled"})
+    assert external.model_dump(exclude_none=True) == {
+        "type": "external",
+        "network": "enabled",
+    }
+    unrestricted = TypeAdapter(ExecManagedFileSystemPermissions).validate_python(
+        {"type": "unrestricted"}
+    )
+    assert unrestricted.model_dump(exclude_none=True) == {"type": "unrestricted"}
+
+
+def test_nested_sandbox_dict_is_validated_instead_of_bypassing_models():
+    with pytest.raises(ValueError):
+        ProcessStartParams.model_validate(
+            {
+                "processId": "p",
+                "argv": ["true"],
+                "cwd": "file:///tmp",
+                "env": {},
+                "sandbox": {
+                    "permissions": {
+                        "type": "managed",
+                        "file_system": {
+                            "type": "restricted",
+                            "entries": "not-a-list",
+                        },
+                    }
+                },
+            }
+        )
+
+
+def test_sandbox_factories_accept_windows_absolute_paths():
+    read_only = FileSystemSandboxContext.read_only(r"C:\work")
+    assert read_only.policy_context is not None
+    assert read_only.policy_context.cwd == "file:///C:/work"
+    workspace = FileSystemSandboxContext.workspace_write(r"\\server\share\work")
+    assert workspace.policy_context is not None
+    assert workspace.policy_context.cwd == "file://server/share/work"

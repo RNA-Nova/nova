@@ -16,6 +16,7 @@ from nova_harness.types.session.model import ScopedModelConfig
 from nova_protocol import Model, ModelThinkingLevel
 
 from nova_ai import clamp_thinking_level
+from nova_ai import models_are_equal as models_are_equal_upstream
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -89,8 +90,8 @@ def _provider_str(provider: Any) -> str:
 
 
 def _models_are_equal(a: Model, b: Model) -> bool:
-    """比较两个模型是否等价（provider + id）。"""
-    return a.provider == b.provider and a.id == b.id
+    """聊天解析的窄封装；比较规则仍归 AI 正典。"""
+    return models_are_equal_upstream(a, b)
 
 
 # ---------------------------------------------------------------------------

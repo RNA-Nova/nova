@@ -7,6 +7,7 @@ from nova_protocol import (
     AgentToolResult,
     AssistantMessage,
     DoneEvent,
+    ErrorEvent,
     Model,
     StartEvent,
     TextContent,
@@ -166,8 +167,10 @@ def make_assistant_message(
 def make_stream(events: list) -> EventStream:
     """按给定事件列表构造 EventStream（end 收尾）。"""
     stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
+        is_complete=lambda e: getattr(e, "type", None) in ("done", "error"),
+        extract_result=lambda e: (
+            e.message if getattr(e, "type", None) == "done" else e.error
+        ),
     )
     for event in events:
         stream.push(event)
@@ -196,7 +199,10 @@ def final_stream(
     if text:
         events.append(TextDeltaEvent(content_index=0, delta=text, partial=partial))
         events.append(TextEndEvent(content_index=0, content=text, partial=partial))
-    events.append(DoneEvent(reason=stop_reason, message=partial))
+    if stop_reason in ("error", "aborted"):
+        events.append(ErrorEvent(reason=stop_reason, error=partial))
+    else:
+        events.append(DoneEvent(reason=stop_reason, message=partial))
     return make_stream(events)
 
 

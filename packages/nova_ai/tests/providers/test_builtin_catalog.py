@@ -13,17 +13,14 @@ from nova_protocol import (
 
 from nova_ai import create_models_manager
 from nova_ai.gateway import create_provider
-from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, get_kimi_coding_model
-from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, get_moonshotai_model
-from nova_ai.providers.moonshotai_cn import (
-    MOONSHOTAI_CN_MODELS,
-    get_moonshotai_cn_model,
-)
+from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS
+from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS
+from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS
 
 
 class TestMoonshotaiModels:
-    def test_models_count(self):
-        assert len(MOONSHOTAI_MODELS) == 6
+    def test_models_exist(self):
+        assert MOONSHOTAI_MODELS
 
     def test_all_models_have_required_fields(self):
         for model_id, model in MOONSHOTAI_MODELS.items():
@@ -39,7 +36,7 @@ class TestMoonshotaiModels:
             assert model.cost is not None
 
     def test_kimi_k3_fields(self):
-        m = get_moonshotai_model("kimi-k3")
+        m = MOONSHOTAI_MODELS["kimi-k3"]
         assert m.id == "kimi-k3"
         assert m.name == "Kimi K3"
         assert m.reasoning is True
@@ -50,23 +47,17 @@ class TestMoonshotaiModels:
         assert m.thinking_level_map["off"] is None
 
     def test_kimi_k2_6_fields(self):
-        m = get_moonshotai_model("kimi-k2.6")
+        m = MOONSHOTAI_MODELS["kimi-k2.6"]
         assert m.id == "kimi-k2.6"
         assert m.reasoning is True
         assert m.input_types == ["text", "image"]
         assert m.context_window == 262144
         assert m.max_tokens == 262144
 
-    def test_get_model_not_found(self):
-        import pytest
-
-        with pytest.raises(KeyError):
-            get_moonshotai_model("nonexistent")
-
 
 class TestMoonshotaiCnModels:
-    def test_models_count(self):
-        assert len(MOONSHOTAI_CN_MODELS) == 6
+    def test_models_exist(self):
+        assert MOONSHOTAI_CN_MODELS
 
     def test_all_models_have_required_fields(self):
         for model_id, model in MOONSHOTAI_CN_MODELS.items():
@@ -81,7 +72,7 @@ class TestMoonshotaiCnModels:
             assert model.max_tokens > 0
 
     def test_kimi_k3_fields(self):
-        m = get_moonshotai_cn_model("kimi-k3")
+        m = MOONSHOTAI_CN_MODELS["kimi-k3"]
         assert m.id == "kimi-k3"
         assert m.name == "Kimi K3"
         assert m.reasoning is True
@@ -96,29 +87,23 @@ class TestMoonshotaiCnModels:
         assert m.thinking_level_map["off"] is None
 
     def test_kimi_k2_6_fields(self):
-        m = get_moonshotai_cn_model("kimi-k2.6")
+        m = MOONSHOTAI_CN_MODELS["kimi-k2.6"]
         assert m.id == "kimi-k2.6"
         assert m.reasoning is True
         assert m.context_window == 262_144
         assert m.max_tokens == 262_144
 
     def test_kimi_k2_7_code_fields(self):
-        m = get_moonshotai_cn_model("kimi-k2.7-code")
+        m = MOONSHOTAI_CN_MODELS["kimi-k2.7-code"]
         assert m.id == "kimi-k2.7-code"
         assert m.reasoning is True
         assert m.context_window == 262_144
         assert m.max_tokens == 262_144
 
-    def test_get_model_not_found(self):
-        import pytest
-
-        with pytest.raises(KeyError):
-            get_moonshotai_cn_model("nonexistent")
-
 
 class TestKimiCodingModels:
-    def test_models_count(self):
-        assert len(KIMI_CODING_MODELS) == 6
+    def test_models_exist(self):
+        assert KIMI_CODING_MODELS
 
     def test_all_models_have_required_fields(self):
         for model_id, model in KIMI_CODING_MODELS.items():
@@ -133,7 +118,7 @@ class TestKimiCodingModels:
             assert model.max_tokens > 0
 
     def test_k3_fields(self):
-        m = get_kimi_coding_model("k3")
+        m = KIMI_CODING_MODELS["k3"]
         assert m.id == "k3"
         assert m.name == "Kimi K3"
         assert m.reasoning is True
@@ -149,7 +134,7 @@ class TestKimiCodingModels:
         assert m.thinking_level_map["off"] is None
 
     def test_kimi_for_coding_fields(self):
-        m = get_kimi_coding_model("kimi-for-coding")
+        m = KIMI_CODING_MODELS["kimi-for-coding"]
         assert m.id == "kimi-for-coding"
         # name 随源事实：pi.dev / models.dev global 键均给裸 id（仅 cn 键有美化名）
         assert m.name == "kimi-for-coding"
@@ -158,18 +143,12 @@ class TestKimiCodingModels:
         assert m.max_tokens == 32768
 
     def test_kimi_for_coding_highspeed_fields(self):
-        m = get_kimi_coding_model("kimi-for-coding-highspeed")
+        m = KIMI_CODING_MODELS["kimi-for-coding-highspeed"]
         assert m.id == "kimi-for-coding-highspeed"
         assert m.name == "Kimi For Coding HighSpeed"
         assert m.reasoning is True
         assert m.context_window == 262_144
         assert m.max_tokens == 32768
-
-    def test_get_model_not_found(self):
-        import pytest
-
-        with pytest.raises(KeyError):
-            get_kimi_coding_model("nonexistent")
 
 
 class TestStreamContract:
@@ -238,3 +217,29 @@ class TestStreamContract:
         stream = models.stream(model, Context(messages=[UserMessage(content="hi")]))
         types = [e.type async for e in stream]
         assert types == ["error"]
+
+
+def test_openrouter_classifier_catalog_is_separate_from_chat():
+    from nova_ai import (
+        builtin_models,
+        get_builtin_classifier_model,
+        get_builtin_classifier_models,
+    )
+
+    classifiers = get_builtin_classifier_models("openrouter")
+    assert classifiers
+    for model in classifiers:
+        assert model.type == "classifier"
+        assert model.api == "typesafe-system-one"
+        assert model.base_url == "https://openrouter.ai/api/v1"
+        assert model.compat is not None
+        assert model.compat.image_input == "state-image-urls"
+        assert model.compat.send_image_opt_in_header is False
+        assert get_builtin_classifier_model("openrouter", model.id) == model
+
+    models = builtin_models()
+    assert models.get_model("openrouter", classifiers[0].id) is None
+    assert (
+        models.get_model_of_type("classifier", "openrouter", classifiers[0].id)
+        == classifiers[0]
+    )

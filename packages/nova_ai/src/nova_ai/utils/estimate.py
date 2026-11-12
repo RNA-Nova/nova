@@ -17,7 +17,6 @@ from nova_protocol import (
     StopReason,
     SystemMessage,
     TextContent,
-    Tool,
     ToolResultMessage,
     Usage,
     UserMessage,

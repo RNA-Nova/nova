@@ -1,7 +1,7 @@
 """Anthropic Messages 选项类型与协议标识（对齐 TS ``AnthropicOptions``）。"""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, TypedDict, Union
+from typing import Any, Literal, Optional, TypedDict, Union
 
 from nova_protocol import KnownApi
 

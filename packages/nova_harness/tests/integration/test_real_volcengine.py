@@ -13,7 +13,7 @@ import pytest
 from nova_harness import create_agent_session
 from nova_protocol import Context, TextContent, UserMessage
 
-from nova_ai import VOLCENGINE_MODELS, builtin_models
+from nova_ai import builtin_models, get_builtin_model
 
 
 def _volc_key():
@@ -21,7 +21,7 @@ def _volc_key():
 
 
 def _flash_model():
-    return VOLCENGINE_MODELS.get("deepseek-v4-flash-260425")
+    return get_builtin_model("volcengine", "deepseek-v4-flash-260425")
 
 
 @pytest.fixture

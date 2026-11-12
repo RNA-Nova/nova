@@ -1,10 +1,9 @@
-"""
-OpenAI Completions 协议参数构建测试（detect_compat / get_compat / build_params / convert_messages）
-"""
+"""OpenAI Completions 的请求参数构建与方言分派测试。"""
 
 import pytest
 from nova_protocol import (
     AssistantMessage,
+    ConstrainedSampling,
     Context,
     KnownApi,
     KnownProvider,
@@ -16,230 +15,11 @@ from nova_protocol import (
     ThinkingContent,
     ThinkingFormat,
     Tool,
-    ToolResultMessage,
     UserMessage,
     VercelGatewayRouting,
 )
 
-from nova_ai.api_impls.openai_completions import (
-    OpenAICompletionsOptions,
-    build_params,
-    convert_messages,
-    detect_compat,
-    get_compat,
-)
-
-
-class TestDetectCompat:
-    """兼容性自动检测测试"""
-
-    def test_openai_default(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.thinking_format == ThinkingFormat.OPENAI
-        assert compat.supports_store is True
-        assert compat.supports_usage_in_streaming is True
-
-    def test_deepseek(self):
-        model = Model(
-            id="deepseek-v3",
-            name="DeepSeek",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider="deepseek",
-            base_url="https://api.deepseek.com",
-            reasoning=True,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.thinking_format == ThinkingFormat.DEEPSEEK
-        assert compat.requires_reasoning_content_on_assistant_messages is True
-
-    def test_volcengine_deepseek(self):
-        model = Model(
-            id="deepseek-v3-2",
-            name="DeepSeek",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.VOLCENGINE,
-            base_url="https://ark.cn-beijing.volces.com/api/v3/",
-            reasoning=True,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.thinking_format == ThinkingFormat.DEEPSEEK
-        assert compat.requires_reasoning_content_on_assistant_messages is True
-
-    def test_openrouter(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENROUTER,
-            base_url="https://openrouter.ai/api/v1",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.thinking_format == ThinkingFormat.OPENROUTER
-
-    def test_zai(self):
-        model = Model(
-            id="zai-model",
-            name="ZAI",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.ZAI,
-            base_url="https://api.z.ai",
-            reasoning=True,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.thinking_format == ThinkingFormat.ZAI
-
-    def test_nvidia_detected(self):
-        """NVIDIA：按非标准处理，不支持 reasoning_effort（对齐 TS）"""
-        model = Model(
-            id="nvidia-model",
-            name="NVIDIA",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider="nvidia",
-            base_url="https://integrate.api.nvidia.com/v1",
-            reasoning=True,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.thinking_format == ThinkingFormat.OPENAI
-        assert compat.supports_reasoning_effort is False
-        assert compat.supports_store is False
-        assert compat.max_tokens_field == "max_tokens"
-        assert compat.supports_strict_mode is False
-        assert compat.supports_long_cache_retention is False
-
-    def test_openrouter_developer_role_only_for_prefixed_models(self):
-        """OpenRouter：仅 anthropic//openai 前缀模型使用 developer role（对齐 TS）"""
-
-        def _compat(model_id: str):
-            return detect_compat(
-                Model(
-                    id=model_id,
-                    name=model_id,
-                    api=KnownApi.OPENAI_COMPLETIONS,
-                    provider=KnownProvider.OPENROUTER,
-                    base_url="https://openrouter.ai/api/v1",
-                    reasoning=True,
-                    input_types=["text"],
-                    cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-                    context_window=128000,
-                    max_tokens=4096,
-                )
-            )
-
-        assert _compat("anthropic/claude-opus").supports_developer_role is True
-        assert _compat("openai/gpt-5").supports_developer_role is True
-        assert _compat("meta-llama/llama-4").supports_developer_role is False
-
-    def test_mistral_uses_standard_defaults(self):
-        """Mistral：不再做 provider 特判，按标准 OpenAI 检测（对齐 TS）"""
-        model = Model(
-            id="mistral-model",
-            name="Mistral",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.MISTRAL,
-            base_url="https://api.mistral.ai",
-            reasoning=True,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.requires_thinking_as_text is False
-        assert compat.requires_tool_result_name is False
-        assert compat.max_tokens_field == "max_completion_tokens"
-        assert compat.supports_store is True
-        assert compat.supports_developer_role is True
-
-    def test_grok_no_reasoning_effort(self):
-        model = Model(
-            id="grok-2",
-            name="Grok",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.XAI,
-            base_url="https://api.x.ai",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-        assert compat.supports_reasoning_effort is False
-
-
-class TestGetCompat:
-    """get_compat 合并逻辑测试"""
-
-    def test_model_compat_overrides(self):
-        model = Model(
-            id="test",
-            name="Test",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-            compat=OpenAICompletionsCompat(supports_store=False),
-        )
-        compat = get_compat(model)
-        assert compat.supports_store is False
-        assert compat.supports_usage_in_streaming is True  # 自动检测的值
-
-    def test_openai_responses_compat_ignored(self):
-        """OpenAIResponsesCompat 不适用于 completions API"""
-        from nova_protocol import OpenAIResponsesCompat
-
-        model = Model(
-            id="test",
-            name="Test",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-            compat=OpenAIResponsesCompat(),
-        )
-        compat = get_compat(model)
-        assert isinstance(compat, OpenAICompletionsCompat)
+from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, build_params
 
 
 class TestBuildParams:
@@ -573,25 +353,6 @@ class TestBuildParams:
 
         assert "reasoning_effort" not in params
 
-    def test_ant_ling_detected_from_url(self):
-        """ant-ling 经 URL 检测，且不支持 reasoning_effort"""
-        model = Model(
-            id="ant-model",
-            name="AntLing",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.ant-ling.com/v1",
-            reasoning=True,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = detect_compat(model)
-
-        assert compat.thinking_format == "ant-ling"
-        assert compat.supports_reasoning_effort is False
-
     def test_ant_ling_only_sends_explicitly_mapped_levels(self):
         """ant-ling：仅当级别有显式字符串映射时发送 reasoning.effort"""
         model = Model(
@@ -702,7 +463,9 @@ class TestBuildParams:
             cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
             context_window=128000,
             max_tokens=4096,
-            compat=OpenAICompletionsCompat(thinking_format="string-thinking"),
+            compat=OpenAICompletionsCompat(
+                thinking_format=ThinkingFormat.STRING_THINKING
+            ),
         )
         ctx = Context(messages=[UserMessage(content="hello")])
         params = build_params(
@@ -724,7 +487,9 @@ class TestBuildParams:
             cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
             context_window=128000,
             max_tokens=4096,
-            compat=OpenAICompletionsCompat(thinking_format="string-thinking"),
+            compat=OpenAICompletionsCompat(
+                thinking_format=ThinkingFormat.STRING_THINKING
+            ),
         )
         ctx = Context(messages=[UserMessage(content="hello")])
         params = build_params(model, ctx)
@@ -745,7 +510,9 @@ class TestBuildParams:
             cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
             context_window=128000,
             max_tokens=4096,
-            compat=OpenAICompletionsCompat(thinking_format="string-thinking"),
+            compat=OpenAICompletionsCompat(
+                thinking_format=ThinkingFormat.STRING_THINKING
+            ),
         )
         ctx = Context(messages=[UserMessage(content="hello")])
         params = build_params(model, ctx)
@@ -915,127 +682,6 @@ class TestBuildParams:
         assert params["store"] is False
 
 
-class TestConvertMessages:
-    """消息转换测试"""
-
-    def test_user_message_string(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = get_compat(model)
-        ctx = Context(messages=[UserMessage(content="hello")])
-        messages = convert_messages(model, ctx, compat)
-
-        assert len(messages) == 1
-        assert messages[0]["role"] == "user"
-        assert messages[0]["content"] == "hello"
-
-    def test_user_message_list(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = get_compat(model)
-        ctx = Context(messages=[UserMessage(content=[TextContent(text="hello")])])
-        messages = convert_messages(model, ctx, compat)
-
-        assert messages[0]["role"] == "user"
-        assert messages[0]["content"][0]["type"] == "text"
-
-    def test_system_prompt(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = get_compat(model)
-        ctx = Context(
-            system_prompt="You are helpful",
-            messages=[UserMessage(content="hello")],
-        )
-        messages = convert_messages(model, ctx, compat)
-
-        assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are helpful"
-
-    def test_assistant_message(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = get_compat(model)
-        ctx = Context(
-            messages=[
-                UserMessage(content="hello"),
-                AssistantMessage(content=[TextContent(text="hi")]),
-            ],
-        )
-        messages = convert_messages(model, ctx, compat)
-
-        assert messages[1]["role"] == "assistant"
-        assert messages[1]["content"] == "hi"
-
-    def test_tool_result_message(self):
-        model = Model(
-            id="gpt-4",
-            name="GPT-4",
-            api=KnownApi.OPENAI_COMPLETIONS,
-            provider=KnownProvider.OPENAI,
-            base_url="https://api.openai.com",
-            reasoning=False,
-            input_types=["text"],
-            cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
-            context_window=128000,
-            max_tokens=4096,
-        )
-        compat = get_compat(model)
-        ctx = Context(
-            messages=[
-                ToolResultMessage(
-                    tool_call_id="tc1",
-                    tool_name="search",
-                    content=[TextContent(text="result")],
-                ),
-            ],
-        )
-        messages = convert_messages(model, ctx, compat)
-
-        assert messages[0]["role"] == "tool"
-        assert messages[0]["tool_call_id"] == "tc1"
-
-
 class TestOpenAIStrictTools:
     def _tool(self, strict: str) -> Tool:
         return Tool(
@@ -1045,7 +691,9 @@ class TestOpenAIStrictTools:
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
             },
-            constrained_sampling={"type": "json_schema", "strict": strict},
+            constrained_sampling=ConstrainedSampling.model_validate(
+                {"type": "json_schema", "strict": strict}
+            ),
         )
 
     def test_prefer_enables_and_transforms_strict_schema(self):
@@ -1155,7 +803,7 @@ def test_explicit_null_structural_schema_keys_cannot_enable_strict(schema_update
         name="write",
         description="write",
         parameters=parameters,
-        constrained_sampling={"type": "json_schema", "strict": "require"},
+        constrained_sampling=ConstrainedSampling(type="json_schema", strict="require"),
     )
     with pytest.raises(ValueError, match="requires JSON-schema"):
         build_params(

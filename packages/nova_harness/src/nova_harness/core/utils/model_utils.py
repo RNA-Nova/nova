@@ -7,34 +7,19 @@
 
 from typing import Optional
 
-from nova_protocol import Model
+from nova_protocol import AnyModel
 
 from nova_ai.utils.model_utils import (
     clamp_thinking_level,
     get_supported_thinking_levels,
-    to_thinking_level,
 )
+from nova_ai.utils.model_utils import models_are_equal as models_are_equal_upstream
+from nova_ai.utils.model_utils import to_thinking_level
 
 
-def models_are_equal(
-    a: Optional[Model],
-    b: Optional[Model],
-) -> bool:
-    """
-    检查两个模型是否相等（比较 id 和 provider）
-
-    如果任一模型为 None，返回 False
-
-    Args:
-        a: 第一个模型
-        b: 第二个模型
-
-    Returns:
-        两个模型是否相等
-    """
-    if a is None or b is None:
-        return False
-    return a.id == b.id and a.provider == b.provider
+def models_are_equal(a: Optional[AnyModel], b: Optional[AnyModel]) -> bool:
+    """复用 AI 正典：按 type + provider + id 判断模型相等。"""
+    return models_are_equal_upstream(a, b)
 
 
 __all__ = [

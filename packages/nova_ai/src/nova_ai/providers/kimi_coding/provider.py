@@ -2,7 +2,6 @@
 
 from typing import cast
 
-from nova_catalog.providers.kimi_coding import DEF as _knowledge
 from nova_protocol import OAuthAuth, ProviderAuth
 
 from ...auth.helpers import env_api_key_auth, lazy_oauth
@@ -45,6 +44,5 @@ def kimi_coding_provider() -> "Provider":
             ),
         ),
         catalog_source="pi.dev",
-        catalog_knowledge=_knowledge,
         personalize=kimi_personalize,
     )

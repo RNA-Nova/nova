@@ -44,7 +44,7 @@ class DiagnosticsCollector:
             try:
                 self._on_diagnostic(diagnostic)
             except Exception:
-                logger.warning("diagnostic 实时回调失败", exc_info=True)
+                logger.warning("Live diagnostic callback failed", exc_info=True)
 
     def __len__(self) -> int:
         return len(self.items)

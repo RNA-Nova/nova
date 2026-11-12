@@ -12,17 +12,6 @@ from nova_ai.auth.oauth.device_code import (
 )
 
 
-class _DummySignal:
-    def __init__(self, aborted: bool = False):
-        self.aborted = aborted
-
-    def add_event_listener(self, *_args, **_kwargs) -> None:
-        pass
-
-    def remove_event_listener(self, *_args, **_kwargs) -> None:
-        pass
-
-
 @pytest.mark.asyncio
 async def test_poll_returns_complete_value():
     async def _poll() -> DeviceCodePollResult[str]:
@@ -97,31 +86,57 @@ async def test_poll_cancels_when_signal_aborted():
     async def _poll() -> DeviceCodePollResult[str]:
         return DeviceCodePollResult(status="pending")
 
+    controller = AbortController()
+    controller.abort()
     with pytest.raises(AbortedError, match="Login cancelled"):
         await poll_oauth_device_code_flow(
             DeviceCodePollOptions(
                 poll=_poll,
                 interval_seconds=0.01,
-                signal=_DummySignal(aborted=True),
+                signal=controller.signal,
             )
         )
 
 
 @pytest.mark.asyncio
 async def test_poll_cancels_mid_run():
-    signal = _DummySignal(aborted=False)
+    controller = AbortController()
     calls = []
 
     async def _poll() -> DeviceCodePollResult[str]:
         calls.append(1)
-        signal.aborted = True
+        controller.abort()
         return DeviceCodePollResult(status="pending")
 
     with pytest.raises(AbortedError):
         await poll_oauth_device_code_flow(
-            DeviceCodePollOptions(poll=_poll, interval_seconds=0.01, signal=signal)
+            DeviceCodePollOptions(
+                poll=_poll, interval_seconds=0.01, signal=controller.signal
+            )
         )
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_poll_cancels_inside_hanging_custom_poll():
+    started = asyncio.Event()
+    never = asyncio.Event()
+    controller = AbortController()
+
+    async def _poll() -> DeviceCodePollResult[str]:
+        started.set()
+        await never.wait()
+        raise AssertionError("取消后不应继续执行 poll")
+
+    task = asyncio.create_task(
+        poll_oauth_device_code_flow(
+            DeviceCodePollOptions(poll=_poll, signal=controller.signal)
+        )
+    )
+    await started.wait()
+    controller.abort()
+    with pytest.raises(AbortedError):
+        await asyncio.wait_for(task, timeout=1)
 
 
 @pytest.mark.asyncio
@@ -160,6 +175,30 @@ async def test_poll_slow_down_uses_server_interval():
     assert result == "token"
     # 如果没用 server 提供的 interval，会等 5s；用了 1.2s 就应该明显少于 5s。
     assert elapsed < 3.0
+
+
+@pytest.mark.asyncio
+async def test_zero_interval_uses_minimum_not_default(monkeypatch):
+    sleeps = []
+
+    async def fake_sleep(milliseconds, _signal=None):
+        sleeps.append(milliseconds)
+
+    monkeypatch.setattr("nova_ai.auth.oauth.device_code.abortable_sleep", fake_sleep)
+    calls = 0
+
+    async def _poll() -> DeviceCodePollResult[str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return DeviceCodePollResult(status="pending")
+        return DeviceCodePollResult(status="complete", value="token")
+
+    result = await poll_oauth_device_code_flow(
+        DeviceCodePollOptions(poll=_poll, interval_seconds=0, expires_in_seconds=10)
+    )
+    assert result == "token"
+    assert sleeps == [1000]
 
 
 @pytest.mark.asyncio

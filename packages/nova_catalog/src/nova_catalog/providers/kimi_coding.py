@@ -1,13 +1,14 @@
-"""Kimi Coding 的构建期知识（对位 pi ``catalog/providers/kimi-coding.ts``）。"""
+"""Kimi Coding 的目录构建（对位 pi ``catalog/providers/kimi-coding.ts``）。"""
 
-from typing import Any, Dict, cast
+from typing import Any, Dict, List, cast
 
 from nova_protocol import KnownApi, ModelCostFields, ModelFields
 
-from ..define import ProviderContext, define_provider
+from ..define import ProviderContext, define_provider, models_dev_models
 from ..families.kimi import K3_OPENAI_COMPAT
+from ..reasoning import effort_to_thinking_level_map
 
-# 订阅折算价：只填源站的零价/缺价（pi ``source price || implied cost``）。
+BASE_URL = "https://api.kimi.com/coding/v1"
 _IMPLIED_COSTS = {
     "kimi-for-coding": {
         "input": 0.95,
@@ -33,50 +34,71 @@ _IMPLIED_COSTS = {
 }
 
 
-def _map_model(_model_id: str, fields: ModelFields, source: Dict[str, Any]) -> None:
-    """源声明 effort 时启用 K3-style；该相位先于共享 effort 推导。"""
+def _map_model(fields: ModelFields, source: Dict[str, Any]) -> ModelFields:
+    """K3-style 由源声明的 effort 判定；compat 与级别在本地一次落齐。"""
+    fields["thinking_level_map"] = {
+        **(fields.get("thinking_level_map") or {}),
+        "off": None,
+    }
     capabilities = source.get("capabilities")
-    if not isinstance(capabilities, dict):
-        return
-    reasoning = capabilities.get("reasoning")
-    if not isinstance(reasoning, dict) or not isinstance(reasoning.get("effort"), list):
-        return
+    reasoning = (
+        capabilities.get("reasoning") if isinstance(capabilities, dict) else None
+    )
+    if (
+        not isinstance(reasoning, dict)
+        or reasoning.get("supported") is not True
+        or not isinstance(reasoning.get("effort"), list)
+    ):
+        return fields
     fields["compat"] = {
         **(fields.get("compat") or {}),
         **K3_OPENAI_COMPAT,
         "supports_mid_convo_tool_additions": True,
     }
+    effort = effort_to_thinking_level_map(reasoning) or {}
+    fields["thinking_level_map"] = {
+        **effort,
+        **(fields.get("thinking_level_map") or {}),
+    }
+    return fields
 
 
-def _finalize(model_id: str, fields: ModelFields, _ctx: ProviderContext) -> None:
-    implied = _IMPLIED_COSTS.get(model_id)
+def _models(ctx: ProviderContext) -> List[ModelFields]:
+    return models_dev_models(
+        ctx,
+        "kimi-code-plan-global",
+        api=KnownApi.OPENAI_COMPLETIONS,
+        base_url=BASE_URL,
+        map_model=_map_model,
+        record_reasoning=False,
+    )
+
+
+def _finalize(fields: ModelFields, _ctx: ProviderContext) -> None:
+    implied = _IMPLIED_COSTS.get(fields.get("id") or "")
     if implied is not None:
         cost = dict(fields.get("cost") or {})
         for key, value in implied.items():
             if not cost.get(key):
                 cost[key] = value
+        # 订阅折算价是平坦费率，源零价的超档价格不能继续生效。
+        cost.pop("tiers", None)
         fields["cost"] = cast("ModelCostFields", cost)
 
 
 DEF = define_provider(
     id="kimi-coding",
-    name="Kimi Coding",
-    base_url="https://api.kimi.com/coding/v1",
-    api=KnownApi.OPENAI_COMPLETIONS,
-    models_dev_key="kimi-code-plan-global",
-    compat_defaults={
-        "thinking_format": "deepseek",
-        "supports_store": False,
-        "supports_developer_role": False,
-        "supports_reasoning_effort": False,
-        "supports_strict_mode": False,
-        "max_tokens_field": "max_tokens",
-        "supports_mid_convo_system_messages": True,
+    models=_models,
+    compat={
+        "openai-completions": {
+            "thinking_format": "deepseek",
+            "supports_store": False,
+            "supports_developer_role": False,
+            "supports_reasoning_effort": False,
+            "supports_strict_mode": False,
+            "max_tokens_field": "max_tokens",
+            "supports_mid_convo_system_messages": True,
+        }
     },
-    model_corrections={
-        # 全部模型 always-thinking；其余源推导级别保留。
-        "*": {"thinking_level_map": {"off": None}},
-    },
-    map_model=_map_model,
     finalize=_finalize,
 )

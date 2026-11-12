@@ -16,7 +16,7 @@
 import math
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -48,6 +48,7 @@ from .errors import (
     OAuthFlowError,
     oauth_http_kind,
     response_error_detail,
+    response_json_object,
     validation_error,
 )
 
@@ -94,8 +95,8 @@ class _TokenResponse(NovaBaseModel):
     活凭据）永不进错误消息。
     """
 
-    access_token: str = Field(min_length=1)
-    refresh_token: str = Field(min_length=1)
+    access_token: RedactedString = Field(min_length=1, repr=False)
+    refresh_token: RedactedString = Field(min_length=1, repr=False)
     expires_in: float  # lax 强转保留"kimi 容忍字符串数字"的既有语义
 
     # 厂商边界模型按厂商 casing（snake）——关掉枢纽基类的 camel alias
@@ -154,10 +155,10 @@ class _DeviceAuthorization:
     下游 ``AuthEvent.verification_uri`` 以 None 表"本事件不携带"）。
     """
 
-    user_code: str
-    device_code: str
-    verification_uri: Optional[str]
-    verification_uri_complete: str
+    user_code: RedactedString = field(repr=False)
+    device_code: RedactedString = field(repr=False)
+    verification_uri: Optional[str] = field(repr=False)
+    verification_uri_complete: str = field(repr=False)
     expires_in: float
     interval: float
 
@@ -169,10 +170,10 @@ class _DeviceAuthorizationResponse(NovaBaseModel):
     路径（无拒绝、无消息），留在调用点手工处理。
     """
 
-    user_code: str = Field(min_length=1)
-    device_code: str = Field(min_length=1)
-    verification_uri_complete: str
-    verification_uri: Optional[str] = None
+    user_code: RedactedString = Field(min_length=1, repr=False)
+    device_code: RedactedString = Field(min_length=1, repr=False)
+    verification_uri_complete: str = Field(repr=False)
+    verification_uri: Optional[str] = Field(default=None, repr=False)
 
     model_config = ConfigDict(alias_generator=None)  # 厂商 casing（snake）
 
@@ -210,7 +211,7 @@ async def _request_device_authorization(
             status_code=response.status_code,
         )
 
-    data = response.json()
+    data = response_json_object(response, "Kimi device authorization")
     try:
         resp = _DeviceAuthorizationResponse.model_validate(data)
     except ValidationError as error:

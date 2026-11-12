@@ -24,6 +24,19 @@ class KnownApi(str, Enum):
 Api = Union[KnownApi, str]
 
 
+class KnownClassifierApi(str, Enum):
+    """已知的结构化分类 API；开放字符串仍可用于自定义实现。"""
+
+    TYPESAFE_SYSTEM_ONE = "typesafe-system-one"
+    CLOUDFLARE_WORKERS_AI_SYSTEM_ONE = "cloudflare-workers-ai-system-one"
+    LLAMA_CPP_CLASSIFY = "llama-cpp-classify"
+    OPENAI_DECISIONS = "openai-decisions"
+
+
+ClassifierApi = Union[KnownClassifierApi, str]
+"""分类 API 标识；未知字符串表示调用方自建的分类协议。"""
+
+
 class KnownProvider(str, Enum):
     """已知的服务提供商类型"""
 
@@ -71,6 +84,22 @@ class StopReason(str, Enum):
     TOOL_USE = "toolUse"  # 触发工具调用
     ERROR = "error"  # 发生错误
     ABORTED = "aborted"  # 被中止
+
+
+class ImagesStopReason(str, Enum):
+    """非流式图像生成终态；取消与错误独立于聊天扩展状态。"""
+
+    STOP = "stop"
+    ERROR = "error"
+    ABORTED = "aborted"
+
+
+class ClassifierStopReason(str, Enum):
+    """非流式分类终态；不与聊天或图像结果共享生命周期。"""
+
+    STOP = "stop"
+    ERROR = "error"
+    ABORTED = "aborted"
 
 
 class ThinkingLevel(str, Enum):

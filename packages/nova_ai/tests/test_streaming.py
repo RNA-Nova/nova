@@ -6,7 +6,6 @@ import asyncio
 import time
 
 import pytest
-from nova_ai.streaming import AssistantMessageEventStream, EventStream
 from nova_protocol import (
     AssistantMessage,
     DoneEvent,
@@ -17,6 +16,8 @@ from nova_protocol import (
     TextStartEvent,
     Usage,
 )
+
+from nova_ai.streaming import AssistantMessageEventStream, EventStream
 
 
 @pytest.mark.asyncio
@@ -61,6 +62,16 @@ class TestEndSemantics:
         stream = AssistantMessageEventStream()
         stream.end(result=message)
         assert await stream.result() is message
+
+    async def test_none_is_a_valid_terminal_result(self):
+        """通用流必须区分“无终值”与合法 None，包括完成后首次读结果。"""
+        extracted = EventStream(lambda event: event == "done", lambda _event: None)
+        extracted.push("done")
+        assert await asyncio.wait_for(extracted.result(), 0.1) is None
+
+        explicit = EventStream(lambda event: event == "done", lambda _event: None)
+        explicit.end(result=None)
+        assert await asyncio.wait_for(explicit.result(), 0.1) is None
 
 
 @pytest.mark.asyncio
@@ -240,8 +251,9 @@ async def test_result_waiter_cancellation_does_not_poison_shared_future():
 
 @pytest.mark.asyncio
 async def test_response_duration_is_timed_only_for_current_stream():
-    message = AssistantMessage(content=[], timestamp=int(time.time() * 1000))
+    # 先建流再生成消息，匹配真实响应顺序；反向构造会在跨毫秒边界偶发跳过盖戳。
     stream = AssistantMessageEventStream()
+    message = AssistantMessage(content=[], timestamp=int(time.time() * 1000))
     stream.push(DoneEvent(reason=StopReason.STOP, message=message))
     assert message.duration_ms is not None and message.duration_ms >= 0
 

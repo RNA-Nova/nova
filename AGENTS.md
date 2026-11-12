@@ -34,9 +34,9 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 
 | 包 | 角色 |
 |---|---|
-| `packages/nova_ai` | LLM provider 抽象层（流式/鉴权/模型注册） |
+| `packages/nova_ai` | LLM provider 抽象层（聊天流式、非流式图像生成与结构化分类、鉴权、混合模型注册） |
 | `packages/nova_async` | 取消/等待机制族叶子包（AbortScope/竞速/退避/TaskTracker/KeyedLock/Deadline；词汇锚定 nova_protocol） |
-| `packages/nova_catalog` | 模型目录构建管线（对位 pi `packages/ai/catalog/`）——知识 `providers/` + 族事实 `families/` + 薄拉取 `sources/` + 引擎 `build.py`；自包含（不依赖 nova_ai，词汇经 nova_protocol），产物写 nova_ai |
+| `packages/nova_catalog` | 模型目录构建管线（对位 pi `packages/ai/catalog/`）——知识 `providers/` + 族事实 `families/` + 薄拉取 `sources/` + 编排 `build.py`；自包含（不依赖 nova_ai，词汇经 nova_protocol），产物写 nova_ai |
 | `packages/nova_agent` | 事件驱动异步 Agent 循环核心 |
 | `packages/nova_harness` | 高阶 SDK：会话树/压缩/资源/包管理/RuntimeManager |
 | `packages/nova_server` | JSON-RPC 协议服务层 + client 家族 + headless exec |
@@ -51,7 +51,7 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 
 ```bash
 pixi install -e dev        # 环境初始化（dev 含 black/isort/pytest）
-pixi run -e dev test-all   # 八个测试套件全量（各包独立跑，避免 conftest 冲突）
+pixi run -e dev test-all   # 九个测试套件全量（各包独立跑，避免 conftest 冲突）
 pixi run -e dev format     # black + isort 全仓
 pixi run -e dev typecheck  # pyright（protocol/ai/agent + catalog 源码与脚本）
 cd packages/nova_client && npm run build   # TS 前端编译

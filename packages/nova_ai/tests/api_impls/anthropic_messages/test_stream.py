@@ -342,6 +342,7 @@ class TestStreamFailurePaths:
         events = [e.type async for e in es]
         result = await es.result()
         assert result.stop_reason == StopReason.ERROR
+        assert result.error_kind is NovaErrorKind.STREAM_DISCONNECTED
         assert "before message_stop" in (result.error_message or "")
         # 未闭合的块在异常路径也补发 end（不重不漏）
         assert "text_end" in events
@@ -943,6 +944,7 @@ async def test_message_delta_without_message_stop_is_truncated():
         pass
     result = await es.result()
     assert result.stop_reason == StopReason.ERROR
+    assert result.error_kind is NovaErrorKind.STREAM_DISCONNECTED
     assert "before message_stop" in (result.error_message or "")
 
 

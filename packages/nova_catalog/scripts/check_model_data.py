@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""模型数据保鲜检查：离线对账聚合器、shard、JSON 与 manifest。"""
+"""模型数据一致性检查：离线对账聚合器、shard、JSON 与 manifest。"""
 
 from __future__ import annotations
 

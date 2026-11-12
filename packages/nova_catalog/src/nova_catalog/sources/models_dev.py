@@ -63,13 +63,22 @@ def _first_price(value: Any) -> Optional[float]:
     return None
 
 
-def _context_threshold(when: Any) -> Optional[float]:
-    """``when: {context: {gt|gte: n}}`` → n；其余形态（region/tier/time）不支持。"""
+def _context_threshold(when: Any) -> Optional[int]:
+    """``when: {context: {gt|gte: n}}`` → 内部整数严格阈值。
+
+    token 数只会是整数：源 ``gt=n`` 等价于内部 ``> floor(n)``；
+    ``gte=n`` 等价于 ``> ceil(n)-1``。其余条件维度不支持。
+    """
     if not isinstance(when, dict) or set(when.keys()) != {"context"}:
         return None
     ctx = _object(when.get("context"))
-    size = ctx.get("gt", ctx.get("gte"))
-    return float(size) if _finite_number(size) else None
+    if "gt" in ctx:
+        size = ctx["gt"]
+        return math.floor(size) if _finite_number(size) else None
+    if "gte" in ctx:
+        size = ctx["gte"]
+        return math.ceil(size) - 1 if _finite_number(size) else None
+    return None
 
 
 def _cache_write_price(cache: Any) -> Optional[float]:
@@ -115,7 +124,7 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
         "cache_read": _first_price(_object(v_in.get("cache")).get("read")) or 0,
         "cache_write": _cache_write_price(v_in.get("cache")) or 0,
     }
-    tiers: Dict[float, Dict[str, Any]] = {}
+    tiers: Dict[int, Dict[str, Any]] = {}
     overrides = v_in.get("overrides")
     for raw_override in (overrides if isinstance(overrides, list) else []):
         override = _object(raw_override)
@@ -158,6 +167,90 @@ def _normalize_cost(v2_cost: Any) -> Dict[str, Any]:
     return base
 
 
+def _validate_cost_shape(provider_id: str, cost: Dict[str, Any]) -> None:
+    """strict 模式校验已消费的价格字段；缺席可兜底，显式畸形不可。"""
+
+    def fail(label: str) -> None:
+        raise ValueError(f"{provider_id}: {label} has an invalid shape")
+
+    def object_field(
+        owner: Dict[str, Any], key: str, label: str
+    ) -> Optional[Dict[str, Any]]:
+        if key not in owner:
+            return None
+        value = owner[key]
+        if not isinstance(value, dict):
+            fail(label)
+        return value
+
+    def price_field(
+        owner: Dict[str, Any], key: str, label: str, *, allow_ttl: bool = False
+    ) -> None:
+        if key not in owner:
+            return
+        value = owner[key]
+        if _finite_number(value):
+            return
+        if (
+            allow_ttl
+            and isinstance(value, dict)
+            and all(
+                isinstance(ttl, str) and _finite_number(price)
+                for ttl, price in value.items()
+            )
+        ):
+            return
+        fail(label)
+
+    def cache_field(owner: Dict[str, Any], label: str) -> None:
+        cache = object_field(owner, "cache", f"{label}.cache")
+        if cache is None:
+            return
+        price_field(cache, "read", f"{label}.cache.read")
+        price_field(cache, "write", f"{label}.cache.write", allow_ttl=True)
+        explicit = object_field(cache, "explicit", f"{label}.cache.explicit")
+        if explicit is not None:
+            price_field(explicit, "read", f"{label}.cache.explicit.read")
+            price_field(
+                explicit, "write", f"{label}.cache.explicit.write", allow_ttl=True
+            )
+
+    def overrides_field(owner: Dict[str, Any], label: str) -> None:
+        if "overrides" not in owner:
+            return
+        overrides = owner["overrides"]
+        if not isinstance(overrides, list):
+            fail(f"{label}.overrides")
+        for index, override in enumerate(overrides):
+            item_label = f"{label}.overrides[{index}]"
+            if not isinstance(override, dict):
+                fail(item_label)
+            price_field(override, "price", f"{item_label}.price")
+            cache_field(override, item_label)
+            when = object_field(override, "when", f"{item_label}.when")
+            if when is None or set(when) != {"context"}:
+                continue
+            context = object_field(when, "context", f"{item_label}.when.context")
+            assert context is not None
+            for threshold in ("gt", "gte"):
+                if threshold in context and not _finite_number(context[threshold]):
+                    fail(f"{item_label}.when.context.{threshold}")
+
+    text = object_field(cost, "text", "cost.text")
+    if text is None:
+        return
+    for direction in ("input", "output"):
+        label = f"cost.text.{direction}"
+        modality = object_field(text, direction, label)
+        if modality is None:
+            continue
+        if "unit" in modality and not isinstance(modality["unit"], str):
+            fail(f"{label}.unit")
+        price_field(modality, "price", f"{label}.price")
+        cache_field(modality, label)
+        overrides_field(modality, label)
+
+
 # ---------------------------------------------------------------------------
 # v2 条目 → 字段包（含类型/生命周期/工具过滤——pi 同款）
 # ---------------------------------------------------------------------------
@@ -179,9 +272,10 @@ def models_dev_to_nova(
     （dict 直转 TypedDict 静态不认，出口一次 cast——与 pi_dev 同款）。
     """
 
-    def _input_object(value: Any, label: str) -> Dict[str, Any]:
-        if value is None:
+    def _input_object(owner: Dict[str, Any], key: str, label: str) -> Dict[str, Any]:
+        if key not in owner:
             return {}
+        value = owner[key]
         if not isinstance(value, dict):
             if strict:
                 raise ValueError(f"{provider_id}: {label} must be an object")
@@ -196,38 +290,81 @@ def models_dev_to_nova(
         return None
     if skip_deprecated and entry.get("status") == "deprecated":
         return None
-    capabilities = _input_object(entry.get("capabilities"), "capabilities")
-    tools = _input_object(capabilities.get("tools"), "capabilities.tools")
+    capabilities = _input_object(entry, "capabilities", "capabilities")
+    tools = _input_object(capabilities, "tools", "capabilities.tools")
+    if strict and "supported" in tools and not isinstance(tools["supported"], bool):
+        raise ValueError(f"{provider_id}: capabilities.tools.supported must be boolean")
     if tools.get("supported") is not True:
         return None
+    reasoning = _input_object(capabilities, "reasoning", "capabilities.reasoning")
+    if strict:
+        for key in ("supported", "toggle"):
+            if key in reasoning and not isinstance(reasoning[key], bool):
+                raise ValueError(
+                    f"{provider_id}: capabilities.reasoning.{key} must be boolean"
+                )
+        if "effort" in reasoning and (
+            not isinstance(reasoning["effort"], list)
+            or any(
+                value is not None and not isinstance(value, str)
+                for value in reasoning["effort"]
+            )
+        ):
+            raise ValueError(
+                f"{provider_id}: capabilities.reasoning.effort must be an array"
+            )
+        if "budget" in reasoning and not isinstance(reasoning["budget"], dict):
+            raise ValueError(
+                f"{provider_id}: capabilities.reasoning.budget must be an object"
+            )
     model_id = entry.get("id")
     if not isinstance(model_id, str) or not model_id:
         if strict:
             raise ValueError(f"{provider_id}: model entry missing id: {entry!r}")
         return None
     raw_name = entry.get("name")
+    if strict and "name" in entry and (not isinstance(raw_name, str) or not raw_name):
+        raise ValueError(f"{provider_id}/{model_id}: name must be a non-empty string")
     name = raw_name if isinstance(raw_name, str) and raw_name else model_id
-    limit = _input_object(entry.get("limit"), "limit")
+    limit = _input_object(entry, "limit", "limit")
     context_window = limit.get("context")
+    if (
+        strict
+        and "context" in limit
+        and (not _finite_number(context_window) or context_window <= 0)
+    ):
+        raise ValueError(f"{provider_id}: limit.context must be a positive number")
     if not _finite_number(context_window) or context_window <= 0:
         context_window = 4096
     max_tokens = limit.get("output")
+    if (
+        strict
+        and "output" in limit
+        and (not _finite_number(max_tokens) or max_tokens <= 0)
+    ):
+        raise ValueError(f"{provider_id}: limit.output must be a positive number")
     if not _finite_number(max_tokens) or max_tokens <= 0:
         max_tokens = 4096
     # modalities 可能是裸类型（"text"/"image"）或 MIME（"image/jpeg"…）。
-    modalities = _input_object(entry.get("modalities"), "modalities")
+    modalities = _input_object(entry, "modalities", "modalities")
     raw_input = modalities.get("input")
-    if raw_input is not None and not isinstance(raw_input, list):
+    if "input" in modalities and (
+        not isinstance(raw_input, list)
+        or any(not isinstance(modality, str) for modality in raw_input)
+    ):
         if strict:
-            raise ValueError(f"{provider_id}: modalities.input must be an array")
+            raise ValueError(
+                f"{provider_id}: modalities.input must be an array of strings"
+            )
         raw_input = None
     input_modalities = raw_input or ["text"]
     input_types = ["text"]
-    if any(m == "image" or str(m).startswith("image/") for m in input_modalities):
+    if any(m == "image" or m.startswith("image/") for m in input_modalities):
         input_types.append("image")
 
-    reasoning = _input_object(capabilities.get("reasoning"), "capabilities.reasoning")
-    cost = _input_object(entry.get("cost"), "cost")
+    cost = _input_object(entry, "cost", "cost")
+    if strict:
+        _validate_cost_shape(provider_id, cost)
     fields: Dict[str, Any] = {
         "name": name,
         "reasoning": reasoning.get("supported") is True,

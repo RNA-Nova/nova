@@ -57,11 +57,16 @@ from nova_protocol import (
     redact_secrets,
 )
 
+from ...gateway.streams import lazy_stream
 from ...stream_options import ModelIdentity, ProviderResponse, SimpleStreamOptions
 from ...streaming import AssistantMessageEventStream
 from ...utils import calculate_cost
 from ...utils.diagnostics import append_diagnostic
-from ...utils.errors import USAGE_LIMIT_PATTERNS, normalize_error
+from ...utils.errors import (
+    USAGE_LIMIT_PATTERNS,
+    StreamDisconnectedError,
+    normalize_error,
+)
 from ...utils.http import filter_headers_for_hook
 from ...utils.json_parser import StreamingJsonParser, parse_tool_call_arguments
 from .._shared.openrouter_cost import apply_openrouter_reported_cost
@@ -398,6 +403,8 @@ def stream(
                     thinking_enabled=getattr(options, "thinking_enabled", None) is True,
                     federation=federation,
                 )
+                # federation 派生 client 共享基座的传输与凭据缓存，不能随请求关闭。
+                owns_client = federation is None
             knob_s = options.timeout if options else None
             # connect/pool 恒工程上限；read/write 随旋钮（None=引擎默认，
             # 0=显式关闭）——超时治理见 _shared/timeouts.py
@@ -846,9 +853,13 @@ def stream(
                 # SDK typed stream 同样产出 message_stop。见过 start 却缺 stop
                 # 即传输截断；不得成功收尾，更不得写入 thread 台账。
                 if saw_message_start and not saw_message_stop:
-                    raise Exception("Anthropic stream ended before message_stop")
+                    raise StreamDisconnectedError(
+                        "Anthropic stream ended before message_stop"
+                    )
                 if output.stop_reason == StopReason.PENDING:
-                    raise Exception("Anthropic stream ended without a stop reason")
+                    raise StreamDisconnectedError(
+                        "Anthropic stream ended without a stop reason"
+                    )
                 if output.stop_reason in (StopReason.ABORTED, StopReason.ERROR):
                     raise Exception(output.error_message or "An unknown error occurred")
 
@@ -913,7 +924,7 @@ def stream(
                     output.error_kind = normalized_error.kind
                 if normalized_error.retry_after_ms is not None:
                     output.retry_after_ms = int(normalized_error.retry_after_ms)
-            event_stream.push(ErrorEvent(reason=output.stop_reason.value, error=output))
+            event_stream.push(ErrorEvent(reason=output.stop_reason, error=output))
             event_stream.end()
         finally:
             # 关闭序：流 → 客户端（防连接池异步生成器活到循环拆除，
@@ -953,6 +964,17 @@ def _map_thinking_level_to_effort(model: Model, level: Any) -> AnthropicEffort:
 def stream_simple(
     model: Model, context: Context, options: Optional[SimpleStreamOptions] = None
 ) -> AssistantMessageEventStream:
+    """简化入口；装配、鉴权与预算失败同样经事件流收尾，不同步抛出。"""
+
+    async def _setup() -> AssistantMessageEventStream:
+        return _stream_simple(model, context, options)
+
+    return lazy_stream(model, _setup, options.signal if options else None)
+
+
+def _stream_simple(
+    model: Model, context: Context, options: Optional[SimpleStreamOptions] = None
+) -> AssistantMessageEventStream:
     """简化的 Anthropic Messages 流式处理（对齐 TS streamSimple 终态）。
 
     思考映射（对齐 TS）：不请求思考 → 显式关闭；adaptive 模型 → effort；
@@ -960,8 +982,15 @@ def stream_simple(
     """
     api_key = options.api_key if options else None
     headers = options.headers if options else None
-    # fail-fast 守卫（对齐 TS assertRequestAuth）：协议层不读环境变量
-    assert_request_auth(model.provider, api_key, headers)
+    # 完整 federation 配置本身就是合法凭据来源（pi simple 入口同款豁免）；
+    # 未命中时才走普通 key/header fail-fast 守卫。
+    if (
+        anthropic_federation_config(
+            model, api_key, headers, options.env if options else None
+        )
+        is None
+    ):
+        assert_request_auth(model.provider, api_key, headers)
 
     base = build_base_options(model, context, options, api_key)
     compat = get_compat(model)

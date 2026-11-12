@@ -51,9 +51,13 @@ async def test_tool_call_accepted(probe):
         tools=[_WEATHER_TOOL],
     )
     async with asyncio.timeout(120):
-        result = await manager.complete_simple(probe.model, ctx)
+        result = await manager.complete_simple(
+            probe.model, ctx, SimpleStreamOptions(tool_choice="required")
+        )
     assert result.error_message is None
-    for tool_call in _tool_calls(result):
+    tool_calls = _tool_calls(result)
+    assert tool_calls, "tool_choice=required 必须实际产生工具调用"
+    for tool_call in tool_calls:
         assert tool_call.name == "get_weather"
         assert isinstance(tool_call.arguments, dict)
 
@@ -69,11 +73,12 @@ async def test_tool_result_round_trip(probe):
         tools=[_WEATHER_TOOL],
     )
     async with asyncio.timeout(120):
-        result1 = await manager.complete_simple(probe.model, ctx)
+        result1 = await manager.complete_simple(
+            probe.model, ctx, SimpleStreamOptions(tool_choice="required")
+        )
     assert result1.error_message is None
     tool_calls = _tool_calls(result1)
-    if not tool_calls:
-        pytest.skip(f"{probe.label} 本轮未调用工具（模型自由裁量）")
+    assert tool_calls, "tool_choice=required 时不得用 skip 放行缺失工具调用"
 
     ctx.messages.append(result1)
     ctx.messages.append(

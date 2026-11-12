@@ -43,8 +43,7 @@ from nova_protocol import (
     UserMessage,
 )
 
-from nova_ai import ProviderResponse, builtin_models
-from nova_ai.providers.volcengine import get_volcengine_model
+from nova_ai import ProviderResponse, builtin_models, get_builtin_model
 
 pytestmark = pytest.mark.integration
 
@@ -58,7 +57,9 @@ def _get_model(model_id: str):
     """获取真实 DeepSeek 模型，跳过测试如果未配置 API key。"""
     if not os.environ.get("VOLCENGINE_API_KEY"):
         pytest.skip("VOLCENGINE_API_KEY not set")
-    return get_volcengine_model(model_id)
+    model = get_builtin_model("volcengine", model_id)
+    assert model is not None
+    return model
 
 
 def _extract_text(message) -> str:

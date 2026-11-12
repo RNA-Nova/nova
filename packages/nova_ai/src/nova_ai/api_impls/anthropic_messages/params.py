@@ -4,11 +4,10 @@
 声明（键名拼写静态执法），值在出货边界由 SDK 校验。
 """
 
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from nova_protocol import CacheRetention, Context, Model, Tool
 
-from ...stream_options import StreamOptions
 from ...utils.surrogate import sanitize_surrogates
 from .._shared.prompt_cache import CacheControl, resolve_cache_retention
 from .._shared.transcript import (

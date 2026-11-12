@@ -332,3 +332,108 @@ def _recorded_sse(
     return httpx.Response(
         200, content=content, headers={"content-type": "text/event-stream"}
     )
+
+
+@respx.mock
+async def test_async_on_payload_abort_terminates_before_request():
+    import asyncio
+
+    from nova_protocol import AbortController
+
+    route = respx.post(url__regex=r".*/chat/completions$").mock()
+    started = asyncio.Event()
+    never = asyncio.Event()
+    controller = AbortController()
+
+    async def on_payload(_params, _identity):
+        started.set()
+        await never.wait()
+
+    # 在独立的受控任务中运行，避免旧实现的挂起拖死整个测试。
+    task = asyncio.create_task(
+        _run(
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(
+                api_key="sk-test", signal=controller.signal, on_payload=on_payload
+            ),
+        )
+    )
+    await started.wait()
+    controller.abort()
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result.stop_reason == StopReason.ABORTED
+    assert route.call_count == 0
+
+
+@respx.mock
+@pytest.mark.parametrize("api_key", [None, ""])
+async def test_cloudflare_only_auth_never_emits_placeholder_bearer(api_key):
+    capture = RequestCapture()
+    mount_openai_chat([oai_chunk(content="ok", finish="stop")], capture)
+    model = _model().model_copy(
+        update={
+            "provider": "cloudflare-ai-gateway",
+            "base_url": "https://gateway.example/v1",
+        }
+    )
+    event_stream = stream(
+        model,
+        Context(messages=[UserMessage(content="hi")]),
+        OpenAICompletionsOptions(
+            api_key=api_key,
+            headers={"cf-aig-authorization": "Bearer caller-key"},
+        ),
+    )
+    async for _ in event_stream:
+        pass
+    result = await event_stream.result()
+    assert result.stop_reason == StopReason.STOP
+    headers = capture.single().headers
+    assert headers["cf-aig-authorization"] == "Bearer caller-key"
+    assert headers.get("authorization") == ""
+
+
+@respx.mock
+async def test_cloudflare_explicit_authorization_none_is_not_overridden():
+    capture = RequestCapture()
+    mount_openai_chat([oai_chunk(content="ok", finish="stop")], capture)
+    model = _model().model_copy(
+        update={
+            "provider": "cloudflare-ai-gateway",
+            "base_url": "https://gateway.example/v1",
+        }
+    )
+    event_stream = stream(
+        model,
+        Context(messages=[UserMessage(content="hi")]),
+        OpenAICompletionsOptions(
+            headers={
+                "cf-aig-authorization": "Bearer caller-key",
+                "Authorization": None,
+            }
+        ),
+    )
+    async for _ in event_stream:
+        pass
+    result = await event_stream.result()
+    assert result.stop_reason == StopReason.STOP, result.error_message
+    headers = capture.single().headers
+    assert headers["cf-aig-authorization"] == "Bearer caller-key"
+    assert "authorization" not in headers
+
+
+@respx.mock
+async def test_direct_model_authorization_none_uses_request_level_omit():
+    capture = RequestCapture()
+    mount_openai_chat([oai_chunk(content="ok", finish="stop")], capture)
+    model = _model().model_copy(update={"headers": {"Authorization": None}})
+    event_stream = stream(
+        model,
+        Context(messages=[UserMessage(content="hi")]),
+        OpenAICompletionsOptions(api_key="real-key"),
+    )
+    async for _ in event_stream:
+        pass
+    result = await event_stream.result()
+    assert result.stop_reason == StopReason.STOP, result.error_message
+    assert "authorization" not in capture.single().headers

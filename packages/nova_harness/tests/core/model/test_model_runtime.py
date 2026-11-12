@@ -547,7 +547,8 @@ def test_reregister_merges_defined_fields(auth_with_volc_key):
     assert runtime.find("p", "m1") is not None
 
 
-def test_register_stream_fn_dispatched_for_matching_api(auth_with_volc_key):
+@pytest.mark.asyncio
+async def test_register_stream_fn_dispatched_for_matching_api(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
     calls = []
 
@@ -567,12 +568,15 @@ def test_register_stream_fn_dispatched_for_matching_api(auth_with_volc_key):
     )
     provider = runtime.get_provider("myprovider")
     model = runtime.find("myprovider", "m1")
-    with pytest.raises(NotImplementedError):
-        provider.stream_simple(model, context=None)
+    assert provider is not None
+    assert model is not None
+    result = await provider.stream_simple(model, context=None).result()
+    assert result.stop_reason.value == "error"
     assert calls == ["m1"]
 
 
-def test_register_stream_fn_via_dict_key(auth_with_volc_key):
+@pytest.mark.asyncio
+async def test_register_stream_fn_via_dict_key(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
 
     def my_stream(model, context, options=None):
@@ -590,8 +594,10 @@ def test_register_stream_fn_via_dict_key(auth_with_volc_key):
     )
     model = runtime.find("myprovider", "m1")
     provider = runtime.get_provider("myprovider")
-    with pytest.raises(NotImplementedError):
-        provider.stream_simple(model, context=None)
+    assert provider is not None
+    assert model is not None
+    result = await provider.stream_simple(model, context=None).result()
+    assert result.stop_reason.value == "error"
 
 
 def test_register_stream_fn_requires_api(auth_with_volc_key):
@@ -820,9 +826,7 @@ async def test_composed_provider_preserves_dynamic_refresh(tmp_path, monkeypatch
 
 
 def test_composed_provider_preserves_catalog_source():
-    """组合透传：base 的目录站选配（catalog_source）与修正知识
-    （catalog_knowledge）随组合保留——manager 站路由不因组合而失效。"""
-    from nova_catalog.providers.moonshotai import DEF as knowledge
+    """组合透传目录站选配，站路由不因组合失效。"""
     from nova_harness.types.model import ProviderConfig
 
     from nova_ai import create_provider
@@ -832,13 +836,11 @@ def test_composed_provider_preserves_catalog_source():
         name="p",
         base_url="http://p/v1",
         catalog_source="pi.dev",
-        catalog_knowledge=knowledge,
     )
     composed = compose_provider(
         "p", base, ProviderConfig.model_validate({"apiKey": "sk-x"}), None
     )
     assert composed.catalog_source == "pi.dev"
-    assert composed.catalog_knowledge is knowledge
 
 
 @pytest.mark.asyncio

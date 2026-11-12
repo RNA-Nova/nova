@@ -10,6 +10,7 @@ from nova_protocol import (
     KnownProvider,
     Model,
     ModelCost,
+    ModelCostTier,
     ModelThinkingLevel,
     TextContent,
     ThinkingContent,
@@ -65,6 +66,60 @@ class TestCalculateCost:
         usage = Usage()
         cost = calculate_cost(model, usage)
         assert cost.total == 0.0
+
+    def test_tiers_and_cache_write_variants_use_effective_rates(self):
+        model = Model(
+            id="test",
+            name="Test",
+            api=KnownApi.OPENAI_COMPLETIONS,
+            provider=KnownProvider.OPENAI,
+            base_url="https://api.openai.com",
+            reasoning=False,
+            input_types=["text"],
+            cost=ModelCost(
+                input=1,
+                output=2,
+                cache_read=0.5,
+                cache_write=1,
+                tiers=[
+                    # 故意乱序：应选择命中的最高阈值，而不是列表末项。
+                    ModelCostTier(
+                        input_tokens_above=2000,
+                        input=20,
+                        output=40,
+                        cache_read=10,
+                        cache_write=4,
+                    ),
+                    ModelCostTier(
+                        input_tokens_above=1000,
+                        input=10,
+                        output=20,
+                        cache_read=5,
+                        cache_write=2,
+                    ),
+                ],
+            ),
+            context_window=128000,
+            max_tokens=4096,
+        )
+        # 阈值本身是严格大于；1000 仍使用基价。
+        boundary = calculate_cost(model, Usage(input=1000))
+        assert boundary.input == pytest.approx(0.001)
+
+        usage = Usage(
+            input=500,
+            output=100,
+            cache_read=400,
+            cache_write=200,
+            cache_write_1h=50,
+        )
+        cost = calculate_cost(model, usage)
+        assert cost.input == pytest.approx(0.005)
+        assert cost.output == pytest.approx(0.002)
+        assert cost.cache_read == pytest.approx(0.002)
+        # 150 个普通写按 tier cache_write；50 个 1h 写按 tier input 的 2 倍。
+        assert cost.cache_write == pytest.approx(0.0013)
+        assert cost.total == pytest.approx(0.0103)
 
 
 class TestGetSupportedThinkingLevels:
@@ -399,3 +454,78 @@ class TestToThinkingLevel:
         assert to_thinking_level(ThinkingLevel.LOW) is ThinkingLevel.LOW
         assert to_thinking_level("max") is ThinkingLevel.MAX
         assert to_thinking_level(ModelThinkingLevel.MAX) is ThinkingLevel.MAX
+
+
+class TestModelTypePredicates:
+    """不同操作同 id 时，模型相等性与 API 判别都必须包含操作类型。"""
+
+    def _models(self):
+        from nova_protocol import ImageModel
+
+        chat = Model(
+            id="shared",
+            name="Chat",
+            api="openai-completions",
+            provider="test",
+            base_url="https://example.com/v1",
+            reasoning=False,
+            input_types=["text"],
+            cost=ModelCost(),
+            context_window=1000,
+            max_tokens=100,
+        )
+        image = ImageModel(
+            id=chat.id,
+            name="Image",
+            type="image",
+            api="openrouter-images",
+            provider=chat.provider,
+            base_url=chat.base_url,
+            input_types=["text"],
+            output_types=["image"],
+            cost=ModelCost(),
+        )
+        return chat, image
+
+    def test_models_are_equal_includes_model_type(self):
+        from nova_ai.utils import models_are_equal
+
+        chat, image = self._models()
+        assert models_are_equal(chat, chat.model_copy())
+        assert not models_are_equal(chat, image)
+
+    def test_classifier_with_same_id_is_not_equal_to_chat_or_image(self):
+        from nova_protocol import ClassifierModel
+
+        from nova_ai.utils import models_are_equal
+
+        chat, image = self._models()
+        classifier = ClassifierModel(
+            id=chat.id,
+            name="Classifier",
+            type="classifier",
+            api="typesafe-system-one",
+            provider=chat.provider,
+            base_url=chat.base_url,
+            input_types=["text"],
+            cost=ModelCost(),
+            context_window=1000,
+        )
+        assert not models_are_equal(chat, classifier)
+        assert not models_are_equal(image, classifier)
+
+    def test_has_api_only_matches_chat_models(self):
+        from nova_ai.utils import has_api
+
+        chat, image = self._models()
+        assert has_api(chat, "openai-completions")
+        assert not has_api(image, "openrouter-images")
+
+    def test_local_cost_recalculation_clears_provider_billing_flag(self):
+        from nova_ai.utils import calculate_cost
+
+        chat, _ = self._models()
+        usage = Usage(input=100, output=50)
+        usage.cost.total_from_provider = True
+        calculate_cost(chat, usage)
+        assert usage.cost.total_from_provider is False

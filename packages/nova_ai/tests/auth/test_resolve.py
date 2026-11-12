@@ -380,37 +380,28 @@ async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
 
 @pytest.mark.asyncio
 async def test_resolve_stored_oauth_reuses_concurrent_refresh():
-    """双重检查锁：请求读到旧快照，锁内发现已被并发请求刷新——复用零二次刷新。"""
+    """两个真实并发请求共享一次刷新；锁内复查防止第二次重复刷新。"""
     store = InMemoryCredentialStore()
     soon = OAuthCredential(
         access="soon-expiring",
         refresh="refresh-token",
         expires=int(time.time() * 1000) + 60 * 1000,
     )
-    fresh = OAuthCredential(
-        access="fresh-access",
-        refresh="refresh-token",
-        expires=int(time.time() * 1000) + 30 * 60 * 1000,
-    )
-
-    class _StaleReadStore(InMemoryCredentialStore):
-        """模拟请求 B 在 A 刷新之前读到的旧快照：仅**首次**读返回陈旧值
-        （外层快照读），锁内复查读到真实新值。"""
-
-        _served_stale = False
-
-        def read(self, provider_id):
-            if not self._served_stale:
-                self._served_stale = True
-                return soon
-            return super().read(provider_id)
-
-    stale_store = _StaleReadStore()
-    # store 里已是并发请求 A 刚写入的新凭据
-    stale_store.write("test", fresh)
+    store.write("test", soon)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    refreshes = 0
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
-        raise AssertionError("锁内复查判定仍新鲜，不应触发刷新")
+        nonlocal refreshes
+        refreshes += 1
+        started.set()
+        await release.wait()
+        return OAuthCredential(
+            access="fresh-access",
+            refresh="rotated-refresh",
+            expires=int(time.time() * 1000) + 30 * 60 * 1000,
+        )
 
     async def to_auth(credential: OAuthCredential) -> ModelAuth:
         return ModelAuth(api_key=credential.access)
@@ -418,11 +409,21 @@ async def test_resolve_stored_oauth_reuses_concurrent_refresh():
     auth = ProviderAuth(
         oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
     )
-    result = await resolve_provider_auth(
-        "test", auth, stale_store, default_provider_auth_context()
+    first = asyncio.create_task(
+        resolve_provider_auth("test", auth, store, default_provider_auth_context())
     )
-    assert result is not None
-    assert result.auth["api_key"] == "fresh-access"
+    second = asyncio.create_task(
+        resolve_provider_auth("test", auth, store, default_provider_auth_context())
+    )
+    await started.wait()
+    release.set()
+    results = await asyncio.gather(first, second)
+    assert refreshes == 1
+    assert [result.auth["api_key"] for result in results if result] == [
+        "fresh-access",
+        "fresh-access",
+    ]
+    assert store.read("test").refresh == "rotated-refresh"
 
 
 def test_models_error_includes_cause_detail():

@@ -25,12 +25,18 @@ pixi install --environment dev
 # 运行测试（在每个子包目录下独立执行，避免 tests 包名冲突）
 pixi run -e dev test-ai
 pixi run -e dev test-agent
+pixi run -e dev test-async
+pixi run -e dev test-catalog
 pixi run -e dev test-harness
 pixi run -e dev test-server
 pixi run -e dev test-protocol
 pixi run -e dev test-executor-client
 pixi run -e dev test-coding
 pixi run -e dev test-all
+
+# 模型目录生成与离线对账
+pixi run -e dev generate-models
+pixi run -e dev check-model-data
 
 # 格式化全部 Python 源码
 pixi run -e dev format
@@ -115,7 +121,9 @@ npm link           # 全局注册 `nova` 命令
 - 所有包含 `pyproject.toml` 的子包均已将 `pytest` 声明为开发依赖。
 - Python 测试目录结构：
   - `packages/nova_protocol/tests/`
+  - `packages/nova_async/tests/`
   - `packages/nova_ai/tests/`
+  - `packages/nova_catalog/tests/`
   - `packages/nova_agent/tests/`
   - `packages/nova_harness/tests/`
   - `packages/nova_server/tests/`
@@ -125,7 +133,7 @@ npm link           # 全局注册 `nova` 命令
   - `packages/nova_client/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
   - `bundles/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
-- 已通过 pixi 安装 dev 环境并验证：七个套件非集成测试全部通过（计数随开发漂移，以实跑为准）；修改关键逻辑后应在对应子包内运行测试并确认结果。
+- 已通过 pixi 安装 dev 环境并验证：九个套件非集成测试全部通过（计数随开发漂移，以实跑为准）；修改关键逻辑后应在对应子包内运行测试并确认结果。
 
 运行方式：
 

@@ -63,9 +63,19 @@ def parse_policy(source: str, contents: str) -> Policy:
         if not isinstance(call.func, ast.Name) or call.func.id not in _KNOWN_CALLS:
             name = getattr(call.func, "id", getattr(call.func, "attr", "?"))
             raise PolicyParseError(source, call.lineno, f"unknown rule call `{name}`")
-        kwargs = {
-            kw.arg: _literal(kw.value, source, call.lineno) for kw in call.keywords
-        }
+        kwargs = {}
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                raise PolicyParseError(
+                    source, call.lineno, "rule calls do not support keyword unpacking"
+                )
+            if keyword.arg in kwargs:
+                raise PolicyParseError(
+                    source,
+                    call.lineno,
+                    f"duplicate rule keyword `{keyword.arg}`",
+                )
+            kwargs[keyword.arg] = _literal(keyword.value, source, call.lineno)
         if call.args:
             raise PolicyParseError(
                 source, call.lineno, "rules take keyword arguments only"

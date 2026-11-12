@@ -1989,12 +1989,9 @@
         },
         "reason": {
           "enum": [
-            "pending",
             "stop",
             "length",
-            "toolUse",
-            "error",
-            "aborted"
+            "toolUse"
           ],
           "type": "string"
         },

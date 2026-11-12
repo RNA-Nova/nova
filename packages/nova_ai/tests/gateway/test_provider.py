@@ -175,3 +175,43 @@ class TestProviderStreamDispatch:
         result = await stream.result()
         assert result.stop_reason == StopReason.ERROR
         assert "no API implementation" in (result.error_message or "")
+
+    async def test_sync_dispatch_failure_becomes_error_stream(self):
+        class BrokenApi:
+            def stream(self, model, context, options=None):
+                raise RuntimeError("dispatch boom")
+
+            def stream_simple(self, model, context, options=None):
+                raise RuntimeError("dispatch boom")
+
+        provider = create_provider(id="x", api=BrokenApi(), name="X")
+        stream = provider.stream(_make_model(), Context(messages=[]))
+        result = await stream.result()
+        assert result.stop_reason == StopReason.ERROR
+        assert "dispatch boom" in (result.error_message or "")
+
+    async def test_image_model_cannot_enter_chat_dispatch(self):
+        from nova_protocol import ImageModel
+
+        api = _FakeApiImpl()
+        provider = create_provider(id="test", name="Test", api=api)
+        image = ImageModel(
+            id="image",
+            name="Image",
+            type="image",
+            api="openai-completions",
+            provider="test",
+            base_url="https://example.com",
+            input_types=["text"],
+            output_types=["image"],
+            cost=ModelCost(),
+        )
+        from typing import cast
+
+        # 故意绕过静态类型，验证公共运行时的 chat 守卫。
+        result = await provider.stream(
+            cast(Model, image), Context(messages=[])
+        ).result()
+        assert result.stop_reason == StopReason.ERROR
+        assert "not a chat model" in (result.error_message or "")
+        assert api.calls == []

@@ -1,55 +1,51 @@
-"""模型目录运行时机器（"目录数据 → ``Model``"的全部变换）。
+"""模型目录运行时机器（typed-key → Model/ImageModel/ClassifierModel）。
 
-- ``flatten_model_catalog``：数据分片（``providers/data/<provider>.json``，按
-  ``{api 分组: {模型 id: 字段}}`` 组织）拍平成 ``{模型 id: Model}``——分片文件由
-  ``catalog/generate.py`` 生成，运行时只消费、不改写；
-- 运行时 finalize（``finalize_catalog_models``）：站拉取字段 → 盖戳 →
-  ``Model`` 列表，归刷新策略（``gateway/strategies.py``）消费；
-- **修正语义唯一定义点在 nova_catalog**（``nova_catalog.engine`` 的
-  ``apply_corrections``——构建/运行同一台引擎，本模块直引不另立）；
-  知识唯一定义点在 ``nova_catalog.providers``（各 DEF——
-  ``ProviderDefinition`` 结构满足者）；
-- provider 独有的内容裁决（kimi managed 订阅源覆盖、火山 ark 在售筛选）
-  不在本模块——归各家目录的 ``catalog.py`` 回调。
-
-构建期专用流水线（``build_provider_models``/``source_models_for``）不在本
-模块——归 ``nova_catalog`` 包（pi 同款：构建期世界独立成区）。
+- ``flatten_chat/image/classifier_model_catalog``：把生成的 JSON 分片拍平成
+  对应操作目录；
+- ``finalize_catalog_models``：把目录站字段物化为混合目录，负责身份盖戳、
+  去重、effort 和图像默认限制。pi.dev 等成品源不重复执行 provider 修正；
+  models.dev 原料源的专属修正在进入本函数前由 provider 的 materialize
+  回调完成。
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Mapping, Optional, Sequence, cast
 
-from nova_catalog.define import ProviderDefinition
-from nova_catalog.engine import stamp_fields
+from nova_catalog.define import stamp_fields
 from nova_catalog.input_limits import apply_image_resize_defaults
 from nova_catalog.reasoning import apply_models_dev_effort
-from nova_protocol import Model, ModelFields
+from nova_protocol import (
+    AnyModel,
+    ClassifierModel,
+    ImageModel,
+    Model,
+    ModelFields,
+    ModelType,
+)
 
 __all__ = [
     "builtin_catalog_generated_at",
     "finalize_catalog_models",
-    "flatten_model_catalog",
+    "flatten_chat_model_catalog",
+    "flatten_classifier_model_catalog",
+    "flatten_image_model_catalog",
 ]
 
-# ---------------------------------------------------------------------------
-# 数据分片拍平（生成的 models.py shard 在 import 期消费）
-# ---------------------------------------------------------------------------
 
-
-def flatten_model_catalog(
-    provider_id: str, groups: Dict[str, Dict[str, Dict[str, Any]]]
-) -> Dict[str, Model]:
-    """把 ``{api: {模型 id: 字段}}`` 拍平为 ``{模型 id: Model}``。
-
-    - ``api`` 以分组键为准（字段里若带 ``api``，两者必须一致）；
-    - ``provider`` 戳以入参为准；
-    - 字段构造 ``Model`` 时做 pydantic 校验——脏数据在导入期即报错。
-    """
-    models: Dict[str, Model] = {}
+def _flatten_model_catalog(
+    provider_id: str,
+    groups: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    model_type: ModelType,
+) -> Dict[str, Any]:
+    """按 typed key 过滤一种操作，再经对应 Pydantic 模型验收。"""
+    models: Dict[str, Any] = {}
     for api, group in groups.items():
-        for model_id, fields in group.items():
-            fields = dict(fields)
+        for model_key, raw_fields in group.items():
+            entry_type, separator, model_id = model_key.partition(":")
+            if not separator or entry_type != model_type:
+                continue
+            fields = dict(raw_fields)
             if fields.get("id") != model_id:
                 raise ValueError(
                     f"{provider_id}/{model_id}: data id mismatch: {fields.get('id')!r}"
@@ -59,74 +55,97 @@ def flatten_model_catalog(
                 raise ValueError(
                     f"{provider_id}/{model_id}: data api {declared_api!r} != group {api!r}"
                 )
+            fields["type"] = model_type
             fields["api"] = api
             fields["provider"] = provider_id
-            models[model_id] = Model(**fields)
+            if model_type == "image":
+                models[model_id] = ImageModel(**fields)
+            elif model_type == "classifier":
+                models[model_id] = ClassifierModel(**fields)
+            else:
+                models[model_id] = Model(**fields)
     return models
 
 
-# ---------------------------------------------------------------------------
-# 修正引擎（约定发现：知识归各 provider 目录 corrections.py）
-# ---------------------------------------------------------------------------
+def flatten_chat_model_catalog(
+    provider_id: str, groups: Mapping[str, Mapping[str, Mapping[str, Any]]]
+) -> Dict[str, Model]:
+    """拍平 ``chat:<id>`` 条目；其他操作不会误入聊天目录。"""
+    return cast(Dict[str, Model], _flatten_model_catalog(provider_id, groups, "chat"))
+
+
+def flatten_image_model_catalog(
+    provider_id: str, groups: Mapping[str, Mapping[str, Mapping[str, Any]]]
+) -> Dict[str, ImageModel]:
+    """拍平 ``image:<id>`` 条目并校验图像输出模态。"""
+    return cast(
+        Dict[str, ImageModel], _flatten_model_catalog(provider_id, groups, "image")
+    )
+
+
+def flatten_classifier_model_catalog(
+    provider_id: str, groups: Mapping[str, Mapping[str, Mapping[str, Any]]]
+) -> Dict[str, ClassifierModel]:
+    """拍平 ``classifier:<id>`` 条目并校验分类模型形状。"""
+    return cast(
+        Dict[str, ClassifierModel],
+        _flatten_model_catalog(provider_id, groups, "classifier"),
+    )
 
 
 def finalize_catalog_models(
     provider_id: str,
     base_url: Optional[str],
-    models_fields: List[ModelFields],
+    models_fields: Sequence[ModelFields],
     *,
-    knowledge: Optional[ProviderDefinition] = None,
     source_reasoning: Optional[Dict[str, Dict[str, Any]]] = None,
-) -> List[Model]:
-    """站拉取字段 → 修正 → 盖戳 → ``Model`` 列表（运行时 finalize 单点）。
+) -> List[AnyModel]:
+    """站字段 → 身份盖戳 → 分操作混合目录（运行时单点）。
 
-    盖戳素材（``provider_id``/``base_url``）与修正知识（``knowledge``——
-    ``nova_catalog`` 的 ``ProviderDefinition``）全部由调用方递交——引擎
-    不查找、不注册、不含任何单家逻辑；provider 独有的内容裁决（kimi managed
-    订阅源覆盖、火山 ark 在售筛选）归各家回调。钉住模型（``pinned_models``）与站拉取合并，
-    同 id 站拉取胜。
+    去重键是 ``(type, id)``；同类型冲突由后到站条目胜出。原料修正已在
+    更前面的 provider materialize 阶段完成。
     """
-    raw: Dict[str, ModelFields] = {}
+    raw: Dict[tuple[str, str], ModelFields] = {}
     for fields in models_fields:
         model_id = fields.get("id")
-        if not model_id:
+        model_type = fields["type"] if "type" in fields else "chat"
+        if (
+            not isinstance(model_id, str)
+            or not model_id
+            or model_type not in ("chat", "image", "classifier")
+        ):
             continue
-        # 拷贝（apply_corrections 原地改，不污染调用方持有的字段包）
-        raw[model_id] = cast(ModelFields, dict(fields))
+        raw[(model_type, model_id)] = cast(ModelFields, dict(fields))
 
-    pinned = knowledge.pinned_models if knowledge is not None else {}
-    models: List[Model] = []
-
-    def _finalize(model_id: str, fields: ModelFields) -> Model:
-        # 修正+盖戳归 nova_catalog.engine.stamp_fields（单一实现点）；
-        # 本层只补 Model 构造（运行期产物形态——model_validate 即目录边界
-        # 一次性校验入口，TypedDict 声明形状在此验收）
+    models: List[AnyModel] = []
+    for (model_type, model_id), fields in raw.items():
+        source_base_url = fields.get("base_url")
+        base_url_override = (
+            None if isinstance(source_base_url, str) and source_base_url else base_url
+        )
         stamped = stamp_fields(
-            knowledge,
             model_id,
             fields,
             provider_id=provider_id,
-            base_url=base_url,
+            base_url=base_url_override,
         )
-        apply_models_dev_effort(stamped, (source_reasoning or {}).get(model_id))
-        apply_image_resize_defaults(stamped)
-        return Model.model_validate(stamped)
-
-    for model_id, fields in raw.items():
-        models.append(_finalize(model_id, fields))
-    for model_id, fields in pinned.items():
-        if model_id not in raw:
-            models.append(_finalize(model_id, cast(ModelFields, dict(fields))))
+        if model_type == "chat":
+            apply_models_dev_effort(stamped, (source_reasoning or {}).get(model_id))
+        if model_type in ("chat", "image"):
+            # classifier 与 pi 一致：静态构建和远程成品都不额外补默认缩放。
+            apply_image_resize_defaults(stamped)
+        stamped["type"] = model_type
+        if model_type == "image":
+            models.append(ImageModel.model_validate(stamped))
+        elif model_type == "classifier":
+            models.append(ClassifierModel.model_validate(stamped))
+        else:
+            models.append(Model.model_validate(stamped))
     return models
 
 
 def builtin_catalog_generated_at() -> Optional[int]:
-    """基线目录的生成时间（epoch ms；来自 data/.manifest.json，缺失返回 None）。
-
-    远程目录物化的新鲜度竞速锚点：基线比运行时缓存新时，缓存 overlay
-    让位（对齐 TS getBuiltinModelDataGeneratedAt）。包资源经
-    importlib.resources 访问，不依赖 __file__ 安装布局（zip 安装安全）。
-    """
+    """基线目录的生成时间（epoch ms；来自 data/.manifest.json，缺失返回 None）。"""
     import json
     from datetime import datetime
     from importlib.resources import files

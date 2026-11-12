@@ -1,8 +1,8 @@
 """nova_ai —— 统一的 LLM 提供商抽象层
 
 以 ``ModelsManager`` 集合 + ``Provider`` 运行时单元 + API 协议实现三层组织，
-对外暴露一致的 ``stream`` / ``complete`` / ``stream_simple`` /
-``complete_simple`` API。架构对齐 TypeScript ``pi/packages/ai``。
+统一提供聊天、图像与分类调用；低层调用显式使用具体协议模块。架构对齐
+TypeScript ``pi/packages/ai`` 的目标态。
 """
 
 from typing import TYPE_CHECKING
@@ -51,6 +51,8 @@ from .gateway import (
     ModelsManager,
     ModelsStore,
     Provider,
+    ProviderClassifier,
+    ProviderImages,
     ProviderStreams,
     RefreshModelsContext,
     create_models_manager,
@@ -63,30 +65,29 @@ from .providers import (
     KIMI_CODING_MODELS,
     MOONSHOTAI_CN_MODELS,
     MOONSHOTAI_MODELS,
+    OPENROUTER_CLASSIFIER_MODELS,
+    OPENROUTER_IMAGE_MODELS,
     VOLCENGINE_MODELS,
     anthropic_provider,
     builtin_models,
     builtin_providers,
-    get_anthropic_model,
+    get_builtin_classifier_model,
+    get_builtin_classifier_models,
+    get_builtin_image_model,
+    get_builtin_image_models,
     get_builtin_model,
     get_builtin_models,
-    get_kimi_coding_model,
-    get_moonshotai_cn_model,
-    get_moonshotai_model,
-    get_volcengine_model,
     kimi_coding_provider,
-    list_anthropic_models,
-    list_kimi_coding_models,
-    list_moonshotai_cn_models,
-    list_moonshotai_models,
-    list_volcengine_models,
     moonshotai_cn_provider,
     moonshotai_provider,
+    openrouter_provider,
     volcengine_provider,
 )
 
 # 重新导出 stream_options（AI 调用面参数包；类型词汇已迁 nova_protocol）
 from .stream_options import (
+    ClassifierOptions,
+    ImagesOptions,
     ModelIdentity,
     ProviderResponse,
     SimpleStreamOptions,
@@ -164,6 +165,8 @@ __all__ = [
     "ThinkingBudgets",
     "StreamOptions",
     "SimpleStreamOptions",
+    "ImagesOptions",
+    "ClassifierOptions",
     "ProviderResponse",
     "ModelIdentity",
     # api_impls._shared.simple_options
@@ -182,32 +185,31 @@ __all__ = [
     # providers
     "ANTHROPIC_MODELS",
     "anthropic_provider",
-    "get_anthropic_model",
-    "list_anthropic_models",
     "Provider",
+    "ProviderClassifier",
+    "ProviderImages",
     "ProviderStreams",
     "RefreshModelsContext",
     "create_provider",
     "builtin_providers",
     "builtin_models",
+    "get_builtin_classifier_model",
+    "get_builtin_classifier_models",
+    "get_builtin_image_model",
+    "get_builtin_image_models",
     "get_builtin_model",
     "get_builtin_models",
     "kimi_coding_provider",
     "KIMI_CODING_MODELS",
-    "get_kimi_coding_model",
-    "list_kimi_coding_models",
     "moonshotai_provider",
     "MOONSHOTAI_MODELS",
-    "get_moonshotai_model",
-    "list_moonshotai_models",
     "moonshotai_cn_provider",
     "MOONSHOTAI_CN_MODELS",
-    "get_moonshotai_cn_model",
-    "list_moonshotai_cn_models",
+    "openrouter_provider",
+    "OPENROUTER_CLASSIFIER_MODELS",
+    "OPENROUTER_IMAGE_MODELS",
     "volcengine_provider",
     "VOLCENGINE_MODELS",
-    "get_volcengine_model",
-    "list_volcengine_models",
 ]
 
 # ---------------------------------------------------------------------------
@@ -240,5 +242,11 @@ def __getattr__(name: str):
 def __dir__() -> "list[str]":
     return sorted(
         set(globals())
-        | {"OpenAICompletionsOptions", "AnthropicOptions", "ProviderStreamOptions"}
+        | {
+            "OpenAICompletionsOptions",
+            "AnthropicOptions",
+            "ProviderStreamOptions",
+            "kimi_oauth",
+            "openai_codex_oauth",
+        }
     )

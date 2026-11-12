@@ -9,6 +9,7 @@ nova/
 ├── packages/
 │   ├── nova_protocol/      # 词汇枢纽（纯形状零行为——全仓类型的单一正典源）
 │   ├── nova_async/         # 取消/等待机制族叶子包（真杀 scope/竞速等待/信号组合/任务台账；词汇锚定 nova_protocol）
+│   ├── nova_catalog/       # 模型目录构建管线 + 运行期共享的目录纯算法
 │   ├── nova_ai/            # 统一的 LLM 提供商抽象层
 │   ├── nova_agent/         # 事件驱动的异步 Agent 框架
 │   ├── nova_harness/       # 高阶 Agent SDK（会话、压缩、工具链、包管理、RuntimeManager）
@@ -31,6 +32,7 @@ nova/
 
 1. **`nova_protocol`** —— 词汇枢纽（最底层）。全仓类型的单一正典源：LLM 消息/内容/模型/流式事件/枚举/compat/auth 词汇、agent 循环事件与消息、取消原语词汇（`signal.py`）、报告词汇（错误分类/警告事件/装配诊断）、secret 清洗——纯形状零行为，纯洁性审计机械执法。
 2. **`nova_async`** —— 取消/等待机制族叶子包（structure-modeling §二升格出口的落地）。消费枢纽词汇：`AbortScope`/`await_with_abort`（真杀）、`await_with_signal`（竞速）、`abortable_sleep`/`any_signal`/`operation_signal`、`TaskTracker`——禁第三份实现。
+   同级独立叶子 **`nova_catalog`** 负责模型目录构建，并向 `nova_ai` 提供修正/翻译等纯算法；只依赖 `nova_protocol`，不得反向 import `nova_ai`。
 3. **`nova_ai`** —— LLM 抽象层。提供多厂商（OpenAI、Anthropic、Google、Volcengine、GitHub Copilot 等）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层；OpenAI Completions 与 Anthropic Messages 双协议实现。
 4. **`nova_agent`** —— 核心框架。基于 `nova_ai` 的模型能力，提供 `Agent` 类、事件订阅/发布、`agent_loop` 异步循环、生命周期管理、工具校验与执行。
 5. **`nova_harness`** —— 高阶 SDK。基于 `nova_ai` + `nova_agent`，封装 `AgentSession`、会话树（分支/fork/导航）、上下文压缩（Compaction）、资源加载、设置持久化、模型注册表覆盖、内置工具链、包管理器 CLI、Project Trust 门控与 `ExtensionUIContext` UI 桥接。
@@ -53,12 +55,12 @@ nova/
 
 位于 `packages/nova_ai/src/nova_ai/`：
 
-- `gateway/` —— `ModelsManager` 集合（`models.py`）、`Provider` 运行时单元与 `create_provider`（`provider.py`）、`ModelsStore`（`store.py`）；鉴权解析在请求时完成（runtime override → stored credential → 环境变量链 → OAuth 刷新）
-- `providers/` —— 内置厂商定义（`anthropic`、`volcengine`、`moonshotai`、`moonshotai_cn`、`kimi_coding`），各含静态模型数据与 provider 工厂；`all.py` 提供 `builtin_models()`
+- `gateway/` —— `ModelsManager` 集合（`models.py`）、`Provider` 运行时单元（`provider.py`）与 `create_provider`（`factory.py`）、`ModelsStore`（`store.py`）；鉴权解析在请求时完成（runtime override → stored credential → 环境变量链 → OAuth 刷新）
+- `providers/` —— 内置厂商定义（`anthropic`、`volcengine`、`moonshotai`、`moonshotai_cn`、`kimi_coding`、`openrouter`），各含静态模型数据与 provider 工厂；`all.py` 提供 `builtin_models()`。OpenRouter 当前注册图像与分类能力，不注册聊天目录
 - `auth/` —— `AuthContext`、credential store 协议、`resolve_provider_auth`、`env_api_key_auth` 等辅助，以及 `oauth/`（OpenAI Codex、Kimi 的 OAuth 流程与登录页）
-- `api_impls/` —— API 协议实现：`openai_completions/` 与 `anthropic_messages/` 两个完整实现
-- `streaming.py` —— `AssistantMessageEventStream` 与流式调用入口
-- `stream_options.py` —— AI 调用面参数包（`StreamOptions`/`SimpleStreamOptions`/`ThinkingBudgets` 等，dataclass）
+- `api_impls/` —— 聊天协议实现 `openai_completions/`、`anthropic_messages/`，以及非流式 `openrouter_images.py`、`typesafe_system_one.py`
+- `streaming.py` —— 聊天事件流容器；图像/分类与聊天的低层直调均显式使用 `api_impls/` 下的具体协议模块
+- `stream_options.py` —— AI 调用面参数包（`StreamOptions`/`ImagesOptions`/`ClassifierOptions`/`SimpleStreamOptions`/`ThinkingBudgets` 等，dataclass）
 - `utils/` —— 环境变量、JSON 解析、消息转换、流选项、Unicode 代理项清理、上下文溢出检测、模型工具函数等
 
 > 类型词汇（messages/content/model/events/auth 等）已迁 `nova_protocol` 词汇枢纽——本包只剩行为。见 docs/crosscutting/data-modeling.md「住所」。
@@ -66,6 +68,18 @@ nova/
 **Auth 层三层治理（终态）**：流程层（本包 `auth/`）只管状态机与密钥（PKCE/state/换 token/轮询），收货需求经 `AuthInteraction.acquire_authorization_code` 声明；接线层（`nova_harness/config/auth/`）装配收货通道（宿主监听 `host:listenOnce` / 本地一次性监听 / 手动粘贴框）与竞速仲裁；渲染与用户本机执行（开浏览器 `host:openUrl`、收货、输码）归前端。开浏览器永远不后端代开。
 
 开发期 `docs/`（架构设计/ADR/devlog 等）已随 0.1.x 封版移除——设计文档以包内 `README.md` 为准；历史版本可在 git 历史中查阅。
+
+### `nova_catalog`（源码包 `nova_catalog`）
+
+位于 `packages/nova_catalog/src/nova_catalog/`：
+
+- `providers/` + `families/` —— 各 provider 的 `models/images/classifiers` 构建钩子、静态知识与跨宿主族事实；
+- `sources/` —— models.dev 与 OpenRouter 图像/分类列表的薄拉取/翻译、ark 响应解析；
+- `define.py` —— `ProviderDefinition` / `ProviderContext` 与 models.dev 构建、字段盖戳辅助函数；
+- `build.py` —— 调用 provider 构建钩子并执行去重、compat、族规则、effort、finalize；`ProviderCatalog` 分离 chat/image/classifier；
+- `generate.py` + `model_data.py` —— 生成事务、manifest 与聚合器/shard/JSON 对账。
+
+产物写入 `nova_ai`；运行期也复用本包的修正、站翻译和输入限制算法。依赖只指向 `nova_protocol`，不 import `nova_ai`。
 
 ### `nova_agent`（源码包 `nova_agent`）
 

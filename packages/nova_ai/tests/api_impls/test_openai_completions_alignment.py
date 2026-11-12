@@ -8,6 +8,20 @@ baseten chat_template_args、streamSimple thinking_budgets 透传。
 import json
 
 import pytest
+from nova_protocol import (
+    AssistantMessage,
+    Context,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    OpenAICompletionsCompat,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    UserMessage,
+)
+
 from nova_ai.api_impls._shared.simple_options import (
     clamp_thinking_budget_to_answer_room,
     thinking_budget_for_level,
@@ -22,19 +36,6 @@ from nova_ai.api_impls.openai_completions import (
     parse_openai_reasoning_details,
 )
 from nova_ai.stream_options import ThinkingBudgets
-from nova_protocol import (
-    AssistantMessage,
-    Context,
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
-    OpenAICompletionsCompat,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    UserMessage,
-)
 
 
 def _model(**overrides) -> Model:
@@ -65,8 +66,9 @@ def _ctx(*messages) -> Context:
 
 def test_mid_convo_system_passthrough_when_supported():
     """旗标为真：中途 system 消息逐条呈现为 system 条目（名化变更文本）。"""
-    from nova_ai.api_impls.openai_completions import convert_messages
     from nova_protocol import OpenAICompletionsCompat, SystemMessage
+
+    from nova_ai.api_impls.openai_completions import convert_messages
 
     ctx = _ctx(
         UserMessage(content="q1"),
@@ -87,8 +89,9 @@ def test_mid_convo_system_passthrough_when_supported():
 
 def test_mid_convo_system_collapses_when_unsupported():
     """旗标为假：中途变更折叠进头部，无多余 system 条目。"""
-    from nova_ai.api_impls.openai_completions import convert_messages
     from nova_protocol import OpenAICompletionsCompat, SystemMessage
+
+    from nova_ai.api_impls.openai_completions import convert_messages
 
     ctx = _ctx(
         UserMessage(content="q1"),
@@ -313,8 +316,9 @@ def test_normalize_tool_call_id_truncates_over_40_with_hash():
 def test_non_null_assistant_content_flag_rewrites_null():
     """requiresNonNullAssistantContent：assistant 的 null content 改写空串
     （对齐 TS 14b804d80）；缺省 false 时保持 null。"""
-    from nova_ai.api_impls.openai_completions import convert_messages
     from nova_protocol import OpenAICompletionsCompat
+
+    from nova_ai.api_impls.openai_completions import convert_messages
 
     assistant = AssistantMessage(
         role="assistant",
@@ -417,7 +421,8 @@ class TestThinkingBudget:
         # vLLM 等端点 reasoning 与答案共享 max_tokens，预算必须封顶
         assert params["extra_body"]["thinking_token_budget"] == 16384
 
-    def test_stream_simple_passes_thinking_budgets(self):
+    @pytest.mark.asyncio
+    async def test_stream_simple_passes_thinking_budgets(self):
         """streamSimple 不再丢弃 thinking_budgets（旧移植的字段丢失 bug）。"""
         from nova_ai.api_impls.openai_completions import _stream as stream_module
 
@@ -433,6 +438,9 @@ class TestThinkingBudget:
                 async def __anext__(self):
                     raise StopAsyncIteration
 
+                async def result(self):
+                    return AssistantMessage(content=[])
+
             return _Fake()
 
         original = stream_module.stream
@@ -442,7 +450,7 @@ class TestThinkingBudget:
             from nova_ai.stream_options import SimpleStreamOptions, ThinkingBudgets
 
             budgets = ThinkingBudgets(low=999)
-            stream_simple(
+            events = stream_simple(
                 _model(reasoning=True),
                 _ctx(UserMessage(content="hi")),
                 SimpleStreamOptions(
@@ -451,6 +459,7 @@ class TestThinkingBudget:
                     thinking_budgets=budgets,
                 ),
             )
+            await events.result()
             assert captured["opts"].thinking_budgets == budgets
         finally:
             stream_module.stream = original

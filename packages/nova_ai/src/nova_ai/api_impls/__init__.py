@@ -1,7 +1,8 @@
 """API 协议实现模块
 
-每个子包对应一种 API 协议，导出 ``stream`` / ``stream_simple`` 两个函数，
-直接满足 ``ProviderStreams`` 契约（对齐 TS ``src/api/*.ts``）。
+每个模块或子包对应一种 API 协议；聊天实现导出 ``stream`` /
+``stream_simple``，图像与分类实现导出各自的非流式入口（对齐 TS
+``src/api/*.ts``）。
 
 惰性导入（对齐 TS ``lazyApi`` 的包体收益）：协议实现连带的重依赖
 （openai/anthropic SDK 等）只在真正访问时加载——裸 ``import nova_ai``
@@ -20,17 +21,14 @@ if TYPE_CHECKING:
 _LAZY_MODULES = {
     "openai_completions": "nova_ai.api_impls.openai_completions",
     "anthropic_messages": "nova_ai.api_impls.anthropic_messages",
+    "openrouter_images": "nova_ai.api_impls.openrouter_images",
+    "typesafe_system_one": "nova_ai.api_impls.typesafe_system_one",
 }
 
+# 根门面只承载明确的选项类型；调用一律经具体协议模块，避免把
+# stream/build_params 等通用词误当成可跨协议自动分派的历史别名。
 _LAZY_NAMES = {
-    # 首个实现的既有门面（历史面——协议专属请经模块路径）
-    "stream": "openai_completions",
-    "stream_simple": "openai_completions",
     "OpenAICompletionsOptions": "openai_completions",
-    "detect_compat": "openai_completions",
-    "get_compat": "openai_completions",
-    "build_params": "openai_completions",
-    # anthropic_messages 门面
     "AnthropicOptions": "anthropic_messages",
 }
 
@@ -61,12 +59,15 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list:
-    return sorted(set(globals()) | set(_LAZY_MODULES) | set(_LAZY_NAMES))
+    return sorted(
+        set(globals())
+        | set(_LAZY_MODULES)
+        | set(_LAZY_NAMES)
+        | {"ProviderStreamOptions"}
+    )
 
 
 __all__ = [
-    "stream",
-    "stream_simple",
     "OpenAICompletionsOptions",
     "AnthropicOptions",
     "ProviderStreamOptions",

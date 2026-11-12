@@ -667,6 +667,84 @@ class TestStreamError:
 
     @pytest.mark.asyncio
     @respx.mock
+    async def test_response_model_and_raw_stop_reason(self):
+        capture = RequestCapture()
+        mount_openai_chat(
+            [
+                oai_chunk(content="hi", model="upstream-model"),
+                oai_chunk(finish="stop", model="upstream-model"),
+            ],
+            capture,
+        )
+        result = await stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(api_key="sk-test"),
+        ).result()
+        assert result.response_model == "upstream-model"
+        assert result.raw_stop_reason == "stop"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize("with_tool", [False, True])
+    async def test_missing_finish_reason_uses_content_when_compat_allows(
+        self, with_tool
+    ):
+        from nova_protocol import OpenAICompletionsCompat
+
+        tool_chunks = (
+            [
+                oai_chunk(
+                    tool_calls=[oai_tool_call(id="call-1", name="read", arguments="{}")]
+                )
+            ]
+            if with_tool
+            else []
+        )
+        capture = RequestCapture()
+        mount_openai_chat([oai_chunk(content="hi"), *tool_chunks], capture)
+        model = _model().model_copy(
+            update={"compat": OpenAICompletionsCompat(supports_finish_reason=False)}
+        )
+        result = await stream(
+            model,
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(api_key="sk-test"),
+        ).result()
+        assert result.stop_reason is (
+            StopReason.TOOL_USE if with_tool else StopReason.STOP
+        )
+        assert result.raw_stop_reason is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_options_retry_reaches_real_openai_stream(self):
+        success = (
+            f"data: {json.dumps(oai_chunk(content='ok', finish='stop'))}\n\n"
+            "data: [DONE]\n\n"
+        ).encode()
+        route = respx.post(url__regex=r".*/chat/completions$").mock(
+            side_effect=[
+                httpx.Response(429, headers={"retry-after-ms": "1"}),
+                httpx.Response(
+                    200,
+                    content=success,
+                    headers={"content-type": "text/event-stream"},
+                ),
+            ]
+        )
+        result = await stream(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            OpenAICompletionsOptions(
+                api_key="sk-test", max_retries=1, max_retry_delay_ms=0
+            ),
+        ).result()
+        assert result.stop_reason is StopReason.STOP
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_content_filter_error(self):
         capture = RequestCapture()
         mount_openai_chat(
@@ -949,34 +1027,37 @@ class TestEventPairingGuarantee:
 
 
 class TestStreamSimpleGuards:
-    def test_no_api_key_and_no_env_raises(self, monkeypatch):
-        """无 api_key、无 authorization 头、无环境变量时直接抛错（对齐 TS getClientApiKey）。"""
+    @pytest.mark.asyncio
+    async def test_no_api_key_and_no_env_returns_error_stream(self, monkeypatch):
+        """协议直接入口的鉴权失败也进入事件流，不在调用时同步抛出。"""
         from nova_ai.api_impls.openai_completions import stream_simple
         from nova_ai.stream_options import SimpleStreamOptions
 
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        with pytest.raises(ValueError, match="No API key for provider"):
-            stream_simple(
-                _model(),
-                Context(messages=[UserMessage(content="hi")]),
-                SimpleStreamOptions(),
-            )
+        events = stream_simple(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            SimpleStreamOptions(),
+        )
+        result = await events.result()
+        assert result.stop_reason is StopReason.ERROR
+        assert "No API key for provider" in (result.error_message or "")
 
-    def test_env_key_does_not_rescue_protocol_layer(self, monkeypatch):
-        """环境变量有 key 时协议层照样抛错：协议层不读环境变量（对齐 TS getClientApiKey）。
-
-        env 注入是上游（ModelsManager.applyAuth）的职责；本层只认 options.api_key 与 headers。
-        """
+    @pytest.mark.asyncio
+    async def test_env_key_does_not_rescue_protocol_layer(self, monkeypatch):
+        """协议层不读环境变量；env 注入仍是上游 ModelsManager 的职责。"""
         from nova_ai.api_impls.openai_completions import stream_simple
         from nova_ai.stream_options import SimpleStreamOptions
 
         monkeypatch.setenv("OPENAI_API_KEY", "env-key-present")
-        with pytest.raises(ValueError, match="No API key for provider"):
-            stream_simple(
-                _model(),
-                Context(messages=[UserMessage(content="hi")]),
-                SimpleStreamOptions(),
-            )
+        events = stream_simple(
+            _model(),
+            Context(messages=[UserMessage(content="hi")]),
+            SimpleStreamOptions(),
+        )
+        result = await events.result()
+        assert result.stop_reason is StopReason.ERROR
+        assert "No API key for provider" in (result.error_message or "")
 
     @pytest.mark.asyncio
     @respx.mock

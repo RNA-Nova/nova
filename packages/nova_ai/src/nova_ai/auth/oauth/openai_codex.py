@@ -43,6 +43,7 @@ from .errors import (
     OAuthFlowError,
     oauth_http_kind,
     response_error_detail,
+    response_json_object,
     validation_error,
     validation_message,
 )
@@ -104,8 +105,8 @@ class _TokenResponse(NovaBaseModel):
     活凭据）永不进错误消息。
     """
 
-    access_token: str = Field(min_length=1)
-    refresh_token: str = Field(min_length=1)
+    access_token: RedactedString = Field(min_length=1, repr=False)
+    refresh_token: RedactedString = Field(min_length=1, repr=False)
     expires_in: float
 
     # 厂商边界模型按厂商 casing（snake）——关掉枢纽基类的 camel alias
@@ -135,7 +136,7 @@ def _read_token_response(response: httpx.Response, operation: str) -> OAuthCrede
             status_code=response.status_code,
         )
 
-    data = response.json()
+    data = response_json_object(response, f"OpenAI Codex token {operation}")
     try:
         resp = _TokenResponse.model_validate(data)
     except ValidationError as error:
@@ -200,16 +201,16 @@ async def _refresh_access_token(
 class _DeviceCodeStart:
     """设备码登录的初始响应（模块内值对象——规则 5）。"""
 
-    device_auth_id: str
-    user_code: str
+    device_auth_id: RedactedString = field(repr=False)
+    user_code: RedactedString = field(repr=False)
     interval_seconds: float
 
 
 class _DeviceCodeStartResponse(NovaBaseModel):
     """OpenAI Codex deviceauth/usercode 端点响应的边界校验模型。"""
 
-    device_auth_id: str = Field(min_length=1)
-    user_code: str = Field(min_length=1)
+    device_auth_id: RedactedString = Field(min_length=1, repr=False)
+    user_code: RedactedString = Field(min_length=1, repr=False)
     interval: float = Field(ge=0)  # 0 合法（与现状一致——仅负数拒绝）
 
     model_config = ConfigDict(alias_generator=None)  # 厂商 casing（snake）
@@ -251,7 +252,7 @@ async def _start_openai_codex_device_auth(
             status_code=response.status_code,
         )
 
-    data = response.json()
+    data = response_json_object(response, "OpenAI Codex device code")
     try:
         resp = _DeviceCodeStartResponse.model_validate(data)
     except ValidationError as error:
@@ -268,8 +269,8 @@ async def _start_openai_codex_device_auth(
 class _DeviceCodeGrant:
     """设备码轮询终值：授权码 + 配对的 PKCE verifier（模块内值对象）。"""
 
-    authorization_code: str
-    code_verifier: str
+    authorization_code: RedactedString = field(repr=False)
+    code_verifier: RedactedString = field(repr=False)
 
 
 class _DevicePollResponse(NovaBaseModel):
@@ -279,8 +280,8 @@ class _DevicePollResponse(NovaBaseModel):
     模型化为 str 是**有意的微收紧**（端点契约本就是字符串，宽松无收益）。
     """
 
-    authorization_code: str = Field(min_length=1)
-    code_verifier: str = Field(min_length=1)
+    authorization_code: RedactedString = Field(min_length=1, repr=False)
+    code_verifier: RedactedString = Field(min_length=1, repr=False)
 
     model_config = ConfigDict(alias_generator=None)  # 厂商 casing（snake）
 
@@ -300,7 +301,7 @@ async def _poll_openai_codex_device_auth(
         )
 
         if response.status_code < 400:
-            data = response.json()
+            data = response_json_object(response, "OpenAI Codex device auth token")
             try:
                 resp = _DevicePollResponse.model_validate(data)
             except ValidationError as error:

@@ -29,6 +29,13 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
+class _UnsetType:
+    """区分“尚未提供终值”与合法的 ``None`` 终值。"""
+
+
+_UNSET = _UnsetType()
+
+
 class EventStream(Generic[T, R], AsyncIterator[T]):
     """
     通用事件流
@@ -69,7 +76,7 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         self._extract_result = extract_result
 
         self._result_future: Optional[asyncio.Future[R]] = None
-        self._pending_result: Optional[R] = None
+        self._pending_result: R | _UnsetType = _UNSET
         self._pending_exception: Optional[BaseException] = None
 
         # 驱动任务槽位：流自持驱动自己的后台任务（drive() 写入，完成自清）。
@@ -90,7 +97,7 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
             self._result_future = loop.create_future()
             if self._pending_exception is not None:
                 self._result_future.set_exception(self._pending_exception)
-            elif self._pending_result is not None:
+            elif not isinstance(self._pending_result, _UnsetType):
                 self._result_future.set_result(self._pending_result)
         return self._result_future
 
@@ -98,7 +105,10 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         future = self._result_future
         if future is not None and not future.done():
             future.set_result(result)
-        elif self._pending_result is None and self._pending_exception is None:
+        elif (
+            isinstance(self._pending_result, _UnsetType)
+            and self._pending_exception is None
+        ):
             # 先到者为准（docstring 契约）——已有暂存终值/异常时不覆盖
             self._pending_result = result
 
@@ -106,7 +116,10 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         future = self._result_future
         if future is not None and not future.done():
             future.set_exception(exc)
-        elif self._pending_result is None and self._pending_exception is None:
+        elif (
+            isinstance(self._pending_result, _UnsetType)
+            and self._pending_exception is None
+        ):
             self._pending_exception = exc
 
     # -------------------------
@@ -202,7 +215,7 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
 
     def end(
         self,
-        result: Optional[R] = None,
+        result: R | _UnsetType = _UNSET,
         exc: Optional[BaseException] = None,
     ) -> None:
         """
@@ -212,7 +225,7 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         （排干即"无条件唤醒等待者"的 v2 对位：缓冲事件不重不漏）。
 
         可选：
-            end(result=...)
+            end(result=...)（包括合法的 None）
             end(exc=...)
         """
 
@@ -222,7 +235,7 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         if exc is not None:
             self._set_exception(exc)
 
-        elif result is not None:
+        elif not isinstance(result, _UnsetType):
             self._set_result(result)
 
         elif not already_done:
@@ -325,10 +338,10 @@ class AssistantMessageEventStream(
 
     def end(
         self,
-        result: Optional[AssistantMessage] = None,
+        result: AssistantMessage | _UnsetType = _UNSET,
         exc: Optional[BaseException] = None,
     ) -> None:
-        if result is not None:
+        if not isinstance(result, _UnsetType):
             self._time_response(result)
         super().end(result=result, exc=exc)
 

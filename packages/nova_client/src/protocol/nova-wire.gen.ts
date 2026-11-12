@@ -356,7 +356,7 @@ export interface DeleteSessionResult {
 
 export interface DoneEvent {
   type: "done";
-  reason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+  reason: "stop" | "length" | "toolUse";
   message: AssistantMessage;
 }
 

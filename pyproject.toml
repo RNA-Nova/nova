@@ -34,6 +34,7 @@ websockets = ">=12.0"
 # "generator didn't stop after athrow()" 噪音；3.9.0 及之前干净。上游修复后放开。
 openai = ">=2.0,<3.10.0"
 httpx = ">=0.27.0"
+httpx2 = ">=2.0,<3"
 anthropic = ">=1.0"
 # 取消作用域（CancelScope——请求/消费段的真杀执行层；>=4.11 归因与
 # uncancel 簿记修正），词汇层仍是自家 AbortSignal（TS 对齐）
@@ -62,6 +63,11 @@ respx = ">=0.22.0"
 hypothesis = ">=6.100.0"
 sniffio = ">=1.3.0"
 
+[tool.black]
+target-version = ["py313"]
+# 生成物由 nova-catalog 管线产出，格式以生成器为准。
+extend-exclude = 'packages/nova_ai/src/nova_ai/(models_generated\.py|providers/data|providers/(anthropic|kimi_coding|moonshotai|moonshotai_cn|openrouter|volcengine)/models\.py)'
+
 [tool.isort]
 profile = "black"
 multi_line_output = 3
@@ -74,6 +80,7 @@ extend_skip = [
     "packages/nova_ai/src/nova_ai/providers/kimi_coding/models.py",
     "packages/nova_ai/src/nova_ai/providers/moonshotai/models.py",
     "packages/nova_ai/src/nova_ai/providers/moonshotai_cn/models.py",
+    "packages/nova_ai/src/nova_ai/providers/openrouter/models.py",
     "packages/nova_ai/src/nova_ai/providers/volcengine/models.py",
 ]
 
@@ -97,4 +104,4 @@ check-model-data = { cmd = "python packages/nova_catalog/scripts/check_model_dat
 check-live = { cmd = "python -m tests.integration.check_live", cwd = "packages/nova_ai" }
 test-integration = { cmd = "NOVA_RUN_INTEGRATION=1 pytest tests/integration", cwd = "packages/nova_ai" }
 format = "black packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src packages/nova_catalog bundles/nova_coding_agent/backend && isort packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src packages/nova_catalog bundles/nova_coding_agent/backend"
-typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent packages/nova_catalog/src packages/nova_catalog/scripts"
+typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent packages/nova_catalog/src packages/nova_catalog/scripts packages/nova_catalog/tests"

@@ -48,15 +48,17 @@ async def test_event_sequence_integrity(probe: Probe):
 
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)
-async def test_stream_and_complete_same_final_text(probe: Probe):
-    """stream 与 complete 的最终文本一致（同一条消息两读）。"""
+async def test_stream_result_is_published_terminal_message(probe: Probe):
+    """流终态消息与 result() 是同一对象，不缺事件也不二次请求。"""
     manager = await build_manager()
     ctx = Context(messages=[UserMessage(content="Say 'ok'")])
     stream = manager.stream_simple(probe.model, ctx)
     async with asyncio.timeout(120):
-        await collect_event_types(stream)
+        events = [event async for event in stream]
     result = await stream.result()
     assert result.error_message is None
+    assert events[-1].type == "done"
+    assert result is events[-1].message
     assert len(extract_text(result)) > 0
     assert result.usage is not None and result.usage.total_tokens > 0
 
@@ -72,10 +74,20 @@ async def test_usage_cost_matches_model_pricing(probe: Probe):
     usage = result.usage
     cost = result.usage.cost
     model = probe.model
+    rates = model.cost
+    total_input = usage.input + usage.cache_read + usage.cache_write
+    applicable = [
+        tier for tier in model.cost.tiers or [] if total_input > tier.input_tokens_above
+    ]
+    if applicable:
+        rates = max(applicable, key=lambda tier: tier.input_tokens_above)
+    long_write = usage.cache_write_1h or 0
+    short_write = usage.cache_write - long_write
     expected = (
-        usage.input * model.cost.input / 1_000_000
-        + usage.output * model.cost.output / 1_000_000
-        + usage.cache_read * model.cost.cache_read / 1_000_000
+        usage.input * rates.input / 1_000_000
+        + usage.output * rates.output / 1_000_000
+        + usage.cache_read * rates.cache_read / 1_000_000
+        + (short_write * rates.cache_write + long_write * rates.input * 2) / 1_000_000
     )
     assert pytest.approx(cost.total, abs=1e-9) == expected
 

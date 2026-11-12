@@ -5,8 +5,10 @@ HTTP 级（respx）：token 交换/刷新、设备码授权与轮询全走真实
 """
 
 import base64
+import hashlib
 import json
 from typing import Any, Dict, List
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -79,6 +81,41 @@ async def test_authorization_flow_repr_hides_verifier_state_and_url():
     assert flow.verifier not in text
     assert flow.state not in text
     assert flow.url not in text
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_browser_login_connects_url_callback_pkce_and_token_exchange():
+    class BrowserInteraction(_FakeInteraction):
+        def __init__(self):
+            super().__init__("browser")
+            self.requests = []
+
+        async def acquire_authorization_code(self, request):
+            self.requests.append(request)
+            return "synthetic-code"
+
+    route = respx.post(_TOKEN_URL).mock(
+        return_value=httpx.Response(200, json=_token_payload(_jwt_with_account()))
+    )
+    interaction = BrowserInteraction()
+    credential = await openai_codex_oauth.login(interaction)
+    assert credential.accountId == "acct-123"
+    assert len(interaction.requests) == 1
+    request = interaction.requests[0]
+    assert interaction.events[0].url == request.auth_url
+    form = parse_qs(route.calls[0].request.content.decode())
+    assert form["code"] == ["synthetic-code"]
+    assert form["redirect_uri"] == ["http://localhost:1455/auth/callback"]
+    verifier = form["code_verifier"][0]
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
+    query = parse_qs(urlparse(request.auth_url).query)
+    assert query["code_challenge"] == [challenge]
+    assert query["state"] == [request.state]
 
 
 class TestTokenResponseBoundary:
@@ -255,3 +292,48 @@ class TestDeviceCodeBoundary:
         message = str(exc_info.value)
         assert "500" in message
         assert "<html>" not in message
+
+    @respx.mock
+    async def test_token_non_json_is_safe_upstream_error(self):
+        respx.post(_TOKEN_URL).mock(
+            return_value=httpx.Response(200, content=b"not-json")
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            await openai_codex_oauth.refresh(
+                OAuthCredential(access="a", refresh="r", expires=0)
+            )
+        assert exc_info.value.nova_error_kind is NovaErrorKind.UPSTREAM_ERROR
+        assert "not-json" not in str(exc_info.value)
+
+    async def test_temporary_oauth_values_are_redacted_from_repr(self):
+        from nova_ai.auth.oauth.openai_codex import (
+            _DeviceCodeGrant,
+            _DeviceCodeStartResponse,
+            _TokenResponse,
+        )
+
+        token = _TokenResponse(
+            access_token="synthetic-access",
+            refresh_token="synthetic-refresh",
+            expires_in=60,
+        )
+        start = _DeviceCodeStartResponse(
+            device_auth_id="synthetic-device-id",
+            user_code="synthetic-user-code",
+            interval=0,
+        )
+        grant = _DeviceCodeGrant(
+            authorization_code="synthetic-code",
+            code_verifier="synthetic-verifier",
+        )
+        for secret in (
+            "synthetic-access",
+            "synthetic-refresh",
+            "synthetic-device-id",
+            "synthetic-user-code",
+            "synthetic-code",
+            "synthetic-verifier",
+        ):
+            assert secret not in repr(token)
+            assert secret not in repr(start)
+            assert secret not in repr(grant)

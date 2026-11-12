@@ -22,11 +22,14 @@ _UTILS_MODULES = frozenset(
         "diagnostics.py",
         "env.py",
         "errors.py",
+        # 公共 token 估算 API；唯一内部消费方是 simple_options，不降层。
         "estimate.py",
         "hash.py",
         "http.py",
         "json_parser.py",
+        "model_operations.py",
         "model_utils.py",
+        # 公共上下文溢出检测 API；无内部消费方是刻意保留的公共面。
         "overflow.py",
         "provider_env.py",
         "surrogate.py",
@@ -37,6 +40,7 @@ _SHARED_MODULES = frozenset(
     {
         "constrained.py",
         "copilot_headers.py",
+        "openai_request.py",
         "openrouter_cost.py",
         "prompt_cache.py",
         "retry.py",

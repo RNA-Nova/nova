@@ -8,10 +8,10 @@
 钉住模型豁免；无凭据匿名不筛）。
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Sequence, Set
 
-from nova_catalog.sources.ark import ARK_MODELS_URL, parse_ark_status
-from nova_protocol import AbortedError, AbortSignal, Model
+from nova_catalog.sources.ark import parse_ark_status
+from nova_protocol import AbortedError, AbortSignal, AnyModel
 
 from ...gateway.catalog import CatalogError
 from ...gateway.provider import RefreshModelsContext
@@ -40,10 +40,10 @@ async def fetch_ark_status(
 
 
 async def ark_personalize(
-    base: List[Model],
+    base: Sequence[AnyModel],
     context: RefreshModelsContext,
     exempt_ids: Optional[Set[str]] = None,
-) -> List[Model]:
+) -> Sequence[AnyModel]:
     """火山 ``personalize`` 钩子：ark 在售筛选（账户生命周期事实）。
 
     凭据带 key 时剔除显式 Shutdown/Retiring；钉住模型经 ``exempt_ids`` 豁免。

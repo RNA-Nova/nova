@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 from nova_protocol import (
     AbortSignal,
     CacheRetention,
-    Model,
+    ModelBase,
     ProviderEnv,
     ProviderHeaders,
     ThinkingLevel,
@@ -44,8 +44,8 @@ class ModelIdentity:
     base_url: str
 
     @classmethod
-    def from_model(cls, model: Model) -> "ModelIdentity":
-        """从完整 ``Model`` 构造归因摘要（钩子调用点的唯一构造通道）。
+    def from_model(cls, model: ModelBase) -> "ModelIdentity":
+        """从完整目录模型构造归因摘要（钩子调用点的唯一构造通道）。
 
         base_url 只保留 scheme/host/port/path；userinfo、query、fragment 均可能
         携带凭据或会话秘密，一律不出钩子面。
@@ -123,6 +123,50 @@ class StreamOptions:
     # 在 auth/model/options headers 合并完成后、provider 派发前运行一次，
     # 可同步或异步返回新的 headers；``ModelsManager`` 负责消费并在派发前移除，
     # provider 实现永远不会看到该字段。
+    transform_headers: Optional[Callable[[ProviderHeaders], Any]] = None
+
+
+@dataclass
+class ImagesOptions:
+    """非流式图像调用的请求选项（pi ``ImagesOptions``）。
+
+    只收图像 API 实际消费的鉴权、传输与观测字段；不含聊天采样参数。
+    """
+
+    metadata: Optional[Dict[str, Any]] = None
+    api_key: Optional[str] = field(default=None, repr=False)
+    headers: Optional[ProviderHeaders] = field(default=None, repr=False)
+    env: Optional[ProviderEnv] = field(default=None, repr=False)
+    timeout: Optional[float] = None
+    max_retries: Optional[int] = None
+    max_retry_delay_ms: Optional[int] = None
+    signal: Optional[AbortSignal] = None
+    on_payload: Optional[Callable[[Any, ModelIdentity], Any]] = None
+    on_response: Optional[Callable[[ProviderResponse, ModelIdentity], Any]] = None
+    # manager 在鉴权/header 合并后运行；provider 实现永远收不到该字段。
+    transform_headers: Optional[Callable[[ProviderHeaders], Any]] = None
+
+
+@dataclass
+class ClassifierOptions:
+    """非流式分类调用的请求选项（pi ``ClassifierOptions``）。
+
+    ``temperature`` 供支持它的分类端点调节概率分布；System One 当前忽略。
+    其余字段与图像/聊天共用同一鉴权、传输和观测语义。
+    """
+
+    metadata: Optional[Dict[str, Any]] = None
+    api_key: Optional[str] = field(default=None, repr=False)
+    headers: Optional[ProviderHeaders] = field(default=None, repr=False)
+    env: Optional[ProviderEnv] = field(default=None, repr=False)
+    timeout: Optional[float] = None
+    max_retries: Optional[int] = None
+    max_retry_delay_ms: Optional[int] = None
+    signal: Optional[AbortSignal] = None
+    temperature: Optional[float] = None
+    on_payload: Optional[Callable[[Any, ModelIdentity], Any]] = None
+    on_response: Optional[Callable[[ProviderResponse, ModelIdentity], Any]] = None
+    # manager 在鉴权/header 合并后运行；provider 实现永远收不到该字段。
     transform_headers: Optional[Callable[[ProviderHeaders], Any]] = None
 
 

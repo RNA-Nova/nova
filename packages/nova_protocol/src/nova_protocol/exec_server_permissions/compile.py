@@ -23,11 +23,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..exec_server_wire import (
+    ExecDisabledPermissionProfile,
     ExecFileSystemPath,
     ExecFileSystemSandboxEntry,
     ExecFileSystemSpecialPath,
     ExecManagedFileSystemPermissions,
+    ExecManagedPermissionProfile,
     ExecPermissionProfile,
+    ExecRestrictedFileSystemPermissions,
     FileSystemAccessMode,
     FileSystemSandboxContext,
     NetworkSandboxPolicy,
@@ -272,18 +275,18 @@ def _builtin_permission_profile(
 ) -> ExecPermissionProfile | None:
     """内置套餐内容（逐行对位 permissions.rs:90-117）"""
     if profile_name == BUILT_IN_PERMISSION_PROFILE_READ_ONLY:
-        return ExecPermissionProfile(
+        return ExecManagedPermissionProfile(
             type="managed",
-            file_system=ExecManagedFileSystemPermissions(
+            file_system=ExecRestrictedFileSystemPermissions(
                 type="restricted", entries=_read_only_file_system_entries()
             ),
             network=NetworkSandboxPolicy.RESTRICTED,
         )
     if profile_name == BUILT_IN_PERMISSION_PROFILE_WORKSPACE:
         if workspace_write is not None:
-            return ExecPermissionProfile(
+            return ExecManagedPermissionProfile(
                 type="managed",
-                file_system=ExecManagedFileSystemPermissions(
+                file_system=ExecRestrictedFileSystemPermissions(
                     type="restricted",
                     entries=_workspace_write_file_system_entries(
                         workspace_write.exclude_tmpdir_env_var,
@@ -296,16 +299,16 @@ def _builtin_permission_profile(
                     else NetworkSandboxPolicy.RESTRICTED
                 ),
             )
-        return ExecPermissionProfile(
+        return ExecManagedPermissionProfile(
             type="managed",
-            file_system=ExecManagedFileSystemPermissions(
+            file_system=ExecRestrictedFileSystemPermissions(
                 type="restricted",
                 entries=_workspace_write_file_system_entries(False, False),
             ),
             network=NetworkSandboxPolicy.RESTRICTED,
         )
     if profile_name == BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS:
-        return ExecPermissionProfile(type="disabled")
+        return ExecDisabledPermissionProfile()
     return None
 
 
@@ -621,12 +624,10 @@ class CompiledPermissionProfile:
             policy_context = WireFileSystemPolicyContext(
                 cwd=base.cwd, workspaceRoots=deduped
             )
-        # 注：`policyContext` 带线上 alias——绕开构造参数按属性赋值
-        # （pyright 对 populate_by_name 模型只认 alias 参数名；wire 模块
-        # 既有工厂的同型报错为 HEAD 存量）
-        context_model = FileSystemSandboxContext(permissions=self.permission_profile)
-        context_model.policy_context = policy_context
-        return context_model
+        # `policyContext` 带线上 alias，构造参数按 alias 传入。
+        return FileSystemSandboxContext(
+            permissions=self.permission_profile, policyContext=policy_context
+        )
 
 
 def compile_permission_profile(
@@ -647,7 +648,14 @@ def compile_permission_profile(
     """
     warnings = startup_warnings if startup_warnings is not None else []
     builtin = _builtin_permission_profile(profile_name, workspace_write)
-    if builtin is not None:
+    if isinstance(builtin, ExecDisabledPermissionProfile):
+        entries = []
+        glob_scan_max_depth = None
+        network = NetworkSandboxPolicy.RESTRICTED
+        workspace_roots = []
+    elif builtin is not None:
+        assert isinstance(builtin, ExecManagedPermissionProfile)
+        assert isinstance(builtin.file_system, ExecRestrictedFileSystemPermissions)
         entries = list(builtin.file_system.entries)
         glob_scan_max_depth = builtin.file_system.glob_scan_max_depth
         network = builtin.network
@@ -689,9 +697,9 @@ def compile_permission_profile(
     else:
         # 对位 PermissionProfile::from_runtime_permissions（models.rs:602-620）
         # ——编译路径恒产 Restricted Managed
-        permission_profile = ExecPermissionProfile(
+        permission_profile = ExecManagedPermissionProfile(
             type="managed",
-            file_system=ExecManagedFileSystemPermissions(
+            file_system=ExecRestrictedFileSystemPermissions(
                 type="restricted",
                 entries=entries,
                 glob_scan_max_depth=glob_scan_max_depth,

@@ -1,11 +1,13 @@
 # nova-ai
 
-统一的多厂商 LLM 抽象层。以 **ModelsManager 集合 + Provider 运行时单元 + API 协议实现**三层组织，对外暴露一致的 `stream` / `complete` / `stream_simple` / `complete_simple` 异步 API。
+统一的多厂商 LLM 抽象层。以 **ModelsManager 集合 + Provider 运行时单元 + API 协议实现**三层组织，统一提供聊天、图像与分类调用；低层直调显式使用具体协议模块。
 
 ## 特性
 
-- **统一流式接口**：所有调用返回同一个 `AssistantMessageEventStream`，文本、思考、工具调用以增量事件产出；`stream()` 同步返回事件流，鉴权解析在后台进行，失败编码为错误事件而非抛出。
-- **内置 5 家 provider**：Anthropic、Volcengine（火山方舟）、Moonshot AI（国际/国内双端点）、Kimi Coding——OpenAI Completions 与 Anthropic Messages 双协议实现；任意 OpenAI 兼容端点可经 `create_provider()` 接入。
+- **统一流式接口**：聊天调用返回同一个 `AssistantMessageEventStream`，文本、思考、工具调用以增量事件产出；`stream()` 同步返回事件流，鉴权解析在后台进行，失败编码为错误事件而非抛出。
+- **内置 6 家 provider**：Anthropic、Volcengine（火山方舟）、Moonshot AI（国际/国内双端点）、Kimi Coding、OpenRouter（图像与分类）；聊天覆盖 OpenAI Completions 与 Anthropic Messages，任意 OpenAI 兼容端点可经 `create_provider()` 接入。
+- **图像生成结果**：OpenRouter 图像模型经 `generate_images()` 返回独立 `AssistantImages`，文本与 base64 图像块、usage/cost、错误和取消均有明确终态。
+- **结构化分类结果**：OpenRouter 分类模型经 `classify()` 返回独立 `ClassifierResult`，支持 choice、score、bool 三类问题与逐 ID 答案。
 - **鉴权解析链**：调用方 `api_key` 覆盖 → 已存储 credential（OAuth 过期自动刷新）→ 环境变量；内置 Kimi device code 与 OpenAI Codex（浏览器 + device code）OAuth 登录流程。
 - **完整流式事件体系**：`text_*` / `thinking_*` / `toolcall_*` 增量事件，工具参数带部分 JSON 增量解析快照。
 - **思考级别统一抽象**：一套 `ThinkingLevel` 级别，按厂商参数格式自动分派（`reasoning_effort`、`thinking`、`reasoning` 对象等）。
@@ -21,6 +23,8 @@
 - [Provider 与模型](#provider-与模型)
 - [鉴权](#鉴权)
 - [工具调用](#工具调用)
+- [图像生成](#图像生成)
+- [结构化分类](#结构化分类)
 - [图片输入](#图片输入)
 - [Thinking / Reasoning](#thinking--reasoning)
 - [停止原因](#停止原因)
@@ -41,10 +45,11 @@
 | Moonshot AI（国际） | `moonshotai` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` |
 | Moonshot AI（国内） | `moonshotai-cn` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | Kimi Coding | `kimi-coding` | `https://api.kimi.com/coding/v1` | `KIMI_API_KEY` 或 OAuth 登录 |
+| OpenRouter（图像与分类） | `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 
-内置 provider 使用两个协议实现：`api_impls/anthropic_messages`（Anthropic，基于官方 `anthropic` SDK）与 `api_impls/openai_completions`（其余四家——含 kimi-coding，与官方 Kimi Code 客户端同协议，基于官方 `openai` SDK）。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
+聊天协议实现为 `api_impls/anthropic_messages`（Anthropic，基于官方 `anthropic` SDK）与 `api_impls/openai_completions`（其余聊天 provider——含 kimi-coding，与官方 Kimi Code 客户端同协议，基于官方 `openai` SDK）。OpenRouter 图像生成由 `api_impls/openrouter_images` 以非流式 Chat Completions 承载，分类由 `api_impls/typesafe_system_one` 以 System One 承载。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
 
-内置模型目录是构建期生成的静态数据（模型 id、上下文窗口、费率、思考级别表等），随包发布、离线可用。
+内置模型目录是构建期生成的静态数据（模型 id、类型、输入/输出模态、上下文窗口、费率、思考级别表等），随包发布、离线可用。
 
 ## 安装
 
@@ -52,7 +57,7 @@
 pip install nova-ai
 ```
 
-要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。
+要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`httpx2>=2.0,<3`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。
 
 在 monorepo 仓库内开发时，使用根目录的 pixi 统一环境（editable 安装全部子包）：
 
@@ -68,14 +73,14 @@ pixi install --environment dev
 export VOLCENGINE_API_KEY="your-api-key"
 ```
 
-构建 `Models` 集合、取模型、发起流式调用：
+构建 `ModelsManager` 集合、取模型、发起流式调用：
 
 ```python
 import asyncio
 from nova_ai import builtin_models
 from nova_protocol import Context, UserMessage
 
-models = builtin_models()  # 注册全部内置 provider 的 Models 集合
+models = builtin_models()  # 注册全部内置 provider 的 ModelsManager 集合
 model = models.get_model("volcengine", "doubao-seed-2-0-mini-260428")
 
 context = Context(messages=[UserMessage(content="用一句话介绍你自己")])
@@ -157,35 +162,38 @@ models.set_provider(volcengine_provider())
 models.set_provider(kimi_coding_provider())
 ```
 
-`builtin_providers()` 返回五家工厂实例的列表；`builtin_models()` 等价于 `create_models_manager()` 后注册全部内置 provider。
+`builtin_providers()` 返回六家工厂实例的列表；`builtin_models()` 等价于 `create_models_manager()` 后注册全部内置 provider。
 
 ### 查询
 
 ```python
 models.get_providers()                    # 全部已注册 Provider
 models.get_provider("volcengine")         # 按 id 查 Provider
-models.get_models()                       # 全部模型；get_models("volcengine") 限定单家
-models.get_model("volcengine", "doubao-seed-2-0-mini-260428")  # 精确查找，未命中返回 None
-await models.get_available()              # 已配置鉴权的 provider 的模型（异步）
+models.get_models()                       # 聊天模型；参数可限定单家
+models.get_all_models()                   # chat/image/classifier 混合目录
+models.get_models_of_type("image", "openrouter")  # OpenRouter 图像模型
+models.get_models_of_type("classifier", "openrouter")  # OpenRouter 分类模型
+models.get_model("volcengine", "doubao-seed-2-0-mini-260428")  # 精确查找聊天模型，未命中返回 None
+await models.get_available()              # 已配置鉴权的聊天模型（异步）
 ```
 
 ### 静态目录读取
 
-不构造 `Models` 集合也可以直接读内置目录：
+不构造 `ModelsManager` 集合也可以直接读内置目录：
 
 ```python
-from nova_ai import VOLCENGINE_MODELS, get_volcengine_model, list_volcengine_models
+from nova_ai import VOLCENGINE_MODELS
 
-model = get_volcengine_model("doubao-seed-2-0-mini-260428")  # 未命中抛 KeyError
-for model_id, m in list_volcengine_models().items():
+model = VOLCENGINE_MODELS["doubao-seed-2-0-mini-260428"]  # 未命中抛 KeyError
+for model_id, m in VOLCENGINE_MODELS.items():
     print(model_id, m.name)
 ```
 
-其余四家同形：`ANTHROPIC_MODELS` / `MOONSHOTAI_MODELS` / `MOONSHOTAI_CN_MODELS` / `KIMI_CODING_MODELS` 与对应的 `get_*_model` / `list_*_models`；跨 provider 的便捷函数是 `get_builtin_models(provider_id=None)` 与 `get_builtin_model(provider_id, model_id)`。
+其余聊天 provider 同形：`ANTHROPIC_MODELS` / `MOONSHOTAI_MODELS` / `MOONSHOTAI_CN_MODELS` / `KIMI_CODING_MODELS`；跨 provider 的聊天便捷函数是 `get_builtin_models(provider_id=None)` 与 `get_builtin_model(provider_id, model_id)`。图像目录使用 `OPENROUTER_IMAGE_MODELS`，或 `get_builtin_image_models("openrouter")` / `get_builtin_image_model("openrouter", model_id)`；分类目录对应 `OPENROUTER_CLASSIFIER_MODELS` 与 `get_builtin_classifier_models()` / `get_builtin_classifier_model()`。
 
 ### 动态模型目录
 
-`create_provider(fetch_models=...)` 让 provider 的模型列表可刷新：`Models.refresh()` 先从 `ModelsStore` 恢复上次缓存的目录（离线可用），再解析凭据走网络拉取，新目录经世代校验后发布并持久化——被 `set_provider` / `delete_provider` 取代的在途刷新不会覆盖新目录。
+`create_provider(catalog_source="models.dev" 或 "pi.dev")` 装配公开站刷新；直接构造集合时经 `create_models_manager(catalog_services=...)` 注入站实现。`ModelsManager.refresh()` 先从 `ModelsStore` 恢复上次缓存的目录（离线可用），再解析凭据走网络拉取，新目录经世代校验后发布并持久化——被 `set_provider` / `delete_provider` 取代的在途刷新不会覆盖新目录。
 
 ```python
 result = await models.refresh(providers=["volcengine"], force=True)
@@ -194,7 +202,7 @@ result = await models.refresh(providers=["volcengine"], force=True)
 # —— 错误与非致命降级诊断（如无公开站回退基线）按 provider 收集，不抛出
 ```
 
-`ModelsStore` 是持久化抽象（`read` / `write` / `delete`，条目为 `ModelsStoreEntry`），默认 `InMemoryModelsStore` 只存进程内存；需要跨进程缓存时注入自己的实现（`create_models_manager(models_store=...)`）。
+`ModelsStore` 是持久化抽象（`read` / `write` / `delete`，条目为 `ModelsStoreEntry`），默认 `InMemoryModelsStore` 只存进程内存；需要跨进程缓存时注入自己的实现（`create_models_manager(models_store=...)`）。写入/删除必须满足取消原子性：方法返回或取消落定后不得再后台提交；非原子远程写需要另行设计条件写协议。
 
 ## 鉴权
 
@@ -203,7 +211,7 @@ result = await models.refresh(providers=["volcengine"], force=True)
 每次请求的鉴权按以下优先级解析（凭据占有 provider——存在已存储 credential 时不再咨询环境变量）：
 
 1. **调用方覆盖**：`StreamOptions.api_key`（`complete` / `stream` 系列调用的 options 参数）；
-2. **已存储 credential**：`CredentialStore` 中的 API key 或 OAuth credential；OAuth token 剩余有效期不足 5 分钟时在 store 锁内自动刷新（并发请求只刷一次，刷新有 15 秒硬超时）；
+2. **已存储 credential**：`CredentialStore` 中的 API key 或 OAuth credential；OAuth token 剩余有效期不足 5 分钟时经 per-provider 编排锁自动刷新（并发请求只刷一次，刷新有 15 秒硬超时）；
 3. **环境变量**：每个 provider 固定的环境变量名（见下表）。
 
 解析失败（无任何可用凭据）不会抛出——调用以 `error` 事件收尾。
@@ -236,6 +244,8 @@ from nova_protocol import AuthEvent, AuthPrompt
 
 class CliInteraction:
     """AuthInteraction 契约：prompt() 索取输入，notify() 接收登录进度事件。"""
+
+    signal = None  # 本示例不接入取消；生产宿主应提供会话取消信号
 
     async def prompt(self, prompt: AuthPrompt) -> str:
         return input(f"{prompt.message}: ")
@@ -283,7 +293,7 @@ credential 两种形态：`ApiKeyCredential(key, env)` 与 `OAuthCredential(acce
 
 ### 请求头合并与 transform_headers
 
-请求头按 **auth 解析结果 → `Model.headers` → `StreamOptions.headers`** 的顺序合并（大小写不敏感，后者覆盖前者；`StreamOptions.headers` 中值为 `None` 表示抑制同名默认头）。在此之上，`StreamOptions.transform_headers` 是最后一道钩子：在合并完成后、派发给协议实现前运行一次，可同步或异步返回新的 headers；该字段由 `Models` 层消费，协议实现永远看不到它。
+请求头按 **auth 解析结果 → `Model.headers` → `StreamOptions.headers`** 的顺序合并（大小写不敏感，后者覆盖前者；`StreamOptions.headers` 中值为 `None` 表示抑制同名默认头）。在此之上，`StreamOptions.transform_headers` 是最后一道钩子：在合并完成后、派发给协议实现前运行一次，可同步或异步返回新的 headers；该字段由 `ModelsManager` 层消费，协议实现永远看不到它。
 
 ## 工具调用
 
@@ -316,6 +326,57 @@ async for event in models.stream_simple(model, context):
 需要在自有流式管线里做同样的防御性解析时，可直接使用公开的 `parse_streaming_json(partial_json_str)`：任意不完整 JSON 都返回合法对象，解析失败返回 `{}`。
 
 工具执行结果以 `ToolResultMessage` 回灌上下文（见[快速上手](#快速上手)的完整回合）。`ToolResultMessage` 字段：`tool_call_id`、`tool_name`、`content`（`TextContent` / `ImageContent` 列表）、`is_error`、`details`（任意 JSON 值，工具自定义形态）。
+
+## 图像生成
+
+OpenRouter 的图像模型使用独立非流式结果 `AssistantImages`，不会进入聊天事件流：
+
+```python
+from nova_ai import ImagesOptions
+from nova_protocol import ImagesContext, TextContent
+
+model = models.get_model_of_type("image", "openrouter", "black-forest-labs/flux.2-klein-4b")
+assert model is not None
+result = await models.generate_images(
+    model,
+    ImagesContext(input=[TextContent(text="画一个红色圆")]),
+    ImagesOptions(timeout=120),
+)
+```
+
+`result.output` 是 `TextContent` / `ImageContent` 列表；`result.stop_reason` 区分 stop/error/aborted，`result.usage` 在 provider 上报时携带用量与目录估算成本。低层直调可显式使用 `nova_ai.api_impls.openrouter_images.generate_images()`，并按 `ImagesOptions.api_key` 供 key；完整调用统一经 ModelsManager，沿用同一鉴权解析链。
+
+## 结构化分类
+
+OpenRouter 的分类模型使用独立非流式结果 `ClassifierResult`。每次调用提交一个状态与一组 choice/score/bool 问题，结果按问题 ID 返回答案；公共 bool 在 System One 线上自动映射为 `noul`：
+
+```python
+from nova_ai import ClassifierOptions
+from nova_protocol import ClassifierContext
+
+model = models.get_model_of_type(
+    "classifier", "openrouter", "parallel/decisions-fast:free"
+)
+assert model is not None
+context = ClassifierContext.model_validate(
+    {
+        "state": "The customer was charged twice for the same order.",
+        "questions": {
+            "is_billing": {
+                "type": "bool",
+                "instructions": "Is this a billing issue?",
+                "criteria": {"true": "Billing issue", "false": "Other issue"},
+            }
+        },
+    }
+)
+result = await models.classify(model, context, ClassifierOptions(timeout=60))
+answer = result.answers["is_billing"]
+if answer.type == "bool":
+    print(answer.probability)
+```
+
+`result.stop_reason` 区分 stop/error/aborted；`result.usage` 在 provider 上报时携带用量与目录估算成本。低层直调可显式使用 `nova_ai.api_impls.typesafe_system_one.classify()`，并按 `ClassifierOptions.api_key` 供 key；完整调用统一经 ModelsManager，沿用与聊天、图像相同的鉴权、请求头、取消与重试链。
 
 ## 图片输入
 
@@ -354,7 +415,7 @@ from nova_ai import SimpleStreamOptions
 from nova_protocol import ThinkingLevel
 
 options = SimpleStreamOptions(reasoning=ThinkingLevel.HIGH)
-# minimal | low | medium | high | xhigh | max；不传（None）= 关闭思考，不发送任何 reasoning 参数
+# minimal | low | medium | high | xhigh | max；不传（None）= 请求关闭思考，关闭字段按协议方言发送
 message = await models.complete_simple(model, context, options)
 ```
 
@@ -382,7 +443,7 @@ message = await models.complete_simple(model, context, options)
 
 ### 错误即事件，不是异常
 
-经 `Models` / `Provider` 发起的调用**不抛异常**：一切失败——未知 provider、鉴权缺失、网络错误、厂商 4xx/5xx——都编码为 `error` 事件终止流，`complete` 系列随之返回 `stop_reason=ERROR` 的 `AssistantMessage`：
+经 `ModelsManager` / `Provider` 发起的调用**不抛异常**：一切失败——未知 provider、鉴权缺失、网络错误、厂商 4xx/5xx——都编码为 `error` 事件终止流，`complete` 系列随之返回 `stop_reason=ERROR` 的 `AssistantMessage`：
 
 ```python
 async for event in models.stream_simple(model, context):
@@ -419,7 +480,7 @@ controller.abort()  # 主动关闭底层 HTTP 流；已收到的内容块正常�
 - `StreamOptions.on_response(ProviderResponse, model_identity)`：拿到原始 HTTP 状态码与响应头。
 
   两钩子的第二参为 `ModelIdentity`（归因白名单摘要：provider/id/base_url 三字段）——整 `Model` 不出钩子面（`headers` 等敏感字段防泄）。
-- 重试在请求层执行（`StreamOptions.max_retries`，默认 `0` 不重试），退避等待可被 abort 打断；`max_retry_delay_ms` 封顶服务器 `Retry-After` 要求的等待（默认 60000ms，`0` 为不封顶）。SDK 内建重试恒为关闭——它无法被中止打断。
+- 重试在请求层执行（`StreamOptions.max_retries`，默认 `0` 不重试），退避等待可被 abort 打断；服务器 `Retry-After` 要求的等待超过 `max_retry_delay_ms` 时本次直接失败（默认上限 60000ms，`0` 为不设上限），不会继续按超长等待睡眠。SDK 内建重试恒为关闭——它无法被中止打断。
 - `StreamOptions.timeout`（秒）设置单次请求超时。
 
 ## 自定义 Provider
@@ -504,7 +565,7 @@ model = Model(
 
 ## 跨模型交接
 
-把一段对话从模型 A 回放到模型 B 时，`transform_messages(messages, model)` 做跨厂商规范化：思考块按目标模型保留或转文本、剥离目标不认识的签名、规范化工具调用 id、为孤立工具调用补合成 `ToolResultMessage`、把目标模型不支持的图片降级为占位文本，并跳过 `ERROR` / `ABORTED` 的不完整助手消息。协议实现内部已对每个请求自动执行；在自有编排层手动回放上下文时可直接调用。
+把一段对话从模型 A 回放到模型 B 时，`transform_messages(messages, model)` 做跨厂商规范化：同模型保留有效思考块，跨模型思考块一律丢弃（不转成可见文本）、剥离目标不认识的签名、规范化工具调用 id、为孤立工具调用补合成 `ToolResultMessage`、把目标模型不支持的图片降级为占位文本，并跳过 `ERROR` / `ABORTED` 的不完整助手消息。协议实现内部已对每个请求自动执行；在自有编排层手动回放上下文时可直接调用。
 
 ## 示例
 
@@ -512,7 +573,7 @@ model = Model(
 
 - `01_quickstart.py` —— 最小用法：mock 协议模块 + `builtin_models()` 真实调用
 - `02_stream_events.py` —— 流式事件类型与消费顺序
-- `03_models_and_providers.py` —— Models 集合、自定义 provider 注册、动态模型目录
+- `03_models_and_providers.py` —— ModelsManager 集合、自定义 provider 注册、动态模型目录
 - `04_auth.py` —— 鉴权解析链：环境变量、`options.api_key` 覆盖、动态 key 注入
 
 ## 开发

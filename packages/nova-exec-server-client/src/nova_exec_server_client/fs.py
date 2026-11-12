@@ -94,12 +94,11 @@ def _new_handle_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:30]}"
 
 
-def _sandbox_wire(sandbox: FileSystemSandboxContext | None) -> dict | None:
-    """按请求沙箱上下文的上线形态（对位 Rust `sandbox.cloned()` 全方法透传；
-    None 项不上线，与 process/start 出货路径同纪律）"""
-    if sandbox is None:
-        return None
-    return sandbox.model_dump(by_alias=True, exclude_none=True)
+def _sandbox_wire(
+    sandbox: FileSystemSandboxContext | None,
+) -> FileSystemSandboxContext | None:
+    """沙箱模型实例直达最终出货点，不在请求装配中预先 dump。"""
+    return sandbox
 
 
 def _walk_join(directory: str, file_name: str) -> str:
@@ -198,13 +197,13 @@ class FileSystemManager:
         offset: int = 0,
         length: int | None = None,
         *,
-        sandbox: dict | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         signal: AbortSignal | None = None,
     ) -> AsyncIterator[bytes]:
         """流式读取文件（大文件推荐）
 
         `sandbox`（v1.10 起服务端按请求沙箱开门，能力位
-        sandboxedFileStreaming）：FileSystemSandboxContext 的线上 dict，
+        sandboxedFileStreaming）：FileSystemSandboxContext 的模型实例，
         语义同 `open()`；None = 无上下文直开（现状语义）。
         `signal`：取消词汇——开门请求与逐块消费（queue 等待）两段竞速，
         AbortedError 直通；收摊纪律不破（finally 注销路由 + 未收摊补
@@ -320,7 +319,7 @@ class FileSystemManager:
         block_size: int = 256 * 1024,
         offset: int | None = None,
         *,
-        sandbox: dict | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         signal: AbortSignal | None = None,
     ) -> int:
         """流式写入文件（大文件推荐），返回实际落盘总字节数。
@@ -333,7 +332,7 @@ class FileSystemManager:
           Some(n) = 不截断、从 n 续写（n 不得超当前文件长度，服务端
           越界/缺失文件即拒）
         - `sandbox`（v1.10 起服务端按请求沙箱开门写，能力位
-          sandboxedFileStreaming）：FileSystemSandboxContext 的线上 dict；
+          sandboxedFileStreaming）：FileSystemSandboxContext 的模型实例；
           None = 无上下文直开（现状语义）
         - 协议序列：`fs/writeStream` 请求开句柄 → `fs/writeStream/chunk`
           通知（seq 从 0 连续）→ 空块 `eof=True` 收尾 → `fs/writeStream/done`
@@ -429,7 +428,7 @@ class FileSystemManager:
         block_size: int = 256 * 1024,
         offset: int = 0,
         max_resume_attempts: int = 3,
-        sandbox: dict | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         signal: AbortSignal | None = None,
     ) -> int:
         """断点续传的流式写入（v1.12，nova 自有通道）：断线后重连续传。
@@ -496,7 +495,7 @@ class FileSystemManager:
         length: int | None = None,
         max_resume_attempts: int = 3,
         *,
-        sandbox: dict | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         signal: AbortSignal | None = None,
     ) -> AsyncIterator[bytes]:
         """断点续传的流式读取（v1.12，nova 自有通道）：断线后重连续读。
@@ -553,7 +552,7 @@ class FileSystemManager:
         confirmed: int,
         pushed: int,
         *,
-        sandbox: dict | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         signal: AbortSignal | None = None,
     ) -> int:
         """断线后对账服务端文件大小：
@@ -563,7 +562,7 @@ class FileSystemManager:
           （断线窗口内被外部追加）——外来字节不得收养为"已确认"（零块上传
           会把外来内容误判成自己的完成态）。上界取等不误杀：done 响应丢失
           场景服务端恰好收齐全轮推送，size == confirmed + pushed。
-        `sandbox`：与 write_stream 开门同一载荷（线上 dict），对账
+        `sandbox`：与 write_stream 开门同一载荷（模型实例），对账
         getMetadata 同样透传（句柄族方法全透传纪律）。
         `signal`：取消词汇——对账请求可被打断，AbortedError 直通。
         """
@@ -917,7 +916,7 @@ class FileSystemManager:
         handle_id: str | None = None,
         *,
         mode: FsOpenMode = FsOpenMode.READ,
-        sandbox: dict | None = None,
+        sandbox: FileSystemSandboxContext | None = None,
         signal: AbortSignal | None = None,
     ) -> str:
         """打开文件句柄用于分块读/写

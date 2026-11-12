@@ -1,7 +1,7 @@
 """OpenAI Completions 选项类型与协议标识（对齐 TS OpenAICompletionsOptions）。"""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, TypedDict, Union
+from typing import Dict, Literal, Optional, TypedDict, Union
 
 from nova_protocol import KnownApi
 

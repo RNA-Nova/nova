@@ -1,5 +1,6 @@
 """兼容配置词汇（compat.py）测试——构造/dump 行为 + Model.compat 判别。"""
 
+import pytest
 from nova_protocol import (
     AnthropicMessagesCompat,
     Model,
@@ -127,3 +128,29 @@ class TestModelCompatResolution:
         model = _make_model("anthropic-messages", {"supports_temperature": False})
         assert isinstance(model.compat, AnthropicMessagesCompat)
         assert model.compat.supports_temperature is False
+
+    @pytest.mark.parametrize(
+        "api", ["openai-responses", "azure-openai-responses", "openai-codex-responses"]
+    )
+    def test_compat_instance_cannot_bypass_api_discrimination(self, api):
+        with pytest.raises(ValueError, match="compat"):
+            Model.model_validate(
+                {
+                    "id": "m1",
+                    "name": "m1",
+                    "api": api,
+                    "provider": "openai",
+                    "base_url": "http://x",
+                    "reasoning": True,
+                    "input_types": ["text"],
+                    "cost": {
+                        "input": 0,
+                        "output": 0,
+                        "cache_read": 0,
+                        "cache_write": 0,
+                    },
+                    "context_window": 8192,
+                    "max_tokens": 4096,
+                    "compat": OpenAICompletionsCompat(),
+                }
+            )

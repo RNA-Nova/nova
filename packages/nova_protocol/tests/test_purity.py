@@ -20,7 +20,7 @@ PKG_ROOT = Path(__file__).resolve().parent.parent / "src" / "nova_protocol"
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
 SIBLING_BAN = re.compile(
-    r"^nova_(ai|agent|harness|server|coding_agent|executor|exec_server_client)(\.|$)"
+    r"^nova_(ai|agent|async|catalog|harness|server|coding_agent|executor|exec_server_client)(\.|$)"
 )
 
 BEHAVIOR_BAN = {
@@ -44,6 +44,34 @@ BEHAVIOR_BAN = {
 IMPORT_WHITELIST = {
     "signal.py": {"asyncio"},
 }
+
+# 纯函数算法件不需要 import 例外；在此登记住所，I/O 仍由全局扫描统一禁止。
+PURE_ALGORITHM_PATHS = {
+    "exec_server_intent.py",
+    "exec_server_policy",
+    "exec_server_permissions",
+    "sanitize.py",
+}
+
+
+def test_registered_pure_algorithm_paths_exist():
+    missing = sorted(
+        path for path in PURE_ALGORITHM_PATHS if not (PKG_ROOT / path).exists()
+    )
+    assert not missing, f"纯算法登记册指向不存在的住所：{missing}"
+
+
+def test_public_exec_wire_types_have_docstrings():
+    """公共线上类型必须说明契约用途，不再积累无名形状。"""
+    tree = ast.parse((PKG_ROOT / "exec_server_wire.py").read_text(encoding="utf-8"))
+    missing = [
+        f"{node.lineno}:{node.name}"
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and not node.name.startswith("_")
+        and ast.get_docstring(node) is None
+    ]
+    assert not missing, f"公共 exec 类型缺 docstring：{missing}"
 
 
 def _iter_modules():
@@ -94,3 +122,46 @@ def test_pyproject_dependencies_minimal():
         "python",
         "pydantic",
     }, f"枢纽包运行时依赖越界：{sorted(set(keys))}"
+
+
+def test_root_reexports_are_complete():
+    """显式 import 的公共词汇必须全部进入 __all__，根级公共定义必须挂到门面。"""
+    import nova_protocol
+
+    tree = ast.parse((PKG_ROOT / "__init__.py").read_text(encoding="utf-8"))
+    imported = {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if (alias.asname or alias.name) != "*"
+        and not (alias.asname or alias.name).startswith("_")
+    }
+    missing_from_all = sorted(imported - set(nova_protocol.__all__))
+    assert not missing_from_all, f"根门面 __all__ 漏项：{missing_from_all}"
+
+    missing_from_root = []
+    for path in PKG_ROOT.glob("*.py"):
+        if path.name == "__init__.py":
+            continue
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        for node in module.body:
+            if isinstance(
+                node, (ast.ClassDef, ast.FunctionDef)
+            ) and not node.name.startswith("_"):
+                if not hasattr(nova_protocol, node.name):
+                    missing_from_root.append(f"{path.name}:{node.name}")
+    assert not missing_from_root, f"根门面漏挂公共定义：{missing_from_root}"
+
+    # 子包自行声明的公共词汇也必须递归挂到根门面，不能只查根级 .py。
+    import importlib
+
+    for module_name in (
+        "nova_protocol.exec_server_permissions",
+        "nova_protocol.exec_server_policy",
+        "nova_protocol.agent_events",
+    ):
+        module = importlib.import_module(module_name)
+        for name in module.__all__:
+            assert hasattr(nova_protocol, name), f"根门面缺少 {module_name}.{name}"
+            assert name in nova_protocol.__all__, f"__all__ 缺少 {module_name}.{name}"

@@ -58,19 +58,29 @@ class TestRequestWithAbort:
         assert seen["headers"] == {"X-A": "b"}
 
     async def test_abort_midflight_raises_aborted_error(self, monkeypatch):
+        started = asyncio.Event()
+        closed = []
+
         async def handler(method, url, **kwargs):
+            started.set()
             await asyncio.sleep(30)
             return httpx.Response(200)  # pragma: no cover
 
+        async def fake_aclose(client):
+            closed.append(client)
+
         _patch_request(monkeypatch, handler)
+        monkeypatch.setattr(httpx.AsyncClient, "aclose", fake_aclose)
         controller = AbortController(name="test")
         task = asyncio.ensure_future(
             request_with_abort("GET", "https://x.test", signal=controller.signal)
         )
-        await asyncio.sleep(0.05)
+        await started.wait()
         controller.abort()
         with pytest.raises(AbortedError):
             await task
+        # client 关闭在 AbortScope 外完整执行，不被同一个取消信号再次杀掉。
+        assert len(closed) == 1
 
     async def test_pre_aborted_signal_rejects_immediately(self):
         controller = AbortController(name="test")
