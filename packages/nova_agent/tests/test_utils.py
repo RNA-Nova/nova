@@ -6,8 +6,9 @@ validate_tool_arguments 在 jsonschema 校验前按 schema 做类型矫正（coe
 """
 
 import pytest
-from nova_agent.utils import validate_tool_arguments
 from nova_protocol import Tool, ToolCall
+
+from nova_agent.utils import validate_tool_arguments
 
 
 def _tool(schema: dict) -> Tool:
@@ -59,7 +60,14 @@ def test_coerce_bool_to_number():
 
 
 def test_coerce_none_to_number():
-    tool = _tool({"type": "object", "properties": {"x": {"type": "number"}}})
+    # required 属性不删除，None 仍按 number primitive 规则矫正为 0。
+    tool = _tool(
+        {
+            "type": "object",
+            "properties": {"x": {"type": "number"}},
+            "required": ["x"],
+        }
+    )
     assert validate_tool_arguments(tool, _call({"x": None})) == {"x": 0}
 
 
@@ -203,7 +211,51 @@ def test_any_of_coercion():
             "properties": {"v": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
         }
     )
-    assert validate_tool_arguments(tool, _call({"v": "5"})) == {"v": 5}
+    # 原值已是合法 string 时不得被第一个 integer 分支改写。
+    assert validate_tool_arguments(tool, _call({"v": "5"})) == {"v": "5"}
+
+
+def test_any_of_keeps_original_value_when_any_branch_accepts_it():
+    tool = _tool(
+        {
+            "type": "object",
+            "properties": {"v": {"anyOf": [{"type": "number"}, {"type": "null"}]}},
+        }
+    )
+    assert validate_tool_arguments(tool, _call({"v": None})) == {"v": None}
+
+
+def test_optional_non_nullable_null_is_removed_before_coercion():
+    tool = _tool(
+        {
+            "type": "object",
+            "properties": {
+                "offset": {"type": "number"},
+                "enabled": {"type": "boolean"},
+                "name": {"type": "string"},
+                "required_count": {"type": "integer"},
+                "nullable": {"type": ["integer", "null"]},
+            },
+            "required": ["required_count"],
+        }
+    )
+    assert validate_tool_arguments(
+        tool,
+        _call(
+            {
+                "offset": None,
+                "enabled": None,
+                "name": None,
+                "required_count": None,
+                "nullable": None,
+            }
+        ),
+    ) == {"required_count": 0, "nullable": None}
+
+
+def test_integral_float_stringifies_like_javascript():
+    tool = _tool({"type": "object", "properties": {"v": {"type": "string"}}})
+    assert validate_tool_arguments(tool, _call({"v": 5.0})) == {"v": "5"}
 
 
 def test_all_of_coercion():
@@ -246,3 +298,20 @@ def test_invalid_schema_leniently_returns_args():
     """schema 本身无法被 jsonschema 处理时宽容跳过校验。"""
     tool = _tool({"type": "object", "properties": {"x": {"type": 123}}})
     assert validate_tool_arguments(tool, _call({"x": "5"})) == {"x": "5"}
+
+
+def test_validate_tool_call_selects_tool_and_returns_coerced_arguments():
+    from nova_agent.utils import validate_tool_call
+
+    tool = _tool({"type": "object", "properties": {"x": {"type": "integer"}}})
+    assert validate_tool_call([tool], _call({"x": "5"})) == {"x": 5}
+
+
+def test_validate_tool_call_rejects_unknown_tool_before_execution():
+    from nova_agent.utils import validate_tool_call
+
+    with pytest.raises(ValueError, match='Tool "missing" not found'):
+        validate_tool_call(
+            [_tool({"type": "object"})],
+            ToolCall(id="tc-1", name="missing", arguments={}),
+        )

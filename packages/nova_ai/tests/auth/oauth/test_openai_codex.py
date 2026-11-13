@@ -16,15 +16,19 @@ import respx
 from nova_protocol import (
     AuthEvent,
     AuthInteraction,
+    AuthorizationRequest,
     AuthPrompt,
     NovaErrorKind,
     OAuthCredential,
+    RedactedString,
 )
 
+from nova_ai.auth.oauth.errors import OAuthFlowError
 from nova_ai.auth.oauth.openai_codex import (
     create_authorization_flow,
     openai_codex_oauth,
 )
+from tests._helpers.auth import oauth_credential
 
 pytestmark = pytest.mark.asyncio
 
@@ -58,6 +62,9 @@ class _FakeInteraction(AuthInteraction):
 
     async def prompt(self, prompt: AuthPrompt) -> str:
         return self._method
+
+    async def acquire_authorization_code(self, request: AuthorizationRequest) -> str:
+        raise NotImplementedError
 
     def notify(self, event: AuthEvent) -> None:
         self.events.append(event)
@@ -126,8 +133,8 @@ class TestTokenResponseBoundary:
         respx.post(_TOKEN_URL).mock(
             return_value=httpx.Response(200, json=_token_payload(_jwt_with_account()))
         )
-        old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
-        new = await openai_codex_oauth.refresh(old)
+        old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
+        new = await openai_codex_oauth.refresh(old, None)
         assert new.refresh == "refresh-456"
         assert new.accountId == "acct-123"  # JWT claim 提取接线
 
@@ -140,9 +147,9 @@ class TestTokenResponseBoundary:
                 200, json={"access_token": secret_access, "expires_in": 3600}
             )
         )
-        old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+        old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
         with pytest.raises(RuntimeError) as exc_info:
-            await openai_codex_oauth.refresh(old)
+            await openai_codex_oauth.refresh(old, None)
         message = str(exc_info.value)
         assert "refresh_token" in message
         assert secret_access not in message
@@ -157,7 +164,7 @@ class TestTokenResponseBoundary:
         )
         with pytest.raises(RuntimeError) as exc_info:
             await openai_codex_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         assert "expires_in" in str(exc_info.value)
 
@@ -171,7 +178,7 @@ class TestTokenResponseBoundary:
         )
         with pytest.raises(RuntimeError) as exc_info:
             await openai_codex_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         assert "expires_in" in str(exc_info.value)
 
@@ -189,7 +196,7 @@ class TestTokenResponseBoundary:
         )
         with pytest.raises(RuntimeError) as exc_info:
             await openai_codex_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         message = str(exc_info.value)
         assert "invalid_grant" in message
@@ -264,7 +271,7 @@ class TestDeviceCodeBoundary:
                 200, json={"code_verifier": "verifier-secret-456"}
             )
         )
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(OAuthFlowError) as exc_info:
             await openai_codex_oauth.login(_FakeInteraction())
         message = str(exc_info.value)
         assert exc_info.value.nova_error_kind is NovaErrorKind.UPSTREAM_ERROR
@@ -298,9 +305,9 @@ class TestDeviceCodeBoundary:
         respx.post(_TOKEN_URL).mock(
             return_value=httpx.Response(200, content=b"not-json")
         )
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(OAuthFlowError) as exc_info:
             await openai_codex_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         assert exc_info.value.nova_error_kind is NovaErrorKind.UPSTREAM_ERROR
         assert "not-json" not in str(exc_info.value)
@@ -313,18 +320,18 @@ class TestDeviceCodeBoundary:
         )
 
         token = _TokenResponse(
-            access_token="synthetic-access",
-            refresh_token="synthetic-refresh",
+            access_token=RedactedString("synthetic-access"),
+            refresh_token=RedactedString("synthetic-refresh"),
             expires_in=60,
         )
         start = _DeviceCodeStartResponse(
-            device_auth_id="synthetic-device-id",
-            user_code="synthetic-user-code",
+            device_auth_id=RedactedString("synthetic-device-id"),
+            user_code=RedactedString("synthetic-user-code"),
             interval=0,
         )
         grant = _DeviceCodeGrant(
-            authorization_code="synthetic-code",
-            code_verifier="synthetic-verifier",
+            authorization_code=RedactedString("synthetic-code"),
+            code_verifier=RedactedString("synthetic-verifier"),
         )
         for secret in (
             "synthetic-access",

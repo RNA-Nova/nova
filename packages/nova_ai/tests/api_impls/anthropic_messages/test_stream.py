@@ -22,7 +22,9 @@ from nova_protocol import (
     ModelCost,
     NovaErrorKind,
     StopReason,
+    ThinkingContent,
     Tool,
+    ToolCall,
     UserMessage,
 )
 
@@ -54,6 +56,7 @@ from tests._helpers.fake_llm import (
     anthropic_client_scripted,
     anthropic_stream_client,
 )
+from tests._helpers.messages import text_of
 
 pytestmark = pytest.mark.asyncio
 
@@ -102,7 +105,7 @@ class TestStreamHappyPath:
         assert result.response_id == "msg_1"
         # 实际服务模型与请求一致 → response_model 不落（仅被改写时落，对齐 TS）
         assert result.response_model is None
-        assert result.content[0].text == "你好"
+        assert text_of(result) == "你好"
         usage = result.usage
         assert (usage.input, usage.output, usage.total_tokens) == (12, 5, 17)
         # 成本 = 12*3 + 5*15 每百万
@@ -145,6 +148,7 @@ class TestStreamHappyPath:
         ]
         result = await es.result()
         block = result.content[0]
+        assert isinstance(block, ThinkingContent)
         assert block.thinking == "先想"
         assert block.thinking_signature == "sig-1-2"
         assert len(capture) == 1
@@ -190,6 +194,7 @@ class TestStreamHappyPath:
         result = await es.result()
         assert result.stop_reason == StopReason.TOOL_USE
         call = result.content[0]
+        assert isinstance(call, ToolCall)
         assert call.arguments == {"city": "bj"}
         assert call.partial_args is None  # 瞬态缓冲清零
 
@@ -218,6 +223,7 @@ class TestStreamHappyPath:
         result = await es.result()
         assert result.stop_reason == StopReason.STOP
         block = result.content[0]
+        assert isinstance(block, ThinkingContent)
         assert block.redacted is True
         assert block.thinking_signature == "opaque"
         assert len(capture) == 1
@@ -417,7 +423,7 @@ class TestStreamFailurePaths:
             pass
         result = await es.result()
         assert result.stop_reason == StopReason.STOP
-        assert result.content[0].text == "你好"
+        assert text_of(result) == "你好"
 
     async def test_raw_control_character_in_known_json_event_is_repaired(self):
         capture = RequestCapture()
@@ -446,7 +452,7 @@ class TestStreamFailurePaths:
             pass
         result = await es.result()
         assert result.stop_reason == StopReason.STOP
-        assert result.content[0].text == "a\tb"
+        assert text_of(result) == "a\tb"
 
     async def test_delta_after_content_block_stop_cannot_rewrite_finished_block(self):
         capture = RequestCapture()
@@ -470,7 +476,7 @@ class TestStreamFailurePaths:
         events = [event async for event in es]
         result = await es.result()
         assert result.stop_reason == StopReason.STOP
-        assert result.content[0].text == "accepted"
+        assert text_of(result) == "accepted"
         text_end = next(event for event in events if event.type == "text_end")
         assert text_end.content == "accepted"
 
@@ -828,7 +834,7 @@ class TestServerSideFallback:
         assert result.response_model == "claude-fallback-x"
         # 内容只有文本块（fallback 标记不进）
         assert [c.type for c in result.content] == ["text"]
-        assert result.content[0].text == "兜底应答"
+        assert text_of(result) == "兜底应答"
         # 成本按 fallback 费率：12*1 + 5*2 每百万
         assert result.usage.cost.total == pytest.approx((12 * 1 + 5 * 2) / 1_000_000)
 
@@ -1088,4 +1094,4 @@ async def test_invalid_sse_escape_is_repaired_before_sdk_decode():
     )
     result = await es.result()
     assert result.stop_reason == StopReason.STOP
-    assert result.content[0].text == "\\Hok"
+    assert text_of(result) == "\\Hok"

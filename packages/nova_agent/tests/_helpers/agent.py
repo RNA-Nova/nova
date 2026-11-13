@@ -1,15 +1,18 @@
-"""测试共享 helper：mock 工具与 EventStream 构造。"""
+"""测试共享 builder：工具实现与类型化 EventStream 构造。"""
 
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Union
 
-from nova_agent import AgentTool
+from nova_ai import AssistantMessageEventStream
 from nova_protocol import (
+    AbortedError,
     AgentToolResult,
     AssistantMessage,
+    AssistantMessageEvent,
     DoneEvent,
     ErrorEvent,
     Model,
     StartEvent,
+    StopReason,
     TextContent,
     TextDeltaEvent,
     TextEndEvent,
@@ -17,7 +20,7 @@ from nova_protocol import (
     ToolCallEndEvent,
 )
 
-from nova_ai import EventStream
+from nova_agent import AgentTool, ToolExecutionMode
 
 
 class EchoTool(AgentTool):
@@ -75,12 +78,11 @@ class SlowTool(AgentTool):
         "properties": {"value": {"type": "string"}},
         "required": ["value"],
     }
-    execution_mode: str = "sequential"
+    execution_mode: Union[ToolExecutionMode, None] = "sequential"
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(
-            content=[TextContent(text=f"slow-{params['value']}")],
-            details={},
+            content=[TextContent(text=f"slow-{params['value']}")], details={}
         )
 
 
@@ -94,9 +96,7 @@ class TerminateTool(AgentTool):
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(
-            content=[TextContent(text="done")],
-            details={},
-            terminate=True,
+            content=[TextContent(text="done")], details={}, terminate=True
         )
 
 
@@ -137,22 +137,15 @@ class AbortableTool(AgentTool):
     parameters: dict = {"type": "object", "properties": {}}
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
-        import asyncio
-
-        for _ in range(100):
-            if signal and signal.aborted:
-                raise Exception("Operation aborted")
-            await asyncio.sleep(0.01)
-        return AgentToolResult(content=[TextContent(text="done")], details={})
-
-
-# ----------------------------------------------------------------------
-# EventStream 构造
-# ----------------------------------------------------------------------
+        assert signal is not None
+        await signal.wait()
+        raise AbortedError("Operation aborted")
 
 
 def make_assistant_message(
-    model: Model, content: List[Any], stop_reason: str = "stop"
+    model: Model,
+    content: List[Any],
+    stop_reason: Union[StopReason, str] = StopReason.STOP,
 ) -> AssistantMessage:
     return AssistantMessage(
         role="assistant",
@@ -160,63 +153,75 @@ def make_assistant_message(
         api=model.api,
         provider=model.provider,
         model=model.id,
-        stop_reason=stop_reason,
+        stop_reason=StopReason(stop_reason),
     )
 
 
-def make_stream(events: list) -> EventStream:
-    """按给定事件列表构造 EventStream（end 收尾）。"""
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) in ("done", "error"),
-        extract_result=lambda e: (
-            e.message if getattr(e, "type", None) == "done" else e.error
-        ),
-    )
+def make_stream(events: List[AssistantMessageEvent]) -> AssistantMessageEventStream:
+    """按给定事件列表构造正式 assistant 流（end 收尾）。"""
+    stream = AssistantMessageEventStream()
     for event in events:
         stream.push(event)
     stream.end()
     return stream
 
 
-def text_stream(model: Model, text: str) -> EventStream:
+def _done(reason: StopReason, message: AssistantMessage) -> DoneEvent:
+    if reason is StopReason.LENGTH:
+        return DoneEvent(reason=StopReason.LENGTH, message=message)
+    if reason is StopReason.TOOL_USE:
+        return DoneEvent(reason=StopReason.TOOL_USE, message=message)
+    return DoneEvent(reason=StopReason.STOP, message=message)
+
+
+def _error(reason: StopReason, message: AssistantMessage) -> ErrorEvent:
+    if reason is StopReason.ABORTED:
+        return ErrorEvent(reason=StopReason.ABORTED, error=message)
+    return ErrorEvent(reason=StopReason.ERROR, error=message)
+
+
+def text_stream(model: Model, text: str) -> AssistantMessageEventStream:
     """构造一个只回复固定文本的 EventStream。"""
     partial = make_assistant_message(model, [TextContent(text=text)])
-    events: list = [StartEvent(partial=partial)]
+    events: List[AssistantMessageEvent] = [StartEvent(partial=partial)]
     if text:
         events.append(TextDeltaEvent(content_index=0, delta=text, partial=partial))
         events.append(TextEndEvent(content_index=0, content=text, partial=partial))
-    events.append(DoneEvent(reason="stop", message=partial))
+    events.append(_done(StopReason.STOP, partial))
     return make_stream(events)
 
 
 def final_stream(
-    model: Model, text: str = "", stop_reason: str = "stop"
-) -> EventStream:
+    model: Model,
+    text: str = "",
+    stop_reason: Union[StopReason, str] = StopReason.STOP,
+) -> AssistantMessageEventStream:
     """构造一个以任意 stop_reason 结束的 EventStream。"""
+    reason = StopReason(stop_reason)
     content: List[Any] = [TextContent(text=text)] if text else []
-    partial = make_assistant_message(model, content, stop_reason=stop_reason)
-    events: list = [StartEvent(partial=partial)]
+    partial = make_assistant_message(model, content, stop_reason=reason)
+    events: List[AssistantMessageEvent] = [StartEvent(partial=partial)]
     if text:
         events.append(TextDeltaEvent(content_index=0, delta=text, partial=partial))
         events.append(TextEndEvent(content_index=0, content=text, partial=partial))
-    if stop_reason in ("error", "aborted"):
-        events.append(ErrorEvent(reason=stop_reason, error=partial))
+    if reason in (StopReason.ERROR, StopReason.ABORTED):
+        events.append(_error(reason, partial))
     else:
-        events.append(DoneEvent(reason=stop_reason, message=partial))
+        events.append(_done(reason, partial))
     return make_stream(events)
 
 
 def tool_call_stream(
     model: Model, tool_name: str, arguments: dict, text_prefix: str = ""
-) -> EventStream:
+) -> AssistantMessageEventStream:
     """构造一个回复单个 tool call 的 EventStream。"""
     content: List[Any] = []
     if text_prefix:
         content.append(TextContent(text=text_prefix))
     tool_call = ToolCall(id="tc-1", name=tool_name, arguments=arguments)
     content.append(tool_call)
-    partial = make_assistant_message(model, content, stop_reason="toolUse")
-    events: list = [StartEvent(partial=partial)]
+    partial = make_assistant_message(model, content, stop_reason=StopReason.TOOL_USE)
+    events: List[AssistantMessageEvent] = [StartEvent(partial=partial)]
     if text_prefix:
         events.append(
             TextDeltaEvent(content_index=0, delta=text_prefix, partial=partial)
@@ -226,40 +231,42 @@ def tool_call_stream(
         )
     events.append(
         ToolCallEndEvent(
-            content_index=len(content) - 1,
-            tool_call=tool_call,
-            partial=partial,
+            content_index=len(content) - 1, tool_call=tool_call, partial=partial
         )
     )
-    events.append(DoneEvent(reason="toolUse", message=partial))
+    events.append(_done(StopReason.TOOL_USE, partial))
     return make_stream(events)
 
 
-def multi_tool_call_stream(model: Model, calls: List[tuple]) -> EventStream:
+def multi_tool_call_stream(
+    model: Model, calls: List[tuple]
+) -> AssistantMessageEventStream:
     """构造一个回复多个 tool call 的 EventStream。calls: [(name, args)]"""
     content: List[Any] = [
         ToolCall(id=f"tc-{i}", name=name, arguments=args)
         for i, (name, args) in enumerate(calls, 1)
     ]
-    partial = make_assistant_message(model, content, stop_reason="toolUse")
-    events: list = [StartEvent(partial=partial)]
-    for idx, tc in enumerate(content):
+    partial = make_assistant_message(model, content, stop_reason=StopReason.TOOL_USE)
+    events: List[AssistantMessageEvent] = [StartEvent(partial=partial)]
+    for idx, tool_call in enumerate(content):
         events.append(
-            ToolCallEndEvent(content_index=idx, tool_call=tc, partial=partial)
+            ToolCallEndEvent(content_index=idx, tool_call=tool_call, partial=partial)
         )
-    events.append(DoneEvent(reason="toolUse", message=partial))
+    events.append(_done(StopReason.TOOL_USE, partial))
     return make_stream(events)
 
 
 def abortable_tool_call_stream(
     tool_name: str, arguments: dict
-) -> Callable[[Model, Any, Any], EventStream]:
-    """第一次返回 tool call；若 signal 已 aborted，则返回 stop_reason='aborted' 的流。"""
+) -> Callable[[Model, Any, Any], AssistantMessageEventStream]:
+    """第一次返回 tool call；若 signal 已 aborted，则返回 aborted 流。"""
 
-    def stream_fn(model: Model, context: Any, options: Any) -> EventStream:
+    def stream_fn(
+        model: Model, context: Any, options: Any
+    ) -> AssistantMessageEventStream:
         signal = getattr(options, "signal", None)
         if signal and signal.aborted:
-            return final_stream(model, "aborted", stop_reason="aborted")
+            return final_stream(model, "aborted", stop_reason=StopReason.ABORTED)
         return tool_call_stream(model, tool_name, arguments)
 
     return stream_fn
@@ -267,11 +274,13 @@ def abortable_tool_call_stream(
 
 def tool_call_then_text_stream(
     tool_name: str, arguments: dict, text: str = "ok"
-) -> Callable[[Model, Any, Any], EventStream]:
+) -> Callable[[Model, Any, Any], AssistantMessageEventStream]:
     """第一次返回 tool call，之后返回固定文本。"""
     step = 0
 
-    def stream_fn(model: Model, context: Any, options: Any) -> EventStream:
+    def stream_fn(
+        model: Model, context: Any, options: Any
+    ) -> AssistantMessageEventStream:
         nonlocal step
         step += 1
         if step == 1:

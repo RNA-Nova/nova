@@ -768,14 +768,39 @@ class TestPersonalizedRefreshPolicy:
     async def test_replace_read_mode_and_empty_dynamic_fallback(self):
         """replace 以发布状态而非列表长度裁决；合法空集同样整取代。"""
         provider = _personal_provider()
-        # 空 dynamic：基线兜底
         assert [m.id for m in provider.get_models()] == ["kimi-k2.5"]
-        # 非空 dynamic：整取代（baseline 中被筛掉的不重现）
-        provider._set_dynamic_models([_model("managed-only", provider="kimi-coding")])
+
+        async def hook(base, context):
+            return base
+
+        policy = self._policy(provider, hook)
+        managed = _model("managed-only", provider="kimi-coding")
+        await policy(
+            _Context(
+                stored=ModelsStoreEntry(models=[managed], checked_at=1),
+                allow_network=False,
+            )
+        )
         assert [m.id for m in provider.get_models()] == ["managed-only"]
-        provider._set_dynamic_models([])
-        assert provider.get_models() == []  # 合法空目录同样整取代
-        # overlay 对照组：merge（baseline ∪ dynamic）
+
+        await policy(
+            _Context(
+                stored=ModelsStoreEntry(models=[], checked_at=2),
+                allow_network=False,
+            )
+        )
+        assert provider.get_models() == []
+
         overlay = _provider()
-        overlay._dynamic_models = [_model("kimi-k3")]
+        overlay_policy = _policy(overlay)
+        await overlay_policy(
+            _Context(
+                stored=ModelsStoreEntry(
+                    models=[_model("kimi-k3")],
+                    checked_at=3,
+                    last_modified=GENERATED_AT + 1,
+                ),
+                allow_network=False,
+            )
+        )
         assert [m.id for m in overlay.get_models()] == ["kimi-k2.5", "kimi-k3"]

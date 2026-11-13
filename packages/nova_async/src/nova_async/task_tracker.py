@@ -32,6 +32,8 @@ import asyncio
 import logging
 from typing import Any, Coroutine, Optional, Set
 
+from nova_protocol import AbortedError
+
 logger = logging.getLogger(__name__)
 
 
@@ -143,7 +145,7 @@ class TaskTracker:
             return
         # task.exception() 的读取兼作 "never retrieved" 警告的合法消费
         exc = task.exception()
-        if exc is not None:
+        if exc is not None and not isinstance(exc, AbortedError):
             logger.error(
                 "TaskTracker[%s] 任务 %r 异常终结",
                 self._name or "(unnamed)",

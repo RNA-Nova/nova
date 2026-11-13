@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
+## [Unreleased]
+
+### Added
+
+- **转录与生命周期**：`SystemMessage` 承载系统提示词与工具差分；新增 `prepare_request` / `prepare_next_turn` / `finish_turn`、`run_tool_call` 与 `stream_proxy`。
+- **工具结果**：`structured_content`、`usage`、`duration_ms`、`output_schema` 与 `replay`；公开 `AgentToolCallOutcome`。
+- **请求身份与可观测性**：`ClientIdentity`、provider 归因头、错误分类和敏感信息清洗。
+
+### Fixed
+
+- **运行收尾**：provider abandonment、并行工具异常排水、run 代际清理与 proxy 在飞取消。
+- **启动与终止**：`start_prompt()` 同步登记 active run；abort 采用 100ms 优雅窗口，超时硬取消并告警。
+- **并发与观测**：sequential 终态在门内、通知在门外；工具 update observer 异常转为工具错误结果。
+- **参数与契约**：单次调用工具集、联合输入保留、optional null 归一及 `ToolCall.namespace` 往返。
+
 ## [0.1.0] - 2026-09-04
 
 首个封版。
@@ -18,4 +33,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **消息队列**：steering（运行中插队）与 follow-up（收尾后续跑）双队列，`one-at-a-time` / `all` 两种注入模式。
 - **自定义消息类型**：`CustomAgentMessage` 扩展基类 + `transform_context` / `convert_to_llm` 上下文管线。
 - **错误处理约定**：工具异常、校验失败、hook 拦截一律落账为 `is_error` 工具结果，provider 失败生成失败 assistant 消息，均不中断 run；`terminate` 提前终止提示。
-- **取消传播**：`AbortSignal`（re-export 自 `nova_ai`）贯穿 provider 流与工具执行。
+- **取消传播**：`AbortSignal`（来自 `nova_protocol`）贯穿 provider 流与工具执行。

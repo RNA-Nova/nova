@@ -15,12 +15,16 @@ from nova_protocol import (
     AbortedError,
     AuthEvent,
     AuthInteraction,
+    AuthorizationRequest,
     AuthPrompt,
     NovaErrorKind,
     OAuthCredential,
+    RedactedString,
 )
 
+from nova_ai.auth.oauth.errors import OAuthFlowError
 from nova_ai.auth.oauth.kimi import kimi_oauth
+from tests._helpers.auth import oauth_credential
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,6 +42,9 @@ class _FakeInteraction(AuthInteraction):
         self.events: List[AuthEvent] = []
 
     async def prompt(self, prompt: AuthPrompt) -> str:
+        raise NotImplementedError
+
+    async def acquire_authorization_code(self, request: AuthorizationRequest) -> str:
         raise NotImplementedError
 
     def notify(self, event: AuthEvent) -> None:
@@ -162,8 +169,8 @@ async def test_refresh_success():
             200, json=_token_payload(access="access-new", refresh="refresh-new")
         )
     )
-    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
-    new = await kimi_oauth.refresh(old)
+    old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
+    new = await kimi_oauth.refresh(old, None)
 
     assert new.access == "access-new"
     assert new.refresh == "refresh-new"
@@ -181,9 +188,9 @@ async def test_refresh_unauthorized():
             401, json={"error": "invalid_grant", "error_description": "token revoked"}
         )
     )
-    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+    old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
     with pytest.raises(RuntimeError, match="token revoked"):
-        await kimi_oauth.refresh(old)
+        await kimi_oauth.refresh(old, None)
 
 
 @respx.mock
@@ -199,8 +206,8 @@ async def test_refresh_retries_on_non_json_error_body(monkeypatch):
             httpx.Response(200, json=_token_payload(access="a", refresh="r")),
         ]
     )
-    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
-    new = await kimi_oauth.refresh(old)
+    old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
+    new = await kimi_oauth.refresh(old, None)
     assert new.access == "a"
     assert route.call_count == 2
 
@@ -213,9 +220,9 @@ async def test_refresh_uses_initial_plus_three_retries_for_all_5xx(monkeypatch):
     route = respx.post(_TOKEN_URL).mock(
         return_value=httpx.Response(501, json={"error": "server_error"})
     )
-    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+    old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
     with pytest.raises(RuntimeError, match="501"):
-        await kimi_oauth.refresh(old)
+        await kimi_oauth.refresh(old, None)
     assert route.call_count == 4
 
 
@@ -226,7 +233,7 @@ async def test_device_flow_uses_server_expiry_and_waits_before_first_poll(monkey
     async def fake_poll(options):
         captured["expires"] = options.expires_in_seconds
         captured["wait"] = options.wait_before_first_poll
-        return OAuthCredential(access="a", refresh="r", expires=1)
+        return oauth_credential(access="a", refresh="r", expires=1)
 
     monkeypatch.setattr(
         "nova_ai.auth.oauth.kimi.poll_oauth_device_code_flow", fake_poll
@@ -244,9 +251,9 @@ async def test_refresh_non_json_error_body_terminal_unauthorized():
     respx.post(_TOKEN_URL).mock(
         return_value=httpx.Response(401, content=b"<html>denied</html>")
     )
-    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+    old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
     with pytest.raises(RuntimeError, match="unauthorized"):
-        await kimi_oauth.refresh(old)
+        await kimi_oauth.refresh(old, None)
 
 
 @respx.mock
@@ -260,9 +267,9 @@ async def test_refresh_abort_during_backoff_raises_aborted(monkeypatch):
         raise AbortedError("The operation was aborted")
 
     monkeypatch.setattr("nova_ai.auth.oauth.kimi.abortable_sleep", _abort_sleep)
-    old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+    old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
     with pytest.raises(AbortedError):
-        await kimi_oauth.refresh(old)
+        await kimi_oauth.refresh(old, None)
 
 
 class TestResponseValidationNoLeak:
@@ -278,9 +285,9 @@ class TestResponseValidationNoLeak:
                 200, json={"access_token": secret_access, "expires_in": 3600}
             )
         )
-        old = OAuthCredential(access="access-old", refresh="refresh-old", expires=0)
+        old = oauth_credential(access="access-old", refresh="refresh-old", expires=0)
         with pytest.raises(RuntimeError) as exc_info:
-            await kimi_oauth.refresh(old)
+            await kimi_oauth.refresh(old, None)
         message = str(exc_info.value)
         assert "refresh_token" in message  # 字段名指引（可行动文案）
         assert secret_access not in message  # 活 token 不进消息
@@ -299,7 +306,7 @@ class TestResponseValidationNoLeak:
             )
         )
         new = await kimi_oauth.refresh(
-            OAuthCredential(access="a", refresh="r", expires=0)
+            oauth_credential(access="a", refresh="r", expires=0), None
         )
         assert new.access == "a1"
 
@@ -314,7 +321,7 @@ class TestResponseValidationNoLeak:
         )
         with pytest.raises(RuntimeError) as exc_info:
             await kimi_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         message = str(exc_info.value)
         assert "expires_in" in message
@@ -331,7 +338,7 @@ class TestResponseValidationNoLeak:
         respx.post(_TOKEN_URL).mock(return_value=httpx.Response(200, content=body))
         with pytest.raises(RuntimeError) as exc_info:
             await kimi_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         assert "expires_in" in str(exc_info.value)
 
@@ -380,7 +387,7 @@ class TestResponseValidationNoLeak:
         )
         with pytest.raises(RuntimeError) as exc_info:
             await kimi_oauth.refresh(
-                OAuthCredential(access="a", refresh="r", expires=0)
+                oauth_credential(access="a", refresh="r", expires=0), None
             )
         message = str(exc_info.value)
         assert "backend exploded" in message
@@ -391,7 +398,7 @@ class TestResponseValidationNoLeak:
         respx.post(_DEVICE_AUTH_URL).mock(
             return_value=httpx.Response(200, content=b"not-json")
         )
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(OAuthFlowError) as exc_info:
             await kimi_oauth.login(_FakeInteraction())
         assert exc_info.value.nova_error_kind is NovaErrorKind.UPSTREAM_ERROR
         assert "not-json" not in str(exc_info.value)
@@ -400,13 +407,13 @@ class TestResponseValidationNoLeak:
         from nova_ai.auth.oauth.kimi import _DeviceAuthorizationResponse, _TokenResponse
 
         token = _TokenResponse(
-            access_token="synthetic-access",
-            refresh_token="synthetic-refresh",
+            access_token=RedactedString("synthetic-access"),
+            refresh_token=RedactedString("synthetic-refresh"),
             expires_in=60,
         )
         device = _DeviceAuthorizationResponse(
-            user_code="synthetic-user-code",
-            device_code="synthetic-device-code",
+            user_code=RedactedString("synthetic-user-code"),
+            device_code=RedactedString("synthetic-device-code"),
             verification_uri_complete="https://example.com?code=synthetic-user-code",
         )
         for secret in (

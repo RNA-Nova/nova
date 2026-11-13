@@ -6,7 +6,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Generic, List, Optional, TypeVar
+from typing import Any, Callable, Generic, List, Literal, Optional, TypeVar
 
 from nova_protocol import AbortSignal, AgentToolResult, Tool
 
@@ -40,6 +40,12 @@ class AgentTool(Tool, Generic[TParameters, TDetails], ABC):
         Must return an object that matches TParameters.
         """
         return args
+
+    output_schema: Optional[dict[str, Any]] = None
+    """structured_content 的 JSON Schema；声明者应在成功结果中始终提供它。"""
+
+    replay: Optional[Literal["never", "safe"]] = None
+    """持久化意图已存在但结果未知时的重放策略（供持久化宿主消费）。"""
 
     execution_mode: Optional[ToolExecutionMode] = None
     """

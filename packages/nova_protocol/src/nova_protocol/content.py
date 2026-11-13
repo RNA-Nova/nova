@@ -48,6 +48,7 @@ class ToolCall(NovaBaseModel):
     - ``arguments``：工具参数（任意 JSON 对象——线上载体，本层不校验；
       参数的形状归工具所在包声明与校验）；
     - ``thought_signature``：Google 专用的思考上下文签名；``None`` = 无；
+    - ``namespace``：OpenAI Responses 动态/命名空间工具的命名空间；``None`` = 普通工具；
     - ``partial_args`` / ``stream_index``：流式解析的瞬态缓冲，
       不参与序列化（``exclude=True``）。
     """
@@ -61,6 +62,7 @@ class ToolCall(NovaBaseModel):
     # 完整参数文本非法/截断时的结构化错误；有值时禁止执行工具。
     arguments_error: Optional[str] = None
     thought_signature: Optional[str] = None
+    namespace: Optional[str] = None
     partial_args: Optional[str] = Field(
         default=None, exclude=True
     )  # 流式解析时的临时参数缓冲

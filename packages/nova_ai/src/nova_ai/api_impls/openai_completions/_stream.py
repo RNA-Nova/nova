@@ -404,6 +404,7 @@ def stream(
                 options.headers if options else None,
                 session_id=cache_session_id,
                 compat=compat,
+                identity=options.identity if options else None,
             )
             params = build_params(model, context, options, compat, cache_retention)
 

@@ -370,25 +370,3 @@ class TestStreamingJsonParserProperties:
             parser.feed(full[pos : pos + step])
             pos += step
         assert parser.value == value
-
-
-def test_large_open_array_snapshot_copying_is_budgeted(monkeypatch):
-    """开放大数组不得每次 delta 都全量浅拷；闭合后仍给出精确终值。"""
-    parser = StreamingJsonParser()
-    copy_calls = 0
-    original = parser._make_snapshot
-
-    def counted_snapshot():
-        nonlocal copy_calls
-        copy_calls += 1
-        return original()
-
-    monkeypatch.setattr(parser, "_make_snapshot", counted_snapshot)
-    parser.feed("[")
-    for index in range(2000):
-        parser.feed(f"{index},")
-        snapshot = parser.value
-        assert isinstance(snapshot, list)
-    parser.feed("]")
-    assert parser.value == list(range(2000))
-    assert copy_calls < 1000

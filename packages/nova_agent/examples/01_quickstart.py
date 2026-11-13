@@ -9,7 +9,6 @@
 
 import asyncio
 
-from nova_agent import Agent
 from nova_ai import EventStream
 from nova_protocol import (
     DoneEvent,
@@ -20,6 +19,8 @@ from nova_protocol import (
     StartEvent,
     TextContent,
 )
+
+from nova_agent import Agent
 
 
 def make_demo_model() -> Model:

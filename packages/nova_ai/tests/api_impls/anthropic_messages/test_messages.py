@@ -12,6 +12,7 @@ from nova_protocol import (
     KnownApi,
     Model,
     ModelCost,
+    StopReason,
     TextContent,
     ThinkingContent,
     Tool,
@@ -45,7 +46,9 @@ def _model(compat=None) -> Model:
     )
 
 
-def _assistant(content, stop_reason="stop") -> AssistantMessage:
+def _assistant(
+    content, stop_reason: StopReason | str = StopReason.STOP
+) -> AssistantMessage:
     """构造与被测模型同源的 assistant 消息（transform_messages 的同模型
     回放判定要求 api/provider/model 三元组一致）。"""
     return AssistantMessage(
@@ -54,7 +57,7 @@ def _assistant(content, stop_reason="stop") -> AssistantMessage:
         provider="anthropic",
         model="claude-sonnet-4-5",
         usage=Usage(),
-        stop_reason=stop_reason,
+        stop_reason=StopReason(stop_reason),
     )
 
 

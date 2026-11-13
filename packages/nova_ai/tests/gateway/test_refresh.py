@@ -8,6 +8,7 @@ from typing import List
 
 import pytest
 from nova_protocol import (
+    AnyModel,
     Context,
     KnownApi,
     Model,
@@ -128,7 +129,7 @@ class TestDynamicProvider:
 
     async def test_refresh_models_restores_from_store(self):
         store = InMemoryModelsStore()
-        dynamic = [_make_model("d1")]
+        dynamic: List[AnyModel] = [_make_model("d1")]
         await store.write("test", ModelsStoreEntry(models=dynamic, checked_at=123))
 
         async def fetch_models(context: RefreshModelsContext) -> List[Model]:
@@ -424,20 +425,32 @@ async def test_refresh_preserves_diagnostics_when_network_phase_raises():
 
 @pytest.mark.asyncio
 async def test_cancelled_previous_publication_does_not_poison_next_publish():
+    """公开 refresh 链：取消一次发布后，下一代仍可正常发布。"""
     from nova_ai.gateway import ModelsPublication
 
-    store = InMemoryModelsStore()
-    models = ModelsManager(models_store=store)
-    generation, controller = models._begin_provider_refresh("test")
-    previous = asyncio.get_running_loop().create_future()
-    previous.cancel()
-    models._publication_chains["test"] = previous
+    provider = create_provider(id="test", name="Test", auth=_resolving_auth())
     updated = []
-    published = await models._publish_provider_models(
-        "test",
-        generation,
-        controller.signal,
-        ModelsPublication(update=lambda: updated.append(True)),
-    )
-    assert published is True
-    assert updated == [True]
+    calls = 0
+
+    async def refresh(context: RefreshModelsContext) -> None:
+        nonlocal calls
+        calls += 1
+        publish = context.publish
+        assert publish is not None
+        if calls == 1:
+            cancelled = asyncio.ensure_future(
+                publish(ModelsPublication(update=lambda: updated.append("old")))
+            )
+            cancelled.cancel()
+            await asyncio.gather(cancelled, return_exceptions=True)
+            return
+        await publish(ModelsPublication(update=lambda: updated.append("current")))
+
+    provider.refresh_models = refresh
+    models = ModelsManager(models_store=InMemoryModelsStore())
+    models.set_provider(provider)
+    await models.refresh()
+    result = await models.refresh()
+
+    assert result["errors"] == {}
+    assert updated and set(updated) == {"current"}

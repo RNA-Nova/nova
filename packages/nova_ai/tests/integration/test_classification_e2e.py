@@ -8,6 +8,7 @@ from nova_protocol import ClassifierContext, ClassifierModel, ClassifierStopReas
 from nova_ai.stream_options import ClassifierOptions
 
 from ._helpers.auth import build_manager, has_credential
+from ._helpers.probes import probe_for
 
 pytestmark = [
     pytest.mark.integration,
@@ -16,16 +17,14 @@ pytestmark = [
     pytest.mark.timeout(300),
 ]
 
-_MODEL_ID = "parallel/decisions-fast:free"
-
 
 async def test_openrouter_returns_classifier_bool_answer():
     if not has_credential("openrouter"):
         pytest.skip("OpenRouter credentials are not configured")
     manager = await build_manager()
-    model = manager.get_model_of_type("classifier", "openrouter", _MODEL_ID)
+    model = probe_for(manager.get_models_of_type("classifier", "openrouter"))
     if model is None:
-        pytest.skip(f"Current classifier catalog does not contain {_MODEL_ID}")
+        pytest.skip("Current classifier catalog is empty")
     assert isinstance(model, ClassifierModel)
     context = ClassifierContext.model_validate(
         {

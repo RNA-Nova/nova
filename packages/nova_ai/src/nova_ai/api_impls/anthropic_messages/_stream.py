@@ -402,9 +402,11 @@ def stream(
                     # pi `thinkingEnabled === true` 严格语义（显式真才算）
                     thinking_enabled=getattr(options, "thinking_enabled", None) is True,
                     federation=federation,
+                    identity=options.identity if options else None,
                 )
-                # federation 派生 client 共享基座的传输与凭据缓存，不能随请求关闭。
-                owns_client = federation is None
+                # federation 只共享基座的 token cache；本请求新建的派生 client
+                # 仍归本流关闭，基座与共享 token cache 不随请求销毁。
+                owns_client = True
             knob_s = options.timeout if options else None
             # connect/pool 恒工程上限；read/write 随旋钮（None=引擎默认，
             # 0=显式关闭）——超时治理见 _shared/timeouts.py

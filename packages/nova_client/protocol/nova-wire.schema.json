@@ -503,6 +503,25 @@
           ],
           "type": "string"
         },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "timestamp": {
           "type": "number"
         },
@@ -527,6 +546,7 @@
         "responseId",
         "responseModel",
         "providerThinkingLevel",
+        "thinkingLevel",
         "diagnostics",
         "timestamp",
         "durationMs"
@@ -5589,6 +5609,16 @@
         "name": {
           "type": "string"
         },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "partialArgs": {
           "anyOf": [
             {
@@ -5633,6 +5663,7 @@
         "arguments",
         "argumentsError",
         "thoughtSignature",
+        "namespace",
         "partialArgs",
         "streamIndex"
       ],
@@ -5812,6 +5843,16 @@
     "ToolExecutionEndEvent": {
       "additionalProperties": false,
       "properties": {
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "isError": {
           "type": "boolean"
         },
@@ -5834,7 +5875,8 @@
         "toolCallId",
         "toolName",
         "result",
-        "isError"
+        "isError",
+        "durationMs"
       ],
       "title": "ToolExecutionEndEvent",
       "type": "object"
@@ -6023,6 +6065,16 @@
             }
           ]
         },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "isError": {
           "type": "boolean"
         },
@@ -6040,6 +6092,16 @@
         },
         "toolName": {
           "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Usage"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -6048,7 +6110,9 @@
         "toolName",
         "content",
         "details",
+        "usage",
         "isError",
+        "durationMs",
         "timestamp"
       ],
       "title": "ToolResultMessage",

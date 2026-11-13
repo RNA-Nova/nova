@@ -3,12 +3,13 @@
 import httpx
 import pytest
 from nova_protocol import (
-    ApiKeyCredential,
     KnownApi,
     Model,
     ModelCost,
     NovaErrorKind,
     OAuthCredential,
+    OpenAICompletionsCompat,
+    ThinkingFormat,
     WarningKind,
 )
 
@@ -16,12 +17,13 @@ from nova_ai.gateway.catalog import CatalogError
 from nova_ai.gateway.provider import RefreshModelsContext
 from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
 from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
+from tests._helpers.auth import api_key_credential, oauth_credential
 
 pytestmark = pytest.mark.asyncio
 
 
 def _oauth() -> OAuthCredential:
-    return OAuthCredential(access="tok", refresh="r", expires=9999999999999)
+    return oauth_credential(access="tok", refresh="r", expires=9999999999999)
 
 
 def _context(credential=None) -> RefreshModelsContext:
@@ -29,21 +31,20 @@ def _context(credential=None) -> RefreshModelsContext:
 
 
 def _model(model_id: str, **overrides) -> Model:
-    fields = {
-        "id": model_id,
-        "name": model_id,
-        "api": "openai-completions",
-        "provider": "kimi-coding",
-        "base_url": BASE_URL,
-        "reasoning": True,
-        "input_types": ["text"],
-        "cost": {"input": 0.95, "output": 4, "cache_read": 0.19, "cache_write": 0},
-        "context_window": 1048576,
-        "max_tokens": 32768,
-        "compat": {"thinking_format": "openai"},
-    }
-    fields.update(overrides)
-    return Model(**fields)
+    model = Model(
+        id=model_id,
+        name=model_id,
+        api=KnownApi.OPENAI_COMPLETIONS,
+        provider="kimi-coding",
+        base_url=BASE_URL,
+        reasoning=True,
+        input_types=["text"],
+        cost=ModelCost(input=0.95, output=4, cache_read=0.19, cache_write=0),
+        context_window=1048576,
+        max_tokens=32768,
+        compat=OpenAICompletionsCompat(thinking_format=ThinkingFormat.OPENAI),
+    )
+    return model.model_copy(update=overrides)
 
 
 def _managed_payload(*ids):
@@ -96,7 +97,7 @@ async def test_api_key_credential_uses_managed_too(monkeypatch):
     seen = []
     _patch_managed(monkeypatch, _managed_payload("kimi-for-coding"), seen)
     result = await kimi_personalize(
-        [_model("kimi-for-coding")], _context(credential=ApiKeyCredential(key="k"))
+        [_model("kimi-for-coding")], _context(credential=api_key_credential("k"))
     )
     assert seen == ["Bearer k"]
     assert [m.id for m in result] == ["kimi-for-coding"]
@@ -113,20 +114,23 @@ async def test_managed_overlay_semantics(monkeypatch):
     result = await kimi_personalize(base, _context(credential=_oauth()))
     assert len(result) == 1
     merged = result[0]
+    assert isinstance(merged, Model)
     # 活字段覆盖（managed 账户真相）
     assert merged.name == "Managed kimi-for-coding"
     assert merged.context_window == 262144
     assert merged.input_types == ["text", "image"]
-    assert merged.thinking_level_map is not None
-    assert merged.thinking_level_map.get("low") == "low"
-    assert merged.thinking_level_map.get("high") == "high"
-    assert merged.thinking_level_map.get("max") is None
-    assert merged.thinking_level_map.get("off") is None
+    levels = merged.thinking_level_map
+    assert levels is not None
+    assert levels.get("low") == "low"
+    assert levels.get("high") == "high"
+    assert levels.get("max") is None
+    assert levels.get("off") is None
     # 公共事实继承基底（账户层零修正）
     assert merged.cost.input == 0.95 and merged.cost.output == 4
     assert merged.max_tokens == 32768  # 不再被 context_length 充数顶掉
-    assert merged.compat is not None
-    assert merged.compat.thinking_format == "openai"
+    compat = merged.compat
+    assert isinstance(compat, OpenAICompletionsCompat)
+    assert compat.thinking_format == "openai"
     assert merged.api == "openai-completions"
     assert merged.provider == "kimi-coding"
 
@@ -202,7 +206,6 @@ async def test_factory_wires_personalized_strategy():
     provider = kimi_coding_provider()
     assert provider.refresh_models is not None
     assert provider.catalog_source == "pi.dev"
-    assert provider._dynamic_replaces_baseline is True
 
 
 @pytest.mark.parametrize(

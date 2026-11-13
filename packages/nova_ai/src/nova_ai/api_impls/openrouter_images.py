@@ -27,13 +27,13 @@ from ..utils.errors import LoginRequiredError, normalize_error
 from ..utils.http import filter_headers_for_hook
 from ..utils.model_utils import calculate_cost
 from ..utils.surrogate import sanitize_surrogates
+from ._shared.identity import get_identity_headers
 from ._shared.openai_request import (
     build_chat_completion_kwargs,
     collect_omitted_headers,
 )
 from ._shared.retry import RetryOptions, retry_provider_request
 from ._shared.timeouts import build_request_timeout
-from ._shared.user_agent import get_nova_user_agent
 
 _DATA_IMAGE = re.compile(r"data:([^;]+);base64,(.+)", re.DOTALL)
 
@@ -53,7 +53,9 @@ def _merge_headers(
 def _client(model: ImageModel, options: ImagesOptions) -> AsyncOpenAI:
     if not options.api_key:
         raise LoginRequiredError(model.provider)
-    headers: Dict[str, Optional[str]] = {"User-Agent": get_nova_user_agent()}
+    headers = cast(
+        Dict[str, Optional[str]], get_identity_headers(model, options.identity)
+    )
     _merge_headers(headers, model.headers)
     _merge_headers(headers, options.headers)
     return AsyncOpenAI(

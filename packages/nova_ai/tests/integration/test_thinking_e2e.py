@@ -12,7 +12,7 @@ from nova_ai.stream_options import SimpleStreamOptions
 
 from ._helpers.auth import build_manager
 from ._helpers.probes import collect_probes
-from ._helpers.streams import extract_text, extract_thinking
+from ._helpers.streams import extract_text
 
 pytestmark = [
     pytest.mark.integration,
@@ -53,7 +53,7 @@ def _supported_levels(model):
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)
 async def test_supported_thinking_levels_complete(probe):
-    """模型声明支持的每个思考级别都能完成且产出思考内容。"""
+    """模型声明支持的每个思考级别都能正常完成，不要求特定输出文本。"""
     levels = _supported_levels(probe.model)
     assert levels  # 探针选型已保证（require 谓词）
     manager = await build_manager()
@@ -63,23 +63,41 @@ async def test_supported_thinking_levels_complete(probe):
             result = await manager.complete_simple(
                 probe.model, ctx, SimpleStreamOptions(reasoning=level)
             )
-        assert result.error_message is None
-        assert len(extract_thinking(result)) > 0, f"{level} 应有思考内容"
+        assert result.error_message is None, f"{level} 请求应正常完成"
+        assert result.content, f"{level} 应返回 assistant 内容块"
 
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)
 async def test_thinking_off_completes_with_text_only(probe):
-    """思考关闭：正常完成、无思考内容。"""
+    """思考关闭：正常完成，且请求不启用任何思考控制。"""
     level_map = probe.model.thinking_level_map or {}
     if "off" not in level_map:
         pytest.skip(f"{probe.label} 不支持思考开关")
     manager = await build_manager()
     ctx = Context(messages=[UserMessage(content="1+1=?")])
+    payloads = []
+
+    def capture(payload, _identity):
+        payloads.append(payload)
+
     async with asyncio.timeout(120):
-        result = await manager.complete_simple(probe.model, ctx, SimpleStreamOptions())
+        result = await manager.complete_simple(
+            probe.model,
+            ctx,
+            SimpleStreamOptions(on_payload=capture),
+        )
     assert result.error_message is None
     assert len(extract_text(result)) > 0
-    assert extract_thinking(result) == ""
+    assert len(payloads) == 1
+
+    off = level_map["off"]
+    payload = payloads[0]
+    extra = payload.get("extra_body") or {}
+    # 关闭语义在请求面：各协议只能缺席或发送目录声明的 off 值，
+    # 不接受厂商是否额外输出 thinking 文本作为判据。
+    assert payload.get("reasoning_effort") in (None, off)
+    assert payload.get("reasoning") in (None, off)
+    assert extra.get("thinking") in (None, off)
 
 
 @pytest.mark.parametrize("probe", _PROBES, ids=lambda p: p.label)

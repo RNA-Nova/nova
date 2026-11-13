@@ -49,3 +49,10 @@ class TestToolCall:
         restored = ToolCall.model_validate(tc.model_dump())
         assert restored == tc
         assert restored.arguments_error == "invalid JSON"
+
+    def test_namespace_roundtrip(self):
+        tc = ToolCall(id="tc1", name="dynamic", namespace="dynamic_tools")
+        restored = ToolCall.model_validate(tc.model_dump())
+        assert restored == tc
+        assert restored.namespace == "dynamic_tools"
+        assert tc.dump_wire()["namespace"] == "dynamic_tools"

@@ -13,9 +13,10 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Dict, List, Literal, NamedTuple, Optional, Sequence, TypeGuard
 
-from nova_protocol import Context, Message, SystemMessage, Tool
+from nova_protocol import Context, Message, SystemMessage, Tool, ToolReference
 
 
 def _content_text(content: object) -> str:
@@ -232,18 +233,76 @@ def resolve_transcript(
     return collapse_system_messages(messages)
 
 
+def get_current_system_prompt(messages: Sequence[Message]) -> str:
+    """重放全部 system 消息，返回当前提示词文本。"""
+    message = get_current_system_message(messages)
+    return get_system_message_text(message) if message is not None else ""
+
+
+def to_tool_declaration(tool: Tool) -> Tool:
+    """剥去执行/展示字段，得到用于转录与比较的最小工具声明。"""
+    return Tool(
+        name=tool.name,
+        description=tool.description,
+        parameters=copy.deepcopy(tool.parameters),
+        constrained_sampling=tool.constrained_sampling,
+    )
+
+
+def declarations_equal(left: Tool, right: Tool) -> bool:
+    """两个工具是否具有相同的模型可见声明。"""
+    return (
+        to_tool_declaration(left).model_dump()
+        == to_tool_declaration(right).model_dump()
+    )
+
+
+class ToolStateChanges(NamedTuple):
+    """两组完整工具状态之间的新增与移除（定义变化 = 先删后增）。"""
+
+    tools_added: List[Tool]
+    tools_removed: List[ToolReference]
+
+
+def get_tool_state_changes(
+    previous: Sequence[Tool], current: Sequence[Tool]
+) -> ToolStateChanges:
+    """比较完整工具状态，产出可重放的新增/删除集。"""
+    previous_tools = {tool.name: tool for tool in previous}
+    current_tools = {tool.name: tool for tool in current}
+    return ToolStateChanges(
+        tools_added=[
+            to_tool_declaration(tool)
+            for tool in current
+            if tool.name not in previous_tools
+            or not declarations_equal(previous_tools[tool.name], tool)
+        ],
+        tools_removed=[
+            ToolReference(name=tool.name)
+            for tool in previous
+            if tool.name not in current_tools
+            or not declarations_equal(tool, current_tools[tool.name])
+        ],
+    )
+
+
 __all__ = [
+    "ToolStateChanges",
     "TranscriptTools",
     "TranscriptToolSupport",
     "collapse_system_messages",
     "create_initial_system_message",
+    "declarations_equal",
     "get_current_system_message",
+    "get_current_system_prompt",
     "get_current_tools",
     "get_initial_system_message",
     "get_system_message_text",
+    "get_tool_state_changes",
     "normalize_context",
     "render_system_message_update",
     "resolve_transcript",
     "resolve_transcript_tools",
+    "to_tool_declaration",
     "without_initial_system_message",
 ]

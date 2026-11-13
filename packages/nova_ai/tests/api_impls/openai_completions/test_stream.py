@@ -26,9 +26,11 @@ from nova_protocol import (
     ModelCost,
     NovaErrorKind,
     StopReason,
+    TextContent,
     TextDeltaEvent,
     TextEndEvent,
     TextStartEvent,
+    ThinkingContent,
     ThinkingEndEvent,
     ThinkingStartEvent,
     ToolCallDeltaEvent,
@@ -337,7 +339,9 @@ class TestStreamReasoningDetails:
         thinking_blocks = [
             b for b in thinking_ends[0].partial.content if b.type == "thinking"
         ]
-        archived = json.loads(thinking_blocks[0].thinking_signature)
+        signature = thinking_blocks[0].thinking_signature
+        assert signature is not None
+        archived = json.loads(signature)
         assert archived == [detail]
         ends = [e for e in events if isinstance(e, ToolCallEndEvent)]
         assert len(ends) == 1
@@ -373,7 +377,9 @@ class TestStreamReasoningDetails:
         thinking_blocks = [
             b for b in thinking_ends[0].partial.content if b.type == "thinking"
         ]
-        archived = json.loads(thinking_blocks[0].thinking_signature)
+        signature = thinking_blocks[0].thinking_signature
+        assert signature is not None
+        archived = json.loads(signature)
         assert archived == [detail]
         ends = [e for e in events if isinstance(e, ToolCallEndEvent)]
         assert len(ends) == 1
@@ -659,7 +665,7 @@ class TestStreamError:
         assert not done
         errors = [e for e in events if isinstance(e, ErrorEvent)]
         assert len(errors) == 1
-        assert "finish_reason" in errors[0].error.error_message
+        assert "finish_reason" in (errors[0].error.error_message or "")
         assert errors[0].error.error_kind is NovaErrorKind.STREAM_DISCONNECTED
 
         body = RequestCapture.body_json(capture.single())
@@ -831,7 +837,9 @@ class TestStreamInterleaved:
         assert len(done) == 1
         blocks = done[0].message.content
         assert [b.type for b in blocks] == ["thinking", "text"]
+        assert isinstance(blocks[0], ThinkingContent)
         assert blocks[0].thinking == "r1r2r3"
+        assert isinstance(blocks[1], TextContent)
         assert blocks[1].text == "t1t2"
 
         body = RequestCapture.body_json(capture.single())

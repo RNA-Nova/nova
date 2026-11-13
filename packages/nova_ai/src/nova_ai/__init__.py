@@ -23,6 +23,16 @@ from .api_impls._shared import (
     infer_copilot_initiator,
     transform_messages,
 )
+from .api_impls._shared.identity import NOVA_ATTRIBUTION, merge_client_identity
+from .api_impls._shared.transcript import (
+    ToolStateChanges,
+    create_initial_system_message,
+    get_current_system_message,
+    get_current_system_prompt,
+    get_current_tools,
+    get_tool_state_changes,
+    to_tool_declaration,
+)
 
 # auth 行为层（类型词汇住 nova_protocol，本包不再导出枢纽类型）
 from .auth import (
@@ -115,6 +125,7 @@ from .utils import (
     sanitize_surrogates,
     to_thinking_level,
 )
+from .utils.json_parser import StreamingJsonParser
 
 __all__ = [
     # auth
@@ -141,6 +152,17 @@ __all__ = [
     "EventStream",
     "AssistantMessageEventStream",
     "create_assistant_message_event_stream",
+    # 跨包转录/身份/流式 JSON 公共机制
+    "NOVA_ATTRIBUTION",
+    "merge_client_identity",
+    "ToolStateChanges",
+    "create_initial_system_message",
+    "get_current_system_message",
+    "get_current_system_prompt",
+    "get_current_tools",
+    "get_tool_state_changes",
+    "to_tool_declaration",
+    "StreamingJsonParser",
     # gateway.models
     "ModelsManager",
     "create_models_manager",

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 from nova_protocol import (
     AbortSignal,
     CacheRetention,
+    ClientIdentity,
     ModelBase,
     ProviderEnv,
     ProviderHeaders,
@@ -88,6 +89,8 @@ class StreamOptions:
     # 自定义请求头；值为 None 表示抑制同名默认头
     headers: Optional[ProviderHeaders] = field(default=None, repr=False)
     metadata: Optional[Dict[str, Any]] = None
+    # 请求身份与 provider 归因；由协议实现生成底层默认头。
+    identity: Optional[ClientIdentity] = None
     # Provider 级环境变量，优先级高于进程环境变量
     env: Optional[ProviderEnv] = field(default=None, repr=False)
     # 请求超时（秒）：连接建立后的 read/idle 相耐心——connect/pool 相归
@@ -134,6 +137,8 @@ class ImagesOptions:
     """
 
     metadata: Optional[Dict[str, Any]] = None
+    # 请求身份与 provider 归因；由协议实现生成底层默认头。
+    identity: Optional[ClientIdentity] = None
     api_key: Optional[str] = field(default=None, repr=False)
     headers: Optional[ProviderHeaders] = field(default=None, repr=False)
     env: Optional[ProviderEnv] = field(default=None, repr=False)
@@ -156,6 +161,8 @@ class ClassifierOptions:
     """
 
     metadata: Optional[Dict[str, Any]] = None
+    # 请求身份与 provider 归因；由协议实现生成底层默认头。
+    identity: Optional[ClientIdentity] = None
     api_key: Optional[str] = field(default=None, repr=False)
     headers: Optional[ProviderHeaders] = field(default=None, repr=False)
     env: Optional[ProviderEnv] = field(default=None, repr=False)

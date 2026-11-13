@@ -8,7 +8,14 @@ from pydantic import ConfigDict, Field
 
 from .base_model import NovaBaseModel
 from .content import ImageContent, TextContent, ThinkingContent, ToolCall
-from .enums import Api, ImagesStopReason, NovaErrorKind, ProviderId, StopReason
+from .enums import (
+    Api,
+    ImagesStopReason,
+    ModelThinkingLevel,
+    NovaErrorKind,
+    ProviderId,
+    StopReason,
+)
 from .model import Usage
 
 
@@ -70,6 +77,8 @@ class AssistantMessage(NovaBaseModel):
     # ``providerThinkingLevel``）：mid-convo effort 开启时记录在回复上，
     # 后续请求经 effort 标记回放；``None`` = 未记录
     provider_thinking_level: Optional[str] = None
+    # Agent 循环实际请求的思考级别；None = 非 Agent 循环或旧消息。
+    thinking_level: Optional[ModelThinkingLevel] = None
     # 脱敏后的 provider/运行时诊断（失败与恢复路径，开放形状列表）；None = 无诊断
     diagnostics: Optional[List[Dict[str, Any]]] = None
     timestamp: int = 0
@@ -88,7 +97,11 @@ class ToolResultMessage(NovaBaseModel):
     ] = Field(default_factory=list)
     # 任意 JSON 值（对齐 TS details: unknown）——工具自定义形态，渲染端按工具解释
     details: Optional[Any] = None
+    # 工具执行自身用量；不并入主 LLM 上下文计费。
+    usage: Optional[Usage] = None
     is_error: bool = False
+    # execute() 的单调时钟耗时；None = 旧结果或工具未实际运行。
+    duration_ms: Optional[int] = None
     timestamp: int = 0
 
 

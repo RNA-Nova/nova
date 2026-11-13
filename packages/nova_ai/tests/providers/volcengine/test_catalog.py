@@ -1,13 +1,11 @@
 """volcengine ark_personalize 钩子测试（ark 在售筛选——账户生命周期事实）。"""
 
 import pytest
-from nova_catalog.providers.volcengine import materialize_volcengine_fields
 from nova_protocol import (
     ApiKeyCredential,
     KnownApi,
     Model,
     ModelCost,
-    ModelFields,
     OAuthCredential,
     WarningKind,
 )
@@ -20,6 +18,7 @@ from nova_ai.providers.volcengine.catalog import (
     fetch_ark_status,
 )
 from nova_ai.providers.volcengine.provider import volcengine_provider
+from tests._helpers.auth import api_key_credential, oauth_credential
 
 pytestmark = pytest.mark.asyncio
 
@@ -73,7 +72,7 @@ async def test_credential_applies_ark_filter(monkeypatch):
     _patch_ark(monkeypatch, {"m1": "Shutdown", "m3": "Retiring"}, seen)
     result = await ark_personalize(
         _base("m1", "m2", "m3"),
-        _context(credential=ApiKeyCredential(key="k")),
+        _context(credential=api_key_credential("k")),
     )
     assert seen == ["k"]  # ark 用凭据的 key 调用
     assert [m.id for m in result] == ["m2"]
@@ -84,7 +83,7 @@ async def test_ark_invalid_payload_raises(monkeypatch):
     _patch_ark(monkeypatch, None)
     with pytest.raises(CatalogError, match="payload"):
         await ark_personalize(
-            _base("m1", "m2"), _context(credential=ApiKeyCredential(key="k"))
+            _base("m1", "m2"), _context(credential=api_key_credential("k"))
         )
 
 
@@ -95,7 +94,7 @@ async def test_oauth_credential_uses_access_token_for_ark(monkeypatch):
     result = await ark_personalize(
         _base("m1", "m2"),
         _context(
-            credential=OAuthCredential(
+            credential=oauth_credential(
                 access="oa-tok", refresh="r", expires=9999999999999
             )
         ),
@@ -112,9 +111,7 @@ async def test_ark_failure_raises_and_keeps_cause(monkeypatch):
 
     monkeypatch.setattr("nova_ai.providers.volcengine.catalog.fetch_ark_status", _boom)
     with pytest.raises(CatalogError, match="lifecycle") as exc_info:
-        await ark_personalize(
-            _base("m1"), _context(credential=ApiKeyCredential(key="k"))
-        )
+        await ark_personalize(_base("m1"), _context(credential=api_key_credential("k")))
     assert isinstance(exc_info.value.__cause__, TimeoutError)
 
 
@@ -133,63 +130,8 @@ async def test_ark_models_url_derives_from_effective_provider_base_url(monkeypat
     assert seen == ["https://ark.example.com/custom/v3/models"]
 
 
-async def test_factory_wires_personalized_strategy():
-    """volcengine 出厂：personalized 刷新策略 + replace 读取位 + 站选配。"""
+async def test_factory_wires_personalized_refresh_strategy():
+    """volcengine 出厂：personalized 刷新策略与 models.dev 站选配。"""
     provider = volcengine_provider()
     assert provider.refresh_models is not None
     assert provider.catalog_source == "models.dev"
-    assert provider._dynamic_replaces_baseline is True
-
-
-async def test_materialize_applies_only_evidence_based_volcengine_corrections():
-    fields = [
-        ModelFields(
-            id="deepseek-v4-flash-test",
-            name="DeepSeek",
-            reasoning=True,
-            input_types=["text"],
-            cost={"input": 1, "output": 2, "cache_read": 0, "cache_write": 0},
-            context_window=1000000,
-            max_tokens=1000000,
-        ),
-        ModelFields(
-            id="doubao-seed-character-test",
-            name="Character",
-            reasoning=True,
-            input_types=["text", "image"],
-            cost={"input": 1, "output": 2, "cache_read": 0, "cache_write": 0},
-            context_window=256000,
-            max_tokens=256000,
-        ),
-    ]
-    result = materialize_volcengine_fields(fields, {})
-    deepseek, character = result.models_fields
-    assert deepseek["provider"] == "volcengine"
-    assert deepseek["api"] == "openai-completions"
-    assert deepseek["thinking_level_map"]["off"] == "none"
-    assert deepseek["thinking_level_map"]["xhigh"] == "xhigh"
-    assert deepseek["compat"]["thinking_format"] == "deepseek"
-    assert character["max_tokens"] == 32768
-
-    filtered = materialize_volcengine_fields(fields, {fields[0]["id"]: "deprecated"})
-    assert [field["id"] for field in filtered.models_fields] == [fields[1]["id"]]
-    assert filtered.remove_ids == frozenset({fields[0]["id"]})
-
-
-async def test_materialize_preserves_complete_pinned_facts_over_upstream():
-    pinned_id = "deepseek-v4-flash-260425"
-    upstream = ModelFields(
-        id=pinned_id,
-        name="Upstream",
-        reasoning=False,
-        input_types=["text"],
-        cost={"input": 99, "output": 99, "cache_read": 99, "cache_write": 99},
-        context_window=4096,
-        max_tokens=4096,
-    )
-    result = materialize_volcengine_fields([upstream], {})
-    model = result.models_fields[0]
-    assert model["name"] == "Deepseek-V4-Flash"
-    assert model["cost"]["input"] == 1
-    assert model["context_window"] == 1048576
-    assert model["max_tokens"] == 393216

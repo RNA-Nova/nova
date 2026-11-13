@@ -14,6 +14,12 @@ from nova_protocol import (
 )
 
 from nova_ai.api_impls._shared.transform_messages import transform_messages
+from tests._helpers.messages import (
+    assistant_message,
+    text_of,
+    tool_call,
+    tool_result_message,
+)
 
 
 def _model(
@@ -58,8 +64,8 @@ class TestImageDowngrade:
         assert len(result) == 1
         content = result[0].content
         assert len(content) == 2
-        assert content[0].text == "hello"
-        assert content[1].text == "(image omitted: model does not support images)"
+        assert text_of(result[0]) == "hello"
+        assert text_of(result[0], 1) == "(image omitted: model does not support images)"
 
     def test_tool_result_image_downgraded_when_not_supported(self):
         msg = ToolResultMessage(
@@ -75,8 +81,11 @@ class TestImageDowngrade:
 
         content = result[0].content
         assert len(content) == 2
-        assert content[0].text == "result"
-        assert content[1].text == "(tool image omitted: model does not support images)"
+        assert text_of(result[0]) == "result"
+        assert (
+            text_of(result[0], 1)
+            == "(tool image omitted: model does not support images)"
+        )
 
     def test_image_kept_when_supported(self):
         msg = UserMessage(
@@ -90,7 +99,7 @@ class TestImageDowngrade:
 
         content = result[0].content
         assert len(content) == 2
-        assert content[1].type == "image"
+        assert isinstance(content[1], ImageContent)
 
     def test_consecutive_images_single_placeholder(self):
         msg = UserMessage(
@@ -105,7 +114,7 @@ class TestImageDowngrade:
 
         content = result[0].content
         assert len(content) == 1
-        assert content[0].text == "(image omitted: model does not support images)"
+        assert text_of(result[0]) == "(image omitted: model does not support images)"
 
 
 class TestHeldSystemMessages:
@@ -167,8 +176,8 @@ class TestToolCallIdNormalization:
 
         result = transform_messages([assistant, tool_result], _model(), normalize)
 
-        assert result[0].content[0].id == "call_123"
-        assert result[1].tool_call_id == "call_123"
+        assert tool_call(result[0]).id == "call_123"
+        assert tool_result_message(result[1]).tool_call_id == "call_123"
 
     def test_tool_result_id_updated_via_map(self):
         assistant = AssistantMessage(
@@ -188,8 +197,8 @@ class TestToolCallIdNormalization:
 
         result = transform_messages([assistant, tool_result], _model(), normalize)
 
-        assert result[0].content[0].id == "new_id"
-        assert result[1].tool_call_id == "new_id"
+        assert tool_call(result[0]).id == "new_id"
+        assert tool_result_message(result[1]).tool_call_id == "new_id"
 
     def test_tool_result_fields_preserved_on_id_normalization(self):
         """规范化 tool_call_id 重建消息时，details / is_error 等字段不丢（回归）。"""
@@ -212,7 +221,7 @@ class TestToolCallIdNormalization:
 
         result = transform_messages([assistant, tool_result], _model(), normalize)
 
-        rebuilt = result[1]
+        rebuilt = tool_result_message(result[1])
         assert rebuilt.tool_call_id == "new_id"
         assert rebuilt.details == {"k": "v"}
         assert rebuilt.is_error is True
@@ -231,7 +240,7 @@ class TestToolCallIdNormalization:
 
         result = transform_messages([assistant], _model())
 
-        rebuilt = result[0]
+        rebuilt = assistant_message(result[0])
         assert rebuilt.diagnostics == [{"type": "retry", "details": {"attempt": 2}}]
         assert rebuilt.response_id == "resp-1"
         assert rebuilt.response_model == "other-concrete"
@@ -249,10 +258,11 @@ class TestOrphanedToolCalls:
 
         assert len(result) == 2
         assert result[0] == assistant
-        assert result[1].role == "toolResult"
-        assert result[1].tool_call_id == "tc1"
-        assert result[1].is_error is True
-        assert "No result provided" in result[1].content[0].text
+        synthetic = tool_result_message(result[1])
+        assert synthetic.role == "toolResult"
+        assert synthetic.tool_call_id == "tc1"
+        assert synthetic.is_error is True
+        assert "No result provided" in text_of(synthetic)
 
     def test_user_message_breaks_tool_flow(self):
         assistant1 = AssistantMessage(

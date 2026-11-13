@@ -5,16 +5,28 @@ Provides state management, event subscription, message queuing, and lifecycle co
 
 import asyncio
 import inspect
+import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, cast
 
+from nova_ai import (
+    ModelIdentity,
+    ProviderResponse,
+    SimpleStreamOptions,
+    ThinkingBudgets,
+    get_current_system_message,
+    to_thinking_level,
+)
+from nova_ai.gateway import create_setup_error_message
 from nova_protocol import (
     AbortController,
+    AbortedError,
     AbortSignal,
     AgentEndEvent,
     AgentEvent,
     AgentMessage,
     AssistantMessage,
+    ClientIdentity,
     ImageContent,
     Message,
     MessageEndEvent,
@@ -28,17 +40,8 @@ from nova_protocol import (
     ToolExecutionStartEvent,
     Transport,
     TurnEndEvent,
-    Usage,
     UserMessage,
     is_aborted,
-)
-
-from nova_ai import (
-    ModelIdentity,
-    ProviderResponse,
-    SimpleStreamOptions,
-    ThinkingBudgets,
-    to_thinking_level,
 )
 
 from .agent_loop import run_agent_loop, run_agent_loop_continue
@@ -49,14 +52,17 @@ from .types import (
     AgentContext,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
+    AgentRequestUpdate,
     AgentState,
     AgentStateKwargs,
     AgentTool,
+    AgentTurnContext,
+    AgentTurnDecision,
     BeforeToolCallContext,
     BeforeToolCallResult,
     PrepareNextTurnContext,
+    PrepareRequestContext,
     QueueMode,
-    ShouldStopAfterTurnContext,
     StreamFn,
     ToolExecutionMode,
 )
@@ -65,6 +71,9 @@ from .utils import default_convert_to_llm, invoke_hook
 Listener = Callable[[AgentEvent, Optional[AbortSignal]], None]
 AsyncListener = Callable[[AgentEvent, Optional[AbortSignal]], Awaitable[None]]
 AgentListener = Union[Listener, AsyncListener]
+
+logger = logging.getLogger(__name__)
+_GRACEFUL_ABORT_TIMEOUT_S = 0.1
 
 
 class _PendingMessageQueue:
@@ -80,16 +89,15 @@ class _PendingMessageQueue:
     def has_items(self) -> bool:
         return len(self._messages) > 0
 
-    def drain(self) -> List[AgentMessage]:
+    def peek(self) -> List[AgentMessage]:
         if self.mode == "all":
-            drained = self._messages[:]
-            self._messages.clear()
-            return drained
+            return self._messages[:]
+        return self._messages[:1]
 
-        if not self._messages:
-            return []
-        first = self._messages.pop(0)
-        return [first]
+    def drain(self) -> List[AgentMessage]:
+        drained = self.peek()
+        del self._messages[: len(drained)]
+        return drained
 
     def clear(self) -> None:
         self._messages.clear()
@@ -133,30 +141,58 @@ class Agent:
         # 返回值 Any = 可同步返回或返回 awaitable
         on_payload: Optional[Callable[[Any, ModelIdentity], Any]] = None,
         on_response: Optional[Callable[[ProviderResponse, ModelIdentity], Any]] = None,
+        on_provider_stream_event: Optional[Callable[[Any, ModelIdentity], Any]] = None,
         before_tool_call: Optional[
             Callable[
                 [BeforeToolCallContext, Optional[AbortSignal]],
-                Union[BeforeToolCallResult, Awaitable[BeforeToolCallResult], None],
+                Union[
+                    BeforeToolCallResult,
+                    Awaitable[Optional[BeforeToolCallResult]],
+                    None,
+                ],
             ]
         ] = None,
         after_tool_call: Optional[
             Callable[
                 [AfterToolCallContext, Optional[AbortSignal]],
-                Union[AfterToolCallResult, Awaitable[AfterToolCallResult], None],
+                Union[
+                    AfterToolCallResult,
+                    Awaitable[Optional[AfterToolCallResult]],
+                    None,
+                ],
+            ]
+        ] = None,
+        finish_turn: Optional[
+            Callable[
+                [AgentTurnContext, Optional[AbortSignal]],
+                Union[
+                    AgentTurnDecision,
+                    Awaitable[Optional[AgentTurnDecision]],
+                    None,
+                ],
+            ]
+        ] = None,
+        prepare_request: Optional[
+            Callable[
+                [PrepareRequestContext, Optional[AbortSignal]],
+                Union[
+                    AgentRequestUpdate,
+                    Awaitable[Optional[AgentRequestUpdate]],
+                    None,
+                ],
             ]
         ] = None,
         prepare_next_turn: Optional[
             Callable[
                 [PrepareNextTurnContext, Optional[AbortSignal]],
-                Union[AgentLoopTurnUpdate, Awaitable[AgentLoopTurnUpdate], None],
+                Union[
+                    AgentLoopTurnUpdate,
+                    Awaitable[Optional[AgentLoopTurnUpdate]],
+                    None,
+                ],
             ]
         ] = None,
-        should_stop_after_turn: Optional[
-            Callable[
-                [ShouldStopAfterTurnContext, Optional[AbortSignal]],
-                Union[bool, Awaitable[bool]],
-            ]
-        ] = None,
+        identity: Optional[ClientIdentity] = None,
     ):
         # Initialise state. AgentState 是普通 class，不再走 Pydantic 校验；
         # 这里只从 initial_state 提取配置字段，运行时字段统一重置。
@@ -200,6 +236,7 @@ class Agent:
         self._listeners: Dict[AgentListener, None] = {}
         self._abort_controller: Optional[AbortController] = None
         self._running_task: Optional[asyncio.Task] = None
+        self._drain_watchdog: Optional[asyncio.Task[None]] = None
 
         # Message queues（先建队列：steering/follow_up mode 以 property 直写队列）
         self._steering_queue = _PendingMessageQueue(steering_mode)
@@ -218,10 +255,13 @@ class Agent:
         self.tool_execution: ToolExecutionMode = tool_execution
         self.on_payload = on_payload
         self.on_response = on_response
+        self.on_provider_stream_event = on_provider_stream_event
         self.before_tool_call = before_tool_call
         self.after_tool_call = after_tool_call
+        self.finish_turn = finish_turn
+        self.prepare_request = prepare_request
         self.prepare_next_turn = prepare_next_turn
-        self.should_stop_after_turn = should_stop_after_turn
+        self.identity = identity
 
     # ----------------------------------------------------------------------
     # Properties (mirroring TypeScript get/set)
@@ -273,9 +313,6 @@ class Agent:
         return lambda: self._listeners.pop(fn, None)
 
     # State mutators
-    def set_system_prompt(self, value: str) -> None:
-        self._state.system_prompt = value
-
     def set_model(self, model: Model) -> None:
         self._state.model = model
 
@@ -342,29 +379,62 @@ class Agent:
     def has_queued_messages(self) -> bool:
         return self._steering_queue.has_items() or self._follow_up_queue.has_items()
 
+    def peek_queued_messages(self) -> List[AgentMessage]:
+        """预览下一次会被选中的队列消息，不消费队列。"""
+        steering = self._steering_queue.peek()
+        return steering if steering else self._follow_up_queue.peek()
+
     def clear_messages(self) -> None:
         self._state.messages.clear()
 
     def abort(self) -> None:
-        """Abort the currently running prompt."""
-        if self._abort_controller is not None:
-            self._abort_controller.abort()
+        """先协作取消；超过 100ms 未收尾则硬取消并告警。"""
+        if self._abort_controller is None:
+            return
+        self._abort_controller.abort()
+        running_task = self._running_task
+        if (
+            running_task is not None
+            and not running_task.done()
+            and (self._drain_watchdog is None or self._drain_watchdog.done())
+        ):
+            self._drain_watchdog = asyncio.create_task(
+                self._force_abort_after_grace(running_task)
+            )
+
+    async def _force_abort_after_grace(self, running_task: asyncio.Task) -> None:
+        try:
+            async with asyncio.timeout(_GRACEFUL_ABORT_TIMEOUT_S):
+                await asyncio.shield(running_task)
+        except TimeoutError:
+            if not running_task.done():
+                running_task.cancel()
+                logger.warning(
+                    "Agent run did not finish within 100ms of abort; forced cancellation"
+                )
 
     async def wait_for_idle(self) -> None:
         """Wait until the agent finishes processing the current prompt.
 
         shield 保证等待方被取消时不会传染给正在运行的 run（对齐 TS 的独立 promise 语义）。
         """
-        if self._running_task:
-            await asyncio.shield(self._running_task)
+        running_task = self._running_task
+        if running_task is not None:
+            signal = self.signal
+            try:
+                await asyncio.shield(running_task)
+            except asyncio.CancelledError:
+                if not is_aborted(signal):
+                    raise
 
     def reset(self) -> None:
-        """Reset the agent state (clears messages, queues, and errors)."""
-        if self._state.is_streaming:
+        """Reset 对话与队列，但保留重放后的当前系统提示词/工具基线。"""
+        if self._running_task is not None:
             raise RuntimeError(
                 "Agent is already processing. Wait for completion before resetting."
             )
-        self._state.messages.clear()
+        baseline = get_current_system_message(cast(List[Message], self._state.messages))
+        self._state.messages = [baseline] if baseline is not None else []
         self._state.is_streaming = False
         self._state.streaming_message = None
         self._state.pending_tool_calls.clear()
@@ -382,7 +452,7 @@ class Agent:
         - If input is a string, it is treated as user text (optional images).
         - If input is an AgentMessage or a list of AgentMessages, they are used directly.
         """
-        if self._state.is_streaming:
+        if self._running_task is not None:
             raise RuntimeError(
                 "Agent is already processing a prompt. Use steer() or follow_up() to queue messages, "
                 "or wait for completion."
@@ -397,17 +467,40 @@ class Agent:
         messages = self._normalize_prompt_input(input, images)
         await self._run_with_lifecycle(lambda: self._run_prompt_messages(messages))
 
+    def start_prompt(
+        self,
+        input: Union[str, AgentMessage, List[AgentMessage]],
+        images: Optional[List[ImageContent]] = None,
+    ) -> "asyncio.Task[None]":
+        """同步登记 active run 并返回后台 Task，供立即 abort/wait 使用。
+
+        与 ``asyncio.create_task(agent.prompt(...))`` 不同，本方法在返回前就
+        完成 active run 登记，调用方不会遇到“取消时 run 尚不存在”的窗口。
+        """
+        if not self._state.has_configured_model():
+            raise RuntimeError(
+                "No model configured. Call set_model() or provide initial_state "
+                "with a model before prompt()."
+            )
+        messages = self._normalize_prompt_input(input, images)
+        running_task = self._start_lifecycle(
+            lambda: self._run_prompt_messages(messages)
+        )
+        return asyncio.create_task(self._settle_lifecycle(running_task))
+
     async def continue_(self) -> None:
         """
         Continue an agent loop from the current context (used for retries and resuming queued messages).
         In TypeScript this method is named 'continue' (a keyword in Python, hence the trailing underscore).
         """
-        if self._state.is_streaming:
+        if self._running_task is not None:
             raise RuntimeError(
                 "Agent is already processing. Wait for completion before continuing."
             )
 
-        if not self._state.messages:
+        if not self._state.messages or all(
+            message.role == "system" for message in self._state.messages
+        ):
             raise RuntimeError("No messages to continue from")
 
         last_msg = self._state.messages[-1]
@@ -460,7 +553,6 @@ class Agent:
 
     def _create_context_snapshot(self) -> AgentContext:
         return AgentContext(
-            system_prompt=self._state.system_prompt,
             messages=self._state.messages[:],
             tools=self._state.tools[:],
         )
@@ -485,14 +577,6 @@ class Agent:
         ) -> Optional[AgentLoopTurnUpdate]:
             return await invoke_hook(self.prepare_next_turn, context, self.signal)
 
-        async def should_stop_after_turn_wrapper(
-            context: ShouldStopAfterTurnContext,
-        ) -> bool:
-            result = await invoke_hook(
-                self.should_stop_after_turn, context, self.signal, default=False
-            )
-            return bool(result)
-
         stream_options = SimpleStreamOptions(
             # 状态侧级别 → 请求侧：OFF 时 reasoning=None（不发送）
             reasoning=to_thinking_level(self._state.thinking_level),
@@ -503,6 +587,8 @@ class Agent:
             timeout=self._timeout,
             on_payload=self.on_payload,
             on_response=self.on_response,
+            on_provider_stream_event=self.on_provider_stream_event,
+            identity=self.identity,
         )
 
         return AgentLoopConfig(
@@ -511,11 +597,10 @@ class Agent:
             tool_execution=self.tool_execution,
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
+            finish_turn=self.finish_turn,
+            prepare_request=self.prepare_request,
             prepare_next_turn=(
                 prepare_next_turn_wrapper if self.prepare_next_turn else None
-            ),
-            should_stop_after_turn=(
-                should_stop_after_turn_wrapper if self.should_stop_after_turn else None
             ),
             convert_to_llm=self.convert_to_llm,
             transform_context=self.transform_context,
@@ -524,10 +609,11 @@ class Agent:
             get_follow_up_messages=get_follow_up,
         )
 
-    async def _run_with_lifecycle(
+    def _start_lifecycle(
         self, executor: Callable[[], Awaitable[None]]
-    ) -> None:
-        if self._state.is_streaming:
+    ) -> "asyncio.Task[None]":
+        """在首个 await 前完成 active run 登记并返回 Task。"""
+        if self._running_task is not None:
             raise RuntimeError("Agent is already processing.")
 
         self._abort_controller = AbortController()
@@ -539,17 +625,36 @@ class Agent:
             try:
                 await executor()
             except asyncio.CancelledError:
-                raise
+                if is_aborted(self.signal):
+                    await self._handle_run_failure(AbortedError("Operation aborted"))
+                else:
+                    raise
             except Exception as e:
                 await self._handle_run_failure(e)
             finally:
                 self._finish_run()
 
-        self._running_task = asyncio.create_task(_run())
+        running_task = asyncio.create_task(_run())
+        self._running_task = running_task
+        return running_task
+
+    async def _settle_lifecycle(self, running_task: asyncio.Task) -> None:
+        """等待内部 run，并在返回前完成 watchdog 与 active run 清理。"""
         try:
-            await self._running_task
+            await running_task
         finally:
-            self._running_task = None
+            watchdog = self._drain_watchdog
+            if watchdog is not None:
+                watchdog.cancel()
+                await asyncio.gather(watchdog, return_exceptions=True)
+                self._drain_watchdog = None
+            if self._running_task is running_task:
+                self._running_task = None
+
+    async def _run_with_lifecycle(
+        self, executor: Callable[[], Awaitable[None]]
+    ) -> None:
+        await self._settle_lifecycle(self._start_lifecycle(executor))
 
     async def _run_prompt_messages(
         self,
@@ -576,18 +681,11 @@ class Agent:
         )
 
     async def _handle_run_failure(self, error: Exception) -> None:
-        aborted = is_aborted(self.signal)
-        model = self._state.model
-        failure_message = AssistantMessage(
-            role="assistant",
-            content=[TextContent(text="")],
-            api=model.api,
-            provider=model.provider,
-            model=model.id,
-            usage=Usage(),
+        aborted = is_aborted(self.signal) or isinstance(error, AbortedError)
+        failure_message = create_setup_error_message(
+            self._state.model,
+            error,
             stop_reason=StopReason.ABORTED if aborted else StopReason.ERROR,
-            error_message=str(error),
-            timestamp=int(time.time() * 1000),
         )
         await self._process_event(MessageStartEvent(message=failure_message))
         await self._process_event(MessageEndEvent(message=failure_message))

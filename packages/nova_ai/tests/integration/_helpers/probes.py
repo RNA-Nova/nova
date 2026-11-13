@@ -7,9 +7,9 @@ e2e 验证行为契约，不做全模型扫描（可用性巡检归
 
 import os
 from dataclasses import dataclass
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence, TypeVar
 
-from nova_protocol import Model
+from nova_protocol import AnyModel, Model
 
 from nova_ai.gateway.models import create_models_manager
 from nova_ai.providers.all import builtin_providers
@@ -37,9 +37,13 @@ class Probe:
         return f"{self.provider_id}/{self.model.id}"
 
 
+_ProbeModel = TypeVar("_ProbeModel", bound=AnyModel)
+
+
 def probe_for(
-    models: List[Model], require: Optional[Callable[[Model], bool]] = None
-) -> Optional[Model]:
+    models: Sequence[_ProbeModel],
+    require: Optional[Callable[[_ProbeModel], bool]] = None,
+) -> Optional[_ProbeModel]:
     """最便宜优先（pi 的成本探针序），同价按 id 字典序。
 
     ``require``：能力过滤（如思考/视觉）——特性文件在**有该能力的模型里**

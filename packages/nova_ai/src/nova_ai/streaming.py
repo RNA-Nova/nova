@@ -145,6 +145,10 @@ class EventStream(Generic[T, R], AsyncIterator[T]):
         （官方文档警告）；流的寿命与驱动任务的寿命天然重合，是最天然的
         持有者。1:N 的属主台账场景用 ``nova_async.TaskTracker``。
 
+        持引用只解决寿命与关流，不等于消费者退出时自动取消并等待生产者。
+        ``result()`` 返回也不等于驱动或 transport 已收尾；提前停止消费时，
+        消费方必须通知 provider 并 join 本属性暴露的驱动 Task。
+
         **结构闭合**：驱动任务以任何方式退出都终结本流——正常退出
         ``end()`` 幂等；异常 ``end(exc=...)``（错误进 result 通道，
         ``result()`` 的 await 方拿到真错而非悬挂）；外部掀桌（如关停

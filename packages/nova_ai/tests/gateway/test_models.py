@@ -1,16 +1,19 @@
 """ModelsManager 集合测试（对齐 TS Models 接口）。"""
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import pytest
 from nova_protocol import (
+    AbortSignal,
     ApiKeyAuth,
     ApiKeyCredential,
+    AuthorizationRequest,
     Context,
     ErrorEvent,
     KnownApi,
     Model,
+    ModelAuth,
     ModelCost,
     OAuthAuth,
     OAuthCredential,
@@ -26,6 +29,7 @@ from nova_ai.providers import create_provider
 from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 from nova_ai.streaming import create_assistant_message_event_stream
 from nova_ai.utils.errors import RequestTimeoutError
+from tests._helpers.auth import api_key_credential, oauth_credential
 from tests._helpers.callback_refresh import callback_refresh
 
 
@@ -56,13 +60,13 @@ class _FakeApiImpl:
     def stream(self, model, context, options=None):
         self.stream_calls.append({"model": model, "options": options})
         stream = create_assistant_message_event_stream()
-        stream.end(result=None)
+        stream.end()
         return stream
 
     def stream_simple(self, model, context, options=None):
         self.stream_simple_calls.append({"model": model, "options": options})
         stream = create_assistant_message_event_stream()
-        stream.end(result=None)
+        stream.end()
         return stream
 
 
@@ -130,7 +134,7 @@ class TestModelsAuth:
     async def test_get_auth_api_key_credential(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",
@@ -147,7 +151,7 @@ class TestModelsAuth:
     async def test_get_auth_for_model_merges_headers(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",
@@ -178,7 +182,7 @@ class TestModelsAuth:
         assert result is None
 
         # 有 credential 时
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
         result = await models.check_auth("test")
         assert result is not None
         assert result.type == "api_key"
@@ -200,28 +204,34 @@ class TestModelsAuth:
         assert available == []
 
         # 有 credential
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
         available = await models.get_available()
         assert available == [model]
         assert await models.get_available("missing") == []
 
     async def test_provider_headers_feed_request_with_lowest_priority(self):
         store = InMemoryCredentialStore()
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
+        api = _FakeApiImpl()
         provider = create_provider(
             id="test",
             name="Test",
+            api=api,
             headers={"X-Provider": "yes", "X-Shared": "provider"},
             auth=_make_auth(api_key_env="TEST_API_KEY"),
         )
         models = ModelsManager(credential_store=store)
         models.set_provider(provider)
-        _, options = await models._apply_auth(
+        stream = models.stream(
             _make_model(),
+            Context(messages=[UserMessage(content="hi")]),
             StreamOptions(headers={"x-shared": "request"}),
         )
-        assert options is not None
-        assert options.headers == {"X-Provider": "yes", "x-shared": "request"}
+        async for _ in stream:
+            pass
+
+        called_options = api.stream_calls[0]["options"]
+        assert called_options.headers == {"X-Provider": "yes", "x-shared": "request"}
 
     async def test_get_available_with_filter_models(self):
         store = InMemoryCredentialStore()
@@ -241,7 +251,7 @@ class TestModelsAuth:
         models = ModelsManager(credential_store=store)
         models.set_provider(provider)
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
         available = await models.get_available()
         assert available == [m1]
 
@@ -262,10 +272,13 @@ async def _never_refresh(_credential, _signal=None):
 class _FakeInteraction:
     """最小 AuthInteraction 桩（login 路径只读 signal；prompt/notify 不消费）。"""
 
-    signal = None
+    signal: Optional[AbortSignal] = None
 
     async def prompt(self, prompt):  # pragma: no cover - 本测试不触发
         raise AssertionError("unexpected prompt")
+
+    async def acquire_authorization_code(self, request: AuthorizationRequest) -> str:
+        raise AssertionError("unexpected authorization code acquisition")
 
     def notify(self, event):  # pragma: no cover - 本测试不触发
         raise AssertionError("unexpected notify")
@@ -277,7 +290,7 @@ class TestModelsLoginLogout:
         store = InMemoryCredentialStore()
 
         async def _login(_interaction):
-            return ApiKeyCredential(key="sk-login")
+            return api_key_credential(key="sk-login")
 
         provider = create_provider(
             id="test",
@@ -290,21 +303,22 @@ class TestModelsLoginLogout:
         models.set_provider(provider)
 
         credential = await models.login("test", "api_key", _FakeInteraction())
+        assert isinstance(credential, ApiKeyCredential)
         assert credential.key == "sk-login"
 
         stored = store.read("test")
-        assert stored is not None
+        assert isinstance(stored, ApiKeyCredential)
         assert stored.key == "sk-login"
 
     async def test_login_unknown_provider(self):
         models = create_models_manager()
         with pytest.raises(ModelsError, match="Unknown provider"):
-            await models.login("missing", "api_key", None)
+            await models.login("missing", "api_key", _FakeInteraction())
 
     async def test_logout(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",
@@ -337,7 +351,9 @@ class TestModelsRefresh:
         store = InMemoryCredentialStore()
         store.write(
             "test",
-            OAuthCredential(access="old-access", refresh="refresh-token", expires=1000),
+            oauth_credential(
+                access="old-access", refresh="refresh-token", expires=1000
+            ),
         )
 
         never = asyncio.Event()
@@ -377,7 +393,7 @@ class TestModelsRefresh:
         （不冒名 aborted）。"""
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         never = asyncio.Event()
 
@@ -411,7 +427,7 @@ class TestModelsStream:
         )
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         models = ModelsManager(credential_store=store)
         models.set_provider(provider)
@@ -436,7 +452,7 @@ class TestModelsStream:
         )
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         models = ModelsManager(credential_store=store)
         models.set_provider(provider)
@@ -470,7 +486,7 @@ class TestModelsStream:
 
         errors = [e for e in events if isinstance(e, ErrorEvent)]
         assert len(errors) == 1
-        assert "not configured" in errors[0].error.error_message
+        assert "not configured" in (errors[0].error.error_message or "")
 
 
 @pytest.mark.asyncio
@@ -478,7 +494,7 @@ class TestModelsApplyAuth:
     async def test_apply_auth_merges_headers(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         api = _FakeApiImpl()
         provider = create_provider(
@@ -507,13 +523,13 @@ class TestModelsApplyAuth:
         store = InMemoryCredentialStore()
         store.write(
             "test",
-            OAuthCredential(access="token", refresh="refresh", expires=9999999999999),
+            oauth_credential(access="token", refresh="refresh", expires=9999999999999),
         )
 
         api = _FakeApiImpl()
 
         async def _to_auth(credential):
-            return {"api_key": "token", "base_url": "https://oauth.example.com"}
+            return ModelAuth(api_key="token", base_url="https://oauth.example.com")
 
         provider = create_provider(
             id="test",
@@ -549,7 +565,7 @@ class TestModelsTransformHeaders:
     async def _run_stream(self, api, options):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",
@@ -612,7 +628,7 @@ class TestModelHeadersResolver:
     async def test_resolver_headers_merged_into_auth(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",
@@ -620,7 +636,7 @@ class TestModelHeadersResolver:
             auth=_make_auth(api_key_env="TEST_API_KEY"),
         )
 
-        def resolver(model, env):
+        def resolver(model, env) -> Dict[str, Optional[str]]:
             return {"X-Resolved": f"{model.id}-v"}
 
         models = ModelsManager(credential_store=store, model_headers_resolver=resolver)
@@ -628,12 +644,14 @@ class TestModelHeadersResolver:
 
         result = await models.get_auth_for_model(_make_model("m1"))
         assert result is not None
-        assert result.auth["headers"]["X-Resolved"] == "m1-v"
+        headers = result.auth.get("headers")
+        assert headers is not None
+        assert headers["X-Resolved"] == "m1-v"
 
     async def test_resolver_overrides_static_model_headers(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",
@@ -641,7 +659,7 @@ class TestModelHeadersResolver:
             auth=_make_auth(api_key_env="TEST_API_KEY"),
         )
 
-        def resolver(model, env):
+        def resolver(model, env) -> Dict[str, Optional[str]]:
             return {"X-K": "from-resolver"}
 
         models = ModelsManager(credential_store=store, model_headers_resolver=resolver)
@@ -650,12 +668,15 @@ class TestModelHeadersResolver:
         model = _make_model()
         model.headers = {"X-K": "static"}
         result = await models.get_auth_for_model(model)
-        assert result.auth["headers"]["X-K"] == "from-resolver"
+        assert result is not None
+        headers = result.auth.get("headers")
+        assert headers is not None
+        assert headers["X-K"] == "from-resolver"
 
     async def test_async_resolver_receives_env(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test", env={"E1": "v1"}))
+        store.write("test", api_key_credential(key="sk-test", env={"E1": "v1"}))
 
         provider = create_provider(
             id="test",
@@ -679,7 +700,7 @@ class TestModelHeadersResolver:
     async def test_no_resolver_unchanged(self):
         store = InMemoryCredentialStore()
 
-        store.write("test", ApiKeyCredential(key="sk-test"))
+        store.write("test", api_key_credential(key="sk-test"))
 
         provider = create_provider(
             id="test",

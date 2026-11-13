@@ -40,6 +40,7 @@ _SHARED_MODULES = frozenset(
     {
         "constrained.py",
         "copilot_headers.py",
+        "identity.py",
         "openai_request.py",
         "openrouter_cost.py",
         "prompt_cache.py",
@@ -90,3 +91,32 @@ def test_every_registered_module_has_family_docstring():
         for name in sorted(registry):
             first_line = _docstring_first_line(directory / name)
             assert first_line, f"{directory.name}/{name} 缺 docstring 首行族声明"
+
+
+_ALLOWED_NOVA_IMPORTS = frozenset(
+    {"nova_ai", "nova_async", "nova_catalog", "nova_protocol"}
+)
+
+
+def _nova_imports(path: Path):
+    tree = ast.parse(path.read_text("utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        modules = []
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            modules = [node.module]
+        for module in modules:
+            root = module.split(".", 1)[0]
+            if root.startswith("nova_"):
+                yield getattr(node, "lineno", 0), root, module
+
+
+def test_dependency_direction_stays_inside_lower_layers():
+    offenders = [
+        f"{path.relative_to(_SRC)}:{line} imports {module}"
+        for path in sorted(_SRC.rglob("*.py"))
+        for line, root, module in _nova_imports(path)
+        if root not in _ALLOWED_NOVA_IMPORTS
+    ]
+    assert offenders == []

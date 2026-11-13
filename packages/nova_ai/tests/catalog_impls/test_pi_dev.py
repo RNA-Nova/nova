@@ -69,8 +69,10 @@ class TestPiDevCatalog:
         route = respx.route(method="GET").mock(return_value=httpx.Response(404))
         await PiDevCatalog().fetch("tenant/a?admin=true#fragment", None, None)
         request = route.calls[0].request
-        assert request.url.path == "/api/models/providers/tenant/a?admin=true#fragment"
-        assert request.url.query == b"types=chat,image,classifier"
+        assert request.url.raw_path == (
+            b"/api/models/providers/tenant%2Fa%3Fadmin%3Dtrue%23fragment"
+            b"?types=chat,image,classifier"
+        )
 
     async def test_200_maps_fields_and_extracts_validators(self, monkeypatch):
         seen = {}

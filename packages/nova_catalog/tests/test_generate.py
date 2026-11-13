@@ -1,6 +1,7 @@
 """真实 generate.main 的产物、provider 边界与事务测试。"""
 
 import json
+import os
 
 import pytest
 from nova_catalog import model_data as mdata
@@ -148,6 +149,7 @@ def test_data_only_rejects_provider_missing_from_definitions(tmp_path):
 
 
 def test_post_commit_validation_failure_rolls_back_everything(monkeypatch, tmp_path):
+    """提交后的真实 JSON 校验失败时，所有已替换文件都恢复。"""
     write_generated_fixture(
         tmp_path,
         {
@@ -157,18 +159,15 @@ def test_post_commit_validation_failure_rolls_back_everything(monkeypatch, tmp_p
     )
     before = _tree_bytes(tmp_path)
     before_directories = _tree_directories(tmp_path)
-    original = mdata.validate_generated_model_data
-    calls = 0
+    original_replace = os.replace
 
-    def fail_second_validation(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise ValueError("post-commit mismatch")
-        return original(*args, **kwargs)
+    def corrupt_committed_json(source, destination):
+        original_replace(source, destination)
+        if destination.suffix == ".json":
+            destination.write_text("{broken", "utf-8")
 
-    monkeypatch.setattr(mdata, "validate_generated_model_data", fail_second_validation)
-    with pytest.raises(ValueError, match="post-commit mismatch"):
+    monkeypatch.setattr("nova_catalog.generate.os.replace", corrupt_committed_json)
+    with pytest.raises(ValueError, match="not valid JSON"):
         main(
             [],
             package_root=tmp_path,
@@ -182,19 +181,13 @@ def test_post_commit_validation_failure_rolls_back_everything(monkeypatch, tmp_p
 def test_keyboard_interrupt_during_commit_rolls_back_everything(monkeypatch, tmp_path):
     write_generated_fixture(tmp_path)
     before = _tree_bytes(tmp_path)
-    original = mdata.validate_generated_model_data
-    calls = 0
+    original_replace = os.replace
 
-    def interrupt_second_validation(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise KeyboardInterrupt()
-        return original(*args, **kwargs)
+    def interrupt_after_replace(source, destination):
+        original_replace(source, destination)
+        raise KeyboardInterrupt()
 
-    monkeypatch.setattr(
-        mdata, "validate_generated_model_data", interrupt_second_validation
-    )
+    monkeypatch.setattr("nova_catalog.generate.os.replace", interrupt_after_replace)
     with pytest.raises(KeyboardInterrupt):
         main(
             [],
@@ -205,25 +198,7 @@ def test_keyboard_interrupt_during_commit_rolls_back_everything(monkeypatch, tmp
     assert _tree_bytes(tmp_path) == before
 
 
-def test_staging_validation_failure_never_touches_formal_tree(monkeypatch, tmp_path):
-    write_generated_fixture(tmp_path)
-    before = _tree_bytes(tmp_path)
-
-    def fail_validation(*_args, **_kwargs):
-        raise ValueError("invalid staged data")
-
-    monkeypatch.setattr(mdata, "validate_generated_model_data", fail_validation)
-    with pytest.raises(ValueError, match="invalid staged data"):
-        main(
-            [],
-            package_root=tmp_path,
-            provider_definitions=[_definition()],
-            sources=_source("test"),
-        )
-    assert _tree_bytes(tmp_path) == before
-
-
-def test_invalid_model_schema_never_touches_formal_tree(tmp_path):
+def test_staging_validation_failure_never_touches_formal_tree(tmp_path):
     write_generated_fixture(tmp_path)
     before = _tree_bytes(tmp_path)
     provider = _definition(

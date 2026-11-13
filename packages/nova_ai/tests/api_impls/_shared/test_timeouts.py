@@ -1,6 +1,7 @@
 """``_shared/timeouts.py`` 测试（超时常量语义 + SSE idle 看门狗）。"""
 
 import asyncio
+from typing import AsyncIterator
 
 import httpx
 import httpx2
@@ -52,30 +53,26 @@ class TestKnobSemantics:
         assert t.read == 30.0
 
 
-class _Scripted:
-    """按脚本出事件的流：``events`` 为 (delay_s, value) 序列。"""
+def _scripted(events) -> AsyncIterator[str]:
+    """按脚本出事件的异步迭代器：``events`` 为 (delay_s, value) 序列。"""
 
-    def __init__(self, events):
-        self._events = events
+    async def _gen():
+        for delay, value in events:
+            await asyncio.sleep(delay)
+            yield value
 
-    def __aiter__(self):
-        async def _gen():
-            for delay, value in self._events:
-                await asyncio.sleep(delay)
-                yield value
-
-        return _gen()
+    return _gen()
 
 
 @pytest.mark.asyncio
 class TestIdleGuarded:
     async def test_events_within_budget_pass_through(self):
-        stream = _Scripted([(0.01, "a"), (0.01, "b")])
+        stream = _scripted([(0.01, "a"), (0.01, "b")])
         assert [e async for e in idle_guarded(stream, 1.0)] == ["a", "b"]
 
     async def test_stalled_stream_dies_with_request_timeout(self):
         """事件间长沉默：处死当前流，死因 REQUEST_TIMEOUT（可重试家族）。"""
-        stream = _Scripted([(0.01, "a"), (10.0, "b")])
+        stream = _scripted([(0.01, "a"), (10.0, "b")])
         seen = []
         with pytest.raises(RequestTimeoutError) as exc_info:
             async for e in idle_guarded(stream, 0.05):
@@ -85,9 +82,9 @@ class TestIdleGuarded:
 
     async def test_stream_end_is_not_timeout(self):
         """流正常结束（StopAsyncIteration）不被误判为超时。"""
-        stream = _Scripted([(0.01, "a")])
+        stream = _scripted([(0.01, "a")])
         assert [e async for e in idle_guarded(stream, 1.0)] == ["a"]
 
     async def test_none_disables_watchdog(self):
-        stream = _Scripted([(0.05, "a")])
+        stream = _scripted([(0.05, "a")])
         assert [e async for e in idle_guarded(stream, None)] == ["a"]

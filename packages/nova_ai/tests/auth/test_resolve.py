@@ -7,6 +7,8 @@ import pytest
 from nova_protocol import (
     AbortController,
     AbortedError,
+    ApiKeyAuth,
+    ApiKeyAuthInput,
     ApiKeyCredential,
     AuthResult,
     ModelAuth,
@@ -25,6 +27,12 @@ from nova_ai.auth.resolve import (
     resolve_provider_auth,
 )
 from nova_ai.utils.errors import RequestTimeoutError
+from tests._helpers.auth import (
+    api_key_credential,
+    never_login,
+    never_refresh,
+    oauth_credential,
+)
 
 
 @pytest.mark.asyncio
@@ -35,7 +43,7 @@ async def test_resolve_uses_env_api_key_when_nothing_stored(monkeypatch):
         "test", auth, InMemoryCredentialStore(), default_provider_auth_context()
     )
     assert result is not None
-    assert result.auth["api_key"] == "env-key"
+    assert result.auth.get("api_key") == "env-key"
     assert result.source == "TEST_RESOLVE_API_KEY"
 
 
@@ -51,20 +59,20 @@ async def test_resolve_override_api_key_takes_priority(monkeypatch):
         AuthResolutionOverrides(api_key="override-key"),
     )
     assert result is not None
-    assert result.auth["api_key"] == "override-key"
+    assert result.auth.get("api_key") == "override-key"
 
 
 @pytest.mark.asyncio
 async def test_resolve_stored_api_key_takes_priority_over_env():
     store = InMemoryCredentialStore()
-    store.write("test", ApiKeyCredential(key="stored-key"))
+    store.write("test", api_key_credential(key="stored-key"))
 
     auth = ProviderAuth(api_key=env_api_key_auth("test", ["TEST_RESOLVE_API_KEY"]))
     result = await resolve_provider_auth(
         "test", auth, store, default_provider_auth_context()
     )
     assert result is not None
-    assert result.auth["api_key"] == "stored-key"
+    assert result.auth.get("api_key") == "stored-key"
     assert result.source == "stored credential"
 
 
@@ -72,7 +80,7 @@ async def test_resolve_stored_api_key_takes_priority_over_env():
 async def test_resolve_stored_oauth_when_not_expired():
     """未进入 5 分钟提前刷新窗的 token 直接复用（对齐 TS expiresSoon 语义）。"""
     store = InMemoryCredentialStore()
-    cred = OAuthCredential(
+    cred = oauth_credential(
         access="access-token",
         refresh="refresh-token",
         expires=int(time.time() * 1000) + 10 * 60 * 1000,
@@ -83,20 +91,22 @@ async def test_resolve_stored_oauth_when_not_expired():
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=None, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=never_refresh, to_auth=to_auth
+        )
     )
     result = await resolve_provider_auth(
         "test", auth, store, default_provider_auth_context()
     )
     assert result is not None
-    assert result.auth["api_key"] == "access-token"
+    assert result.auth.get("api_key") == "access-token"
     assert result.source == "OAuth"
 
 
 @pytest.mark.asyncio
 async def test_resolve_stored_oauth_refreshes_when_expired():
     store = InMemoryCredentialStore()
-    expired = OAuthCredential(
+    expired = oauth_credential(
         access="old-access",
         refresh="refresh-token",
         expires=int(time.time() * 1000) - 1000,
@@ -104,7 +114,7 @@ async def test_resolve_stored_oauth_refreshes_when_expired():
     store.write("test", expired)
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
-        return OAuthCredential(
+        return oauth_credential(
             access="new-access",
             refresh=credential.refresh,
             expires=int(time.time() * 1000) + 60000,
@@ -114,16 +124,18 @@ async def test_resolve_stored_oauth_refreshes_when_expired():
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     result = await resolve_provider_auth(
         "test", auth, store, default_provider_auth_context()
     )
     assert result is not None
-    assert result.auth["api_key"] == "new-access"
+    assert result.auth.get("api_key") == "new-access"
 
     updated = store.read("test")
-    assert updated is not None
+    assert isinstance(updated, OAuthCredential)
     assert updated.access == "new-access"
 
 
@@ -139,11 +151,11 @@ async def test_min_oauth_validity_refreshes_and_enforces_postcondition(
     store = InMemoryCredentialStore()
     store.write(
         "test",
-        OAuthCredential(access="old", refresh="refresh", expires=now + 10 * 60 * 1000),
+        oauth_credential(access="old", refresh="refresh", expires=now + 10 * 60 * 1000),
     )
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
-        return OAuthCredential(
+        return oauth_credential(
             access="new",
             refresh=credential.refresh,
             expires=int(time.time() * 1000) + refreshed_validity_ms,
@@ -153,14 +165,16 @@ async def test_min_oauth_validity_refreshes_and_enforces_postcondition(
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     overrides = AuthResolutionOverrides(min_oauth_validity_ms=30 * 60 * 1000)
     if succeeds:
         result = await resolve_provider_auth(
             "test", auth, store, default_provider_auth_context(), overrides
         )
-        assert result is not None and result.auth["api_key"] == "new"
+        assert result is not None and result.auth.get("api_key") == "new"
     else:
         with pytest.raises(ModelsError, match="expires too soon"):
             await resolve_provider_auth(
@@ -173,7 +187,7 @@ async def test_refresh_aborted_inside_refresh_lock_propagates_aborted_error():
     """刷新在 per-provider 刷新锁内因 signal 抛 AbortedError：直通，不得包成 ModelsError
     （取消不落泛型兜底——否则 abort 会被误报成"OAuth 刷新失败"）。"""
     store = InMemoryCredentialStore()
-    expired = OAuthCredential(
+    expired = oauth_credential(
         access="old-access",
         refresh="refresh-token",
         expires=int(time.time() * 1000) - 1000,
@@ -187,7 +201,9 @@ async def test_refresh_aborted_inside_refresh_lock_propagates_aborted_error():
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     with pytest.raises(AbortedError):
         await resolve_provider_auth(
@@ -204,7 +220,7 @@ async def test_refresh_timeout_raises_request_timeout_not_aborted(monkeypatch):
 
     monkeypatch.setattr(resolve_module, "DEFAULT_OAUTH_REFRESH_TIMEOUT_MS", 50)
     store = InMemoryCredentialStore()
-    expired = OAuthCredential(
+    expired = oauth_credential(
         access="old-access",
         refresh="refresh-token",
         expires=int(time.time() * 1000) - 1000,
@@ -221,7 +237,9 @@ async def test_refresh_timeout_raises_request_timeout_not_aborted(monkeypatch):
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     with pytest.raises(RequestTimeoutError) as exc_info:
         await resolve_provider_auth(
@@ -236,13 +254,13 @@ async def test_started_refresh_does_not_receive_caller_signal():
     store = InMemoryCredentialStore()
     store.write(
         "test",
-        OAuthCredential(access="old-access", refresh="refresh-token", expires=0),
+        oauth_credential(access="old-access", refresh="refresh-token", expires=0),
     )
     seen = []
 
     async def refresh(credential: OAuthCredential, signal=None) -> OAuthCredential:
         seen.append(signal)
-        return OAuthCredential(
+        return oauth_credential(
             access="new-access", refresh=credential.refresh, expires=60_000
         )
 
@@ -250,7 +268,9 @@ async def test_started_refresh_does_not_receive_caller_signal():
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     await resolve_provider_auth("test", auth, store, default_provider_auth_context())
     assert seen == [None]
@@ -268,7 +288,9 @@ async def test_cancelled_request_still_persists_rotated_refresh_token():
                 write_observed.set()
 
     store = _Store()
-    store.write("test", OAuthCredential(access="old", refresh="old-refresh", expires=0))
+    store.write(
+        "test", oauth_credential(access="old", refresh="old-refresh", expires=0)
+    )
     started = asyncio.Event()
     finish = asyncio.Event()
     controller = AbortController()
@@ -276,13 +298,15 @@ async def test_cancelled_request_still_persists_rotated_refresh_token():
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
         started.set()
         await finish.wait()
-        return OAuthCredential(access="new", refresh="new-refresh", expires=60_000)
+        return oauth_credential(access="new", refresh="new-refresh", expires=60_000)
 
     async def to_auth(credential: OAuthCredential) -> ModelAuth:
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     request = asyncio.create_task(
         resolve_provider_auth(
@@ -297,11 +321,15 @@ async def test_cancelled_request_still_persists_rotated_refresh_token():
     controller.abort()
     with pytest.raises(AbortedError):
         await request
-    assert store.read("test").refresh == "old-refresh"
+    after_abort = store.read("test")
+    assert isinstance(after_abort, OAuthCredential)
+    assert after_abort.refresh == "old-refresh"
 
     finish.set()
     await asyncio.wait_for(write_observed.wait(), timeout=1.0)
-    assert store.read("test").refresh == "new-refresh"
+    after_write = store.read("test")
+    assert isinstance(after_write, OAuthCredential)
+    assert after_write.refresh == "new-refresh"
 
 
 @pytest.mark.asyncio
@@ -315,7 +343,7 @@ async def test_resolve_overlay_env_from_overrides():
         AuthResolutionOverrides(env={"TEST_RESOLVE_OVERLAY": "overlay-key"}),
     )
     assert result is not None
-    assert result.auth["api_key"] == "overlay-key"
+    assert result.auth.get("api_key") == "overlay-key"
 
 
 @pytest.mark.asyncio
@@ -329,14 +357,10 @@ async def test_resolve_missing_auth_returns_none():
 
 @pytest.mark.asyncio
 async def test_resolve_api_key_failure_raises_models_error():
-    async def resolve(_input: dict) -> AuthResult:
+    async def resolve(_input: ApiKeyAuthInput) -> AuthResult:
         raise RuntimeError("boom")
 
-    auth = ProviderAuth(
-        api_key=env_api_key_auth("test", ["TEST_RESOLVE_API_KEY"]).__class__(
-            name="bad", resolve=resolve
-        )
-    )
+    auth = ProviderAuth(api_key=ApiKeyAuth(name="bad", resolve=resolve))
     with pytest.raises(ModelsError) as exc_info:
         await resolve_provider_auth(
             "test", auth, InMemoryCredentialStore(), default_provider_auth_context()
@@ -348,7 +372,7 @@ async def test_resolve_api_key_failure_raises_models_error():
 async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
     """剩余有效期不足 5 分钟即提前刷新（对齐 TS 默认窗口，不再等到过期）。"""
     store = InMemoryCredentialStore()
-    soon = OAuthCredential(
+    soon = oauth_credential(
         access="soon-expiring",
         refresh="refresh-token",
         expires=int(time.time() * 1000) + 60 * 1000,  # 1 分钟后过期
@@ -358,7 +382,7 @@ async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
 
     async def refresh(credential: OAuthCredential, _signal=None) -> OAuthCredential:
         refreshed.append(credential.access)
-        return OAuthCredential(
+        return oauth_credential(
             access="new-access",
             refresh=credential.refresh,
             expires=int(time.time() * 1000) + 30 * 60 * 1000,
@@ -368,13 +392,15 @@ async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     result = await resolve_provider_auth(
         "test", auth, store, default_provider_auth_context()
     )
     assert result is not None
-    assert result.auth["api_key"] == "new-access"
+    assert result.auth.get("api_key") == "new-access"
     assert refreshed == ["soon-expiring"]
 
 
@@ -382,7 +408,7 @@ async def test_resolve_stored_oauth_expires_soon_triggers_refresh():
 async def test_resolve_stored_oauth_reuses_concurrent_refresh():
     """两个真实并发请求共享一次刷新；锁内复查防止第二次重复刷新。"""
     store = InMemoryCredentialStore()
-    soon = OAuthCredential(
+    soon = oauth_credential(
         access="soon-expiring",
         refresh="refresh-token",
         expires=int(time.time() * 1000) + 60 * 1000,
@@ -397,7 +423,7 @@ async def test_resolve_stored_oauth_reuses_concurrent_refresh():
         refreshes += 1
         started.set()
         await release.wait()
-        return OAuthCredential(
+        return oauth_credential(
             access="fresh-access",
             refresh="rotated-refresh",
             expires=int(time.time() * 1000) + 30 * 60 * 1000,
@@ -407,7 +433,9 @@ async def test_resolve_stored_oauth_reuses_concurrent_refresh():
         return ModelAuth(api_key=credential.access)
 
     auth = ProviderAuth(
-        oauth=OAuthAuth(name="oauth", login=None, refresh=refresh, to_auth=to_auth)
+        oauth=OAuthAuth(
+            name="oauth", login=never_login, refresh=refresh, to_auth=to_auth
+        )
     )
     first = asyncio.create_task(
         resolve_provider_auth("test", auth, store, default_provider_auth_context())
@@ -419,11 +447,13 @@ async def test_resolve_stored_oauth_reuses_concurrent_refresh():
     release.set()
     results = await asyncio.gather(first, second)
     assert refreshes == 1
-    assert [result.auth["api_key"] for result in results if result] == [
+    assert [result.auth.get("api_key") for result in results if result] == [
         "fresh-access",
         "fresh-access",
     ]
-    assert store.read("test").refresh == "rotated-refresh"
+    rotated = store.read("test")
+    assert isinstance(rotated, OAuthCredential)
+    assert rotated.refresh == "rotated-refresh"
 
 
 def test_models_error_includes_cause_detail():

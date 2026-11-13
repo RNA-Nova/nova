@@ -814,3 +814,179 @@ def test_explicit_null_structural_schema_keys_cannot_enable_strict(schema_update
             Context(messages=[UserMessage(content="hi")], tools=[tool]),
             OpenAICompletionsOptions(),
         )
+
+
+# ---------------------------------------------------------------------------
+# thinking budget / chat template args / generic options
+# ---------------------------------------------------------------------------
+
+
+class TestThinkingBudget:
+    def test_budget_table_and_custom_override(self):
+        from nova_ai.api_impls._shared.simple_options import (
+            clamp_thinking_budget_to_answer_room,
+            thinking_budget_for_level,
+        )
+        from nova_ai.stream_options import ThinkingBudgets
+
+        from .conftest import _ctx, _model
+
+        assert thinking_budget_for_level("low") == 2048
+        assert thinking_budget_for_level("xhigh") == 16384
+        custom = ThinkingBudgets(low=100)
+        assert thinking_budget_for_level("low", custom) == 100
+
+    def test_answer_room_clamp(self):
+        from nova_ai.api_impls._shared.simple_options import (
+            clamp_thinking_budget_to_answer_room,
+        )
+
+        assert clamp_thinking_budget_to_answer_room(16384, 4096) == 3072
+        assert clamp_thinking_budget_to_answer_room(100, 4096) == 100
+
+    def test_budget_field_applied_for_vllm(self):
+        """supports_thinking_token_budget 端点：顶层预算字段上线（经 extra_body）。"""
+        from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
+
+        from .conftest import _ctx, _model
+
+        model = _model(
+            reasoning=True,
+            max_tokens=65536,
+            compat=OpenAICompletionsCompat(
+                supports_thinking_token_budget=True,
+                thinking_format=ThinkingFormat.CHAT_TEMPLATE,
+            ),
+        )
+        ctx = _ctx(UserMessage(content="hi"))
+        params = build_params(
+            model, ctx, OpenAICompletionsOptions(reasoning_effort="high")
+        )
+        assert params["extra_body"]["thinking_token_budget"] == 16384
+
+    @pytest.mark.asyncio
+    async def test_stream_simple_passes_thinking_budgets(self):
+        """streamSimple 不再丢弃 thinking_budgets（旧移植的字段丢失 bug）。"""
+        from nova_ai.api_impls.openai_completions import _stream as stream_module
+        from nova_ai.stream_options import SimpleStreamOptions, ThinkingBudgets
+
+        from .conftest import _ctx, _model
+
+        captured = {}
+
+        def _fake_stream(m, c, opts):
+            captured["opts"] = opts
+
+            class _Fake:
+                def __aiter__(self):
+                    return self
+
+                async def __anext__(self):
+                    raise StopAsyncIteration
+
+                async def result(self):
+                    return AssistantMessage(content=[])
+
+            return _Fake()
+
+        original = stream_module.stream
+        stream_module.stream = _fake_stream
+        try:
+            from nova_ai.api_impls.openai_completions import stream_simple
+
+            budgets = ThinkingBudgets(low=999)
+            events = stream_simple(
+                _model(reasoning=True),
+                _ctx(UserMessage(content="hi")),
+                SimpleStreamOptions(
+                    api_key="sk-test",
+                    reasoning=None,
+                    thinking_budgets=budgets,
+                ),
+            )
+            await events.result()
+            assert captured["opts"].thinking_budgets == budgets
+        finally:
+            stream_module.stream = original
+
+
+def test_baseten_chat_template_args_with_budget_var():
+    """baseten 格式：chat_template_args 支持 $var: thinking.budget 变量替换。"""
+    from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
+
+    from .conftest import _ctx, _model
+
+    model = _model(
+        reasoning=True,
+        max_tokens=65536,
+        compat=OpenAICompletionsCompat(
+            thinking_format=ThinkingFormat.BASETEN,
+            supports_thinking_token_budget=True,
+            chat_template_args={
+                "enable_thinking": {"$var": "thinking.enabled"},
+                "budget": {"$var": "thinking.budget"},
+            },
+        ),
+    )
+    ctx = _ctx(UserMessage(content="hi"))
+    params = build_params(
+        model, ctx, OpenAICompletionsOptions(reasoning_effort="medium")
+    )
+    args = params["extra_body"]["chat_template_args"]
+    assert args["enable_thinking"] is True
+    assert args["budget"] == 8192
+
+
+def test_use_max_tokens_for_deepseek_and_zai():
+    """deepseek / zai 端点用 max_tokens 而非 max_completion_tokens。"""
+    from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
+
+    from .conftest import _ctx, _model
+
+    deepseek = _model(provider="deepseek", base_url="https://api.deepseek.com/v1")
+    params = build_params(
+        deepseek,
+        _ctx(UserMessage(content="hi")),
+        OpenAICompletionsOptions(max_tokens=100),
+    )
+    assert params["max_tokens"] == 100
+
+    zai = _model(provider="zai", base_url="https://api.z.ai/v1")
+    params = build_params(
+        zai, _ctx(UserMessage(content="hi")), OpenAICompletionsOptions(max_tokens=100)
+    )
+    assert params["max_tokens"] == 100
+
+
+def test_build_params_with_generic_base_options():
+    """通用基类选项进 build_params 不炸。"""
+    from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
+
+    from .conftest import _ctx, _model
+
+    model = _model(reasoning=True)
+    ctx = _ctx(UserMessage(content="hi"))
+
+    params = build_params(model, ctx, StreamOptions(api_key="sk-test"))
+    assert params["model"] == "test-model"
+
+    params = build_params(
+        model,
+        ctx,
+        SimpleStreamOptions(api_key="sk-test", max_tokens=512),
+    )
+    assert params["max_completion_tokens"] == 512
+    params = build_params(model, ctx, None)
+    assert params["model"] == "test-model"
+
+
+def test_tool_choice_is_explicit_even_without_tools():
+    """显式 tool_choice 原样透传，不由本地工具列表反推。"""
+    from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
+
+    from .conftest import _ctx, _model
+
+    model = _model()
+    ctx = _ctx(UserMessage(content="hi"))
+    params = build_params(model, ctx, OpenAICompletionsOptions(tool_choice="auto"))
+    assert params["tool_choice"] == "auto"

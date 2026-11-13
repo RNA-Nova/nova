@@ -10,7 +10,6 @@
 
 import asyncio
 
-from nova_agent import Agent
 from nova_ai import EventStream
 from nova_protocol import (
     DoneEvent,
@@ -22,6 +21,8 @@ from nova_protocol import (
     TextContent,
     UserMessage,
 )
+
+from nova_agent import Agent
 
 
 def make_model() -> Model:
@@ -73,21 +74,35 @@ async def main():
     agent = Agent(stream_fn=stream_fn, steering_mode="one-at-a-time")
     agent.set_model(model)
 
-    # 运行前排队两条 steering：会在后续轮次中逐条注入
-    agent.steer(UserMessage(role="user", content="补充一点 A"))
-    agent.steer(UserMessage(role="user", content="补充一点 B"))
+    # 运行中排队两条 steering：首个 turn 开始时入队，后续逐条注入
+    queued = False
 
+    def queue_during_run(event, signal):
+        nonlocal queued
+        if event.type == "turn_start" and not queued:
+            queued = True
+            agent.steer(UserMessage(role="user", content="补充一点 A"))
+            agent.steer(UserMessage(role="user", content="补充一点 B"))
+
+    agent.subscribe(queue_during_run)
     await agent.prompt("开始")
 
     print("总轮数:", len(calls), "（one-at-a-time 每轮只 drain 一条）")
     user_messages = [m.content for m in agent.state.messages if m.role == "user"]
     print("用户消息序列:", user_messages)
 
-    # follow_up：agent 即将停止时继续
+    # follow_up：自然回合完成、agent 即将停止时入队并继续
     agent2 = Agent(stream_fn=stream_fn)
     agent2.set_model(model)
-    agent2.follow_up(UserMessage(role="user", content="再补充一点 C"))
+    queued_follow_up = False
 
+    def queue_before_stop(event, signal):
+        nonlocal queued_follow_up
+        if event.type == "turn_end" and not queued_follow_up:
+            queued_follow_up = True
+            agent2.follow_up(UserMessage(role="user", content="再补充一点 C"))
+
+    agent2.subscribe(queue_before_stop)
     await agent2.prompt("第二轮开始")
 
     user_messages2 = [m.content for m in agent2.state.messages if m.role == "user"]

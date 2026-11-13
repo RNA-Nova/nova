@@ -1,6 +1,6 @@
 """openai_completions 缓存与兼容行为单元测试。"""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 from nova_protocol import (
@@ -17,8 +17,10 @@ from nova_protocol import (
     Usage,
     UserMessage,
 )
+from openai.types.chat import ChatCompletionToolParam
 
 from nova_ai.api_impls import openai_completions
+from nova_ai.api_impls._shared.prompt_cache import CacheControl
 from nova_ai.api_impls.openai_completions import (
     OpenAICompletionsOptions,
     _apply_anthropic_cache_control,
@@ -35,9 +37,9 @@ def _make_model(
     model_id: str = "test",
     provider: str = "test",
     base_url: str = "https://example.com",
-    compat: OpenAICompletionsCompat = None,
+    compat: Optional[OpenAICompletionsCompat] = None,
     reasoning: bool = False,
-    input_types: list = None,
+    input_types: Optional[list] = None,
 ) -> Model:
     return Model(
         id=model_id,
@@ -54,6 +56,20 @@ def _make_model(
     )
 
 
+def _openai_compat(model: Model) -> OpenAICompletionsCompat:
+    compat = model.compat
+    assert isinstance(compat, OpenAICompletionsCompat)
+    return compat
+
+
+def _function_name(tool: ChatCompletionToolParam) -> str:
+    function = tool.get("function")
+    assert function is not None
+    name = function.get("name")
+    assert name is not None
+    return name
+
+
 class TestClampOpenAIPromptCacheKey:
     def test_short_key_unchanged(self):
         assert clamp_openai_prompt_cache_key("abc") == "abc"
@@ -61,6 +77,7 @@ class TestClampOpenAIPromptCacheKey:
     def test_long_key_truncated(self):
         key = "x" * 100
         result = clamp_openai_prompt_cache_key(key)
+        assert result is not None
         assert len(result) == 64
         assert result == "x" * 64
 
@@ -71,15 +88,15 @@ class TestClampOpenAIPromptCacheKey:
 class TestGetCompatCacheControl:
     def test_no_cache_control_for_non_anthropic(self):
         compat = OpenAICompletionsCompat(cache_control_format=None)
-        assert _get_compat_cache_control(compat, "long") is None
+        assert _get_compat_cache_control(compat, CacheRetention.LONG) is None
 
     def test_no_cache_control_when_retention_none(self):
         compat = OpenAICompletionsCompat(cache_control_format="anthropic")
-        assert _get_compat_cache_control(compat, "none") is None
+        assert _get_compat_cache_control(compat, CacheRetention.NONE) is None
 
     def test_short_retention_no_ttl(self):
         compat = OpenAICompletionsCompat(cache_control_format="anthropic")
-        control = _get_compat_cache_control(compat, "short")
+        control = _get_compat_cache_control(compat, CacheRetention.SHORT)
         assert control == {"type": "ephemeral"}
 
     def test_long_retention_with_ttl(self):
@@ -87,7 +104,7 @@ class TestGetCompatCacheControl:
             cache_control_format="anthropic",
             supports_long_cache_retention=True,
         )
-        control = _get_compat_cache_control(compat, "long")
+        control = _get_compat_cache_control(compat, CacheRetention.LONG)
         assert control == {"type": "ephemeral", "ttl": "1h"}
 
 
@@ -102,7 +119,7 @@ class TestApplyAnthropicCacheControl:
             {"type": "function", "function": {"name": "t1"}},
             {"type": "function", "function": {"name": "t2"}},
         ]
-        cache_control = {"type": "ephemeral"}
+        cache_control: CacheControl = {"type": "ephemeral"}
         _apply_anthropic_cache_control(messages, tools, cache_control)
 
         # system prompt 被标记
@@ -431,13 +448,15 @@ class TestMidConvoToolAdditions:
             ],
             tools=[self._tool("static_tool")],
         )
-        messages = convert_messages(model, ctx, model.compat)
+        messages = convert_messages(model, ctx, _openai_compat(model))
 
         kimi_msgs = [
             m for m in messages if m.get("role") == "system" and m.get("tools")
         ]
         assert len(kimi_msgs) == 1
-        assert kimi_msgs[0]["tools"][0]["function"]["name"] == "dynamic_tool"
+        tools = kimi_msgs[0].get("tools")
+        assert tools is not None
+        assert _function_name(tools[0]) == "dynamic_tool"
 
     def test_additions_not_duplicated_in_top_level(self):
         """就地新增不进顶层列表（顶层 = 折叠段状态——仅初始工具）。"""
@@ -482,7 +501,9 @@ class TestMidConvoToolAdditions:
             if m.get("role") == "system" and m.get("tools")
         ]
         assert len(kimi_msgs) == 1
-        assert kimi_msgs[0]["tools"][0]["function"]["name"] == "dynamic_tool"
+        tools = kimi_msgs[0].get("tools")
+        assert tools is not None
+        assert _function_name(tools[0]) == "dynamic_tool"
 
     def test_redefinition_is_non_additive(self):
         """同名重声明是非增量变更：顶层直接换血，不发 kimi 消息。"""
@@ -529,11 +550,11 @@ class TestMidConvoToolAdditions:
                 ),
             ],
         )
-        messages = convert_messages(model, ctx, model.compat)
+        messages = convert_messages(model, ctx, _openai_compat(model))
 
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         assert len(tool_msgs) == 1
-        assert tool_msgs[0]["content"] == "(no tool output)"
+        assert tool_msgs[0].get("content") == "(no tool output)"
 
     def test_tool_result_whitespace_only_uses_no_output_placeholder(self):
         """纯空白 tool result（如 bash 返回裸 \r\n）视同空输出占位——
@@ -553,11 +574,11 @@ class TestMidConvoToolAdditions:
                 ),
             ],
         )
-        messages = convert_messages(model, ctx, model.compat)
+        messages = convert_messages(model, ctx, _openai_compat(model))
 
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         assert len(tool_msgs) == 1
-        assert tool_msgs[0]["content"] == "(no tool output)"
+        assert tool_msgs[0].get("content") == "(no tool output)"
 
     def test_kimi_tool_message_anchors_at_system_message_position(self):
         """kimi 工具消息锚在 SystemMessage 自己的转录位置（含图片工具结果
@@ -601,7 +622,7 @@ class TestMidConvoToolAdditions:
                 SystemMessage(tools_added=[tool_def], timestamp=1),
             ],
         )
-        messages = convert_messages(model, ctx, model.compat)
+        messages = convert_messages(model, ctx, _openai_compat(model))
 
         roles = [m.get("role") for m in messages]
         # user(run) -> tool -> user(image) -> system(kimi 工具消息)
@@ -623,7 +644,7 @@ class TestConvertMessagesUserContent:
                 UserMessage(content=[TextContent(type="text", text="hello")]),
             ],
         )
-        messages = convert_messages(model, ctx, model.compat)
+        messages = convert_messages(model, ctx, _openai_compat(model))
 
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
@@ -649,13 +670,14 @@ class TestConvertMessagesUserContent:
                 ),
             ],
         )
-        messages = convert_messages(model, ctx, model.compat)
+        messages = convert_messages(model, ctx, _openai_compat(model))
 
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
+        content = messages[0].get("content")
+        assert isinstance(content, list)
         assert (
-            messages[0]["content"][0]["text"]
-            == "(image omitted: model does not support images)"
+            content[0].get("text") == "(image omitted: model does not support images)"
         )
 
 

@@ -7,7 +7,13 @@ abort；真正的重试由 ``_shared/retry.py`` 的 ``retry_provider_request``
 
 from typing import Mapping, Optional, cast
 
-from nova_protocol import Context, Model, OpenAICompletionsCompat, ProviderHeaders
+from nova_protocol import (
+    ClientIdentity,
+    Context,
+    Model,
+    OpenAICompletionsCompat,
+    ProviderHeaders,
+)
 from openai import AsyncOpenAI, Omit
 
 from ...utils.errors import LoginRequiredError
@@ -15,7 +21,7 @@ from .._shared.copilot_headers import (
     build_copilot_dynamic_headers,
     has_copilot_vision_input,
 )
-from .._shared.user_agent import get_nova_user_agent
+from .._shared.identity import get_identity_headers
 from .compat import get_compat
 
 
@@ -54,6 +60,7 @@ def create_client(
     options_headers: Optional[ProviderHeaders] = None,
     session_id: Optional[str] = None,
     compat: Optional[OpenAICompletionsCompat] = None,
+    identity: Optional[ClientIdentity] = None,
 ) -> AsyncOpenAI:
     """创建 OpenAI 客户端（对齐 TS createClient）。
 
@@ -62,7 +69,8 @@ def create_client(
     """
     resolved_compat = compat or get_compat(model)
 
-    headers: ProviderHeaders = {"User-Agent": get_nova_user_agent()}
+    # 身份工具返回无 None 的头；Dict 值不变性要求在合并边界显式收口。
+    headers = cast(ProviderHeaders, get_identity_headers(model, identity))
     _merge_headers(headers, model.headers)
 
     if model.provider == "github-copilot":

@@ -11,7 +11,6 @@
 
 import asyncio
 
-from nova_agent import Agent, AgentTool
 from nova_ai import EventStream
 from nova_protocol import (
     AgentToolResult,
@@ -25,6 +24,8 @@ from nova_protocol import (
     ToolCall,
     ToolCallEndEvent,
 )
+
+from nova_agent import Agent, AgentTool
 
 
 class SquareTool(AgentTool):

@@ -8,6 +8,8 @@ import pytest
 import respx
 from nova_protocol import (
     AbortController,
+    ClientAttribution,
+    ClientIdentity,
     ImageContent,
     ImageModel,
     ImagesContext,
@@ -303,3 +305,25 @@ async def test_openrouter_images_abort_error_is_redacted():
     assert result.stop_reason is ImagesStopReason.ABORTED
     assert "sk-live-FAKE-REVIEW-SECRET" not in (result.error_message or "")
     assert route.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_openrouter_images_identity_headers_reach_wire():
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json=_response()))
+    identity = ClientIdentity(
+        user_agent="short",
+        attribution=ClientAttribution(
+            name="nova-test", url="https://example.com", categories=["cli-agent"]
+        ),
+    )
+    result = await generate_images(
+        _model(["image"]),
+        ImagesContext(input=[TextContent(text="draw")]),
+        ImagesOptions(api_key="test", identity=identity),
+    )
+    assert result.stop_reason is ImagesStopReason.STOP
+    headers = route.calls[0].request.headers
+    assert headers["user-agent"] == "nova-ai"
+    assert headers["http-referer"] == "https://example.com"
+    assert headers["x-openrouter-title"] == "nova-test"

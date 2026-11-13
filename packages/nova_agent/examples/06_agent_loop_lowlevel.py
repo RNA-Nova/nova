@@ -13,11 +13,7 @@
 
 import asyncio
 
-from nova_agent import AgentContext, AgentLoopConfig, agent_loop
-from nova_ai import (
-    EventStream,
-    SimpleStreamOptions,
-)
+from nova_ai import EventStream, SimpleStreamOptions
 from nova_protocol import (
     DoneEvent,
     KnownApi,
@@ -25,9 +21,12 @@ from nova_protocol import (
     Model,
     ModelCost,
     StartEvent,
+    SystemMessage,
     TextContent,
     UserMessage,
 )
+
+from nova_agent import AgentContext, AgentLoopConfig, agent_loop
 
 
 def make_model() -> Model:
@@ -69,7 +68,7 @@ def text_stream(model: Model, text: str) -> EventStream:
 async def main():
     model = make_model()
     config = AgentLoopConfig(stream_options=SimpleStreamOptions(), model=model)
-    context = AgentContext(system_prompt="你是一个简洁的助手", messages=[])
+    context = AgentContext(messages=[SystemMessage(content="你是一个简洁的助手")])
 
     stream = agent_loop(
         [UserMessage(role="user", content="你好")],
@@ -87,8 +86,9 @@ async def main():
     print("新消息角色序列:", [m.role for m in new_messages])
     print("助手回复:", new_messages[-1].content[0].text)
 
-    # context.messages 也被同步更新（注意：这是低层 API 的约定）
-    print("context 消息数:", len(context.messages))
+    # agent_loop 在工作副本上运行；原始 context 不接收本次新消息，
+    # 新消息统一从 result() 获取。agent_loop_continue 才会续写原 context。
+    print("原始 context 消息数:", len(context.messages))
 
 
 if __name__ == "__main__":

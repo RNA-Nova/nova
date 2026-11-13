@@ -9,18 +9,23 @@ def _message() -> AssistantMessage:
     return AssistantMessage(role="assistant", content=[], usage=Usage())
 
 
+def _first_diagnostic(message: AssistantMessage):
+    diagnostics = message.diagnostics
+    assert diagnostics is not None
+    return diagnostics[0]
+
+
 class TestAppendDiagnostic:
     def test_appends_with_timestamp(self):
         message = _message()
         append_diagnostic(message, {"type": "x", "details": {"reason": "r"}})
-        entry = message.diagnostics[0]
+        entry = _first_diagnostic(message)
         assert entry["type"] == "x"
         assert isinstance(entry["timestamp"], int)
         assert entry["details"] == {"reason": "r"}
 
     def test_secret_values_redacted(self):
-        """错误报文里的凭据形态（Bearer/sk-/api_key 键）出口即脱敏——
-        诊断随消息落盘并上线，与 error_message 同一纪律。"""
+        """错误报文里的凭据形态在出口即脱敏。"""
         message = _message()
         append_diagnostic(
             message,
@@ -30,7 +35,7 @@ class TestAppendDiagnostic:
                 "details": {"auth": "Bearer sk-abcdef0123456789"},
             },
         )
-        entry = message.diagnostics[0]
+        entry = _first_diagnostic(message)
         assert "sk-ant-secret123" not in entry["error"]["message"]
         assert "sk-abcdef0123456789" not in entry["details"]["auth"]
 
@@ -46,5 +51,5 @@ class TestAppendDiagnostic:
                 },
             },
         )
-        assert "sk-live-key-1234567890" not in str(message.diagnostics[0])
-        assert "sk-tuple-key-1234567890" not in str(message.diagnostics[0])
+        assert "sk-live-key-1234567890" not in str(_first_diagnostic(message))
+        assert "sk-tuple-key-1234567890" not in str(_first_diagnostic(message))

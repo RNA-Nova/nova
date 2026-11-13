@@ -1,5 +1,7 @@
 """is_context_overflow 测试（对齐 TS isContextOverflow）。"""
 
+from typing import Optional
+
 from nova_protocol import AssistantMessage, KnownApi, NovaErrorKind, StopReason, Usage
 
 from nova_ai.utils.overflow import is_context_overflow, is_recoverable_length
@@ -7,7 +9,7 @@ from nova_ai.utils.overflow import is_context_overflow, is_recoverable_length
 
 def _message(
     stop_reason: StopReason = StopReason.STOP,
-    error_message: str = None,
+    error_message: Optional[str] = None,
     input: int = 0,
     output: int = 0,
     cache_read: int = 0,

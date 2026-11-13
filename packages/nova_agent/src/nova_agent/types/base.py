@@ -10,10 +10,9 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Protocol, Union
 from nova_protocol import ToolCall
 
 if TYPE_CHECKING:
-    from nova_protocol import AgentEvent, Context, Model
-
     from nova_ai import AssistantMessageEventStream
     from nova_ai.stream_options import SimpleStreamOptions
+    from nova_protocol import AgentEvent, Context, Model
 
 
 # A single tool call content block emitted by an assistant message.
@@ -31,6 +30,7 @@ class StreamFn(Protocol):
         model: "Model",
         context: "Context",
         options: "SimpleStreamOptions",
+        /,
     ) -> Union[
         "AssistantMessageEventStream", Awaitable["AssistantMessageEventStream"]
     ]: ...

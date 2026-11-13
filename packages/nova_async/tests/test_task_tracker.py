@@ -5,6 +5,7 @@ import logging
 
 import pytest
 from nova_async import TaskTracker
+from nova_protocol import AbortedError
 
 
 @pytest.mark.asyncio
@@ -109,6 +110,19 @@ async def test_cancelled_task_does_not_log_error(caplog):
         tracker.cancel_all()
         await tracker.wait()
     assert not caplog.records  # 取消不是失败，不报 error
+
+
+@pytest.mark.asyncio
+async def test_aborted_error_does_not_log_error(caplog):
+    tracker = TaskTracker(name="abort-vocabulary")
+
+    async def aborting():
+        raise AbortedError("stop requested")
+
+    tracker.spawn(aborting())
+    with caplog.at_level(logging.ERROR):
+        await asyncio.sleep(0.05)
+    assert not caplog.records  # AbortedError 同样是取消词汇，不是故障
 
 
 def test_closed_flag_and_repr():

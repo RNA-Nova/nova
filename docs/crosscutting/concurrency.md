@@ -3,7 +3,7 @@
 > 坐标：横切·并发与取消（体系总图与状态三档约定见 `docs/README.md`）。
 
 > 本页管**等待的治理**：取消原语族、token 树所有权、超时治理三层、死因分型、取消竞速裁决、任务台账。类型的住所与序列化归 `docs/crosscutting/data-modeling.md`；诊断分类学（kind / 警告 / 持久化表）归 `docs/crosscutting/diagnostics-modeling.md`；模块与包的住所归 `docs/crosscutting/structure-modeling.md`；测试细则归 `docs/crosscutting/testing-modeling.md`。
-> 状态：**现状**（本页机制均已建成并有测试锁定）。
+> 状态：取消原语与机制件【现状】；Agent run 与 proxy 的所有权接入及回归覆盖【现状】；其余编排层【待补】。
 > 测试要求：见末节。
 
 **总纲**：每个等待都要回答三问——**能叫停吗、叫停后收尸吗、死了知道怎么死的吗**。取消是词汇不是形状：取消语义经 `AbortSignal`/`AbortedError`/终态事件流动，不在数据形状上挂 token 字段（`docs/crosscutting/data-modeling.md` §七，本页引用不重复其三海拔模型）。
@@ -36,6 +36,20 @@
 - **两阶段中止**：优雅取消走 signal → `AbortedError`（允许收尾路径执行）；收摊掀桌走 `TaskTracker.cancel_all()`（关停路径的硬地板）。
 - **收尾不发布**：取消/超时路径的流收尾只补块闭合（end 事件不重不漏）与终态事件，**不发布 `DoneEvent`**。
 - **先落盘后发声**：持久化顺序契约归 `docs/crosscutting/diagnostics-modeling.md` §六（引用不重复）。
+
+### 任务作用域与代际
+
+任务按生命周期归属，不按包名寻找总账：session 级后台任务归会话属主；run 级任务归一次 prompt/continue 的属主；request 级 provider/transport 归单次请求；tool batch 级工具与 update 归当前工具批。子作用域必须先于父作用域收尾，不要求所有地方共用一本 `TaskTracker`。
+
+provider 管自己的资源，消费者管消费关系：正常完成须确认 driver 收尾；外部取消、监听器异常等提前退出（abandonment）时，消费者先通知 provider 清理，再 join，无响应时才硬取消。每次 run 都有独立身份——旧 run 不得清理或污染新 run；被 abort/replace 接管的 run 不再走正常完成。
+
+### 分层终态与排水
+
+`result()` 返回 ≠ driver 完成 ≠ transport 关闭 ≠ 子任务全部排水 ≠ `agent_end` ≠ run idle。`close()` 只停止接纳新任务，不等于取消；`cancel_all()` 只发起取消，不等于收尾；`wait()` 才是排水。close 后晚到的 update/future 不得起跑。
+
+终态线性化统一为：provider 收尾 → 工具批收尾 → 终态消息 → 监听器完成 → `agent_end` → 按 run 身份清理 → 公开 idle。
+
+【现状】工具 update observer 异常转成工具错误结果；run 级 listener 异常使 run 失败并先排水。sequential 临界区为 execute + update 排干 + after（终态产生），`tool_execution_end` 与 toolResult 通知在门外。`start_prompt()` 在返回 Task 前同步登记 active run，供立即 abort/wait 使用；`create_task(agent.prompt())` 仅调度，不代表 run 已接受。abort 先协作取消，超过 100ms 未收尾则硬取消并告警，不把清理超时伪装成全部成功。
 
 ## 四、store 的同步引擎纪律（编排永远不进引擎）
 

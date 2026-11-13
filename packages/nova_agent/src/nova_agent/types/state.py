@@ -5,9 +5,14 @@ AgentState 是运行时可变状态容器，不是 JSON 边界类型，因此不
 而是用普通 class + property setter 实现 TS 侧 MutableAgentState 的拷贝语义。
 """
 
-from typing import List, Optional, Set, TypedDict
+from typing import Any, List, Optional, Set, TypedDict, cast
 
-from nova_protocol import AgentMessage, Model, ModelCost, ModelThinkingLevel
+from nova_ai import (
+    create_initial_system_message,
+    get_current_system_prompt,
+    to_tool_declaration,
+)
+from nova_protocol import AgentMessage, Message, Model, ModelCost, ModelThinkingLevel
 
 from .tool import AgentTool
 
@@ -25,7 +30,8 @@ class AgentStateKwargs(TypedDict, total=False):
     """
 
     system_prompt: Optional[str]
-    model: Optional[Model]
+    # 可信 Model 或不可信散装 dict；后者在 Agent 构造边界 model_validate。
+    model: Optional[Model | dict[str, Any]]
     thinking_level: Optional[ModelThinkingLevel]
     tools: Optional[List[AgentTool]]
     messages: Optional[List[AgentMessage]]
@@ -71,7 +77,6 @@ class AgentState:
         pending_tool_calls: Optional[Set[str]] = None,
         error_message: Optional[str] = None,
     ):
-        self.system_prompt: str = system_prompt or ""
         self.model: Model = model or _default_placeholder_model()
         self.thinking_level: ModelThinkingLevel = (
             thinking_level or ModelThinkingLevel.OFF
@@ -80,12 +85,26 @@ class AgentState:
         self._messages: List[AgentMessage] = (
             list(messages) if messages is not None else []
         )
+        initial = create_initial_system_message(
+            system_prompt,
+            [to_tool_declaration(tool) for tool in self._tools],
+        )
+        # 首条已是 system 时由调用方转录完全接管；否则把初始配置折成基线。
+        if initial is not None and (
+            not self._messages or self._messages[0].role != "system"
+        ):
+            self._messages.insert(0, initial)
         self.is_streaming: bool = is_streaming
         self.streaming_message: Optional[AgentMessage] = streaming_message
         self.pending_tool_calls: Set[str] = (
             set(pending_tool_calls) if pending_tool_calls is not None else set()
         )
         self.error_message: Optional[str] = error_message
+
+    @property
+    def system_prompt(self) -> str:
+        """当前提示词只从转录重放推导，不再有第二份可变状态。"""
+        return get_current_system_prompt(cast(List[Message], self._messages))
 
     @property
     def tools(self) -> List[AgentTool]:

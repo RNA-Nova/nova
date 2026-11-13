@@ -28,6 +28,7 @@ from .content import ImageContent, TextContent
 from .enums import WarningKind
 from .events import AssistantMessageEvent
 from .messages import Message, ToolResultMessage
+from .model import Usage
 
 _FRAMEWORK_MESSAGE_ROLES = frozenset({"user", "assistant", "toolResult", "system"})
 
@@ -94,6 +95,10 @@ class AgentToolResult(NovaBaseModel, Generic[TDetails]):
     """Content blocks supporting text and images."""
     details: SerializeAsAny[TDetails]
     """Details to be displayed in a UI or logged."""
+    # 匹配工具 outputSchema 的程序化结果；不进模型上下文，content 才是模型面。
+    structured_content: Optional[Any] = None
+    # 本次工具执行自身用量；不计入主 LLM 上下文用量。
+    usage: Optional[Usage] = None
     terminate: Optional[bool] = None
     """
     Hint that the agent should stop after the current tool batch.
@@ -219,6 +224,8 @@ class ToolExecutionEndEvent(_AgentEventBase):
     tool_name: str
     result: Any
     is_error: bool
+    # execute() 的单调时钟耗时；None = 工具未实际运行。
+    duration_ms: Optional[int] = None
 
 
 class WarningEvent(_AgentEventBase):

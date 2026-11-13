@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- Python >= 3.12, < 3.14
+- Python >= 3.13, < 3.14
 - 已安装 `nova_agent` 与 `nova_ai`（pixi workspace 或 `pip install -e packages/nova_agent`）
 
 ## 示例列表
@@ -13,7 +13,7 @@
 |------|------|
 | `01_quickstart.py` | Agent 最小用法：创建、订阅事件、prompt、状态查看 |
 | `02_custom_tools.py` | 继承 `AgentTool` 实现自定义工具；JSON Schema 校验与类型矫正（coercion） |
-| `03_hooks.py` | 四个 hook：`before_tool_call` 拦截、`after_tool_call` 改写、`prepare_next_turn`、`should_stop_after_turn` |
+| `03_hooks.py` | 五个 hook：工具 before/after、`prepare_request`、`prepare_next_turn`、`finish_turn` |
 | `04_steering_followup.py` | `steer()` 运行中插入、`follow_up()` 停止前排队、队列 drain 模式 |
 | `05_abort_continue.py` | `abort()` 取消 run、`wait_for_idle()` 的 shield 语义、`continue_()` 继续 |
 | `06_agent_loop_lowlevel.py` | 低层 facade：`agent_loop()` 返回 `AgentEventStream`，自管状态 |

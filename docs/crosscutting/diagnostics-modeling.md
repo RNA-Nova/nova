@@ -107,8 +107,10 @@ error_kind: Optional[NovaErrorKind] = None   # stop_reason == error 时填充
 
 **转换点**：两个 api_impls 的 `_stream.py` catch 块 + `gateway/streams.py` 的
 setup 路径（`create_setup_error_message`——装配期失败同样归一上 kind）共三处——
-异常归一后 `error_kind`/`retry_after_ms` 上 `AssistantMessage`。refresh errors
-字典保持原始异常（领域层），呈现层再归一。
+异常归一后 `error_kind`/`retry_after_ms` 上 `AssistantMessage`。高层 Agent 的运行异常、
+proxy 的非 2xx / 上游 error 帧 / 非法事件 / 网络中断与无终态 EOF 同样归一；
+无终态 EOF 使用 `STREAM_DISCONNECTED`。proxy 的任意 token 先精确替换，再跑通用出口清洗；
+abort 不填 kind 或 retry 信息。refresh errors 字典保持原始异常（领域层），呈现层再归一。
 
 ## 四、警告与弃用（`WarningEvent`）
 
@@ -259,7 +261,7 @@ docs/crosscutting/diagnostics-modeling.md  # 诊断家族地图（分散架构�
 
 1. **nova_protocol 词汇**：`NovaErrorKind` / `RETRYABLE_ERROR_KINDS` / `WarningKind` / `WarningEvent` / `error_kind` / `FatalToolError` / `NovaDiagnostic`；wire schema 重导出 + 漂移测试 + 旧 JSONL 兼容测试——**已落地**；
 2. **nova_ai 归一枢纽**：`NormalizedError` + `normalize_error`（词表收编）；两个 `_stream.py` catch 接入——**已落地**；
-3. **领域挂 kind + 消费改读**：`ModelsError` / `ExecutorError` 映射；RetryController 与压缩恢复改读 `error_kind`；自动重试接 `retry_after_ms`——**部分落地（2026-10）**：`AssistantMessage.retry_after_ms` 载体 + 三转换点抄录 + RetryController/压缩恢复改读 kind（子串清单删除）+ `LOGIN_REQUIRED` 产出 + anthropic 流内 error.type 映射 + catalog 传输保真（`CatalogOutcome.cause`）；残余：ExecutorError 映射（executor-client 侧）；
+3. **领域挂 kind + 消费改读**：`ModelsError` / `ExecutorError` 映射；RetryController 与压缩恢复改读 `error_kind`；自动重试接 `retry_after_ms`——**部分落地（2026-10）**：`AssistantMessage.retry_after_ms` 载体 + 三转换点抄录 + 高层 Agent/proxy 转换点接入 + RetryController/压缩恢复改读 kind（子串清单删除）+ `LOGIN_REQUIRED` 产出 + anthropic 流内 error.type 映射 + catalog 传输保真（`CatalogOutcome.cause`）；残余：ExecutorError 映射（executor-client 侧）；
 4. **FatalToolError 接 loop** + WarningEvent 入事件流 + logger 分诊升格 + 呈现层去重 + `NovaDiagnostic` 接装配层；
 5. **遥测单点 + RPC `data.errorKind` + Rust 协议层投影**。
 

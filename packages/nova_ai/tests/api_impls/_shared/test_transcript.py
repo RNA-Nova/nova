@@ -51,7 +51,9 @@ class TestNormalize:
         head = get_initial_system_message(normalized)
         assert head is not None
         assert head.content == "你是助手"
-        assert [t.name for t in head.tools_added] == ["bash"]
+        tools_added = head.tools_added
+        assert tools_added is not None
+        assert [t.name for t in tools_added] == ["bash"]
 
     def test_empty_context_stays_empty(self):
         assert normalize_context(_ctx()) == []
@@ -90,6 +92,7 @@ class TestFold:
         )
         assert [m.role for m in collapsed] == ["system", "user"]
         head = collapsed[0]
+        assert isinstance(head, SystemMessage)
         assert get_system_message_text(head) == "base\n\nmore"
 
 
@@ -103,6 +106,7 @@ class TestResolve:
         messages = [SystemMessage(content="s", timestamp=1), UserMessage(content="u")]
         out = resolve_transcript(messages, False)
         assert [m.role for m in out] == ["system", "user"]
+        assert isinstance(out[0], SystemMessage)
         assert get_system_message_text(out[0]) == "s"
 
     def test_without_initial(self):

@@ -9,10 +9,11 @@
 """
 
 import asyncio
+from contextlib import suppress
 
-from nova_agent import Agent, AgentTool
 from nova_ai import EventStream
 from nova_protocol import (
+    AbortedError,
     AgentToolResult,
     DoneEvent,
     KnownApi,
@@ -26,6 +27,10 @@ from nova_protocol import (
     UserMessage,
 )
 
+from nova_agent import Agent, AgentTool
+
+started = asyncio.Event()
+
 
 class SlowTool(AgentTool):
     """会检查 abort signal 的慢工具。"""
@@ -36,9 +41,10 @@ class SlowTool(AgentTool):
     parameters: dict = {"type": "object", "properties": {}}
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
+        started.set()
         for _ in range(100):
             if signal and signal.aborted:
-                raise Exception("Operation aborted")
+                raise AbortedError("Operation aborted")
             await asyncio.sleep(0.01)
         return AgentToolResult(content=[TextContent(text="done")], details={})
 
@@ -101,11 +107,15 @@ async def main():
     agent.set_model(model)
     agent.set_tools([SlowTool()])
 
-    # 启动 run，等工具开始执行后 abort
+    # 等工具真正开始后 abort；另取消一个 idle waiter，验证 shield 不传染给 run
     run_task = asyncio.create_task(agent.prompt("开始"))
-    await asyncio.sleep(0.1)
+    await started.wait()
     agent.abort()
-    await run_task  # run 正常收尾（失败路径会产生 error/aborted 消息，不抛异常）
+    idle_waiter = asyncio.create_task(agent.wait_for_idle())
+    idle_waiter.cancel()
+    with suppress(asyncio.CancelledError):
+        await idle_waiter
+    await run_task  # run 自行完成 aborted 收尾，不被 waiter 的取消影响
 
     print("abort 后 is_streaming:", agent.state.is_streaming)
     print("最后一条消息 stop_reason:", agent.state.messages[-1].stop_reason)

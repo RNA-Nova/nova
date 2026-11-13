@@ -14,6 +14,7 @@ from nova_ai.catalog_impls.models_dev import MODELS_DEV_API, ModelsDevCatalog
 from nova_ai.catalog_impls.pi_dev import PI_DEV_CATALOG_BASE_URL, PiDevCatalog
 from nova_ai.gateway.provider import RefreshModelsContext
 from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
+from tests._helpers.auth import oauth_credential
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,7 +46,7 @@ async def test_pi_dev_request_line_and_conditional_headers():
     assert request.url.params["types"] == "chat,image,classifier"
     assert outcome.status == 200
     assert outcome.etag == '"v9"'
-    assert outcome.models_fields[0]["id"] == "kimi-k3"
+    assert outcome.models_fields[0].get("id") == "kimi-k3"
 
 
 @respx.mock
@@ -85,7 +86,7 @@ async def test_models_dev_request_line_and_catalog_ua():
     request = route.calls[0].request
     assert "nova-ai-model-data" in request.headers["user-agent"]
     assert outcome.status == 200
-    assert outcome.models_fields[0]["id"] == "deepseek-v4"
+    assert outcome.models_fields[0].get("id") == "deepseek-v4"
 
 
 def _kimi_base_model() -> Model:
@@ -124,7 +125,7 @@ async def test_kimi_managed_sends_bearer_and_parses():
         )
     )
     context = RefreshModelsContext(
-        credential=OAuthCredential(access="tok", refresh="r", expires=9999999999999)
+        credential=oauth_credential(access="tok", refresh="r", expires=9999999999999)
     )
     models = await kimi_personalize([_kimi_base_model()], context)
     assert route.called
@@ -133,5 +134,8 @@ async def test_kimi_managed_sends_bearer_and_parses():
     assert request.headers["accept"] == "application/json"
     # 覆盖式合并：managed 活字段生效（级别表来自 valid_efforts）
     assert [m.id for m in models] == ["kimi-k3"]
-    assert models[0].thinking_level_map is not None
-    assert models[0].thinking_level_map.get("high") == "high"
+    merged = models[0]
+    assert isinstance(merged, Model)
+    levels = merged.thinking_level_map
+    assert levels is not None
+    assert levels.get("high") == "high"

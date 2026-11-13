@@ -370,7 +370,7 @@ class TestNormalizedErrorFields:
     def test_frozen(self):
         result = normalize_error(ValueError("x"))
         with pytest.raises(Exception):
-            result.kind = NovaErrorKind.INTERNAL  # type: ignore[misc]
+            setattr(result, "kind", NovaErrorKind.INTERNAL)
 
 
 class TestHeaderHelpers:
@@ -497,14 +497,27 @@ class TestHeadersOf:
     def test_reads_sdk_error_response_headers(self):
         """openai/anthropic 的 ``APIStatusError`` 实例无 ``.headers``——
         头在 ``.response.headers``（SDK 源码实证，归一函数注释在案）。"""
-        for cls in (openai.APIStatusError, anthropic.APIStatusError):
-            response = httpx.Response(
+        responses = (
+            httpx.Response(
                 429,
                 headers={"retry-after-ms": "2000"},
                 request=httpx.Request("POST", "http://x"),
-            )
-            error = cls("rate limited", response=response, body=None)
-            assert headers_of(error) is response.headers
+            ),
+            httpx2.Response(
+                429,
+                headers={"retry-after-ms": "2000"},
+                request=httpx2.Request("POST", "http://x"),
+            ),
+        )
+        openai_response, anthropic_response = responses
+        openai_error = openai.APIStatusError(
+            "rate limited", response=openai_response, body=None
+        )
+        anthropic_error = anthropic.APIStatusError(
+            "rate limited", response=anthropic_response, body=None
+        )
+        assert headers_of(openai_error) is openai_response.headers
+        assert headers_of(anthropic_error) is anthropic_response.headers
 
     def test_plain_error_returns_none(self):
         """无头可读的普通异常 → None（显式缺席语义）。"""

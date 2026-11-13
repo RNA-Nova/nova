@@ -18,7 +18,7 @@ import traceback
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from nova_agent import Agent
+from nova_ai.session_resources import cleanup_session_resources
 from nova_async import TaskTracker
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
@@ -120,12 +120,13 @@ from nova_protocol import (
     ImageContent,
     ModelThinkingLevel,
     NovaDiagnostic,
+    SystemMessage,
     TextContent,
     UserMessage,
     WarningEvent,
 )
 
-from nova_ai.session_resources import cleanup_session_resources
+from nova_agent import Agent
 
 # ============================================================================
 # Extension action 具体实现（替代 SimpleNamespace，提供类型安全）
@@ -389,19 +390,23 @@ class AgentSession:
             )
             return await runner.emit_prepare_next_turn(event)
 
-        async def should_stop_after_turn(ctx: Any) -> bool:
+        async def finish_turn(ctx: Any, signal: Optional[Any] = None) -> Any:
             runner = self._extension_runner
             if runner is None:
-                return False
+                return None
             event = TurnEndEvent(
                 turn_index=getattr(ctx, "turn_index", 0),
                 message=getattr(ctx, "message", None),
                 tool_results=getattr(ctx, "tool_results", []),
             )
-            # 必须取 .stop——结果对象本身是 dataclass 实例，恒为 truthy，
-            # 直接返回会让每个 turn 都被误判为"停止"（工具结果永远送不回 LLM）
+            # 扩展事件词汇保持 should_stop_after_turn；Agent 层统一使用
+            # finish_turn 的显式决策，不能把结果对象本身当布尔值返回。
             result = await runner.emit_should_stop_after_turn(event)
-            return bool(getattr(result, "stop", False))
+            if getattr(result, "stop", False):
+                from nova_agent import AgentTurnDecision
+
+                return AgentTurnDecision(action="end")
+            return None
 
         async def transform_context(
             messages: List[AgentMessage], signal: Optional[Any] = None
@@ -414,7 +419,7 @@ class AgentSession:
         self.agent.before_tool_call = before_tool_call
         self.agent.after_tool_call = after_tool_call
         self.agent.prepare_next_turn = prepare_next_turn
-        self.agent.should_stop_after_turn = should_stop_after_turn
+        self.agent.finish_turn = finish_turn
         self.agent.transform_context = transform_context
 
     def _get_allowed_extensions(self, extensions: List[Any]) -> List[Any]:
@@ -723,7 +728,19 @@ class AgentSession:
         self._base_system_prompt_options = (
             self.system_prompt_manager.build_system_prompt_options(context)
         )
-        self.agent.state.system_prompt = self._base_system_prompt
+        self._replace_leading_system_prompt(self._base_system_prompt)
+
+    def _replace_leading_system_prompt(self, prompt: str) -> None:
+        """替换转录首条 system 的文本，保留其工具声明与后续差分。"""
+        messages = list(self.agent.state.messages)
+        if messages and messages[0].role == "system":
+            messages[0] = messages[0].model_copy(update={"content": prompt})
+        elif prompt:
+            messages.insert(
+                0,
+                SystemMessage(content=prompt, timestamp=int(time.time() * 1000)),
+            )
+        self.agent.replace_messages(messages)
 
     def _enrich_environment_context(self, context: Any) -> None:
         """富化系统提示词环境段（设计定案 R5——会话条目即事实源）。
@@ -1570,11 +1587,11 @@ class AgentSession:
                 )
                 if before_result is not None:
                     if before_result.system_prompt is not None:
-                        self.agent.state.system_prompt = before_result.system_prompt
+                        self._replace_leading_system_prompt(before_result.system_prompt)
                     if before_result.messages:
                         messages.extend(before_result.messages)
             else:
-                self.agent.state.system_prompt = self._base_system_prompt
+                self._replace_leading_system_prompt(self._base_system_prompt)
 
         except Exception:
             if preflight_result is not None:

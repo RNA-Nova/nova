@@ -19,6 +19,7 @@ from nova_protocol import (
     AgentMessage,
     AssistantMessage,
     Message,
+    SystemMessage,
     Tool,
     ToolCall,
     ToolResultMessage,
@@ -29,14 +30,15 @@ from nova_protocol import (
 def default_convert_to_llm(messages: List[AgentMessage]) -> List[Message]:
     """Default converter: keep only LLM-compatible messages.
 
-    只保留框架三角色消息（``UserMessage``/``AssistantMessage``/
-    ``ToolResultMessage``）；包级自定义消息（``CustomAgentMessage`` 子类，
-    ``role`` 是包专属词汇）被过滤掉（与 TS defaultConvertToLlm 对齐）。
+    保留框架的 system/user/assistant/toolResult 消息；包级自定义消息
+    （``CustomAgentMessage`` 子类，``role`` 是包专属词汇）被过滤掉。
     """
     return [
         m
         for m in messages
-        if isinstance(m, (UserMessage, AssistantMessage, ToolResultMessage))
+        if isinstance(
+            m, (SystemMessage, UserMessage, AssistantMessage, ToolResultMessage)
+        )
     ]
 
 
@@ -146,6 +148,9 @@ def _coerce_primitive(value: Any, schema_type: str) -> Any:
         if isinstance(value, bool):
             # JSON 语义小写，而非 Python str(True) 的 "True"
             return "true" if value else "false"
+        if isinstance(value, float) and value.is_integer():
+            # JS String(5.0) == "5"（JSON 数字的整值浮点同形）
+            return str(int(value))
         if isinstance(value, (int, float)):
             return str(value)
         return value
@@ -171,8 +176,59 @@ def _is_changed(original: Any, candidate: Any) -> bool:
     return type(candidate) is not type(original) or candidate != original
 
 
+def _normalize_optional_nulls(value: Any, schema: Any) -> None:
+    """删除 optional 且不接受 null 的属性 null（先于类型矫正）。
+
+    数组只递归 items；对象只递归 properties。required 属性、nullable
+    schema 与 $ref 引用保持原值，交给后续完整校验处理。
+    """
+    if not isinstance(schema, dict):
+        return
+    if isinstance(value, list):
+        items = schema.get("items")
+        if isinstance(items, list):
+            for index, item in enumerate(value):
+                if index < len(items):
+                    _normalize_optional_nulls(item, items[index])
+        elif isinstance(items, dict):
+            for item in value:
+                _normalize_optional_nulls(item, items)
+        return
+    if not isinstance(value, dict):
+        return
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return
+
+    required = set(schema.get("required") or [])
+    for key, property_schema in properties.items():
+        if key not in value or not isinstance(property_schema, dict):
+            continue
+        if value[key] is None and key not in required:
+            accepts_null: Optional[bool] = None
+            if not isinstance(property_schema.get("$ref"), str):
+                try:
+                    accepts_null = jsonschema.Draft7Validator(property_schema).is_valid(
+                        None
+                    )
+                except Exception:
+                    accepts_null = None
+            if accepts_null is False:
+                del value[key]
+                continue
+        _normalize_optional_nulls(value[key], property_schema)
+
+
 def _coerce_with_union_schema(value: Any, schemas: List[Any]) -> Any:
-    """anyOf/oneOf：对每个子 schema 试矫正并用其校验，第一个通过的胜出。"""
+    """anyOf/oneOf：原值合法则保留，否则逐分支矫正并校验。"""
+    for sub in schemas:
+        if not isinstance(sub, dict):
+            continue
+        try:
+            if jsonschema.Draft7Validator(sub).is_valid(value):
+                return value
+        except Exception:
+            continue
     for sub in schemas:
         if not isinstance(sub, dict):
             continue
@@ -316,8 +372,10 @@ def validate_tool_arguments(tool: Tool, tool_call: ToolCall) -> Any:
         # 校验路径下 parameters 恒为 dict）
         return tool_call.arguments
 
-    # 克隆参数以避免修改原始数据，然后按 schema 矫正类型
-    args = _coerce_with_json_schema(copy.deepcopy(tool_call.arguments), schema)
+    # 克隆参数以避免修改原始数据；先归一 optional null，再按 schema 矫正类型
+    args = copy.deepcopy(tool_call.arguments)
+    _normalize_optional_nulls(args, schema)
+    args = _coerce_with_json_schema(args, schema)
 
     try:
         errors = list(jsonschema.Draft7Validator(schema).iter_errors(args))

@@ -19,7 +19,7 @@
 pip install nova-agent nova-ai
 ```
 
-本包 PyPI 名为 `nova-agent`，import 名为 `nova_agent`；运行时类型（`Model`、消息、流式事件、`AbortSignal` 等）由 `nova-ai` 提供，两个包需在同一环境中。
+本包 PyPI 名为 `nova-agent`，import 名为 `nova_agent`；跨组件类型（`Model`、消息、流式事件、`AbortSignal` 等）由 `nova-protocol` 提供，流式调用原语由 `nova-ai` 提供，几个包需在同一环境中。
 
 仓库内开发安装（monorepo 根目录统一环境）：
 
@@ -131,9 +131,10 @@ set_default_stream_fn(builtin_models().stream_simple)  # 鉴权从环境变量�
 
 `AgentMessage = Union[Message, CustomAgentMessage]`（开放集：判别联合 + 兜底成员 + `union_mode="left_to_right"`）。其中 `Message` 是 `nova_protocol` 的判别联合（判别键 `role`）：
 
+- `SystemMessage`：系统提示词与工具状态变更，携带 `content`、可选的 `sections`、`tools_added` / `tools_removed`；初始 prompt/tools 与对话中途的变更都记录在转录里；
 - `UserMessage`：用户输入，`content` 为字符串或 `TextContent` / `ImageContent` 列表；
 - `AssistantMessage`：助手回复，`content` 为 `TextContent` / `ThinkingContent` / `ToolCall` 列表，附带 `usage`、`stop_reason`、`error_message` 等元数据；
-- `ToolResultMessage`：工具结果，携带 `tool_call_id`、`tool_name`、`content`、`details`、`is_error`。
+- `ToolResultMessage`：工具结果，携带 `tool_call_id`、`tool_name`、`content`、`details`、`usage`、`duration_ms`、`is_error`。`structured_content` 只存在执行结果 / `AgentToolCallOutcome.result`，不进入转录。
 
 `CustomAgentMessage` 是留给应用的扩展基类（见「自定义消息类型」）。
 
@@ -147,9 +148,9 @@ AgentMessage[] → transform_context() → AgentMessage[] → convert_to_llm() �
 ```
 
 1. `transform_context(messages, signal)`：可选的异步变换，适合做上下文窗口裁剪、注入外部信息；
-2. `convert_to_llm(messages)`：把 `AgentMessage` 转成 LLM 可理解的消息。默认实现只保留 `user` / `assistant` / `toolResult` 三种 role，其余一律过滤——自定义消息类型必须在这里转换或丢弃。
+2. `convert_to_llm(messages)`：把 `AgentMessage` 转成 LLM 可理解的消息。默认实现保留 `system` / `user` / `assistant` / `toolResult` 四种 role，其余一律过滤——自定义消息类型必须在这里转换或丢弃。
 
-转换结果与 `system_prompt`、`tools` 一起组成 `nova_ai.Context`，交给 `stream_fn(model, context, options)` 调用。
+转换结果直接组成 `nova_protocol.Context(messages=...)`，交给 `stream_fn(model, context, options)` 调用。系统提示词和工具声明不再另行拼接：provider 从转录重放当前系统提示词与工具集，因此会话恢复和分支导航能忠实还原当时的指令状态。
 
 ## 事件流
 
@@ -223,6 +224,26 @@ prompt("读取 config.json")
 - 事件按订阅顺序逐个 `await` 监听器——`Agent` 路径上事件处理是**屏障**：`message_end` 的监听器全部完成后，循环才开始工具预检。
 - `agent_end` 是 run 的最后一个事件；`prompt()` / `wait_for_idle()` 在 `agent_end` 监听器全部结束后才落定，`state.is_streaming` 也保持 `True` 到那一刻。
 
+## Run 生命周期与任务所有权【现状】
+
+每次 `prompt()` / `continue_()` 都是独立的一代 run。活动守卫使用私有运行身份，不依赖公开可写的 `state.is_streaming`；旧 run 只能清理自己的任务槽，其迟到事件与状态归约不得污染新 run。被 abort/replace 接管的 run 不再走正常完成。
+
+任务按生命周期分作用域，不要求所有地方共用一本总账：
+
+- **request 级**：provider 自己管理 HTTP、driver 与 transport；Agent 负责消费关系。正常完成不能只等 `result()`，还要确认 driver 已收尾。外部取消或监听器异常等提前退出（abandonment）时，Agent 先通知 provider 清理，再 join；无响应时才硬取消。
+- **tool batch 级**：工具与 update 任务按批归属。正常路径等待全部结果，异常路径先停止接纳，再取消未完成 sibling，最后等全部任务落定；close 后晚到的 update 不得起跑。
+
+终态线性化顺序为：
+
+```text
+provider 收尾 → 工具批收尾 → 终态消息 → 监听器完成
+→ agent_end → 按 run 身份清理 → 公开 idle
+```
+
+`stream.result()` 返回不等于 driver/transport 已结束；`close()` 不等于取消，`cancel_all()` 不等于排水，`wait()` 才是排水。session 级后台任务归 harness 的会话属主，不与当前 run 共用跨代台账。
+
+补充行为契约【现状】：工具 update observer 异常转成工具错误结果；run 级 listener 异常使 run 失败并先排水。sequential 的临界区为 execute + update 排干 + after（终态产生），`tool_execution_end` 与 toolResult 通知在门外。`start_prompt()` 在返回 Task 前同步登记 active run，供立即 abort/wait 使用；`create_task(agent.prompt())` 仅调度，不代表 run 已接受。abort 先协作取消，超过 100ms 未收尾则硬取消并告警，不把清理超时伪装成全部成功。
+
 ## Agent 选项
 
 ```python
@@ -241,12 +262,15 @@ Agent(
     max_retry_delay_ms=None,   # 单次重试等待上限（毫秒），透传 nova_ai 请求层
     timeout=None,              # 请求超时（秒）
     tool_execution="parallel", # 工具执行模式
-    on_payload=None,           # 请求载荷回调：(params, model)，可返回替换载荷
-    on_response=None,          # 响应观测回调：(ProviderResponse, model)
+    identity=None,             # ClientIdentity：User-Agent 与 provider 归因头
+    on_payload=None,           # 请求载荷回调：(params, model_identity)，可返回替换载荷
+    on_response=None,          # 响应观测回调：(ProviderResponse, model_identity)
+    on_provider_stream_event=None,  # provider 原始流事件观测：(event, model_identity)
     before_tool_call=None,     # 见下
     after_tool_call=None,
+    prepare_request=None,
     prepare_next_turn=None,
-    should_stop_after_turn=None,
+    finish_turn=None,
 )
 ```
 
@@ -255,18 +279,18 @@ Agent(
 ```python
 initial_state={
     "system_prompt": "你是一个助手。",
-    "model": model,                     # nova_ai.Model（也可以是 dict，自动校验为 Model）
+    "model": model,                     # nova_protocol.Model（也可以是 dict，自动校验为 Model）
     "thinking_level": ModelThinkingLevel.MEDIUM,
     "tools": [my_tool],
     "messages": [],
 }
 ```
 
-传入 `AgentState` 时只拷贝这五个配置字段，运行时字段（`is_streaming` 等）一律重置。
+传入 `AgentState` 时只拷贝这五个配置字段，运行时字段（`is_streaming` 等）一律重置。初始 `system_prompt` / `tools` 会折叠成首条 `SystemMessage`；若 `messages` 已以 system 消息开头，则转录自身优先。
 
 ### Hooks
 
-四个 hook 在构造时注入，签名均为 `(ctx, signal)`，可同步可异步，返回 `None` 表示不改变默认行为。
+五个 hook 在构造时注入，Agent 层签名均为 `(ctx, signal)`，可同步可异步，返回 `None` 表示不改变默认行为。
 
 **`before_tool_call(ctx, signal)`** — 参数校验通过之后、`execute` 之前调用（此时 `tool_execution_start` 已发出）。`ctx` 字段：`assistant_message`、`tool_call`、`args`（校验矫正后）、`context`。
 
@@ -290,7 +314,9 @@ def after(ctx, signal):
 
 hook 自身抛异常时，结果替换为错误结果（`is_error=True`）。
 
-**`prepare_next_turn(ctx, signal)`** — `turn_end` 发出后、下一轮 LLM 调用前调用。`ctx` 字段：`message`、`tool_results`、`context`、`new_messages`、`turn_index`。返回 `AgentLoopTurnUpdate` 替换下一轮运行时：
+**`prepare_request(ctx, signal)`** — 每次 provider 请求前运行，包括第一轮。`ctx` 字段为 `context`、`model`、`thinking_level`；返回 `AgentRequestUpdate(context=..., model=..., thinking_level=...)` 替换本次及后续请求运行时，不追加消息。
+
+**`prepare_next_turn(ctx, signal)`** — 仅在已确定会继续时、下一轮 `turn_start` 前运行；自然收尾的最终回合不会调用。`ctx` 字段：`message`、`tool_results`、`context`、`new_messages`、`turn_index`。返回 `AgentLoopTurnUpdate` 替换下一轮运行时：
 
 ```python
 def prepare(ctx, signal):
@@ -299,11 +325,11 @@ def prepare(ctx, signal):
     return None  # 不变
 ```
 
-可替换字段：`context`（整个 `AgentContext`）、`model`、`thinking_level`。
+可替换字段：`context`（整个 `AgentContext`）、`model`、`thinking_level`；`messages` 可在下一轮请求前追加到转录。
 
-**`should_stop_after_turn(ctx, signal)`** — `prepare_next_turn` 之后、轮询 steering/follow-up 队列之前调用，`ctx` 与上者相同。返回 `True` 时循环发出 `agent_end` 优雅退出：不中止 provider 流、不取消工具（它们已完成），只是不再发起新的 LLM 调用。适合做「上下文将满，主动收尾」类控制。
+**`finish_turn(ctx, signal)`** — 工具完成后、`turn_end` 前运行，`ctx` 与 `prepare_next_turn` 相同。返回 `AgentTurnDecision(action="end")` 优雅结束；返回 `action="continue"` 时，若没有工具结果、steering 或 follow-up 等自然续跑输入，就补一次仅含当前上下文的请求。错误/中止回合仍会调用该 hook 供观测，但始终硬退出，决策被忽略。
 
-> 低层 `AgentLoopConfig` 中的同名 hook 签名不同：`prepare_next_turn` / `should_stop_after_turn` 只收 `ctx` 一个参数（signal 就是调用方传给 `agent_loop` 的那个，由调用方自行持有）；`before_tool_call` / `after_tool_call` 与 Agent 层同为 `(ctx, signal)`。
+> 低层 `AgentLoopConfig` 中只有 `prepare_next_turn` 的签名不同：它只收 `ctx`，signal 由调用方自行持有；其余四个 hook 与 Agent 层同为 `(ctx, signal)`。
 
 ## Agent 状态
 
@@ -311,32 +337,34 @@ def prepare(ctx, signal):
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `system_prompt` | `str` | 系统提示词，默认 `""` |
+| `system_prompt` | `str` | 只读属性：重放转录中的 system 消息得到当前提示词，默认 `""` |
 | `model` | `Model` | 当前模型；未配置时是占位模型（`id="unknown"`），`state.has_configured_model()` 返回 `False`，`prompt()` 会 fail-fast |
 | `thinking_level` | `ModelThinkingLevel` | 思考级别，默认 `OFF` |
 | `tools` | `List[AgentTool]` | 可用工具 |
-| `messages` | `List[AgentMessage]` | 完整对话历史（含 toolResult 与自定义消息） |
+| `messages` | `List[AgentMessage]` | 完整转录（含 system、toolResult 与自定义消息） |
 | `is_streaming` | `bool` | 是否有 run 在进行 |
 | `streaming_message` | `AgentMessage \| None` | 流式期间当前部分 assistant 消息 |
 | `pending_tool_calls` | `Set[str]` | 执行中的 `tool_call_id` |
 | `error_message` | `str \| None` | 最近一轮 assistant 消息的错误文本 |
 
-`tools` 与 `messages` 赋值时会**拷贝顶层数组**（防止外部引用污染内部状态）；对 getter 返回的数组原地 `append` / `clear` 则直接改当前状态。
+`tools` 与 `messages` 赋值时会**拷贝顶层数组**（防止外部引用污染内部状态）；对 getter 返回的数组原地 `append` / `clear` 则直接改当前状态。系统提示词没有第二份可变状态，也不再提供 `set_system_prompt()`；中途变更通过 `SystemMessage` 进入转录。
 
 ## 方法
 
 | 方法 | 说明 |
 |---|---|
 | `await prompt(input, images=None)` | 发起对话。`input` 为 `str`（可附 `images: List[ImageContent]`，如 `ImageContent(data=<base64>, mime_type="image/jpeg")`）、单条 `AgentMessage` 或 `AgentMessage` 列表。运行中调用、或未配置模型时抛 `RuntimeError` |
+| `start_prompt(input, images=None)` | 同步登记 active run 并返回后台 `asyncio.Task`，供立即 `abort()` / `wait_for_idle()` 使用；参数与 `prompt()` 相同 |
 | `await continue_()` | 从当前上下文继续（事件序列见上文）；无可继续内容时抛 `RuntimeError` |
-| `abort()` | 中断当前 run：触发 `AbortSignal`，传播到 provider 流与工具 |
+| `abort()` | 先协作取消；超过 100ms 未收尾则硬取消并告警 |
 | `await wait_for_idle()` | 等待当前 run 落定；等待方自身被取消不会传染给 run（`asyncio.shield`） |
 | `subscribe(fn)` | 订阅事件，返回退订函数 |
-| `set_system_prompt(v)` / `set_model(m)` / `set_thinking_level(l)` / `set_tools(ts)` | 状态修改 |
+| `set_model(m)` / `set_thinking_level(l)` / `set_tools(ts)` | 状态修改；工具集变化会在下次请求前记录成转录差分 |
 | `replace_messages(ms)` / `append_message(m)` / `clear_messages()` | 消息操作（`replace` 拷贝顶层数组） |
-| `reset()` | 清空消息、双队列与错误状态；运行中调用抛 `RuntimeError` |
+| `peek_queued_messages()` | 预览下一条待消费队列消息，不从队列移除 |
+| `reset()` | 清空消息、双队列与错误状态，保留当前折叠后的系统提示词与工具基线；运行中调用抛 `RuntimeError` |
 
-属性：`state`、`signal`（当前 run 的 `AbortSignal`，空闲时 `None`）、`session_id`、`thinking_budgets`、`transport`、`steering_mode` / `follow_up_mode`（property，附 `set_/get_` 方法）可读写；`tool_execution`、`stream_fn`、`convert_to_llm`、`transform_context`、`get_api_key`、`max_retry_delay_ms`、`on_payload`、`on_response` 与四个 hook 是普通属性，两次 run 之间可直接赋值。
+属性：`state`、`signal`（当前 run 的 `AbortSignal`，空闲时 `None`）、`session_id`、`thinking_budgets`、`transport`、`steering_mode` / `follow_up_mode`（property，附 `set_/get_` 方法）可读写；`tool_execution`、`stream_fn`、`convert_to_llm`、`transform_context`、`get_api_key`、`max_retry_delay_ms`、`identity`、`on_payload`、`on_response`、`on_provider_stream_event` 与五个 hook 是普通属性，两次 run 之间可直接赋值。
 
 `prompt()` / `continue_()` 对 provider 失败等运行期异常**不向外抛**：框架生成一条 `stop_reason="error"`（已中断则为 `"aborted"`）的 assistant 失败消息，补发 `message_start` / `message_end` / `turn_end` / `agent_end` 后正常收尾，错误文本可从 `state.error_message` 读取。
 
@@ -386,7 +414,9 @@ class SquareTool(AgentTool):
         )
 ```
 
-`AgentToolResult` 字段：`content`（`TextContent` / `ImageContent` 列表，回给模型）、`details`（任意 JSON，供 UI 渲染或日志）、`is_error`（默认 `False`，预期内失败——非零退出、文件不存在等——置 `True`）、`terminate`（提前终止提示，见下）。
+`AgentToolResult` 字段：`content`（`TextContent` / `ImageContent` 列表，回给模型）、`details`（任意 JSON，供 UI 渲染或日志）、`structured_content`（匹配工具 `output_schema` 的程序化结果，不进模型上下文）、`usage`（工具自身用量，不并入主 LLM 用量）、`is_error`（默认 `False`，预期内失败置 `True`）、`terminate`（提前终止提示，见下）。实际执行的单调时钟耗时会同步写入 `ToolResultMessage.duration_ms` 与 `tool_execution_end.duration_ms`。
+
+工具还可声明 `output_schema`（`structured_content` 的 JSON Schema）与 `replay="never" | "safe"`（结果未知时是否允许持久化宿主重放）。`after_tool_call` 只替换 `content` 时会丢弃旧 `structured_content`，避免文本与结构化结果指向不同事实。
 
 ### 参数校验与矫正
 
@@ -399,11 +429,11 @@ class SquareTool(AgentTool):
 
 ### 执行进度
 
-`on_update(partial_result)` 上报进度，每次调用产生一条 `tool_execution_update` 事件；可从任意线程调用（框架自动编组回事件循环）。`tool_execution_end` 保证排在所有 update 之后。
+`on_update(partial_result)` 上报进度，每次调用产生一条 `tool_execution_update` 事件；可从任意线程调用（框架自动编组回事件循环）。`tool_execution_end` 保证排在所有 update 之后。update observer 异常会转成工具错误结果；run 级 listener 异常则使 run 失败并先完成子任务排水。
 
 ### 执行模式
 
-- `tool_execution="parallel"`（默认）：同批调用按提交顺序串行完成预检（`prepare_arguments` → 校验 → `before_tool_call`），执行期经公平读写门——普通工具共享读门并发执行；声明了 `execution_mode="sequential"` 的工具取写门，等场内并发排空后独占执行。批内混有 sequential 工具**不会**把整批毒化为串行。
+- `tool_execution="parallel"`（默认）：同批调用按提交顺序串行完成预检（`prepare_arguments` → 校验 → `before_tool_call`），执行期经公平读写门——普通工具共享读门并发执行；声明了 `execution_mode="sequential"` 的工具取写门，等场内并发排空后独占执行。临界区为 execute + update 排干 + after（终态产生），`tool_execution_end` 与 toolResult 通知在门外。批内混有 sequential 工具**不会**把整批毒化为串行。
 - `tool_execution="sequential"`：全批严格一个接一个（预检、执行、落账都完成才到下一个）。
 
 ### terminate 提前终止
@@ -419,6 +449,10 @@ class SquareTool(AgentTool):
 
 以上路径都不会中断 run——错误 toolResult 进入上下文，由模型在下一轮自行处理。长任务工具应定期检查 `signal.aborted` 并提前退出。
 
+### 单次工具调用
+
+`run_tool_call(tool_call, RunToolCallOptions(...))` 复用同一套参数校验、before/after 钩子与进度回调，但不发 Agent 事件、不写转录，适合子 Agent 或独立工具运行时。`RunToolCallOptions` 需要提供 `tools`、`assistant_message`、`context`，可选 `signal`、`on_update`、`before_tool_call`、`after_tool_call`；返回的 `AgentToolCallOutcome` 含最终 `result`、`is_error` 与 `duration_ms`，并从包根门面导出。
+
 ## 自定义消息类型
 
 继承 `CustomAgentMessage`（住 `nova_protocol`）定义应用私有消息（UI 通知、审计记录等）：
@@ -433,7 +467,7 @@ class NotificationMessage(CustomAgentMessage):
     timestamp: int = 0
 ```
 
-自定义消息会进入 `state.messages` 与事件流，但 LLM 看不懂——默认 `convert_to_llm` 会过滤非框架三角色的消息。需要让模型感知时，自定义 `convert_to_llm` 把它们转成标准消息：
+自定义消息会进入 `state.messages` 与事件流，但 LLM 看不懂——默认 `convert_to_llm` 会过滤 system / user / assistant / toolResult 之外的消息。需要让模型感知时，自定义 `convert_to_llm` 把它们转成标准消息：
 
 ```python
 def convert(messages):
@@ -454,10 +488,12 @@ agent = Agent(convert_to_llm=convert)
 ```python
 from nova_agent import AgentContext, AgentLoopConfig, agent_loop
 from nova_ai import SimpleStreamOptions
-from nova_protocol import UserMessage
+from nova_protocol import SystemMessage, UserMessage
 
 config = AgentLoopConfig(stream_options=SimpleStreamOptions(), model=model)
-context = AgentContext(system_prompt="你是一个简洁的助手", messages=[])
+context = AgentContext(
+    messages=[SystemMessage(content="你是一个简洁的助手")]
+)
 
 stream = agent_loop(
     [UserMessage(role="user", content="你好")],
@@ -477,9 +513,13 @@ new_messages = await stream.result()  # 本次 run 新增的全部消息
 - `agent_loop_continue(context, config, signal=None, stream_fn=None)`：不加新消息续跑；`context` 为空或尾消息是 `assistant` 时抛 `ValueError`；
 - `run_agent_loop(prompts, context, config, emit, signal=None, stream_fn=None)` / `run_agent_loop_continue(context, config, emit, signal=None, stream_fn=None)`：async 函数形态，事件直接推给 `emit` sink，返回新消息列表——前两个 facade 就是在它们之上包了一层 `AgentEventStream`。
 
-`AgentLoopConfig` 字段：`stream_options`（`SimpleStreamOptions`）与 `model` 必填，其余可选——`convert_to_llm`、`transform_context`、`get_api_key`、`before_tool_call`、`after_tool_call`、`prepare_next_turn`、`should_stop_after_turn`、`get_steering_messages`、`get_follow_up_messages`、`tool_execution`。
+`AgentContext` 只有 `messages` 与可选 `tools`，没有独立的 `system_prompt` 字段。`AgentLoopConfig` 的 `stream_options`（`SimpleStreamOptions`）与 `model` 必填，其余可选——`convert_to_llm`、`transform_context`、`get_api_key`、`before_tool_call`、`after_tool_call`、`prepare_request`、`prepare_next_turn`、`finish_turn`、`get_steering_messages`、`get_follow_up_messages`、`tool_execution`。
 
-与 `Agent` 类的取舍：低层流是**观察式**的——事件 push 进流后循环立即继续推进，不等待消费者处理；`context.messages` 由循环就地更新。`Agent` 类则在循环关键路径上 `await` 每个监听器（屏障语义），并自动归约 `state`。需要把事件转发进自己的管道、或完全自管状态时用低层 API；需要「`message_end` 处理完才开始工具预检」这类屏障、或现成的状态容器时用 `Agent`。
+与 `Agent` 类的取舍：低层流是**观察式**的——事件 push 进流后循环立即继续推进，不等待消费者处理。`agent_loop()` 在包含初始消息的工作副本上运行，原 `context` 不接收本次新消息；`agent_loop_continue()` 则复用并续写原 `context.messages`。`Agent` 类在循环关键路径上 `await` 每个监听器（屏障语义），并自动归约 `state`。需要把事件转发进自己的管道、或完全自管状态时用低层 API；需要「`message_end` 处理完才开始工具预检」这类屏障、或现成的状态容器时用 `Agent`。
+
+## 服务端代理流
+
+`stream_proxy(model, context, ProxyStreamOptions(proxy_url=..., auth_token=...))` 经 `POST {proxy_url}/api/stream` 调用服务端代理，把 SSE 中的判别联合事件重建为标准 `AssistantMessageEventStream`。它增量重建文本、思考与工具参数，拒绝非法 `contentIndex`，连接在终态事件前断开会产生错误终态；`auth_token` 只进入 Authorization 请求头，不进入请求体或配置的 `repr`。
 
 ## 示例
 
@@ -489,7 +529,7 @@ new_messages = await stream.result()  # 本次 run 新增的全部消息
 |---|---|
 | `01_quickstart.py` | Agent 最小用法：创建、订阅事件、prompt、状态查看 |
 | `02_custom_tools.py` | 继承 `AgentTool` 实现自定义工具；JSON Schema 校验与类型矫正 |
-| `03_hooks.py` | 四个 hook：`before_tool_call` 拦截、`after_tool_call` 改写、`prepare_next_turn`、`should_stop_after_turn` |
+| `03_hooks.py` | 五个 hook：工具 before/after、`prepare_request`、`prepare_next_turn`、`finish_turn` |
 | `04_steering_followup.py` | `steer()` 运行中插入、`follow_up()` 停止前排队、队列 drain 模式 |
 | `05_abort_continue.py` | `abort()` 取消、`wait_for_idle()` 的 shield 语义、`continue_()` 继续 |
 | `06_agent_loop_lowlevel.py` | 低层 `agent_loop()`：`AgentEventStream` 自管状态 |
@@ -505,8 +545,8 @@ pixi run -e dev test-agent
 cd packages/nova_agent
 pytest tests -m "not integration"
 
-# 真实模型集成测试（需 VOLCENGINE_API_KEY）
-pytest tests -m integration
+# 真实模型集成测试（env key 优先，auth.json 兜底；单探针、特性文件）
+pixi run -e dev test-agent-integration
 ```
 
 ## License

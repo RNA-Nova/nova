@@ -5,8 +5,6 @@
 ``{}``（扩展注入消息、bash 用户工具终态卡经 RPC 到不了前端的根因）。
 """
 
-from typing import Literal
-
 from nova_protocol import (
     AgentEndEvent,
     CustomAgentMessage,
@@ -20,14 +18,14 @@ class _FakeCustomMessage(CustomAgentMessage):
 
     custom_type: str
     content: str
-    role: Literal["custom"] = "custom"
+    role: str = "custom"
 
 
 class _FakeBashMessage(CustomAgentMessage):
     command: str
     output: str
     exit_code: int
-    role: Literal["bashExecution"] = "bashExecution"
+    role: str = "bashExecution"
 
 
 def test_message_end_keeps_custom_subclass_fields():
@@ -63,3 +61,16 @@ def test_agent_end_messages_list_keeps_fields():
     messages = event.dump_wire()["messages"]
     assert messages[0]["customType"] == "info"
     assert messages[0]["content"] == "c1"
+
+
+def test_agent_events_reject_field_mutation():
+    import pytest
+    from nova_protocol import AgentStartEvent, MessageStartEvent, UserMessage
+
+    started = AgentStartEvent()
+    with pytest.raises(Exception):
+        setattr(started, "type", "changed")
+
+    message_started = MessageStartEvent(message=UserMessage(content="original"))
+    with pytest.raises(Exception):
+        setattr(message_started, "message", UserMessage(content="changed"))

@@ -14,6 +14,7 @@ import asyncio
 import os
 from types import SimpleNamespace
 
+from nova_ai import EventStream, builtin_models, create_models_manager, create_provider
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -26,8 +27,6 @@ from nova_protocol import (
     TextContent,
     UserMessage,
 )
-
-from nova_ai import EventStream, builtin_models, create_models_manager, create_provider
 
 
 def make_echo_api():
@@ -78,9 +77,8 @@ async def demo_custom():
         context_window=8192,
         max_tokens=4096,
     )
-    from nova_protocol import ProviderAuth
-
     from nova_ai.auth.helpers import env_api_key_auth
+    from nova_protocol import ProviderAuth
 
     provider = create_provider(
         id="my-provider",

@@ -4,7 +4,8 @@
 流式事件、枚举与 compat、auth 词汇（含 `RedactedString` 脱敏类型）、模型目录存储条目
 （`ModelsStoreEntry`）、agent 循环事件与 agent 消息词汇（`agent_events.py`：AgentEvent
 家族 + AgentMessage 开放集 + CustomAgentMessage 基座 + AgentToolResult +
-`dump_agent_message`）、诊断家族词汇（`enums.py` 的 `NovaErrorKind`/`WarningKind`、
+`dump_agent_message`）、客户端身份与归因词汇（`identity.py` 的 `ClientIdentity`/
+`ClientAttribution`）、诊断家族词汇（`enums.py` 的 `NovaErrorKind`/`WarningKind`、
 `diagnostics.py` 的 `NovaDiagnostic`/`WarningEvent`）、exec-server 词汇域六模块
 （`exec_server_config`/`environment`/`intent`/`policy`/`verdict`/`wire`——execpolicy
 裁决引擎与安全白名单的 Python 移植住所）、出口清洗器（`sanitize.py` 的

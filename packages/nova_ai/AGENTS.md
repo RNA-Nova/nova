@@ -87,7 +87,9 @@ src/nova_ai/
 │   │                        #   prompt_cache / copilot_headers / user_agent / timeouts /
 │   │                        #   constrained.py（跨协议 strict 引擎）+ openrouter_cost.py +
 │   │                        #   openai_request.py（OpenAI SDK kwargs/extra_body 出货边界）+
-│   │                        #   transcript——转录折叠机：normalize/resolve/get_current_tools/
+│   │                        #   identity.py（ClientIdentity 合并、UA 与提供方归因头）+
+│   │                        #   transcript——转录折叠机：normalize/resolve/get_current_system_prompt/
+│   │                        #   get_current_tools/get_tool_state_changes/to_tool_declaration/
 │   │                        #   resolve_transcript_tools 三模式分工，pi transcript.ts 对位）
 │   ├── openai_completions/  # OpenAI Completions（模块即满足 ProviderStreams）
 │   │                        #   compat / messages / client / options / params / reasoning / _stream 分件
@@ -157,8 +159,9 @@ src/nova_ai/
 1. **ModelsManager 集合 + Provider 单元**  
    不存在全局注册表。`ModelsManager`（`gateway/models.py`）持有按 id 注册的 `Provider` 实例，负责鉴权解析（`getAuth`）、动态模型刷新（`refresh`）、登录/登出（`login`/`logout`）与 stream/generate_images/classify 派发（`_apply_auth` 合并 auth/model/options 的 apiKey、headers、env 后调用 `provider.stream*()`）。`stream*()` 同步返回事件流，auth 在后台异步解析，失败以 error 事件结束（`lazy_stream`）。Provider 找不到 API 实现时同样返回 error 流而非抛异常（StreamFunction 契约）。动态性为能力字段：`Provider.refresh_models` 为 None 即静态，注入策略闭包即动态——**刷新治理只有一份**（`gateway/strategies.py` 的策略工厂，两形态：overlay 纯站六件套 / personalized 站+账户钩子，pi `withRemoteCatalog`/`withPersonalizedCatalog` 对位），`create_provider` 装配链：`personalize` → personalized 策略（+replace 读取位）；仅 `catalog_source` → overlay 策略出生自带；皆无 → 静态（要自定义刷新就实现 `refresh_models` 裸口袋，pi 同款）。目录站为运行时共享资源：manager 持有 `CatalogServices` 容器（单站/dict 双形态，对位 `ApiImpl`），按 `Provider.catalog_source` 路由并经 `partial(service.fetch, provider.id)` 绑定后发放进 `RefreshModelsContext.catalog_fetch`——refresh 实现的可选能力；kimi/火山的私有鉴权拉取（managed 订阅源、ark 在售筛选）是各家目录的 `personalize` 钩子（装配参数，类型无痕），凭据与公开站都经 context 获取。
 
-2. **事件流模型**  
+2. **事件流模型与请求生命周期**
    所有流式调用返回 `AssistantMessageEventStream`（`streaming.py`）。生产者 `push(event)`，消费者 `async for` 迭代；收到 `DoneEvent` / `ErrorEvent` 时解析出最终 `AssistantMessage`，可用 `await stream.result()` 获取。多个 result 等待者经 `asyncio.shield` 共享终值，单个等待者取消不毒化 Future；本流见证的响应由流写入 `duration_ms`，旧/延迟消息不盖戳。`end()` 后不可再迭代。
+   `drive()` 以流为属主持有 1:1 驱动 Task，并在驱动退出时关流；但 `result()` 返回不等于驱动或 transport 已收尾。provider 负责自己的 HTTP、driver 与资源清理，消费者负责在提前退出（abandonment）时发出取消通知并 join——正常完成、abort、外部取消与监听器异常都必须让请求落定。`stream.task` 是等待与硬取消兜底口，不能只凭 `stream.done` 推断资源已释放。
 
 3. **协议实现（聊天两个 + 非流式图像/分类）**
    `api_impls/openai_completions/`（官方 `openai.AsyncOpenAI`）与 `api_impls/anthropic_messages/`（官方 `anthropic.AsyncAnthropic`，httpx2 底座）——模块即满足 `ProviderStreams` 契约；分件同构（compat / messages / client / params / _stream，openai 另有 reasoning）。非流式操作由 `openrouter_images.py` 与 `typesafe_system_one.py` 分别满足 `ProviderImages` / `ProviderClassifier`，错误与取消直接落在 `AssistantImages` / `ClassifierResult`。openai_completions 的实现要点：

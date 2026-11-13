@@ -132,10 +132,17 @@ class TestConvertToolsWiring:
             [_tool(self._BAD_SCHEMA)],
             OpenAICompletionsCompat(requires_moonshot_flavored_schema=True),
         )
-        params = tools[0]["function"]["parameters"]
-        assert params["type"] == "object"
-        assert params["anyOf"][0]["type"] == "object"
+        function = tools[0].get("function")
+        assert function is not None
+        params = function.get("parameters")
+        assert params is not None
+        assert params.get("type") == "object"
+        any_of = params.get("anyOf")
+        assert isinstance(any_of, list)
+        assert any_of[0].get("type") == "object"
 
     def test_default_compat_passes_verbatim(self):
         tools = convert_tools([_tool(self._BAD_SCHEMA)], OpenAICompletionsCompat())
-        assert tools[0]["function"]["parameters"] == self._BAD_SCHEMA
+        function = tools[0].get("function")
+        assert function is not None
+        assert function.get("parameters") == self._BAD_SCHEMA

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple, cast
 
 import httpx2
 from anthropic import AsyncAnthropic, omit
-from nova_protocol import Context, Model, ProviderEnv, ProviderHeaders
+from nova_protocol import ClientIdentity, Context, Model, ProviderEnv, ProviderHeaders
 
 from ...utils.errors import LoginRequiredError
 from ...utils.provider_env import get_provider_env_value
@@ -20,8 +20,8 @@ from .._shared.copilot_headers import (
     build_copilot_dynamic_headers,
     has_copilot_vision_input,
 )
+from .._shared.identity import get_identity_headers
 from .._shared.transcript import get_current_tools, normalize_context
-from .._shared.user_agent import get_nova_user_agent
 from .compat import ResolvedAnthropicCompat
 from .params import (
     INLINE_TOOLS_BETA,
@@ -250,6 +250,7 @@ def create_client(
     thinking_enabled: bool = False,
     http_client=None,
     federation: Optional[Dict[str, Any]] = None,
+    identity: Optional[ClientIdentity] = None,
 ) -> Tuple[AsyncAnthropic, bool]:
     """创建 Anthropic 客户端（对齐 TS createClient），返回 ``(client, is_oauth)``。
 
@@ -257,7 +258,7 @@ def create_client(
     生产恒 None 由 SDK 自造）。
     """
     headers: ProviderHeaders = {
-        "User-Agent": get_nova_user_agent(),
+        **get_identity_headers(model, identity),
         "accept": "application/json",
     }
     beta_features: List[str] = []

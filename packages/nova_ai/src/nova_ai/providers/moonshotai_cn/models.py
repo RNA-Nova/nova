@@ -7,21 +7,22 @@ import json
 from importlib.resources import files
 from typing import Dict
 
-from nova_protocol import ClassifierModel, ImageModel, Model
-
 from nova_ai.model_catalog import (
     flatten_chat_model_catalog,
     flatten_classifier_model_catalog,
     flatten_image_model_catalog,
 )
+from nova_protocol import ClassifierModel, ImageModel, Model
 
 _DATA = json.loads(
     (files("nova_ai.providers") / "data" / "moonshotai-cn.json").read_text("utf-8")
 )
-MOONSHOTAI_CN_MODELS: Dict[str, Model] = flatten_chat_model_catalog("moonshotai-cn", _DATA)
+MOONSHOTAI_CN_MODELS: Dict[str, Model] = flatten_chat_model_catalog(
+    "moonshotai-cn", _DATA
+)
 MOONSHOTAI_CN_IMAGE_MODELS: Dict[str, ImageModel] = flatten_image_model_catalog(
     "moonshotai-cn", _DATA
 )
-MOONSHOTAI_CN_CLASSIFIER_MODELS: Dict[str, ClassifierModel] = flatten_classifier_model_catalog(
-    "moonshotai-cn", _DATA
+MOONSHOTAI_CN_CLASSIFIER_MODELS: Dict[str, ClassifierModel] = (
+    flatten_classifier_model_catalog("moonshotai-cn", _DATA)
 )

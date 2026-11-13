@@ -216,12 +216,12 @@ nova_harness/
 ### 4. `core/agent_session/agent.py` — AgentSession
 专注于**单一会话**内的运行时逻辑：
 - 直接持有 `_session_manager`、`_settings_manager`、`_model_runtime`、`_resource_loader`、`_system_prompt_manager`、`_cwd`。
-- 在初始化时从 `ResourceLoader` 创建 `ExtensionRunner`，并把 Agent 层的扩展 hook（`before_tool_call` / `after_tool_call` / `transform_context` / `on_payload` / `on_response` / `prepare_next_turn` / `should_stop_after_turn`）直接绑定到 runner。
+- 在初始化时从 `ResourceLoader` 创建 `ExtensionRunner`，并把 Agent 层的扩展 hook（`before_tool_call` / `after_tool_call` / `transform_context` / `on_payload` / `on_response` / `prepare_next_turn` / `finish_turn`）绑定到 runner；扩展事件 `should_stop_after_turn` 在适配层转换为 `AgentTurnDecision(action="end")`。
 - `bind_extensions()`：与 TS `AgentSession.bindExtensions()` 对齐，绑定扩展上下文、发出 `session_start`，并调用 `resources_discover` 把扩展贡献的 skill/prompt/theme 路径合并到 `ResourceLoader`。
 - `execute_command()` / `prompt()` 中的 slash command 解析：支持扩展通过 `/command args` 执行自定义命令；`get_slash_commands()` 同时暴露扩展命令与 `skill:name` 命令。
 - `/skill:name` 命令展开：`prompt()`、`steer()`、`follow_up()` 在启用模板展开时，通过 `core.harness.skills.expand_skill_command()` 把 `/skill:name args` 展开为 XML skill block。
 - `reload_extensions()`：关闭当前 runner 并重新加载扩展，保留 flag 值。
-- 系统提示词重建委托给 `SystemPromptManager`：在初始化、`change_agent()`、`set_active_tools_by_name()`、`reload()` 时触发 `_rebuild_system_prompt()`。
+- 系统提示词重建委托给 `SystemPromptManager`：在初始化、`change_agent()`、`set_active_tools_by_name()`、`reload()` 时触发 `_sync_system_prompt()`；文本写入转录首条 `SystemMessage`，保留工具声明与后续差分，不直接写只读的 `agent.state.system_prompt`。
 - `prompt()` 每轮允许扩展通过 `before_agent_start` 事件临时覆盖系统提示词（仅影响当轮）。
 - 事件订阅/发布（`subscribe` / `_emit`）。
 - 工具注册与白名单（`set_active_tools_by_name`）。
@@ -290,7 +290,7 @@ nova_harness/
 - 扩展的运行期动作面在 `ExtensionContext`（事件 handler 的 `ctx`）上：`exec(command, args, options?)` 执行 shell 命令并返回 `ExecResult`；`set_model(model)` 返回 `bool`（缺少 API key 时返回 `False`）；`get_active_tools()` / `get_all_tools()` / `set_active_tools()` 查询与切换工具激活状态；`get_commands()` 返回 `SlashCommandInfo[]`；`send_message` / `send_user_message` / `append_entry` / `set_label` 等会话动作同在该处。
 - `NovaExtensionAPI.register_command` / `register_shortcut` / `register_flag` 采用 TS 风格的 `(name/key, options)` 调用。
 - `session_start` 由 `AgentSession.bind_extensions()` 发出（与 TS 参考实现一致），随后触发 `resources_discover`。
-- 支持事件：`session_start` / `session_shutdown` / `session_before_compact` / `session_compact` / `session_before_tree` / `session_tree`，以及 `prepare_next_turn` / `should_stop_after_turn`，`AgentEvent` 桥接、`tool_call` / `tool_result` / `context` / `input` / `before_provider_request` / `after_provider_response` 等 hook。
+- 支持事件：`session_start` / `session_shutdown` / `session_before_compact` / `session_compact` / `session_before_tree` / `session_tree`，以及扩展词汇 `prepare_next_turn` / `should_stop_after_turn`（分别适配到 Agent 的 `prepare_next_turn` / `finish_turn`），`AgentEvent` 桥接、`tool_call` / `tool_result` / `context` / `input` / `before_provider_request` / `after_provider_response` 等 hook。
 - 扩展可通过 `NovaExtensionAPI`（`nova`）注册 provider、命令、快捷键、flag；**工具统一走 package tool 路径，不再通过扩展注册**。
 - 扩展目录：项目级 `<cwd>/.nova/backend/extensions/`、全局 `~/.nova/agent/backend/extensions/`（前后端分治 §9 后端半区），以及 `Settings.extensions` 显式配置的路径。
 - `ExtensionContext` 暴露 `ui`（`UIContext`）、`has_ui`（是否有前端挂在通道上，trust 决议等早期判断用它）以及 `is_project_trusted()` 等上下文 action，扩展可据此决定是否执行需要用户交互或高权限的操作。

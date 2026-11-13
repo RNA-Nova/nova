@@ -1,8 +1,11 @@
 """GitHub Copilot 请求头构造测试（对齐 TS github-copilot-headers.ts）。"""
 
+from typing import List
+
 from nova_protocol import (
     AssistantMessage,
     ImageContent,
+    Message,
     TextContent,
     ToolResultMessage,
     UserMessage,
@@ -20,18 +23,18 @@ class TestInferCopilotInitiator:
         assert infer_copilot_initiator([]) == "user"
 
     def test_last_user_message_is_user(self):
-        messages = [UserMessage(content="hi")]
+        messages: List[Message] = [UserMessage(content="hi")]
         assert infer_copilot_initiator(messages) == "user"
 
     def test_last_assistant_message_is_agent(self):
-        messages = [
+        messages: List[Message] = [
             UserMessage(content="hi"),
             AssistantMessage(content=[TextContent(text="ok")]),
         ]
         assert infer_copilot_initiator(messages) == "agent"
 
     def test_last_tool_result_is_agent(self):
-        messages = [
+        messages: List[Message] = [
             ToolResultMessage(tool_call_id="1", content=[TextContent(text="out")])
         ]
         assert infer_copilot_initiator(messages) == "agent"
@@ -39,13 +42,13 @@ class TestInferCopilotInitiator:
 
 class TestHasCopilotVisionInput:
     def test_user_image(self):
-        messages = [
+        messages: List[Message] = [
             UserMessage(content=[ImageContent(mime_type="image/png", data="aGVsbG8=")])
         ]
         assert has_copilot_vision_input(messages) is True
 
     def test_tool_result_image(self):
-        messages = [
+        messages: List[Message] = [
             ToolResultMessage(
                 tool_call_id="1",
                 content=[ImageContent(mime_type="image/png", data="aGVsbG8=")],
@@ -54,11 +57,11 @@ class TestHasCopilotVisionInput:
         assert has_copilot_vision_input(messages) is True
 
     def test_text_only(self):
-        messages = [UserMessage(content="hi")]
+        messages: List[Message] = [UserMessage(content="hi")]
         assert has_copilot_vision_input(messages) is False
 
     def test_string_content_user(self):
-        messages = [UserMessage(content="hi")]
+        messages: List[Message] = [UserMessage(content="hi")]
         assert has_copilot_vision_input(messages) is False
 
 
@@ -75,6 +78,6 @@ class TestBuildCopilotDynamicHeaders:
         assert headers["Copilot-Vision-Request"] == "true"
 
     def test_agent_initiator(self):
-        messages = [AssistantMessage(content=[TextContent(text="ok")])]
+        messages: List[Message] = [AssistantMessage(content=[TextContent(text="ok")])]
         headers = build_copilot_dynamic_headers(messages, has_images=False)
         assert headers["X-Initiator"] == "agent"

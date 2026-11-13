@@ -18,6 +18,12 @@ from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS
 from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS
 
 
+def _level(model: Model, key: str):
+    levels = model.thinking_level_map
+    assert levels is not None
+    return levels.get(key)
+
+
 class TestMoonshotaiModels:
     def test_models_exist(self):
         assert MOONSHOTAI_MODELS
@@ -43,8 +49,8 @@ class TestMoonshotaiModels:
         assert m.input_types == ["text", "image"]
         assert m.context_window == 1_048_576
         assert m.max_tokens == 1048576
-        assert m.thinking_level_map["max"] == "max"
-        assert m.thinking_level_map["off"] is None
+        assert _level(m, "max") == "max"
+        assert _level(m, "off") is None
 
     def test_kimi_k2_6_fields(self):
         m = MOONSHOTAI_MODELS["kimi-k2.6"]
@@ -79,12 +85,12 @@ class TestMoonshotaiCnModels:
         assert m.context_window == 1_048_576
         assert m.max_tokens == 1_048_576
         # k3 当前支持 low/high/max
-        assert m.thinking_level_map["max"] == "max"
-        assert m.thinking_level_map["low"] == "low"
-        assert m.thinking_level_map["high"] == "high"
-        assert m.thinking_level_map["minimal"] is None
-        assert m.thinking_level_map["medium"] is None
-        assert m.thinking_level_map["off"] is None
+        assert _level(m, "max") == "max"
+        assert _level(m, "low") == "low"
+        assert _level(m, "high") == "high"
+        assert _level(m, "minimal") is None
+        assert _level(m, "medium") is None
+        assert _level(m, "off") is None
 
     def test_kimi_k2_6_fields(self):
         m = MOONSHOTAI_CN_MODELS["kimi-k2.6"]
@@ -126,12 +132,12 @@ class TestKimiCodingModels:
         assert m.context_window == 1_048_576
         assert m.max_tokens == 131_072
         # k3 当前支持 low/high/max
-        assert m.thinking_level_map["max"] == "max"
-        assert m.thinking_level_map["low"] == "low"
-        assert m.thinking_level_map["high"] == "high"
-        assert m.thinking_level_map["minimal"] is None
-        assert m.thinking_level_map["medium"] is None
-        assert m.thinking_level_map["off"] is None
+        assert _level(m, "max") == "max"
+        assert _level(m, "low") == "low"
+        assert _level(m, "high") == "high"
+        assert _level(m, "minimal") is None
+        assert _level(m, "medium") is None
+        assert _level(m, "off") is None
 
     def test_kimi_for_coding_fields(self):
         m = KIMI_CODING_MODELS["kimi-for-coding"]

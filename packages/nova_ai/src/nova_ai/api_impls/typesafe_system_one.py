@@ -34,9 +34,9 @@ from ..utils.errors import LoginRequiredError, normalize_error
 from ..utils.http import HttpFetchError, filter_headers_for_hook, request_with_abort
 from ..utils.model_operations import api_value, assert_classifier_input_supported
 from ..utils.model_utils import calculate_cost
+from ._shared.identity import get_identity_headers
 from ._shared.retry import RetryOptions, retry_provider_request
 from ._shared.timeouts import build_request_timeout
-from ._shared.user_agent import get_nova_user_agent
 
 api = KnownClassifierApi.TYPESAFE_SYSTEM_ONE
 _IMAGE_OPT_IN_HEADER = "TypeSafe-Danger-Zone-Images"
@@ -63,7 +63,7 @@ def _request_headers(
     headers: Dict[str, Optional[str]] = {
         "authorization": f"Bearer {options.api_key}",
         "content-type": "application/json",
-        "User-Agent": get_nova_user_agent(),
+        **get_identity_headers(model, options.identity),
     }
     _merge_headers(headers, model.headers)
     _merge_headers(headers, options.headers)

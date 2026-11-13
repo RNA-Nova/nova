@@ -327,6 +327,7 @@ from .exec_server_wire import (
     WindowsSandboxProxySettingsMode,
     WireFileSystemPolicyContext,
 )
+from .identity import ClientAttribution, ClientIdentity, UserAgentCustom, UserAgentMode
 from .ids import EntryId, RunId, SessionId, ToolCallId
 from .messages import (
     AssistantImages,
@@ -404,6 +405,11 @@ __all__ = [
     "ToolCall",
     "ImageContent",
     "ContentUnion",
+    # 请求身份与归因
+    "ClientAttribution",
+    "ClientIdentity",
+    "UserAgentCustom",
+    "UserAgentMode",
     # 使用统计
     "Usage",
     "Cost",

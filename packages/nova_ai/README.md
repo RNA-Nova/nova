@@ -291,9 +291,11 @@ credential 两种形态：`ApiKeyCredential(key, env)` 与 `OAuthCredential(acce
 
 另有一个行为开关：`NOVA_CACHE_RETENTION=long` 将 prompt 缓存保留策略默认值从 `short` 提升为 `long`。
 
-### 请求头合并与 transform_headers
+### 请求头合并、客户端身份与 transform_headers
 
 请求头按 **auth 解析结果 → `Model.headers` → `StreamOptions.headers`** 的顺序合并（大小写不敏感，后者覆盖前者；`StreamOptions.headers` 中值为 `None` 表示抑制同名默认头）。在此之上，`StreamOptions.transform_headers` 是最后一道钩子：在合并完成后、派发给协议实现前运行一次，可同步或异步返回新的 headers；该字段由 `ModelsManager` 层消费，协议实现永远看不到它。
+
+聊天、图像与分类选项均可传 `identity=ClientIdentity(...)`。协议实现据此生成 User-Agent，并按端点补充 OpenRouter / NVIDIA / OpenCode 归因头；调用方在 `headers` 中显式给出的同名头优先，身份对象不携带或泄露凭据。`nova_agent.Agent(identity=...)` 会把同一身份透传给每次模型请求。
 
 ## 工具调用
 
@@ -473,6 +475,12 @@ stream = models.stream_simple(model, context, options)
 controller.abort()  # 主动关闭底层 HTTP 流；已收到的内容块正常收尾，
                     # 最终以 ErrorEvent(reason="aborted") 结束
 ```
+
+### 流与驱动任务的生命周期
+
+`EventStream.drive()` 以流为属主持有 1:1 驱动 Task，驱动退出会关闭事件流，但这不等于消费者退出时会自动取消并等待 provider。`await stream.result()` 只证明终值已发布，不证明 `stream.task` 或底层 transport 已收尾；后者要单独确认。
+
+provider 负责自己的 HTTP 与资源清理，调用方负责消费关系：正常完成时确认驱动落定；提前停止消费（外部取消、监听器异常等 abandonment）时先经 signal 通知 provider，再 join `stream.task`，无响应时才硬取消。取消与清理遵循 `AbortScope` 的“块后归因、块外清理”顺序。
 
 ### 调试钩子与重试
 

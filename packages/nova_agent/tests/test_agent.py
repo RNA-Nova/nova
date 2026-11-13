@@ -5,10 +5,10 @@ nova_agent Agent 包装类单元测试
 """
 
 import asyncio
-from typing import Any, List
+from typing import Any, List, cast
 
 import pytest
-from helpers import (
+from _helpers.agent import (
     AbortableTool,
     EchoTool,
     abortable_tool_call_stream,
@@ -16,12 +16,21 @@ from helpers import (
     text_stream,
     tool_call_then_text_stream,
 )
-from nova_agent import Agent, BeforeToolCallContext
+from _helpers.messages import (
+    assistant_message,
+    text_of,
+    tool_result_message,
+    user_message,
+)
+from nova_ai import AssistantMessageEventStream, ModelIdentity, ProviderResponse
 from nova_protocol import (
     DoneEvent,
     ImageContent,
     Model,
+    ModelThinkingLevel,
     StartEvent,
+    StopReason,
+    SystemMessage,
     TextContent,
     ThinkingContent,
     ThinkingDeltaEvent,
@@ -30,7 +39,7 @@ from nova_protocol import (
     UserMessage,
 )
 
-from nova_ai import EventStream, ModelIdentity, ProviderResponse
+from nova_agent import Agent, BeforeToolCallContext
 
 # ------------------------------------------------------------------------------
 # 初始化与状态
@@ -54,36 +63,43 @@ def test_agent_init_custom_state(dummy_model):
         },
     )
     assert agent.state.system_prompt == "hello"
-    assert len(agent.state.messages) == 1
+    assert [message.role for message in agent.state.messages] == ["system", "user"]
 
 
-def test_agent_timeout_propagates_to_loop_config(dummy_model):
+@pytest.mark.asyncio
+async def test_agent_timeout_reaches_provider_options(dummy_model):
+    seen = []
+
+    def stream_fn(model, context, options):
+        seen.append(options.timeout)
+        return text_stream(model, "ok")
+
     agent = Agent(
-        stream_fn=lambda m, c, o: text_stream(m, "ok"),
+        stream_fn=stream_fn,
         initial_state={"model": dummy_model},
         timeout=123.0,
     )
-    config = agent._create_loop_config()
-    assert config.stream_options.timeout == 123.0
+    await agent.prompt("hi")
+    assert seen == [123.0]
 
 
 def test_agent_state_mutators(dummy_model):
     agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
-    agent.set_system_prompt("sys")
+    agent.append_message(SystemMessage(content="sys"))
     agent.set_model(dummy_model)
-    agent.set_thinking_level("medium")
+    agent.set_thinking_level(ModelThinkingLevel.MEDIUM)
     agent.set_tools([EchoTool()])
     agent.append_message(UserMessage(role="user", content=[TextContent(text="a")]))
 
     assert agent.state.system_prompt == "sys"
     assert agent.state.model == dummy_model
-    assert agent.state.thinking_level == "medium"
+    assert agent.state.thinking_level is ModelThinkingLevel.MEDIUM
     assert agent.state.tools == [EchoTool()]
-    assert len(agent.state.messages) == 1
+    assert len(agent.state.messages) == 2
 
     agent.replace_messages([UserMessage(role="user", content=[TextContent(text="b")])])
     assert len(agent.state.messages) == 1
-    assert agent.state.messages[0].content[0].text == "b"
+    assert text_of(user_message(agent.state.messages[0])) == "b"
 
     agent.clear_messages()
     assert agent.state.messages == []
@@ -132,21 +148,25 @@ async def test_agent_prompt_basic(dummy_model):
     assert "agent_start" in events
     assert "agent_end" in events
     assert [m.role for m in agent.state.messages] == ["user", "assistant"]
-    assert agent.state.messages[-1].content[0].text == "hello"
+    assert text_of(assistant_message(agent.state.messages[-1])) == "hello"
 
 
 @pytest.mark.asyncio
 async def test_agent_prompt_with_string_and_images(dummy_model):
     agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
+    image = ImageContent(type="image", data="base64", mime_type="image/png")
 
-    await agent.prompt(
-        "look",
-        images=[ImageContent(type="image", data="base64", mime_type="image/png")],
+    await agent.prompt("look", images=[image])
+
+    prompt, reply = agent.state.messages
+    assert isinstance(prompt, UserMessage)
+    assert prompt == UserMessage(
+        role="user",
+        content=[TextContent(text="look"), image],
+        timestamp=prompt.timestamp,
     )
-
-    last = agent.state.messages[-1]
-    assert last.role == "assistant"
+    assert reply.role == "assistant"
 
 
 @pytest.mark.asyncio
@@ -159,7 +179,7 @@ async def test_agent_continue_from_user_message(dummy_model):
 
     assert len(agent.state.messages) == 2
     assert agent.state.messages[-1].role == "assistant"
-    assert agent.state.messages[-1].content[0].text == "continued"
+    assert text_of(assistant_message(agent.state.messages[-1])) == "continued"
 
 
 # ------------------------------------------------------------------------------
@@ -182,17 +202,17 @@ async def test_agent_steer_queue_drained_on_continue(dummy_model):
     agent.set_model(dummy_model)
 
     await agent.prompt("hi")
-    assert agent.state.messages[-1].content[0].text == "first"
+    assert text_of(assistant_message(agent.state.messages[-1])) == "first"
 
     agent.steer(UserMessage(role="user", content=[TextContent(text="steer this")]))
     await agent.continue_()
 
     assert any(
-        m.role == "user" and m.content[0].text == "steer this"
+        isinstance(m, UserMessage) and text_of(m) == "steer this"
         for m in agent.state.messages
     )
     assert agent.state.messages[-1].role == "assistant"
-    assert agent.state.messages[-1].content[0].text == "steered"
+    assert text_of(assistant_message(agent.state.messages[-1])) == "steered"
 
 
 @pytest.mark.asyncio
@@ -214,10 +234,10 @@ async def test_agent_follow_up_queue_drained_on_continue(dummy_model):
     await agent.continue_()
 
     assert any(
-        m.role == "user" and m.content[0].text == "follow up"
+        isinstance(m, UserMessage) and text_of(m) == "follow up"
         for m in agent.state.messages
     )
-    assert agent.state.messages[-1].content[0].text == "followed"
+    assert text_of(assistant_message(agent.state.messages[-1])) == "followed"
 
 
 # ------------------------------------------------------------------------------
@@ -252,7 +272,7 @@ async def test_agent_abort_during_tool_execution(dummy_model):
     assert "tool_execution_end" in events
     tool_results = [m for m in agent.state.messages if m.role == "toolResult"]
     assert len(tool_results) == 1
-    assert tool_results[0].is_error is True
+    assert tool_result_message(tool_results[0]).is_error is True
 
 
 @pytest.mark.asyncio
@@ -481,11 +501,8 @@ async def test_agent_continue_from_assistant_without_queued_raises(dummy_model):
 # ------------------------------------------------------------------------------
 
 
-def _thinking_stream(model: Model) -> EventStream:
-    stream = EventStream(
-        is_complete=lambda e: getattr(e, "type", None) == "done",
-        extract_result=lambda e: e.message,
-    )
+def _thinking_stream(model: Model) -> AssistantMessageEventStream:
+    stream = AssistantMessageEventStream()
     partial = make_assistant_message(
         model,
         [
@@ -501,7 +518,7 @@ def _thinking_stream(model: Model) -> EventStream:
     stream.push(
         ThinkingEndEvent(content_index=0, content="let me think", partial=partial)
     )
-    stream.push(DoneEvent(reason="stop", message=partial))
+    stream.push(DoneEvent(reason=StopReason.STOP, message=partial))
     stream.end()
     return stream
 
@@ -514,11 +531,11 @@ async def test_agent_thinking_content_preserved(dummy_model):
 
     await agent.prompt("hi")
 
-    last = agent.state.messages[-1]
-    assert last.role == "assistant"
-    assert [c.type for c in last.content] == ["thinking", "text"]
-    assert last.content[0].thinking == "let me think"
-    assert last.content[1].text == "answer"
+    last = assistant_message(agent.state.messages[-1])
+    assert last.content == [
+        ThinkingContent(type="thinking", thinking="let me think"),
+        TextContent(text="answer"),
+    ]
 
 
 # ------------------------------------------------------------------------------
@@ -556,13 +573,15 @@ async def test_agent_pending_tool_calls_tracked(dummy_model):
 def test_initial_state_rejects_unknown_keys(dummy_model):
     """dict 形式 initial_state 含未知 key 时应立即 TypeError，而不是静默忽略。"""
     with pytest.raises(TypeError, match="Unknown initial_state keys"):
-        Agent(initial_state={"model": dummy_model, "bogus_key": 1})
+        # 负例边界显式越型：运行时未知键必须被拒绝。
+        Agent(initial_state=cast(Any, {"model": dummy_model, "bogus_key": 1}))
 
 
 def test_default_convert_to_llm_filters_messages_without_role(dummy_model):
     """不带 role 字段的自定义消息应被默认 convert_to_llm 过滤而不是炸掉。"""
-    from nova_agent.utils import default_convert_to_llm
     from nova_protocol import CustomAgentMessage
+
+    from nova_agent.utils import default_convert_to_llm
 
     class Notification(CustomAgentMessage):
         text: str = ""
@@ -578,33 +597,90 @@ def test_default_convert_to_llm_filters_messages_without_role(dummy_model):
 
 @pytest.mark.asyncio
 async def test_wait_for_idle_shielded_from_cancellation(dummy_model):
-    """等待 wait_for_idle 的协程被取消时，正在运行的 run 不应被传染取消。"""
+    """取消等待方不会传染给正在运行的 run。"""
+    started = asyncio.Event()
+    release = asyncio.Event()
 
     async def slow_stream(model, context, options):
-        # 让 run 持续一小段时间，保证 waiter 取消时 run 仍在进行
-        await asyncio.sleep(0.05)
+        started.set()
+        await release.wait()
         return text_stream(model, "ok")
 
     agent = Agent(stream_fn=slow_stream)
     agent.set_model(dummy_model)
-
-    run_task = asyncio.create_task(agent.prompt("hi"))
-    # 等 run 真正开始（_running_task 已创建）
-    for _ in range(100):
-        if agent.state.is_streaming:
-            break
-        await asyncio.sleep(0)
-    assert agent.state.is_streaming
+    run_task = agent.start_prompt("hi")
+    await started.wait()
 
     waiter = asyncio.create_task(agent.wait_for_idle())
-    # 让 waiter 进入 shield 等待
-    await asyncio.sleep(0)
     await asyncio.sleep(0)
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
 
-    # run 不被影响，正常完成
+    release.set()
     await run_task
     assert agent.state.messages[-1].role == "assistant"
     assert not agent.state.is_streaming
+
+
+def test_queue_mode_properties_and_aliases_stay_in_sync():
+    agent = Agent(stream_fn=lambda model, context, options: text_stream(model, "ok"))
+
+    agent.steering_mode = "all"
+    agent.follow_up_mode = "all"
+    assert agent.steering_mode == agent.get_steering_mode() == "all"
+    assert agent.follow_up_mode == agent.get_follow_up_mode() == "all"
+
+    agent.set_steering_mode("one-at-a-time")
+    agent.set_follow_up_mode("one-at-a-time")
+    assert agent.steering_mode == "one-at-a-time"
+    assert agent.follow_up_mode == "one-at-a-time"
+
+
+def test_queue_clear_operations_have_independent_and_combined_semantics():
+    agent = Agent(stream_fn=lambda model, context, options: text_stream(model, "ok"))
+    agent.steer(UserMessage(content="steer"))
+    agent.follow_up(UserMessage(content="follow"))
+
+    agent.clear_steering_queue()
+    assert user_message(agent.peek_queued_messages()[0]).content == "follow"
+
+    agent.steer(UserMessage(content="steer-again"))
+    agent.clear_follow_up_queue()
+    assert user_message(agent.peek_queued_messages()[0]).content == "steer-again"
+
+    agent.follow_up(UserMessage(content="follow-again"))
+    agent.clear_all_queues()
+    assert not agent.has_queued_messages()
+    assert agent.peek_queued_messages() == []
+
+
+@pytest.mark.asyncio
+async def test_provider_request_options_reach_stream_fn(dummy_model):
+    from nova_ai import ThinkingBudgets
+    from nova_protocol import Transport
+
+    seen = []
+    budgets = ThinkingBudgets(high=8192)
+
+    def stream_fn(model, context, options):
+        seen.append(options)
+        return text_stream(model, "ok")
+
+    agent = Agent(
+        stream_fn=stream_fn,
+        session_id="initial",
+        max_retry_delay_ms=2500,
+    )
+    agent.set_model(dummy_model)
+    agent.session_id = "session-current"
+    agent.thinking_budgets = budgets
+    agent.transport = Transport.WEBSOCKET
+    await agent.prompt("hi")
+
+    assert len(seen) == 1
+    options = seen[0]
+    assert options.session_id == "session-current"
+    assert options.thinking_budgets is budgets
+    assert options.transport is Transport.WEBSOCKET
+    assert options.max_retry_delay_ms == 2500

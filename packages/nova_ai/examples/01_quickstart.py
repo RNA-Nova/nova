@@ -12,6 +12,7 @@
 import asyncio
 import os
 
+from nova_ai import EventStream
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -21,8 +22,6 @@ from nova_protocol import (
     TextContent,
     UserMessage,
 )
-
-from nova_ai import EventStream
 
 
 # ----------------------------------------------------------------------

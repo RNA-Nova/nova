@@ -48,13 +48,15 @@ class TestModelsDevCatalog:
         assert outcome.status == 200
         assert len(outcome.models_fields) == 1
         fields = outcome.models_fields[0]
-        assert fields["id"] == "deepseek-v4"  # id 由条目内 source.id 补回
-        assert fields["context_window"] == 1048576
-        assert fields["max_tokens"] == 393216
-        assert fields["reasoning"] is True
+        assert fields.get("id") == "deepseek-v4"  # id 由条目内 source.id 补回
+        assert fields.get("context_window") == 1048576
+        assert fields.get("max_tokens") == 393216
+        assert fields.get("reasoning") is True
         # v2 嵌套价格被翻译件拍平
-        assert fields["cost"]["input"] == 1
-        assert fields["cost"]["output"] == 2
+        cost = fields.get("cost")
+        assert cost is not None
+        assert cost.get("input") == 1
+        assert cost.get("output") == 2
 
     async def test_unknown_key_is_404(self, monkeypatch):
         async def fake_fetch_json(url, **kwargs):
@@ -101,7 +103,7 @@ class TestModelsDevCatalog:
             "nova_ai.catalog_impls.models_dev.fetch_json", fake_fetch_json
         )
         outcome = await ModelsDevCatalog().fetch("volcengine", None, None)
-        assert outcome.models_fields[0]["id"] == "canonical"
+        assert outcome.models_fields[0].get("id") == "canonical"
 
     async def test_instance_cache_dedups_downloads(self, monkeypatch):
         calls = []

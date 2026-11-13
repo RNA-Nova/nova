@@ -82,6 +82,7 @@ export interface AssistantMessage {
   responseId: string | null;
   responseModel: string | null;
   providerThinkingLevel: string | null;
+  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
   diagnostics: Record<string, unknown>[] | null;
   timestamp: number;
   durationMs: number | null;
@@ -1109,6 +1110,7 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
   argumentsError: string | null;
   thoughtSignature: string | null;
+  namespace: string | null;
   partialArgs: string | null;
   streamIndex: number | null;
 }
@@ -1154,6 +1156,7 @@ export interface ToolExecutionEndEvent {
   toolName: string;
   result: unknown;
   isError: boolean;
+  durationMs: number | null;
 }
 
 export interface ToolExecutionStartEvent {
@@ -1192,7 +1195,9 @@ export interface ToolResultMessage {
   toolName: string;
   content: (TextContent | ImageContent)[];
   details: unknown | null;
+  usage: Usage | null;
   isError: boolean;
+  durationMs: number | null;
   timestamp: number;
 }
 

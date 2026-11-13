@@ -103,5 +103,6 @@ generate-models = { cmd = "python packages/nova_catalog/scripts/generate.py --st
 check-model-data = { cmd = "python packages/nova_catalog/scripts/check_model_data.py" }
 check-live = { cmd = "python -m tests.integration.check_live", cwd = "packages/nova_ai" }
 test-integration = { cmd = "NOVA_RUN_INTEGRATION=1 pytest tests/integration", cwd = "packages/nova_ai" }
+test-agent-integration = { cmd = "pytest tests/integration", cwd = "packages/nova_agent" }
 format = "black packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src packages/nova_catalog bundles/nova_coding_agent/backend && isort packages/nova_protocol/src packages/nova_ai/src packages/nova_agent/src packages/nova_harness/src packages/nova_server/src packages/nova-exec-server-client/src packages/nova_catalog bundles/nova_coding_agent/backend"
-typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_agent/src/nova_agent packages/nova_catalog/src packages/nova_catalog/scripts packages/nova_catalog/tests"
+typecheck = "pyright packages/nova_protocol/src/nova_protocol packages/nova_ai/src/nova_ai packages/nova_ai/tests packages/nova_agent/src/nova_agent packages/nova_agent/tests packages/nova_protocol/tests/test_agent_event_custom_fields.py packages/nova_catalog/src packages/nova_catalog/scripts packages/nova_catalog/tests"
