@@ -23,7 +23,7 @@ python = ">=3.13,<3.14"
 pydantic = ">=2.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.4.0"
+pytest = ">=7.4,<10.0"
 pytest-asyncio = ">=0.21.0"
 
 [build-system]
