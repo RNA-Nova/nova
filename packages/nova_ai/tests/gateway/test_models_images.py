@@ -1,17 +1,10 @@
 """ModelsManager 的图像鉴权、请求头与守卫顺序测试。"""
 
 import pytest
-from nova_protocol import (
-    ImagesContext,
-    ImagesStopReason,
-    Model,
-    ProviderAuth,
-    TextContent,
-)
-
-from nova_ai.auth import env_api_key_auth
+from nova_ai.auth import ProviderAuth, env_api_key_auth
 from nova_ai.gateway import ModelsManager, create_provider
 from nova_ai.stream_options import ImagesOptions
+from nova_protocol import ImagesContext, ImagesStopReason, Model, TextContent
 from tests.gateway._helpers.images import FakeImages, _chat, _image
 
 
@@ -45,7 +38,7 @@ async def test_manager_generates_images_with_auth_and_reports_capability_errors(
 async def test_image_model_headers_resolver_is_abortable():
     import asyncio
 
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     started = asyncio.Event()
     never = asyncio.Event()
@@ -84,7 +77,7 @@ async def test_image_model_headers_resolver_is_abortable():
 async def test_image_transform_headers_is_abortable():
     import asyncio
 
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     started = asyncio.Event()
     never = asyncio.Event()
@@ -151,7 +144,8 @@ async def test_image_transform_returns_the_final_header_set():
 async def test_manager_rejects_image_before_auth_side_effects():
     from typing import cast
 
-    from nova_protocol import ApiKeyAuth, Context, StopReason
+    from nova_ai.auth import ApiKeyAuth
+    from nova_protocol import Context, StopReason
 
     auth_calls = []
 

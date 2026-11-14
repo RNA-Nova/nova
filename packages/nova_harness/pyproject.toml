@@ -41,6 +41,8 @@ sniffio = "^1.3.0"
 nova-ai = { path = "../../nova_ai" }
 nova-agent = { path = "../../nova_agent" }
 nova-protocol = { path = "../../nova_protocol" }
+nova-exec-protocol = { path = "../../nova_exec_protocol" }
+nova-exec-policy = { path = "../../nova_exec_policy" }
 nova-exec-server-client = { path = "../../nova-exec-server-client" }
 
 [tool.poetry.scripts]

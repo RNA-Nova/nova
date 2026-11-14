@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from nova_server.types.items import NovaItem
+from nova_server.protocol.items import NovaItem
 
 
 class BashExecutionItem(NovaItem):

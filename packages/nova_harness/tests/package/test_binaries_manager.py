@@ -11,6 +11,7 @@ import tarfile
 import zipfile
 
 import pytest
+
 from nova_harness.package.binaries import manager
 from nova_harness.package.binaries.manager import (
     detect_platform_key,
@@ -112,6 +113,7 @@ def test_ensure_binary_download_install_tar_gz(tmp_path, monkeypatch):
 
     progress = []
     result = ensure_binary("fd", bin_dir=str(bin_dir), on_progress=progress.append)
+    assert result is not None
     assert result == str(bin_dir / "fd")
     assert os.access(result, os.X_OK)
     assert open(result, "rb").read() == _make_executable_bytes()

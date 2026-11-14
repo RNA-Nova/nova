@@ -16,8 +16,9 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from nova_harness.core.utils.telemetry import is_install_telemetry_enabled
 from nova_protocol import Model
+
+from nova_harness.core.utils.telemetry import is_install_telemetry_enabled
 
 # ---------------------------------------------------------------------------
 # Provider detection

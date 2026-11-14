@@ -12,9 +12,27 @@ stream 函数，之后 ``Agent`` 与低层循环省略 ``stream_fn`` 时都走�
 from __future__ import annotations
 
 import threading
-from typing import Optional
+from typing import TYPE_CHECKING, Awaitable, Optional, Protocol, Union
 
-from .types.base import StreamFn
+if TYPE_CHECKING:
+    from nova_ai import AssistantMessageEventStream
+    from nova_ai.stream_options import SimpleStreamOptions
+    from nova_protocol import Context, Model
+
+
+class StreamFn(Protocol):
+    """模型流式调用签名（与 ``ModelsManager.stream_simple`` 一致）。"""
+
+    def __call__(
+        self,
+        model: "Model",
+        context: "Context",
+        options: "SimpleStreamOptions",
+        /,
+    ) -> Union[
+        "AssistantMessageEventStream", Awaitable["AssistantMessageEventStream"]
+    ]: ...
+
 
 _default_stream_fn: Optional[StreamFn] = None
 _lock = threading.Lock()
@@ -41,6 +59,7 @@ def get_default_stream_fn() -> StreamFn:
 
 
 __all__ = [
+    "StreamFn",
     "get_default_stream_fn",
     "set_default_stream_fn",
 ]

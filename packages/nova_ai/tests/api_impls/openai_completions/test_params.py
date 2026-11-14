@@ -1,6 +1,7 @@
 """OpenAI Completions 的请求参数构建与方言分派测试。"""
 
 import pytest
+from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, build_params
 from nova_protocol import (
     AssistantMessage,
     ConstrainedSampling,
@@ -18,8 +19,6 @@ from nova_protocol import (
     UserMessage,
     VercelGatewayRouting,
 )
-
-from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, build_params
 
 
 class TestBuildParams:

@@ -3,6 +3,7 @@
 import os
 
 import pytest
+
 from nova_exec_server_client import ExecutorClient
 
 EXECUTOR_URL = os.environ.get("NOVA_EXECUTOR_URL", "ws://127.0.0.1:28080")

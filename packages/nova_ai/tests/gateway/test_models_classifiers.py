@@ -1,6 +1,8 @@
 """ModelsManager 分类目录、鉴权与分派测试。"""
 
 import pytest
+from nova_ai import ClassifierOptions, ModelsManager, create_provider, env_api_key_auth
+from nova_ai.auth import ProviderAuth
 from nova_protocol import (
     ClassifierContext,
     ClassifierModel,
@@ -8,10 +10,7 @@ from nova_protocol import (
     ClassifierStopReason,
     ImageContent,
     ModelCost,
-    ProviderAuth,
 )
-
-from nova_ai import ClassifierOptions, ModelsManager, create_provider, env_api_key_auth
 
 pytestmark = pytest.mark.asyncio
 

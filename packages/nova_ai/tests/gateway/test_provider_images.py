@@ -1,10 +1,9 @@
 """Provider 的混合目录读取与图像实现分派测试。"""
 
 import pytest
-from nova_protocol import ImageModel, ImagesContext, ImagesStopReason, TextContent
-
 from nova_ai.gateway import create_provider
 from nova_ai.stream_options import ImagesOptions
+from nova_protocol import ImageModel, ImagesContext, ImagesStopReason, TextContent
 from tests.gateway._helpers.images import FakeImages, _chat, _image
 
 

@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.domains.skills import expand_skill_command
 from nova_harness.events import ExtensionErrorEvent
+from nova_harness.extensions.commands import RegisteredCommand
 from nova_harness.resources.loaders.prompt_templates import expand_prompt_template
-from nova_harness.types.extensions.commands import RegisteredCommand
-from nova_harness.types.protocols import AgentSessionProtocol
 
 if TYPE_CHECKING:
-    from nova_harness.extensions import ExtensionRunner
+    from nova_harness.extensions.protocol import ExtensionRunnerProtocol
 
 
 class SlashInputHandler:
@@ -119,7 +119,7 @@ class SlashInputHandler:
         command: RegisteredCommand,
         command_name: str,
         text: str,
-        runner: ExtensionRunner,
+        runner: ExtensionRunnerProtocol,
     ) -> None:
         """执行单个扩展命令并捕获异常。"""
         args = self._parse_args(text)
@@ -129,7 +129,7 @@ class SlashInputHandler:
         except Exception as err:
             runner.emit_error(
                 ExtensionErrorEvent(
-                    extension_path=command.extension_path,
+                    extension_path=command.extension_path or "<unknown>",
                     event="command",
                     error=str(err),
                 )

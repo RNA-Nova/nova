@@ -10,11 +10,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import SESSION_INFO_CHANGED
+from nova_harness.extensions.actions import ExtensionContextActions
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
 from nova_harness.extensions.runner import ExtensionRunner
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
-from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.sessions.config import AgentSessionConfig
 
 
 def _minimal_runtime() -> ExtensionRuntime:
@@ -37,7 +39,7 @@ def _minimal_runtime() -> ExtensionRuntime:
         "set_thinking_level",
     ):
         setattr(runtime, name, lambda *args, **kwargs: None)
-    runtime.context_actions = SimpleNamespace(
+    runtime.context_actions = ExtensionContextActions(
         get_model=lambda: None,
         is_idle=lambda: True,
         is_project_trusted=lambda: True,

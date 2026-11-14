@@ -17,7 +17,8 @@ from __future__ import annotations
 import codecs
 from typing import Any, Callable, Dict, Optional
 
-from nova_async import await_with_signal
+from nova_async import AbortedError, await_with_signal
+
 from nova_coding_agent.bash.engine import BashResult
 from nova_coding_agent.tools_common.output_accumulator import (
     OutputAccumulator,
@@ -25,7 +26,6 @@ from nova_coding_agent.tools_common.output_accumulator import (
 )
 from nova_coding_agent.tools_common.shell import sanitize_shell_output
 from nova_coding_agent.tools_common.truncate import DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES
-from nova_protocol import AbortedError
 
 from .manager import ExecutorClientManager
 

@@ -32,6 +32,7 @@ _UTILS_MODULES = frozenset(
         # 公共上下文溢出检测 API；无内部消费方是刻意保留的公共面。
         "overflow.py",
         "provider_env.py",
+        "sanitize.py",
         "surrogate.py",
     }
 )
@@ -93,9 +94,7 @@ def test_every_registered_module_has_family_docstring():
             assert first_line, f"{directory.name}/{name} 缺 docstring 首行族声明"
 
 
-_ALLOWED_NOVA_IMPORTS = frozenset(
-    {"nova_ai", "nova_async", "nova_catalog", "nova_protocol"}
-)
+_ALLOWED_NOVA_IMPORTS = frozenset({"nova_ai", "nova_async", "nova_protocol"})
 
 
 def _nova_imports(path: Path):

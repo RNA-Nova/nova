@@ -5,22 +5,23 @@
 """
 
 import pytest
-from nova_harness.types.compaction.compaction import CompactionSettings
-from nova_harness.types.config.settings import RetrySettings, Settings
-from nova_harness.types.messages import (
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
-    CustomMessage,
-    OpaqueUserToolMessage,
-)
-from nova_harness.types.model import ModelDefinition, ModelsConfig, ProviderConfig
-from nova_harness.types.session.entries import (
+from nova_protocol import ModelThinkingLevel, OpenAICompletionsCompat, ThinkingFormat
+
+from nova_harness.config.settings.models import RetrySettings, Settings
+from nova_harness.core.domains.compaction.models import CompactionSettings
+from nova_harness.model.config import ModelDefinition, ModelsConfig, ProviderConfig
+from nova_harness.sessions.entries import (
     BranchSummaryEntry,
     CompactionEntry,
     SessionHeader,
     ThinkingLevelChangeEntry,
 )
-from nova_protocol import ModelThinkingLevel
+from nova_harness.sessions.messages import (
+    BranchSummaryMessage,
+    CompactionSummaryMessage,
+    CustomMessage,
+    OpaqueUserToolMessage,
+)
 
 SIMPLE_TYPES = [
     (
@@ -50,7 +51,7 @@ SIMPLE_TYPES = [
         CompactionSummaryMessage,
     ),
     (lambda: CompactionSettings(enabled=True, reserve_tokens=1000), CompactionSettings),
-    (lambda: RetrySettings(max_retries=3, max_delay_ms=1000), RetrySettings),
+    (lambda: RetrySettings(max_retries=3, base_delay_ms=1000), RetrySettings),
     (
         lambda: ProviderConfig(base_url="https://example.com", api_key="sk"),
         ProviderConfig,
@@ -105,12 +106,14 @@ def test_model_definition_with_compat():
         cost=ModelCost(input=1.0, output=2.0),
         context_window=128000,
         max_tokens=4096,
-        compat=OpenAICompletionsCompat(thinking_format="deepseek"),
+        compat=OpenAICompletionsCompat(thinking_format=ThinkingFormat.DEEPSEEK),
     )
     data = md.model_dump()
     restored = ModelDefinition.model_validate(data)
     assert restored.id == "test-model"
+    assert restored.cost is not None
     assert restored.cost.input == 1.0
+    assert isinstance(restored.compat, OpenAICompletionsCompat)
     assert restored.compat.thinking_format == "deepseek"
 
 
@@ -126,7 +129,9 @@ def test_settings_with_nested_objects():
     restored = Settings.model_validate(data)
     assert restored.default_model == "deepseek-v4-flash-260425"
     assert restored.default_thinking_level == ModelThinkingLevel.HIGH
+    assert restored.compaction is not None
     assert restored.compaction.enabled is True
+    assert restored.retry is not None
     assert restored.retry.max_retries == 5
 
 
@@ -152,4 +157,6 @@ def test_models_config_roundtrip():
     data = config.model_dump()
     restored = ModelsConfig.model_validate(data)
     assert "volcengine" in restored.providers
-    assert restored.providers["volcengine"].models[0].id == "deepseek-v4-flash-260425"
+    models = restored.providers["volcengine"].models
+    assert models is not None
+    assert models[0].id == "deepseek-v4-flash-260425"

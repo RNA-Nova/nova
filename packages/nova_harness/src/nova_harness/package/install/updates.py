@@ -9,8 +9,9 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
+from nova_harness.config.settings.models import PackageSourceSpec
 from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.package.install.store import install_path_for_source
 from nova_harness.package.source.resolver import git_env
@@ -19,9 +20,8 @@ from nova_harness.package.source.spec import (
     get_package_source_string,
     parse_source,
 )
+from nova_harness.package.types import PackageUpdate, SourceScope
 from nova_harness.package.utils import is_offline_mode_enabled
-from nova_harness.types.config.settings import PackageSourceSpec
-from nova_harness.types.package import PackageUpdate, SourceScope
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ def _package_update_scope(
 
 
 async def check_for_available_updates(
-    scoped_sources: List[Tuple[SourceScope, PackageSourceSpec, Path, Path]],
+    scoped_sources: Sequence[Tuple[SourceScope, PackageSourceSpec, Path, Path]],
     *,
     max_concurrency: int = UPDATE_CHECK_CONCURRENCY,
 ) -> List[PackageUpdate]:

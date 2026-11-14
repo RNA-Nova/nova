@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 from nova_protocol import ModelThinkingLevel
 from nova_server.protocol import JSONRPCError, MethodRegistry
+from nova_server.protocol.jsonrpc import JsonRpcMessage
 from nova_server.protocol.methods import auth as auth_methods
 from nova_server.protocol.methods import model as model_methods
 from nova_server.protocol.methods import package as package_methods
@@ -21,9 +22,11 @@ from nova_server.protocol.methods import settings as settings_methods
 from nova_server.protocol.methods import system as system_methods
 from nova_server.protocol.methods.state import ServerState
 
+from nova_harness.ui import NoOpUIContext
+
 
 def _make_state(runtime: Any = None) -> ServerState:
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     if runtime is not None:
         state.set_runtime(runtime)
     return state
@@ -31,8 +34,10 @@ def _make_state(runtime: Any = None) -> ServerState:
 
 def _dispatch(registry: MethodRegistry):
     async def _call(method: str, params: Optional[Dict[str, Any]] = None):
-        msg = SimpleNamespace(method=method, params=params or {}, id=1)
-        return await registry.dispatch(msg)
+        msg = JsonRpcMessage(method=method, params=params or {}, id=1)
+        response = await registry.dispatch(msg)
+        assert response is not None
+        return response
 
     return _call
 
@@ -158,7 +163,9 @@ async def test_export_and_import_session():
 
 
 class _ModelSession:
-    def __init__(self, next_level=ModelThinkingLevel.HIGH):
+    def __init__(
+        self, next_level: Optional[ModelThinkingLevel] = ModelThinkingLevel.HIGH
+    ):
         self.model_runtime = SimpleNamespace()
         self.set_levels: List[Any] = []
         self._next_level = next_level
@@ -280,7 +287,6 @@ async def test_invoke_shortcut_requires_param():
 @pytest.mark.asyncio
 async def test_get_settings_without_runtime(monkeypatch):
     from nova_harness.config.settings.manager import SettingsManager
-
     from tests._helpers.settings_storage import InMemorySettingsStorage
 
     fallback = SettingsManager.from_storage(InMemorySettingsStorage())
@@ -310,7 +316,7 @@ async def test_get_settings_without_runtime(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_auth_status_without_runtime(monkeypatch):
-    from nova_harness.config import AuthStorage
+    from nova_harness.config.auth.storage import AuthStorage
 
     class _FakeStorage:
         def list(self):

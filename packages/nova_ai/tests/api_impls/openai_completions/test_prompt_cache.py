@@ -3,6 +3,18 @@
 from typing import Any, Dict, List, Optional
 
 import pytest
+from nova_ai.api_impls import openai_completions
+from nova_ai.api_impls._shared.prompt_cache import CacheControl
+from nova_ai.api_impls.openai_completions import (
+    OpenAICompletionsOptions,
+    _apply_anthropic_cache_control,
+    _get_compat_cache_control,
+    build_params,
+    clamp_openai_prompt_cache_key,
+    create_client,
+    parse_chunk_usage,
+)
+from nova_ai.stream_options import StreamOptions
 from nova_protocol import (
     AssistantMessage,
     CacheRetention,
@@ -18,19 +30,6 @@ from nova_protocol import (
     UserMessage,
 )
 from openai.types.chat import ChatCompletionToolParam
-
-from nova_ai.api_impls import openai_completions
-from nova_ai.api_impls._shared.prompt_cache import CacheControl
-from nova_ai.api_impls.openai_completions import (
-    OpenAICompletionsOptions,
-    _apply_anthropic_cache_control,
-    _get_compat_cache_control,
-    build_params,
-    clamp_openai_prompt_cache_key,
-    create_client,
-    parse_chunk_usage,
-)
-from nova_ai.stream_options import StreamOptions
 
 
 def _make_model(
@@ -436,9 +435,8 @@ class TestMidConvoToolAdditions:
 
     def test_system_message_tools_added_emits_kimi_message(self):
         """中途 SystemMessage 的 toolsAdded → kimi 工具型 system 消息。"""
-        from nova_protocol import SystemMessage
-
         from nova_ai.api_impls.openai_completions import convert_messages
+        from nova_protocol import SystemMessage
 
         model = self._model_kimi()
         ctx = Context(
@@ -535,9 +533,8 @@ class TestMidConvoToolAdditions:
 
     def test_tool_result_empty_content_uses_no_output_placeholder(self):
         """无文本且无图片的 tool result 应使用 '(no tool output)' 占位。"""
-        from nova_protocol import ToolResultMessage
-
         from nova_ai.api_impls.openai_completions import convert_messages
+        from nova_protocol import ToolResultMessage
 
         model = _make_model()
         ctx = Context(
@@ -559,9 +556,8 @@ class TestMidConvoToolAdditions:
     def test_tool_result_whitespace_only_uses_no_output_placeholder(self):
         """纯空白 tool result（如 bash 返回裸 \r\n）视同空输出占位——
         纯空白内容会被部分 provider 400 且会话内每轮复现（pi #8720 实证）。"""
-        from nova_protocol import TextContent, ToolResultMessage
-
         from nova_ai.api_impls.openai_completions import convert_messages
+        from nova_protocol import TextContent, ToolResultMessage
 
         model = _make_model()
         ctx = Context(
@@ -583,14 +579,13 @@ class TestMidConvoToolAdditions:
     def test_kimi_tool_message_anchors_at_system_message_position(self):
         """kimi 工具消息锚在 SystemMessage 自己的转录位置（含图片工具结果
         的用户块之后不窜位）。"""
+        from nova_ai.api_impls.openai_completions import convert_messages
         from nova_protocol import (
             ImageContent,
             SystemMessage,
             TextContent,
             ToolResultMessage,
         )
-
-        from nova_ai.api_impls.openai_completions import convert_messages
 
         tool_def = Tool(
             name="dynamic_tool",
@@ -633,9 +628,8 @@ class TestMidConvoToolAdditions:
 class TestConvertMessagesUserContent:
     def test_empty_user_content_array_is_skipped(self):
         """空 content 数组的 user 消息应直接跳过，对齐 TS。"""
-        from nova_protocol import TextContent
-
         from nova_ai.api_impls.openai_completions import convert_messages
+        from nova_protocol import TextContent
 
         model = _make_model()
         ctx = Context(
@@ -652,9 +646,8 @@ class TestConvertMessagesUserContent:
 
     def test_unsupported_image_user_content_gets_placeholder(self):
         """只有图片但模型不支持时保留占位，避免消息完全丢失。"""
-        from nova_protocol import ImageContent
-
         from nova_ai.api_impls.openai_completions import convert_messages
+        from nova_protocol import ImageContent
 
         model = _make_model(input_types=["text"])
         ctx = Context(

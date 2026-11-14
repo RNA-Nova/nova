@@ -2,7 +2,7 @@
 
 Typical usage::
 
-    >>> from nova_harness.package import PackageInstaller
+    >>> from nova_harness.package.install.installer import PackageInstaller
     >>> installer = PackageInstaller()
     >>>
     >>> # Install a bundle (not persisted)
@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from filelock import FileLock
+
 from nova_harness.config.defaults import (
     GIT_PACKAGES_DIR_NAME,
     NPM_PACKAGES_DIR_NAME,
@@ -32,7 +33,9 @@ from nova_harness.config.defaults import (
     get_agent_dir,
     get_project_base_dir,
 )
+from nova_harness.config.protocol import SettingsManagerProtocol
 from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.config.settings.models import PackageSourceSpec
 from nova_harness.core.utils.binaries import binary_install_guidance, resolve_binary
 from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.telemetry import report_install_telemetry
@@ -73,6 +76,17 @@ from nova_harness.package.source.spec import (
     parse_package_source_spec,
     parse_source,
 )
+from nova_harness.package.types import (
+    AmbiguousPackageNameError,
+    PackageFilter,
+    PackageManifest,
+    PackageMetadata,
+    PackageView,
+    ProgressAction,
+    ProgressEvent,
+    ProgressEventType,
+    ResourceMetadata,
+)
 from nova_harness.package.utils import (
     copytree,
     ensure_symlink_dir,
@@ -85,17 +99,6 @@ from nova_harness.package.validation import (
     is_skill_path,
     is_tool_dir,
     is_user_tool_dir,
-)
-from nova_harness.types.config.settings import PackageSourceSpec
-from nova_harness.types.package import (
-    AmbiguousPackageNameError,
-    NovaManifest,
-    PackageFilter,
-    PackageManifest,
-    PackageMetadata,
-    PackageView,
-    ProgressEvent,
-    ResourceMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -158,7 +161,7 @@ class PackageInstaller:
         self,
         agent_dir: Optional[str] = None,
         local: bool = False,
-        settings_manager: Optional[SettingsManager] = None,
+        settings_manager: Optional[SettingsManagerProtocol] = None,
         cwd: Optional[Union[str, Path]] = None,
         on_progress=None,
         requires_checker=None,
@@ -314,7 +317,7 @@ class PackageInstaller:
         self,
         abs_src: str,
         source_obj: PackageSource,
-        manifest: Optional[NovaManifest] = None,
+        manifest: Optional[PackageManifest] = None,
         no_deps: bool = False,
         dry_run: bool = False,
         quiet: bool = False,
@@ -589,7 +592,7 @@ class PackageInstaller:
             copytree(abs_src, str(install_path))
         return str(install_path)
 
-    def _should_install_deps(self, manifest: NovaManifest, no_deps: bool) -> bool:
+    def _should_install_deps(self, manifest: PackageManifest, no_deps: bool) -> bool:
         """根据 manifest 与 no_deps 标志判断是否需要安装依赖。"""
         if no_deps:
             return False
@@ -890,8 +893,8 @@ class PackageInstaller:
 
     def _emit_progress(
         self,
-        event_type: str,
-        action: str,
+        event_type: ProgressEventType,
+        action: ProgressAction,
         source: str,
         message: str,
         percent: Optional[float] = None,

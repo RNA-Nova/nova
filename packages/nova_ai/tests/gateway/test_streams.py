@@ -3,16 +3,9 @@
 import asyncio
 
 import pytest
-from nova_protocol import (
-    AbortController,
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
-    StopReason,
-)
-
 from nova_ai.gateway.streams import lazy_stream
+from nova_async import AbortController
+from nova_protocol import KnownApi, KnownProvider, Model, ModelCost, StopReason
 
 
 def _model() -> Model:
@@ -155,7 +148,7 @@ async def test_signal_interrupts_hanging_setup():
 
 @pytest.mark.asyncio
 async def test_aborted_exception_is_cancellation_even_without_signal_flag():
-    from nova_protocol import AbortedError
+    from nova_async import AbortedError
 
     async def failing_setup():
         raise AbortedError("Bearer sk-live-FAKE-REVIEW-SECRET")

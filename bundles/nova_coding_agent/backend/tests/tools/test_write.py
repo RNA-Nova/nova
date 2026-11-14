@@ -16,7 +16,7 @@ def _load_executor(settings=None):
     spec = importlib.util.spec_from_file_location("_test_tool_write", executor_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=settings or NULL_TOOL_SETTINGS)
     return module.Tool(context)
@@ -92,7 +92,7 @@ def test_write_content_not_string(tmpdir):
 
 def test_write_pre_aborted_signal(tmpdir):
     """spawn 前 signal 已中止：is_error 返回且不产生任何文件副作用（对齐 pi）。"""
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     executor = _load_executor()
     controller = AbortController()

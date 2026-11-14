@@ -1,13 +1,17 @@
 """SDK 包管理进度回调桥接测试。"""
 
 from nova_harness.core.runtime_manager.assembly import _resolve_on_progress
-from nova_harness.types.package import ProgressEvent
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.package.types import ProgressEvent
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.ui import NoOpUIContext, UIResponse
 
 
-class _RecordingUIContext:
+class _RecordingUIContext(NoOpUIContext):
     def __init__(self) -> None:
         self.calls = []
+
+    async def request(self, method, params, *, scope=None) -> UIResponse:
+        return UIResponse()
 
     def notify(self, method, params) -> None:
         self.calls.append((method, params))

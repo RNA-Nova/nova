@@ -11,11 +11,11 @@ import json
 from typing import Any, Dict, List, Optional
 
 import pytest
-from nova_server.client.in_process import InProcessServerError
+from nova_server.client.in_process import InProcessNovaClient, InProcessServerError
 from nova_server.exec.runner import ExecRunner
 
 
-class _FakeClient:
+class _FakeClient(InProcessNovaClient):
     """协议客户端替身：记录请求、按剧本回放响应与事件帧。"""
 
     def __init__(self) -> None:
@@ -48,7 +48,7 @@ class _FakeClient:
 
 
 def _runner(client: _FakeClient, **kwargs: Any) -> ExecRunner:
-    async def _factory() -> _FakeClient:
+    async def _factory() -> InProcessNovaClient:
         return client
 
     return ExecRunner(client_factory=_factory, **kwargs)

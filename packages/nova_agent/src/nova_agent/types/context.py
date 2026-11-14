@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, List, Optional, Union
 
 from nova_ai import SimpleStreamOptions
-from nova_protocol import AbortSignal, AgentMessage, Message, Model
+from nova_async import AbortSignal
+from nova_protocol import AgentMessage, Message, Model
 
-from .base import ToolExecutionMode
 from .hooks import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -19,7 +19,7 @@ from .hooks import (
     PrepareNextTurnContext,
     PrepareRequestContext,
 )
-from .tool import AgentTool
+from .tool import AgentTool, ToolExecutionMode
 
 
 @dataclass

@@ -12,9 +12,9 @@ from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.jsonrpc import JsonRpcMessage, build_error, build_response
 from pydantic import BaseModel, RootModel, ValidationError
 
-# 注册表的擦除存储型（注册时从 handler 真实签名推导精确形状——规则 9）；
-# Dict[str, Any] 为自由负载语义（规则 11 款 3）
-Handler = Callable[[Dict[str, Any]], Any | Awaitable[Any]]
+# 注册表的擦除存储型：入参在分派时才由 Dict 校验为具体模型，
+# 因而存储签名必须同时容纳自由负载 dict 与各 handler 的精确 Params 类型。
+Handler = Callable[[Any], Any | Awaitable[Any]]
 
 logger = logging.getLogger(__name__)
 

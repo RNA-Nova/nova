@@ -16,15 +16,30 @@ import os
 import time
 import traceback
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
 
+from nova_agent import Agent, QueueMode
 from nova_ai.session_resources import cleanup_session_resources
-from nova_async import TaskTracker
+from nova_async import AbortController, TaskTracker
+from nova_protocol import (
+    AgentMessage,
+    AssistantMessage,
+    CustomAgentMessage,
+    ImageContent,
+    ModelThinkingLevel,
+    NovaDiagnostic,
+    SystemMessage,
+    TextContent,
+    UserMessage,
+    WarningEvent,
+)
+
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
 )
 from nova_harness.config.defaults import get_agent_dir
+from nova_harness.config.protocol import SettingsManagerProtocol
 from nova_harness.core.agent_session.controllers import (
     CompactionController,
     EventController,
@@ -37,14 +52,18 @@ from nova_harness.core.agent_session.controllers import (
     TreeNavigator,
     UserToolController,
 )
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.domains.agents import AgentManager
+from nova_harness.core.domains.compaction.models import CompactionResult
 from nova_harness.core.domains.persona import PersonaManager
 from nova_harness.core.domains.skills import (
     expand_skill_command,
     filter_skills_by_whitelist,
 )
-from nova_harness.core.domains.system_prompt import SystemPromptManager
-from nova_harness.core.domains.tools import ToolsManager
+from nova_harness.core.domains.system_prompt.manager import SystemPromptManager
+from nova_harness.core.domains.system_prompt.protocol import SystemPromptManagerProtocol
+from nova_harness.core.domains.tools.manager import ToolsManager
+from nova_harness.core.domains.tools.protocol import ToolsManagerProtocol
 from nova_harness.core.domains.user_tools import UserToolManager
 from nova_harness.core.utils.child_process import hidden_console_kwargs
 from nova_harness.core.utils.messages import extract_text_from_content
@@ -78,55 +97,35 @@ from nova_harness.events.constants import (
     TOOL_CALL,
     TOOL_RESULT,
 )
-from nova_harness.extensions import ExtensionRunner, emit_session_shutdown_event
-from nova_harness.resources.loaders.prompt_templates import expand_prompt_template
-from nova_harness.sessions import SessionManager
-from nova_harness.types.compaction.compaction import CompactionResult
-from nova_harness.types.extensions.actions import (
+from nova_harness.extensions.actions import (
     ExtensionActions,
     ExtensionCommandContextActions,
     ExtensionContextActions,
     ExtensionProviderActions,
 )
-from nova_harness.types.extensions.commands import SlashCommandInfo
-from nova_harness.types.extensions.context import ExtensionCommandContext
-from nova_harness.types.extensions.exec import ExecOptions, ExecResult
-from nova_harness.types.protocols import (
-    ModelRuntimeProtocol,
-    ResourceLoaderProtocol,
-    SessionManagerProtocol,
-    SettingsManagerProtocol,
-    SystemPromptManagerProtocol,
-    ToolsManagerProtocol,
-)
-from nova_harness.types.resources.extension_paths import (
+from nova_harness.extensions.commands import SlashCommandInfo
+from nova_harness.extensions.context import ExtensionCommandContext
+from nova_harness.extensions.exec import ExecOptions, ExecResult
+from nova_harness.extensions.protocol import ExtensionRunnerProtocol
+from nova_harness.extensions.runner import ExtensionRunner, emit_session_shutdown_event
+from nova_harness.model.protocol import ModelRuntimeProtocol
+from nova_harness.resources.extension_paths import (
     ResourceExtensionPathEntry,
     ResourceExtensionPaths,
 )
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.selection import CapabilitySelection
-from nova_harness.types.resources.tools import ToolDefinition, ToolExecContext
-from nova_harness.types.resources.user_tools import UserToolInfo
-from nova_harness.types.session.config import AgentSessionConfig
-from nova_harness.types.session.model import ModelCycleResult, ScopedModelConfig
-from nova_harness.types.session.options import NavigateOptions, PromptOptions
-from nova_harness.types.session.stats import SessionStats
-from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
-from nova_protocol import (
-    AbortController,
-    AgentMessage,
-    AssistantMessage,
-    CustomAgentMessage,
-    ImageContent,
-    ModelThinkingLevel,
-    NovaDiagnostic,
-    SystemMessage,
-    TextContent,
-    UserMessage,
-    WarningEvent,
-)
-
-from nova_agent import Agent
+from nova_harness.resources.loaders.prompt_templates import expand_prompt_template
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.protocol import ResourceLoaderProtocol
+from nova_harness.resources.selection import CapabilitySelection
+from nova_harness.resources.tools import ToolDefinition, ToolExecContext
+from nova_harness.resources.user_tools import UserToolInfo
+from nova_harness.sessions.config import AgentSessionConfig
+from nova_harness.sessions.manager import SessionManager
+from nova_harness.sessions.model import ModelCycleResult, ScopedModelConfig
+from nova_harness.sessions.options import NavigateOptions, PromptOptions
+from nova_harness.sessions.protocol import SessionManagerProtocol
+from nova_harness.sessions.stats import SessionStats
+from nova_harness.ui import NoOpUIContext, ScopedUIContext, UIContext
 
 # ============================================================================
 # Extension action 具体实现（替代 SimpleNamespace，提供类型安全）
@@ -137,7 +136,7 @@ from nova_agent import Agent
 # ============================================================================
 
 
-class AgentSession:
+class AgentSession(AgentSessionProtocol):
     """Agent 会话核心：状态、事件、模型、工具、压缩、树导航。"""
 
     # 类层级只做类型标注，不赋可变默认值；实例值在 __init__ 中设置。
@@ -161,7 +160,7 @@ class AgentSession:
     excluded_tool_names: Optional[Set[str]] = None
     extension_runner_ref: Optional[Dict[str, Optional[Any]]] = None
     session_start_event: SessionStartEvent = None  # type: ignore[assignment]
-    _extension_runner: Optional[ExtensionRunner] = None
+    _extension_runner: Optional[ExtensionRunnerProtocol] = None
     _unsubscribe_agent: Optional[Callable[[], None]] = None
     _event_listeners: List[Callable[[AgentSessionEvent], None]]
     _steering_messages: List[str]
@@ -228,7 +227,7 @@ class AgentSession:
         )
 
         self._runtime: Optional[Any] = None
-        self._extension_runner: Optional[ExtensionRunner] = None
+        self._extension_runner: Optional[ExtensionRunnerProtocol] = None
         self._unsubscribe_agent: Optional[Callable[[], None]] = None
         self._event_listeners: List[Callable[[AgentSessionEvent], None]] = []
         # 会话级任务台账：listener 派发 / runner.emit / abort shim 等
@@ -640,7 +639,7 @@ class AgentSession:
         flag_values: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化扩展 runner、工具注册表与系统提示词。"""
-        from nova_harness.types.extensions.loading import ExtensionRuntime
+        from nova_harness.extensions.loading import ExtensionRuntime
 
         raw_extensions_result = self.resource_loader.get_extensions()
         extensions = raw_extensions_result.extensions
@@ -718,7 +717,9 @@ class AgentSession:
 
     def _sync_system_prompt(self) -> None:
         """用当前配置和工具白名单重建系统提示词。"""
-        from nova_harness.types.resources.agents import DynamicContext
+        if self.system_prompt_manager is None:
+            raise RuntimeError("System prompt manager is not initialized")
+        from nova_harness.resources.agents import DynamicContext
 
         context = DynamicContext(cwd=self.cwd, session_id=str(self.session_id))
         self._enrich_environment_context(context)
@@ -898,15 +899,15 @@ class AgentSession:
         return self.session_manager.get_session_name()
 
     @property
-    def extension_runner(self) -> Optional[ExtensionRunner]:
+    def extension_runner(self) -> Optional[ExtensionRunnerProtocol]:
         return self._extension_runner
 
     @property
-    def steering_mode(self) -> str:
+    def steering_mode(self) -> QueueMode:
         return getattr(self.agent, "steering_mode", "one-at-a-time")
 
     @property
-    def follow_up_mode(self) -> str:
+    def follow_up_mode(self) -> QueueMode:
         return getattr(self.agent, "follow_up_mode", "one-at-a-time")
 
     @property
@@ -991,7 +992,7 @@ class AgentSession:
             await self._extension_runner.emit(self.session_start_event)
             await self._extend_resources_from_extensions()
 
-    def _bind_extension_core(self, runner: ExtensionRunner) -> None:
+    def _bind_extension_core(self, runner: ExtensionRunnerProtocol) -> None:
         """把 session 能力打包成 actions 注入 runner。"""
 
         async def send_message(
@@ -1254,7 +1255,7 @@ class AgentSession:
             provider_actions,
         )
 
-    def _apply_extension_bindings(self, runner: ExtensionRunner) -> None:
+    def _apply_extension_bindings(self, runner: ExtensionRunnerProtocol) -> None:
         """把保存的 UI 上下文、命令上下文与错误监听器绑定到指定 runner。
 
         每次重建 runner（如 _build_runtime / reload）都会调用本方法，
@@ -1388,7 +1389,9 @@ class AgentSession:
             )
         )
 
-    async def _extend_resources_from_extensions(self, reason: str = "startup") -> None:
+    async def _extend_resources_from_extensions(
+        self, reason: Literal["startup", "reload"] = "startup"
+    ) -> None:
         """收集扩展贡献的临时资源路径并重新加载受影响资源。"""
         if self._extension_runner is None:
             return
@@ -1511,10 +1514,10 @@ class AgentSession:
                         preflight_result(True)
                     return
                 if action == "transform":
-                    if getattr(input_result, "text", None) is not None:
+                    if input_result.text is not None:
                         current_text = input_result.text
-                    if getattr(input_result, "images", None) is not None:
-                        current_images = input_result.images
+                    if input_result.images is not None:
+                        current_images = list(input_result.images)
 
             # 3. skill / prompt template 展开
             if expand_prompt_templates:
@@ -1779,8 +1782,8 @@ class AgentSession:
             text_parts: List[str] = []
             images = []
             for part in content:
-                if getattr(part, "type", None) == "text":
-                    text_parts.append(getattr(part, "text", ""))
+                if isinstance(part, TextContent):
+                    text_parts.append(part.text)
                 else:
                     images.append(part)
             text = "\n".join(text_parts)
@@ -1803,7 +1806,7 @@ class AgentSession:
         options: Optional[Dict[str, Any]] = None,
     ) -> None:
         """发送一条自定义消息，创建 CustomMessageEntry。"""
-        from nova_harness.types.messages import CustomMessage
+        from nova_harness.sessions.messages import CustomMessage
 
         opts = options or {}
         # 边界归一：扩展圈事实惯例是 {"type": ..., "text": ...}（pi 对位为
@@ -1855,6 +1858,8 @@ class AgentSession:
         ``send_message`` / ``send_user_message``，使扩展在新会话上
         也能直接发送消息。
         """
+        if self.extension_runner is None:
+            raise RuntimeError("Extension runner is not initialized")
         ctx = self.extension_runner.create_command_context()
 
         async def send_message(
@@ -1890,12 +1895,12 @@ class AgentSession:
         self.agent.steering_mode = self.settings_manager.get_steering_mode()
         self.agent.follow_up_mode = self.settings_manager.get_follow_up_mode()
 
-    def set_steering_mode(self, mode: str) -> None:
+    def set_steering_mode(self, mode: QueueMode) -> None:
         """设置 steering 模式并保存到设置。"""
         self.agent.steering_mode = mode
         self.settings_manager.set_steering_mode(mode)
 
-    def set_follow_up_mode(self, mode: str) -> None:
+    def set_follow_up_mode(self, mode: QueueMode) -> None:
         """设置 follow-up 模式并保存到设置。"""
         self.agent.follow_up_mode = mode
         self.settings_manager.set_follow_up_mode(mode)
@@ -2055,7 +2060,7 @@ class AgentSession:
             ),
             persona_override=(
                 self.persona_manager.current_override
-                if getattr(self, "persona_manager", None) is not None
+                if self.persona_manager is not None
                 else None
             ),
         )
@@ -2086,7 +2091,7 @@ class AgentSession:
         （completed），落盘与定稿同一事实源（消息），item 只是其线上呈现。
 
         core 对 ``item`` 全程不透明：约定为
-        ``nova_server.types.items.NovaItem`` 子类——core 不 import
+        ``nova_server.protocol.items.NovaItem`` 子类——core 不 import
         不解读，类型校验在 server 承接时进行（垃圾在边界丢弃 + 日志）。
         """
         self._emit(ItemEmissionEvent(phase="started", item=item))

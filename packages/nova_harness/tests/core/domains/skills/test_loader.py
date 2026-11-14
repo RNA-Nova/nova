@@ -7,7 +7,7 @@ from nova_harness.resources.loaders.skills import (
     validate_description,
     validate_name,
 )
-from nova_harness.types.resources.skills import Skill
+from nova_harness.resources.skills import Skill
 
 
 def test_validate_name():

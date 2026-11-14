@@ -15,6 +15,8 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
+from nova_protocol import AgentMessage
+
 from nova_harness.events import (
     AfterProviderResponseEvent,
     BeforeAgentStartEvent,
@@ -63,27 +65,27 @@ from nova_harness.events.results import (
     ToolResultEventResult,
     UserBashEventResult,
 )
-from nova_harness.types.extensions.actions import (
+from nova_harness.extensions.actions import (
     ExtensionActions,
     ExtensionCommandContextActions,
     ExtensionContextActions,
     ExtensionProviderActions,
 )
-from nova_harness.types.extensions.context import (
-    ExtensionCommandContext,
-    ExtensionContext,
-)
-from nova_harness.types.extensions.extension import (
+from nova_harness.extensions.context import ExtensionCommandContext, ExtensionContext
+from nova_harness.extensions.extension import (
     ExtensionFlag,
     ExtensionShortcut,
     RegisteredCommand,
 )
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
-from nova_harness.types.project_trust import ProjectTrustEvent, ProjectTrustEventResult
-from nova_harness.types.protocols import ModelRuntimeProtocol
-from nova_harness.types.session.factory import ProjectTrustContext
-from nova_harness.types.ui import NoOpUIContext, ScopedUIContext, UIContext
-from nova_protocol import AgentMessage
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.extensions.protocol import ExtensionRunnerProtocol
+from nova_harness.model.protocol import ModelRuntimeProtocol
+from nova_harness.resources.project_trust.types import (
+    ProjectTrustEvent,
+    ProjectTrustEventResult,
+)
+from nova_harness.sessions.factory import ProjectTrustContext
+from nova_harness.ui import NoOpUIContext, ScopedUIContext, UIContext
 
 
 @dataclass
@@ -95,7 +97,7 @@ class BeforeAgentStartCombinedResult:
 
 
 async def emit_session_shutdown_event(
-    runner: ExtensionRunner,
+    runner: ExtensionRunnerProtocol,
     event: SessionShutdownEvent,
 ) -> bool:
     """触发 session_shutdown 事件。返回是否有 handler 处理。"""
@@ -253,14 +255,16 @@ class ExtensionRunner:
 
         # bind 之后直接生效：扩展调用 runtime.register_provider 时直连真实 registry
         def _register_provider(
-            name: str, config: Any, extension_path: str = "<unknown>"
+            name: str, config: Any, extension_path: Optional[str] = None
         ) -> None:
             if runtime.provider_actions.register_provider:
                 runtime.provider_actions.register_provider(name, config)
             elif self.model_runtime is not None:
                 self.model_runtime.register_provider(name, config)
 
-        def _unregister_provider(name: str, extension_path: str = "<unknown>") -> None:
+        def _unregister_provider(
+            name: str, extension_path: Optional[str] = None
+        ) -> None:
             if runtime.provider_actions.unregister_provider:
                 runtime.provider_actions.unregister_provider(name)
             elif self.model_runtime is not None:
@@ -572,7 +576,7 @@ class ExtensionRunner:
         （对齐 TS： falsy 结果不覆盖已收集的结果），并支持 cancel 短路；
         其余事件类型只分发不返回。
         """
-        event_type = getattr(event, "type", None)
+        event_type = event.type
         is_session_before = event_type in self._SESSION_BEFORE_TYPES
         result: Any = None
 
@@ -607,7 +611,7 @@ class ExtensionRunner:
 
     async def _emit_single_result(self, event: Any, default_factory: Any) -> Any:
         """触发事件并返回最后一个非 None 结果。"""
-        event_type = getattr(event, "type", None)
+        event_type = event.type
         result: Any = None
         for ext in self.extensions:
             handlers = ext.handlers.get(event_type, [])
@@ -663,6 +667,8 @@ class ExtensionRunner:
         """触发 message_end 事件。多个 handler 链式修改 message，并校验 role 不变。"""
         ctx = self.create_context()
         current_message = event.message
+        if current_message is None:
+            return None
         modified = False
 
         for ext in self.extensions:
@@ -860,7 +866,7 @@ class ExtensionRunner:
         current_system_prompt = event.system_prompt
         messages: List[Any] = []
         system_prompt_modified = False
-        event_type = getattr(event, "type", None)
+        event_type = event.type
 
         for ext in self.extensions:
             handlers = ext.handlers.get(event_type, [])

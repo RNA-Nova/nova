@@ -13,13 +13,8 @@ from _helpers.agent import (
 )
 from _helpers.messages import text_of, tool_result_message
 from nova_ai import SimpleStreamOptions
-from nova_protocol import (
-    AbortController,
-    AgentToolResult,
-    TextContent,
-    ToolResultMessage,
-    UserMessage,
-)
+from nova_async import AbortController
+from nova_protocol import AgentToolResult, TextContent, ToolResultMessage, UserMessage
 
 from nova_agent import Agent, AgentContext, AgentLoopConfig
 from nova_agent.agent_loop import run_agent_loop

@@ -18,18 +18,9 @@ import asyncio
 import time
 from typing import Awaitable, Callable, Optional
 
-from nova_async import await_with_abort
-from nova_protocol import (
-    AbortedError,
-    AbortSignal,
-    AssistantMessage,
-    ErrorEvent,
-    Model,
-    StopReason,
-    Usage,
-    is_aborted,
-    redact_secrets,
-)
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_async import AbortedError, AbortSignal, await_with_abort, is_aborted
+from nova_protocol import AssistantMessage, ErrorEvent, Model, StopReason, Usage
 
 from ..streaming import AssistantMessageEventStream
 from ..utils.errors import normalize_error

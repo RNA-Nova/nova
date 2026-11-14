@@ -9,13 +9,14 @@
 from pathlib import Path
 
 import pytest
+
 from nova_harness.core.agent_session.services import AgentSessionServices
 from nova_harness.core.runtime_manager.assembly import (
     create_agent_session_from_services,
 )
-from nova_harness.sessions import SessionManager
-from nova_harness.types.resources.tools import NULL_TOOL_EXEC_CONTEXT, ToolExecContext
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.resources.tools import NULL_TOOL_EXEC_CONTEXT, ToolExecContext
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.sessions.manager import SessionManager
 
 
 def _write_agent(agents_dir: Path, name: str) -> None:

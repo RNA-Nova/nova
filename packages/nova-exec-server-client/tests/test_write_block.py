@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import pytest
 from fake_transport import FakeTransport
+from nova_exec_protocol import EnvironmentInfo, FsOpenMode
+
 from nova_exec_server_client import ProtocolError
 from nova_exec_server_client.fs import FileSystemManager
-from nova_protocol import EnvironmentInfo, FsOpenMode
 
 
 def env_info(*, file_write_streaming: bool) -> dict:

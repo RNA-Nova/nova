@@ -1,6 +1,7 @@
 """OpenAI Completions 的 compat 自动检测与显式覆盖测试。"""
 
 import pytest
+from nova_ai.api_impls.openai_completions import detect_compat, get_compat
 from nova_protocol import (
     KnownApi,
     KnownProvider,
@@ -9,8 +10,6 @@ from nova_protocol import (
     OpenAICompletionsCompat,
     ThinkingFormat,
 )
-
-from nova_ai.api_impls.openai_completions import detect_compat, get_compat
 
 
 class TestDetectCompat:

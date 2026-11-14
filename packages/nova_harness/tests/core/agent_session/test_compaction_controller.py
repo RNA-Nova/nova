@@ -12,11 +12,20 @@ from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nova_protocol import (
+    AssistantMessage,
+    Model,
+    ModelCost,
+    NovaErrorKind,
+    StopReason,
+    TextContent,
+    Usage,
+)
+
 from nova_harness.core.agent_session.controllers.compaction import CompactionController
 from nova_harness.core.agent_session.controllers.tree import TreeNavigator
-from nova_harness.sessions import SessionManager
-from nova_harness.types.compaction import CompactionSettings
-from nova_protocol import AssistantMessage, Model, ModelCost, NovaErrorKind, Usage
+from nova_harness.core.domains.compaction.types import CompactionSettings
+from nova_harness.sessions.manager import SessionManager
 
 
 def _model(context_window: int = 1000) -> Model:
@@ -37,13 +46,13 @@ def _model(context_window: int = 1000) -> Model:
 def _assistant(
     text: str,
     *,
-    stop_reason: str = "stop",
+    stop_reason: StopReason = StopReason.STOP,
     usage: Optional[Usage] = None,
     timestamp: int = 0,
 ) -> AssistantMessage:
     return AssistantMessage(
         role="assistant",
-        content=[{"type": "text", "text": text}],
+        content=[TextContent(type="text", text=text)],
         api="openai-completions",
         provider="test",
         model="m",
@@ -133,7 +142,7 @@ async def test_error_overflow_retries_once(tmp_path):
     """错误（error）且超窗：压缩+重试，错误消息从上下文移除。"""
     model = _model(context_window=100)
     message = _assistant(
-        "failed", stop_reason="error", usage=Usage(input=150, output=10)
+        "failed", stop_reason=StopReason.ERROR, usage=Usage(input=150, output=10)
     )
     session = _session(tmp_path, model, [message])
     session._overflow_recovery_attempted = False
@@ -157,10 +166,11 @@ async def test_will_retry_strips_length_tail_after_rebuild(tmp_path, monkeypatch
     回归：真实集成中 thinking 模型撞 max_tokens 的截断回复已随 message_end
     落盘，压缩重建把它还原成尾消息——守卫此前只剥 error 不剥 length。
     """
+    from nova_protocol import UserMessage
+
     from nova_harness.core.agent_session.controllers import (
         compaction as compaction_controller_module,
     )
-    from nova_protocol import UserMessage
 
     model = _model(context_window=1000)
     session = _session(tmp_path, model, [])
@@ -174,7 +184,7 @@ async def test_will_retry_strips_length_tail_after_rebuild(tmp_path, monkeypatch
     sm.append_message(
         _assistant(
             "a2-truncated",
-            stop_reason="length",
+            stop_reason=StopReason.LENGTH,
             usage=Usage(input=900, output=4096),
             timestamp=4,
         )
@@ -260,10 +270,11 @@ async def test_tree_navigate_without_summary_clears_abort_controller(tmp_path):
 async def test_summarization_auth_returns_headers_filtered_and_env(tmp_path):
     """有 auth 时返回 (api_key, headers, env)，headers 中 None 值被过滤
     （None 表示抑制同名默认头，对齐 TS withoutDeletedHeaders）。"""
+    from nova_protocol import AuthResult
+
     from nova_harness.core.agent_session.controllers.compaction import (
         get_summarization_request_auth,
     )
-    from nova_protocol import AuthResult
 
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(
@@ -359,8 +370,12 @@ async def test_auto_compaction_passes_stream_fn_headers_env(tmp_path, monkeypatc
     provider headers 与 env（对齐 TS：摘要请求保持 SDK 请求行为一致）。"""
     from types import SimpleNamespace
 
-    from nova_harness.types.compaction import CompactionPreparation, CompactionResult
     from nova_protocol import AuthResult
+
+    from nova_harness.core.domains.compaction.types import (
+        CompactionPreparation,
+        CompactionResult,
+    )
 
     session = _session(tmp_path, _model(), [])
     session.model_runtime.get_request_auth = AsyncMock(
@@ -416,7 +431,7 @@ async def test_provider_overflow_error_triggers_compact_and_retry(tmp_path):
     model = _model(context_window=100)
     message = _assistant(
         "failed",
-        stop_reason="error",
+        stop_reason=StopReason.ERROR,
         usage=Usage(),
     )
     message.error_kind = NovaErrorKind.CONTEXT_OVERFLOW

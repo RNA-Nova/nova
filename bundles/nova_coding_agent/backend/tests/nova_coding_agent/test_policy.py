@@ -6,6 +6,8 @@ import asyncio
 from typing import Any, Dict, Optional
 
 import pytest
+from nova_exec_server_client import load_executor_config
+
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
@@ -14,7 +16,6 @@ from nova_coding_agent.executor import (
     reset_backend_selection,
     set_backend_selection,
 )
-from nova_exec_server_client import load_executor_config
 
 
 class _Ctx:
@@ -71,7 +72,7 @@ def _config_with_mode(tmp_path, mode: str | None):
 
 
 def test_resolve_returns_none_without_mode_or_cwd(tmp_path):
-    from nova_protocol import ExecutorConfig
+    from nova_exec_policy import ExecutorConfig
 
     config = ExecutorConfig()
     assert config.resolve_execution("/tmp/proj").sandbox is None

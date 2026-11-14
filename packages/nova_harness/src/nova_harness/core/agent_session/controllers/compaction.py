@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Tuple
+
+from nova_async import AbortController
+from nova_protocol import Model, NovaErrorKind, ProviderHeaders
 
 from nova_harness.config.auth.guidance import (
     format_no_auth_message,
     format_no_model_selected_message,
 )
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.domains.compaction import compaction as _compaction_module
 from nova_harness.core.domains.compaction.compaction import (
     calculate_context_tokens,
@@ -16,6 +20,7 @@ from nova_harness.core.domains.compaction.compaction import (
     estimate_messages_tokens,
     should_compact,
 )
+from nova_harness.core.domains.compaction.models import CompactionResult
 from nova_harness.core.utils import is_context_overflow
 from nova_harness.events import (
     CompactionEndEvent,
@@ -24,29 +29,30 @@ from nova_harness.events import (
 )
 from nova_harness.events.constants import SESSION_BEFORE_COMPACT
 from nova_harness.sessions.utils import get_latest_compaction_entry
-from nova_harness.types.compaction.compaction import CompactionResult
-from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import AbortController, Model, NovaErrorKind
 
 if TYPE_CHECKING:
     from nova_protocol import AssistantMessage
 
 
 def _without_deleted_headers(
-    headers: Optional[Dict[str, Optional[str]]],
-) -> Optional[Dict[str, str]]:
+    headers: Optional[ProviderHeaders],
+) -> Optional[ProviderHeaders]:
     """过滤值为 None 的 header（None 表示抑制同名默认头）。
 
     对齐 TS agent-session 的 withoutDeletedHeaders。
     """
     if not headers:
         return None
-    return {k: v for k, v in headers.items() if v is not None}
+    filtered: ProviderHeaders = {}
+    for key, value in headers.items():
+        if value is not None:
+            filtered[key] = value
+    return filtered
 
 
 async def get_summarization_request_auth(
     session: AgentSessionProtocol, model: Model, *, required: bool
-) -> Tuple[Optional[str], Optional[Dict[str, str]], Optional[Dict[str, str]]]:
+) -> Tuple[Optional[str], Optional[ProviderHeaders], Optional[Dict[str, str]]]:
     """解析摘要请求的鉴权，返回 (api_key, headers, env)。
 
     对齐 TS agent-session 的 ``_getRequiredRequestAuth`` /
@@ -59,7 +65,7 @@ async def get_summarization_request_auth(
     """
     result = await session.model_runtime.get_request_auth(model)
     api_key = result.auth.get("api_key") if result else None
-    if api_key:
+    if result is not None and api_key:
         return (
             api_key,
             _without_deleted_headers(result.auth.get("headers")),
@@ -346,7 +352,7 @@ class CompactionController:
 
     async def run_auto_compaction(
         self,
-        reason: str,
+        reason: Literal["manual", "threshold", "overflow"],
         will_retry: bool,
     ) -> bool:
         """内部：执行自动压缩并发射事件。

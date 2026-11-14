@@ -22,15 +22,12 @@
   永远不计。
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from nova_harness.types.session.entries import SessionEntry
-from nova_harness.types.session.stats import (
-    CacheMiss,
-    CacheWasteTotals,
-    ModelPriceSource,
-)
 from nova_protocol import Message
+
+from nova_harness.sessions.entries import SessionEntry
+from nova_harness.sessions.stats import CacheMiss, CacheWasteTotals, ModelPriceSource
 
 # Prompt 缓存参考 TTL：空闲超过该间隔的 miss 多半可归因于缓存过期
 # （Anthropic 默认缓存 TTL 为 5 分钟）。
@@ -149,7 +146,7 @@ def _is_assistant_message(message) -> bool:
 
 
 def _scan(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     models: Optional[ModelPriceSource],
 ) -> Tuple[Optional[_PreviousRequest], CacheWasteTotals, Dict[int, CacheMiss]]:
     prev: Optional[_PreviousRequest] = None
@@ -185,7 +182,7 @@ def _scan(
 
 
 def compute_cache_waste(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     models: Optional[ModelPriceSource] = None,
 ) -> CacheWasteTotals:
     """会话级缓存浪费：上一轮 prompt 已出现、却被重新计费而非缓存读取的 token。"""
@@ -193,7 +190,7 @@ def compute_cache_waste(
 
 
 def collect_cache_misses(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     models: Optional[ModelPriceSource] = None,
 ) -> Dict[int, CacheMiss]:
     """会话内全部计及的缓存 miss，以 assistant 消息所在 entry 的下标为键。
@@ -204,7 +201,7 @@ def collect_cache_misses(
 
 
 def detect_cache_miss(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     message: Message,
     models: Optional[ModelPriceSource] = None,
 ) -> Optional[CacheMiss]:

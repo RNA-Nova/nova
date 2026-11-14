@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, Tuple
 
+from nova_async import AbortedError, AbortSignal
+
 from nova_coding_agent.tools_common.fs_layer import (
     FileSystemLayer,
     get_local_file_system_layer,
@@ -44,7 +46,6 @@ from nova_coding_agent.tools_common.truncate import (
     truncate_head,
     truncate_line,
 )
-from nova_protocol import AbortedError, AbortSignal
 
 # ---------------------------------------------------------------------------
 # Read

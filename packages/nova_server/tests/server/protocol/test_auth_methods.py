@@ -4,17 +4,22 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import pytest
-from nova_protocol import ApiKeyCredential, CredentialInfo
+from nova_protocol import ApiKeyCredential, CredentialInfo, RedactedString
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import auth as auth_methods
 from nova_server.protocol.methods.state import ServerState
+
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from tests._helpers.ui_context import FakeUIContext
 
 
 class FakeAuthStorage:
     """内存版 AuthStorage 替身（sync 协议）。"""
 
     def __init__(self):
-        self.data: Dict[str, Any] = {"volcengine": ApiKeyCredential(key="k-1")}
+        self.data: Dict[str, Any] = {
+            "volcengine": ApiKeyCredential(key=RedactedString("k-1"))
+        }
 
     def list(self):
         return [
@@ -43,16 +48,16 @@ class FakeModelRuntime:
 
     async def login(self, provider_id, auth_type, interaction):
         self.calls.append(("login", provider_id, auth_type, interaction))
-        return ApiKeyCredential(key="new-key")
+        return ApiKeyCredential(key=RedactedString("new-key"))
 
     async def logout(self, provider_id):
         self.calls.append(("logout", provider_id))
 
 
-class FakeRuntime:
+class FakeRuntime(AgentSessionRuntime):
     def __init__(self, session, storage):
-        self.session = session
-        self.services = SimpleNamespace(auth_storage=storage)
+        self._session = session
+        self._services = SimpleNamespace(auth_storage=storage)
 
 
 @pytest.fixture
@@ -60,7 +65,7 @@ def registry():
     model_runtime = FakeModelRuntime()
     storage = FakeAuthStorage()
     session = SimpleNamespace(model_runtime=model_runtime)
-    state = ServerState(ui_context=SimpleNamespace(has_capability=lambda method: True))
+    state = ServerState(ui_context=FakeUIContext())
     state.set_runtime(FakeRuntime(session, storage))
     reg = MethodRegistry()
     auth_methods.register(reg, state)
@@ -72,9 +77,7 @@ def _registry_with_capabilities(capabilities):
     model_runtime = FakeModelRuntime()
     storage = FakeAuthStorage()
     session = SimpleNamespace(model_runtime=model_runtime)
-    state = ServerState(
-        ui_context=SimpleNamespace(has_capability=lambda method: method in capabilities)
-    )
+    state = ServerState(ui_context=FakeUIContext(set(capabilities)))
     state.set_runtime(FakeRuntime(session, storage))
     reg = MethodRegistry()
     auth_methods.register(reg, state)

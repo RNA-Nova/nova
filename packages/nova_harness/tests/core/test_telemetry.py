@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from nova_harness.core.utils.telemetry import is_install_telemetry_enabled
 
 

@@ -25,7 +25,23 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
+
+from nova_protocol import ToolCall
+from nova_server.protocol.items import (
+    AgentMessageItem,
+    CompactionItem,
+    CustomItem,
+    ItemStatus,
+    NovaItem,
+    ToolCallItem,
+)
+from nova_server.protocol.notifications import (
+    ItemCompletedNotification,
+    ItemDeltaNotification,
+    ItemNotification,
+    ItemStartedNotification,
+)
 
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.events import (
@@ -39,21 +55,6 @@ from nova_harness.events import (
     TOOL_EXECUTION_END,
     TOOL_EXECUTION_START,
     TOOL_EXECUTION_UPDATE,
-)
-from nova_protocol import ToolCall
-from nova_server.types.items import (
-    AgentMessageItem,
-    CompactionItem,
-    CustomItem,
-    ItemStatus,
-    NovaItem,
-    ToolCallItem,
-)
-from nova_server.types.notifications import (
-    ItemCompletedNotification,
-    ItemDeltaNotification,
-    ItemNotification,
-    ItemStartedNotification,
 )
 
 from .mapping import (
@@ -356,7 +357,7 @@ class SessionReducer:
         通道上线。非 custom 类型（label 等管理条目）不产 item。
         """
         entry = getattr(event, "entry", None)
-        if getattr(entry, "type", None) != "custom":
+        if entry is None or getattr(entry, "type", None) != "custom":
             return
         self._one_shot(
             CustomItem(

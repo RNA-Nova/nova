@@ -16,9 +16,13 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 
 import pytest
+
 from nova_harness.core.domains.persona import PersonaManager
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.personas import Persona, SourceInfo
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.extensions.loading import LoadedExtensionsResult
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.extension_paths import ResourceExtensionPaths
+from nova_harness.resources.personas import Persona, SourceInfo
 
 
 class _FakeLoader:
@@ -26,6 +30,37 @@ class _FakeLoader:
 
     def __init__(self, personas: Optional[Dict[str, Persona]] = None) -> None:
         self._personas = personas or {}
+        self.event_bus = ExtensionEventBus()
+
+    async def reload(self, pre_trust_extensions=None) -> None:
+        pass
+
+    def extend_resources(self, paths: ResourceExtensionPaths) -> None:
+        pass
+
+    def get_prompts(self):
+        return {"prompts": []}
+
+    def get_extensions(self) -> LoadedExtensionsResult:
+        return LoadedExtensionsResult()
+
+    def get_disabled_extension_names(self) -> set[str]:
+        return set()
+
+    def get_agents(self):
+        return {}
+
+    def get_agent_names(self) -> list[str]:
+        return []
+
+    def get_skills(self):
+        return {"skills": {}}
+
+    def get_tools(self):
+        return {"tools": {}}
+
+    def get_context_files(self) -> list:
+        return []
 
     def get_personas(self) -> Dict[str, object]:
         return {"personas": self._personas, "diagnostics": []}

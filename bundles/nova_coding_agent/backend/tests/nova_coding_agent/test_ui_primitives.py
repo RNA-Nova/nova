@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+
 from nova_coding_agent.ui_primitives import (
     STANDARD_METHODS,
     confirm,

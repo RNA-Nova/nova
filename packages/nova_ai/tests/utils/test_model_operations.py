@@ -1,8 +1,7 @@
 """模型操作公共出口的错误脱敏测试。"""
 
-from nova_protocol import ImageModel, ModelCost
-
 from nova_ai.utils.model_operations import image_error_result
+from nova_protocol import ImageModel, ModelCost
 
 
 def test_image_error_result_redacts_provider_error_text():

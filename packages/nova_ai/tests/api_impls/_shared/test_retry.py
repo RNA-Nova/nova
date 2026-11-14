@@ -4,13 +4,12 @@ import asyncio
 
 import httpx
 import pytest
-from nova_protocol import AbortController, AbortedError
-
 from nova_ai.api_impls._shared.retry import (
     _get_retry_delay_ms,
     _is_retryable_provider_error,
     retry_provider_request,
 )
+from nova_async import AbortController, AbortedError
 
 
 class _FakeProviderError(Exception):

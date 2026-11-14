@@ -12,7 +12,7 @@
 事件是不可变值对象：构造后只读，统一经 ``_AgentEventBase`` 锁定 frozen。
 """
 
-from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar, Union
+from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar, Union, cast
 
 from pydantic import (
     BeforeValidator,
@@ -33,7 +33,10 @@ from .model import Usage
 _FRAMEWORK_MESSAGE_ROLES = frozenset({"user", "assistant", "toolResult", "system"})
 
 
-class CustomAgentMessage(NovaBaseModel):
+_RoleT = TypeVar("_RoleT", bound=str, covariant=True)
+
+
+class CustomAgentMessage(NovaBaseModel, Generic[_RoleT]):
     """包级自定义消息基座（开放集兜底成员）。
 
     子类约定：以包专属的 ``role`` 字面量覆盖默认值（如 ``"bashExecution"``），
@@ -46,7 +49,7 @@ class CustomAgentMessage(NovaBaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    role: str = "custom"
+    role: _RoleT = cast(_RoleT, "custom")
 
     @model_validator(mode="after")
     def _reject_framework_role(self) -> "CustomAgentMessage":

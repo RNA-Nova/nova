@@ -2,18 +2,20 @@
 
 from typing import Any, Dict, Optional
 
+from nova_async import AbortSignal
+from nova_harness.resources.tools import (
+    NULL_TOOL_EXEC_CONTEXT,
+    ToolContext,
+    ToolExecContext,
+)
+from nova_protocol import AgentToolResult, ConstrainedSampling, TextContent
+
 from nova_coding_agent.executor import backend_file_layer, resolve_backend_path
 from nova_coding_agent.tools_common.file_queue import with_file_write_lock
 from nova_coding_agent.tools_common.operations import (
     WriteOperations,
     create_local_write_operations,
 )
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_EXEC_CONTEXT,
-    ToolContext,
-    ToolExecContext,
-)
-from nova_protocol import AbortSignal, AgentToolResult, ConstrainedSampling, TextContent
 
 
 class Tool:

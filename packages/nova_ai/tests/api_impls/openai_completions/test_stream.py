@@ -14,8 +14,13 @@ from types import SimpleNamespace
 from typing import Any, List, Optional
 
 import httpx
+
+# 注意：patch 目标是流式实现子模块（create_client 的消费方绑定处）——仅
+# 注明理由的保留用例使用，其余一律过线
+import nova_ai.api_impls.openai_completions._stream as stream_module
 import pytest
 import respx
+from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, stream
 from nova_protocol import (
     Context,
     DoneEvent,
@@ -38,11 +43,6 @@ from nova_protocol import (
     ToolCallStartEvent,
     UserMessage,
 )
-
-# 注意：patch 目标是流式实现子模块（create_client 的消费方绑定处）——仅
-# 注明理由的保留用例使用，其余一律过线
-import nova_ai.api_impls.openai_completions._stream as stream_module
-from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, stream
 from tests._helpers.fake_llm import (
     RequestCapture,
     mount_openai_chat,
@@ -476,7 +476,7 @@ class TestStreamAbort:
     @pytest.mark.asyncio
     @respx.mock
     async def test_abort_signal(self):
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         controller = AbortController()
         # 首帧后挂起的受控流：消费者见 TextDelta 举旗时流确定在飞（原 0.01s
@@ -512,7 +512,7 @@ class TestStreamAbort:
         过线版断言更强：``closed`` 观测口在传输层字节流上——SDK 的
         ``stream.close()`` 沿 response 一路关到字节流，全真跑。
         """
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         byte_stream = oai_scripted_stream([], hang=True)
         capture = RequestCapture()
@@ -549,7 +549,7 @@ class TestStreamAbort:
         client"——``client.close()`` 是 SDK 客户端对象的行为，线级设施
         （respx 拦传输）没有观测口；本用例即 client 生命周期治理本身。
         """
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         started = asyncio.Event()
         never = asyncio.Event()
@@ -596,7 +596,7 @@ class TestStreamAbort:
     async def test_create_truly_killed_on_abort(self):
         """create 阶段 abort：在飞请求被 scope **真杀**（传输层 handler 亲见
         CancelledError），不存在迟到响应（任何补关/parse 都无对象）。"""
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         capture = RequestCapture()
         started, killed = mount_openai_hanging_request(capture)
@@ -908,7 +908,7 @@ class TestEventPairingGuarantee:
     @respx.mock
     async def test_abort_pairing(self):
         """abort 时所有打开的块都有且仅有一个 end，error 收尾。"""
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         controller = AbortController()
         # 三块打开后挂起：消费者见 TextDelta 举旗时三块确定在飞
@@ -1002,7 +1002,7 @@ class TestEventPairingGuarantee:
         举旗时机从 0.05s 引导睡眠改为消费者见 TextDelta 即举旗——流挂起
         保证此时两块确定在飞（Event 受控完成序，确定性等价）。
         """
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         controller = AbortController()
         byte_stream = oai_scripted_stream(
@@ -1170,7 +1170,7 @@ class TestStreamErrorTerminal:
         过线表达：响应头到达后、首帧前字节流即抛 AbortedError——传输层
         中途注入不被 SDK 包装（实测直达），与看门狗竞态同形。
         """
-        from nova_protocol import AbortedError
+        from nova_async import AbortedError
 
         byte_stream = oai_scripted_stream([], error=AbortedError("Request was aborted"))
         capture = RequestCapture()
@@ -1294,7 +1294,7 @@ class TestDoneThenAbortRace:
         守卫拦住（两种时序共享同一断言集，确定性绿；原假流在最后一个
         __anext__ 内同步引爆同属该窗口）。
         """
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         controller = AbortController()
         capture = RequestCapture()

@@ -5,8 +5,9 @@ nova-pkg CLI 单元测试。
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from nova_harness.app.package import main
-from nova_harness.types.package import PackageMetadata, PackageView
+from nova_harness.package.types import PackageMetadata, PackageView
 
 
 def _metadata(name="pkg", version="1.0.0") -> PackageMetadata:
@@ -21,7 +22,7 @@ def _metadata(name="pkg", version="1.0.0") -> PackageMetadata:
 
 
 def _resource_metadata(name="res"):
-    from nova_harness.types.package import ResourceMetadata
+    from nova_harness.package.types import ResourceMetadata
 
     return ResourceMetadata(
         name=name,
@@ -155,7 +156,7 @@ def test_install_editable_flag_rejects_git(mock_pm_class, capsys):
 
 @patch("nova_harness.app.package.PackageManager")
 def test_uninstall_found(mock_pm_class, capsys):
-    from nova_harness.types.package import UninstallResult
+    from nova_harness.package.types import UninstallResult
 
     mock_pm = MagicMock()
     mock_pm.uninstall.return_value = UninstallResult(removed=True)
@@ -169,7 +170,7 @@ def test_uninstall_found(mock_pm_class, capsys):
 
 @patch("nova_harness.app.package.PackageManager")
 def test_uninstall_not_found(mock_pm_class, capsys):
-    from nova_harness.types.package import UninstallResult
+    from nova_harness.package.types import UninstallResult
 
     mock_pm = MagicMock()
     mock_pm.uninstall.return_value = UninstallResult(removed=False)
@@ -253,7 +254,7 @@ def test_json_list_flat(mock_pm_class, capsys):
 
 @patch("nova_harness.app.package.PackageManager")
 def test_json_uninstall(mock_pm_class, capsys):
-    from nova_harness.types.package import UninstallResult
+    from nova_harness.package.types import UninstallResult
 
     mock_pm = MagicMock()
     mock_pm.uninstall.return_value = UninstallResult(removed=True)

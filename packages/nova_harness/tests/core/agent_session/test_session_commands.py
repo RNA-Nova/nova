@@ -4,9 +4,10 @@ import os
 from unittest.mock import MagicMock
 
 import pytest
+
 from nova_harness.core import AgentSession
-from nova_harness.sessions import SessionManager
-from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.sessions.config import AgentSessionConfig
+from nova_harness.sessions.manager import SessionManager
 
 
 def _make_config(session_manager, **overrides):
@@ -75,6 +76,7 @@ async def test_clone_session_creates_new_file(persisted_session_manager):
 
     assert result["cancelled"] is False
     new_file = session.session_manager.get_session_file()
+    assert new_file is not None
     assert new_file != original_file
     assert os.path.exists(new_file)
     assert (

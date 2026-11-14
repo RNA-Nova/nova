@@ -10,8 +10,7 @@
 import asyncio
 
 import pytest
-from nova_async import await_with_signal
-from nova_protocol import AbortController, AbortedError, AbortSignal
+from nova_async import AbortController, AbortedError, AbortSignal, await_with_signal
 
 
 class TestAwaitWithSignal:

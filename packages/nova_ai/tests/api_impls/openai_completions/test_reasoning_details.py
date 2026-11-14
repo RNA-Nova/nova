@@ -2,6 +2,14 @@
 
 import json
 
+from nova_ai.api_impls.openai_completions import (
+    append_openai_reasoning_detail,
+    build_params,
+    is_openai_reasoning_detail,
+    is_reasoning_field,
+    parse_legacy_encrypted_reasoning_detail,
+    parse_openai_reasoning_details,
+)
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -11,15 +19,6 @@ from nova_protocol import (
     ThinkingContent,
     ToolCall,
     UserMessage,
-)
-
-from nova_ai.api_impls.openai_completions import (
-    append_openai_reasoning_detail,
-    build_params,
-    is_openai_reasoning_detail,
-    is_reasoning_field,
-    parse_legacy_encrypted_reasoning_detail,
-    parse_openai_reasoning_details,
 )
 
 from .conftest import _ctx, _model

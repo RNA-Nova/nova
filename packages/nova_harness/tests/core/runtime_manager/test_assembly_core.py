@@ -5,8 +5,9 @@ assembly 组装编排的工厂与解析逻辑测试（原 tests/core/sdk/test_co
 from unittest.mock import MagicMock
 
 import pytest
+from nova_protocol import Model, ModelThinkingLevel
+
 from nova_harness.core.runtime_manager.assembly import CreateAgentSessionOptions
-from nova_harness.model import ModelRuntime
 from nova_harness.model.resolver import (
     find_initial_model,
     parse_model_pattern,
@@ -15,9 +16,8 @@ from nova_harness.model.resolver import (
     resolve_thinking_level,
     restore_model_from_session,
 )
-from nova_harness.sessions import SessionManager
-from nova_protocol import Model, ModelThinkingLevel
-
+from nova_harness.model.runtime import ModelRuntime
+from nova_harness.sessions.manager import SessionManager
 from tests._helpers.auth_storage import auth_storage_in_memory
 from tests._helpers.settings_manager import settings_manager_in_memory
 
@@ -206,7 +206,9 @@ async def test_resolve_cli_model_unknown_provider(tmp_path):
 def test_parse_model_pattern_extracts_thinking_level():
     from nova_ai import get_builtin_model
 
-    available = [get_builtin_model("volcengine", "deepseek-v4-flash-260425")]
+    model = get_builtin_model("volcengine", "deepseek-v4-flash-260425")
+    assert model is not None
+    available = [model]
     result = parse_model_pattern(
         "deepseek-v4-flash-260425:high",
         available,
@@ -219,7 +221,9 @@ def test_parse_model_pattern_extracts_thinking_level():
 def test_parse_model_pattern_invalid_thinking_level_warns():
     from nova_ai import get_builtin_model
 
-    available = [get_builtin_model("volcengine", "deepseek-v4-flash-260425")]
+    model = get_builtin_model("volcengine", "deepseek-v4-flash-260425")
+    assert model is not None
+    available = [model]
     result = parse_model_pattern(
         "deepseek-v4-flash-260425:invalid",
         available,

@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from nova_harness.package import PackageManager
+
+from nova_harness.package.manager import PackageManager
 from nova_harness.package.manifest import read_manifest
 
 
@@ -55,7 +56,7 @@ def _make_b_pkg(root: Path, name: str, requires=None) -> Path:
     )
     import json
 
-    payload = {"name": name, "version": "1.0.0", "description": "b"}
+    payload: dict[str, object] = {"name": name, "version": "1.0.0", "description": "b"}
     if requires:
         payload["nova"] = {"requires": requires}
     (root / "package.json").write_text(json.dumps(payload), encoding="utf-8")

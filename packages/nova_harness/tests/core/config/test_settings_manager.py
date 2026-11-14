@@ -2,10 +2,10 @@
 SettingsManager 测试。
 """
 
-from nova_harness.config.settings.manager import SettingsManager
-from nova_harness.types.config.settings import ProviderRetrySettings, Settings
 from nova_protocol import ModelThinkingLevel
 
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.config.settings.models import ProviderRetrySettings, Settings
 from tests._helpers.settings_manager import settings_manager_in_memory
 
 
@@ -60,7 +60,7 @@ def test_settings_manager_apply_overrides():
 
 
 def test_settings_manager_drain_errors():
-    from nova_harness.types.config.settings import SettingsScope
+    from nova_harness.config.settings.models import SettingsScope
 
     sm = settings_manager_in_memory()
     sm._record_error(SettingsScope.GLOBAL, ValueError("boom"))
@@ -71,11 +71,12 @@ def test_settings_manager_drain_errors():
 
 def test_unknown_fields_ignored_on_load():
     """历史/未知字段在加载时自然丢弃（pydantic 忽略未知键，无需迁移代码）。"""
+    from nova_harness.config.settings.models import SettingsScope
     from tests._helpers.settings_storage import InMemorySettingsStorage
 
     storage = InMemorySettingsStorage()
     storage.with_lock(
-        "global",
+        SettingsScope.GLOBAL,
         lambda current: '{"queueMode": "all", "websockets": true, "steering_mode": "one-at-a-time"}',
     )
     sm = SettingsManager.from_storage(storage)
@@ -105,10 +106,14 @@ def test_settings_manager_retry_provider_defaults():
 def test_settings_manager_retry_provider_roundtrip():
     sm = settings_manager_in_memory()
     sm.set_retry_enabled(False)
-    sm._global_settings.retry.provider = ProviderRetrySettings(max_retry_delay_ms=12345)
+    retry = sm._global_settings.retry
+    assert retry is not None
+    retry.provider = ProviderRetrySettings(max_retry_delay_ms=12345)
     sm._mark_modified("retry", "provider")
     sm._save()
-    assert sm.get_retry_settings().provider.max_retry_delay_ms == 12345
+    provider = sm.get_retry_settings().provider
+    assert provider is not None
+    assert provider.max_retry_delay_ms == 12345
 
 
 def test_update_global_settings_partial_merge():

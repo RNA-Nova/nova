@@ -5,10 +5,10 @@
 避免底层资源加载器/系统提示词层向上依赖 harness。
 """
 
-from typing import Iterable
+from typing import Iterable, Mapping
 
-from nova_harness.types.extensions.commands import ExtensionCommand
-from nova_harness.types.resources.skills import Skill
+from nova_harness.extensions.commands import ExtensionCommand
+from nova_harness.resources.skills import Skill
 
 
 def _escape_xml(value: str) -> str:
@@ -63,7 +63,7 @@ def format_skills_for_prompt(
     return "\n".join(lines)
 
 
-def list_skill_commands(skills: dict[str, Skill]) -> list[ExtensionCommand]:
+def list_skill_commands(skills: Mapping[str, Skill]) -> list[ExtensionCommand]:
     """把 skill 列表转换为 slash 命令列表（invocation name 为 ``skill:name``）。"""
     return [
         ExtensionCommand(

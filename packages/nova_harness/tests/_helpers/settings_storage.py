@@ -2,9 +2,9 @@
 
 from typing import Callable, Optional
 
+from nova_harness.config.settings.models import SettingsScope
 from nova_harness.config.settings.storage import SettingsStorage
 from nova_harness.config.storage import InMemoryStorageBackend
-from nova_harness.types.config.settings import SettingsScope
 
 
 class InMemorySettingsStorage(SettingsStorage):

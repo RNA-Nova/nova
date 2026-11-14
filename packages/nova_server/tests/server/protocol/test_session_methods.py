@@ -5,11 +5,14 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
-from nova_harness.types.compaction.compaction import CompactionResult
 from nova_protocol import ModelThinkingLevel
 from nova_server.protocol import JSONRPCError, MethodRegistry
 from nova_server.protocol.methods import session as session_methods
 from nova_server.protocol.methods.state import ServerState
+
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from nova_harness.core.domains.compaction.models import CompactionResult
+from nova_harness.ui import NoOpUIContext
 
 
 class FakeSession:
@@ -164,15 +167,15 @@ class FakeSession:
         return SimpleNamespace(get_entries=lambda: [entry], get_leaf_id=lambda: "e1")
 
 
-class FakeRuntime:
+class FakeRuntime(AgentSessionRuntime):
     def __init__(self, session):
-        self.session = session
+        self._session = session
 
 
 @pytest.fixture
 def registry():
     session = FakeSession()
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     state.set_runtime(FakeRuntime(session))
     reg = MethodRegistry()
     session_methods.register(reg, state)
@@ -433,7 +436,7 @@ async def test_save_agent_as_new_name(registry):
 
 @pytest.mark.asyncio
 async def test_methods_require_active_session():
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     reg = MethodRegistry()
     session_methods.register(reg, state)  # runtime 为 None
 

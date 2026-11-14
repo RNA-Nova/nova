@@ -14,15 +14,19 @@
 """
 
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Literal, Optional
 
 import pytest
 import yaml
+
 from nova_harness.core.domains.agents import AgentManager
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.selection import CapabilitySelection
-from nova_harness.types.resources.tools import ToolInfo
+from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.extensions.loading import LoadedExtensionsResult
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.extension_paths import ResourceExtensionPaths
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.selection import CapabilitySelection
+from nova_harness.resources.tools import ToolInfo
 
 
 class _FakeLoader:
@@ -36,14 +40,42 @@ class _FakeLoader:
         self._agents = dict(agents or {})
         self._on_reload = on_reload
         self.reload_calls = 0
+        self.event_bus = ExtensionEventBus()
 
     def get_agents(self) -> Dict[str, AgentConfig]:
         return dict(self._agents)
 
-    async def reload(self) -> None:
+    async def reload(self, pre_trust_extensions=None) -> None:
         self.reload_calls += 1
         if self._on_reload is not None:
             self._agents = self._on_reload()
+
+    def extend_resources(self, paths: ResourceExtensionPaths) -> None:
+        pass
+
+    def get_prompts(self):
+        return {"prompts": []}
+
+    def get_extensions(self) -> LoadedExtensionsResult:
+        return LoadedExtensionsResult()
+
+    def get_disabled_extension_names(self) -> set[str]:
+        return set()
+
+    def get_agent_names(self) -> list[str]:
+        return sorted(self._agents)
+
+    def get_skills(self):
+        return {"skills": {}}
+
+    def get_personas(self):
+        return {"personas": {}}
+
+    def get_tools(self):
+        return {"tools": {}}
+
+    def get_context_files(self) -> list:
+        return []
 
 
 class _FakeToolsManager:
@@ -80,7 +112,11 @@ def _config(
     return AgentConfig(name=name, agent_dir="", source_info=source_info, **kwargs)
 
 
-def _source(scope: str, origin: str, path: str = "/x.yaml") -> SourceInfo:
+def _source(
+    scope: Literal["user", "project", "temporary"],
+    origin: Literal["package", "top-level", "local", "auto"],
+    path: str = "/x.yaml",
+) -> SourceInfo:
     return SourceInfo(path=path, scope=scope, origin=origin)
 
 
@@ -152,7 +188,9 @@ def test_change_agent_switches_current():
     manager = AgentManager(resource_loader=loader)
     manager.change_agent("zzz")
     assert manager.current == "zzz"
-    assert manager.current_config().name == "zzz"
+    current = manager.current_config()
+    assert current is not None
+    assert current.name == "zzz"
 
 
 def test_change_agent_unknown_raises_with_available_names():
@@ -437,7 +475,9 @@ def test_save_reload_makes_shadow_effective(tmp_path: Path):
     # reload 后活视图反映影子内容：影子 yaml 的 tools 激活集覆盖了
     # 包内原文（包内 yaml 无 tools 字段——读到 tools 即证明影子生效）
     assert loader.reload_calls == 1
-    assert [t.name for t in manager.current_config().tools] == ["read"]
+    current = manager.current_config()
+    assert current is not None and current.tools is not None
+    assert [t.name for t in current.tools] == ["read"]
 
 
 def _run_save(

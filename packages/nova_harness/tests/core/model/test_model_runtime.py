@@ -11,12 +11,44 @@
 
 import json
 from pathlib import Path
+from typing import Any, TypeVar, cast
 
 import pytest
-from nova_harness.model import ModelRuntime
+from nova_ai.gateway.provider import ProviderStreams
+from nova_protocol import (
+    AuthResult,
+    Context,
+    Model,
+    OAuthCredential,
+    OpenAICompletionsCompat,
+    RedactedString,
+)
+
 from nova_harness.model.composer import compose_provider
-from nova_harness.types.model import ProviderConfigInput
-from nova_protocol import OAuthCredential, OpenAICompletionsCompat
+from nova_harness.model.config import ProviderConfigInput
+from nova_harness.model.runtime import ModelRuntime
+
+T = TypeVar("T")
+
+
+def _required(value: T | None) -> T:
+    assert value is not None
+    return value
+
+
+def _find(runtime: ModelRuntime, provider: str, model_id: str) -> Model:
+    return _required(runtime.find(provider, model_id))
+
+
+def _provider(runtime: ModelRuntime, provider_id: str):
+    return _required(runtime.get_provider(provider_id))
+
+
+async def _get_auth(runtime: ModelRuntime, *args: Any, **kwargs: Any) -> AuthResult:
+    result = await runtime.get_request_auth(*args, **kwargs)
+    assert result is not None
+    return result
+
 
 from tests._helpers.auth_storage import auth_storage_in_memory
 
@@ -48,7 +80,7 @@ def auth_with_volc_key():
 
 def test_loads_builtin_models(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert model is not None
     assert model.provider == "volcengine"
     assert model.base_url == "https://ark.cn-beijing.volces.com/api/v3/"
@@ -70,7 +102,7 @@ def test_custom_models_from_models_json(tmp_path):
             }
         },
     )
-    model = runtime.find("custom", "local-model")
+    model = _find(runtime, "custom", "local-model")
     assert model is not None
     assert model.base_url == "http://localhost:8000/v1"
     assert model.context_window == 32000
@@ -92,7 +124,7 @@ def test_custom_models_do_not_bake_authorization(tmp_path):
             }
         },
     )
-    model = runtime.find("custom", "m1")
+    model = _find(runtime, "custom", "m1")
     assert model is not None
     assert not (model.headers or {}).get("Authorization")
 
@@ -111,7 +143,7 @@ def test_custom_models_without_api_key_allowed(tmp_path):
             }
         },
     )
-    assert runtime.find("custom", "m1") is not None
+    assert _find(runtime, "custom", "m1") is not None
     assert runtime.get_error() is None
 
 
@@ -128,7 +160,7 @@ def test_custom_model_level_base_url_wins(tmp_path):
             }
         },
     )
-    assert runtime.find("custom", "m1").base_url == "http://model-level/v1"
+    assert _find(runtime, "custom", "m1").base_url == "http://model-level/v1"
 
 
 def test_custom_model_thinking_level_map_and_compat(tmp_path):
@@ -149,11 +181,11 @@ def test_custom_model_thinking_level_map_and_compat(tmp_path):
             }
         },
     )
-    m1 = runtime.find("custom", "m1")
+    m1 = _find(runtime, "custom", "m1")
     assert isinstance(m1.compat, OpenAICompletionsCompat)
     assert m1.compat.thinking_format == "openai"
     assert m1.thinking_level_map == {"low": "L", "medium": "M"}
-    assert runtime.find("custom", "m2").thinking_level_map == {"high": "H"}
+    assert _find(runtime, "custom", "m2").thinking_level_map == {"high": "H"}
 
 
 def test_invalid_models_json_sets_load_error(tmp_path):
@@ -178,7 +210,7 @@ def test_invalid_provider_config_becomes_composition_error(tmp_path):
             }
         },
     )
-    assert runtime.find("ok", "m2") is not None
+    assert _find(runtime, "ok", "m2") is not None
     assert runtime.find("broken", "m1") is None
     error = runtime.get_error()
     assert error is not None and 'Provider "broken"' in error
@@ -195,7 +227,7 @@ def test_provider_override_base_url_on_builtin(auth_with_volc_key, tmp_path):
         {"providers": {"volcengine": {"base_url": "http://proxy/v1"}}},
         storage=auth_with_volc_key,
     )
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert model.base_url == "http://proxy/v1"
 
 
@@ -216,7 +248,7 @@ def test_model_overrides_on_builtin(auth_with_volc_key, tmp_path):
         },
         storage=auth_with_volc_key,
     )
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert model.max_tokens == 9999
     assert model.cost.input == 1.5
 
@@ -235,7 +267,7 @@ def test_model_override_merges_thinking_level_map(tmp_path):
             }
         },
     )
-    assert runtime.find("custom", "m1").thinking_level_map == {
+    assert _find(runtime, "custom", "m1").thinking_level_map == {
         "low": "L",
         "medium": "M",
     }
@@ -262,7 +294,9 @@ def test_model_override_merges_chat_template_kwargs(tmp_path):
             }
         },
     )
-    assert runtime.find("custom", "m1").compat.chat_template_kwargs == {
+    compat = _find(runtime, "custom", "m1").compat
+    assert isinstance(compat, OpenAICompletionsCompat)
+    assert compat.chat_template_kwargs == {
         "a": 1,
         "b": 3,
     }
@@ -298,7 +332,7 @@ def test_model_override_preserves_cost_tiers(tmp_path):
             }
         },
     )
-    cost = runtime.find("custom", "m1").cost
+    cost = _find(runtime, "custom", "m1").cost
     assert cost.input == 9.9
     assert cost.tiers is not None and cost.tiers[0].input == 2.0
 
@@ -311,7 +345,7 @@ def test_model_override_preserves_cost_tiers(tmp_path):
 @pytest.mark.asyncio
 async def test_get_api_key_from_runtime_override(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert await runtime.get_api_key(model) == "volc-key"
 
 
@@ -321,7 +355,7 @@ async def test_get_api_key_from_stored_credential():
         {"volcengine": {"type": "api_key", "key": "stored-key"}}
     )
     runtime = ModelRuntime(storage)
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert await runtime.get_api_key(model) == "stored-key"
 
 
@@ -340,7 +374,7 @@ async def test_get_api_key_from_models_json_key(tmp_path):
             }
         },
     )
-    assert await runtime.get_api_key(runtime.find("custom", "m1")) == "json-key"
+    assert await runtime.get_api_key(_find(runtime, "custom", "m1")) == "json-key"
 
 
 @pytest.mark.asyncio
@@ -360,7 +394,7 @@ async def test_stored_credential_beats_models_json_key(tmp_path):
         },
         storage=storage,
     )
-    assert await runtime.get_api_key(runtime.find("custom", "m1")) == "stored"
+    assert await runtime.get_api_key(_find(runtime, "custom", "m1")) == "stored"
 
 
 @pytest.mark.asyncio
@@ -379,9 +413,9 @@ async def test_auth_header_injects_bearer_at_request_time(tmp_path):
             }
         },
     )
-    auth = await runtime.get_request_auth(runtime.find("custom", "m1"))
+    auth = await _get_auth(runtime, _find(runtime, "custom", "m1"))
     assert auth is not None
-    assert auth.auth["headers"]["Authorization"] == "Bearer json-key"
+    assert auth.auth.get("headers", {})["Authorization"] == "Bearer json-key"
 
 
 @pytest.mark.asyncio
@@ -392,10 +426,10 @@ async def test_provider_headers_resolved_at_request_time(auth_with_volc_key, tmp
         {"providers": {"volcengine": {"headers": {"X-Custom": "yes"}}}},
         storage=auth_with_volc_key,
     )
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert not (model.headers or {}).get("X-Custom")
-    auth = await runtime.get_request_auth(model)
-    assert auth.auth["headers"]["X-Custom"] == "yes"
+    auth = await _get_auth(runtime, model)
+    assert auth.auth.get("headers", {})["X-Custom"] == "yes"
 
 
 @pytest.mark.asyncio
@@ -405,10 +439,14 @@ async def test_get_api_key_resolves_oauth_access_token():
 
     storage.write(
         "kimi-coding",
-        OAuthCredential(access="kimi-oauth-token", refresh="r", expires=9999999999999),
+        OAuthCredential(
+            access=RedactedString("kimi-oauth-token"),
+            refresh=RedactedString("r"),
+            expires=9999999999999,
+        ),
     )
 
-    model = runtime.find("kimi-coding", "k3")
+    model = _find(runtime, "kimi-coding", "k3")
     assert model is not None
     assert await runtime.get_api_key(model) == "kimi-oauth-token"
     assert await runtime.get_api_key_for_provider("kimi-coding") == "kimi-oauth-token"
@@ -417,7 +455,7 @@ async def test_get_api_key_resolves_oauth_access_token():
 def test_builtin_provider_untouched_without_overlay():
     """无覆盖时内置 provider 原样进入集合（保持 auth/stream 行为精确）。"""
     runtime = ModelRuntime(auth_storage_in_memory({}))
-    provider = runtime.get_provider("kimi-coding")
+    provider = _provider(runtime, "kimi-coding")
     assert provider is not None
     # 未经 composer 重组：正是构造期捕获的那个内置实例
     assert provider is runtime._builtins["kimi-coding"]
@@ -429,7 +467,7 @@ def test_oauth_preserved_under_models_json_overlay(tmp_path):
         tmp_path,
         {"providers": {"kimi-coding": {"headers": {"X-Team": "a"}}}},
     )
-    provider = runtime.get_provider("kimi-coding")
+    provider = _provider(runtime, "kimi-coding")
     assert provider is not None
     assert provider.auth is not None and provider.auth.oauth is not None
 
@@ -447,9 +485,9 @@ def test_get_available_sync_snapshot(auth_with_volc_key):
 
 def test_has_configured_auth(auth_with_volc_key):
     runtime = ModelRuntime(auth_with_volc_key)
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert runtime.has_configured_auth(model)
-    kimi = runtime.find("kimi-coding", "k3")
+    kimi = _find(runtime, "kimi-coding", "k3")
     assert not runtime.has_configured_auth(kimi)
 
 
@@ -460,12 +498,16 @@ async def test_refresh_availability_marks_oauth():
 
     storage.write(
         "kimi-coding",
-        OAuthCredential(access="a", refresh="r", expires=9999999999999),
+        OAuthCredential(
+            access=RedactedString("a"),
+            refresh=RedactedString("r"),
+            expires=9999999999999,
+        ),
     )
     await runtime.refresh_availability()
 
     assert runtime.is_using_oauth("kimi-coding")
-    kimi = runtime.find("kimi-coding", "k3")
+    kimi = _find(runtime, "kimi-coding", "k3")
     assert runtime.has_configured_auth(kimi)
 
 
@@ -510,7 +552,7 @@ def test_register_provider_replaces_models(auth_with_volc_key):
         },
     )
     assert runtime.find("volcengine", "deepseek-v4-flash-260425") is None
-    assert runtime.find("volcengine", "only-model") is not None
+    assert _find(runtime, "volcengine", "only-model") is not None
 
 
 def test_unregister_provider_restores_builtin(auth_with_volc_key):
@@ -525,7 +567,7 @@ def test_unregister_provider_restores_builtin(auth_with_volc_key):
         },
     )
     runtime.unregister_provider("volcengine")
-    assert runtime.find("volcengine", "deepseek-v4-flash-260425") is not None
+    assert _find(runtime, "volcengine", "deepseek-v4-flash-260425") is not None
 
 
 def test_reregister_merges_defined_fields(auth_with_volc_key):
@@ -541,10 +583,10 @@ def test_reregister_merges_defined_fields(auth_with_volc_key):
         },
     )
     runtime.register_provider("p", {"api_key": "k2"})
-    config = runtime.get_registered_provider_config("p")
+    config = _required(runtime.get_registered_provider_config("p"))
     assert config.api_key == "k2"
     assert config.base_url == "http://a"
-    assert runtime.find("p", "m1") is not None
+    assert _find(runtime, "p", "m1") is not None
 
 
 @pytest.mark.asyncio
@@ -566,11 +608,11 @@ async def test_register_stream_fn_dispatched_for_matching_api(auth_with_volc_key
         },
         stream_fn=my_stream,
     )
-    provider = runtime.get_provider("myprovider")
-    model = runtime.find("myprovider", "m1")
+    provider = _provider(runtime, "myprovider")
+    model = _find(runtime, "myprovider", "m1")
     assert provider is not None
     assert model is not None
-    result = await provider.stream_simple(model, context=None).result()
+    result = await provider.stream_simple(model, context=Context()).result()
     assert result.stop_reason.value == "error"
     assert calls == ["m1"]
 
@@ -592,11 +634,11 @@ async def test_register_stream_fn_via_dict_key(auth_with_volc_key):
             "stream_simple": my_stream,
         },
     )
-    model = runtime.find("myprovider", "m1")
-    provider = runtime.get_provider("myprovider")
+    model = _find(runtime, "myprovider", "m1")
+    provider = _provider(runtime, "myprovider")
     assert provider is not None
     assert model is not None
-    result = await provider.stream_simple(model, context=None).result()
+    result = await provider.stream_simple(model, context=Context()).result()
     assert result.stop_reason.value == "error"
 
 
@@ -624,8 +666,9 @@ def test_register_extension_compat_applies_without_models(auth_with_volc_key):
             "thinking_level_map": {"xhigh": "X"},
         },
     )
-    model = runtime.find("volcengine", "deepseek-v4-flash-260425")
+    model = _find(runtime, "volcengine", "deepseek-v4-flash-260425")
     assert model is not None
+    assert isinstance(model.compat, OpenAICompletionsCompat)
     assert model.compat.supports_store is True
     assert model.thinking_level_map == {"xhigh": "X"}
 
@@ -652,11 +695,11 @@ def test_model_overrides_apply_to_extension_models(auth_with_volc_key, tmp_path)
             "models": [{"id": "e1"}],
         },
     )
-    assert runtime.find("ext-p", "e1").max_tokens == 1234
+    assert _find(runtime, "ext-p", "e1").max_tokens == 1234
 
 
 def test_provider_config_input_is_pure_data():
-    from nova_harness.types.model import ProviderConfigInput
+    from nova_harness.model.config import ProviderConfigInput
 
     assert "stream_simple" not in ProviderConfigInput.model_fields
 
@@ -697,11 +740,11 @@ async def test_login_logout_api_key(tmp_path):
 
     await runtime.login("custom", "api_key", _FakeInteraction("logged-in-key"))
     assert await runtime.get_api_key_for_provider("custom") == "logged-in-key"
-    assert runtime.has_configured_auth(runtime.find("custom", "m1"))
+    assert runtime.has_configured_auth(_find(runtime, "custom", "m1"))
 
     await runtime.logout("custom")
     assert await runtime.get_api_key_for_provider("custom") is None
-    assert not runtime.has_configured_auth(runtime.find("custom", "m1"))
+    assert not runtime.has_configured_auth(_find(runtime, "custom", "m1"))
 
 
 # ---------------------------------------------------------------------------
@@ -749,19 +792,19 @@ def _make_model(model_id: str, provider: str = "dyn", max_tokens: int = 8192):
 
 
 def _make_dynamic_base(fetch):
-    from nova_protocol import ModelsStoreEntry, ProviderAuth
-
     from nova_ai import create_provider
     from nova_ai.api_impls import openai_completions
+    from nova_ai.auth import ProviderAuth
     from nova_ai.auth.helpers import env_api_key_auth
     from nova_ai.gateway.provider import ModelsPublication
+    from nova_protocol import ModelsStoreEntry
 
     provider = create_provider(
         id="dyn",
         name="dyn",
         base_url="http://dyn/v1",
         models=[_make_model("old-m")],
-        api=openai_completions,
+        api=cast(ProviderStreams, openai_completions),
         auth=ProviderAuth(api_key=env_api_key_auth("Dyn key", ["NOVA_TEST_DYN_KEY"])),
     )
 
@@ -814,7 +857,7 @@ async def test_composed_provider_preserves_dynamic_refresh(tmp_path, monkeypatch
     runtime._builtins["dyn"] = _make_dynamic_base(fetch)
     runtime._recompose_provider("dyn")
 
-    provider = runtime.get_provider("dyn")
+    provider = _provider(runtime, "dyn")
     assert provider is not None
     assert getattr(provider, "refresh_models", None) is not None
 
@@ -822,14 +865,16 @@ async def test_composed_provider_preserves_dynamic_refresh(tmp_path, monkeypatch
 
     model_ids = [m.id for m in provider.get_models()]
     assert "old-m" in model_ids and "new-m" in model_ids
-    assert provider.get_model("new-m").max_tokens == 111
+    refreshed = provider.get_model("new-m")
+    assert refreshed is not None
+    assert refreshed.max_tokens == 111
 
 
 def test_composed_provider_preserves_catalog_source():
     """组合透传目录站选配，站路由不因组合失效。"""
-    from nova_harness.types.model import ProviderConfig
-
     from nova_ai import create_provider
+
+    from nova_harness.model.config import ProviderConfig
 
     base = create_provider(
         id="p",
@@ -886,7 +931,7 @@ async def test_composed_builtin_keeps_catalog_refresh(tmp_path, monkeypatch):
     monkeypatch.setattr(PiDevCatalog, "fetch", fake_pi_dev_fetch)
     monkeypatch.setattr(ModelsDevCatalog, "fetch", fake_models_dev_fetch)
     runtime = _runtime(tmp_path, {"providers": {"moonshotai": {"apiKey": "sk-x"}}})
-    provider = runtime.get_provider("moonshotai")
+    provider = _provider(runtime, "moonshotai")
     assert type(provider).__name__ == "_ComposedProvider"  # 覆盖确实触发了组合
 
     result = await runtime.refresh(allow_network=True)
@@ -917,7 +962,7 @@ def test_composed_provider_without_refresh_capability():
 @pytest.mark.asyncio
 async def test_extension_refresh_models_fn(tmp_path):
     """扩展 refresh_models_fn 的结果进入模型列表（先校验再发布）。"""
-    from nova_harness.types.model import ModelDefinition
+    from nova_harness.model.config import ModelDefinition
 
     calls = []
 
@@ -937,7 +982,7 @@ async def test_extension_refresh_models_fn(tmp_path):
         refresh_models_fn=refresh_fn,
     )
 
-    provider = runtime.get_provider("ext-p")
+    provider = _provider(runtime, "ext-p")
     assert getattr(provider, "refresh_models", None) is not None
 
     await runtime.refresh(allow_network=True)
@@ -950,7 +995,7 @@ async def test_extension_refresh_models_fn(tmp_path):
 @pytest.mark.asyncio
 async def test_extension_oauth_login_and_modify_models(tmp_path):
     """扩展 OAuth：login 持久化 credential，modify_models 在刷新后生效。"""
-    from nova_harness.types.model import ExtensionOAuthConfig
+    from nova_harness.model.config import ExtensionOAuthConfig
 
     async def oauth_login(interaction):
         return {"access": "ext-tok", "refresh": "r", "expires": 9999999999999}
@@ -977,7 +1022,7 @@ async def test_extension_oauth_login_and_modify_models(tmp_path):
         oauth=oauth,
     )
 
-    provider = runtime.get_provider("oauth-p")
+    provider = _provider(runtime, "oauth-p")
     assert provider.auth is not None and provider.auth.oauth is not None
 
     await runtime.login("oauth-p", "oauth", _FakeInteraction("ignored"))
@@ -1006,7 +1051,7 @@ async def test_set_and_remove_runtime_api_key_updates_snapshot(tmp_path):
             }
         },
     )
-    model = runtime.find("custom", "m1")
+    model = _find(runtime, "custom", "m1")
     assert not runtime.has_configured_auth(model)
 
     await runtime.set_runtime_api_key("custom", "rt-key")
@@ -1020,8 +1065,9 @@ async def test_set_and_remove_runtime_api_key_updates_snapshot(tmp_path):
 
 @pytest.mark.asyncio
 async def test_file_models_store_roundtrip(tmp_path):
-    from nova_harness.model.store import FileModelsStore
     from nova_protocol import ModelsStoreEntry
+
+    from nova_harness.model.store import FileModelsStore
 
     store = FileModelsStore(str(tmp_path / "models-store.json"))
     entry = ModelsStoreEntry(models=[_make_model("m1")], checked_at=123)
@@ -1039,9 +1085,8 @@ async def test_file_models_store_roundtrip(tmp_path):
 @pytest.mark.asyncio
 async def test_refresh_restores_models_from_store_when_offline(tmp_path, monkeypatch):
     """离线刷新：从 models-store 缓存恢复动态模型，不触网。"""
-    from nova_protocol import ModelsStoreEntry
-
     from nova_ai.gateway.store import InMemoryModelsStore
+    from nova_protocol import ModelsStoreEntry
 
     monkeypatch.setenv("NOVA_TEST_DYN_KEY", "dyn-key")
 
@@ -1063,7 +1108,7 @@ async def test_refresh_restores_models_from_store_when_offline(tmp_path, monkeyp
     runtime._recompose_provider("dyn")
 
     await runtime.refresh()
-    model_ids = [m.id for m in runtime.get_provider("dyn").get_models()]
+    model_ids = [m.id for m in _provider(runtime, "dyn").get_models()]
     assert "cached-m" in model_ids
 
 
@@ -1089,7 +1134,7 @@ async def test_models_json_env_ref_resolves_at_request_time(tmp_path, monkeypatc
             }
         },
     )
-    assert await runtime.get_api_key(runtime.find("custom", "m1")) == "from-env"
+    assert await runtime.get_api_key(_find(runtime, "custom", "m1")) == "from-env"
 
 
 @pytest.mark.asyncio
@@ -1109,7 +1154,7 @@ async def test_models_json_literal_key_used_as_is(tmp_path, monkeypatch):
             }
         },
     )
-    assert await runtime.get_api_key(runtime.find("custom", "m1")) == "literal-key"
+    assert await runtime.get_api_key(_find(runtime, "custom", "m1")) == "literal-key"
 
 
 @pytest.mark.asyncio
@@ -1129,7 +1174,7 @@ async def test_missing_env_ref_surfaces_named_error(tmp_path):
         },
     )
     with pytest.raises(Exception, match="NOVA_TEST_MISSING_CFG_KEY"):
-        await runtime.get_api_key(runtime.find("custom", "m1"))
+        await runtime.get_api_key(_find(runtime, "custom", "m1"))
 
 
 def test_missing_env_ref_reports_not_configured(tmp_path):
@@ -1147,7 +1192,7 @@ def test_missing_env_ref_reports_not_configured(tmp_path):
             }
         },
     )
-    assert not runtime.has_configured_auth(runtime.find("custom", "m1"))
+    assert not runtime.has_configured_auth(_find(runtime, "custom", "m1"))
     assert runtime.get_provider_auth_status("custom") == {"configured": False}
 
 
@@ -1254,10 +1299,10 @@ async def test_get_request_auth_with_overrides(tmp_path):
             }
         },
     )
-    model = runtime.find("custom", "m1")
-    assert (await runtime.get_request_auth(model)).auth["api_key"] == "json-key"
-    overridden = await runtime.get_request_auth(model, api_key="override-key")
-    assert overridden.auth["api_key"] == "override-key"
+    model = _find(runtime, "custom", "m1")
+    assert (await _get_auth(runtime, model)).auth.get("api_key") == "json-key"
+    overridden = await _get_auth(runtime, model, api_key="override-key")
+    assert overridden.auth.get("api_key") == "override-key"
 
 
 @pytest.mark.asyncio
@@ -1305,16 +1350,17 @@ async def test_env_ref_resolves_via_custom_auth_context(tmp_path, monkeypatch):
         ),
         auth_context=CustomCtx(),
     )
-    auth = await runtime.get_request_auth(runtime.find("custom", "m1"))
+    auth = await _get_auth(runtime, _find(runtime, "custom", "m1"))
     assert auth is not None
-    assert auth.auth["api_key"] == "from-custom-ctx"
-    assert auth.auth["headers"]["X-Token"] == "from-custom-ctx"
+    assert auth.auth.get("api_key") == "from-custom-ctx"
+    assert auth.auth.get("headers", {})["X-Token"] == "from-custom-ctx"
 
 
 def test_config_types_are_frozen():
     """models.json 配置类型冻结：顶层赋值被拒绝（对齐 TS deepFreeze 的顶层语义）。"""
-    from nova_harness.types.model import ModelsConfig, ProviderConfig
     from pydantic import ValidationError
+
+    from nova_harness.model.config import ModelsConfig, ProviderConfig
 
     cfg = ModelsConfig.model_validate({"providers": {"p": {"base_url": "http://x"}}})
     with pytest.raises(ValidationError):
@@ -1346,11 +1392,11 @@ async def test_per_model_headers_resolve_at_request_time(tmp_path):
             }
         },
     )
-    model = runtime.find("custom", "m1")
+    model = _find(runtime, "custom", "m1")
     assert model.headers is None
 
-    auth = await runtime.get_request_auth(model)
-    assert auth.auth["headers"]["X-Team"] == "blue"
+    auth = await _get_auth(runtime, model)
+    assert auth.auth.get("headers", {})["X-Team"] == "blue"
 
 
 @pytest.mark.asyncio
@@ -1376,8 +1422,8 @@ async def test_per_model_headers_precedence(tmp_path):
         },
     )
     # models.json 定义（definition）覆盖 override
-    auth = await runtime.get_request_auth(runtime.find("ext-p", "e1"))
-    assert auth.auth["headers"]["X-K"] == "definition"
+    auth = await _get_auth(runtime, _find(runtime, "ext-p", "e1"))
+    assert auth.auth.get("headers", {})["X-K"] == "definition"
 
     # 扩展注册定义最优先
     runtime.register_provider(
@@ -1389,8 +1435,8 @@ async def test_per_model_headers_precedence(tmp_path):
             "models": [{"id": "e1", "headers": {"X-K": "extension"}}],
         },
     )
-    auth = await runtime.get_request_auth(runtime.find("ext-p", "e1"))
-    assert auth.auth["headers"]["X-K"] == "extension"
+    auth = await _get_auth(runtime, _find(runtime, "ext-p", "e1"))
+    assert auth.auth.get("headers", {})["X-K"] == "extension"
 
 
 @pytest.mark.asyncio
@@ -1412,11 +1458,11 @@ async def test_per_model_header_env_ref_resolves_without_reload(tmp_path, monkey
             }
         },
     )
-    model = runtime.find("custom", "m1")
-    assert (await runtime.get_request_auth(model)).auth["headers"]["X-Ver"] == "v1"
+    model = _find(runtime, "custom", "m1")
+    assert (await _get_auth(runtime, model)).auth.get("headers", {})["X-Ver"] == "v1"
 
     monkeypatch.setenv("NOVA_MODEL_HEADER", "v2")
-    assert (await runtime.get_request_auth(model)).auth["headers"]["X-Ver"] == "v2"
+    assert (await _get_auth(runtime, model)).auth.get("headers", {})["X-Ver"] == "v2"
 
 
 @pytest.mark.asyncio
@@ -1437,7 +1483,7 @@ async def test_per_model_header_missing_env_raises_named_error(tmp_path):
         },
     )
     with pytest.raises(Exception, match="NOVA_MISSING_MODEL_HDR"):
-        await runtime.get_request_auth(runtime.find("custom", "m1"))
+        await _get_auth(runtime, _find(runtime, "custom", "m1"))
 
 
 def test_override_headers_not_baked_into_model(tmp_path):
@@ -1456,4 +1502,4 @@ def test_override_headers_not_baked_into_model(tmp_path):
             }
         },
     )
-    assert runtime.find("custom", "m1").headers is None
+    assert _find(runtime, "custom", "m1").headers is None

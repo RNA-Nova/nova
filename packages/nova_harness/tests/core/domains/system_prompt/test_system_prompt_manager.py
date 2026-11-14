@@ -2,20 +2,23 @@
 SystemPromptManager 与 Builder 测试。
 """
 
+from typing import Literal
 from unittest.mock import MagicMock
 
 from nova_harness.core.domains.agents import AgentManager
-from nova_harness.core.domains.system_prompt import SystemPromptManager
 from nova_harness.core.domains.system_prompt.builder import (
     compose_system_prompt,
     render_delegation_menu,
     render_guidelines,
     render_tools,
 )
-from nova_harness.core.domains.tools import ToolsManager
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.context_files import ContextFile
-from nova_harness.types.resources.tools import ToolDefinition, ToolInfo
+from nova_harness.core.domains.system_prompt.manager import SystemPromptManager
+from nova_harness.core.domains.tools.manager import ToolsManager
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.context_files import ContextFile
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.skills import Skill
+from nova_harness.resources.tools import ToolDefinition, ToolInfo
 
 
 def _make_agent_loader(config):
@@ -144,11 +147,12 @@ def test_compose_system_prompt_fallback_when_no_config():
     assert "You are a helpful assistant." in prompt
 
 
-def _skill(name: str, description: str, origin: str = "package"):
+def _skill(
+    name: str,
+    description: str,
+    origin: Literal["package", "top-level", "local", "auto"] = "package",
+):
     """构造带指定来源的 Skill（origin 决定白名单是否适用）。"""
-    from nova_harness.types.resources.personas import SourceInfo
-    from nova_harness.types.resources.skills import Skill
-
     return Skill(
         name=name,
         description=description,
@@ -326,8 +330,6 @@ def test_compose_system_prompt_includes_delegation_menu():
 
 def test_manager_injects_menu_only_when_subagent_active():
     """manager 层：激活工具含 subagent 时菜单出现（含 source 标签），否则无此段。"""
-    from nova_harness.types.resources.personas import SourceInfo
-
     scout = AgentConfig(
         name="scout",
         agent_dir="",

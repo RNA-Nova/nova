@@ -9,11 +9,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nova_harness.config.settings.manager import SettingsManager
-from nova_harness.config.settings.storage import FileSettingsStorage
-from nova_harness.types.config.settings import Settings, SettingsError, SettingsScope
 from nova_protocol import ModelThinkingLevel
 
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.config.settings.models import Settings, SettingsError, SettingsScope
+from nova_harness.config.settings.storage import FileSettingsStorage
 from tests._helpers.settings_manager import settings_manager_in_memory
 from tests._helpers.settings_storage import InMemorySettingsStorage
 
@@ -187,7 +187,7 @@ def test_save_project_settings_skips_when_project_load_error():
     sm._project_settings_load_error = ValueError("load failed")
     sm.set_project_packages([])
     sm.flush_sync()
-    assert sm._storage._project._value is None
+    assert getattr(sm._storage, "_project")._value is None
 
 
 class TestSettingsManagerGetterSetters:
@@ -225,12 +225,14 @@ class TestSettingsManagerGetterSetters:
         sm.set_compaction_enabled(False)
         assert sm.get_compaction_enabled() is False
         settings = sm.get_compaction_settings()
+        assert settings is not None
         assert settings.enabled is False
 
     def test_branch_summary_settings(self):
         sm = settings_manager_in_memory()
         assert sm.get_branch_summary_reserve_tokens() == 16384
         settings = sm.get_branch_summary_settings()
+        assert settings is not None
         assert settings.reserve_tokens == 16384
 
     def test_retry_settings(self):
@@ -239,7 +241,9 @@ class TestSettingsManagerGetterSetters:
         assert sm.get_retry_settings().max_retries == 3
         sm.set_retry_enabled(False)
         assert sm.get_retry_enabled() is False
-        assert sm.get_retry_settings_raw().enabled is False
+        raw = sm.get_retry_settings_raw()
+        assert raw is not None
+        assert raw.enabled is False
 
     def test_shell_path_and_prefix(self):
         sm = settings_manager_in_memory()
@@ -401,5 +405,6 @@ def test_deep_merge_nested_fields_set():
     overrides = Settings.model_validate({"compaction": {"enabled": False}})
     merged = deep_merge_settings(base, overrides)
 
+    assert merged.compaction is not None
     assert merged.compaction.enabled is False
     assert merged.compaction.reserve_tokens == 100  # 嵌套未提供 → 保留

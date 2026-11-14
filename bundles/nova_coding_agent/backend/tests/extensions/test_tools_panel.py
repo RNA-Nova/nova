@@ -11,7 +11,7 @@ import os
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
 
-from nova_harness.types.ui.primitives import UIResponse
+from nova_harness.ui.primitives import UIResponse
 
 
 def _load_extension():

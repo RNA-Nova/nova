@@ -8,7 +8,6 @@ dict 未命中（含未选配）。发放物是站经 ``partial(service.fetch, p
 from typing import List, Optional
 
 import pytest
-
 from nova_ai.gateway.catalog import CatalogOutcome
 from nova_ai.gateway.factory import create_provider
 from nova_ai.gateway.models import create_models_manager

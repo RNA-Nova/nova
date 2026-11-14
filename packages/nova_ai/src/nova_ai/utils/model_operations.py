@@ -2,6 +2,7 @@
 
 import time
 
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
 from nova_protocol import (
     AnyModel,
     Api,
@@ -15,7 +16,6 @@ from nova_protocol import (
     KnownApi,
     KnownClassifierApi,
     ModelType,
-    redact_secrets,
 )
 
 

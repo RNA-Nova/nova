@@ -14,9 +14,10 @@ from typing import Any, Dict, List, Optional
 
 from nova_harness.core.domains.skills import filter_skills_by_whitelist
 from nova_harness.core.domains.system_prompt.builder import compose_system_prompt
-from nova_harness.types.protocols import ResourceLoaderProtocol, ToolsManagerProtocol
-from nova_harness.types.resources.agents import AgentConfig, DynamicContext
-from nova_harness.types.resources.tools import ToolDefinition, ToolInfo
+from nova_harness.core.domains.tools.protocol import ToolsManagerProtocol
+from nova_harness.resources.agents import AgentConfig, DynamicContext
+from nova_harness.resources.protocol import ResourceLoaderProtocol
+from nova_harness.resources.tools import ToolDefinition, ToolInfo
 
 
 class SystemPromptManager:

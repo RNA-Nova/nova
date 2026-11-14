@@ -13,21 +13,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
-from nova_harness.config import AuthStorage, SettingsManager
+from nova_async import AbortController
+
+from nova_harness.config.auth.protocol import AuthStorageProtocol
+from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.config.defaults import AUTH_FILE_NAME, MODELS_FILE_NAME, get_agent_dir
 from nova_harness.config.migration import migrate_backend_layout
+from nova_harness.config.protocol import SettingsManagerProtocol
+from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.core.utils.timings import time
 from nova_harness.extensions.api import NovaExtensionAPI
-from nova_harness.model import ModelRuntime
-from nova_harness.package import PackageManager
-from nova_harness.resources.loader import DefaultResourceLoader, ResourceLoader
-from nova_harness.types.extensions import ExtensionFlag, LoadedExtensionsResult
-from nova_harness.types.package.progress import ProgressCallback
-from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.types.resources.tools import ToolContext
-from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
-from nova_harness.types.session.factory import CreateAgentSessionRuntimeResult
-from nova_protocol import AbortController
+from nova_harness.extensions.types import ExtensionFlag, LoadedExtensionsResult
+from nova_harness.model.protocol import ModelRuntimeProtocol
+from nova_harness.model.runtime import ModelRuntime
+from nova_harness.package.manager import PackageManager
+from nova_harness.package.progress import ProgressCallback
+from nova_harness.resources.loader import DefaultResourceLoader
+from nova_harness.resources.options import DefaultResourceLoaderOptions
+from nova_harness.resources.protocol import ResourceLoaderProtocol
+from nova_harness.resources.tools import ToolContext
+from nova_harness.sessions.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.sessions.factory import CreateAgentSessionRuntimeResult
 
 __all__ = ["AgentSessionServices"]
 
@@ -43,10 +49,10 @@ class AgentSessionServices:
 
     cwd: str
     agent_dir: str
-    settings_manager: SettingsManager = field(default=None)  # type: ignore[assignment]
-    model_runtime: ModelRuntime = field(default=None)  # type: ignore[assignment]
-    resource_loader: ResourceLoader = field(default=None)  # type: ignore[assignment]
-    auth_storage: AuthStorage = field(default=None)  # type: ignore[assignment]
+    settings_manager: SettingsManagerProtocol = field(default=None)  # type: ignore[assignment]
+    model_runtime: ModelRuntimeProtocol = field(default=None)  # type: ignore[assignment]
+    resource_loader: ResourceLoaderProtocol = field(default=None)  # type: ignore[assignment]
+    auth_storage: AuthStorageProtocol = field(default=None)  # type: ignore[assignment]
     diagnostics: List[AgentSessionRuntimeDiagnostic] = field(default_factory=list)
 
     @classmethod
@@ -54,10 +60,10 @@ class AgentSessionServices:
         cls,
         cwd: str,
         agent_dir: Optional[Union[str, Path]] = None,
-        auth_storage: Optional[AuthStorage] = None,
-        settings_manager: Optional[SettingsManager] = None,
-        model_runtime: Optional[ModelRuntime] = None,
-        resource_loader: Optional[ResourceLoader] = None,
+        auth_storage: Optional[AuthStorageProtocol] = None,
+        settings_manager: Optional[SettingsManagerProtocol] = None,
+        model_runtime: Optional[ModelRuntimeProtocol] = None,
+        resource_loader: Optional[ResourceLoaderProtocol] = None,
         extension_flag_values: Optional[Dict[str, Any]] = None,
         install_missing_packages: bool = True,
         additional_skill_paths: Optional[List[str]] = None,
@@ -108,7 +114,7 @@ class AgentSessionServices:
             settings_manager.set_project_trusted(initial_project_trusted)
 
         model_runtime = model_runtime or ModelRuntime(
-            auth_storage, Path(resolved_agent_dir) / MODELS_FILE_NAME
+            auth_storage, str(Path(resolved_agent_dir) / MODELS_FILE_NAME)
         )
         # 包 LLM 工具的构造期上下文：cwd + settings 活视图（不变量）；
         # 执行期的当前模型由 ToolExecContext 经 execute 第 5 参注入
@@ -139,8 +145,11 @@ class AgentSessionServices:
                     settings_manager=settings_manager,
                     model_runtime=model_runtime,
                     tool_context=tool_context,
-                    additional_prompt_template_paths=additional_prompt_template_paths
-                    or [],
+                    additional_prompt_template_paths=(
+                        list(additional_prompt_template_paths)
+                        if additional_prompt_template_paths is not None
+                        else []
+                    ),
                     additional_skill_paths=additional_skill_paths or [],
                     additional_extension_paths=[],
                     no_prompt_templates=False,
@@ -202,7 +211,7 @@ class AgentSessionServices:
     @staticmethod
     def _flush_pending_provider_registrations(
         extensions_result: LoadedExtensionsResult,
-        model_runtime: ModelRuntime,
+        model_runtime: ModelRuntimeProtocol,
         diagnostics: List[AgentSessionRuntimeDiagnostic],
     ) -> None:
         """把扩展加载阶段排队的 provider 注册刷新到 model_runtime。"""

@@ -33,16 +33,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Protocol
 
-from nova_harness.types.resources.tools import ToolExecContext
-from nova_protocol import (
-    ApprovalPolicy,
+from nova_exec_policy import ApprovalPolicy, is_likely_sandbox_denied
+from nova_exec_protocol import FileSystemSandboxContext
+
+from nova_harness.core.agent_session.controllers.execution import (
     ExecApprovalRequirement,
-    FileSystemSandboxContext,
     ReviewDecision,
     ReviewDecisionPayload,
     ToolDecisionSource,
-    is_likely_sandbox_denied,
 )
+from nova_harness.resources.tools import ToolExecContext
 
 # =============================================================================
 # 错误（对位 tools/sandboxing.rs ToolError）

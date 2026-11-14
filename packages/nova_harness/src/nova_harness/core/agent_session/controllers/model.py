@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from nova_ai import clamp_thinking_level, get_supported_thinking_levels
+from nova_protocol import Model, ModelThinkingLevel
+
 from nova_harness.config.defaults import DEFAULT_THINKING_LEVEL
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.utils import models_are_equal
 from nova_harness.events import (
     ModelSelectEvent,
     ThinkingLevelChangedEvent,
     ThinkingLevelSelectEvent,
 )
-from nova_harness.types.protocols import AgentSessionProtocol
-from nova_harness.types.session.model import ModelCycleResult
-from nova_protocol import Model, ModelThinkingLevel
-
-from nova_ai import clamp_thinking_level, get_supported_thinking_levels
+from nova_harness.sessions.model import ModelCycleResult, ScopedModelConfig
 
 
 def _thinking_level_from_value(
@@ -197,7 +197,7 @@ class ModelController:
         api_key = await registry.get_api_key(model)
         return api_key is not None and api_key != ""
 
-    def set_scoped_models(self, scoped_models: List[object]) -> None:
+    def set_scoped_models(self, scoped_models: List[ScopedModelConfig]) -> None:
         """更新 scoped models（例如来自 --models 参数）。"""
         self._session.scoped_models = scoped_models
 

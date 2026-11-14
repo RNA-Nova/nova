@@ -4,6 +4,7 @@ import stat
 import sys
 
 import pytest
+
 from nova_harness.core.utils import binaries
 from nova_harness.core.utils.binaries import (
     get_env_bin_dir,

@@ -13,7 +13,7 @@ from nova_harness.core.runtime_manager.assembly import (
     create_agent_session_by_name,
     list_installed_agents,
 )
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 __all__ = [
     "create_agent_session",

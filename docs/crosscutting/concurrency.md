@@ -18,7 +18,7 @@
 
 | 件 | 住所 | 职责 |
 |---|---|---|
-| `AbortSignal` / `AbortController` / `AbortedError` / `is_aborted` | `nova_protocol/signal.py` | 取消词汇（TS 对齐；被契约注解引用，锚定枢纽） |
+| `AbortSignal` / `AbortController` / `AbortedError` / `is_aborted` | `nova_async/signal.py`（由 `nova_protocol/signal.py` 迁入，待实施） | 取消词汇（TS 对齐；与等待机制同包，不再锚定数据枢纽） |
 | `AbortScope` / `await_with_abort` | `nova_async/abort.py` | **真杀执行层**（anyio `CancelScope` 的桥）：signal 触发即取消 scope，块内一切等待（connect→TTFB→逐事件→锁等待）真死；scope 在块边界吞取消，归因在块后翻译（`raise_if_aborted`）；**清理段必须在块外**（level-triggered 语义下块内 await 会持续抛取消）。`await_with_abort` 为一次性糖 |
 | `abortable_sleep` / `any_signal` / `operation_signal` / `await_with_signal` | `nova_async/abort.py` | 可中断退避 / 信号组合 / 操作内信号兜底 / asyncio 原生竞速型可中断等待 |
 | `TaskTracker` | `nova_async/task_tracker.py` | 属主级在途台账：`close()` 落闸 → `cancel_all()` 举旗 → `wait()` 排水；`async with` 三段式收摊（`__aexit__` = close→cancel_all→wait，对位 tokio-util `AbortOnDropHandle` 所有权即生命周期）；`cancel_all()`/`wait()` 跳过当前任务（台账内任务可安全发起收摊——等自己=死锁由实现消除） |
@@ -55,7 +55,7 @@ provider 管自己的资源，消费者管消费关系：正常完成须确认 d
 
 **store 是同步引擎，manager 是 async 编排——编排（网络、去重、复查、重试、锁内回调）永远不许漏进引擎。** 同步无 await 点 ⇒ 取消在结构上打不断写入，store 整体不在取消面内（codex `storage.rs` vs `manager.rs` 分层；本条的实证解剖与事故史见本节末）。
 
-- **引擎侧**：`CredentialStore` 类协议（`nova_protocol/auth.py`）四件套 `read/list/write/delete` 全同步、瞬时、无 signal 参数；写盘走 temp+rename 原子写（撕读/崩溃半写不存在）；全局文件锁只护"读-改-写"微秒临界区，**永不跨网络**；
+- **引擎侧**：`CredentialStore` 类协议（终态归 `nova_ai/auth`，由 `nova_protocol/auth.py` 迁出）四件套 `read/list/write/delete` 全同步、瞬时、无 signal 参数；写盘走 temp+rename 原子写（撕读/崩溃半写不存在）；全局文件锁只护"读-改-写"微秒临界区，**永不跨网络**；
 - **编排侧**：per-provider 锁（`KeyedLockFactory`，住 `nova_async/keyed_lock.py`）串行同 provider 的 refresh/logout/login（防轮转 token 双刷、防刷新与登出串号——pi 契约语义），不同 provider 互不阻塞；网络段包 `AbortScope`；锁等待同样可被 scope 真杀；
 - **判别测试（新 store 组件评审用）**：① 方法签名里有 `await` 吗？② 锁/临界区里有网络或长操作吗？任一答"是" = 编排漏进引擎，打回；
 - **现行例外**：`ModelsStore`（`gateway/store.py`）保留 async 形状——无锁无网络，零 await 协程无可中断点，运行时无害；签名形状与 `CredentialStore` 有意不齐（留待需要时同步化）；

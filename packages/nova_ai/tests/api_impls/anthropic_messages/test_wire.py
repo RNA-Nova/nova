@@ -5,6 +5,7 @@
 """
 
 import pytest
+from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
 from nova_protocol import (
     Context,
     KnownApi,
@@ -15,8 +16,6 @@ from nova_protocol import (
     Tool,
     UserMessage,
 )
-
-from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
 from tests._helpers.fake_llm import (
     RequestCapture,
     ant_error,

@@ -13,25 +13,22 @@ from typing import Dict, List, Optional, Tuple
 
 from nova_harness.core.utils.files import canonicalize_path
 from nova_harness.core.utils.frontmatter import parse_frontmatter
+from nova_harness.package.types import SourceOrigin, SourceScope
 from nova_harness.package.utils import (
     SKIP_ENTRY_NAMES,
     IgnoreSpecWithPrefix,
     is_ignored_by_specs,
     load_ignore_specs,
 )
+from nova_harness.resources.diagnostics import ResourceCollision, ResourceDiagnostic
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.prompts import ResolvedResource
+from nova_harness.resources.skills import Skill
 from nova_harness.resources.source_info import (
     default_source_info_for_path,
     find_source_info_for_path,
     source_info_from_metadata,
 )
-from nova_harness.types.package import SourceOrigin, SourceScope
-from nova_harness.types.resources.diagnostics import (
-    ResourceCollision,
-    ResourceDiagnostic,
-)
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.prompts import ResolvedResource
-from nova_harness.types.resources.skills import Skill
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _MAX_NAME_LEN = 64

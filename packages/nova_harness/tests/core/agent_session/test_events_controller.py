@@ -10,11 +10,12 @@ from types import SimpleNamespace
 from typing import Any, List
 
 import pytest
+from nova_protocol import TextContent, UserMessage
+
 from nova_harness.core.agent_session.controllers.events import EventController
 from nova_harness.events.results import MessageEndEventResult
 from nova_harness.extensions.runner import ExtensionRunner
-from nova_harness.types.extensions.runtime import ExtensionRuntime
-from nova_protocol import TextContent, UserMessage
+from nova_harness.extensions.runtime import ExtensionRuntime
 
 
 class _FakeQueue:
@@ -30,22 +31,25 @@ class _FakeSessionManager:
         self.appended.append(message)
 
 
-class _FakeSession:
-    """EventController 触碰面的最小替身。"""
+def _make_session(runner: Any) -> Any:
+    from unittest.mock import MagicMock
 
-    def __init__(self, runner: Any) -> None:
-        self._extension_runner = runner
-        self._steering_messages: List[str] = []
-        self._follow_up_messages: List[str] = []
-        self._queue = _FakeQueue()
-        self._overflow_recovery_attempted = False
-        self._retry_attempt = 0
-        self._last_assistant_message = None
-        self.session_manager = _FakeSessionManager()
-        self.emitted: List[Any] = []
-
-    def _emit(self, event: Any) -> None:
-        self.emitted.append(event)
+    session = MagicMock()
+    session._extension_runner = runner
+    session._steering_messages = []
+    session._follow_up_messages = []
+    session._queue = MagicMock()
+    session._overflow_recovery_attempted = False
+    session._retry_attempt = 0
+    session._last_assistant_message = None
+    session.session_manager = MagicMock()
+    session.session_manager.appended = []
+    session.session_manager.append_message.side_effect = (
+        session.session_manager.appended.append
+    )
+    session.emitted = []
+    session._emit = lambda event: session.emitted.append(event)
+    return session
 
 
 def _make_runner(extensions: List[Any]) -> ExtensionRunner:
@@ -64,7 +68,7 @@ def _user_message(text: str) -> UserMessage:
 @pytest.mark.asyncio
 async def test_message_end_forwarding_wraps_event():
     """零扩展 runner：message_end 正常穿透（回归：裸消息传参会 AttributeError）。"""
-    session = _FakeSession(_make_runner([]))
+    session = _make_session(_make_runner([]))
     controller = EventController(session)
     message = _user_message("hi")
 
@@ -86,7 +90,7 @@ async def test_message_end_extension_rewrite_applied_in_place():
         path="/tmp/fake-ext",
         handlers={"message_end": [rewrite_handler]},
     )
-    session = _FakeSession(_make_runner([fake_extension]))
+    session = _make_session(_make_runner([fake_extension]))
     controller = EventController(session)
     message = _user_message("原始")
 

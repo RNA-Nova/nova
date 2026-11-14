@@ -9,7 +9,8 @@ async loop implementation in `loop.py`. It is not the API itself;
 from typing import List, Optional
 
 from nova_ai import EventStream
-from nova_protocol import AbortSignal, AgentEndEvent, AgentEvent, AgentMessage
+from nova_async import AbortSignal
+from nova_protocol import AgentEndEvent, AgentEvent, AgentMessage
 
 from ..types import AgentContext, AgentEventSink, AgentLoopConfig, StreamFn
 from .loop import run_agent_loop, run_agent_loop_continue

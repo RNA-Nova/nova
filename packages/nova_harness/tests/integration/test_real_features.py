@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any, List
 
 import pytest
-from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
-from nova_harness.types.session.config import CreateAgentSessionOptions
-
 from nova_ai import get_builtin_model
+from nova_protocol import ToolResultMessage
+
+from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
@@ -48,7 +49,7 @@ async def _has_key() -> bool:
 async def _make_session(cwd: str, trusted: bool = True):
     runtime = await create_agent_session_runtime(
         CreateAgentSessionOptions(
-            cwd=cwd, agent_name="coding_agent", project_trusted=trusted
+            cwd=Path(cwd), agent_name="coding_agent", project_trusted=trusted
         )
     )
     model = get_builtin_model("volcengine", MODEL_ID)
@@ -65,8 +66,8 @@ async def test_thinking_off_vs_high():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.set_thinking_level("off")
             await session.prompt("37*46=?只给数字")
             await session.agent.wait_for_idle()
@@ -89,8 +90,8 @@ async def test_prompt_template_debug_expands():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt("/debug 程序报错 IndexError: list index out of range")
             await session.agent.wait_for_idle()
             reply = _text_of(session.messages[-1])
@@ -113,8 +114,8 @@ async def test_set_active_tools_disables_and_reenables():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             all_tools = session.get_active_tool_names()
             assert "bash" in all_tools
 
@@ -126,7 +127,7 @@ async def test_set_active_tools_disables_and_reenables():
             bash_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "bash"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "bash"
             ]
             # 没有一次成功执行：要么根本没调用，要么只是 not-found 错误
             assert all(m.is_error for m in bash_results), "bash 被禁用后仍被成功执行"
@@ -138,7 +139,7 @@ async def test_set_active_tools_disables_and_reenables():
             bash_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "bash"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "bash"
             ]
             assert any(
                 not m.is_error for m in bash_results
@@ -154,8 +155,8 @@ async def test_queue_update_event_and_drain():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             events: List[str] = []
             session.subscribe(lambda e: events.append(e.type))
 
@@ -185,8 +186,8 @@ async def test_retry_and_compaction_toggles_snapshot():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             session.set_auto_retry_enabled(False)
             assert session.auto_retry_enabled is False
             session.set_auto_retry_enabled(True)
@@ -208,8 +209,8 @@ async def test_project_untrusted_excludes_project_skills_from_prompt():
             encoding="utf-8",
         )
         runtime = await _make_session(cwd, trusted=False)
+        session = runtime.session
         try:
-            session = runtime.session
             assert "proj-skill" not in session.system_prompt
             assert "proj-skill" not in session._get_allowed_skills()
         finally:
@@ -223,8 +224,8 @@ async def test_abort_user_tool():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             task = asyncio.create_task(
                 session.invoke_user_tool("bash", {"command": "sleep 30 && echo done"})
             )

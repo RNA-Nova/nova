@@ -26,7 +26,7 @@
 
 6. **Secret 卫生**（codex 对位——值层脱敏 + 出口清洗）
    - **凭据模型值层脱敏**：`nova_protocol` 的 `RedactedString`（str 子类——repr 调试通道恒 `<redacted>`，str 使用通道即原值，序列化/落盘照常明文）；`OAuthCredential.access/refresh`、`ApiKeyCredential.key` 均用此类型，`ApiKeyCredential.env` 为 `repr=False`，`OAuthCredential.__repr_args__` 白名单只露 `type/expires/accountId`（`extra="allow"` 扩展字段可能藏第二个 token）。纪律：**凭据/令牌类字段一律 `RedactedString`，新的含密结构一律白名单 repr**——防"顺手打印模型/dump 产物/异常栈捕获"；`print(裸值)` 是有意取值的使用通道，不设防。
-   - **出口统一清洗**：`nova_protocol.sanitize.redact_secrets`（Bearer/sk-/AKIA/api_key= 四条词表，占位 `[REDACTED_SECRET]`）——**只在出口调用**（当前接入点：会话 JSONL 落盘的 `entry_to_json` 单点），不在生产者内部调用；导出口径（`export_to_jsonl`）不经清洗（用户主动导出自己数据）。bundle 侧的审批弹窗/RPC 出栈渲染随整体优化接入。
+   - **出口统一清洗**：`redact_secrets`（Bearer/sk-/AKIA/api_key= 等词表，占位 `[REDACTED_SECRET]`）——终态住所归 `nova_ai/utils/sanitize.py`（迁移前在 `nova_protocol/sanitize.py`）；**只在出口调用**（当前接入点：会话 JSONL 落盘的 `entry_to_json` 单点），不在生产者内部调用；导出口径（`export_to_jsonl`）不经清洗（用户主动导出自己数据）。bundle 侧的审批弹窗/RPC 出栈渲染随整体优化接入。
 
 ---
 

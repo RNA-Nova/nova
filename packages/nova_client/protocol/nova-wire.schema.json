@@ -1623,9 +1623,7 @@
     "CustomAgentMessage": {
       "additionalProperties": true,
       "properties": {
-        "role": {
-          "type": "string"
-        }
+        "role": {}
       },
       "required": [
         "role"

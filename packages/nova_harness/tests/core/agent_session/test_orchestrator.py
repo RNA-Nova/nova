@@ -1,6 +1,15 @@
 """Orchestrator 测试——编排四步对位 codex orchestrator.rs 语义"""
 
 import pytest
+from nova_exec_policy import ApprovalPolicy
+from nova_exec_protocol import FileSystemSandboxContext
+
+from nova_harness.core.agent_session.controllers.execution import (
+    ExecApprovalRequirement,
+    ReviewDecision,
+    ReviewDecisionPayload,
+    ToolDecisionSource,
+)
 from nova_harness.core.agent_session.controllers.orchestrator import (
     ApprovalAction,
     ExecAttemptOutput,
@@ -10,13 +19,7 @@ from nova_harness.core.agent_session.controllers.orchestrator import (
     ToolRejected,
     default_exec_approval_requirement,
 )
-from nova_protocol import (
-    ApprovalPolicy,
-    ExecApprovalRequirement,
-    ReviewDecision,
-    ReviewDecisionPayload,
-    ToolDecisionSource,
-)
+from nova_harness.resources.tools import ToolExecContext
 
 
 class FakeRuntime:
@@ -44,7 +47,7 @@ class FakeRuntime:
 
 def _orchestrator(policy=ApprovalPolicy.NEVER, decision=None, telemetry=None):
     async def request_approval(action, ctx):
-        return decision
+        return decision or ReviewDecisionPayload(decision=ReviewDecision.APPROVED)
 
     return Orchestrator(
         approval_policy=policy,
@@ -65,7 +68,7 @@ async def test_forbidden_rejects_without_execution():
         requirement=ExecApprovalRequirement.forbidden("policy says no")
     )
     with pytest.raises(ToolRejected, match="policy says no"):
-        await _orchestrator().run(runtime, _request(), ctx=None)
+        await _orchestrator().run(runtime, _request(), ctx=ToolExecContext())
     assert runtime.runs == []
 
 
@@ -74,7 +77,7 @@ async def test_skip_executes_with_config_telemetry():
     events = []
     runtime = FakeRuntime(requirement=ExecApprovalRequirement.skip())
     orchestrator = _orchestrator(telemetry=lambda *args: events.append(args))
-    output = await orchestrator.run(runtime, _request(), ctx=None)
+    output = await orchestrator.run(runtime, _request(), ctx=ToolExecContext())
     assert output.exit_code == 0
     assert len(runtime.runs) == 1
     assert events == [
@@ -88,7 +91,9 @@ async def test_needs_approval_approved_executes():
     runtime = FakeRuntime(
         requirement=ExecApprovalRequirement.needs_approval(reason="dangerous")
     )
-    output = await _orchestrator(decision=decision).run(runtime, _request(), ctx=None)
+    output = await _orchestrator(decision=decision).run(
+        runtime, _request(), ctx=ToolExecContext()
+    )
     assert output.exit_code == 0
     assert len(runtime.runs) == 1
 
@@ -100,7 +105,9 @@ async def test_needs_approval_denied_rejects():
     )
     runtime = FakeRuntime(requirement=ExecApprovalRequirement.needs_approval())
     with pytest.raises(ToolRejected, match="user said no"):
-        await _orchestrator(decision=decision).run(runtime, _request(), ctx=None)
+        await _orchestrator(decision=decision).run(
+            runtime, _request(), ctx=ToolExecContext()
+        )
     assert runtime.runs == []
 
 
@@ -126,7 +133,7 @@ async def test_sandbox_denial_escalates_once_without_reapproval():
         first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
         escalated_attempt=SandboxAttempt(sandbox_type=None),
     )
-    output = await orchestrator.run(runtime, request, ctx=None)
+    output = await orchestrator.run(runtime, request, ctx=ToolExecContext())
 
     assert output.exit_code == 0
     assert len(runtime.runs) == 2
@@ -142,7 +149,7 @@ async def test_denial_without_escalation_returns_first_output():
         outputs=[ExecAttemptOutput(exit_code=1, stderr="Operation not permitted")]
     )
     request = _request(first_attempt=SandboxAttempt(sandbox_type="seatbelt"))
-    output = await _orchestrator().run(runtime, request, ctx=None)
+    output = await _orchestrator().run(runtime, request, ctx=ToolExecContext())
     assert output.exit_code == 1
     assert len(runtime.runs) == 1
 
@@ -156,7 +163,7 @@ async def test_quick_reject_output_does_not_escalate():
         first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
         escalated_attempt=SandboxAttempt(sandbox_type=None),
     )
-    output = await _orchestrator().run(runtime, request, ctx=None)
+    output = await _orchestrator().run(runtime, request, ctx=ToolExecContext())
     # 126 是 shell 快速拒绝码——但含 "permission denied" 关键词会判沙箱拒绝
     # （对位 denial.rs：关键词优先于快排码）——这里确认语义：会升级
     assert len(runtime.runs) == 2
@@ -167,7 +174,7 @@ async def test_default_requirement_fallback():
     # 工具自报 None → 落默认：never → skip 直通
     runtime = FakeRuntime(requirement=None)
     output = await _orchestrator(policy=ApprovalPolicy.NEVER).run(
-        runtime, _request(), ctx=None
+        runtime, _request(), ctx=ToolExecContext()
     )
     assert output.exit_code == 0
 
@@ -176,9 +183,11 @@ async def test_default_requirement_fallback():
     runtime = FakeRuntime(requirement=None)
     orchestrator = _orchestrator(policy=ApprovalPolicy.ON_REQUEST, decision=decision)
     request = _request(
-        first_attempt=SandboxAttempt(sandbox_type="seatbelt", sandbox_context=object())
+        first_attempt=SandboxAttempt(
+            sandbox_type="seatbelt", sandbox_context=FileSystemSandboxContext()
+        )
     )
-    output = await orchestrator.run(runtime, request, ctx=None)
+    output = await orchestrator.run(runtime, request, ctx=ToolExecContext())
     assert output.exit_code == 0
 
 
@@ -231,7 +240,7 @@ async def test_sandbox_denial_skip_requires_retry_approval():
         first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
         escalated_attempt=SandboxAttempt(sandbox_type=None),
     )
-    output = await orchestrator.run(runtime, request, ctx=None)
+    output = await orchestrator.run(runtime, request, ctx=ToolExecContext())
 
     assert output.exit_code == 0
     assert len(runtime.runs) == 2
@@ -261,7 +270,7 @@ async def test_sandbox_denial_never_bypasses_retry_approval():
         first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
         escalated_attempt=SandboxAttempt(sandbox_type=None),
     )
-    output = await orchestrator.run(runtime, request, ctx=None)
+    output = await orchestrator.run(runtime, request, ctx=ToolExecContext())
 
     assert output.exit_code == 0
     assert len(runtime.runs) == 2
@@ -285,7 +294,7 @@ async def test_sandbox_denial_retry_approval_denied_rejects():
         escalated_attempt=SandboxAttempt(sandbox_type=None),
     )
     with pytest.raises(ToolRejected, match="no escape"):
-        await orchestrator.run(runtime, request, ctx=None)
+        await orchestrator.run(runtime, request, ctx=ToolExecContext())
     assert len(runtime.runs) == 1
 
 
@@ -302,7 +311,7 @@ async def test_bypass_sandbox_skip_runs_first_attempt_unsandboxed():
         first_attempt=SandboxAttempt(sandbox_type="seatbelt"),
         escalated_attempt=SandboxAttempt(sandbox_type=None),
     )
-    output = await _orchestrator().run(runtime, request, ctx=None)
+    output = await _orchestrator().run(runtime, request, ctx=ToolExecContext())
     assert output.exit_code == 0
     assert runtime.runs[0][1].sandbox_type is None
     assert len(runtime.runs) == 1

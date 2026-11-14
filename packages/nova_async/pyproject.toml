@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "nova-async"
 version = "0.1.0"
-description = "Nova 取消/等待机制族——真杀 scope、竞速等待、可中断退避、信号组合与任务台账（词汇锚定 nova_protocol）。"
+description = "Nova 取消/等待机制族——取消词汇、真杀 scope、竞速等待、可中断退避、信号组合与任务台账。"
 authors = ["Liujinming"]
 readme = "README.md"
 license = "MIT"

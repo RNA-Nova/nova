@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from fake_transport import FakeTransport
+
 from nova_exec_server_client import (
     NETWORK_POLICY_DECISION,
     ExecutorClient,

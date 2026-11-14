@@ -1,8 +1,13 @@
 """测试资源自动发现。"""
 
 import pytest
+
 from nova_harness.package.resolve.discovery import (
+    ResourceType,
     collect_auto_prompt_entries,
+)
+from nova_harness.package.resolve.discovery import collect_explicit as _collect_explicit
+from nova_harness.package.resolve.discovery import (
     collect_extension_entries,
     collect_prompt_entries,
     collect_skill_entries,
@@ -217,15 +222,23 @@ def test_collect_agent_entries_respects_gitignore(tmp_path) -> None:
     assert collect_agent_entries(str(tmp_path)) == [str(agent_yaml.resolve())]
 
 
+def _explicit(*args, **kwargs):
+    result = _collect_explicit(*args, **kwargs)
+    assert result is not None
+    return result
+
+
 def test_collect_explicit_respects_gitignore_for_files(tmp_path):
     """manifest 显式声明的文件路径应被 .gitignore 过滤。"""
-    from nova_harness.package.resolve.discovery import collect_explicit
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     (tmp_path / "keep.md").write_text("keep")
     (tmp_path / "ignored.md").write_text("ignored")
     (tmp_path / ".gitignore").write_text("ignored.md\n", encoding="utf-8")
 
-    result = collect_explicit(["./keep.md", "./ignored.md"], tmp_path)
+    result = _explicit(["./keep.md", "./ignored.md"], tmp_path)
 
     assert str((tmp_path / "keep.md").resolve()) in result
     assert str((tmp_path / "ignored.md").resolve()) not in result
@@ -233,7 +246,10 @@ def test_collect_explicit_respects_gitignore_for_files(tmp_path):
 
 def test_collect_explicit_respects_gitignore_for_dirs(tmp_path):
     """manifest 显式声明的目录路径应递归扫描，并应用 .gitignore 过滤。"""
-    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
+    from nova_harness.package.resolve.discovery import ResourceType
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     keep = tmp_path / "keep"
     keep.mkdir()
@@ -245,7 +261,7 @@ def test_collect_explicit_respects_gitignore_for_dirs(tmp_path):
 
     (tmp_path / ".gitignore").write_text("ignored/\n", encoding="utf-8")
 
-    result = collect_explicit(
+    result = _explicit(
         ["./keep", "./ignored"], tmp_path, resource_type=ResourceType.PROMPTS
     )
 
@@ -257,13 +273,15 @@ def test_collect_explicit_respects_gitignore_for_dirs(tmp_path):
 
 def test_collect_explicit_glob_respects_gitignore(tmp_path):
     """manifest 中的 glob 模式结果应被 .gitignore 过滤。"""
-    from nova_harness.package.resolve.discovery import collect_explicit
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     (tmp_path / "keep.md").write_text("keep")
     (tmp_path / "ignored.md").write_text("ignored")
     (tmp_path / ".gitignore").write_text("ignored.md\n", encoding="utf-8")
 
-    result = collect_explicit(["./*.md"], tmp_path)
+    result = _explicit(["./*.md"], tmp_path)
 
     assert str((tmp_path / "keep.md").resolve()) in result
     assert str((tmp_path / "ignored.md").resolve()) not in result
@@ -271,14 +289,16 @@ def test_collect_explicit_glob_respects_gitignore(tmp_path):
 
 def test_collect_explicit_with_override_patterns(tmp_path):
     """manifest 中的 !/+/- override 模式应生效。"""
-    from nova_harness.package.resolve.discovery import collect_explicit
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     (tmp_path / "keep.md").write_text("keep")
     (tmp_path / "exclude.md").write_text("exclude")
     (tmp_path / "force.md").write_text("force")
 
     items = ["./*.md", "!./exclude.md", "+./force.md"]
-    result = collect_explicit(items, tmp_path)
+    result = _explicit(items, tmp_path)
 
     assert str((tmp_path / "keep.md").resolve()) in result
     assert str((tmp_path / "exclude.md").resolve()) not in result
@@ -287,21 +307,25 @@ def test_collect_explicit_with_override_patterns(tmp_path):
 
 def test_collect_explicit_directory_as_skill(tmp_path):
     """manifest 显式声明的目录本身即为 skill 时应返回该目录。"""
-    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
+    from nova_harness.package.resolve.discovery import ResourceType
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     skill_dir = tmp_path / "my-skill"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---", encoding="utf-8")
 
-    result = collect_explicit(
-        ["./my-skill"], tmp_path, resource_type=ResourceType.SKILLS
-    )
+    result = _explicit(["./my-skill"], tmp_path, resource_type=ResourceType.SKILLS)
     assert str(skill_dir.resolve()) in result
 
 
 def test_collect_explicit_directory_recursive_for_prompts(tmp_path):
     """manifest 显式声明的 prompt 目录应递归发现其内部 .md 文件。"""
-    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
+    from nova_harness.package.resolve.discovery import ResourceType
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     prompt_dir = tmp_path / "prompts"
     prompt_dir.mkdir()
@@ -309,16 +333,17 @@ def test_collect_explicit_directory_recursive_for_prompts(tmp_path):
     nested.mkdir()
     (nested / "hello.md").write_text("hello", encoding="utf-8")
 
-    result = collect_explicit(
-        ["./prompts"], tmp_path, resource_type=ResourceType.PROMPTS
-    )
+    result = _explicit(["./prompts"], tmp_path, resource_type=ResourceType.PROMPTS)
     assert str((nested / "hello.md").resolve()) in result
     assert str(prompt_dir.resolve()) not in result
 
 
 def test_collect_explicit_directory_recursive_for_extensions(tmp_path):
     """manifest 显式声明的 extension 目录应递归发现内部扩展。"""
-    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
+    from nova_harness.package.resolve.discovery import ResourceType
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     ext_dir = tmp_path / "extensions"
     ext_dir.mkdir()
@@ -326,32 +351,37 @@ def test_collect_explicit_directory_recursive_for_extensions(tmp_path):
     sub.mkdir()
     (sub / "extension.py").write_text("def extension(nova): pass", encoding="utf-8")
 
-    result = collect_explicit(
+    result = _explicit(
         ["./extensions"], tmp_path, resource_type=ResourceType.EXTENSIONS
     )
     assert str(sub.resolve()) in result
     assert str(ext_dir.resolve()) not in result
     """manifest 中的 glob 匹配到目录时也应递归扫描。"""
-    from nova_harness.package.resolve.discovery import ResourceType, collect_explicit
+    from nova_harness.package.resolve.discovery import ResourceType
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     prompt_dir = tmp_path / "prompts"
     prompt_dir.mkdir()
     (prompt_dir / "debug.md").write_text("# debug", encoding="utf-8")
 
-    result = collect_explicit(["./*"], tmp_path, resource_type=ResourceType.PROMPTS)
+    result = _explicit(["./*"], tmp_path, resource_type=ResourceType.PROMPTS)
     assert str((prompt_dir / "debug.md").resolve()) in result
 
 
 def test_collect_explicit_glob_escapes_package_root(tmp_path):
     """glob 模式中出现 .. 应视为逃逸包根并拒绝。"""
-    from nova_harness.package.resolve.discovery import collect_explicit
+    from nova_harness.package.resolve.discovery import (
+        collect_explicit as _collect_explicit,
+    )
 
     (tmp_path / "keep.md").write_text("keep")
     parent = tmp_path.parent
     (parent / "outside.md").write_text("outside")
 
     with pytest.raises(ValueError, match="escapes package root"):
-        collect_explicit(["../*.md"], tmp_path)
+        _explicit(["../*.md"], tmp_path)
 
 
 def test_collect_ancestor_agents_skills_dirs(tmp_path):

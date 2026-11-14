@@ -8,9 +8,34 @@ and after compaction the session is reloaded.
 import inspect
 import json
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from nova_agent import StreamFn
+from nova_ai import SimpleStreamOptions, builtin_models, to_thinking_level
+from nova_async import AbortSignal
+from nova_protocol import (
+    AgentMessage,
+    AssistantMessage,
+    Context,
+    Model,
+    ModelThinkingLevel,
+    ProviderHeaders,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    Usage,
+    UserMessage,
+)
+
+from nova_harness.core.domains.compaction.file_ops import FileOperations
+from nova_harness.core.domains.compaction.models import (
+    CompactionDetails,
+    CompactionPreparation,
+    CompactionResult,
+    CompactionSettings,
+    ContextUsageEstimate,
+    CutPointResult,
+)
 from nova_harness.core.domains.compaction.utils import (
     SUMMARIZATION_SYSTEM_PROMPT,
     compute_file_lists,
@@ -21,29 +46,9 @@ from nova_harness.core.domains.compaction.utils import (
     serialize_conversation,
 )
 from nova_harness.core.utils.messages import convert_to_llm
-from nova_harness.sessions import build_session_context
-from nova_harness.types.compaction.compaction import (
-    CompactionDetails,
-    CompactionPreparation,
-    CompactionResult,
-    CompactionSettings,
-    ContextUsageEstimate,
-    CutPointResult,
-)
-from nova_harness.types.compaction.file_ops import FileOperations
-from nova_harness.types.messages import ContextInjectable
-from nova_harness.types.session.entries import CompactionEntry, SessionEntry
-from nova_protocol import (
-    AbortSignal,
-    AgentMessage,
-    AssistantMessage,
-    Context,
-    Model,
-    ModelThinkingLevel,
-    Usage,
-)
-
-from nova_ai import SimpleStreamOptions, builtin_models, to_thinking_level
+from nova_harness.sessions.entries import CompactionEntry, SessionEntry
+from nova_harness.sessions.messages import ContextInjectable
+from nova_harness.sessions.utils import build_session_context
 
 # ============================================================================
 # File Operation Tracking
@@ -112,7 +117,7 @@ def _get_assistant_usage(msg: AgentMessage) -> Optional[Usage]:
     Get usage from an assistant message if available.
     Skips aborted, error, and all-zero usage messages as they don't have valid usage data.
     """
-    if msg.role != "assistant":
+    if not isinstance(msg, AssistantMessage):
         return None
     if (
         msg.stop_reason != "aborted"
@@ -138,7 +143,7 @@ def get_last_assistant_usage(entries: List[SessionEntry]) -> Optional[Usage]:
 
 
 def _get_last_assistant_usage_info(
-    messages: List[AgentMessage],
+    messages: Sequence[AgentMessage],
 ) -> Optional[Tuple[Usage, int]]:
     for i in range(len(messages) - 1, -1, -1):
         usage = _get_assistant_usage(messages[i])
@@ -147,7 +152,7 @@ def _get_last_assistant_usage_info(
     return None
 
 
-def estimate_context_tokens(messages: List[AgentMessage]) -> ContextUsageEstimate:
+def estimate_context_tokens(messages: Sequence[AgentMessage]) -> ContextUsageEstimate:
     """
     Estimate context tokens from messages, using the last assistant usage when available.
     If there are messages after the last usage, estimate their tokens with estimate_tokens.
@@ -202,7 +207,7 @@ def estimate_tokens(message: AgentMessage) -> int:
     """
     chars = 0
 
-    if message.role == "user":
+    if isinstance(message, UserMessage):
         content = message.content
         if isinstance(content, str):
             chars = len(content)
@@ -214,14 +219,13 @@ def estimate_tokens(message: AgentMessage) -> int:
                     chars += 4800
         return (chars + 3) // 4
 
-    elif message.role == "assistant":
+    elif isinstance(message, AssistantMessage):
         for block in message.content:
-            block_type = block.type
-            if block_type == "text":
+            if isinstance(block, TextContent):
                 chars += len(block.text)
-            elif block_type == "thinking":
+            elif isinstance(block, ThinkingContent):
                 chars += len(block.thinking)
-            elif block_type == "toolCall":
+            elif isinstance(block, ToolCall):
                 chars += len(block.name)
                 # 对齐 TS JSON.stringify：紧凑 JSON 序列化，不用 str(dict)
                 chars += len(
@@ -232,22 +236,24 @@ def estimate_tokens(message: AgentMessage) -> int:
         return (chars + 3) // 4
 
     elif message.role in ("custom", "toolResult"):
-        if isinstance(message.content, str):
-            chars = len(message.content)
-        else:
-            for block in message.content:
-                if block.type == "text" and block.text:
+        # 自定义消息载荷由包声明；有标准 content 时按文本/图像估算。
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            chars = len(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, TextContent) and block.text:
                     chars += len(block.text)
-                if block.type == "image":
+                elif block.type == "image":
                     chars += 4800  # 对齐 TS ESTIMATED_IMAGE_CHARS
         return (chars + 3) // 4
 
     elif message.role == "bashExecution":
-        chars = len(message.command) + len(message.output)
+        chars = len(getattr(message, "command")) + len(getattr(message, "output"))
         return (chars + 3) // 4
 
     elif message.role in ("branchSummary", "compactionSummary"):
-        chars = len(message.summary)
+        chars = len(getattr(message, "summary"))
         return (chars + 3) // 4
 
     return 0
@@ -482,7 +488,7 @@ def _create_summarization_options(
     model: Model,
     max_tokens: int,
     api_key: Optional[str],
-    headers: Optional[Dict[str, str]],
+    headers: Optional[ProviderHeaders],
     env: Optional[Dict[str, str]],
     signal: Optional[AbortSignal],
     thinking_level: Optional[ModelThinkingLevel],
@@ -529,7 +535,7 @@ async def generate_summary(
     model: Model,
     reserve_tokens: int,
     api_key: Optional[str] = None,
-    headers: Optional[Dict[str, str]] = None,
+    headers: Optional[ProviderHeaders] = None,
     signal: Optional[AbortSignal] = None,
     custom_instructions: Optional[str] = None,
     previous_summary: Optional[str] = None,
@@ -722,7 +728,7 @@ async def compact(
     preparation: CompactionPreparation,
     model: Model,
     api_key: Optional[str] = None,
-    headers: Optional[Dict[str, str]] = None,
+    headers: Optional[ProviderHeaders] = None,
     custom_instructions: Optional[str] = None,
     signal: Optional[AbortSignal] = None,
     thinking_level: Optional[ModelThinkingLevel] = None,
@@ -817,7 +823,7 @@ async def _generate_turn_prefix_summary(
     model: Model,
     reserve_tokens: int,
     api_key: Optional[str] = None,
-    headers: Optional[Dict[str, str]] = None,
+    headers: Optional[ProviderHeaders] = None,
     env: Optional[Dict[str, str]] = None,
     signal: Optional[AbortSignal] = None,
     thinking_level: Optional[ModelThinkingLevel] = None,

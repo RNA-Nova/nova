@@ -6,27 +6,31 @@
 
 from typing import Optional
 
-import nova_harness.core.domains.compaction.branch_summarization as branch_module
 import pytest
-from nova_harness.core.domains.compaction.branch_summarization import (
-    collect_entries_for_branch_summary,
-    generate_branch_summary,
-    prepare_branch_entries,
-)
-from nova_harness.sessions import SessionManager
-from nova_harness.types.compaction.branch_summary import GenerateBranchSummaryOptions
+from nova_async import AbortController
 from nova_protocol import (
-    AbortController,
     AssistantMessage,
     KnownApi,
     KnownProvider,
     Model,
     ModelCost,
+    StopReason,
     TextContent,
     ToolCall,
     Usage,
     UserMessage,
 )
+
+import nova_harness.core.domains.compaction.branch_summarization as branch_module
+from nova_harness.core.domains.compaction.branch_summarization import (
+    collect_entries_for_branch_summary,
+    generate_branch_summary,
+    prepare_branch_entries,
+)
+from nova_harness.core.domains.compaction.branch_summary import (
+    GenerateBranchSummaryOptions,
+)
+from nova_harness.sessions.manager import SessionManager
 
 
 def _make_model(context_window: int = 128000, max_tokens: int = 4096) -> Model:
@@ -54,7 +58,7 @@ def _assistant(text: str) -> AssistantMessage:
         content=[TextContent(type="text", text=text)],
         provider="test",
         model="test",
-        stop_reason="stop",
+        stop_reason=StopReason.STOP,
         usage=Usage(),
     )
 
@@ -71,13 +75,13 @@ def _tool_call(name: str, path: str) -> AssistantMessage:
         ],
         provider="test",
         model="test",
-        stop_reason="toolUse",
+        stop_reason=StopReason.TOOL_USE,
     )
 
 
 def _summary_assistant(
     text: str = "summary",
-    stop_reason: str = "stop",
+    stop_reason: StopReason = StopReason.STOP,
     error_message: Optional[str] = None,
 ) -> AssistantMessage:
     return AssistantMessage(
@@ -238,7 +242,7 @@ async def test_generate_branch_summary_aborted(session, branch_options, monkeypa
     u13 = session.append_message(_user("q"))  # noqa: F841
 
     async def fake_complete(*a, **k):
-        return _summary_assistant("", stop_reason="aborted")
+        return _summary_assistant("", stop_reason=StopReason.ABORTED)
 
     monkeypatch.setattr(branch_module, "complete_summarization", fake_complete)
     result = await generate_branch_summary(session.get_branch(), branch_options)
@@ -250,7 +254,9 @@ async def test_generate_branch_summary_error(session, branch_options, monkeypatc
     u14 = session.append_message(_user("q"))  # noqa: F841
 
     async def fake_complete(*a, **k):
-        return _summary_assistant("", stop_reason="error", error_message="fail")
+        return _summary_assistant(
+            "", stop_reason=StopReason.ERROR, error_message="fail"
+        )
 
     monkeypatch.setattr(branch_module, "complete_summarization", fake_complete)
     result = await generate_branch_summary(session.get_branch(), branch_options)

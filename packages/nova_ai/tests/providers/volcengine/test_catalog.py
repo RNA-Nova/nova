@@ -1,15 +1,6 @@
 """volcengine ark_personalize 钩子测试（ark 在售筛选——账户生命周期事实）。"""
 
 import pytest
-from nova_protocol import (
-    ApiKeyCredential,
-    KnownApi,
-    Model,
-    ModelCost,
-    OAuthCredential,
-    WarningKind,
-)
-
 from nova_ai.gateway.catalog import CatalogError
 from nova_ai.gateway.provider import RefreshModelsContext
 from nova_ai.providers.volcengine.catalog import (
@@ -18,6 +9,14 @@ from nova_ai.providers.volcengine.catalog import (
     fetch_ark_status,
 )
 from nova_ai.providers.volcengine.provider import volcengine_provider
+from nova_protocol import (
+    ApiKeyCredential,
+    KnownApi,
+    Model,
+    ModelCost,
+    OAuthCredential,
+    WarningKind,
+)
 from tests._helpers.auth import api_key_credential, oauth_credential
 
 pytestmark = pytest.mark.asyncio

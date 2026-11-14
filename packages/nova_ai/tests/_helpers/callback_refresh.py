@@ -9,14 +9,14 @@ manager 刷新机器的测试制造动态 provider——恢复段发布 stored�
 import time
 from typing import Awaitable, Callable, List, Optional
 
-from nova_protocol import Model, ModelsStoreEntry, is_aborted
-
 from nova_ai.gateway.provider import (
     ModelsPublication,
     Provider,
     RefreshModelsContext,
     RefreshModelsFn,
 )
+from nova_async import is_aborted
+from nova_protocol import Model, ModelsStoreEntry
 
 
 def callback_refresh(

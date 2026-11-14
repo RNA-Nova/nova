@@ -16,9 +16,9 @@ from nova_ai import (
     StreamingJsonParser,
 )
 from nova_ai.utils.errors import StreamDisconnectedError, normalize_error
-from nova_async import AbortScope
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_async import AbortedError, AbortScope, is_aborted
 from nova_protocol import (
-    AbortedError,
     AssistantMessage,
     Context,
     DoneEvent,
@@ -42,8 +42,6 @@ from nova_protocol import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     Usage,
-    is_aborted,
-    redact_secrets,
 )
 from pydantic import Field, StrictInt, TypeAdapter
 

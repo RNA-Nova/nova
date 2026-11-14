@@ -8,9 +8,14 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Generic, List, Literal, Optional, TypeVar
 
-from nova_protocol import AbortSignal, AgentToolResult, Tool
+from nova_async import AbortSignal
+from nova_protocol import AgentToolResult, Tool, ToolCall
 
-from .base import ToolExecutionMode
+# 单个助手工具调用内容块（与 ``ToolCall`` 同一正典）。
+AgentToolCall = ToolCall
+
+# 单条助手消息中多个工具调用的执行模式。
+ToolExecutionMode = Literal["sequential", "parallel"]
 
 TDetails = TypeVar("TDetails")
 """Type variable for tool execution details."""
@@ -75,8 +80,10 @@ class AgentTool(Tool, Generic[TParameters, TDetails], ABC):
 
 
 __all__ = [
+    "AgentToolCall",
     "AgentTool",
     "AgentToolUpdateCallback",
+    "ToolExecutionMode",
     "TDetails",
     "TParameters",
 ]

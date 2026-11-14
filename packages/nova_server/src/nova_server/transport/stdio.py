@@ -80,7 +80,7 @@ class StdioTransport(Transport):
         """stdio does not support binary frames."""
         raise NotImplementedError("StdioTransport does not support binary frames")
 
-    async def receive_binary(self) -> tuple[bytes, Dict[str, Any] | None] | None:
+    async def receive_binary(self) -> tuple[bytes, Dict[str, Any]] | None:
         """stdio does not support binary frames."""
         raise NotImplementedError("StdioTransport does not support binary frames")
 

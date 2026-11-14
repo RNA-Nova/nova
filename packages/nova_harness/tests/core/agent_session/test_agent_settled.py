@@ -8,11 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import AGENT_SETTLED
+from nova_harness.extensions.actions import ExtensionContextActions
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
 from nova_harness.extensions.runner import ExtensionRunner
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
-from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.sessions.config import AgentSessionConfig
 
 
 def _minimal_runtime() -> ExtensionRuntime:
@@ -35,7 +37,7 @@ def _minimal_runtime() -> ExtensionRuntime:
         "set_thinking_level",
     ):
         setattr(runtime, name, lambda *args, **kwargs: None)
-    runtime.context_actions = SimpleNamespace(
+    runtime.context_actions = ExtensionContextActions(
         get_model=lambda: None,
         is_idle=lambda: True,
         is_project_trusted=lambda: True,
@@ -101,9 +103,12 @@ def _runner_with_settled_handler(received):
 async def test_settled_fires_after_run_on_both_channels():
     received = []
     session = AgentSession(_make_config())
+    session.agent = MagicMock()
+    session.agent.prompt = AsyncMock()
+    session.agent.has_queued_messages.return_value = False
     session._extension_runner = _runner_with_settled_handler(received)
     bus_events = []
-    session._emit = bus_events.append
+    session._emit = lambda event: bus_events.append(event)
 
     await session._run_agent_prompt([])
 
@@ -131,7 +136,7 @@ async def test_settled_fires_after_prompt_completes():
         session_manager=None,
         model_runtime=None,
     )
-    session._emit = lambda e: None
+    session._emit = lambda event: None
 
     await session._run_agent_prompt([])
     assert order == ["prompt", AGENT_SETTLED]
@@ -145,7 +150,7 @@ async def test_settled_fires_on_exception():
     session.agent.prompt = AsyncMock(side_effect=RuntimeError("boom"))
     session._extension_runner = _runner_with_settled_handler(received)
     bus_events = []
-    session._emit = bus_events.append
+    session._emit = lambda event: bus_events.append(event)
 
     with pytest.raises(RuntimeError):
         await session._run_agent_prompt([])
@@ -159,7 +164,7 @@ async def test_settled_without_runner_bus_only():
     session = AgentSession(_make_config())
     session._extension_runner = None
     bus_events = []
-    session._emit = bus_events.append
+    session._emit = lambda event: bus_events.append(event)
 
     await session._run_agent_prompt([])
     assert [e.type for e in bus_events] == [AGENT_SETTLED]

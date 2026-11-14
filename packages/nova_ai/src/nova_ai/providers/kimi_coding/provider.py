@@ -2,7 +2,7 @@
 
 from typing import cast
 
-from nova_protocol import OAuthAuth, ProviderAuth
+from nova_ai.auth import OAuthAuth, ProviderAuth
 
 from ...auth.helpers import env_api_key_auth, lazy_oauth
 from ...gateway import Provider, ProviderStreams, create_provider

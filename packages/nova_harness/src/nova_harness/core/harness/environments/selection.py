@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from nova_exec_policy import ExecutorConfig
 from nova_exec_server_client import resolve_environment
-from nova_protocol import ExecutorConfig, ResolvedEnvironment
+from nova_exec_server_client.environments import ResolvedEnvironment
 
 
 def resolve_environment_selection(

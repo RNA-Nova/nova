@@ -11,7 +11,8 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, cast
 from urllib.parse import quote
 
-from nova_protocol import AbortedError, AbortSignal, ModelFields, is_aborted
+from nova_async import AbortedError, AbortSignal, is_aborted
+from nova_protocol import ModelFields
 
 from ..gateway.catalog import CatalogOutcome
 from ..utils.http import get_with_retry, json_headers

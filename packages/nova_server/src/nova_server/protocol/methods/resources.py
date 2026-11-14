@@ -45,7 +45,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
                     **serialize_source_info(getattr(template, "source_info", None)),
                 }
             )
-        return shapes.ListPromptTemplatesResult(prompts=prompts)
+        return shapes.ListPromptTemplatesResult(
+            prompts=[shapes.PromptTemplateInfo(**prompt) for prompt in prompts]
+        )
 
     async def listSkills(params: shapes.EmptyParams) -> shapes.ListSkillsResult:
         """全部已加载 skills。"""
@@ -60,7 +62,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
                     "source_label": getattr(skill, "source_label", None),
                 }
             )
-        return shapes.ListSkillsResult(skills=skills)
+        return shapes.ListSkillsResult(
+            skills=[shapes.SkillInfo(**skill) for skill in skills]
+        )
 
     _D = "resources"
     registry.register(

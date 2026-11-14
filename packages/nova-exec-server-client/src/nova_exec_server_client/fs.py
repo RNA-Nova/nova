@@ -8,8 +8,8 @@ from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable
 from urllib.parse import quote
 
-from nova_async import TaskTracker, await_with_signal
-from nova_protocol import (
+from nova_async import AbortedError, AbortSignal, TaskTracker, await_with_signal
+from nova_exec_protocol import (
     ENVIRONMENT_INFO,
     FS_CANONICALIZE,
     FS_CLOSE,
@@ -29,8 +29,6 @@ from nova_protocol import (
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
     MAX_WRITE_STREAM_CHUNK_BYTES,
-    AbortedError,
-    AbortSignal,
     DirEntry,
     EnvironmentInfo,
     FileMetadata,

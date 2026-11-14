@@ -3,16 +3,10 @@
 import asyncio
 
 import pytest
-from nova_protocol import (
-    AbortSignal,
-    AuthorizationRequest,
-    AuthPrompt,
-    ModelAuth,
-    OAuthAuth,
-    OAuthCredential,
-)
-
+from nova_ai.auth import OAuthAuth
 from nova_ai.auth.helpers import lazy_oauth
+from nova_async import AbortSignal
+from nova_protocol import AuthorizationRequest, AuthPrompt, ModelAuth, OAuthCredential
 from tests._helpers.auth import oauth_credential
 
 pytestmark = pytest.mark.asyncio

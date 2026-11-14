@@ -2,13 +2,10 @@
 
 import pytest
 from nova_protocol import (
-    ApiKeyAuth,
     ApiKeyCredential,
     AuthCheck,
     AuthResult,
-    OAuthAuth,
     OAuthCredential,
-    ProviderAuth,
     RedactedString,
 )
 from pydantic import ValidationError
@@ -133,15 +130,3 @@ class TestAuthContainers:
         assert result.env is None
         check = AuthCheck(type="api_key", source="s")
         assert check.type == "api_key"
-
-    def test_provider_auth_defaults(self):
-        auth = ProviderAuth()
-        assert auth.api_key is None
-        assert auth.oauth is None
-
-    def test_auth_defs_are_dataclasses(self):
-        import dataclasses
-
-        assert dataclasses.is_dataclass(ApiKeyAuth)
-        assert dataclasses.is_dataclass(OAuthAuth)
-        assert dataclasses.is_dataclass(ProviderAuth)

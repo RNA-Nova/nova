@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from nova_server.protocol.methods import shapes
+
+if TYPE_CHECKING:
+    from nova_harness.package.manager import PackageManager
 from nova_server.protocol.methods.shapes import PkgUninstallResult
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.router import MethodRegistry
 
 
 def _package_manager(state: ServerState) -> "PackageManager":
-    from nova_harness.package import PackageManager
+    from nova_harness.package.manager import PackageManager
 
     def _on_progress(event) -> None:
         # 转发安装/更新进度为 UI 通知；前端未声明该 capability 时安全降级。
@@ -49,7 +52,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         local = params.local
         # pip 安装是长阻塞操作，必须放线程（否则 abort/ui 应答全部冻结）
         meta = await asyncio.to_thread(pm.install_and_persist, source, local=local)
-        return meta
+        return meta.dump_wire()
 
     async def pkgUninstall(params: shapes.PkgNameParams) -> PkgUninstallResult:
         pm = _package_manager(state)
@@ -63,7 +66,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         name_or_source = params.name_or_source
         local = params.local
         meta = await asyncio.to_thread(pm.info, name_or_source, local=local)
-        return meta
+        return meta.dump_wire() if meta is not None else None
 
     async def pkgUpdate(params: shapes.PkgNameParams) -> shapes.PkgUpdateResult:
         pm = _package_manager(state)
@@ -82,7 +85,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         except Exception:
             updates = []
         # PackageUpdate（core 类型）与契约 PackageUpdateItem 不同构，dump 后重建
-        return shapes.PkgCheckUpdatesResult(updates=[u.model_dump() for u in updates])
+        return shapes.PkgCheckUpdatesResult(
+            updates=[shapes.PackageUpdateItem(**u.model_dump()) for u in updates]
+        )
 
     _D = "package"
     registry.register("pkgList", pkgList, domain=_D)

@@ -13,13 +13,14 @@ from unittest.mock import MagicMock
 
 import pytest
 from nova_agent import AgentTool
-from nova_harness.core.domains.tools import ToolsManager
+from nova_protocol import AgentToolResult, TextContent
+
 from nova_harness.core.domains.tools.dynamic_tool import (
     DynamicTool,
     create_tool_definition_from_agent_tool,
 )
-from nova_harness.types.resources.tools import ToolDefinition
-from nova_protocol import AgentToolResult, TextContent
+from nova_harness.core.domains.tools.manager import ToolsManager
+from nova_harness.resources.tools import ToolDefinition
 
 
 class _EchoTool(AgentTool):
@@ -78,6 +79,7 @@ async def test_dynamic_tool_execute_result_normalization():
 
     tool = DynamicTool(ToolDefinition(name="t", description="d", execute=execute))
     result = await tool.execute("id1", {})
+    assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "plain text"
 
 
@@ -103,7 +105,10 @@ async def test_create_tool_definition_from_agent_tool():
     assert definition.source_info.path == "<sdk:echo>"
 
     # 适配器接受 5 参（ctx 被丢弃），转发到纯 AgentTool 的 4 参 execute
-    result = await definition.execute("id", {}, None, None, object())
+    execute = definition.execute
+    assert callable(execute)
+    result = await execute("id", {}, None, None, object())
+    assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "echo"
 
 
@@ -135,7 +140,9 @@ def test_package_tool_keeps_real_definition_and_source():
     manager.refresh()
 
     definition = manager.get_tool_definition("bash")
+    assert definition is not None
     assert definition is pkg_definition
+    assert definition.tool_dir is not None
     assert definition.tool_dir == "/pkg/tools/bash"
 
     infos = {t.name: t for t in manager.get_all_tools()}
@@ -283,7 +290,9 @@ def test_refresh_injects_extension_spawn_hooks():
     )
     manager.refresh()
     # 聚合 hook 按注册顺序依次应用
-    assert executor.spawn_hook([]) == ["h1", "h2"]
+    spawn_hook = executor.spawn_hook
+    assert callable(spawn_hook)
+    assert spawn_hook([]) == ["h1", "h2"]
 
 
 def test_refresh_clears_spawn_hook_when_no_extension_runner():

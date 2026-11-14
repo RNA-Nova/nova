@@ -4,6 +4,7 @@ import asyncio
 import base64
 
 import pytest
+from nova_ai.stream_options import ImagesOptions
 from nova_protocol import (
     ImageContent,
     ImageModel,
@@ -11,8 +12,6 @@ from nova_protocol import (
     ImagesStopReason,
     TextContent,
 )
-
-from nova_ai.stream_options import ImagesOptions
 
 from ._helpers.auth import build_manager, has_credential
 from ._helpers.probes import probe_for

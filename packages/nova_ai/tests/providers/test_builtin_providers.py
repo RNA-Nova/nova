@@ -4,8 +4,17 @@
 """
 
 import pytest
+from nova_ai.api_impls.openai_completions import (
+    OpenAICompletionsOptions,
+    build_params,
+    detect_compat,
+)
+from nova_ai.auth import ApiKeyAuthInput
+from nova_ai.providers.anthropic import anthropic_provider
+from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, kimi_coding_provider
+from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, moonshotai_provider
+from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS, moonshotai_cn_provider
 from nova_protocol import (
-    ApiKeyAuthInput,
     Context,
     KnownApi,
     KnownProvider,
@@ -14,16 +23,6 @@ from nova_protocol import (
     ThinkingLevelMap,
     UserMessage,
 )
-
-from nova_ai.api_impls.openai_completions import (
-    OpenAICompletionsOptions,
-    build_params,
-    detect_compat,
-)
-from nova_ai.providers.anthropic import anthropic_provider
-from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS, kimi_coding_provider
-from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS, moonshotai_provider
-from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS, moonshotai_cn_provider
 
 
 def _level(model: Model, key: str):

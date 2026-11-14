@@ -31,7 +31,7 @@ import stat as stat_module
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, Tuple
 
-from nova_protocol import AbortSignal
+from nova_async import AbortSignal
 
 
 @dataclass(frozen=True)

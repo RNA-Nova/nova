@@ -13,6 +13,7 @@ import json
 import pytest
 import websockets.asyncio.client
 import websockets.asyncio.server
+
 from nova_exec_server_client import (
     NETWORK_POLICY_REQUEST,
     ConnectionError,

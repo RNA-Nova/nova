@@ -33,8 +33,8 @@
 
 | 面 | 家 | 状态 |
 |---|---|---|
-| 形状 | `data-modeling.md` | 【现状】（住所/选型/序列化/演化/开放集/取消三海拔/契约测试） |
-| 结构 | `structure-modeling.md` | 【待补】住所三层/依赖方向/禁止清单/结构核对（fitness functions）——类型住所归 `data-modeling.md` §一不重复，本面管模块与包 |
+| 形状 | `data-modeling.md` | 【现状】共享领域纯数据、边界协议、机制与组件类型已完成分址；语义 id 渐进棘轮等存量治理见全文 |
+| 结构 | `structure-modeling.md` | 【现状】住所三层/包内组织（领域内聚优先，单领域 `types/` 或 `types.py` 可保留）/依赖方向/结构核对——类型住所归 `data-modeling.md` §一不重复，本面管模块与包 |
 | 诊断与观测 | `diagnostics-modeling.md` | 【现状】落地波次 1/2 完成；波次 3-5【待补】（见其 §十四） |
 | 并发与取消 | `concurrency.md` | 取消原语与机制件【现状】；Agent run/proxy 所有权接入【现状】；其余编排层【待补】——token 树/两阶段中止/超时治理/死因分型/竞速裁决/任务台账；取消三海拔引用 `data-modeling.md` §七不重复 |
 | 配置 | `configuration.md` | 【待补】（codex 调查改判立篇——配置是层栈对象不是值）：层栈与优先级（global/project/CLI/SDK/会话条目）、合并语义、逐键 provenance【目标态】、strict 未知键、schema 导出【待补】、旗标生命周期【目标态】、项目配置安全 denylist（trust 门） |

@@ -11,12 +11,13 @@
 
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_harness.types.resources.tools import (
+from nova_async import AbortSignal
+from nova_harness.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContext,
     ToolExecContext,
 )
-from nova_protocol import AbortSignal, AgentToolResult, TextContent
+from nova_protocol import AgentToolResult, TextContent
 
 VALID_STATUSES = ("pending", "in_progress", "completed")
 

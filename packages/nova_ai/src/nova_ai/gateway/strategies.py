@@ -23,6 +23,7 @@ from __future__ import annotations
 import time
 from typing import Callable, List, Mapping, Optional, cast
 
+from nova_async import is_aborted
 from nova_protocol import (
     AnyModel,
     MaterializedCatalog,
@@ -30,7 +31,6 @@ from nova_protocol import (
     ModelsStoreEntry,
     NovaDiagnostic,
     WarningKind,
-    is_aborted,
 )
 
 from ..model_catalog import builtin_catalog_generated_at, finalize_catalog_models

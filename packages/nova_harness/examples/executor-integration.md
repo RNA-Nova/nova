@@ -138,9 +138,9 @@ pi/Claude Code 的标记块训练分布实证安全）；`<environment>` 标记�
 
 | 改什么 | 在哪 |
 |---|---|
-| settings **无** executor 节（终态：默认执行姿态 + 端点清单唯一事实源在 exec-server 配置根 `~/.nova/exec-server/config.toml`；settings 不重复持有——批次 D 端点搬家 + 收尾删 `ExecutorSettings`/`register_executor_endpoint` 写门） | （已删除）`core/types/config/settings.py` 的 `ExecutorSettings`/`ExecutorEndpoint` + `manager.py` 三方法 |
+| settings **无** executor 节（终态：默认执行姿态 + 端点清单唯一事实源在 exec-server 配置根 `~/.nova/exec-server/config.toml`；settings 不重复持有——批次 D 端点搬家 + 收尾删 `ExecutorSettings`/`register_executor_endpoint` 写门） | （已删除）`config/settings/models.py` 的 `ExecutorSettings`/`ExecutorEndpoint` + `manager.py` 三方法 |
 | 二进制注册表加 `nova-executor` 条目（或走 `binary_dependencies` PyPI wheel 车道——ripgrep 先例，pip 即发布渠道） | `package/binaries/registry.json` / bundle pyproject |
-| ExtensionContext 加 `refresh_system_prompt`（切换后重建触发）一个 action（`get_executor_settings`/`register_executor_endpoint`/`unregister_executor_endpoint` 初版曾加、终态删除——端点与默认姿态归 exec-server 配置根，不经扩展上下文） | `core/types/extensions/context.py` + `actions.py` + `runner.py` + `agent.py` 接线 |
+| ExtensionContext 加 `refresh_system_prompt`（切换后重建触发）一个 action（`get_executor_settings`/`register_executor_endpoint`/`unregister_executor_endpoint` 初版曾加、终态删除——端点与默认姿态归 exec-server 配置根，不经扩展上下文） | `extensions/context.py` + `actions.py` + `runner.py` + `agent.py` 接线 |
 
 ### nova_agent——本期不动
 

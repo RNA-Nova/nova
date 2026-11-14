@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
+
+from nova_harness.config.settings.models import PackageSourceSpec, Settings
 from nova_harness.package.resolve.resolver import PackageResolver
-from nova_harness.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.types.package import SourceOrigin, SourceScope
+from nova_harness.package.types import SourceOrigin, SourceScope
 
 
 class _FakeSettingsManager:

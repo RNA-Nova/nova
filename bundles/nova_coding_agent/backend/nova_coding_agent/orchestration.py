@@ -15,8 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from nova_coding_agent.adjudication.engine import AdjudicationEngine
 from nova_harness.core.agent_session.controllers.orchestrator import Orchestrator
+
+from nova_coding_agent.adjudication.engine import AdjudicationEngine
 
 
 @dataclass(frozen=True)

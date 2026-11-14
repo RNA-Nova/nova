@@ -12,28 +12,21 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_protocol import (
+    CustomAgentMessage,
+    ImageContent,
+    Message,
+    ModelThinkingLevel,
+    TextContent,
+)
+from pydantic import BaseModel
+
 from nova_harness.config.defaults import get_sessions_dir
-from nova_harness.sessions.listing import (
-    MAX_CONCURRENT_SESSION_INFO_LOADS,
-    build_session_info,
-    list_sessions_from_dir,
-)
-from nova_harness.sessions.utils import (
-    assert_valid_session_id,
-    build_context_entries,
-    build_session_context,
-    find_most_recent_session,
-    generate_id,
-    generate_session_id,
-    get_default_session_dir,
-    get_default_session_dir_path,
-    load_entries_from_file,
-    now_iso,
-)
-from nova_harness.types.compaction.branch_summary import SessionEntry
-from nova_harness.types.session.constants import CURRENT_SESSION_VERSION
-from nova_harness.types.session.context import SessionContext
-from nova_harness.types.session.entries import (
+from nova_harness.core.domains.compaction.branch_summary import SessionEntry
+from nova_harness.sessions.constants import CURRENT_SESSION_VERSION
+from nova_harness.sessions.context import SessionContext
+from nova_harness.sessions.entries import (
     BranchSummaryEntry,
     CompactionEntry,
     CustomEntry,
@@ -46,17 +39,25 @@ from nova_harness.types.session.entries import (
     SessionMessageEntry,
     ThinkingLevelChangeEntry,
 )
-from nova_harness.types.session.info import SessionInfo
-from nova_harness.types.session.tree import SessionTreeNode
-from nova_protocol import (
-    CustomAgentMessage,
-    ImageContent,
-    Message,
-    ModelThinkingLevel,
-    TextContent,
-    redact_secrets,
+from nova_harness.sessions.info import SessionInfo
+from nova_harness.sessions.listing import (
+    MAX_CONCURRENT_SESSION_INFO_LOADS,
+    build_session_info,
+    list_sessions_from_dir,
 )
-from pydantic import BaseModel
+from nova_harness.sessions.tree import SessionTreeNode
+from nova_harness.sessions.utils import (
+    assert_valid_session_id,
+    build_context_entries,
+    build_session_context,
+    find_most_recent_session,
+    generate_id,
+    generate_session_id,
+    get_default_session_dir,
+    get_default_session_dir_path,
+    load_entries_from_file,
+    now_iso,
+)
 
 # details 字段允许写入的 JSON 原生类型
 _JSON_NATIVE_TYPES = (dict, list, str, int, float, bool)
@@ -673,7 +674,10 @@ class SessionManager:
                 for s in sessions
                 if s.cwd and os.path.abspath(os.path.expanduser(s.cwd)) == resolved_cwd
             ]
-        sessions.sort(key=lambda s: s.modified, reverse=True)
+        sessions.sort(
+            key=lambda s: s.modified.timestamp() if s.modified else 0.0,
+            reverse=True,
+        )
         return sessions
 
     @classmethod
@@ -687,7 +691,10 @@ class SessionManager:
             sessions = await list_sessions_from_dir(
                 os.path.abspath(os.path.expanduser(session_dir)), on_progress
             )
-            sessions.sort(key=lambda s: s.modified, reverse=True)
+            sessions.sort(
+            key=lambda s: s.modified.timestamp() if s.modified else 0.0,
+            reverse=True,
+        )
             return sessions
 
         sessions_dir = str(get_sessions_dir())
@@ -736,7 +743,10 @@ class SessionManager:
                 if isinstance(result, SessionInfo):
                     sessions.append(result)
 
-            sessions.sort(key=lambda s: s.modified, reverse=True)
+            sessions.sort(
+            key=lambda s: s.modified.timestamp() if s.modified else 0.0,
+            reverse=True,
+        )
             return sessions
         except Exception:
             return []

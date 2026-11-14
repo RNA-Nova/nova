@@ -18,7 +18,7 @@ def _load_executor(tool_name: str = "bash", settings=None):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=settings or NULL_TOOL_SETTINGS)
     return module.Tool(context)
@@ -86,7 +86,7 @@ def test_bash_timeout(tmpdir):
 
 
 def test_bash_cancel(tmpdir):
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     executor = _load_executor()
     controller = AbortController()
@@ -236,7 +236,7 @@ def test_bash_no_default_timeout(tmpdir):
 
 def test_bash_pre_spawn_aborted_signal(tmpdir):
     """spawn 前 signal 已中止：直接 is_error 返回，不启动进程（对齐 pi）。"""
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     executor = _load_executor()
     controller = AbortController()
@@ -283,7 +283,7 @@ def test_bash_env_param(tmpdir):
 
 def test_bash_spawn_hook_rewrites_command(tmpdir):
     """spawn_hook 可在启动前改写 command/cwd/env（对齐 pi spawnHook）。"""
-    from nova_harness.types.extensions.process import SpawnContext
+    from nova_harness.extensions.process import SpawnContext
 
     executor = _load_executor()
 
@@ -325,7 +325,7 @@ def test_bash_timeout_keeps_partial_output(tmpdir):
 
 def test_bash_cancel_keeps_partial_output(tmpdir):
     """取消结果保留已产出的部分输出（对齐 pi：aborted 时输出 + 状态行）。"""
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     executor = _load_executor()
     controller = AbortController()

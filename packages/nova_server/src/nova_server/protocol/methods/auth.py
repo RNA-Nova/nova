@@ -13,8 +13,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from nova_harness.config.auth.interaction import UIAuthInteraction
-from nova_protocol import AbortController, ApiKeyCredential
+from nova_async import AbortController
+from nova_protocol import ApiKeyCredential, RedactedString
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.methods import shapes
 from nova_server.protocol.methods.shapes import (
@@ -25,6 +25,8 @@ from nova_server.protocol.methods.shapes import (
 )
 from nova_server.protocol.methods.state import ServerState
 from nova_server.protocol.router import MethodRegistry
+
+from nova_harness.config.auth.interaction import UIAuthInteraction
 
 _AUTH_TYPES = ("api_key", "oauth")
 
@@ -46,7 +48,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         if state.runtime is not None:
             storage = state.runtime.services.auth_storage
         else:
-            from nova_harness.config import AuthStorage
+            from nova_harness.config.auth.storage import AuthStorage
 
             storage = AuthStorage.create()
         infos = storage.list()
@@ -72,7 +74,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         # 经统一写漏斗（per-provider 锁串行）——不直接摸 AuthStorage，
         # 否则可被在飞刷新整条目覆盖
         await session.model_runtime.set_credential(
-            provider, ApiKeyCredential(key=api_key.strip())
+            provider, ApiKeyCredential(key=RedactedString(api_key.strip()))
         )
         # 与 login 同一联动：credential 变更后刷新模型与可用性快照
         await session.model_runtime.refresh()

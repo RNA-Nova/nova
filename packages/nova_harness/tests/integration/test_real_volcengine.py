@@ -10,10 +10,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from nova_harness import create_agent_session
+from nova_ai import builtin_models, get_builtin_model
 from nova_protocol import Context, TextContent, UserMessage
 
-from nova_ai import builtin_models, get_builtin_model
+from nova_harness import create_agent_session
 
 
 def _volc_key():
@@ -62,7 +62,7 @@ async def test_complete_simple_with_volcengine():
     result = await builtin_models().complete_simple(model, context)
     assert result.stop_reason != "error"
     assert result.error_message is None or result.error_message == ""
-    text = "".join(c.text for c in result.content if getattr(c, "type", None) == "text")
+    text = "".join(c.text for c in result.content if isinstance(c, TextContent))
     assert "pong" in text.lower()
 
 
@@ -112,6 +112,7 @@ async def test_set_model_with_volcengine(temp_agent_dir):
         pytest.skip("flash model not available")
 
     await session.set_model(flash)
+    assert session.model is not None
     assert session.model.id == "deepseek-v4-flash-260425"
 
 
@@ -125,7 +126,9 @@ async def test_cycle_model_with_volcengine(temp_agent_dir):
 
     runtime = await create_agent_session()
     session = runtime.session
+    assert session.model is not None
     initial_id = session.model.id
     result = await session.cycle_model("forward")
     if result is not None:
+        assert result.model is not None
         assert result.model.id != initial_id

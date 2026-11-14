@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from nova_coding_agent.bash.engine import create_local_bash_operations
 
 
@@ -122,7 +123,7 @@ async def test_local_bash_tail_truncation_and_full_output(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_local_bash_spawn_hook(tmp_path: Path):
     """spawn hook 可修改 command/cwd/env。"""
-    from nova_harness.types.extensions.process import SpawnContext
+    from nova_harness.extensions.process import SpawnContext
 
     def hook(ctx: SpawnContext) -> SpawnContext:
         ctx.env["NOVA_TEST_VAR"] = "hooked"

@@ -9,18 +9,20 @@ from pathlib import Path
 from typing import List, Optional
 
 import pytest
+from nova_protocol import CustomAgentMessage
+
+from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.config.settings.models import Settings
 from nova_harness.core.agent_session.services import AgentSessionServices
 from nova_harness.core.runtime_manager.assembly import (
     create_agent_session_from_services,
 )
-from nova_harness.package import PackageManager
+from nova_harness.package.manager import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader
-from nova_harness.sessions import SessionManager
+from nova_harness.resources.options import DefaultResourceLoaderOptions
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.sessions.manager import SessionManager
 from nova_harness.sessions.message_types import clear_session_message_types
-from nova_harness.types.config.settings import Settings
-from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.types.session.config import CreateAgentSessionOptions
-from nova_protocol import CustomAgentMessage
 
 _EXECUTOR = """
 from typing import Literal
@@ -51,7 +53,7 @@ class UserTool:
 """
 
 
-class _FakeSettingsManager:
+class _FakeSettingsManager(SettingsManager):
     def __init__(self, global_settings: Settings) -> None:
         self._global = global_settings
         self._project_trusted = True
@@ -59,10 +61,10 @@ class _FakeSettingsManager:
     def is_project_trusted(self) -> bool:
         return self._project_trusted
 
-    def set_project_trusted(self, value: bool) -> None:
-        self._project_trusted = value
+    def set_project_trusted(self, trusted: bool) -> None:
+        self._project_trusted = trusted
 
-    def reload(self) -> None:
+    async def reload(self) -> None:
         pass
 
     def get_global_settings(self) -> Settings:
@@ -177,7 +179,7 @@ async def test_user_tool_registered_and_invokable(user_tool_env):
     message = await session.invoke_user_tool("fake", {"command": "ls"})
     assert isinstance(message, CustomAgentMessage)
     assert message.role == "fakeResult"
-    assert message.text == "ran:ls"
+    assert getattr(message, "text") == "ran:ls"
 
 
 @pytest.mark.asyncio

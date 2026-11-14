@@ -7,9 +7,10 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_exec_protocol import FileSystemSandboxContext
+
 from nova_exec_server_client import ExecutorClient, FileSystemError
 from nova_exec_server_client.fs import FileSystemManager
-from nova_protocol import FileSystemSandboxContext
 
 
 def chunk_msg(handle: str, seq: int, data: bytes, eof: bool = False) -> dict:

@@ -3,6 +3,7 @@
 import os
 
 import pytest
+
 from nova_coding_agent.tools_common.shell import (
     _bash_shell_config,
     get_shell_config,

@@ -3,13 +3,12 @@
 import asyncio
 
 import pytest
-from nova_protocol import AbortController, AbortedError
-
 from nova_ai.auth.oauth.device_code import (
     DeviceCodePollOptions,
     DeviceCodePollResult,
     poll_oauth_device_code_flow,
 )
+from nova_async import AbortController, AbortedError
 
 
 @pytest.mark.asyncio

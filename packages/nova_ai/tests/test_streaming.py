@@ -6,6 +6,7 @@ import asyncio
 import time
 
 import pytest
+from nova_ai.streaming import AssistantMessageEventStream, EventStream
 from nova_protocol import (
     AssistantMessage,
     DoneEvent,
@@ -16,8 +17,6 @@ from nova_protocol import (
     TextStartEvent,
     Usage,
 )
-
-from nova_ai.streaming import AssistantMessageEventStream, EventStream
 
 
 @pytest.mark.asyncio

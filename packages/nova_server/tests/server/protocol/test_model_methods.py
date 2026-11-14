@@ -5,10 +5,13 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import pytest
-from nova_protocol import Model
+from nova_protocol import Model, ModelCost
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import model as model_methods
 from nova_server.protocol.methods.state import ServerState
+
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from nova_harness.ui import NoOpUIContext
 
 
 def _model(model_id: str, provider: str = "volcengine") -> Model:
@@ -20,7 +23,7 @@ def _model(model_id: str, provider: str = "volcengine") -> Model:
         base_url="https://example.test",
         reasoning=False,
         input_types=["text"],
-        cost={},
+        cost=ModelCost(),
         context_window=128000,
         max_tokens=8192,
     )
@@ -69,15 +72,15 @@ class FakeSession:
         self.scoped_models = list(scoped)
 
 
-class FakeRuntime:
+class FakeRuntime(AgentSessionRuntime):
     def __init__(self, session):
-        self.session = session
+        self._session = session
 
 
 @pytest.fixture
 def registry():
     session = FakeSession()
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     state.set_runtime(FakeRuntime(session))
     reg = MethodRegistry()
     model_methods.register(reg, state)

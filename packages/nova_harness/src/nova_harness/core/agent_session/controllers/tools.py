@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from nova_harness.types.protocols import AgentSessionProtocol, ToolsManagerProtocol
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
+from nova_harness.core.domains.tools.protocol import ToolsManagerProtocol
 
 
 class ToolController:
@@ -16,7 +17,7 @@ class ToolController:
     def _tools_manager(self) -> ToolsManagerProtocol:
         manager = self._session.tools_manager
         if manager is None:
-            return manager  # type: ignore[return-value]
+            raise RuntimeError("Tools manager is not initialized")
         # 保持 ToolsManager 与 session 的当前配置一致（测试会替换 runner/override）
         manager.extension_runner = self._session.extension_runner
         manager.base_tools_override = self._session.base_tools_override
@@ -83,7 +84,8 @@ class ToolController:
         manager = self._tools_manager()
         manager.set_active_tools(tool_names)
         valid_names = self._sync_to_agent()
-        self._session.system_prompt_manager.set_active_tools(valid_names)
+        if self._session.system_prompt_manager is not None:
+            self._session.system_prompt_manager.set_active_tools(valid_names)
         self._session._sync_system_prompt()
 
     def _sync_to_agent(self) -> List[str]:

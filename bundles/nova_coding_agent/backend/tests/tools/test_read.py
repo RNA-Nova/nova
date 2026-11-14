@@ -17,7 +17,7 @@ def _load_executor():
     spec = importlib.util.spec_from_file_location("_test_tool_read", executor_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=NULL_TOOL_SETTINGS)
     return module.Tool(context)
@@ -84,7 +84,7 @@ def _make_exec_context(model_input_types):
     """构造执行期 ToolExecContext（模型经 execute 第 5 参注入）。"""
     from types import SimpleNamespace
 
-    from nova_harness.types.resources.tools import ToolExecContext
+    from nova_harness.resources.tools import ToolExecContext
 
     return ToolExecContext(model=SimpleNamespace(input_types=model_input_types))
 
@@ -128,7 +128,7 @@ def test_read_image_uses_model_resize_options(tmpdir):
     agent-session 的 resizeOptions 注入）：小维度限生效并记缩放提示。"""
     from types import SimpleNamespace
 
-    from nova_harness.types.resources.tools import ToolExecContext
+    from nova_harness.resources.tools import ToolExecContext
 
     path = os.path.join(tmpdir, "big.png")
     _make_noise_png(path, width=300, height=200)

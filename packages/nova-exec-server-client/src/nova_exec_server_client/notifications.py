@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from nova_async import TaskTracker
-from nova_protocol import (
+from nova_exec_protocol import (
     FS_READ_STREAM_CHUNK,
     FS_READ_STREAM_DONE,
     HTTP_REQUEST_BODY_DELTA,

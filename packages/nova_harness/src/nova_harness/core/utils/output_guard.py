@@ -23,7 +23,7 @@ import sys
 import threading
 from contextlib import contextmanager
 from types import TracebackType
-from typing import List, Optional, TextIO, Type
+from typing import Callable, List, Optional, TextIO, Type
 
 
 class OutputGuard:
@@ -36,7 +36,7 @@ class OutputGuard:
     ) -> None:
         self._stdout = stdout or sys.stdout
         self._stderr = stderr or sys.stderr
-        self._original_write: Optional[callable] = None
+        self._original_write: Optional[Callable[[str], int]] = None
         self._local = threading.local()
         self._logging_handlers_changed: list[logging.Handler] = []
 
@@ -61,7 +61,8 @@ class OutputGuard:
     def _guarded_write(self, data: str) -> int:
         """Write data to stdout only if inside a protocol write block."""
         if self._in_protocol_write():
-            # type: ignore[misc] # original_write is set when installed
+            if self._original_write is None:
+                raise RuntimeError("OutputGuard is not installed")
             return self._original_write(data)
         try:
             self._stderr.write(data)

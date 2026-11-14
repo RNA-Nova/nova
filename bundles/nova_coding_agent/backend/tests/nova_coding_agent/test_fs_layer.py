@@ -6,6 +6,7 @@ import asyncio
 import errno
 
 import pytest
+
 from nova_coding_agent.executor import (
     BackendSelection,
     reset_backend_selection,
@@ -129,12 +130,12 @@ class _FakeFs:
         pass
 
     async def metadata(self, path, signal=None):
-        from nova_protocol import FileMetadata
+        from nova_exec_protocol import FileMetadata
 
         self.seen_signals.append(("metadata", signal))
         # 取消词汇：预触发信号按 SDK 举旗点语义抛 AbortedError（仿真 SDK 行为）
         if signal is not None and getattr(signal, "aborted", False):
-            from nova_protocol import AbortedError
+            from nova_async import AbortedError
 
             raise AbortedError("Operation aborted: test")
         self._track(path)
@@ -159,7 +160,7 @@ class _FakeFs:
         raise RuntimeError("not found")
 
     async def read_dir(self, path, signal=None):
-        from nova_protocol import DirEntry
+        from nova_exec_protocol import DirEntry
 
         self.seen_signals.append(("read_dir", signal))
         self._track(path)
@@ -173,7 +174,7 @@ class _FakeFs:
         self._track(path)
 
     async def walk(self, path, options, signal=None):
-        from nova_protocol import WalkOutcome
+        from nova_exec_protocol import WalkOutcome
 
         self.seen_signals.append(("walk", signal))
         self._track(path)
@@ -282,7 +283,7 @@ class TestExecutorLayer:
     def test_metadata_abort_not_collapsed(self):
         """取消词汇直通：预触发 signal 的 AbortedError 不得收编成
         ``FsStat(exists=False)``（否则用户取消被误报成"文件不存在"）。"""
-        from nova_protocol import AbortController, AbortedError
+        from nova_async import AbortController, AbortedError
 
         layer, _fs = self._make()
         ctl = AbortController()

@@ -11,9 +11,12 @@ import inspect
 import os
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from nova_agent import Agent
+from nova_ai import ProviderResponse
+from nova_protocol import ImageContent, Model, ModelThinkingLevel, TextContent
+
 from nova_harness.config.defaults import SESSIONS_DIR_NAME
 from nova_harness.core.agent_session import AgentSession, AgentSessionConfig
 from nova_harness.core.utils import resolve_api_key
@@ -25,14 +28,13 @@ from nova_harness.events.constants import (
     BEFORE_PROVIDER_HEADERS,
     BEFORE_PROVIDER_REQUEST,
 )
-from nova_harness.extensions import ExtensionRunner
+from nova_harness.extensions.protocol import ExtensionRunnerProtocol
+from nova_harness.extensions.runner import ExtensionRunner
 from nova_harness.model.attribution import merge_provider_attribution_headers
-from nova_harness.sessions import SessionManager
-from nova_harness.types.session.config import CreateAgentSessionOptions
-from nova_harness.types.ui import UIContext
-from nova_protocol import ImageContent, Model, ModelThinkingLevel, TextContent
-
-from nova_ai import ProviderResponse
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.sessions.manager import SessionManager
+from nova_harness.sessions.protocol import SessionManagerProtocol
+from nova_harness.ui import UIContext
 
 _BLOCK_IMAGE_PLACEHOLDER = "Image reading is disabled."
 
@@ -40,7 +42,7 @@ _BLOCK_IMAGE_PLACEHOLDER = "Image reading is disabled."
 def resolve_session_manager(
     options: CreateAgentSessionOptions,
     services: Any,
-) -> SessionManager:
+) -> SessionManagerProtocol:
     """解析或创建 SessionManager。"""
     if options.session_manager is not None:
         return options.session_manager
@@ -87,7 +89,9 @@ def resolve_initial_active_tool_names(
 def create_stream_fn(
     services: Any,
     session_id: Optional[str],
-    extension_runner_ref: Optional[Dict[str, Optional[ExtensionRunner]]] = None,
+    extension_runner_ref: Optional[
+        Mapping[str, Optional[ExtensionRunnerProtocol]]
+    ] = None,
 ) -> Any:
     """构造合并 provider attribution headers、重试与超时的 stream_fn。
 
@@ -148,7 +152,7 @@ def create_stream_fn(
 
 def _chain_transform_headers(
     previous: Any,
-    extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
+    extension_runner_ref: Mapping[str, Optional[ExtensionRunnerProtocol]],
 ) -> Any:
     """把扩展的 headers 钩子链接到既有 transform_headers 之后（若有）。"""
 
@@ -222,10 +226,10 @@ def create_convert_to_llm(settings_manager: Any) -> Any:
 
 def create_agent(
     services: Any,
-    session_manager: SessionManager,
+    session_manager: SessionManagerProtocol,
     model: Optional[Model],
     thinking_level: Optional[ModelThinkingLevel],
-    extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
+    extension_runner_ref: Mapping[str, Optional[ExtensionRunnerProtocol]],
 ) -> Agent:
     """构造底层 Agent，并挂接扩展 runner 的 provider 拦截钩子。"""
     get_api_key = partial(resolve_api_key, model_runtime=services.model_runtime)
@@ -257,7 +261,7 @@ def create_agent(
 
 
 async def _on_payload(
-    extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
+    extension_runner_ref: Mapping[str, Optional[ExtensionRunnerProtocol]],
     payload: Any,
 ) -> Any:
     runner = extension_runner_ref.get("current")
@@ -267,7 +271,7 @@ async def _on_payload(
 
 
 async def _on_response(
-    extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
+    extension_runner_ref: Mapping[str, Optional[ExtensionRunnerProtocol]],
     response: ProviderResponse,
     _model: Any,
 ) -> None:
@@ -284,7 +288,7 @@ async def _on_response(
 
 
 async def _transform_context(
-    extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
+    extension_runner_ref: Mapping[str, Optional[ExtensionRunnerProtocol]],
     messages: List[Any],
     signal: Optional[Any] = None,
 ) -> List[Any]:
@@ -295,7 +299,7 @@ async def _transform_context(
 
 
 def restore_or_persist_session_state(
-    session_manager: SessionManager,
+    session_manager: SessionManagerProtocol,
     agent: Agent,
     model: Optional[Model],
     thinking_level: Optional[ModelThinkingLevel],
@@ -321,11 +325,11 @@ def restore_or_persist_session_state(
 
 def build_agent_session_config(
     services: Any,
-    session_manager: SessionManager,
+    session_manager: SessionManagerProtocol,
     agent: Agent,
     options: CreateAgentSessionOptions,
     initial_active_tool_names: Optional[List[str]],
-    extension_runner_ref: Dict[str, Optional[ExtensionRunner]],
+    extension_runner_ref: Dict[str, Optional[ExtensionRunnerProtocol]],
 ) -> AgentSessionConfig:
     """从服务集合与已创建的 Agent 构造 AgentSessionConfig。"""
     return AgentSessionConfig(

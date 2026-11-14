@@ -4,6 +4,12 @@ Anthropic 形态不变量逐条锁：签名回放、redacted 透传、tool_resul
 INLINE_TOOLS 中途 system 块、cache_control 落点、schema 裁剪。
 """
 
+from nova_ai.api_impls.anthropic_messages.compat import get_compat
+from nova_ai.api_impls.anthropic_messages.messages import (
+    convert_messages,
+    convert_tools,
+    normalize_tool_call_id,
+)
 from nova_protocol import (
     AnthropicMessagesCompat,
     AssistantMessage,
@@ -20,13 +26,6 @@ from nova_protocol import (
     ToolResultMessage,
     Usage,
     UserMessage,
-)
-
-from nova_ai.api_impls.anthropic_messages.compat import get_compat
-from nova_ai.api_impls.anthropic_messages.messages import (
-    convert_messages,
-    convert_tools,
-    normalize_tool_call_id,
 )
 
 

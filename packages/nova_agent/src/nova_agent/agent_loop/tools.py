@@ -7,10 +7,14 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
-from nova_async import TaskTracker, await_with_signal
-from nova_protocol import (
+from nova_async import (
     AbortedError,
     AbortSignal,
+    TaskTracker,
+    await_with_signal,
+    is_aborted,
+)
+from nova_protocol import (
     AgentToolResult,
     AssistantMessage,
     MessageEndEvent,
@@ -20,7 +24,6 @@ from nova_protocol import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
     ToolResultMessage,
-    is_aborted,
 )
 
 from ..types import (

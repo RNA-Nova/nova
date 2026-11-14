@@ -34,9 +34,11 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 
 | 包 | 角色 |
 |---|---|
-| `packages/nova_ai` | LLM provider 抽象层（聊天流式、非流式图像生成与结构化分类、鉴权、混合模型注册） |
-| `packages/nova_async` | 取消/等待机制族叶子包（AbortScope/竞速/退避/TaskTracker/KeyedLock/Deadline；词汇锚定 nova_protocol） |
-| `packages/nova_catalog` | 模型目录构建管线（对位 pi `packages/ai/catalog/`）——知识 `providers/` + 族事实 `families/` + 薄拉取 `sources/` + 编排 `build.py`；自包含（不依赖 nova_ai，词汇经 nova_protocol），产物写 nova_ai |
+| `packages/nova_protocol` | 跨领域共享纯数据词汇（LLM/Agent/Auth/ID/诊断），零行为、零兄弟包依赖 |
+| `packages/nova_ai` | LLM provider 抽象层（聊天流式、非流式图像生成与结构化分类、鉴权、混合模型注册）+ 包内 `catalog/` 模型目录构建管线（对位 pi `packages/ai/catalog/`） |
+| `packages/nova_async` | 完整取消词汇与等待机制族叶子包（AbortSignal/AbortScope/竞速/退避/TaskTracker/KeyedLock/Deadline） |
+| `packages/nova_exec_protocol` | executor 独立版本化 wire DTO |
+| `packages/nova_exec_policy` | Shell 分析、执行策略、权限编译与配置物化 |
 | `packages/nova_agent` | 事件驱动异步 Agent 循环核心 |
 | `packages/nova_harness` | 高阶 SDK：会话树/压缩/资源/包管理/RuntimeManager |
 | `packages/nova_server` | JSON-RPC 协议服务层 + client 家族 + headless exec |
@@ -45,15 +47,15 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | `packages/nova-exec-server-client` | executor 的 Python 薄客户端 |
 | `bundles/nova_coding_agent` | 官方编程 bundle（10 工具 + 6 扩展 + agents） |
 
-数据建模终态：`nova_protocol` 词汇枢纽（已建成，批次迁移中）＋边界协议包＋组件内部类型——见 `docs/crosscutting/data-modeling.md`「住所」。
+数据建模现状：`nova_protocol` 共享纯数据词汇＋边界协议包＋行为机制与组件内部类型，已完成分址——见 `docs/crosscutting/data-modeling.md`「住所」。
 
 ## 命令速查
 
 ```bash
 pixi install -e dev        # 环境初始化（dev 含 black/isort/pytest）
-pixi run -e dev test-all   # 九个测试套件全量（各包独立跑，避免 conftest 冲突）
+pixi run -e dev test-all   # 十个测试套件全量（各包独立跑，避免 conftest 冲突）
 pixi run -e dev format     # black + isort 全仓
-pixi run -e dev typecheck  # pyright（protocol/ai/agent + catalog 源码与脚本）
+pixi run -e dev typecheck  # pyright（protocol/async/ai/agent/harness/server + exec 协议与策略）
 cd packages/nova_client && npm run build   # TS 前端编译
 ```
 
@@ -67,7 +69,7 @@ cd packages/nova_client && npm run build   # TS 前端编译
 
 > 全文：`docs/crosscutting/data-modeling.md`。以下速览覆盖日常决策；拿不准时读全文。
 
-- **住所总规则**：跨组件边界的纯数据词汇进 `nova_protocol`（已建成，批次迁移中）；其余留在原地。三问判定：只一个消费方→组件内；带行为/状态/IO→行为组件；是外部契约版本面→边界协议包。**单一正典源**：类型只从 `nova_protocol` 进（门面全量再导出），不经行为包二手转发。
+- **住所总规则**：跨领域且需统一正典的纯数据进 `nova_protocol`；其余按语义所有权归位。四问判定：单一领域或行为私有入参→业务包；Callable/Protocol/状态/IO/算法→机制包；外部版本契约→边界协议包；跨领域纯数据→枢纽。包内以领域内聚优先，单一公共类型领域可用 `types/` 或 `types.py` 表达，跨领域混合类型收容层不立；外部版本协议只入 `protocol/`。**单一正典源**：枢纽类型从 `nova_protocol` 进，业务类型从语义所有方公共入口进，不经二手中转。
 - **选型决策序**：可变→普通 class/dataclass；低频契约→Pydantic（`NovaBaseModel`）；Callable/服务/异常→dataclass；不可变值对象→`frozen=True`；union 必判别；哑容器不进 Pydantic。
 - **序列化**：`model_dump()`（持久化 snake）与 `dump_wire()`（线上 camel）双出口不混用；边界 `model_validate`、内部 `model_construct`。
 - **演化**：加 optional/加联合成员 = minor；删改字段/改判别键 = major。线上与落盘（JSONL v3）双契约共用。

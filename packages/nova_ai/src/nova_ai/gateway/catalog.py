@@ -17,7 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
-from nova_protocol import AbortSignal, ModelFields, NovaErrorKind
+from nova_async import AbortSignal
+from nova_protocol import ModelFields, NovaErrorKind
 
 
 class CatalogError(RuntimeError):

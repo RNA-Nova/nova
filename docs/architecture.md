@@ -7,10 +7,11 @@
 ```
 nova/
 ├── packages/
-│   ├── nova_protocol/      # 词汇枢纽（纯形状零行为——全仓类型的单一正典源）
-│   ├── nova_async/         # 取消/等待机制族叶子包（真杀 scope/竞速等待/信号组合/任务台账；词汇锚定 nova_protocol）
-│   ├── nova_catalog/       # 模型目录构建管线 + 运行期共享的目录纯算法
-│   ├── nova_ai/            # 统一的 LLM 提供商抽象层
+│   ├── nova_protocol/      # 跨领域共享纯数据词汇（零行为、零兄弟包依赖）
+│   ├── nova_async/         # 完整取消词汇与等待机制族叶子包
+│   ├── nova_exec_protocol/ # executor 独立版本化 wire DTO
+│   ├── nova_exec_policy/   # Shell/执行策略/权限/配置物化纯算法
+│   ├── nova_ai/            # 统一的 LLM 提供商抽象层 + 包内 Catalog 目录构建管线
 │   ├── nova_agent/         # 事件驱动的异步 Agent 框架
 │   ├── nova_harness/       # 高阶 Agent SDK（会话、压缩、工具链、包管理、RuntimeManager）
 │   ├── nova_server/        # JSON-RPC 协议服务层（protocol/transport/reduction/client 家族/exec）
@@ -30,10 +31,9 @@ nova/
 
 ### 运行时依赖层次（自下而上）
 
-1. **`nova_protocol`** —— 词汇枢纽（最底层）。全仓类型的单一正典源：LLM 消息/内容/模型/流式事件/枚举/compat/auth 词汇、agent 循环事件与消息、取消原语词汇（`signal.py`）、报告词汇（错误分类/警告事件/装配诊断）、secret 清洗——纯形状零行为，纯洁性审计机械执法。
-2. **`nova_async`** —— 取消/等待机制族叶子包（structure-modeling §二升格出口的落地）。消费枢纽词汇：`AbortScope`/`await_with_abort`（真杀）、`await_with_signal`（竞速）、`abortable_sleep`/`any_signal`/`operation_signal`、`TaskTracker`——禁第三份实现。
-   同级独立叶子 **`nova_catalog`** 负责模型目录构建，并向 `nova_ai` 提供修正/翻译等纯算法；只依赖 `nova_protocol`，不得反向 import `nova_ai`。
-3. **`nova_ai`** —— LLM 抽象层。提供多厂商（OpenAI、Anthropic、Google、Volcengine、GitHub Copilot 等）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层；OpenAI Completions 与 Anthropic Messages 双协议实现。
+1. **`nova_protocol`** —— 共享领域数据枢纽（最底层）。只收 LLM 消息/内容/模型/流式事件/枚举/compat、Agent 循环事件与消息、Auth 公共数据、跨域 ID 与诊断词汇；取消词汇、Auth 行为、出口清洗与 exec 域均已迁出，不设行为登记制。
+2. **`nova_async`** —— 取消/等待机制族叶子包。包含完整取消词汇（`AbortSignal`/`AbortController`/`AbortedError`/`is_aborted`）与 `AbortScope`/`await_with_abort`/`await_with_signal`/`abortable_sleep`/`any_signal`/`operation_signal`/`TaskTracker`——禁第三份实现。`nova_exec_protocol` 与 `nova_exec_policy` 分别承载 executor 版本化 wire DTO 和执行策略纯算法。
+3. **`nova_ai`** —— LLM 抽象层。提供多厂商（OpenAI、Anthropic、Google、Volcengine、GitHub Copilot 等）统一的流式调用、模型注册表、鉴权、消息类型与兼容性层；OpenAI Completions 与 Anthropic Messages 双协议实现。模型目录构建管线为包内 `catalog/` 子包，对位 pi `packages/ai/catalog/`，不再单独拆包。
 4. **`nova_agent`** —— 核心框架。基于 `nova_ai` 的模型能力，提供 `Agent` 类、事件订阅/发布、`agent_loop` 异步循环、生命周期管理、工具校验与执行。
 5. **`nova_harness`** —— 高阶 SDK。基于 `nova_ai` + `nova_agent`，封装 `AgentSession`、会话树（分支/fork/导航）、上下文压缩（Compaction）、资源加载、设置持久化、模型注册表覆盖、内置工具链、包管理器 CLI、Project Trust 门控与 `ExtensionUIContext` UI 桥接。
    manager 层（读自由写独占、互不调用、编排在 AgentSession）：`AgentManager`（agents 注册表视图 + 当前角色旋钮 + 默认解析链 + CapabilitySelection 汇集 + yaml 写回——`/agent save` 落地，包来源影子写 user 级）、`ToolsManager`（工具裁决单点）、`PersonaManager`（persona 装配 + override）、`SystemPromptManager`（纯渲染，激活工具含 `subagent` 时注入 `# Available Agents` 委派菜单）、`SettingsManager`（settings 唯一写门）。
@@ -45,7 +45,7 @@ nova/
 
 > **依赖声明现状**：
 > - 各 Python 子包的 `[tool.poetry.dependencies]` **只声明各自的第三方依赖**，不再声明兄弟包的 path 依赖（pip 对"同一包同时被 editable 与非 editable path 依赖引用"会报 ResolutionImpossible；互依关系到发布时再恢复）。
-> - 统一安装的单一事实源是根 `pyproject.toml` 的 `[tool.pixi.pypi-dependencies]`（八个 editable path 包 + 第三方依赖并集，`pixi install -e dev` 一把求解）；服务器部署脚本同理按此清单安装。
+> - 统一安装的单一事实源是根 `pyproject.toml` 的 `[tool.pixi.pypi-dependencies]`（十个 editable path 包 + 第三方依赖并集，`pixi install -e dev` 一把求解）；服务器部署脚本同理按此清单安装。
 
 ---
 
@@ -55,6 +55,7 @@ nova/
 
 位于 `packages/nova_ai/src/nova_ai/`：
 
+- `catalog/` —— 包内模型目录构建管线：`providers/` + `families/` 提供构建钩子与族事实；`sources/` 负责薄拉取与翻译；`define.py` 声明构建词汇；`build.py` 统一编排；`generate.py` + `model_data.py` 负责生成事务与四方对账。目录子包只依赖 `nova_protocol` 与自身，AI 运行时单向复用其修正、站翻译和输入限制算法
 - `gateway/` —— `ModelsManager` 集合（`models.py`）、`Provider` 运行时单元（`provider.py`）与 `create_provider`（`factory.py`）、`ModelsStore`（`store.py`）；鉴权解析在请求时完成（runtime override → stored credential → 环境变量链 → OAuth 刷新）
 - `providers/` —— 内置厂商定义（`anthropic`、`volcengine`、`moonshotai`、`moonshotai_cn`、`kimi_coding`、`openrouter`），各含静态模型数据与 provider 工厂；`all.py` 提供 `builtin_models()`。OpenRouter 当前注册图像与分类能力，不注册聊天目录
 - `auth/` —— `AuthContext`、credential store 协议、`resolve_provider_auth`、`env_api_key_auth` 等辅助，以及 `oauth/`（OpenAI Codex、Kimi 的 OAuth 流程与登录页）
@@ -63,23 +64,11 @@ nova/
 - `stream_options.py` —— AI 调用面参数包（`StreamOptions`/`ImagesOptions`/`ClassifierOptions`/`SimpleStreamOptions`/`ThinkingBudgets` 等，dataclass）
 - `utils/` —— 环境变量、JSON 解析、消息转换、流选项、Unicode 代理项清理、上下文溢出检测、模型工具函数等
 
-> 类型词汇（messages/content/model/events/auth 等）已迁 `nova_protocol` 词汇枢纽——本包只剩行为。见 docs/crosscutting/data-modeling.md「住所」。
+> 公共类型词汇（messages/content/model/events/auth 等）住 `nova_protocol` 词汇枢纽；目录知识与运行时行为留在本包。见 docs/crosscutting/data-modeling.md「住所」。
 
 **Auth 层三层治理（终态）**：流程层（本包 `auth/`）只管状态机与密钥（PKCE/state/换 token/轮询），收货需求经 `AuthInteraction.acquire_authorization_code` 声明；接线层（`nova_harness/config/auth/`）装配收货通道（宿主监听 `host:listenOnce` / 本地一次性监听 / 手动粘贴框）与竞速仲裁；渲染与用户本机执行（开浏览器 `host:openUrl`、收货、输码）归前端。开浏览器永远不后端代开。
 
 开发期 `docs/`（架构设计/ADR/devlog 等）已随 0.1.x 封版移除——设计文档以包内 `README.md` 为准；历史版本可在 git 历史中查阅。
-
-### `nova_catalog`（源码包 `nova_catalog`）
-
-位于 `packages/nova_catalog/src/nova_catalog/`：
-
-- `providers/` + `families/` —— 各 provider 的 `models/images/classifiers` 构建钩子、静态知识与跨宿主族事实；
-- `sources/` —— models.dev 与 OpenRouter 图像/分类列表的薄拉取/翻译、ark 响应解析；
-- `define.py` —— `ProviderDefinition` / `ProviderContext` 与 models.dev 构建、字段盖戳辅助函数；
-- `build.py` —— 调用 provider 构建钩子并执行去重、compat、族规则、effort、finalize；`ProviderCatalog` 分离 chat/image/classifier；
-- `generate.py` + `model_data.py` —— 生成事务、manifest 与聚合器/shard/JSON 对账。
-
-产物写入 `nova_ai`；运行期也复用本包的修正、站翻译和输入限制算法。依赖只指向 `nova_protocol`，不 import `nova_ai`。
 
 ### `nova_agent`（源码包 `nova_agent`）
 
@@ -90,9 +79,8 @@ nova/
   - `facade.py` —— 对外暴露的 `agent_loop()` / `agent_loop_continue()` / `run_agent_loop()` / `run_agent_loop_continue()`
   - `loop.py` —— 循环内部实现
   - `tools.py` —— 循环中的工具执行相关逻辑
-- `types/` —— 完整事件类型体系、Agent 状态、上下文、工具、钩子上下文与结果等
-- `signal.py` —— `AbortSignal` / `AbortController` 异步取消信号
-- `stream_fn.py` —— 宿主（如 nova_harness）安装默认模型运行时 stream 函数的注入点
+- `types/` —— **单一、内聚的 Agent 公共运行时与行为类型领域**（保留）：`context.py` / `state.py` / `tool.py` / `hooks.py` / `tool_execution.py`；`base.py` 的混合别名按真实消费点拆解，无需整体迁移
+- `stream_fn.py` —— `StreamFn` 公共签名与宿主默认 stream 函数注入点；取消词汇统一归 `nova_async/signal.py`
 - `utils.py` —— 工具调用校验与参数验证（基于 `jsonschema`）
 
 ### `nova_harness`（源码包 `nova_harness`）
@@ -104,14 +92,14 @@ nova/
 - `core/domains/` —— 领域能力：`agents/`（多 agent 注册表）、`compaction/`（上下文压缩与分支摘要）、`persona/`、`system_prompt/`、`skills.py`、`tools/`（工具裁决）、`user_tools/`（UserToolManager 注册中心——框架不内置用户工具，由包经 `[tool.nova] user_tools` 类目分发）
 - `core/runtime_manager/` —— 会话工厂与装配（`assembly.py`、`factory.py`、`manager.py`）
 - `core/utils/` —— 通用工具（二进制解析、子进程、HTTP 空闲超时、OutputGuard、遥测等）
-- `sessions/` —— 会话**持久化账本**域：`manager.py`、listing/builders/cache_stats、消息回载注册表 `message_types.py`；与运行时会话分离（运行时归 core/agent_session，账本归 sessions）
-- `types/` —— 共享词汇层：跨域契约 `protocols.py`、自定义消息 `messages.py`、各域类型子包（`session/` `ui/` `resources/` `extensions/` `package/` `config/` `model/` `compaction/` `project_trust.py`）。领域私有类型就近放各域，不在此聚合
+- `sessions/` —— 会话**持久化账本与公共契约**域：`entries.py`/`tree.py`/`config.py`/`types.py`+ `manager.py`、listing/builders/cache_stats、消息回载注册表 `message_types.py`；与运行时会话分离（运行时归 core/agent_session，账本归 sessions）
+- `ui/` —— UI 公共契约与桥接；其余 `resources/`、`package/`、`config/`、`core/domains/` 同样在各自领域内持有公共类型，不再设统一 `types/` 或 `contracts/` 收容层
 - `events/` —— 会话事件联合（`AgentSessionEvent` 等）与监听器类型
 - `resources/` —— 资源发现与加载（`loader.py` 与 `loaders/` 下的 agent_config、extensions、personas、prompt_templates、skills、tools、user_tools、context_files）+ Project Trust 门控（`project_trust/`：信任决策、resolver 读取门控、`trust_store.py` 持久化）
 - `package/` —— Agent / tool / bundle / skill / extension 包管理器核心（manager facade + install/ 安装世界 + resolve/ 运行时世界 + source/ source 领域 + manifest / validation / scaffold / utils + `binaries/`）。安装事实以 `*.dist-info/`（PEP 610 风格）为权威快照，副本推导兜底
 - `config/` —— settings、auth storage、路径默认值、配置解析（含 `auth/`、`settings/`、`storage/`）
 - `model/` —— 模型域：注册表运行时（`ModelRuntime`、store/composer）、模型解析（`resolver.py`）、provider attribution
-- `extensions/` —— 扩展系统：API、loader、runner、event_bus、`types/`
+- `extensions/` —— 扩展系统：API、loader、runner、event_bus、`types.py` 与各领域叶子模块
 
 > JSON-RPC 服务器宿主已独立为 `packages/nova_server`（见下节），不在本包内。
 
@@ -120,10 +108,9 @@ nova/
 位于 `packages/nova_server/src/nova_server/`：
 
 - `server.py` —— `RpcServer` + 连接层 `Connection`/`ConnectionRegistry`
-- `protocol/` —— `methods/`（auth/model/package/resources/session/settings/system/state/user_tools 九域 + `shapes.py` 线上形状声明——dispatch 校验 / schema 导出 / 能力位三方共吃）+ `router.py` + `jsonrpc.py` + `serialize.py` + `schema_export.py`（前端 gen 工件导出）+ `errors.py`
+- `protocol/` —— `methods/`（auth/model/package/resources/session/settings/system/state/user_tools 九域 + `shapes.py` 线上形状声明——dispatch 校验 / schema 导出 / 能力位三方共吃）+ `router.py` + `jsonrpc.py` + `serialize.py` + `schema_export.py`（前端 gen 工件导出）+ `errors.py` + `items.py`/`notifications.py`（线上 item 与通知）
 - `transport/` —— stdio / WebSocket / memory 三传输（WS 鉴权三守则见 `transport/websocket.py`）
 - `reduction/` —— 事件 → wire 条目归约（`orchestrator.py`、`mapping.py`、`entries.py`）
-- `types/` —— wire 条目词汇（`items.py` 的 `NovaItem`/`WireItem` 判别联合 + `CustomItem` 兜底；`notifications.py`）
 - `ui_context.py` —— `RoutingUIContext`（跨连接反向原语路由）
 - `rpc/` —— `nova-server` CLI 装配入口；`exec/` —— headless 运行（协议客户端形态）
 - `client/` —— client 家族：`base.py` / `in_process.py` / `remote.py`

@@ -1,6 +1,7 @@
 """真实模型集成测试使用的确定性本地工具。"""
 
-from nova_protocol import AbortedError, AgentToolResult, TextContent
+from nova_async import AbortedError
+from nova_protocol import AgentToolResult, TextContent
 
 from nova_agent import AgentTool
 

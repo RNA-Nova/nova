@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
 from unittest.mock import AsyncMock, Mock
 
-from nova_harness.types.ui.primitives import UIResponse
+from nova_harness.ui.primitives import UIResponse
 
 
 def _load_extension():
@@ -253,7 +253,7 @@ def test_context_filters_stale_plan_messages_when_disabled():
     module.extension(api)
     ctx = _fake_ctx()
 
-    from nova_harness.types.messages import CustomMessage
+    from nova_harness.sessions.messages import CustomMessage
     from nova_protocol import UserMessage
 
     stale = CustomMessage(

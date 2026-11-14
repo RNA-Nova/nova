@@ -3,16 +3,11 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Literal, Optional, Protocol, Union
 
-from nova_protocol import (
-    AbortSignal,
-    AgentToolResult,
-    AssistantMessage,
-    ToolResultMessage,
-)
+from nova_async import AbortSignal
+from nova_protocol import AgentToolResult, AssistantMessage, ToolResultMessage
 
-from .base import AgentToolCall
 from .context import AgentContext
-from .tool import AgentTool
+from .tool import AgentTool, AgentToolCall
 
 
 class ToolCallHooks(Protocol):
@@ -85,6 +80,7 @@ class RunToolCallOptions:
 PreparedToolCall = Union[PreparedToolCallModel, ImmediateToolCallOutcome]
 
 __all__ = [
+    "AgentToolCall",
     "ExecutedToolCallOutcome",
     "AgentToolCallOutcome",
     "ExecutedToolCallBatch",

@@ -9,10 +9,9 @@ import os
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, TypeVar
 
-from nova_protocol import AnyModel, Model
-
 from nova_ai.gateway.models import create_models_manager
 from nova_ai.providers.all import builtin_providers
+from nova_protocol import AnyModel, Model
 
 from .auth import has_credential
 

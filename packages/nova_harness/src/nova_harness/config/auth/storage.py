@@ -21,18 +21,19 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from nova_harness.config.defaults import AUTH_FILE_NAME, get_agent_dir
-from nova_harness.config.resolve import resolve_config_value
-from nova_harness.config.storage import FileStorageBackend, StorageBackend
+from nova_ai import get_env_api_key
+from nova_ai.auth import CredentialStore
 from nova_protocol import (
     ApiKeyCredential,
     Credential,
     CredentialInfo,
-    CredentialStore,
     OAuthCredential,
+    RedactedString,
 )
 
-from nova_ai import get_env_api_key
+from nova_harness.config.defaults import AUTH_FILE_NAME, get_agent_dir
+from nova_harness.config.resolve import resolve_config_value
+from nova_harness.config.storage import FileStorageBackend, StorageBackend
 
 
 class AuthStorage(CredentialStore):
@@ -84,14 +85,21 @@ class AuthStorage(CredentialStore):
         self._reload_if_changed()
         runtime_key = self._runtime_overrides.get(provider_id)
         if runtime_key:
-            return ApiKeyCredential(key=runtime_key)
+            return ApiKeyCredential(key=RedactedString(runtime_key))
         credential = self._materialize(self._data.get(provider_id))
         if credential is None:
             return None
         if credential.type == "api_key" and credential.key is not None:
             resolved_key = resolve_config_value(credential.key, credential.env)
             if resolved_key != credential.key:
-                return ApiKeyCredential(key=resolved_key, env=credential.env)
+                return ApiKeyCredential(
+                    key=(
+                        RedactedString(resolved_key)
+                        if resolved_key is not None
+                        else None
+                    ),
+                    env=credential.env,
+                )
         return credential
 
     def list(self) -> List[CredentialInfo]:

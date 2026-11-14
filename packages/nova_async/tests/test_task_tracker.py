@@ -4,8 +4,7 @@ import asyncio
 import logging
 
 import pytest
-from nova_async import TaskTracker
-from nova_protocol import AbortedError
+from nova_async import AbortedError, TaskTracker
 
 
 @pytest.mark.asyncio
@@ -260,6 +259,7 @@ async def test_cancel_all_and_wait_from_tracked_task_no_deadlock_no_suicide():
     inner_task = tracker.spawn(inner())
     tracker.spawn(sibling())
     await sibling_started.wait()
+    assert inner_task is not None
     await asyncio.wait_for(inner_task, timeout=1.0)  # 死锁则此处超时判红
     assert inner_done.is_set()
     assert sibling_cancelled.is_set()

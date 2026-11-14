@@ -18,8 +18,13 @@ from typing import Awaitable, Callable, Optional, TypedDict, TypeVar
 import anthropic
 import httpx
 import httpx2
-from nova_async import abortable_sleep, backoff_delay_ms
-from nova_protocol import AbortedError, AbortSignal, is_aborted
+from nova_async import (
+    AbortedError,
+    AbortSignal,
+    abortable_sleep,
+    backoff_delay_ms,
+    is_aborted,
+)
 
 from ...utils.errors import (
     extract_retry_after_ms,

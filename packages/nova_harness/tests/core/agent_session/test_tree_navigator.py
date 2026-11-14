@@ -11,12 +11,21 @@ from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nova_protocol import (
+    AssistantMessage,
+    Model,
+    ModelCost,
+    StopReason,
+    TextContent,
+    Usage,
+    UserMessage,
+)
+
+from nova_harness.config.settings.models import BranchSummarySettings
 from nova_harness.core.agent_session.controllers import tree as tree_module
 from nova_harness.core.agent_session.controllers.tree import TreeNavigator
-from nova_harness.sessions import SessionManager
-from nova_harness.types.config.settings import BranchSummarySettings
-from nova_harness.types.session.options import NavigateOptions
-from nova_protocol import AssistantMessage, Model, ModelCost, Usage, UserMessage
+from nova_harness.sessions.manager import SessionManager
+from nova_harness.sessions.options import NavigateOptions
 
 
 def _model() -> Model:
@@ -37,12 +46,12 @@ def _model() -> Model:
 def _assistant(text: str, *, timestamp: int = 0) -> AssistantMessage:
     return AssistantMessage(
         role="assistant",
-        content=[{"type": "text", "text": text}],
+        content=[TextContent(type="text", text=text)],
         api="openai-completions",
         provider="test",
         model="m",
         usage=Usage(),
-        stop_reason="stop",
+        stop_reason=StopReason.STOP,
         timestamp=timestamp,
     )
 

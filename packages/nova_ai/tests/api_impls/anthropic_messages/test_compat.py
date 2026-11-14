@@ -1,9 +1,8 @@
 """anthropic_messages/compat.py 测试（默认值合并 + 显式覆盖 + 判别拒绝）。"""
 
 import pytest
-from nova_protocol import AnthropicMessagesCompat, KnownApi, Model, ModelCost
-
 from nova_ai.api_impls.anthropic_messages.compat import get_compat
+from nova_protocol import AnthropicMessagesCompat, KnownApi, Model, ModelCost
 
 
 def _model(

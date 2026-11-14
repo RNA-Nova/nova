@@ -9,12 +9,12 @@ from nova_harness.core.domains.system_prompt.builder import (
     render_dynamic_section,
     render_environment_section,
 )
-from nova_harness.types.resources.agents import AgentConfig, DynamicContext
+from nova_harness.resources.agents import AgentConfig, DynamicContext
 
 
 def _compose(context: DynamicContext) -> str:
     return compose_system_prompt(
-        AgentConfig(name="test", description="test agent", agentDir=""),
+        AgentConfig(name="test", description="test agent", agent_dir=""),
         context=context,
     )
 

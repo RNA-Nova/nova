@@ -3,12 +3,22 @@ Shared utilities for compaction and branch summarization.
 """
 
 import json
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
+from nova_protocol import (
+    AgentMessage,
+    AssistantMessage,
+    Message,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+
+from nova_harness.core.domains.compaction.branch_summary import SessionEntry
+from nova_harness.core.domains.compaction.file_ops import FileOperations
 from nova_harness.sessions.utils import session_entry_to_context_messages
-from nova_harness.types.compaction.branch_summary import SessionEntry
-from nova_harness.types.compaction.file_ops import FileOperations
-from nova_protocol import AgentMessage, Message
 
 # ============================================================================
 # Message Extraction
@@ -56,11 +66,11 @@ def extract_file_ops_from_message(
     """
     Extract file operations from tool calls in an assistant message.
     """
-    if message.role != "assistant":
+    if not isinstance(message, AssistantMessage):
         return
 
     for block in message.content:
-        if block.type != "toolCall":
+        if not isinstance(block, ToolCall):
             continue
 
         args = block.arguments
@@ -123,7 +133,7 @@ def _truncate_for_summary(text: str, max_chars: int = _TOOL_RESULT_MAX_CHARS) ->
     return f"{text[:max_chars]}\n\n[... {truncated_chars} more characters truncated]"
 
 
-def serialize_conversation(messages: List[Message]) -> str:
+def serialize_conversation(messages: Sequence[Message]) -> str:
     """
     Serialize LLM messages to text for summarization.
     This prevents the model from treating it as a conversation to continue.
@@ -132,7 +142,7 @@ def serialize_conversation(messages: List[Message]) -> str:
     parts: List[str] = []
 
     for msg in messages:
-        if msg.role == "user":
+        if isinstance(msg, UserMessage):
             if isinstance(msg.content, str):
                 content = msg.content
             else:
@@ -146,20 +156,17 @@ def serialize_conversation(messages: List[Message]) -> str:
             if content:
                 parts.append(f"[User]: {content}")
 
-        elif msg.role == "assistant":
+        elif isinstance(msg, AssistantMessage):
             text_parts: List[str] = []
             thinking_parts: List[str] = []
             tool_calls: List[str] = []
 
             for block in msg.content:
-
-                block_type = block.type
-
-                if block_type == "text":
+                if isinstance(block, TextContent):
                     text_parts.append(block.text)
-                elif block_type == "thinking":
+                elif isinstance(block, ThinkingContent):
                     thinking_parts.append(block.thinking)
-                elif block_type == "toolCall":
+                elif isinstance(block, ToolCall):
                     args = block.arguments
                     # 对齐 TS：参数值用 JSON.stringify 风格序列化，不用 repr
                     args_str = ", ".join(
@@ -180,7 +187,7 @@ def serialize_conversation(messages: List[Message]) -> str:
             if tool_calls:
                 parts.append(f"[Assistant tool calls]: {'; '.join(tool_calls)}")
 
-        elif msg.role == "toolResult":
+        elif isinstance(msg, ToolResultMessage):
             text_parts = []
             for c in msg.content:
                 if c.type == "text":

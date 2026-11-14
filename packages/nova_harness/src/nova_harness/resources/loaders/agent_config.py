@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.diagnostics import ResourceDiagnostic
-from nova_harness.types.resources.tools import ToolInfo
+
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.diagnostics import ResourceDiagnostic
+from nova_harness.resources.tools import ToolInfo
 
 
 def _parse_tool_items(items: Any) -> Optional[List[ToolInfo]]:

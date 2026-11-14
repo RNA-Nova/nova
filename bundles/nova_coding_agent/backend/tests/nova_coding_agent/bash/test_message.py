@@ -1,7 +1,8 @@
 """BashExecutionMessage 的 to_context_text 格式与 to_item 呈现桥测试。"""
 
+from nova_server.protocol.items import ItemStatus
+
 from nova_coding_agent.bash.message import BashExecutionMessage
-from nova_server.types.items import ItemStatus
 
 
 def _msg(**overrides) -> BashExecutionMessage:

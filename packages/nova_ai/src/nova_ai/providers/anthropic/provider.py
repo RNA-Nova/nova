@@ -2,14 +2,8 @@
 
 from typing import Optional, cast
 
-from nova_protocol import (
-    ApiKeyAuth,
-    ApiKeyAuthInput,
-    AuthCheck,
-    AuthResult,
-    ModelAuth,
-    ProviderAuth,
-)
+from nova_ai.auth import ApiKeyAuth, ApiKeyAuthInput, ProviderAuth
+from nova_protocol import AuthCheck, AuthResult, ModelAuth
 
 from ...auth.helpers import env_api_key_auth
 from ...gateway import Provider, ProviderStreams, create_provider
@@ -91,6 +85,6 @@ def anthropic_provider() -> "Provider":
         api=cast(ProviderStreams, anthropic_messages),
         auth=ProviderAuth(api_key=_anthropic_api_key_auth()),
         # 运行时 pi.dev 全供（api/级别表/compat）——无运行时 corrections；
-        # 种子知识归 nova_catalog/providers/anthropic.py 的 DEF
+        # 种子知识归 nova_ai.catalog/providers/anthropic.py 的 DEF
         catalog_source="pi.dev",
     )

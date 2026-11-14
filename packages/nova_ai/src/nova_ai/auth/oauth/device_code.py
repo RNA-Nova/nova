@@ -9,8 +9,14 @@ import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Generic, Literal, Optional, TypeVar
 
-from nova_async import abortable_sleep, await_with_abort
-from nova_protocol import AbortedError, AbortSignal, NovaErrorKind, is_aborted
+from nova_async import (
+    AbortedError,
+    AbortSignal,
+    abortable_sleep,
+    await_with_abort,
+    is_aborted,
+)
+from nova_protocol import NovaErrorKind
 
 from .errors import OAuthFlowError
 

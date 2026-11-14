@@ -1,5 +1,6 @@
 """OpenAI Completions 的消息转换契约测试。"""
 
+from nova_ai.api_impls.openai_completions import convert_messages, get_compat
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -14,8 +15,6 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
-
-from nova_ai.api_impls.openai_completions import convert_messages, get_compat
 
 
 class TestConvertMessages:
@@ -331,12 +330,11 @@ def test_non_null_assistant_content_flag_rewrites_null():
 
 def test_cache_control_covers_tool_result_message():
     """openrouter+anthropic 模型：最后一条消息是 tool 结果时 marker 落在它上面。"""
-    from nova_protocol import CacheRetention, ToolResultMessage
-
     from nova_ai.api_impls.openai_completions import (
         OpenAICompletionsOptions,
         build_params,
     )
+    from nova_protocol import CacheRetention, ToolResultMessage
 
     from .conftest import _model
 

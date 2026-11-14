@@ -10,6 +10,7 @@ from typing import Optional
 import httpx
 import pytest
 import respx
+from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, stream
 from nova_protocol import (
     Context,
     KnownApi,
@@ -20,8 +21,6 @@ from nova_protocol import (
     Tool,
     UserMessage,
 )
-
-from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions, stream
 from tests._helpers.fake_llm import (
     RequestCapture,
     mount_openai_chat,
@@ -338,7 +337,7 @@ def _recorded_sse(
 async def test_async_on_payload_abort_terminates_before_request():
     import asyncio
 
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     route = respx.post(url__regex=r".*/chat/completions$").mock()
     started = asyncio.Event()

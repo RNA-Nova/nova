@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any, List
 
 import pytest
-from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
-from nova_harness.types.session.config import CreateAgentSessionOptions
-
 from nova_ai import get_builtin_model
+from nova_protocol import ToolResultMessage
+
+from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
@@ -47,7 +48,7 @@ async def _has_key() -> bool:
 
 async def _make_session(cwd: str):
     runtime = await create_agent_session_runtime(
-        CreateAgentSessionOptions(cwd=cwd, agent_name="coding_agent")
+        CreateAgentSessionOptions(cwd=Path(cwd), agent_name="coding_agent")
     )
     model = get_builtin_model("volcengine", MODEL_ID)
     assert model is not None
@@ -62,8 +63,8 @@ async def test_write_and_read_roundtrip():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt(
                 "请先用 write 工具创建文件 notes.txt（内容：alpha beta gamma），"
                 "再用 read 工具读回它。"
@@ -85,8 +86,8 @@ async def test_edit_tool_real_diff():
         target = Path(cwd) / "app.py"
         target.write_text("def answer():\n    return 41\n")
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt(
                 "请用 edit 工具把 app.py 里的 `return 41` 改成 `return 42`。"
             )
@@ -106,8 +107,8 @@ async def test_grep_and_find_and_ls():
         (Path(cwd) / "a.py").write_text("MARKER_ALPHA = 1\n")
         (Path(cwd) / "b.py").write_text("MARKER_BETA = 2\n")
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt(
                 "请完成三个小任务：1) 用 grep 工具搜索 MARKER_ALPHA 在哪个文件；"
                 "2) 用 find 工具找到 b.py；3) 用 ls 工具列出当前目录。"
@@ -121,7 +122,7 @@ async def test_grep_and_find_and_ls():
             grep_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "grep"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "grep"
             ]
             assert any("a.py" in _text_of(m) for m in grep_results)
         finally:
@@ -134,15 +135,15 @@ async def test_bash_nonzero_exit_is_error():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt("请用 bash 工具执行 `exit 3`，然后告诉我结果。")
             await session.agent.wait_for_idle()
 
             bash_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "bash"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "bash"
             ]
             assert bash_results, "没有 bash 调用"
             assert any(m.is_error for m in bash_results), "非零退出未被标记为错误"
@@ -158,15 +159,15 @@ async def test_read_missing_file_is_error():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt("请用 read 工具读取 not-exist.txt（不存在的文件）。")
             await session.agent.wait_for_idle()
 
             read_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "read"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "read"
             ]
             assert read_results and any(m.is_error for m in read_results)
         finally:
@@ -180,8 +181,8 @@ async def test_streaming_tool_output_events():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             events: List[str] = []
             session.subscribe(lambda e: events.append(e.type))
             await session.prompt("请用 bash 工具执行 `seq 1 50`，输出全部行。")
@@ -192,7 +193,7 @@ async def test_streaming_tool_output_events():
             bash_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "bash"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "bash"
             ]
             assert bash_results and "50" in _text_of(bash_results[-1])
         finally:
@@ -207,8 +208,8 @@ async def test_parallel_tool_calls_in_one_message():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await session.prompt(
                 "请**同时**发起两个互不依赖的工具调用（一次消息里两个 tool call）："
                 "bash 执行 `echo P1` 和 bash 执行 `echo P2`。"
@@ -218,7 +219,7 @@ async def test_parallel_tool_calls_in_one_message():
             bash_results = [
                 m
                 for m in session.messages
-                if m.role == "toolResult" and m.tool_name == "bash"
+                if isinstance(m, ToolResultMessage) and m.tool_name == "bash"
             ]
             assert len(bash_results) >= 2
             texts = [_text_of(m) for m in bash_results]

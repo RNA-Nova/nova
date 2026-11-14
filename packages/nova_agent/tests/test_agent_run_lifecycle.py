@@ -6,8 +6,8 @@ import pytest
 from _helpers.agent import make_assistant_message, multi_tool_call_stream, text_stream
 from _helpers.messages import assistant_message, text_of
 from nova_ai import AssistantMessageEventStream
+from nova_async import AbortedError
 from nova_protocol import (
-    AbortedError,
     AgentToolResult,
     ErrorEvent,
     NovaErrorKind,

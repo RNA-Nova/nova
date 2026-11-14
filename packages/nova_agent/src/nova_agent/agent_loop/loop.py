@@ -16,10 +16,8 @@ from nova_ai import (
     to_thinking_level,
     to_tool_declaration,
 )
-from nova_async import any_signal
+from nova_async import AbortController, AbortSignal, any_signal
 from nova_protocol import (
-    AbortController,
-    AbortSignal,
     AgentEndEvent,
     AgentMessage,
     AgentStartEvent,

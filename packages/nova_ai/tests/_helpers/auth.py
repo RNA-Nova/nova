@@ -2,13 +2,9 @@
 
 from typing import Any
 
-from nova_protocol import (
-    AbortSignal,
-    ApiKeyCredential,
-    AuthInteraction,
-    OAuthCredential,
-    RedactedString,
-)
+from nova_ai.auth import AuthInteraction
+from nova_async import AbortSignal
+from nova_protocol import ApiKeyCredential, OAuthCredential, RedactedString
 
 
 def api_key_credential(key: str, **kwargs: Any) -> ApiKeyCredential:

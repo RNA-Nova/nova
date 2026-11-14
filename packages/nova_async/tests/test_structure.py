@@ -41,6 +41,7 @@ _OLD_HOME_BAN = frozenset(
     {
         "nova_ai.utils.abort",
         "nova_protocol.task_tracker",
+        "nova_protocol.signal",
         "nova_ai.auth.refresh_locks",
         "nova_ai.gateway.deadline",
     }
@@ -48,7 +49,10 @@ _OLD_HOME_BAN = frozenset(
 
 #: 族清单快照（登记制——改动 __all__ 必须同步本表；按 sorted 序钉死）
 _ALL_SNAPSHOT = [
+    "AbortController",
     "AbortScope",
+    "AbortSignal",
+    "AbortedError",
     "Deadline",
     "KeyedLockFactory",
     "TaskTracker",
@@ -59,6 +63,7 @@ _ALL_SNAPSHOT = [
     "backoff_delay_ms",
     "default_keyed_locks",
     "in_memory_keyed_locks",
+    "is_aborted",
     "operation_signal",
 ]
 
@@ -130,10 +135,8 @@ def test_old_home_imports_zero():
     """升格旧路径引用归零（§六第二条验收）：packages/ + bundles/ import 扫描。
 
     禁配：``nova_ai.utils.abort`` / ``nova_protocol.task_tracker`` /
-    ``nova_ai.auth.refresh_locks`` / ``nova_ai.gateway.deadline`` 的
-    import，以及 ``from nova_protocol.signal import await_with_signal``
-    （竞速件已迁 nova_async——signal.py docstring 的文字提及不算引用，
-    故本条走 AST import 判别而非文本扫描）。
+    ``nova_protocol.signal`` / ``nova_ai.auth.refresh_locks`` /
+    ``nova_ai.gateway.deadline`` 的 import（AST 判别而非文本扫描）。
     """
     offenders = []
     for root in _SCAN_ROOTS:
@@ -144,13 +147,6 @@ def test_old_home_imports_zero():
                     targets = [alias.name for alias in node.names]
                 elif isinstance(node, ast.ImportFrom):
                     targets = [node.module] if node.level == 0 and node.module else []
-                    if node.level == 0 and node.module == "nova_protocol.signal":
-                        for alias in node.names:
-                            if alias.name == "await_with_signal":
-                                offenders.append(
-                                    f"{path.relative_to(REPO_ROOT)}: "
-                                    "from nova_protocol.signal import await_with_signal"
-                                )
                 else:
                     continue
                 for target in targets:

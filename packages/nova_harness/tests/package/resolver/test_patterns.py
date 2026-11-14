@@ -3,6 +3,7 @@
 import os
 
 import pytest
+
 from nova_harness.package.resolve.discovery import (
     apply_patterns,
     is_glob_pattern,

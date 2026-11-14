@@ -13,20 +13,19 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 import respx
+from nova_ai.auth import AuthInteraction
+from nova_ai.auth.oauth.errors import OAuthFlowError
+from nova_ai.auth.oauth.openai_codex import (
+    create_authorization_flow,
+    openai_codex_oauth,
+)
 from nova_protocol import (
     AuthEvent,
-    AuthInteraction,
     AuthorizationRequest,
     AuthPrompt,
     NovaErrorKind,
     OAuthCredential,
     RedactedString,
-)
-
-from nova_ai.auth.oauth.errors import OAuthFlowError
-from nova_ai.auth.oauth.openai_codex import (
-    create_authorization_flow,
-    openai_codex_oauth,
 )
 from tests._helpers.auth import oauth_credential
 

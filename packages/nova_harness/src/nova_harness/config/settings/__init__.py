@@ -1,12 +1,1 @@
-"""Settings management."""
-
-from nova_harness.config.settings.manager import SettingsManager
-from nova_harness.config.settings.storage import FileSettingsStorage, SettingsStorage
-from nova_harness.config.settings.utils import deep_merge_settings
-
-__all__ = [
-    "SettingsManager",
-    "SettingsStorage",
-    "FileSettingsStorage",
-    "deep_merge_settings",
-]
+"""设置持久化模型、存储与管理器；入口不做急切 re-export。"""

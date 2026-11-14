@@ -10,6 +10,7 @@ import importlib.util
 import os
 
 import pytest
+
 from nova_coding_agent.executor import (
     BackendSelection,
     reset_backend_selection,
@@ -136,7 +137,7 @@ def _make_tool(name, layer):
     module.backend_file_layer = lambda: layer
     # 便携引擎路径：runner 恒 None（远程 rg 链另有专项测试）
     module.backend_process_runner = lambda: None
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     return module.Tool(ToolContext(cwd="/local/cwd", settings=NULL_TOOL_SETTINGS))
 
@@ -223,7 +224,7 @@ def test_tool_signal_reaches_file_layer():
     write/read/ls/grep/find 五链各跑一次（edit 链由 write/read 同层覆盖）：
     layer 每个被触达的原语收到的 signal 必须就是工具入参那个对象。
     """
-    from nova_protocol import AbortController
+    from nova_async import AbortController
 
     ctl = AbortController()
     layer = MemLayer()

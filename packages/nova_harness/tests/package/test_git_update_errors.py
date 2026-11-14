@@ -2,13 +2,15 @@
 
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import pytest
+
 from nova_harness.package.source.resolver import SourceResolver
-from nova_harness.types.package import PackageSource
+from nova_harness.package.types import PackageSource
 
 
-def _git_source(ref: str = "main") -> PackageSource:
+def _git_source(ref: Optional[str] = "main") -> PackageSource:
     spec = "git:github.com/a/b" + (f"@{ref}" if ref else "")
     return PackageSource(
         type="git",

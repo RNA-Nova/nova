@@ -7,7 +7,6 @@
 """
 
 import pytest
-
 from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
 from nova_ai.gateway.catalog import CatalogOutcome
 

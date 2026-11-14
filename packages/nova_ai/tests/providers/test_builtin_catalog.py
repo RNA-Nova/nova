@@ -1,6 +1,11 @@
 """新 provider 模型详细字段测试（moonshotai / moonshotai-cn / kimi-coding）。"""
 
 import pytest
+from nova_ai import create_models_manager
+from nova_ai.gateway import create_provider
+from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS
+from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS
+from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS
 from nova_protocol import (
     Context,
     KnownApi,
@@ -10,12 +15,6 @@ from nova_protocol import (
     NovaErrorKind,
     UserMessage,
 )
-
-from nova_ai import create_models_manager
-from nova_ai.gateway import create_provider
-from nova_ai.providers.kimi_coding import KIMI_CODING_MODELS
-from nova_ai.providers.moonshotai import MOONSHOTAI_MODELS
-from nova_ai.providers.moonshotai_cn import MOONSHOTAI_CN_MODELS
 
 
 def _level(model: Model, key: str):
@@ -195,7 +194,7 @@ class TestStreamContract:
     @pytest.mark.asyncio
     async def test_unconfigured_provider_yields_error_stream(self):
         """provider 存在但未配置 auth：同样 error 流，不抛异常。"""
-        from nova_protocol import ApiKeyAuth, ProviderAuth
+        from nova_ai.auth import ApiKeyAuth, ProviderAuth
 
         async def _resolve(_ctx):
             return None

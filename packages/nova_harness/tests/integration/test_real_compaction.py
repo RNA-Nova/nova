@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any, List
 
 import pytest
-from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
-from nova_harness.types.session.config import CreateAgentSessionOptions
-
 from nova_ai import get_builtin_model
+
+from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 pytestmark = pytest.mark.integration
 
@@ -43,7 +43,7 @@ async def _has_key() -> bool:
 
 async def _make_session(cwd: str):
     runtime = await create_agent_session_runtime(
-        CreateAgentSessionOptions(cwd=cwd, agent_name="coding_agent")
+        CreateAgentSessionOptions(cwd=Path(cwd), agent_name="coding_agent")
     )
     model = get_builtin_model("volcengine", MODEL_ID)
     assert model is not None
@@ -73,8 +73,8 @@ async def test_real_compaction_full_cycle():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             # 关掉 auto-compaction，验证手动 compact 路径（否则超窗时它先跑）；
             # finally 恢复——该开关持久化到全局 settings，不能污染后续用例
             session.set_auto_compaction_enabled(False)
@@ -114,8 +114,8 @@ async def test_auto_compaction_fires_on_overwindow_context():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             # 显式开启（不假定默认值——开关持久化到全局 settings，前序用例可能改过）
             session.set_auto_compaction_enabled(True)
 
@@ -123,11 +123,11 @@ async def test_auto_compaction_fires_on_overwindow_context():
 
             import json
 
+            session_file = session.session_file
+            assert session_file is not None
             entries = [
                 json.loads(line)
-                for line in Path(session.session_file)
-                .read_text(encoding="utf-8")
-                .splitlines()
+                for line in Path(session_file).read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
             assert any(
@@ -149,8 +149,8 @@ async def test_second_compaction_hits_clean_boundary():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             # 关掉 auto-compaction，验证手动路径的二次边界
             session.set_auto_compaction_enabled(False)
             await _push_context_over_window(session, cwd)
@@ -174,19 +174,19 @@ async def test_compaction_persists_entry_and_continuity():
         pytest.skip("无 volcengine 凭证")
     with tempfile.TemporaryDirectory() as cwd:
         runtime = await _make_session(cwd)
+        session = runtime.session
         try:
-            session = runtime.session
             await _push_context_over_window(session, cwd)
             await session.compact()
 
             import json
 
             assert session.session_file
+            session_file = session.session_file
+            assert session_file is not None
             entries = [
                 json.loads(line)
-                for line in Path(session.session_file)
-                .read_text(encoding="utf-8")
-                .splitlines()
+                for line in Path(session_file).read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
             assert any(

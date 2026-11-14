@@ -4,12 +4,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from nova_harness.package import PackageManager
+
 from nova_harness.package.install.store import (
     dist_info_dir,
     read_dist_info,
     write_dist_info,
 )
+from nova_harness.package.manager import PackageManager
 from nova_harness.package.source.spec import parse_source
 
 
@@ -105,7 +106,9 @@ def test_write_dist_info_clears_stale_package_name(tmp_path):
         editable=False,
         package_name="foo",
     )
-    assert read_dist_info(str(install_path)).package_name == "foo"
+    info = read_dist_info(str(install_path))
+    assert info is not None
+    assert info.package_name == "foo"
 
     write_dist_info(
         str(install_path),

@@ -33,7 +33,9 @@ async def test_memory_transport_binary():
     await b.open()
 
     await a.send_binary(b"data", {"name": "x"})
-    data, meta = await b.receive_binary()
+    result = await b.receive_binary()
+    assert result is not None
+    data, meta = result
     assert data == b"data"
     assert meta == {"name": "x"}
 

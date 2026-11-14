@@ -26,8 +26,6 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from nova_async import TaskTracker
-from nova_harness.events.constants import ITEM_EMISSION
-from nova_harness.types.ui.context import UIContext
 from nova_server.connection import (
     Connection,
     ConnectionOrigin,
@@ -42,11 +40,14 @@ from nova_server.protocol import (
     build_notification,
     parse_message,
 )
+from nova_server.protocol.notifications import ItemNotification
 from nova_server.protocol.serialize import serialize_event, to_json_safe
 from nova_server.reduction import SessionReducer
 from nova_server.transport.base import Transport
-from nova_server.types.notifications import ItemNotification
 from nova_server.ui_context import RoutingUIContext
+
+from nova_harness.events.constants import ITEM_EMISSION
+from nova_harness.ui.context import UIContext
 
 
 class RpcServer:
@@ -378,7 +379,9 @@ class RpcServer:
         # 通知无 id 无从取消）
         request_id = msg.id
         if request_id is not None:
-            conn.request_tasks[request_id] = asyncio.current_task()
+            task = asyncio.current_task()
+            if task is not None:
+                conn.request_tasks[request_id] = task
         # 来源连接进上下文：handler 及其派生任务链（工具执行/UI 弹窗）
         # 全程可取——UI 寻址"发起方优先"与 cancelRequest 隔离的基础
         token = _current_connection.set(conn)

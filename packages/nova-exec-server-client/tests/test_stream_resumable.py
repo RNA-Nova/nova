@@ -8,6 +8,8 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_exec_protocol import FileSystemSandboxContext
+
 from nova_exec_server_client import FileSystemError
 from nova_exec_server_client.errors import (
     EXECUTOR_NOT_FOUND,
@@ -16,7 +18,6 @@ from nova_exec_server_client.errors import (
     TransportError,
 )
 from nova_exec_server_client.fs import FileSystemManager
-from nova_protocol import FileSystemSandboxContext
 
 
 class FakeWriteStreamServer(FakeTransport):

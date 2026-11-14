@@ -7,10 +7,12 @@ import os
 from datetime import datetime
 from typing import Callable, List, Optional
 
+from nova_protocol import AssistantMessage, UserMessage
+
 from nova_harness.core.utils.messages import extract_text_from_content
+from nova_harness.sessions.entries import SessionHeader
+from nova_harness.sessions.info import SessionInfo
 from nova_harness.sessions.utils import message_activity_time, parse_session_entry_line
-from nova_harness.types.session.entries import SessionHeader
-from nova_harness.types.session.info import SessionInfo
 
 # 同时加载会话信息的最大并发数
 MAX_CONCURRENT_SESSION_INFO_LOADS = 10
@@ -52,7 +54,7 @@ def _build_session_info_sync(file_path: str) -> Optional[SessionInfo]:
                     last_time = max(last_time or 0, activity)
 
                 message = entry.message
-                if message.role not in ("user", "assistant"):
+                if not isinstance(message, (UserMessage, AssistantMessage)):
                     continue
                 text_content = extract_text_from_content(message.content)
                 if not text_content:

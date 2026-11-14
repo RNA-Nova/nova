@@ -20,12 +20,12 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from nova_protocol import (
+from nova_async import AbortSignal
+from nova_exec_protocol import (
     FS_READ_STREAM,
     FS_WRITE_STREAM,
     FS_WRITE_STREAM_CHUNK,
     FS_WRITE_STREAM_DONE,
-    AbortSignal,
 )
 
 from .transport import Transport, _signal_kwarg

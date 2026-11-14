@@ -3,10 +3,10 @@
 工具层 - 通用辅助函数与深度合并逻辑
 """
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
-from nova_harness.types.model import ModelOverride, OpenAICompat
 from nova_protocol import (
+    AnthropicMessagesCompat,
     Model,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
@@ -14,10 +14,14 @@ from nova_protocol import (
     VercelGatewayRouting,
 )
 
+from nova_harness.model.config import ModelOverride, OpenAICompat
+
+Compat = Union[OpenAICompat, AnthropicMessagesCompat]
+
 
 def merge_compat(
-    base_compat: Optional[OpenAICompat], override_compat: Optional[OpenAICompat]
-) -> Optional[OpenAICompat]:
+    base_compat: Optional[Compat], override_compat: Optional[OpenAICompat]
+) -> Optional[Compat]:
     """
     Deep merge compat settings.
     处理嵌套的 open_router_routing 和 vercel_gateway_routing 合并。

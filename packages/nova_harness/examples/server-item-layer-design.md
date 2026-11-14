@@ -138,13 +138,13 @@ leaf/label/settings 变更/角色切换归**元数据层/域通知**（学 codex
 
 ### 5.4 住所（讨论收敛后的终态）
 
-- item 类型与线上三帧：`server/types/`（items.py + notifications.py）——item 是
+- item 类型与线上三帧：`nova_server/protocol/`（items.py + notifications.py）——item 是
   wire/呈现词汇，归接入层；core 零 import（发射面载荷 Any 不透明）；
-- 纯映射 + 编排器：`server/reduction/`——归约的产物是线上流，斩断处落在
+- 纯映射 + 编排器：`nova_server/reduction/`——归约的产物是线上流，斩断处落在
   wire 边缘；内部总线保持纯母语；
-- 内部发射信封 `ItemEmissionEvent`：`core/types/events/auto.py`（**不上线**，
+- 内部发射信封 `ItemEmissionEvent`：`nova_harness/events/auto.py`（**不上线**，
   server listener 只喂归约器不直通）——user_tool 事件组的合法继任者；
-- 契约导出：`server/protocol/schema_export.py`——`NovaWireItem` 根 + item 三帧
+- 契约导出：`nova_server/protocol/schema_export.py`——`NovaWireItem` 根 + item 三帧
   手动并入信封变体；`NovaItem` 注解槽位 walker 特判为联合；`extra="allow"`
   模型（CustomItem）走 `[key: string]: unknown` + `additionalProperties: true`。
 

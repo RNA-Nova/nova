@@ -12,8 +12,8 @@ from nova_harness.config.defaults import (
     SETTINGS_FILE_NAME,
     get_agent_dir,
 )
+from nova_harness.config.settings.models import SettingsScope
 from nova_harness.config.storage import FileStorageBackend
-from nova_harness.types.config.settings import SettingsScope
 
 
 class SettingsStorage(ABC):

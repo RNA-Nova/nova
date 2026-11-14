@@ -28,20 +28,20 @@
 | 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pytest`、`pytest-asyncio` |
-| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog` 为运行时硬依赖（需同装） |
+| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（需同装），Catalog 已收编为包内 `nova_ai.catalog` |
 
-**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `ai-catalog-py` 腿覆盖（ubuntu 单平台：nova_ai 非集成 + nova_catalog + 模型数据门禁）；尚无线级/真实 API 的集成腿与三平台矩阵。
+**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `ai-catalog-py` 腿覆盖（ubuntu 单平台：nova_ai 非集成 + nova_ai.catalog + 模型数据门禁）；尚无线级/真实 API 的集成腿与三平台矩阵。
 
 ---
 
 ## 代码组织与模块划分
 
-源码位于 `src/nova_ai/`；**构建期模型目录管线已独立成包 `nova_catalog`**
-（`packages/nova_catalog`，对位 pi `packages/ai/catalog/`——自包含构建期
-世界：知识归 `providers/` 各家定义、
-族事实归 `families/`、薄拉取归 `sources/`、词汇归 `define.py`、引擎归
-`build.py`、入口归 `generate.py`；不依赖 nova_ai 运行时，类型经
-nova_protocol 共用）：
+源码位于 `src/nova_ai/`；**构建期模型目录管线为包内 `catalog/` 子包**
+（对位 pi `packages/ai/catalog/`——知识归 `catalog/providers/` 各家定义、
+族事实归 `catalog/families/`、薄拉取归 `catalog/sources/`、词汇归
+`catalog/define.py`、引擎归 `catalog/build.py`、入口归
+`catalog/generate.py`。目录子包只依赖 `nova_protocol` 与自身，不 import
+本包运行时；AI 运行时可单向复用目录纯算法，包级依赖环不复存在）：
 
 ```
 src/nova_ai/
@@ -53,10 +53,12 @@ src/nova_ai/
 ├── model_catalog.py         # 模型目录运行时机器：flatten_chat/image/classifier_model_catalog（typed key 拍平）+
 │                            #   finalize_catalog_models（运行时盖戳单点）+
 │                            #   builtin_catalog_generated_at（新鲜度竞速锚点）；
-│                            #   字段盖戳辅助归 nova_catalog.define（构建/运行复用）；
+│                            #   字段盖戳辅助归 nova_ai.catalog.define（构建/运行复用）；
 │                            #   pi.dev 成品不重复修正，models.dev 原料经
 │                            #   刷新策略闭包持有 materialize 回调（火山）
 ├── models_generated.py      # 生成的模型目录聚合器
+├── catalog/                 # 包内目录构建管线：providers / families / sources / define / build /
+│                            #   generate / model_data；只依赖 nova_protocol 与自身
 ├── testkit/                 # 跨包共享契约测试设施（store_contracts；各包 tests/contracts/ 实例化）
 ├── gateway/                 # ModelsManager 网关层（对齐 TS models.ts + models-store.ts）
 │   ├── models.py            # ModelsManager 集合 + create_models_manager（auth 网关 + provider 注册表 +
@@ -108,23 +110,25 @@ src/nova_ai/
 │                            #   session-resources.ts 对位）
 ├── catalog_impls/           # 目录站策略枚举（CatalogService 内置实现，对位 api_impls/）
 │   ├── models_dev.py        # ModelsDevCatalog（v2 单体目录切片 + 实例级 60s 缓存——
-│   │                        #   翻译委托 nova_catalog.sources.models_dev，全仓单点）
+│   │                        #   翻译委托 nova_ai.catalog.sources.models_dev，全仓单点）
 │   └── pi_dev.py            # PiDevCatalog（per-provider 目录 + 真条件请求 ETag/304）
 ├── providers/               # 内置 provider 工厂与静态模型目录（纯装配层：数据 + 工厂 + 知识 + 私活）
 │   ├── all.py               # builtin_providers() / builtin_models() + chat/image/classifier 目录读取
 │   ├── anthropic/           # models.py + provider.py（pi.dev 全供，零运行时 corrections——
-│   │                        #   种子知识归 nova_catalog/providers/）
+│   │                        #   种子知识归 nova_ai.catalog/providers/）
 │   ├── kimi_coding/         # models.py + provider.py + catalog.py（personalize 钩子：
 │   │                        #   managed 订阅源拉取+翻译+覆盖式合并——名单+活字段，
 │   │                        #   未收录跳过+诊断；账户层零修正；openai-completions 协议）
-│   ├── moonshotai/          # models.py + provider.py（知识全归 nova_catalog DEF；
+│   ├── moonshotai/          # models.py + provider.py（知识全归 nova_ai.catalog DEF；
 │   │                        #   运行时零修正文件）
 │   ├── moonshotai_cn/       # 同上（DEF 共享 moonshotai 定义件）
 │   ├── openrouter/          # models.py + provider.py（图像与分类目录 + 两类非流式调用）
 │   └── volcengine/          # models.py + provider.py + catalog.py（models.dev 原料
 │                            #   经 catalog_materialize 修正后 ark 在售筛选；有凭据时
 │                            #   失败保留旧成品，公共种子不读账户态）
-├── auth/                    # 鉴权行为层（类型词汇住 nova_protocol.auth）
+├── auth/                    # 鉴权行为层（公共数据住 nova_protocol；行为定义与端口归本层）
+│   ├── definitions.py       # Provider Auth 行为定义与输入配置
+│   ├── ports.py             # AuthContext / CredentialStore / AuthInteraction 宿主接口
 │   ├── resolve.py           # resolve_provider_auth + ModelsError（ModelsErrorCode
 │   │                        #   六域 code + nova_error_kind 自声明）+ AuthResolutionOverrides
 │   ├── credential_store.py  # InMemoryCredentialStore（同步引擎；写互斥归编排层 per-provider 锁）
@@ -152,7 +156,8 @@ src/nova_ai/
     └── hash.py              # short_hash（与 TS 位级对齐的确定性短哈希）
 ```
 
-> 注：取消/等待机制件（`AbortScope` / `await_with_abort` / `await_with_signal` / `abortable_sleep` / `any_signal` / `operation_signal`）、`TaskTracker`（属主级在途任务台账，codex/tokio-util 对位）、`KeyedLockFactory` 编排锁协议（原 `auth/refresh_locks.py`——文件锁 adapter 仍住 nova_harness）、`Deadline` 预算值对象（原 `gateway/deadline.py`——90s 缺省策略件留 `gateway/models.py`）与 `backoff_delay_ms` 退避序列已按结构标准 §二升格出口迁住 `nova_async`（机制族叶子包），本包经 `from nova_async import ...` 消费；取消词汇（`AbortSignal` 等）锚定 `nova_protocol` 不动。
+> 注：取消/等待机制件（`AbortScope` / `await_with_abort` / `await_with_signal` / `abortable_sleep` / `any_signal` / `operation_signal`）、`TaskTracker`（属主级在途任务台账，codex/tokio-util 对位）、`KeyedLockFactory` 编排锁协议（原 `auth/refresh_locks.py`——文件锁 adapter 仍住 nova_harness）、`Deadline` 预算值对象（原 `gateway/deadline.py`——90s 缺省策略件留 `gateway/models.py`）与 `backoff_delay_ms` 退避序列已迁住 `nova_async`，本包经 `
+from nova_async import ...` 消费；取消词汇（`AbortSignal`/`AbortController`/`AbortedError`/`is_aborted`）也统一归 `nova_async/signal.py`，不再锚定数据枢纽。
 
 ### 运行时架构要点
 
@@ -186,8 +191,8 @@ src/nova_ai/
 5. **序列化层约定（选型结果速查）**  
    选型依据遵循根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项），住所规则见 `docs/crosscutting/data-modeling.md`。本包现有归类：
    - **Pydantic（`NovaBaseModel`）**：需要 JSON parse/dump 的类型——全部住 `nova_protocol` 枢纽：`Model`/`Usage`（models.json、会话 JSONL）、messages/content（会话 + RPC）、events（RPC 事件流）、compat（models.json）、`ApiKeyCredential`/`OAuthCredential`（auth.json，`OAuthCredential` 用 `extra="allow"` 保留扩展字段）、`ModelsStoreEntry`（models-store.json）。
-   - **dataclass**：纯代码构造、跨包传递的运行时容器，持 `Callable` 或服务实例——`StreamOptions` 家族（构造签名即契约，传错字段直接 `TypeError`）、`Provider`、`RefreshModelsContext`、`ModelsPublication`、`ApiKeyAuth`/`OAuthAuth`/`ProviderAuth`、`AuthResult`/`AuthCheck` 等（不可变值对象一律 `frozen=True, kw_only=True`，如 `CatalogOutcome`）。
-   - **TypedDict / Protocol**：`ModelAuth` / `ApiKeyAuthInput`（dict 形状透传——声明不校验）、`ModelFields`/`ModelCostFields`（目录字段包形状，`Model(**fields)` 在目录边界一次性校验）、`AuthContext`/`CredentialStore`/`AuthInteraction`/`ProviderStreams`/`ModelsStore`/`CatalogService`（公开目录站契约；`CatalogServices` 容器形状与 `FetchCatalogFn` 为签名别名）。
+   - **dataclass**：纯代码构造、跨包传递的运行时容器，持 `Callable` 或服务实例——`StreamOptions` 家族、`Provider`、`RefreshModelsContext`、`ModelsPublication`、`CatalogOutcome` 等归本包；`ApiKeyAuth`/`OAuthAuth`/`ProviderAuth` 等 Auth 行为定义也归 `nova_ai/auth`（已迁出枢纽）。`AuthResult`/`AuthCheck` 是跨宿主公共数据，继续住 `nova_protocol`。不可变值对象一律 `frozen=True, kw_only=True`。
+   - **TypedDict / Protocol**：`ModelFields`/`ModelCostFields` 继续住 `nova_protocol`；`ModelAuth`/`ApiKeyAuthInput` 与 `AuthContext`/`CredentialStore`/`AuthInteraction` 归 `nova_ai/auth`（行为入参与端口）；`ProviderStreams`/`ModelsStore`/`CatalogService` 为本包公开目录站契约（`CatalogServices` 容器形状与 `FetchCatalogFn` 为签名别名）。
 
 6. **Auth 解析链**  
    `auth/resolve.py` 的优先级：调用方 apiKey override → 已存储 credential（OAuth 进入五分钟提前刷新窗时在 per-provider 刷新锁内复查→刷新→写，防并发双刷）→ 环境变量等 ambient 来源；`AuthResolutionOverrides.min_oauth_validity_ms` 可提高最小剩余有效期，刷新后仍不满足显式要求即报错。锁等待与尚未开始的刷新可取消；一旦进入轮转刷新，独立受管任务必须完成写盘，调用方取消只取消自己的等待（防丢失唯一新 refresh token）。请求头顺序为 provider 默认 < auth < model 静态/动态 < 调用方 options；`transform_headers` 最后运行且不派发给 provider。
@@ -229,6 +234,8 @@ pixi run -e dev isort src tests
 tests/
 ├── gateway/         # ModelsManager 集合 / Provider 单元 / 刷新机器 / 刷新策略
 │                    #   （test_strategies.py：overlay 六件套 + personalized 钩子形态）/ 站路由
+├── catalog/         # 包内目录管线：sources / providers / families / build / generate /
+│                    #   model_data / reasoning / input_limits + 包内依赖方向审计
 ├── catalog_impls/   # 公开站实现（pi_dev / models_dev）+ HTTP 级用例（respx）
 ├── api_impls/       # 协议实现（openai_completions / anthropic_messages 各切面 + _shared +
 │                    #   openrouter_images / typesafe_system_one 非流式操作）
@@ -276,7 +283,8 @@ pixi run -e dev check-live                          # 全模型可用性巡检�
 
 - **先跑测试**：本包有完整非集成测试（`pixi run -e dev pytest tests -m "not integration"`），修改后必须通过。
 - **保持中文注释**：新增代码的 docstring 与行内注释请使用中文。
-- **新增类型先想选址与选型**：跨组件边界的纯数据词汇进 `nova_protocol` 枢纽（消费方一律 `from nova_protocol import X`，本包不中转再导出）；组件内部类型留本包。表示选型按根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项）选定 `NovaBaseModel` / dataclass / TypedDict / Protocol。
+- **新增类型先想选址与选型**：跨组件边界的纯数据词汇进 `nova_protocol` 枢纽（消费方一律 `
+from nova_protocol import X`，本包不中转再导出）；组件内部类型留本包。表示选型按根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项）选定 `NovaBaseModel` / dataclass / TypedDict / Protocol。
 - **新增 provider**：
   1. `providers/<name>/models.py` 写静态模型目录，`provider.py` 用 `create_provider()` + `env_api_key_auth()`（或自定义 auth）构造工厂；
   2. `providers/all.py` 加入 `builtin_providers()`；

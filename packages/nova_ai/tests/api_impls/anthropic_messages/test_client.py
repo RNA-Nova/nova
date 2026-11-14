@@ -3,6 +3,11 @@
 import httpx2
 import pytest
 from anthropic import AsyncAnthropic
+from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
+from nova_ai.api_impls.anthropic_messages.client import (
+    anthropic_federation_config,
+    create_client,
+)
 from nova_protocol import (
     AnthropicMessagesCompat,
     Context,
@@ -11,12 +16,6 @@ from nova_protocol import (
     ModelCost,
     StopReason,
     UserMessage,
-)
-
-from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
-from nova_ai.api_impls.anthropic_messages.client import (
-    anthropic_federation_config,
-    create_client,
 )
 from tests._helpers.fake_llm import RequestCapture, ant_sse_response, ant_text_turn
 

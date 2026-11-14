@@ -17,18 +17,22 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 import pytest
-from nova_harness.core import AgentSession
-from nova_harness.sessions import SessionManager
-from nova_harness.sessions.utils import get_default_session_dir_path
-from nova_harness.types.session.config import AgentSessionConfig
 from nova_protocol import AssistantMessage, TextContent, UserMessage
 from nova_server.protocol import JSONRPCError, MethodRegistry
+from nova_server.protocol.jsonrpc import JsonRpcMessage
 from nova_server.protocol.methods import session as session_methods
 from nova_server.protocol.methods.state import ServerState
 
+from nova_harness.core import AgentSession
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from nova_harness.sessions.config import AgentSessionConfig
+from nova_harness.sessions.manager import SessionManager
+from nova_harness.sessions.utils import get_default_session_dir_path
+from nova_harness.ui import NoOpUIContext
+
 
 def _make_state(runtime: Any = None, runtime_manager: Any = None) -> ServerState:
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     if runtime_manager is not None:
         state.runtime_manager = runtime_manager
     if runtime is not None:
@@ -47,7 +51,7 @@ def _session_registry(
 async def _call(
     registry: MethodRegistry, method: str, params: Optional[Dict[str, Any]] = None
 ):
-    msg = SimpleNamespace(method=method, params=params or {}, id=1)
+    msg = JsonRpcMessage(method=method, params=params or {}, id=1)
     resp = await registry.dispatch(msg)
     assert resp is not None
     return resp

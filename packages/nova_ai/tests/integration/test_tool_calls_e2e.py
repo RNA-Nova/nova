@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from nova_ai.stream_options import SimpleStreamOptions
 from nova_protocol import (
     Context,
     StopReason,
@@ -11,8 +12,6 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
-
-from nova_ai.stream_options import SimpleStreamOptions
 
 from ._helpers.auth import build_manager
 from ._helpers.probes import collect_probes

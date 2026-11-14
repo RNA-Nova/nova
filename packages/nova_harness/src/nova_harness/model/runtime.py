@@ -20,34 +20,16 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union, cast
 
-from nova_async import TaskTracker
-from nova_harness.config.auth.refresh_locks import file_refresh_locks
-from nova_harness.config.auth.storage import AuthStorage
-from nova_harness.config.defaults import (
-    MODELS_FILE_NAME,
-    MODELS_STORE_FILE_NAME,
-    get_agent_dir,
-)
-from nova_harness.config.resolve import (
-    clear_config_value_cache,
-    get_config_value_env_var_names,
-    is_command_config_value,
-    is_config_value_configured,
-    resolve_headers_or_throw,
-)
-from nova_harness.core.utils.json import strip_json_comments
-from nova_harness.model.composer import compose_provider, validate_extension_provider
-from nova_harness.model.store import FileModelsStore
-from nova_harness.package.utils import is_offline_mode_enabled
-from nova_harness.types.model import (
-    ExtensionOAuthConfig,
-    ModelsConfig,
-    ProviderConfigInput,
-)
+from nova_ai import Provider, builtin_models, create_models_manager
+from nova_ai.auth.resolve import AuthResolutionOverrides
+from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
+from nova_ai.gateway.models import ModelsRefreshResult
+from nova_ai.gateway.store import InMemoryModelsStore
+from nova_ai.stream_options import ImagesOptions, SimpleStreamOptions, StreamOptions
+from nova_async import AbortSignal, TaskTracker
 from nova_protocol import (
-    AbortSignal,
     AnyModel,
     AssistantImages,
     AssistantMessage,
@@ -65,11 +47,29 @@ from nova_protocol import (
     ProviderHeaders,
 )
 
-from nova_ai import Provider, builtin_models, create_models_manager
-from nova_ai.auth.resolve import AuthResolutionOverrides
-from nova_ai.catalog_impls import ModelsDevCatalog, PiDevCatalog
-from nova_ai.gateway.store import InMemoryModelsStore
-from nova_ai.stream_options import ImagesOptions, SimpleStreamOptions, StreamOptions
+from nova_harness.config.auth.protocol import AuthStorageProtocol
+from nova_harness.config.auth.refresh_locks import file_refresh_locks
+from nova_harness.config.defaults import (
+    MODELS_FILE_NAME,
+    MODELS_STORE_FILE_NAME,
+    get_agent_dir,
+)
+from nova_harness.config.resolve import (
+    clear_config_value_cache,
+    get_config_value_env_var_names,
+    is_command_config_value,
+    is_config_value_configured,
+    resolve_headers_or_throw,
+)
+from nova_harness.core.utils.json import strip_json_comments
+from nova_harness.model.composer import compose_provider, validate_extension_provider
+from nova_harness.model.config import (
+    ExtensionOAuthConfig,
+    ModelsConfig,
+    ProviderConfigInput,
+)
+from nova_harness.model.store import FileModelsStore
+from nova_harness.package.utils import is_offline_mode_enabled
 
 
 class ModelRuntime:
@@ -77,14 +77,14 @@ class ModelRuntime:
 
     def __init__(
         self,
-        auth_storage: AuthStorage,
+        auth_storage: AuthStorageProtocol,
         models_json_path: Optional[str] = None,
         *,
         models_store: Optional[Any] = None,
         allow_model_network: Optional[bool] = None,
         auth_context: Optional[Any] = None,
     ):
-        self.auth_storage: AuthStorage = auth_storage
+        self.auth_storage: AuthStorageProtocol = auth_storage
         self.models_json_path: str = models_json_path or os.path.join(
             get_agent_dir(), MODELS_FILE_NAME
         )
@@ -230,13 +230,13 @@ class ModelRuntime:
     # per-model headers 请求时解析（对齐 TS resolveConfiguredModelHeaders）
     # ------------------------------------------------------------------
 
-    def _raw_model_headers(self, model: ModelBase) -> Optional[ProviderHeaders]:
+    def _raw_model_headers(self, model: ModelBase) -> Optional[Dict[str, str]]:
         """按优先级收集 per-model 原始 header 模板（不解析）。
 
         优先级（后者覆盖前者）：models.json model_overrides <
         models.json models[] 定义 < 扩展注册的 models[] 定义。
         """
-        headers: ProviderHeaders = {}
+        headers: Dict[str, str] = {}
         config = self._provider_config(model.provider)
         if config is not None:
             override = (config.model_overrides or {}).get(model.id)
@@ -259,8 +259,9 @@ class ModelRuntime:
         raw = self._raw_model_headers(model)
         if raw is None:
             return None
-        return resolve_headers_or_throw(
-            raw, f'model "{model.provider}/{model.id}"', env
+        return cast(
+            Optional[ProviderHeaders],
+            resolve_headers_or_throw(raw, f'model "{model.provider}/{model.id}"', env),
         )
 
     # ------------------------------------------------------------------
@@ -705,7 +706,7 @@ class ModelRuntime:
         self,
         allow_network: Optional[bool] = None,
         signal: Optional[AbortSignal] = None,
-    ) -> Dict[str, Any]:
+    ) -> ModelsRefreshResult:
         """网络刷新动态模型目录，并随后精确刷新可用性快照（对齐 TS refresh）。"""
         if allow_network is None:
             allow_network = self.allow_model_network

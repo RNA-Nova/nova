@@ -1,7 +1,8 @@
-"""nova_agent 组件内部运行时与行为类型；跨组件词汇归 nova_protocol。"""
+"""nova_agent 包级公共运行时与行为类型；跨领域序列化正典归 nova_protocol。"""
 
-from .base import AgentEventSink, AgentToolCall, QueueMode, StreamFn, ToolExecutionMode
+from ..stream_fn import StreamFn
 from .context import AgentContext, AgentLoopConfig
+from .events import AgentEventSink
 from .hooks import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -14,9 +15,10 @@ from .hooks import (
     PrepareNextTurnContext,
     PrepareRequestContext,
 )
-from .state import AgentState, AgentStateKwargs
-from .tool import AgentTool, AgentToolUpdateCallback
+from .state import AgentState, AgentStateKwargs, QueueMode
+from .tool import AgentTool, AgentToolUpdateCallback, ToolExecutionMode
 from .tool_execution import (
+    AgentToolCall,
     AgentToolCallOutcome,
     ExecutedToolCallBatch,
     ExecutedToolCallOutcome,

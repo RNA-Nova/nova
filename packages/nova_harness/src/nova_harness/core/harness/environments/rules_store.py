@@ -14,8 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from filelock import FileLock
-from nova_protocol import ExecPolicyAmendment, format_prefix_rule, parse_policy
-from nova_protocol.exec_server_policy import Policy, append_rule_line_text
+from nova_exec_policy import ExecPolicyAmendment, format_prefix_rule, parse_policy
+from nova_exec_policy.policy import Policy, append_rule_line_text
 
 RULES_FILE_NAME = "rules.lark"
 

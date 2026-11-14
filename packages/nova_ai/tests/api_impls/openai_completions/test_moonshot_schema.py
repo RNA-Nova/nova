@@ -4,6 +4,11 @@
 detect_compat 的厂商判定与 convert_tools 的单点接线。
 """
 
+from nova_ai.api_impls.openai_completions import convert_tools
+from nova_ai.api_impls.openai_completions.compat import detect_compat, get_compat
+from nova_ai.api_impls.openai_completions.moonshot_schema import (
+    normalize_moonshot_flavored_schema,
+)
 from nova_protocol import (
     Context,
     KnownApi,
@@ -11,12 +16,6 @@ from nova_protocol import (
     ModelCost,
     OpenAICompletionsCompat,
     Tool,
-)
-
-from nova_ai.api_impls.openai_completions import convert_tools
-from nova_ai.api_impls.openai_completions.compat import detect_compat, get_compat
-from nova_ai.api_impls.openai_completions.moonshot_schema import (
-    normalize_moonshot_flavored_schema,
 )
 
 

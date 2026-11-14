@@ -9,14 +9,18 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
+
+from nova_harness.core.agent_session.agent import AgentSession
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
 from nova_harness.core.runtime_manager import RuntimeManager, SessionIdCollisionError
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 
-class _FakeRuntime:
+class _FakeRuntime(AgentSessionRuntime):
     """轻量 runtime 替身：记录 dispose 调用，可配置挂起/抛异常。"""
 
     def __init__(
@@ -26,7 +30,7 @@ class _FakeRuntime:
         dispose_error: Optional[Exception] = None,
         dispose_delay: float = 0.0,
     ) -> None:
-        self.session: Any = _FakeSessionHolder(session_id)
+        self._session = _FakeSessionHolder(session_id)
         self.dispose_calls: int = 0
         self._dispose_error = dispose_error
         self._dispose_delay = dispose_delay
@@ -39,7 +43,7 @@ class _FakeRuntime:
             raise self._dispose_error
 
 
-class _FakeSessionHolder:
+class _FakeSessionHolder(AgentSession):
     def __init__(self, session_id: str) -> None:
         self.session_manager: Any = _FakeSessionManager(session_id)
 
@@ -50,6 +54,11 @@ class _FakeSessionManager:
 
     def get_session_id(self) -> str:
         return self._session_id
+
+
+def _as_fake(runtime: AgentSessionRuntime) -> _FakeRuntime:
+    assert isinstance(runtime, _FakeRuntime)
+    return runtime
 
 
 class _Harness:
@@ -65,7 +74,7 @@ class _Harness:
 
     async def factory(
         self, options: Optional[CreateAgentSessionOptions]
-    ) -> _FakeRuntime:
+    ) -> AgentSessionRuntime:
         self.received_options.append(options)
         session_id = self._ids.pop(0) if self._ids else f"sid-{len(self.created)}"
         runtime = _FakeRuntime(session_id)
@@ -87,7 +96,7 @@ async def test_open_session_registers_and_returns():
     harness.queue_ids("sid-a")
     manager = _manager(harness)
 
-    runtime = await manager.open_session()
+    runtime = _as_fake(await manager.open_session())
 
     assert runtime is harness.created[0]
     assert manager.list_session_ids() == ["sid-a"]
@@ -124,11 +133,15 @@ async def test_default_agent_dir_injected_without_mutating_caller():
     options = CreateAgentSessionOptions(agent_name="x")
     await manager.open_session(options)
 
-    assert harness.received_options[0].agent_dir == "/tmp/agents"
+    received = harness.received_options[0]
+    assert received is not None
+    assert received.agent_dir == "/tmp/agents"
     # 显式 agent_dir 不被覆盖
-    explicit = CreateAgentSessionOptions(agent_dir="/explicit")
+    explicit = CreateAgentSessionOptions(agent_dir=Path("/explicit"))
     await manager.open_session(explicit)
-    assert harness.received_options[1].agent_dir == "/explicit"
+    second = harness.received_options[1]
+    assert second is not None
+    assert second.agent_dir == Path("/explicit")
     # 调用方对象原样
     assert options.agent_dir is None
 
@@ -153,7 +166,7 @@ async def test_id_collision_incumbent_wins():
 
     # 新来者被销毁；在位者无损留任
     assert newcomer.dispose_calls == 1
-    assert incumbent.dispose_calls == 0
+    assert harness.created[0].dispose_calls == 0
     assert manager.get_session("dup") is incumbent
 
 
@@ -161,7 +174,7 @@ async def test_injectable_session_id_of():
     harness = _Harness()
     manager = _manager(harness, session_id_of=lambda runtime: f"custom-{id(runtime)}")
 
-    runtime = await manager.open_session()
+    runtime = _as_fake(await manager.open_session())
 
     assert manager.list_session_ids() == [f"custom-{id(runtime)}"]
 
@@ -175,7 +188,7 @@ async def test_close_session_idempotent():
     harness = _Harness()
     manager = _manager(harness)
 
-    runtime = await manager.open_session()
+    runtime = _as_fake(await manager.open_session())
     assert (
         await manager.close_session(runtime.session.session_manager.get_session_id())
         is True
@@ -191,9 +204,9 @@ async def test_close_runtime_removes_by_identity_after_id_drift():
     harness.queue_ids("old-id")
     manager = _manager(harness)
 
-    runtime = await manager.open_session()
+    runtime = _as_fake(await manager.open_session())
     # 模拟 switch_session 原地替换会话：id 漂移
-    runtime.session = _FakeSessionHolder("new-id")
+    runtime._session = _FakeSessionHolder("new-id")
 
     assert await manager.close_runtime(runtime) is True
     assert runtime.dispose_calls == 1

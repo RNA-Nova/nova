@@ -8,6 +8,15 @@ a summary of the branch being left so context isn't lost.
 import time
 from typing import List, Optional
 
+from nova_ai import SimpleStreamOptions
+from nova_protocol import AgentMessage, Context
+
+from nova_harness.core.domains.compaction.branch_summary import (
+    BranchPreparation,
+    BranchSummaryResult,
+    CollectEntriesResult,
+    GenerateBranchSummaryOptions,
+)
 from nova_harness.core.domains.compaction.compaction import (
     complete_summarization,
     estimate_tokens,
@@ -22,17 +31,8 @@ from nova_harness.core.domains.compaction.utils import (
     serialize_conversation,
 )
 from nova_harness.core.utils.messages import convert_to_llm
-from nova_harness.sessions import SessionManager
-from nova_harness.types.compaction.branch_summary import (
-    BranchPreparation,
-    BranchSummaryResult,
-    CollectEntriesResult,
-    GenerateBranchSummaryOptions,
-)
-from nova_harness.types.session.entries import SessionEntry
-from nova_protocol import AgentMessage, Context
-
-from nova_ai import SimpleStreamOptions
+from nova_harness.sessions.entries import SessionEntry
+from nova_harness.sessions.protocol import SessionManagerProtocol
 
 # ============================================================================
 # Entry Collection
@@ -40,7 +40,7 @@ from nova_ai import SimpleStreamOptions
 
 
 def collect_entries_for_branch_summary(
-    session: SessionManager,
+    session: SessionManagerProtocol,
     old_leaf_id: Optional[str],
     target_id: str,
 ) -> CollectEntriesResult:

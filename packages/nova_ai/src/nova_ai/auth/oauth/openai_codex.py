@@ -15,21 +15,18 @@ from typing import Any, Dict, Optional
 from urllib.parse import quote, urlencode
 
 import httpx
+from nova_ai.auth import AuthInteraction, OAuthAuth
+from nova_async import AbortedError, AbortSignal, is_aborted
 from nova_protocol import (
-    AbortedError,
-    AbortSignal,
     AuthEvent,
-    AuthInteraction,
     AuthorizationRequest,
     AuthPrompt,
     AuthPromptOption,
     ModelAuth,
     NovaBaseModel,
     NovaErrorKind,
-    OAuthAuth,
     OAuthCredential,
     RedactedString,
-    is_aborted,
 )
 from pydantic import ConfigDict, Field, ValidationError, field_validator
 

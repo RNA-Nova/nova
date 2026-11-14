@@ -8,7 +8,6 @@
 """
 
 import pytest
-
 from nova_ai.auth.credential_store import InMemoryCredentialStore
 from nova_ai.gateway.store import InMemoryModelsStore
 from nova_ai.testkit.store_contracts import CredentialStoreContract, ModelsStoreContract

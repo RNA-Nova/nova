@@ -18,10 +18,8 @@ from nova_ai import (
     to_thinking_level,
 )
 from nova_ai.gateway import create_setup_error_message
+from nova_async import AbortController, AbortedError, AbortSignal, is_aborted
 from nova_protocol import (
-    AbortController,
-    AbortedError,
-    AbortSignal,
     AgentEndEvent,
     AgentEvent,
     AgentMessage,
@@ -41,7 +39,6 @@ from nova_protocol import (
     Transport,
     TurnEndEvent,
     UserMessage,
-    is_aborted,
 )
 
 from .agent_loop import run_agent_loop, run_agent_loop_continue

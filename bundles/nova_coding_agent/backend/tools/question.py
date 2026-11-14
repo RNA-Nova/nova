@@ -25,15 +25,17 @@ answer=None）。
 
 from typing import Any, Callable, Dict, List, Optional
 
-from nova_coding_agent.ui_primitives import input as ui_input
-from nova_coding_agent.ui_primitives import select_items
-from nova_harness.types.resources.tools import (
+from nova_async import AbortSignal
+from nova_harness.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContext,
     ToolExecContext,
 )
-from nova_harness.types.ui import UIContext
-from nova_protocol import AbortSignal, AgentToolResult, TextContent
+from nova_harness.ui import UIContext
+from nova_protocol import AgentToolResult, TextContent
+
+from nova_coding_agent.ui_primitives import input as ui_input
+from nova_coding_agent.ui_primitives import select_items
 
 # "Type something." 自由输入项的 value 哨兵（label 与 pi 一致）。
 _OTHER_VALUE = "__type_something__"

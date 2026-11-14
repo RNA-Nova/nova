@@ -7,14 +7,13 @@
 
 from typing import Optional
 
-from nova_protocol import AnyModel
-
 from nova_ai.utils.model_utils import (
     clamp_thinking_level,
     get_supported_thinking_levels,
 )
 from nova_ai.utils.model_utils import models_are_equal as models_are_equal_upstream
 from nova_ai.utils.model_utils import to_thinking_level
+from nova_protocol import AnyModel
 
 
 def models_are_equal(a: Optional[AnyModel], b: Optional[AnyModel]) -> bool:

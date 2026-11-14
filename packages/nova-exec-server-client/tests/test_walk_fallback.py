@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 from fake_transport import FakeTransport
+from nova_exec_protocol import FileSystemSandboxContext, WalkOptions
+
 from nova_exec_server_client import FileSystemError, ProtocolError
 from nova_exec_server_client.errors import (
     EXECUTOR_NOT_FOUND,
@@ -14,7 +16,6 @@ from nova_exec_server_client.errors import (
     JSON_RPC_METHOD_NOT_FOUND,
 )
 from nova_exec_server_client.fs import FileSystemManager
-from nova_protocol import FileSystemSandboxContext, WalkOptions
 
 
 def _meta(is_dir=False, is_file=False, is_symlink=False, size=0) -> dict:

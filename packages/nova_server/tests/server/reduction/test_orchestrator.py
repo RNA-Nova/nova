@@ -8,6 +8,27 @@
 from typing import Any, List, Literal
 
 import pytest
+from nova_protocol import (
+    AssistantMessage,
+    CustomAgentMessage,
+    StopReason,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    UserMessage,
+)
+from nova_server.protocol.items import (
+    AgentMessageItem,
+    CustomItem,
+    ItemStatus,
+    NovaItem,
+    ThinkingItem,
+    ToolCallItem,
+    UserMessageItem,
+)
+from nova_server.reduction import SessionReducer, apply_delta
+
+from nova_harness.core.domains.compaction.models import CompactionResult
 from nova_harness.events import (
     AgentEndEvent,
     EntryAppendedEvent,
@@ -21,31 +42,11 @@ from nova_harness.events import (
     ToolExecutionUpdateEvent,
 )
 from nova_harness.events.session import CompactionEndEvent
-from nova_harness.types.compaction.compaction import CompactionResult
-from nova_harness.types.messages import (
+from nova_harness.sessions.entries import CustomEntry, LabelEntry
+from nova_harness.sessions.messages import (
     BranchSummaryMessage,
     CompactionSummaryMessage,
     CustomMessage,
-)
-from nova_harness.types.session.entries import CustomEntry, LabelEntry
-from nova_protocol import (
-    AssistantMessage,
-    CustomAgentMessage,
-    StopReason,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    UserMessage,
-)
-from nova_server.reduction import SessionReducer, apply_delta
-from nova_server.types.items import (
-    AgentMessageItem,
-    CustomItem,
-    ItemStatus,
-    NovaItem,
-    ThinkingItem,
-    ToolCallItem,
-    UserMessageItem,
 )
 
 
@@ -86,7 +87,7 @@ def test_user_message_one_shot(emitted):
     assert isinstance(item, UserMessageItem)
     assert item.source == "user"
     assert item.ts == 7
-    assert [b.text for b in item.content] == ["你好"]
+    assert [b.text for b in item.content if isinstance(b, TextContent)] == ["你好"]
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +281,9 @@ def test_package_message_without_to_item_falls_back(emitted):
 
 def test_item_emission_delta_and_garbage(emitted):
     reducer, out = emitted
-    item = CustomItem(id="e1", type="bashExecution", output="a")
+    item = CustomItem.model_validate(
+        {"id": "e1", "type": "bashExecution", "output": "a"}
+    )
     reducer.handle_event(ItemEmissionEvent(phase="started", item=item))
     reducer.handle_event(
         ItemEmissionEvent(phase="delta", item_id="e1", delta={"output": "b"})
@@ -295,7 +298,7 @@ def test_item_emission_delta_and_garbage(emitted):
     assert _types(out) == ["item_started", "item_delta"]
     assert out[1].delta == {"output": "b"}
     # 在飞台账同步合并（字符串追加）
-    assert reducer.in_flight_items()[0].output == "ab"
+    assert getattr(reducer.in_flight_items()[0], "output") == "ab"
 
 
 # ---------------------------------------------------------------------------
@@ -382,11 +385,14 @@ def test_apply_delta_status_enum_replaces_not_appends():
 
 
 def test_apply_delta_extra_fields_on_custom_item():
-    item = CustomItem(id="c", type="x", output="a")
+    item = CustomItem.model_validate({"id": "c", "type": "x", "output": "a"})
     apply_delta(item, {"output": "b"})
-    assert item.output == "ab"
+    assert getattr(item, "output") == "ab"
     apply_delta(item, {"exitCode": 0})  # 未声明键落 extra 区
-    assert item.model_dump(mode="json").get("exitCode") == 0 or item.exitCode == 0
+    assert (
+        item.model_dump(mode="json").get("exitCode") == 0
+        or getattr(item, "exitCode") == 0
+    )
 
 
 # ---------------------------------------------------------------------------

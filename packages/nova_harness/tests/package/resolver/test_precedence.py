@@ -1,12 +1,13 @@
 """测试 resolver 元数据与优先级。"""
 
 import pytest
+
 from nova_harness.package.resolve.resolver import (
     resource_precedence_rank,
     sort_resolved_resources,
 )
-from nova_harness.types.package import PathMetadata, SourceOrigin, SourceScope
-from nova_harness.types.resources.prompts import ResolvedResource
+from nova_harness.package.types import PathMetadata, SourceOrigin, SourceScope
+from nova_harness.resources.prompts import ResolvedResource
 
 
 @pytest.mark.parametrize(

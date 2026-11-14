@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
-from nova_harness.events import QueueUpdateEvent
-from nova_harness.types.protocols import AgentSessionProtocol
 from nova_protocol import ImageContent, TextContent, UserMessage
+
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
+from nova_harness.events import QueueUpdateEvent
 
 
 class QueueController:
@@ -30,7 +31,9 @@ class QueueController:
         """在 Agent 运行时插入一条 steering 消息。"""
         self._session._steering_messages.append(text)
         self.emit_update()
-        content: List[object] = [TextContent(type="text", text=text)]
+        content: List[Union[TextContent, ImageContent]] = [
+            TextContent(type="text", text=text)
+        ]
         if images:
             content.extend(images)
         self._session.agent.steer(UserMessage(role="user", content=content))
@@ -41,7 +44,9 @@ class QueueController:
         """在 Agent 完成当前 turn 后追加一条 follow-up 消息。"""
         self._session._follow_up_messages.append(text)
         self.emit_update()
-        content: List[object] = [TextContent(type="text", text=text)]
+        content: List[Union[TextContent, ImageContent]] = [
+            TextContent(type="text", text=text)
+        ]
         if images:
             content.extend(images)
         self._session.agent.follow_up(UserMessage(role="user", content=content))

@@ -3,12 +3,13 @@
 from pathlib import Path
 
 import pytest
+
 from nova_harness.core.agent_session.services import AgentSessionServices
 from nova_harness.core.runtime_manager.assembly import (
     create_agent_session_from_services,
 )
-from nova_harness.sessions import SessionManager
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.sessions.manager import SessionManager
 
 
 def _write_agent(agents_dir: Path, name: str) -> None:
@@ -47,6 +48,7 @@ async def test_explicit_agent_name_wins_over_first_available(two_agent_dirs):
         cwd, agent_dir, CreateAgentSessionOptions(agent_name="zzz_agent")
     )
     assert result.session.agent_manager.current == "zzz_agent"
+    assert result.session.tools_manager is not None
     assert result.session.tools_manager.agent_name == "zzz_agent"
 
 
@@ -80,6 +82,7 @@ async def test_change_agent_rebuilds_runtime(two_agent_dirs):
     await session.change_agent("zzz_agent")
 
     assert session.agent_manager.current == "zzz_agent"
+    assert session.tools_manager is not None
     assert session.tools_manager.agent_name == "zzz_agent"
 
 

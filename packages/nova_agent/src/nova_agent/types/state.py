@@ -5,7 +5,7 @@ AgentState 是运行时可变状态容器，不是 JSON 边界类型，因此不
 而是用普通 class + property setter 实现 TS 侧 MutableAgentState 的拷贝语义。
 """
 
-from typing import Any, List, Optional, Set, TypedDict, cast
+from typing import Any, List, Literal, Optional, Set, TypedDict, cast
 
 from nova_ai import (
     create_initial_system_message,
@@ -15,6 +15,9 @@ from nova_ai import (
 from nova_protocol import AgentMessage, Message, Model, ModelCost, ModelThinkingLevel
 
 from .tool import AgentTool
+
+# 队列排空时注入多少条用户消息。
+QueueMode = Literal["all", "one-at-a-time"]
 
 _PLACEHOLDER_MODEL_ID = "unknown"
 """占位模型的 id，用于识别"未显式配置模型"的状态。"""
@@ -141,4 +144,4 @@ class AgentState:
         )
 
 
-__all__ = ["AgentState", "AgentStateKwargs"]
+__all__ = ["AgentState", "AgentStateKwargs", "QueueMode"]

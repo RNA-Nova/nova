@@ -8,8 +8,8 @@ from typing import Any, Callable, Optional
 
 from nova_harness.core.agent_session import AgentSessionRuntime
 from nova_harness.core.runtime_manager import RuntimeManager
-from nova_harness.types.ui import NoOpUIContext
-from nova_harness.types.ui.context import UIContext
+from nova_harness.ui import NoOpUIContext
+from nova_harness.ui.context import UIContext
 
 
 @dataclass

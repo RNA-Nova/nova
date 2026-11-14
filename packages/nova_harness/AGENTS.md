@@ -13,7 +13,7 @@
 - **资源加载**：提示词模板、扩展发现加载、扩展事件总线、诊断与资源冲突检测。
 - **设置持久化**：本地 JSON 存储用户设置与模型配置（支持全局/项目级作用域）。
 - **工具链**：内置工具的注册与运行时白名单控制。
-- **UI 反向原语**：`UIContext` 是**泛型 transport（零词汇）**——只定义 `capabilities` / `has_capability` / `request(method, params)`（需响应）/ `notify(method, params)`（fire-and-forget），所有 method 均为自由字符串，harness 不持有任何交互词汇（`STANDARD_UI_METHODS`、便捷方法、params schema 全部移出）。**词汇定义权归包**：官方 bundle 的 `nova_coding_agent.ui_primitives` 定义基线四件套（select/confirm/input/notify）并提供糖库（`select()`/`confirm()`/`input()`/`notify_message()`），第三方包可自定义原语经同一通道（设计见 `nova-client/docs/ui-primitives.md`）。无 UI 的运行模式（print/headless）使用 `NoOpUIContext` 降级；有 UI 时经 `nova_server` 的 JSON-RPC over stdio 接入终端/Web 前端。抽象接口统一在 `types/ui/context.py`（唯一 ABC），`NoOpUIContext` 在 `types/ui/noop.py`，`UIResponse` 在 `types/ui/primitives.py`。正向 UI 操作（组件/状态栏/编辑器/主题）归 Node 层 UI 管线（架构 2.0，见 `examples/nova_architecture_2.0.md`）。
+- **UI 反向原语**：`UIContext` 是**泛型 transport（零词汇）**——只定义 `capabilities` / `has_capability` / `request(method, params)`（需响应）/ `notify(method, params)`（fire-and-forget），所有 method 均为自由字符串，harness 不持有任何交互词汇（`STANDARD_UI_METHODS`、便捷方法、params schema 全部移出）。**词汇定义权归包**：官方 bundle 的 `nova_coding_agent.ui_primitives` 定义基线四件套（select/confirm/input/notify）并提供糖库（`select()`/`confirm()`/`input()`/`notify_message()`），第三方包可自定义原语经同一通道（设计见 `nova-client/docs/ui-primitives.md`）。无 UI 的运行模式（print/headless）使用 `NoOpUIContext` 降级；有 UI 时经 `nova_server` 的 JSON-RPC over stdio 接入终端/Web 前端。抽象接口统一在 `ui/context.py`（唯一 ABC），`NoOpUIContext` 在 `ui/noop.py`，`UIResponse` 在 `ui/primitives.py`。正向 UI 操作（组件/状态栏/编辑器/主题）归 Node 层 UI 管线（架构 2.0，见 `examples/nova_architecture_2.0.md`）。
 - **Project Trust**：项目级信任门控，决定在加载 `<cwd>/.nova` 下的 settings、extensions、skills 等资源前是否信任该项目；支持 `--trust` 覆盖、扩展裁决、持久化记录、默认策略与 UI 弹窗确认。**trust 只存在于运行时**（会话启动决议 + `trust.json` 持久化 + resolver 读取门控）；包管理（`nova-pkg`）不介入信任决策——装/卸包是用户的主动行为，写操作不做 trust 检查。
 
 项目语言：**Python `>=3.13,<3.14`**，注释与文档主要使用**中文**。
@@ -118,19 +118,7 @@ nova_harness/
     │   ├── cache_stats.py  # 缓存与统计
     │   ├── message_types.py# 消息回载注册表（包级 MESSAGE_TYPES 注册点）
     │   └── utils.py        # 上下文重建、id 生成、条目读写
-    ├── types/              # 统一类型层：跨模块/模块内数据类型与事件 payload
-    │   ├── resources/        # 资源类型（agents / skills / prompts / tools / context files / 诊断）
-    │   ├── session/          # 会话生命周期、条目、树、状态、模型配置、运行时诊断
-    │   ├── config/           # 设置
-    │   ├── extensions/       # 扩展协议类型（含 process.py spawn hook 契约）
-    │   ├── events/           # 事件常量与 payload（dataclass）
-    │   ├── compaction/       # 上下文压缩
-    │   ├── package/          # 包管理域类型（PackageSource / NovaManifest / PackageManifest 等）
-    │   ├── ui/               # UI 能力抽象（UIContext / UIResponse / noop.py 空实现 NoOpUIContext）
-    │   ├── model.py          # 模型注册表运行时类型
-    │   ├── messages.py       # 消息类型
-    │   ├── project_trust.py  # Project Trust 决策
-    │   └── __init__.py       # 说明文档，不做大规模顶层重导出
+    ├── ui/                 # UI 能力抽象（UIContext / UIResponse / ScopedUIContext / NoOpUIContext）
     ├── events/             # 会话事件联合（AgentSessionEvent 等）与监听器类型
     ├── resources/          # 资源发现与加载
     │   ├── loader.py       # ResourceLoader 抽象基类与 DefaultResourceLoader
@@ -201,7 +189,7 @@ nova_harness/
 
 `AgentSession` 持有从 services 解包出来的扁平依赖；`ExtensionRunner` 直接接收这些扁平依赖，不再要求 `AgentSession` 保存整个 services 对象。
 
-### 3. `types/session/config.py` — AgentSessionConfig
+### 3. `sessions/config.py` — AgentSessionConfig
 与 TypeScript 参考实现对齐的**运行时扁平配置**（`@dataclass`），不含可序列化 JSON 的边界类型：
 - `agent`、`session_manager`、`settings_manager`
 - `cwd`、`system_prompt_manager`、`resource_loader`、`model_runtime`
@@ -247,7 +235,7 @@ nova_harness/
 ### 6. `sessions/manager.py` — SessionManager
 - 会话持久化为 **JSONL** 文件，存储在 `~/.nova/agent/sessions/--<cwd>--/` 下。
 - 支持分支（`branch`、`branch_with_summary`）、fork（`create_branched_session`）。
-- 条目类型（10 型，见 `types/session/entries.py`）：`message`、`thinking_level_change`、`model_change`、`compaction`、`branch_summary`、`label`、`custom`、`custom_message`、`session_info` 等；`active_tools_change` 与 `leaf` 条目类型已删除（激活工具列表经 `tool-panel`/`agent` 等 custom 条目持久化，leaf 指针为纯内存态不落盘）。
+- 条目类型（10 型，见 `sessions/entries.py`）：`message`、`thinking_level_change`、`model_change`、`compaction`、`branch_summary`、`label`、`custom`、`custom_message`、`session_info` 等；`active_tools_change` 与 `leaf` 条目类型已删除（激活工具列表经 `tool-panel`/`agent` 等 custom 条目持久化，leaf 指针为纯内存态不落盘）。
 - 序列化保持 **Python 惯用的 snake_case**（如 `parent_id`、`first_kept_entry_id`、`active_tool_names`、`target_id`），文件版本为 `3`，ID 使用 generate_session_id 前 8 位（与 TS 行为一致但字段命名符合 Python 规范）。
 
 ### 7. `core/domains/compaction/compaction.py` — 上下文压缩
@@ -255,11 +243,11 @@ nova_harness/
 - 使用 LLM 生成结构化摘要（`_SUMMARIZATION_PROMPT`），支持增量更新（`_UPDATE_SUMMARIZATION_PROMPT`）。
 - 提取文件操作（read/modified）并附在摘要中。
 
-### 8. `core/domains/system_prompt/` + `core/resources/loaders/` — 系统提示词
-- `core/resources/loaders/agent_config.py` 负责 Agent 组合声明读取（`agents/<name>.yaml` 单文件——**只解析不装配**：`persona:` 原始条目原样入 `AgentConfig.persona`），并按 Nova 资源优先级（全局 -> 项目级）加载。
+### 8. `core/domains/system_prompt/` + `resources/loaders/` — 系统提示词
+- `resources/loaders/agent_config.py` 负责 Agent 组合声明读取（`agents/<name>.yaml` 单文件——**只解析不装配**：`persona:` 原始条目原样入 `AgentConfig.persona`），并按 Nova 资源优先级（全局 -> 项目级）加载。
 - `core/domains/persona/`（`PersonaManager`）负责 persona 装配（路径引用→读文件+包根收敛校验；注册名→注册表查找）与 override 旋钮（内存态会话级人格切换）。
 - `core/domains/agents/`（`AgentManager`）负责 agents 注册表活视图与当前角色旋钮（`change_agent` + 默认解析链：保持现状 > 显式 > 第一个可用 > base_agent）、可委派视图与 `# Available Agents` 菜单注入数据、CapabilitySelection 汇集（全资源域——tools 报告归 ToolsManager.refresh、persona 归 PersonaManager 装配、extensions/user_tools/commands/skills 归 AgentSession 过滤点，`_build_runtime` 重建统一收集处后经注入 provider 透出）、**yaml 写回**（`/agent save` 落地——包来源不可写，影子写 `<agent_dir>/agents/<name>.yaml`；user/project 来源就地写回；save-as 写新名 user 级；写盘后 `resource_loader.reload()` 生效）。
-- `core/resources/loader.py` 只负责调度：在 `reload()` 中依次调用 `core/resources/loaders` 下的 `agent_config`、`prompt_templates`、`extensions`、`skills`、`personas`，自身不再包含具体加载逻辑。
+- `resources/loader.py` 只负责调度：在 `reload()` 中依次调用 `resources/loaders` 下的 `agent_config`、`prompt_templates`、`extensions`、`skills`、`personas`，自身不再包含具体加载逻辑。
 - `SystemPromptManager` 纯渲染（config + 各 manager → 文本）：当前角色名经 AgentManager 活取（旋钮已乔迁），工具白名单经 ToolsManager，persona 装配经 PersonaManager；激活工具含 `subagent` 且注册表非空时注入 `# Available Agents` 委派菜单（name + source 标签 + description）。
 - `SystemPromptBuilder`（`core/domains/system_prompt/builder.py`）把 Agent 配置与工具白名单渲染成最终系统提示词字符串；支持通过 `append_system_prompt` 追加额外内容。
 - 当当前激活工具包含 `read` 时，`SystemPromptManager` 会把可用 skill 列表（`disable_model_invocation=False`）以 XML 格式追加到系统提示词末尾。
@@ -267,19 +255,19 @@ nova_harness/
 
 > **`resources/loaders/` 的定位**：它是各业务模块 loader 的 resource 级调用层。业务模块（如 `core/domains/system_prompt`、`extensions`）自己实现文件格式解析，`resources/loaders/` 负责按 Nova 的全局/项目优先级、去重、扩展上下文组装等规则调用它们，并把结果交给 `DefaultResourceLoader`。
 
-### 10. `types/ui/` — UI 反向原语与 JSON-RPC 接入（架构 2.0 收窄版）
+### 10. `ui/` — UI 反向原语与 JSON-RPC 接入（架构 2.0 收窄版）
 
 > 架构 2.0（`examples/nova_architecture_2.0.md` 图纸；落地终态见 **`examples/nova_architecture_2.1.md`**）确立：Python 为纯 agent 运行时，**正向 UI 操作**（组件/状态栏/编辑器/主题/注册表/终端输入）全部归 Node 层 UI 管线。Python 侧只保留**反向原语**——后端运行时需要向用户请求输入/发出通知的通道（trust 询问、OAuth 引导、扩展询问），对应 RPC 协议四件套之一。
 
-- `types/ui/primitives.py` 定义 `UIResponse`；`types/ui/context.py` 定义**唯一的** `UIContext` 抽象接口（泛型 transport：只有 `capabilities`/`has_capability`/`request`/`notify`，零词汇——交互词汇归包，见上文"UI 反向原语"条）。
-- 运行模式不设独立类型（原 `ExtensionMode` 已移除）：扩展只需要两个信号——`has_ui`（有没有前端挂在通道上，构造期即知，trust 决议等早期裁决用它）与 `ui.capabilities`（前端支持哪些原语，连接后协商）。`NoOpUIContext`（`types/ui/noop.py`）表示无 UI 运行模式，全部安全 no-op。
+- `ui/primitives.py` 定义 `UIResponse`；`ui/context.py` 定义**唯一的** `UIContext` 抽象接口（泛型 transport：只有 `capabilities`/`has_capability`/`request`/`notify`，零词汇——交互词汇归包，见上文"UI 反向原语"条）。
+- 运行模式不设独立类型（原 `ExtensionMode` 已移除）：扩展只需要两个信号——`has_ui`（有没有前端挂在通道上，构造期即知，trust 决议等早期裁决用它）与 `ui.capabilities`（前端支持哪些原语，连接后协商）。`NoOpUIContext`（`ui/noop.py`）表示无 UI 运行模式，全部安全 no-op。
 - **JSON-RPC 服务器宿主已独立为 `packages/nova_server`**（原包内 `server/` 与 `modes/rpc` 整体迁出）——`RpcServer` + 连接层（`Connection` 一等公民：状态机/能力集/在飞请求表/有界出站队列+独立写泵，背压按来源分流）+ `protocol/`（方法表 9 域 + 签名推导形状 + schema 导出）+ `transport/`（stdio/WS/memory）+ `reduction/`（事件 → wire 条目）+ `ui_context.py`（反向原语按连接寻址与作用域仲裁）+ `client/`（in_process/remote）+ `exec/`（headless）。详见 `packages/nova_server/README.md` 与 `docs/boundary/protocol-modeling.md`。
 - 反向通道：`ui/request`（后端→前端请求）与 `ui/response`（前端→后端应答）配对；`system/capabilities` 上报前端支持的原语子集，未支持方法优雅降级（`NoOpUIContext` 全部安全 no-op）。
 - 包管理的 `ResourceType.UI_BLOCKS` 与 `THEMES` 资源类目已移除（enums/resolution/manifest/settings/discovery/resolver/loader 全链路）：主题与 UI 渲染资产归 Node 层 UI 管线（架构 2.0），Python 纯运行时的包资源只保留 extensions / skills / prompts / tools / agents 五类能力资源；工具与用户工具的 `ui_blocks` 声明/数据通道也已清除——工具结果只携带平铺结构化 `details`（纯数据），渲染形状归前端。
 - **包管理的安装事实记录采用 dist-info 目录**（对齐 pip/uv 的 `*.dist-info/` 生态风格）：sibling 于已安装副本（`<name>.dist-info/`），安装时机制写入、之后只读——`direct_url.json`（PEP 610 格式：path 源为 `file://` 绝对路径 + editable，git 源为 remote URL + requested ref）、`package_name`（自安装判定快照）、`installed_at`。dist-info 为 source/editable/package_name 的**权威快照**（防副本篡改漂移），name/version/deps 始终读副本 `pyproject.toml`；dist-info 缺失时（旧安装）回退磁盘推导（symlink 判定 editable、重算 package_name）。settings 仍是 source 配置的唯一记录点（相对路径存储、可共享）；`packages/` 下自动写入 `.gitignore`（settings 可提交共享、安装产物不被追踪）；editable 配置的共享仅在包位于仓库内（monorepo）时有效。
-### 11. `extensions/` / `types/extensions/` / `core/resources/loaders/extensions.py` — 扩展系统
+### 11. `extensions/` / `extensions/` / `resources/loaders/extensions.py` — 扩展系统
 - 扩展系统按 TypeScript `coding-agent/src/extensions/` 重新设计，不保留旧版兼容性：
-  - `types/extensions/`：扩展类型统一入口（`Extension`、`ExtensionRuntime`、`ExtensionAPI`、`ExtensionCommand`、`ExtensionFlag`、`ExtensionShortcut`、`LoadedExtensionsResult`、`SourceInfo` 等），按子主题拆分到多个模块并通过 `__init__.py` 统一导出。
+  - `extensions/types.py`：扩展公共数据聚合入口（`Extension`、`ExtensionRuntime`、`ExtensionAPI`、`ExtensionCommand`、`ExtensionFlag`、`ExtensionShortcut`、`LoadedExtensionsResult`、`SourceInfo` 等）；具体类型与行为同域分文件，结构化消费接口在 `extensions/protocol.py`，API Protocol 在 `extensions/contracts.py`。
   - `extensions/api.py`：`NovaExtensionAPI` 是扩展工厂**装载时**收到的注册面（`on` / `registerCommand` / `registerShortcut` / `registerFlag` / `registerSpawnHook` / `getFlag` / `registerProvider` / `events`）——只做声明式注册；运行期动作（`send_message` / `exec` / `set_active_tools` / …）与环境感知统一走事件 handler 的 `ctx`（`ExtensionContext`）。分工判据：注册不依赖会话（装载期申报"我有什么"），动作没有活会话不成立（发给谁/改谁的注册表），故归代表活会话的 `ctx`。
   - `extensions/loader.py`：`ExtensionLoader` 与 `load_extensions()` 负责扩展发现、模块加载与工厂执行。
   - `extensions/runner.py`：`ExtensionRunner` 负责扩展生命周期、事件分发、上下文创建、action 绑定与 provider 注册队列刷新。
@@ -321,8 +309,8 @@ nova_harness/
 当前 `tests/` 目录已包含覆盖以下模块的测试：
 
 - `tests/core/agent_session/`：AgentSession 生命周期、事件、工具、扩展、消息队列。
-- `tests/core/domains/`：领域能力（session 会话管理、project_trust、user_tools、tools、agents、persona、compaction 等）。
-- `tests/core/resources/`：资源加载器（agent 配置、skills、prompt templates、tools、loader）。
+- `tests/core/domains/`：领域能力（user_tools、tools、agents、persona、compaction 等）；`tests/sessions/` 覆盖会话管理，`tests/resources/project_trust/` 覆盖信任门控。
+- `tests/resources/`：资源加载器（agent 配置、skills、prompt templates、tools、loader）。
 - `tests/core/runtime_manager/`：会话工厂与装配。
 - `tests/extensions/`：扩展系统（api/loader/runner/event_bus）。
 - `tests/package/`：包管理器安装/卸载/列表/校验（含 npm 阶段与 B 型纯 TS 包）。
@@ -439,7 +427,7 @@ commands:
 - `tools` / `skills` / `extensions` / `user_tools` / `commands`：能力名单（可选）。名单字段统一三态：**键缺席 = 全放不设防、显式空列表 `[]` = 全禁、非空 = 名单（支持 `!` 排除）**；`skills` 的名单只约束包内 skill（用户级/项目级始终放行——随时可加性）。`tools` 另有 `role_boundary` 语义开关：open（默认）只做初始激活集、strict 才裁注册表。**`subagents` 字段已删除**——只有 agents 没有 subagents，可委派名单即会话注册表全量。
 - **已退役**：`description.md` 及 frontmatter 合并、`sections/` 目录约定、`setup.md`。
 
-解析逻辑位于 `core/resources/loaders/agent_config.py`（`load_agent_config_from_yaml` / `load_agents`——扫描目录顶层 `*.yaml`）；运行时过滤位于：
+解析逻辑位于 `resources/loaders/agent_config.py`（`load_agent_config_from_yaml` / `load_agents`——扫描目录顶层 `*.yaml`）；运行时过滤位于：
 
 - skills：`core/domains/system_prompt/manager.py`（系统提示词注入）和 `core/agent_session/agent.py`（`/skill:name` 命令展开）——两处统一走 `core/domains/skills.py` 的 `filter_skills_by_whitelist`（来源分治 + 三态：None 全放、[] 包内全禁、名单仅约束 `origin="package"`，其余 origin 与无 `source_info` 放行）。加载层不做名单过滤。
 - extensions：`core/agent_session/agent.py` 初始化 `ExtensionRunner` 时按白名单过滤（config 经 AgentManager 现取——首建时 SystemPromptManager 尚未创建）。
@@ -509,17 +497,17 @@ tools:
 ## 常见开发任务
 
 ### 新增或修改类型
-1. **权威位置**：`types/` 下的对应分组。会话相关类型在 `types/session/`；资源类型（agents/skills/prompts/tools/context files）在 `types/resources/`；扩展协议（含 spawn hook 契约 `process.py`）在 `types/extensions/`；事件在 `types/events/`。
-2. 内部模块和测试都应从 `types/` 下的对应分组导入（如 `core.types.session`、`core.types.resources`、`core.types.config`、`core.types.extensions`、`core.types.project_trust`、`core.types.model`），不要再走已删除的 `<module>/types.py`、`<module>/options.py` 或旧顶层文件。
+1. **权威位置**：类型跟随语义所有域——会话归 `sessions/`、资源归 `resources/`、包管理归 `package/`、设置归 `config/settings/models.py`、扩展归 `extensions/`、压缩归 `core/domains/compaction/`、UI 归 `ui/`；不得恢复全包集中 `types/`。
+2. 公共数据可从本领域 `types.py` 聚合导入，行为与结构化接口直连对应叶子模块或 `protocol.py`。这些领域入口保持零急切 re-export，避免导入数据时拉起整套运行时。
 
 ### 添加新工具
 1. 工具由包分发：创建 `tools/<name>.py`（单文件，推荐；需同目录资产时用 `tools/<name>/executor.py` 目录形态），实现 `Tool` 类——元数据为类属性（`name` / `description` / `parameters` 必需，可选 `label` / `execution_mode` / `prepare_arguments` / `prompt_snippet` / `prompt_guidelines`），`__init__(context)` 注入 `ToolContext`（cwd / settings 只读视图——构造期不变量），执行为 `execute(tool_call_id, params, signal, on_update, ctx)`（`ctx` 为 `ToolExecContext`，当前模型等执行期状态每次调用现取注入）。无独立元数据文件。
-2. 工具加载统一由 `core/resources/loaders/tools.py` 的 `ToolLoader` 完成；`DefaultResourceLoader.get_tools()` 在 `reload()` 时自动加载。
+2. 工具加载统一由 `resources/loaders/tools.py` 的 `ToolLoader` 完成；`DefaultResourceLoader.get_tools()` 在 `reload()` 时自动加载。
 3. `core/agent_session/controllers/tools.py` 只保留运行时执行包装 `DynamicTool`，不再负责扫描加载。
 4. 如需在 Agent 中默认激活，在对应 Agent 配置的 `agent.yaml` 的 `tools` 中加入 tool name。
 
 ### 修改会话条目类型
-1. 更新 `types/session/entries.py` 中的 Pydantic 模型。
+1. 更新 `sessions/entries.py` 中的 Pydantic 模型。
 2. 在 `sessions/manager.py` 中添加 `append_xxx()` 方法。
 3. 在 `sessions/utils.py` 的解析逻辑中处理新类型。
 4. 在 `core/utils/messages.py` 的 `convert_to_llm()` 中映射到 LLM 消息。
@@ -530,7 +518,7 @@ tools:
 
 ### 修改系统提示词结构
 - 编辑 `core/domains/system_prompt/builder.py` 中的 `compose_system_prompt()` 与 `render_xxx()` 函数。
-- 或修改 `core/resources/loaders/agent_config.py` 加载的文件命名规则。
+- 或修改 `resources/loaders/agent_config.py` 加载的文件命名规则。
 
 ---
 

@@ -7,7 +7,7 @@
 
 Typical usage::
 
-    >>> from nova_harness.package import PackageManager
+    >>> from nova_harness.package.manager import PackageManager
     >>> pm = PackageManager(agent_dir="~/.nova/agent")
     >>>
     >>> # Install a bundle globally and persist it to settings
@@ -32,7 +32,10 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from nova_harness.config.defaults import get_agent_dir
+from nova_harness.config.protocol import SettingsManagerProtocol
 from nova_harness.config.settings.manager import SettingsManager
+from nova_harness.config.settings.models import PackageSourceSpec
+from nova_harness.package.errors import PackageInstallError, PackageUpdateError
 from nova_harness.package.install.installer import PackageInstaller
 from nova_harness.package.install.python_backend import uninstall_package
 from nova_harness.package.install.store import (
@@ -60,9 +63,7 @@ from nova_harness.package.source.spec import (
     parse_package_source_spec,
     parse_source,
 )
-from nova_harness.package.utils import is_offline_mode_enabled
-from nova_harness.types.config.settings import PackageSourceSpec
-from nova_harness.types.package import (
+from nova_harness.package.types import (
     AmbiguousPackageNameError,
     ConfiguredPackage,
     MissingSourceAction,
@@ -73,7 +74,7 @@ from nova_harness.types.package import (
     SourceScope,
     UninstallResult,
 )
-from nova_harness.types.package.errors import PackageInstallError, PackageUpdateError
+from nova_harness.package.utils import is_offline_mode_enabled
 
 __all__ = ["PackageManager", "PackageInstallError", "PackageUpdateError"]
 
@@ -94,7 +95,7 @@ class PackageManager:
         self,
         agent_dir: Optional[Union[str, Path]] = None,
         cwd: Optional[Union[str, Path]] = None,
-        settings_manager: Optional[SettingsManager] = None,
+        settings_manager: Optional[SettingsManagerProtocol] = None,
         project_trusted: Optional[bool] = None,
         install_missing_packages: bool = True,
         on_progress=None,
@@ -401,7 +402,7 @@ class PackageManager:
             )
 
         successful: List[Tuple[str, PackageMetadata]] = []
-        failures: List[Tuple[str, Exception]] = []
+        failures: List[Tuple[str, BaseException]] = []
         for scope_local, scope_name in targets:
             try:
                 meta = await asyncio.to_thread(
@@ -440,7 +441,7 @@ class PackageManager:
             return []
 
         successful: List[Tuple[str, PackageMetadata]] = []
-        failures: List[Tuple[str, Exception]] = []
+        failures: List[Tuple[str, BaseException]] = []
         for source in git_sources:
             try:
                 metas = await self.update(source)
@@ -722,7 +723,7 @@ class PackageManager:
         if is_offline_mode_enabled():
             return
 
-        failures: List[Tuple[str, Exception]] = []
+        failures: List[Tuple[str, BaseException]] = []
         for spec in sources:
             source_str, editable, _ = parse_package_source_spec(spec)
             if self._is_package_resolvable(source_str, scope):

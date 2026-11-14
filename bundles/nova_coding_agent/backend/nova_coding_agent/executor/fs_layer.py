@@ -23,14 +23,15 @@ import errno
 import os
 from typing import List, Optional
 
+from nova_async import AbortedError, AbortSignal
+from nova_exec_server_client import ExecutorClient
+
 from nova_coding_agent.tools_common.fs_layer import (
     FsEntry,
     FsStat,
     WalkItem,
     WalkResult,
 )
-from nova_exec_server_client import ExecutorClient
-from nova_protocol import AbortedError, AbortSignal
 
 _URI_PREFIX = "file://"
 
@@ -133,7 +134,7 @@ class ExecutorFileSystemLayer:
         max_entries: int = 50_000,
         signal: Optional[AbortSignal] = None,
     ) -> WalkResult:
-        from nova_protocol import WalkOptions
+        from nova_exec_protocol import WalkOptions
 
         stat = await self.metadata(path, signal=signal)
         if not stat.exists:

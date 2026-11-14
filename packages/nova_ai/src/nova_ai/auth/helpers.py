@@ -8,17 +8,14 @@
 import asyncio
 from typing import Awaitable, Callable, List, Optional
 
+from nova_ai.auth import ApiKeyAuth, ApiKeyAuthInput, AuthInteraction, OAuthAuth
+from nova_async import AbortSignal
 from nova_protocol import (
-    AbortSignal,
-    ApiKeyAuth,
-    ApiKeyAuthInput,
     ApiKeyCredential,
     AuthCheck,
-    AuthInteraction,
     AuthPrompt,
     AuthResult,
     ModelAuth,
-    OAuthAuth,
     OAuthCredential,
     RedactedString,
 )

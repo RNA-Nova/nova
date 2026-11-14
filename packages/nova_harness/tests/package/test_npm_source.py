@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
 from nova_harness.package.source._semver import (
     NpmRange,
     NpmRangeUnion,
@@ -343,6 +344,7 @@ def test_semver_union_bounds():
     assert mixed.allows(parse_version("2.5.0"))
     # 带 prerelease 的分支放行同三元组候选
     pre = parse_version_spec("^1.2.3-beta || ^2.0.0")
+    assert isinstance(pre, (NpmRange, NpmRangeUnion))
     assert pre.allows(parse_version("1.2.3-rc.1"))
     assert not pre.allows(parse_version("1.2.4-beta"))
 
@@ -370,10 +372,12 @@ def test_semver_hyphen_range_bounds():
 def test_semver_max_satisfying_any_and_union():
     # 任意版本：取最高非 prerelease
     any_range = parse_version_spec("*")
+    assert isinstance(any_range, (NpmRange, NpmRangeUnion))
     assert max_satisfying(["1.0.0", "2.0.0-beta", "1.5.0"], any_range) == "1.5.0"
     assert max_satisfying(["2.0.0-beta"], any_range) is None
     # 并集：跨分支取最大满足版本
     union = parse_version_spec("^1.0.0 || ^2.0.0")
+    assert isinstance(union, (NpmRange, NpmRangeUnion))
     assert max_satisfying(["1.5.0", "2.3.0", "3.0.0"], union) == "2.3.0"
     assert max_satisfying(["3.0.0"], union) is None
 

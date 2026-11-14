@@ -37,41 +37,11 @@ BEHAVIOR_BAN = {
     "pathlib",
 }
 
-# 白名单（登记制基础原语，见包 README 与 docs/crosscutting/structure-modeling.md
-# §二第 1 层——两处同步）：
-# - signal.py：取消原语，实现需要 asyncio。
-# （task_tracker.py 已迁出归 nova_async——取消/等待机制族叶子包。）
-IMPORT_WHITELIST = {
-    "signal.py": {"asyncio"},
-}
+# 行为件（登记制基础原语与纯算法）已全部迁出；终态不设 import 白名单。
+IMPORT_WHITELIST = {}
 
-# 纯函数算法件不需要 import 例外；在此登记住所，I/O 仍由全局扫描统一禁止。
-PURE_ALGORITHM_PATHS = {
-    "exec_server_intent.py",
-    "exec_server_policy",
-    "exec_server_permissions",
-    "sanitize.py",
-}
-
-
-def test_registered_pure_algorithm_paths_exist():
-    missing = sorted(
-        path for path in PURE_ALGORITHM_PATHS if not (PKG_ROOT / path).exists()
-    )
-    assert not missing, f"纯算法登记册指向不存在的住所：{missing}"
-
-
-def test_public_exec_wire_types_have_docstrings():
-    """公共线上类型必须说明契约用途，不再积累无名形状。"""
-    tree = ast.parse((PKG_ROOT / "exec_server_wire.py").read_text(encoding="utf-8"))
-    missing = [
-        f"{node.lineno}:{node.name}"
-        for node in tree.body
-        if isinstance(node, ast.ClassDef)
-        and not node.name.startswith("_")
-        and ast.get_docstring(node) is None
-    ]
-    assert not missing, f"公共 exec 类型缺 docstring：{missing}"
+# 纯函数算法件已全部迁出；终态不设住所白名单。
+PURE_ALGORITHM_PATHS = set()
 
 
 def _iter_modules():
@@ -156,12 +126,32 @@ def test_root_reexports_are_complete():
     # 子包自行声明的公共词汇也必须递归挂到根门面，不能只查根级 .py。
     import importlib
 
-    for module_name in (
-        "nova_protocol.exec_server_permissions",
-        "nova_protocol.exec_server_policy",
-        "nova_protocol.agent_events",
-    ):
+    for module_name in ("nova_protocol.agent_events",):
         module = importlib.import_module(module_name)
         for name in module.__all__:
             assert hasattr(nova_protocol, name), f"根门面缺少 {module_name}.{name}"
             assert name in nova_protocol.__all__, f"__all__ 缺少 {module_name}.{name}"
+
+
+def test_legacy_home_imports_zero():
+    """集中类型层与已迁出模块的旧 import 必须在全仓归零。"""
+    repo_root = Path(__file__).resolve().parents[2]
+    banned = (
+        "nova_protocol.signal",
+        "nova_protocol.sanitize",
+        "nova_agent.types.base",
+        "nova_harness.types",
+        "nova_server.types",
+    )
+    offenders = []
+    for root_name in ("packages", "bundles"):
+        for path in (repo_root / root_name).rglob("*.py"):
+            if {"__pycache__", "node_modules", ".venv"} & set(path.parts):
+                continue
+            for target in _imports_of(path):
+                if target.startswith("nova_protocol.exec_server_") or any(
+                    target == prefix or target.startswith(prefix + ".")
+                    for prefix in banned
+                ):
+                    offenders.append(f"{path.relative_to(repo_root)}: {target}")
+    assert not offenders, "旧住所 import 未归零：\n" + "\n".join(offenders)

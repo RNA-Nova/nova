@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from nova_coding_agent.ui_primitives import confirm
 from nova_harness.events.results import (
     SessionBeforeForkResult,
     SessionBeforeSwitchResult,
 )
+
+from nova_coding_agent.ui_primitives import confirm
 
 _ACTION_LABELS = {"new": "新建会话", "resume": "切换会话"}
 

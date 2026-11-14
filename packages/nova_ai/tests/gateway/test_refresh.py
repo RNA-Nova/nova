@@ -7,6 +7,8 @@ import asyncio
 from typing import List
 
 import pytest
+from nova_ai.gateway import InMemoryModelsStore, ModelsManager, RefreshModelsContext
+from nova_ai.providers import create_provider
 from nova_protocol import (
     AnyModel,
     Context,
@@ -18,9 +20,6 @@ from nova_protocol import (
     UserMessage,
     WarningKind,
 )
-
-from nova_ai.gateway import InMemoryModelsStore, ModelsManager, RefreshModelsContext
-from nova_ai.providers import create_provider
 from tests._helpers.callback_refresh import callback_refresh
 
 
@@ -41,7 +40,8 @@ def _make_model(model_id: str = "test", provider: str = "test") -> Model:
 
 def _resolving_auth(key: str = "sk-test"):
     """始终可解析的 apiKey auth 桩（网络阶段需要有效凭据）。"""
-    from nova_protocol import ApiKeyAuth, AuthResult, ProviderAuth
+    from nova_ai.auth import ApiKeyAuth, ProviderAuth
+    from nova_protocol import AuthResult
 
     async def _resolve(_ctx):
         return AuthResult(auth={"api_key": key}, env=None, source="test")
@@ -350,8 +350,7 @@ async def test_refresh_deadline_covers_credential_resolution():
     此前预算只包网络阶段，解析在预算外裸奔（内置 resolve 全读 env 才
     没炸过）——终态：整条链共享一个预算。
     """
-    from nova_protocol import ApiKeyAuth, ProviderAuth
-
+    from nova_ai.auth import ApiKeyAuth, ProviderAuth
     from nova_ai.utils.errors import RequestTimeoutError
 
     async def _hanging_resolve(_ctx):

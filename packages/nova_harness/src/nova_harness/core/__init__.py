@@ -19,8 +19,8 @@ from nova_harness.core.runtime_manager.assembly import (
     create_agent_session_services,
     list_installed_agents,
 )
-from nova_harness.types.session.config import CreateAgentSessionOptions
-from nova_harness.types.session.factory import (
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.sessions.factory import (
     CreateAgentSessionResult,
     CreateAgentSessionRuntimeOptions,
     CreateAgentSessionRuntimeResult,

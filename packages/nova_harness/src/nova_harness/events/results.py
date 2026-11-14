@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any, List, Literal, Optional, Union
 
-from nova_harness.types.compaction.compaction import CompactionResult
 from nova_protocol import AgentMessage, ImageContent, NovaBaseModel, TextContent
 from pydantic import Field
+
+from nova_harness.core.domains.compaction.models import CompactionResult
 
 
 class ContextEventResult(NovaBaseModel):

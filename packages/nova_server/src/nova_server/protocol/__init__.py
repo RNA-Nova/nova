@@ -11,6 +11,19 @@
 """
 
 from nova_server.protocol.errors import JSONRPCError
+from nova_server.protocol.items import (
+    AgentMessageItem,
+    BranchSummaryItem,
+    CompactionItem,
+    CustomItem,
+    FrameworkItem,
+    ItemStatus,
+    NovaItem,
+    NovaWireItem,
+    ThinkingItem,
+    ToolCallItem,
+    UserMessageItem,
+)
 from nova_server.protocol.jsonrpc import (
     JsonRpcMessage,
     build_error,
@@ -18,6 +31,11 @@ from nova_server.protocol.jsonrpc import (
     build_request,
     build_response,
     parse_message,
+)
+from nova_server.protocol.notifications import (
+    ItemCompletedNotification,
+    ItemDeltaNotification,
+    ItemStartedNotification,
 )
 from nova_server.protocol.router import MethodRegistry
 
@@ -30,4 +48,18 @@ __all__ = [
     "build_response",
     "parse_message",
     "MethodRegistry",
+    "ItemStatus",
+    "NovaItem",
+    "UserMessageItem",
+    "AgentMessageItem",
+    "ThinkingItem",
+    "ToolCallItem",
+    "CompactionItem",
+    "BranchSummaryItem",
+    "CustomItem",
+    "FrameworkItem",
+    "NovaWireItem",
+    "ItemStartedNotification",
+    "ItemDeltaNotification",
+    "ItemCompletedNotification",
 ]

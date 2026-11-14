@@ -10,7 +10,7 @@
 """
 
 from nova_harness.events import InputEventResult
-from nova_harness.extensions import NovaExtensionAPI
+from nova_harness.extensions.api import NovaExtensionAPI
 
 
 def extension(nova: NovaExtensionAPI):

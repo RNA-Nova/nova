@@ -4,13 +4,14 @@ import asyncio
 from pathlib import Path
 
 import pytest
+
 from nova_harness.package.install.updates import (
     _git_local_head,
     _git_remote_head,
     _is_pinned_git_ref,
     check_for_available_updates,
 )
-from nova_harness.types.package import PackageUpdate, SourceScope
+from nova_harness.package.types import PackageUpdate, SourceScope
 
 
 @pytest.mark.parametrize(
@@ -152,7 +153,7 @@ def test_package_manager_check_for_available_updates_uses_settings_manager(
     而不是访问已不存在的 _settings_store 属性。"""
     import asyncio
 
-    from nova_harness.package import PackageManager
+    from nova_harness.package.manager import PackageManager
 
     pm = PackageManager(agent_dir=str(tmp_path / "agent"))
 

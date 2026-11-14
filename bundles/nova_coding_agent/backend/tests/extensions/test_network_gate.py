@@ -6,15 +6,16 @@ import pytest
 from nova_exec_server_client import ApprovalPolicy
 
 pytestmark = pytest.mark.asyncio
+from nova_exec_protocol import (
+    ExecServerNetworkPolicyRequest,
+    ExecServerNetworkProtocol,
+    NetworkPolicyRequestParams,
+)
+
 from nova_coding_agent.adjudication.network_gate import (
     AskOutcome,
     NetworkPolicyGate,
     resolve_ask_behavior,
-)
-from nova_protocol import (
-    ExecServerNetworkPolicyRequest,
-    ExecServerNetworkProtocol,
-    NetworkPolicyRequestParams,
 )
 
 
@@ -118,8 +119,8 @@ class TestGateAskFlow:
 
 class TestPolicyDecisionSugar:
     async def test_typed_subscription_and_filter(self, monkeypatch):
+        from nova_exec_protocol import NetworkPolicyDecisionNotification
         from nova_exec_server_client import ExecutorClient
-        from nova_protocol import NetworkPolicyDecisionNotification
 
         client = ExecutorClient(transport_factory=lambda: None)  # 不连接，仅测糖
         router = client.notifications

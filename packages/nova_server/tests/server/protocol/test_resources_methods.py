@@ -8,6 +8,8 @@ from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import resources as resources_methods
 from nova_server.protocol.methods.state import ServerState
 
+from nova_harness.ui import NoOpUIContext
+
 
 class FakeResourceLoader:
     def get_prompts(self):
@@ -47,16 +49,11 @@ class FakeResourceLoader:
         }
 
 
-class FakeRuntime:
-    def __init__(self, session):
-        self.session = session
-
-
 @pytest.fixture
 def registry():
     session = SimpleNamespace(resource_loader=FakeResourceLoader())
-    state = ServerState(ui_context=SimpleNamespace())
-    state.set_runtime(FakeRuntime(session))
+    state = ServerState(ui_context=NoOpUIContext())
+    state.runtime = SimpleNamespace(session=session)
     reg = MethodRegistry()
     resources_methods.register(reg, state)
     return reg

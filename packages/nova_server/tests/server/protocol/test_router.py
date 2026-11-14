@@ -46,6 +46,7 @@ async def test_method_not_found():
 
     assert resp is not None
     assert resp.id == 3
+    assert resp.error is not None
     assert resp.error["code"] == JSONRPCError.METHOD_NOT_FOUND
 
 
@@ -73,6 +74,7 @@ async def test_jsonrpc_error_returned():
 
     assert resp is not None
     assert resp.id == 4
+    assert resp.error is not None
     assert resp.error["code"] == JSONRPCError.INVALID_PARAMS
     assert resp.error["message"] == "bad"
 
@@ -87,6 +89,7 @@ async def test_internal_error_caught():
 
     assert resp is not None
     assert resp.id == 5
+    assert resp.error is not None
     assert resp.error["code"] == JSONRPCError.INTERNAL_ERROR
 
 

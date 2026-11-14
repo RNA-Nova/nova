@@ -28,7 +28,8 @@ import inspect
 from typing import Any, Awaitable, Callable, Iterable, Optional, TypeVar
 
 import anyio
-from nova_protocol import AbortController, AbortedError, AbortSignal, is_aborted
+
+from .signal import AbortController, AbortedError, AbortSignal, is_aborted
 
 T = TypeVar("T")
 

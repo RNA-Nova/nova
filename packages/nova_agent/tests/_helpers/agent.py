@@ -3,8 +3,8 @@
 from typing import Any, Callable, List, Union
 
 from nova_ai import AssistantMessageEventStream
+from nova_async import AbortedError
 from nova_protocol import (
-    AbortedError,
     AgentToolResult,
     AssistantMessage,
     AssistantMessageEvent,

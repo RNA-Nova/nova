@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 from fake_transport import FakeTransport
+
 from nova_exec_server_client import (
     ConnectionError,
     ExecutorClient,
@@ -126,7 +127,7 @@ def test_initialize_timeout_must_be_positive():
 async def test_from_environment_threads_initialize_timeout():
     """from_environment 透传 initialize_timeout 到构造点（environments
     侧 EnvironmentManager.get_client 的注入路径）"""
-    from nova_protocol import ResolvedEnvironment
+    from nova_exec_server_client.environments import ResolvedEnvironment
 
     environment = ResolvedEnvironment(
         id="ws-1",

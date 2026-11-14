@@ -376,7 +376,7 @@ nova-pkg install /path/to/pkg --dry-run
 `PackageManager` 支持两种作用域：
 
 ```python
-from nova_harness.package import PackageManager
+from nova_harness.package.manager import PackageManager
 
 # 全局级（默认）
 pm = PackageManager()

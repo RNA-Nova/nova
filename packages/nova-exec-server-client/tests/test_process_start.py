@@ -12,9 +12,10 @@
 
 import pytest
 from fake_transport import FakeTransport
+from nova_exec_protocol import ExecMetadata
+
 from nova_exec_server_client import ConnectionError, ExecutorClient, ProtocolError
 from nova_exec_server_client.process import ProcessManager
-from nova_protocol import ExecMetadata
 
 INIT_OK = {"sessionId": "fake-session", "protocolVersion": "1.13"}
 

@@ -19,8 +19,8 @@ from nova_harness.core.utils.skills import (
     format_skills_for_prompt,
     list_skill_commands,
 )
-from nova_harness.types.extensions.commands import ExtensionCommand
-from nova_harness.types.resources.skills import ParsedSkillBlock, Skill
+from nova_harness.extensions.commands import ExtensionCommand
+from nova_harness.resources.skills import ParsedSkillBlock, Skill
 
 
 def is_package_skill(skill: Skill) -> bool:

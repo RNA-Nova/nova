@@ -29,7 +29,7 @@ import json
 import types as _py_types
 from dataclasses import is_dataclass
 from datetime import date, datetime, time
-from enum import Enum
+from enum import Enum, EnumMeta
 from pathlib import Path
 from typing import (
     Any,
@@ -44,14 +44,15 @@ from typing import (
     get_type_hints,
 )
 
-from nova_harness.events.unions import AgentSessionEvent
-from nova_harness.types.session.entries import SessionEntry, SessionHeader
-from nova_server.types.items import CustomItem, FrameworkItem, NovaItem, NovaWireItem
-from nova_server.types.notifications import (
+from nova_server.protocol.items import CustomItem, FrameworkItem, NovaItem, NovaWireItem
+from nova_server.protocol.notifications import (
     ItemCompletedNotification,
     ItemDeltaNotification,
     ItemStartedNotification,
 )
+
+from nova_harness.events.unions import AgentSessionEvent
+from nova_harness.sessions.entries import SessionEntry, SessionHeader
 
 # 契约版本（major/minor 语义）：
 # - MAJOR：事件词汇/方法形状发生**不兼容**变更（删字段/改语义）时递增——
@@ -111,12 +112,13 @@ def _union_members(annotation: Any) -> List[Any]:
     return members
 
 
-def _enum_ts_and_schema(enum_cls: type) -> Tuple[str, Dict[str, Any]]:
+def _enum_ts_and_schema(enum_cls: EnumMeta) -> Tuple[str, Dict[str, Any]]:
     """Enum 的线上形态：str 子类取 value；其余取 str(member)（serialize 降级语义）。"""
+    members = [member for member in enum_cls if isinstance(member, Enum)]
     if issubclass(enum_cls, str):
-        values = [member.value for member in enum_cls]
+        values = [member.value for member in members]
     else:
-        values = [str(member) for member in enum_cls]
+        values = [str(member) for member in members]
     ts = " | ".join(json.dumps(v) for v in values)
     return ts, {"type": "string", "enum": values}
 

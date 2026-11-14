@@ -5,11 +5,13 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from nova_async import AbortController
+from nova_protocol import CustomAgentMessage
+
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.domains.user_tools import UserToolManager
 from nova_harness.events import USER_BASH, UserBashEvent
-from nova_harness.types.protocols import AgentSessionProtocol
-from nova_harness.types.resources.user_tools import UserToolEventCallback
-from nova_protocol import AbortController, CustomAgentMessage
+from nova_harness.resources.user_tools import UserToolEventCallback
 
 
 class UserToolController:

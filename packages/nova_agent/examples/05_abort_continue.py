@@ -12,8 +12,10 @@ import asyncio
 from contextlib import suppress
 
 from nova_ai import EventStream
-from nova_protocol import (
+from nova_async import (
     AbortedError,
+)
+from nova_protocol import (
     AgentToolResult,
     DoneEvent,
     KnownApi,

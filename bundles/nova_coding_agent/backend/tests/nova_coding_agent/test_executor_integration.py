@@ -6,6 +6,7 @@
 import asyncio
 
 import pytest
+
 from nova_coding_agent.executor import (
     ExecutorBashOperations,
     get_executor_manager,
@@ -48,7 +49,7 @@ class TestExecutorBashOperationsIntegration:
 
     def test_abort(self, executor_available):
         async def run():
-            from nova_protocol import AbortController
+            from nova_async import AbortController
 
             ctl = AbortController()
             ops = ExecutorBashOperations(get_executor_manager())

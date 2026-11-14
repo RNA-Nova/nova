@@ -9,8 +9,9 @@ import importlib.util
 import os
 
 import pytest
+from nova_harness.ui.primitives import UIResponse
+
 from nova_coding_agent.executor import get_backend_selection, reset_backend_selection
-from nova_harness.types.ui.primitives import UIResponse
 
 
 @pytest.fixture(autouse=True)
@@ -21,8 +22,9 @@ def _hermetic_default_config(monkeypatch):
     只有未切换时的默认解析走磁盘——测试里固定为空配置，语义等价旧
     settings 缺省（local）。
     """
+    from nova_exec_policy import ExecutorConfig
+
     import nova_coding_agent.executor.runtime as runtime_mod
-    from nova_protocol import ExecutorConfig
 
     monkeypatch.setattr(
         runtime_mod, "load_executor_config", lambda **_: ExecutorConfig()

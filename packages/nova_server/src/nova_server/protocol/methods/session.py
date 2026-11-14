@@ -6,16 +6,10 @@ import asyncio
 import json
 import os
 import shutil
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from nova_harness.config.defaults import get_agent_dir
-from nova_harness.core.runtime_manager.assembly import list_installed_agents
-from nova_harness.resources.project_trust.callback import (
-    make_resolve_project_trust_callback,
-)
-from nova_harness.types.compaction.compaction import CompactionResult
-from nova_harness.types.session.config import CreateAgentSessionOptions
-from nova_harness.types.ui import NoOpUIContext
+from nova_protocol import ImageContent, ModelThinkingLevel
 from nova_server.protocol.errors import JSONRPCError
 from nova_server.protocol.methods.model import resolve_model
 from nova_server.protocol.methods.shapes import (
@@ -91,6 +85,15 @@ from nova_server.protocol.schema_export import (
     CONTRACT_VERSION_MINOR,
 )
 from nova_server.reduction import entries_to_items
+
+from nova_harness.config.defaults import get_agent_dir
+from nova_harness.core.domains.compaction.models import CompactionResult
+from nova_harness.core.runtime_manager.assembly import list_installed_agents
+from nova_harness.resources.project_trust.callback import (
+    make_resolve_project_trust_callback,
+)
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.ui import NoOpUIContext
 
 
 def _find_session_path(session_id: str, cwd: Optional[str]) -> Optional[str]:
@@ -212,8 +215,8 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         """握手：服务器版本 + 契约版本（major/minor）+ 真实能力位（域/方法，来自注册表）。"""
         return InitializeResult(
             version="0.1.0",
-            contractVersionMajor=CONTRACT_VERSION_MAJOR,
-            contractVersionMinor=CONTRACT_VERSION_MINOR,
+            contract_version_major=CONTRACT_VERSION_MAJOR,
+            contract_version_minor=CONTRACT_VERSION_MINOR,
             capabilities=CapabilitiesInfo(
                 domains=list(registry.domains().keys()),
                 methods=registry.method_names(),
@@ -275,7 +278,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         # 与 print 模式 --no-session 同一机制）
         session_manager = None
         if no_session:
-            from nova_harness.sessions import SessionManager
+            from nova_harness.sessions.manager import SessionManager
 
             session_manager = SessionManager.in_memory(params.cwd or os.getcwd())
 
@@ -299,11 +302,15 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             )
 
         opts = CreateAgentSessionOptions(
-            cwd=params.cwd,
+            cwd=Path(params.cwd) if params.cwd is not None else None,
             model=model,
-            thinking_level=params.thinking_level,
+            thinking_level=(
+                ModelThinkingLevel(params.thinking_level)
+                if params.thinking_level is not None
+                else None
+            ),
             agent_name=params.agent_name,
-            agent_dir=params.agent_dir,
+            agent_dir=Path(params.agent_dir) if params.agent_dir is not None else None,
             session_manager=session_manager,
             ui_context=state.ui_context,
             # exec/headless 形态参数面（协议承接自 CreateSessionParams）
@@ -314,12 +321,13 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             project_trusted=params.trust,
             resolve_project_trust=resolve_project_trust,
         )
-        state.set_runtime(await state.runtime_manager.open_session(opts))
+        runtime = await state.runtime_manager.open_session(opts)
+        state.set_runtime(runtime)
 
         resumed = False
 
         if session_file_path is not None:
-            result = await state.runtime.switch_session(session_file_path)
+            result = await runtime.switch_session(session_file_path)
             resumed = not result.get("cancelled", False)
         elif session_flag is not None:
             if session_flag == "":
@@ -327,7 +335,7 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             else:
                 session_path = _find_session_path(session_flag, params.cwd)
                 if session_path:
-                    result = await state.runtime.switch_session(session_path)
+                    result = await runtime.switch_session(session_path)
                     resumed = not result.get("cancelled", False)
                 else:
                     raise JSONRPCError(
@@ -337,12 +345,12 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         elif continue_last:
             session_path = _find_most_recent_session(params.cwd)
             if session_path:
-                result = await state.runtime.switch_session(session_path)
+                result = await runtime.switch_session(session_path)
                 resumed = not result.get("cancelled", False)
 
         return CreateSessionResult(
-            session_id=state.runtime.session.session_id,
-            session_name=state.runtime.session.session_name,
+            session_id=runtime.session.session_id,
+            session_name=runtime.session.session_name,
             resumed=resumed,
         )
 
@@ -363,7 +371,10 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             # 纯计算路径（只读扫描不创建目录），目录缺失时 listing 返回空
             session_dir = get_default_session_dir_path(params.cwd or os.getcwd())
             infos = await list_sessions_from_dir(session_dir)
-            infos.sort(key=lambda s: s.modified, reverse=True)
+            infos.sort(
+                key=lambda s: s.modified.timestamp() if s.modified else 0.0,
+                reverse=True,
+            )
 
         items: List[SessionListItem] = []
         for info in infos:
@@ -468,7 +479,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             streaming_behavior=params.streaming_behavior,
             source="rpc",
         )
-        options.images = _parse_images(params.images)
+        images = _parse_images(params.images)
+        if images is not None:
+            options.images = images
 
         await state.runtime.session.prompt(text, options=options)
         return OkResult(success=True)
@@ -479,11 +492,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
         await state.runtime.session.abort()
         return AbortResult(success=True)
 
-    def _parse_images(raw: Any) -> Optional[list]:
+    def _parse_images(raw: Any) -> Optional[List[ImageContent]]:
         if not raw:
             return None
-        from nova_protocol import ImageContent
-
         return [ImageContent.model_validate(img) for img in raw]
 
     async def getSessionState(params: EmptyParams) -> SessionStateResult:

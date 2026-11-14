@@ -4,17 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from nova_async import abortable_sleep, backoff_delay_ms
+from nova_async import AbortController, AbortedError, abortable_sleep, backoff_delay_ms
+from nova_protocol import RETRYABLE_ERROR_KINDS, AssistantMessage, NovaErrorKind
+
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.utils import is_context_overflow
 from nova_harness.events import AutoRetryEndEvent, AutoRetryStartEvent
-from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import (
-    RETRYABLE_ERROR_KINDS,
-    AbortController,
-    AbortedError,
-    AssistantMessage,
-    NovaErrorKind,
-)
 
 
 class RetryController:
@@ -94,6 +89,8 @@ class RetryController:
                 cap_ms=max_delay_ms,
                 jitter=0,
             )
+
+        delay_ms = int(delay_ms)
 
         self._session._emit(
             AutoRetryStartEvent(

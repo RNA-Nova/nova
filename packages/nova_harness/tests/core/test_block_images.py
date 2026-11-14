@@ -3,8 +3,9 @@
 from typing import Any, List
 
 import pytest
-from nova_harness.core.runtime_manager.factory import create_convert_to_llm
 from nova_protocol import AssistantMessage, ImageContent, TextContent, UserMessage
+
+from nova_harness.core.runtime_manager.factory import create_convert_to_llm
 
 
 class _FakeSettingsManager:

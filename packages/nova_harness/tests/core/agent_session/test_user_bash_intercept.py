@@ -10,13 +10,15 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Literal, Optional
 
 import pytest
-from nova_harness.core.agent_session.controllers.user_tools import UserToolController
-from nova_harness.events import USER_BASH, UserBashEventResult
-from nova_harness.types.resources.user_tools import UserToolDefinition
 from nova_protocol import CustomAgentMessage
 
+from nova_harness.core.agent_session.controllers.user_tools import UserToolController
+from nova_harness.core.domains.user_tools import UserToolManager
+from nova_harness.events import USER_BASH, UserBashEventResult
+from nova_harness.resources.user_tools import UserToolDefinition
 
-class _FakeBashMessage(CustomAgentMessage):
+
+class _FakeBashMessage(CustomAgentMessage[Literal["fakeBash"]]):
     """占位消息：模拟 bash 用户工具产出的 BashExecutionMessage。"""
 
     text: str = ""
@@ -47,7 +49,7 @@ class _FakeRunner:
         self.errors.append(error)
 
 
-class _FakeManager:
+class _FakeManager(UserToolManager):
     """最小 UserToolManager 替身：记录 invoke 调用并返回固定消息。"""
 
     def __init__(self, definition: Optional[UserToolDefinition] = None) -> None:
@@ -58,10 +60,20 @@ class _FakeManager:
         return self._definition
 
     async def invoke(
-        self, name: str, params: Dict[str, Any], on_event: Any, signal: Any
+        self,
+        name: str,
+        params: Optional[Dict[str, Any]] = None,
+        on_event: Any = None,
+        signal: Any = None,
     ) -> CustomAgentMessage:
+        params = params or {}
         self.invoke_calls.append({"name": name, "params": params})
         return _FakeBashMessage(text=f"executed:{params.get('command', '')}")
+
+
+def _text(message: CustomAgentMessage) -> str:
+    assert isinstance(message, _FakeBashMessage)
+    return message.text
 
 
 def _make_session(runner: Any, cwd: str = "/tmp/work") -> Any:
@@ -120,7 +132,7 @@ async def test_extension_result_replaces_execution():
     assert manager.invoke_calls == []
     # 扩展 result 经工具转换器翻译为消息并记录进会话
     assert built_with[0]["result"] == {"output": "remote-out", "exit_code": 0}
-    assert message.text == "built:remote-out"
+    assert _text(message) == "built:remote-out"
     assert session.agent.state.messages == [message]
 
 
@@ -140,7 +152,7 @@ async def test_extension_operations_injected_into_params():
     assert len(manager.invoke_calls) == 1
     assert manager.invoke_calls[0]["params"]["operations"] is fake_operations
     assert manager.invoke_calls[0]["params"]["command"] == "echo hi"
-    assert message.text == "executed:echo hi"
+    assert _text(message) == "executed:echo hi"
     assert session.agent.state.messages == [message]
     # 注入不污染调用方传入的字典
     assert "operations" not in caller_params
@@ -157,7 +169,7 @@ async def test_no_extension_runner_unchanged():
 
     assert len(manager.invoke_calls) == 1
     assert manager.invoke_calls[0]["params"] == {"command": "pwd"}
-    assert message.text == "executed:pwd"
+    assert _text(message) == "executed:pwd"
     assert session.agent.state.messages == [message]
 
 
@@ -173,7 +185,7 @@ async def test_no_user_bash_handler_unchanged():
 
     assert runner.emitted_events == []
     assert len(manager.invoke_calls) == 1
-    assert message.text == "executed:pwd"
+    assert _text(message) == "executed:pwd"
 
 
 @pytest.mark.asyncio
@@ -188,7 +200,7 @@ async def test_handler_returning_none_unchanged():
 
     assert len(runner.emitted_events) == 1
     assert len(manager.invoke_calls) == 1
-    assert message.text == "executed:pwd"
+    assert _text(message) == "executed:pwd"
 
 
 @pytest.mark.asyncio
@@ -206,7 +218,7 @@ async def test_non_bash_tool_not_intercepted():
     assert runner.emitted_events == []
     assert len(manager.invoke_calls) == 1
     assert manager.invoke_calls[0]["name"] == "fake"
-    assert message.text == "executed:pwd"
+    assert _text(message) == "executed:pwd"
 
 
 @pytest.mark.asyncio
@@ -222,7 +234,7 @@ async def test_result_without_builder_falls_back_with_error():
     assert len(runner.errors) == 1
     assert runner.errors[0]["event"] == USER_BASH
     assert len(manager.invoke_calls) == 1
-    assert message.text == "executed:ls"
+    assert _text(message) == "executed:ls"
 
 
 # ---------------------------------------------------------------------------

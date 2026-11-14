@@ -1,12 +1,12 @@
 """AuthStorage 内存工厂测试辅助函数。"""
 
 import json
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from nova_harness.config.auth.storage import AuthStorage
 from nova_harness.config.storage import InMemoryStorageBackend
 
-AuthStorageData = Dict[str, Dict[str, str]]
+AuthStorageData = Dict[str, Dict[str, Any]]
 
 
 def auth_storage_in_memory(data: Optional[AuthStorageData] = None) -> AuthStorage:

@@ -41,7 +41,8 @@ from .errors import (
 from .transport import _signal_kwarg
 
 if TYPE_CHECKING:
-    from nova_protocol import AbortSignal, InitializeResponse
+    from nova_async import AbortSignal
+    from nova_exec_protocol import InitializeResponse
 
     from .transport import Transport
 

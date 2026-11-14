@@ -1,9 +1,6 @@
 """OAuthFlowError（auth/oauth/errors.py）测试——自声明 kind 与状态透传。"""
 
 import httpx
-from nova_protocol import NovaBaseModel, NovaErrorKind
-from pydantic import ConfigDict, Field, ValidationError
-
 from nova_ai.auth.oauth.errors import (
     OAuthFlowError,
     oauth_http_kind,
@@ -11,6 +8,8 @@ from nova_ai.auth.oauth.errors import (
     validation_error,
     validation_message,
 )
+from nova_protocol import NovaBaseModel, NovaErrorKind
+from pydantic import ConfigDict, Field, ValidationError
 
 
 class TestOAuthHttpKind:

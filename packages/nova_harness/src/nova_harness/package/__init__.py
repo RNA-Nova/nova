@@ -1,37 +1,4 @@
-"""Package manager for Nova agent configs, tools, skills, extensions, and packages.
+"""Nova 包安装、解析与公共数据类型。
 
-Install, uninstall, list, update, and validate packages from local paths or git::
-
-    >>> from nova_harness.package import PackageManager
-    >>> pm = PackageManager()
-    >>>
-    >>> # Install a bundle and persist it to settings
-    >>> pm.install_and_persist("/path/to/nova_coding_agent")
-    >>>
-    >>> # Resolve all runtime resources
-    >>> paths = await pm.resolve_resources()
-    >>>
-    >>> pm.uninstall("nova-coding-agent")
-
-The public facade is `PackageManager`. Lower-level building blocks are also
-exported for advanced use cases:
-
-- `PackageInstaller`: install / uninstall / list / info / validate
-- `PackageResolver`: runtime resource path resolution
+入口保持轻量；实现从对应叶子模块导入，公共数据聚合在 ``package.types``。
 """
-
-from nova_harness.package.install.installer import PackageInstaller
-from nova_harness.package.manager import (
-    PackageInstallError,
-    PackageManager,
-    PackageUpdateError,
-)
-from nova_harness.package.resolve.resolver import PackageResolver
-
-__all__ = [
-    "PackageInstallError",
-    "PackageManager",
-    "PackageInstaller",
-    "PackageResolver",
-    "PackageUpdateError",
-]

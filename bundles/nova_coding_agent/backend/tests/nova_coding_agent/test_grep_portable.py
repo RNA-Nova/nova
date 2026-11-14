@@ -102,8 +102,9 @@ def test_session_lines_abort_awaits_terminate_settlement():
     完成，否则 finally 的 watcher.cancel() 会把在飞 terminate 掐死在半路。
     全程 Event 受控完成序（terminate 经闸门挂起，释放权在测试）。
     """
+    from nova_async import AbortController, AbortedError
+
     from nova_coding_agent.tools_common.operations import _session_lines_with_abort
-    from nova_protocol import AbortController, AbortedError
 
     class _AbortingSession:
         def __init__(self):

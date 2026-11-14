@@ -1,7 +1,7 @@
 """harness 组合层的图像目录与 generate_images 能力透传。"""
 
 import pytest
-from nova_harness.model.composer import compose_provider
+from nova_ai import create_provider
 from nova_protocol import (
     AssistantImages,
     ImageModel,
@@ -11,7 +11,7 @@ from nova_protocol import (
     TextContent,
 )
 
-from nova_ai import create_provider
+from nova_harness.model.composer import compose_provider
 
 
 class FakeImages:

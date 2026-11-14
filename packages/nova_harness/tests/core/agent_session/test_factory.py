@@ -2,8 +2,9 @@
 
 from unittest.mock import MagicMock
 
-from nova_harness.core.runtime_manager.factory import restore_or_persist_session_state
 from nova_protocol import ModelThinkingLevel
+
+from nova_harness.core.runtime_manager.factory import restore_or_persist_session_state
 
 
 def _session_manager(messages=None, branch=None) -> MagicMock:

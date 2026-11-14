@@ -3,9 +3,8 @@
 import asyncio
 
 import pytest
-from nova_protocol import ClassifierContext, ClassifierModel, ClassifierStopReason
-
 from nova_ai.stream_options import ClassifierOptions
+from nova_protocol import ClassifierContext, ClassifierModel, ClassifierStopReason
 
 from ._helpers.auth import build_manager, has_credential
 from ._helpers.probes import probe_for

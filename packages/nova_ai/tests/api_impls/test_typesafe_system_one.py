@@ -6,8 +6,10 @@ import json
 import httpx
 import pytest
 import respx
+from nova_ai.api_impls.typesafe_system_one import classify
+from nova_ai.stream_options import ClassifierOptions
+from nova_async import AbortController
 from nova_protocol import (
-    AbortController,
     ClassifierContext,
     ClassifierModel,
     ClassifierStopReason,
@@ -15,9 +17,6 @@ from nova_protocol import (
     ModelCost,
     SystemOneCompat,
 )
-
-from nova_ai.api_impls.typesafe_system_one import classify
-from nova_ai.stream_options import ClassifierOptions
 
 pytestmark = pytest.mark.asyncio
 _URL = "https://openrouter.ai/api/v1/systemone"

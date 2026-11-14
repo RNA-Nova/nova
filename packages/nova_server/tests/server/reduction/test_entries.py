@@ -7,27 +7,6 @@
 
 from typing import Any, List, Literal
 
-from nova_harness.events import (
-    AgentEndEvent,
-    ItemEmissionEvent,
-    MessageEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    ToolExecutionEndEvent,
-    ToolExecutionStartEvent,
-)
-from nova_harness.events.session import CompactionEndEvent
-from nova_harness.types.compaction.compaction import CompactionResult
-from nova_harness.types.messages import CustomMessage
-from nova_harness.types.session.entries import (
-    BranchSummaryEntry,
-    CompactionEntry,
-    CustomEntry,
-    CustomMessageEntry,
-    LabelEntry,
-    ModelChangeEntry,
-    SessionMessageEntry,
-)
 from nova_protocol import (
     AgentToolResult,
     AssistantMessage,
@@ -39,8 +18,39 @@ from nova_protocol import (
     ToolResultMessage,
     UserMessage,
 )
+from nova_server.protocol.items import (
+    AgentMessageItem,
+    BranchSummaryItem,
+    CompactionItem,
+    CustomItem,
+    ItemStatus,
+    NovaItem,
+    ThinkingItem,
+    ToolCallItem,
+)
 from nova_server.reduction import SessionReducer, entries_to_items
-from nova_server.types.items import CustomItem, ItemStatus, NovaItem
+
+from nova_harness.core.domains.compaction.models import CompactionResult
+from nova_harness.events import (
+    AgentEndEvent,
+    ItemEmissionEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+)
+from nova_harness.events.session import CompactionEndEvent
+from nova_harness.sessions.entries import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomEntry,
+    CustomMessageEntry,
+    LabelEntry,
+    ModelChangeEntry,
+    SessionMessageEntry,
+)
+from nova_harness.sessions.messages import CustomMessage
 
 
 class _PkgItem(NovaItem):
@@ -107,9 +117,12 @@ def test_assistant_entry_decomposition_and_tool_pairing():
     ]
     items = entries_to_items(entries)
     assert [i.type for i in items] == ["thinking", "agentMessage", "toolCall"]
+    assert isinstance(items[0], ThinkingItem)
     assert items[0].id == "e2:th0" and items[0].text == "想"
+    assert isinstance(items[1], AgentMessageItem)
     assert items[1].id == "e2:t1" and items[1].text == "答"
     tool = items[2]
+    assert isinstance(tool, ToolCallItem)
     assert tool.id == "tc1" and tool.tool == "read"  # 两路径同身份
     assert tool.status is ItemStatus.DONE
     assert tool.result.content[0].text == "内容"
@@ -125,6 +138,7 @@ def test_tool_call_without_result_is_cancelled():
     )
     items = entries_to_items([SessionMessageEntry(id="e4", message=assistant)])
     assert len(items) == 1
+    assert isinstance(items[0], ToolCallItem)
     assert items[0].status is ItemStatus.CANCELLED
     assert items[0].result is None
 
@@ -146,6 +160,7 @@ def test_error_tool_result_maps_failed():
             SessionMessageEntry(id="e6", message=result_msg),
         ]
     )
+    assert isinstance(items[0], ToolCallItem)
     assert items[0].status is ItemStatus.FAILED
     assert items[0].error == "权限被拒"
 
@@ -169,7 +184,9 @@ def test_compaction_and_branch_summary_entries():
         ]
     )
     assert [i.type for i in items] == ["compaction", "branchSummary"]
+    assert isinstance(items[0], CompactionItem)
     assert items[0].summary == "摘要" and items[0].tokens_before == 99
+    assert isinstance(items[1], BranchSummaryItem)
     assert items[1].from_id == "e2"
 
 
@@ -209,6 +226,7 @@ def test_custom_entry_maps_custom_item():
         ]
     )
     assert len(items) == 1
+    assert isinstance(items[0], CustomItem)
     assert items[0].type == "command_result"
     assert items[0].details == {"text": "已信任", "level": "info"}
 

@@ -4,14 +4,13 @@ import asyncio
 
 import httpx
 import pytest
-from nova_protocol import AbortController, AbortedError
-
 from nova_ai.utils.http import (
     fetch_json,
     filter_headers_for_hook,
     json_headers,
     request_with_abort,
 )
+from nova_async import AbortController, AbortedError
 
 pytestmark = pytest.mark.asyncio
 

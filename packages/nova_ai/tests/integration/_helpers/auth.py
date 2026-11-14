@@ -15,13 +15,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from nova_protocol import Credential, CredentialInfo
-from pydantic import TypeAdapter
-
 from nova_ai.auth.credential_store import InMemoryCredentialStore
 from nova_ai.gateway.models import ModelsManager, create_models_manager
 from nova_ai.providers.all import builtin_providers
 from nova_ai.utils.env import get_env_api_key
+from nova_protocol import Credential, CredentialInfo
+from pydantic import TypeAdapter
 
 AUTH_JSON_PATH = Path.home() / ".nova" / "agent" / "auth.json"
 

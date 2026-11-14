@@ -1,44 +1,25 @@
-"""Auth 类型定义。
+"""Auth 公共数据词汇。
 
-对齐 TypeScript ``src/auth/types.ts``：Credential、CredentialStore、
-AuthContext、AuthInteraction、ApiKeyAuth、OAuthAuth、ProviderAuth 等。
+只保留需要跨组件共享的持久化 schema、值对象与交互数据。鉴权行为定义、
+Callable 配置和宿主 Protocol 归 ``nova_ai.auth``。
 
 选型约定：
 
 - 需要 JSON parse/dump 的持久化 schema（credential）→ Pydantic；
-- 运行时容器与行为容器（持有 Callable）→ dataclass；
-- dict 形状透传（``ModelAuth`` / ``ApiKeyAuthInput``）→ TypedDict；
-- 服务接口 → Protocol。
+- 跨组件运行时值对象 → frozen dataclass；
+- dict 形状透传（``ModelAuth``）→ TypedDict。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import (
-    Annotated,
-    Any,
-    Awaitable,
-    Callable,
-    List,
-    Literal,
-    NotRequired,
-    Optional,
-    Protocol,
-    Tuple,
-    TypedDict,
-    Union,
-)
+from typing import Annotated, Any, List, Literal, Optional, Tuple, TypedDict, Union
 
 from pydantic import ConfigDict, Field
 from pydantic_core import core_schema
 
 from .aliases import ProviderEnv, ProviderHeaders
 from .base_model import NovaBaseModel
-from .signal import AbortSignal
-
-# ---------------------------------------------------------------------------
-# 基础类型
-# ---------------------------------------------------------------------------
 
 
 class RedactedString(str):
@@ -99,11 +80,6 @@ class AuthCheck:
 
     type: AuthType
     source: Optional[str] = None
-
-
-# ---------------------------------------------------------------------------
-# Credential（auth.json 持久化 schema）
-# ---------------------------------------------------------------------------
 
 
 class ApiKeyCredential(NovaBaseModel):
@@ -171,60 +147,6 @@ class CredentialInfo:
     type: AuthType
 
 
-# ---------------------------------------------------------------------------
-# AuthContext
-# ---------------------------------------------------------------------------
-
-
-class AuthContext(Protocol):
-    """鉴权解析时可注入的环境访问抽象。"""
-
-    async def env(self, name: str) -> Optional[str]:
-        """读取环境变量。"""
-        ...
-
-    async def file_exists(self, path: str) -> bool:
-        """检查文件是否存在（支持 ``~`` 开头）。"""
-        ...
-
-
-# ---------------------------------------------------------------------------
-# CredentialStore
-# ---------------------------------------------------------------------------
-
-
-class CredentialStore(Protocol):
-    """凭证持久化抽象（**同步引擎**——codex ``storage.rs`` 形状）。
-
-    按 ``provider_id`` 存储一个 credential。四件套全部**同步、瞬时、无
-    signal 参数**——实现内不得含网络/长操作（编排：OAuth 刷新去重、复查、
-    重试，永远住调用方的 manager 层；锁拓扑与判别测试见
-    ``docs/crosscutting/concurrency.md``）。同步无 await 点 ⇒ 取消在结构
-    上打不断写入，store 整体不在取消面内。
-    """
-
-    def read(self, provider_id: str) -> Optional[Credential]:
-        """读取已存储的 credential。"""
-        ...
-
-    def list(self) -> List[CredentialInfo]:
-        """列出所有 credential 元信息。"""
-        ...
-
-    def write(self, provider_id: str, credential: Credential) -> None:
-        """写入（新增/替换）provider 的 credential。"""
-        ...
-
-    def delete(self, provider_id: str) -> None:
-        """删除 credential。"""
-        ...
-
-
-# ---------------------------------------------------------------------------
-# AuthInteraction
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, kw_only=True)
 class AuthPromptOption:
     """select prompt 的选项。
@@ -269,7 +191,7 @@ class AuthEvent:
 
     ``type`` 已知词汇：``auth_url``（浏览器授权地址，``url`` +
     ``instructions``）/ ``device_code``（设备码展示，``user_code`` +
-    ``verification_uri*``）/ ``info``（``message`` + ``links``）/
+    ``verification_uri``）/ ``info``（``message`` + ``links``）/
     ``progress``（``message``）；未识别类型由交互实现按进度提示兜底
     （开放词汇，宿主可扩展）。
 
@@ -288,43 +210,6 @@ class AuthEvent:
     links: Optional[List[AuthInfoLink]] = None
 
 
-class AuthInteraction(Protocol):
-    """登录流程与 UI 的交互契约。"""
-
-    signal: Optional[AbortSignal] = None
-
-    async def prompt(self, prompt: AuthPrompt) -> str:
-        """向用户发起 prompt，返回用户输入/选择。"""
-        ...
-
-    def notify(self, event: AuthEvent) -> None:
-        """通知 UI 当前登录状态。"""
-        ...
-
-    async def acquire_authorization_code(self, request: "AuthorizationRequest") -> str:
-        """获取授权码（浏览器回调流的"收货"高阶操作）。
-
-        渠道装配与竞速仲裁归宿主：本地一次性监听 / 宿主监听 / 手动粘贴框，
-        任选与降级由实现按部署拓扑裁决。流程层只声明需求。
-
-        返回授权码；用户取消抛 ``LoginCancelledError``，超时抛 ``TimeoutError``。
-        """
-        ...
-
-
-class LoginCancelledError(Exception):
-    """登录流程被取消（用户 Esc / 宿主取消 / 会话中止）。
-
-    共享取消词汇：交互实现抛出，流程与 RPC 层据此优雅收尾
-    （停轮询、关监听、清框）。统一取消语义见 docs/crosscutting/data-modeling.md 第七节。
-    """
-
-
-# ---------------------------------------------------------------------------
-# ProviderAuth
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, kw_only=True)
 class AuthorizationRequest:
     """授权码获取请求（浏览器回调流的收货需求）。
@@ -334,7 +219,7 @@ class AuthorizationRequest:
 
     字段缺席语义：
     - ``manual_prompt`` 为 None 时不挂手动粘贴兜底框（纯自动通道）；
-    - ``success_html`` / ``error_html`` 为空串时收货方用自带默认页。
+    - ``success_html`` / ``error_html`` 为空串时收货方自带默认页。
     """
 
     auth_url: str
@@ -347,84 +232,19 @@ class AuthorizationRequest:
     error_html: str = ""
 
 
-class ApiKeyAuthInput(TypedDict):
-    """``ApiKeyAuth.resolve`` / ``check`` 的入参包（规则 10：声明不校验）。
-
-    - ``ctx``：鉴权解析期的环境访问（环境变量读取 / 文件探测）；
-    - ``credential``：已存储的 API key 凭据；``None`` = 无存储凭据，
-      实现应回落到环境变量等 ambient 来源；
-    - ``signal``：调用方取消信号。可选键——历史调用点可能不携带，
-      实现方用 ``input.get("signal")`` 读取。
-    """
-
-    ctx: AuthContext
-    credential: Optional[ApiKeyCredential]
-    signal: NotRequired[Optional[AbortSignal]]
-
-
-@dataclass(frozen=True, kw_only=True)
-class ApiKeyAuth:
-    """API key 鉴权定义（行为定义——持 Callable，规则 4 不进 Pydantic）。
-
-    ``login`` / ``check`` 为 ``None`` 时该 provider 不支持交互登录 /
-    轻量配置检查。
-    """
-
-    name: str
-    resolve: Callable[
-        [ApiKeyAuthInput],
-        Awaitable[Optional[AuthResult]],
-    ]
-    login: Optional[Callable[[AuthInteraction], Awaitable[ApiKeyCredential]]] = None
-    check: Optional[Callable[[ApiKeyAuthInput], Awaitable[Optional[AuthCheck]]]] = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class OAuthAuth:
-    """OAuth 鉴权定义（行为定义——持 Callable，规则 4 不进 Pydantic）。
-
-    ``login_label``：登录方式选择器里的展示名；``None`` = 用 ``name``。
-    """
-
-    name: str
-    login: Callable[[AuthInteraction], Awaitable[OAuthCredential]]
-    refresh: Callable[
-        [OAuthCredential, Optional[AbortSignal]], Awaitable[OAuthCredential]
-    ]
-    to_auth: Callable[[OAuthCredential], Awaitable[ModelAuth]]
-    # 该登录方式是否由 provider 订阅套餐支撑（订阅计费/用量语义）。
-    is_subscription: Optional[bool] = None
-    login_label: Optional[str] = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class ProviderAuth:
-    """Provider 的鉴权配置。至少提供 api_key 或 oauth 之一（均为 None 即未配置）。"""
-
-    api_key: Optional[ApiKeyAuth] = None
-    oauth: Optional[OAuthAuth] = None
-
-
 __all__ = [
-    "ApiKeyAuth",
-    "ApiKeyAuthInput",
-    "AuthorizationRequest",
     "ApiKeyCredential",
     "AuthCheck",
-    "AuthContext",
     "AuthEvent",
     "AuthInfoLink",
-    "AuthInteraction",
     "AuthPrompt",
     "AuthPromptOption",
     "AuthResult",
     "AuthType",
+    "AuthorizationRequest",
     "Credential",
-    "LoginCancelledError",
     "CredentialInfo",
-    "CredentialStore",
     "ModelAuth",
-    "OAuthAuth",
     "OAuthCredential",
-    "ProviderAuth",
+    "RedactedString",
 ]

@@ -13,8 +13,8 @@ from _helpers.agent import (
     tool_call_then_text_stream,
 )
 from _helpers.messages import tool_result_message
+from nova_async import AbortedError
 from nova_protocol import (
-    AbortedError,
     AgentToolResult,
     TextContent,
     ToolCall,

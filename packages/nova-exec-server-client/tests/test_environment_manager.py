@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from fake_transport import FakeTransport
+
 from nova_exec_server_client import (
     ConfigError,
     ExecutorClient,

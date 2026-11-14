@@ -54,7 +54,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 target-version = ['py313']
-# 生成物由 nova-catalog 管线产出，格式以生成器为准——排除出 black/isort
+# 生成物由 nova_ai.catalog 管线产出，格式以生成器为准——排除出 black/isort
 extend-exclude = 'src/nova_ai/(models_generated\.py|providers/data|providers/(anthropic|kimi_coding|moonshotai|moonshotai_cn|openrouter|volcengine)/models\.py)'
 
 [tool.isort]

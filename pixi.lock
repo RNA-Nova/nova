@@ -50,7 +50,8 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_async
-      - pypi: ./packages/nova_catalog
+      - pypi: ./packages/nova_exec_policy
+      - pypi: ./packages/nova_exec_protocol
       - pypi: ./packages/nova_harness
       - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
@@ -111,7 +112,8 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_async
-      - pypi: ./packages/nova_catalog
+      - pypi: ./packages/nova_exec_policy
+      - pypi: ./packages/nova_exec_protocol
       - pypi: ./packages/nova_harness
       - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
@@ -174,7 +176,8 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_async
-      - pypi: ./packages/nova_catalog
+      - pypi: ./packages/nova_exec_policy
+      - pypi: ./packages/nova_exec_protocol
       - pypi: ./packages/nova_harness
       - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
@@ -248,7 +251,8 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_async
-      - pypi: ./packages/nova_catalog
+      - pypi: ./packages/nova_exec_policy
+      - pypi: ./packages/nova_exec_protocol
       - pypi: ./packages/nova_harness
       - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
@@ -334,7 +338,8 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_async
-      - pypi: ./packages/nova_catalog
+      - pypi: ./packages/nova_exec_policy
+      - pypi: ./packages/nova_exec_protocol
       - pypi: ./packages/nova_harness
       - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
@@ -422,7 +427,8 @@ environments:
       - pypi: ./packages/nova_agent
       - pypi: ./packages/nova_ai
       - pypi: ./packages/nova_async
-      - pypi: ./packages/nova_catalog
+      - pypi: ./packages/nova_exec_policy
+      - pypi: ./packages/nova_exec_protocol
       - pypi: ./packages/nova_harness
       - pypi: ./packages/nova_protocol
       - pypi: ./packages/nova_server
@@ -1263,6 +1269,7 @@ packages:
 - pypi: ./packages/nova_agent
   name: nova-agent
   requires_dist:
+  - httpx>=0.27.0
   - jsonschema>=4.0,<5.0
   - pydantic>=2.0,<3.0
   - setuptools
@@ -1270,9 +1277,10 @@ packages:
 - pypi: ./packages/nova_ai
   name: nova-ai
   requires_dist:
-  - anthropic>=0.69.0
+  - anthropic>=1.0
   - anyio>=4.11
   - httpx>=0.27.0
+  - httpx2>=2.0,<3
   - json-repair>=0.58.4
   - openai>=2.0,<3.10.0
   - pydantic>=2.0
@@ -1283,10 +1291,15 @@ packages:
   requires_dist:
   - anyio>=4.11
   requires_python: '>=3.13,<3.14'
-- pypi: ./packages/nova_catalog
-  name: nova-catalog
+- pypi: ./packages/nova_exec_policy
+  name: nova-exec-policy
   requires_dist:
-  - httpx>=0.27
+  - pydantic>=2.0
+  requires_python: '>=3.13,<3.14'
+- pypi: ./packages/nova_exec_protocol
+  name: nova-exec-protocol
+  requires_dist:
+  - pydantic>=2.0
   requires_python: '>=3.13,<3.14'
 - pypi: ./packages/nova_harness
   name: nova-harness

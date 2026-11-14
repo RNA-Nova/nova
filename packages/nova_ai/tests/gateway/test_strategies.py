@@ -8,16 +8,6 @@ personalized（站+账户钩子）。内容源经 ``context.catalog_fetch`` 注�
 import time
 
 import pytest
-from nova_protocol import (
-    AbortController,
-    KnownApi,
-    MaterializedCatalog,
-    Model,
-    ModelCost,
-    ModelFields,
-    ModelsStoreEntry,
-)
-
 from nova_ai.gateway.catalog import CatalogError, CatalogOutcome
 from nova_ai.gateway.provider import (
     ModelsPublication,
@@ -29,6 +19,15 @@ from nova_ai.gateway.strategies import (
     overlay_refresh_policy,
     personalized_refresh_policy,
     remote_models,
+)
+from nova_async import AbortController
+from nova_protocol import (
+    KnownApi,
+    MaterializedCatalog,
+    Model,
+    ModelCost,
+    ModelFields,
+    ModelsStoreEntry,
 )
 
 pytestmark = pytest.mark.asyncio

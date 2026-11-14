@@ -14,7 +14,9 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+
+from nova_protocol import UserMessage
 
 from nova_harness.core.agent_session.agent import AgentSession
 from nova_harness.core.agent_session.services import AgentSessionServices
@@ -26,20 +28,20 @@ from nova_harness.events import (
     SessionShutdownEvent,
     SessionStartEvent,
 )
-from nova_harness.sessions import SessionManager
-from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
-from nova_harness.types.session.factory import (
+from nova_harness.sessions.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.sessions.factory import (
     CreateAgentSessionRuntimeFactory,
     CreateAgentSessionRuntimeOptions,
     CreateAgentSessionRuntimeResult,
 )
-from nova_harness.types.session.options import (
+from nova_harness.sessions.manager import SessionManager
+from nova_harness.sessions.options import (
     ForkOptions,
     NewSessionOptions,
     SwitchSessionOptions,
     WithSessionHook,
 )
-from nova_protocol import UserMessage
+from nova_harness.sessions.protocol import SessionManagerProtocol
 
 
 class SessionImportFileNotFoundError(FileNotFoundError):
@@ -93,7 +95,7 @@ class AgentSessionRuntime:
         return self._services.cwd
 
     @property
-    def session_manager(self) -> SessionManager:
+    def session_manager(self) -> SessionManagerProtocol:
         return self._session.session_manager
 
     @property
@@ -150,7 +152,9 @@ class AgentSessionRuntime:
         return {"cancelled": bool(getattr(result, "cancel", False))}
 
     async def _teardown_current(
-        self, reason: str, target_session_file: Optional[str] = None
+        self,
+        reason: Literal["quit", "reload", "new", "resume", "fork"],
+        target_session_file: Optional[str] = None,
     ) -> None:
         runner = self._extension_runner()
         if runner is not None and runner.has_handlers("session_shutdown"):
@@ -300,6 +304,7 @@ class AgentSessionRuntime:
 
         previous_session_file = self._session.session_file
 
+        session_manager: SessionManagerProtocol
         if self._session_manager.is_persisted():
             current_session_file = self._session.session_file
             if not current_session_file:

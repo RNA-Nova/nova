@@ -3,6 +3,17 @@
 normalize → resolve 两形态（穿过/折叠）；折叠机三件（tools/system/text）。
 """
 
+from nova_ai.api_impls._shared.transcript import (
+    collapse_system_messages,
+    get_current_system_message,
+    get_current_tools,
+    get_initial_system_message,
+    get_system_message_text,
+    normalize_context,
+    render_system_message_update,
+    resolve_transcript,
+    without_initial_system_message,
+)
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -15,18 +26,6 @@ from nova_protocol import (
     ToolReference,
     Usage,
     UserMessage,
-)
-
-from nova_ai.api_impls._shared.transcript import (
-    collapse_system_messages,
-    get_current_system_message,
-    get_current_tools,
-    get_initial_system_message,
-    get_system_message_text,
-    normalize_context,
-    render_system_message_update,
-    resolve_transcript,
-    without_initial_system_message,
 )
 
 

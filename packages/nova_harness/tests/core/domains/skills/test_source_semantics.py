@@ -17,16 +17,17 @@ from typing import Dict, List, Optional
 from unittest.mock import patch
 
 import pytest
+
 from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.core.domains.skills import (
     expand_skill_command,
     filter_skills_by_whitelist,
 )
-from nova_harness.package import PackageManager
+from nova_harness.package.enums import SourceScope
+from nova_harness.package.manager import PackageManager
 from nova_harness.resources.loader import DefaultResourceLoader
-from nova_harness.types.package.enums import SourceScope
-from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.types.resources.skills import Skill
+from nova_harness.resources.options import DefaultResourceLoaderOptions
+from nova_harness.resources.skills import Skill
 
 # ---------------------------------------------------------------------------
 # 环境构造
@@ -201,12 +202,12 @@ async def _make_session(
     env: Dict[str, Path], agent_name: Optional[str] = "test_agent", trusted: bool = True
 ):
     from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
-    from nova_harness.types.session.config import CreateAgentSessionOptions
+    from nova_harness.sessions.config import CreateAgentSessionOptions
 
     return await create_agent_session_runtime(
         CreateAgentSessionOptions(
-            cwd=str(env["cwd"]),
-            agent_dir=str(env["agent_dir"]),
+            cwd=env["cwd"],
+            agent_dir=env["agent_dir"],
             agent_name=agent_name,
             project_trusted=trusted,
         )
@@ -485,7 +486,10 @@ async def test_agent_yaml_skills_whitelist_is_single_source(env, tmp_path):
     runtime = await _make_session(env)
     try:
         # 名单单源来自 yaml（不再有 description.md frontmatter 增量合并）
-        config = runtime.session.system_prompt_manager.get_agent_config()
+        prompt_manager = runtime.session.system_prompt_manager
+        assert prompt_manager is not None
+        config = prompt_manager.get_agent_config()
+        assert config is not None
         assert config.skills == ["bundled-skill"]
         # 名单命中：包内 bundled-skill 放行
         allowed = runtime.session._get_allowed_skills()

@@ -7,9 +7,9 @@ import re
 import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
 
-from nova_async import AbortScope, await_with_abort
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_async import AbortedError, AbortScope, await_with_abort, is_aborted
 from nova_protocol import (
-    AbortedError,
     AssistantImages,
     ImageContent,
     ImageModel,
@@ -17,8 +17,6 @@ from nova_protocol import (
     ImagesStopReason,
     TextContent,
     Usage,
-    is_aborted,
-    redact_secrets,
 )
 from openai import AsyncOpenAI, Omit
 

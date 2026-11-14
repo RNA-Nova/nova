@@ -1,9 +1,8 @@
 """OpenRouter 实际账单总额的归一与覆盖测试。"""
 
 import pytest
-from nova_protocol import KnownApi, Model, ModelCost, Usage
-
 from nova_ai.api_impls._shared.openrouter_cost import apply_openrouter_reported_cost
+from nova_protocol import KnownApi, Model, ModelCost, Usage
 
 
 def _model() -> Model:

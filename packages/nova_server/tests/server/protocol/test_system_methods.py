@@ -77,7 +77,7 @@ def _state_with_session():
         resource_loader=_FakeLoader(),
     )
     state = ServerState(ui_context=MagicMock())
-    state.set_runtime(SimpleNamespace(session=session))
+    state.runtime = SimpleNamespace(session=session)
     return state
 
 
@@ -158,6 +158,8 @@ async def test_set_extension_flag_updates_value():
     assert result.result == {"success": True, "name": "verbose", "value": True}
 
     listed = await registry.dispatch(build_request("getExtensionFlags", {}, id=6))
+    assert listed is not None
+    assert listed.result is not None
     assert listed.result["flags"][0]["value"] is True
 
 

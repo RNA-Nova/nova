@@ -286,7 +286,7 @@ export interface CredentialInfo {
 }
 
 export interface CustomAgentMessage {
-  role: string;
+  role: unknown;
   [key: string]: unknown;
 }
 

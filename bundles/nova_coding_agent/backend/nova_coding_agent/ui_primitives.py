@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, FrozenSet, List, Optional
 
-from nova_harness.types.ui import UIContext
+from nova_harness.ui import UIContext
 
 # 基线四件套：交互原子（语义冻结——决断/选择/文本/告知）+ form（官方复合原语）
 # + set_status（展示类词汇：footer 扩展状态行，pi ctx.ui.setStatus 对位）。

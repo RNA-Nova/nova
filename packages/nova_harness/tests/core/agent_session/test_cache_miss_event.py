@@ -8,9 +8,11 @@ from types import SimpleNamespace
 from typing import Any, List, Optional
 
 import pytest
+from nova_protocol import AssistantMessage, Cost, StopReason, TextContent, Usage
+
+from nova_harness.core.agent_session.agent import AgentSession
 from nova_harness.core.agent_session.controllers.events import EventController
 from nova_harness.events import CacheMissEvent
-from nova_protocol import AssistantMessage, Cost, TextContent, Usage
 
 
 class _FakeQueue:
@@ -38,22 +40,27 @@ class _FakeSettingsManager:
         return self._settings
 
 
-class _FakeSession:
-    def __init__(self, show_notices: bool, entries: Optional[List[Any]] = None) -> None:
-        self._extension_runner = None
-        self._steering_messages: List[str] = []
-        self._follow_up_messages: List[str] = []
-        self._queue = _FakeQueue()
-        self._overflow_recovery_attempted = False
-        self._retry_attempt = 0
-        self._last_assistant_message = None
-        self.session_manager = _FakeSessionManager(entries)
-        self.settings_manager = _FakeSettingsManager(show_notices)
-        self.model_runtime = SimpleNamespace(find=lambda provider, model_id: None)
-        self.emitted: List[Any] = []
+def _make_session(show_notices: bool, entries=None):
+    from unittest.mock import MagicMock
 
-    def _emit(self, event: Any) -> None:
-        self.emitted.append(event)
+    session = MagicMock()
+    session._extension_runner = None
+    session._steering_messages = []
+    session._follow_up_messages = []
+    session._queue = MagicMock()
+    session._overflow_recovery_attempted = False
+    session._retry_attempt = 0
+    session._last_assistant_message = None
+    session.session_manager = MagicMock()
+    session.session_manager.get_entries.return_value = list(entries or [])
+    session.settings_manager.get_settings.return_value = SimpleNamespace(
+        show_cache_miss_notices=show_notices
+    )
+    session.model_runtime = MagicMock()
+    session.model_runtime.find.return_value = None
+    session.emitted = []
+    session._emit = lambda event: session.emitted.append(event)
+    return session
 
 
 def _assistant_message(
@@ -75,7 +82,7 @@ def _assistant_message(
             cost=Cost(input=cost_input, cache_read=0.0, cache_write=0.0),
         ),
         timestamp=timestamp,
-        stop_reason="stop",
+        stop_reason=StopReason.STOP,
     )
 
 
@@ -92,7 +99,7 @@ async def test_cache_miss_emitted_when_significant():
     current = _assistant_message(
         input=45000, cache_read=0, cache_write=0, timestamp=2000
     )
-    session = _FakeSession(show_notices=True, entries=[_entry(prev)])
+    session = _make_session(show_notices=True, entries=[_entry(prev)])
     controller = EventController(session)
 
     await controller.handle(SimpleNamespace(type="message_end", message=current))
@@ -114,7 +121,7 @@ async def test_cache_miss_suppressed_when_setting_off():
     current = _assistant_message(
         input=45000, cache_read=0, cache_write=0, timestamp=2000
     )
-    session = _FakeSession(show_notices=False, entries=[_entry(prev)])
+    session = _make_session(show_notices=False, entries=[_entry(prev)])
     controller = EventController(session)
 
     await controller.handle(SimpleNamespace(type="message_end", message=current))
@@ -130,13 +137,13 @@ async def test_cache_miss_not_emitted_on_noise_floor_or_first_turn():
     current = _assistant_message(
         input=1000, cache_read=100, cache_write=0, timestamp=2000
     )
-    session = _FakeSession(show_notices=True, entries=[_entry(prev)])
+    session = _make_session(show_notices=True, entries=[_entry(prev)])
     controller = EventController(session)
     await controller.handle(SimpleNamespace(type="message_end", message=current))
     assert not [e for e in session.emitted if isinstance(e, CacheMissEvent)]
 
     # 首轮（无 prev）
-    session2 = _FakeSession(show_notices=True, entries=[])
+    session2 = _make_session(show_notices=True, entries=[])
     controller2 = EventController(session2)
     await controller2.handle(
         SimpleNamespace(

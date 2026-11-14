@@ -5,9 +5,8 @@ import time
 import httpx
 import pytest
 import respx
-from nova_protocol import AbortController
-
 from nova_ai.catalog_impls.pi_dev import PiDevCatalog
+from nova_async import AbortController
 
 pytestmark = pytest.mark.asyncio
 

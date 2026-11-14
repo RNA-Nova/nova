@@ -136,10 +136,10 @@ notifyDesktop 内建 / registerDialog / 工具渲染器独立覆盖（pi 须连�
 
 **实施落点**：
 
-- 后端：顶层自动发现扫描根在 `core/types/package/enums.py::TOP_LEVEL_RESOURCE_TYPE_DIRS`
+- 后端：顶层自动发现扫描根在 `nova_harness/package/enums.py::TOP_LEVEL_RESOURCE_TYPE_DIRS`
   （散养四类 → `<base>/backend/<type>`，agents 平级不变；包内约定发现仍用
   `RESOURCE_TYPE_DIRS`），resolver 只改拼接点；迁移在
-  `core/config/migration.py`（`AgentSessionServices.create` 单一挂接，
+  `nova_harness/config/migration.py`（`AgentSessionServices.create` 单一挂接，
   user/project 两级 base 各迁——mv 语义、幂等、新位已有内容不合并不覆盖，
   记诊断日志）。
 - 前端：路径族唯一出处 `src/paths.ts`（`frontend/tui/` 半区）；迁移在

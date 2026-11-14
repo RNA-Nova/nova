@@ -17,19 +17,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal
 
-from nova_protocol import ExecutorConfig, ExecutorEnvironment, ResolvedEnvironment
+from nova_exec_policy import ExecutorConfig, ExecutorEnvironment
+from nova_exec_protocol import NetworkPolicyDecision, NetworkPolicyRequestParams
 
 from .config import validate_runtime_environment
+from .environment_id import LOCAL_ENVIRONMENT_ID, ResolvedEnvironment
 from .errors import ConfigError
 
 if TYPE_CHECKING:
     from .client import ExecutorClient  # 防循环：client.py 依赖本模块的解析件
-
-from nova_protocol import (
-    LOCAL_ENVIRONMENT_ID,
-    NetworkPolicyDecision,
-    NetworkPolicyRequestParams,
-)
 
 
 def resolve_environment(

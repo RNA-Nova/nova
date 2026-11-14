@@ -32,8 +32,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Union
 
+from nova_ai.auth import ProviderAuth
+from nova_async import AbortSignal
 from nova_protocol import (
-    AbortSignal,
     AnyModel,
     AssistantImages,
     ClassifierContext,
@@ -46,7 +47,6 @@ from nova_protocol import (
     Model,
     ModelsStoreEntry,
     ModelType,
-    ProviderAuth,
     ProviderHeaders,
 )
 

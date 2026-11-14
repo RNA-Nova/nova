@@ -16,10 +16,11 @@ import asyncio
 import importlib.util
 import os
 
+from nova_harness.extensions.types import SourceInfo
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.tools import ToolExecContext
+
 from nova_coding_agent.subagent.types import SubagentResult
-from nova_harness.types.extensions import SourceInfo
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.tools import ToolExecContext
 
 
 def _load_subagent_tool():
@@ -31,7 +32,7 @@ def _load_subagent_tool():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=NULL_TOOL_SETTINGS)
     return module, module.Tool(context)

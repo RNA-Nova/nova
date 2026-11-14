@@ -56,7 +56,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
                 }
             )
 
-        return shapes.GetCommandsResult(commands=commands)
+        return shapes.GetCommandsResult(
+            commands=[shapes.CommandInfo(**command) for command in commands]
+        )
 
     async def getShortcuts(params: shapes.EmptyParams) -> shapes.GetShortcutsResult:
         """扩展注册的快捷键目录（键名/描述/来源）。
@@ -71,11 +73,11 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
             return shapes.GetShortcutsResult(shortcuts=[])
         return shapes.GetShortcutsResult(
             shortcuts=[
-                {
-                    "shortcut": shortcut.shortcut,
-                    "description": getattr(shortcut, "description", None),
-                    "extension_path": getattr(shortcut, "extension_path", None),
-                }
+                shapes.ShortcutInfo(
+                    shortcut=shortcut.shortcut,
+                    description=getattr(shortcut, "description", None),
+                    extension_path=getattr(shortcut, "extension_path", None),
+                )
                 for shortcut in runner.get_shortcuts().values()
             ],
         )
@@ -114,7 +116,9 @@ def register(registry: MethodRegistry, state: ServerState) -> None:
                     "extension_path": getattr(flag, "extension_path", None),
                 }
             )
-        return shapes.GetExtensionFlagsResult(flags=flags)
+        return shapes.GetExtensionFlagsResult(
+            flags=[shapes.ExtensionFlagInfo(**flag) for flag in flags]
+        )
 
     async def setExtensionFlag(
         params: shapes.SetExtensionFlagParams,

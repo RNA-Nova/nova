@@ -3,11 +3,14 @@
 from types import SimpleNamespace
 
 import pytest
+from nova_protocol import ImageContent
+
 from nova_harness.events import InputEvent, InputEventResult
 from nova_harness.events.constants import INPUT
+from nova_harness.extensions.actions import ExtensionContextActions
+from nova_harness.extensions.extension import RegisteredCommand
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
 from nova_harness.extensions.runner import ExtensionRunner
-from nova_harness.types.extensions.extension import RegisteredCommand
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
 
 
 def _minimal_runtime() -> ExtensionRuntime:
@@ -34,7 +37,7 @@ def _minimal_runtime() -> ExtensionRuntime:
     for name in core_actions:
         setattr(runtime, name, lambda *args, **kwargs: None)
 
-    runtime.context_actions = SimpleNamespace(
+    runtime.context_actions = ExtensionContextActions(
         get_model=lambda: None,
         is_idle=lambda: True,
         is_project_trusted=lambda: True,
@@ -119,7 +122,9 @@ def test_get_command_by_original_name_ignores_rename():
     ext2 = Extension(path="e2", commands={"foo": RegisteredCommand(name="foo")})
     runner = _runner([ext1, ext2])
     # 原始名查找返回扩展中注册的命令对象本身
-    assert runner.get_command_by_original_name("foo").name == "foo"
+    command = runner.get_command_by_original_name("foo")
+    assert command is not None
+    assert command.name == "foo"
 
 
 # -----------------------------------------------------------------------------
@@ -150,7 +155,7 @@ async def test_emit_input_transform_chains():
 
 @pytest.mark.asyncio
 async def test_emit_input_transform_updates_images():
-    img = {"type": "image", "mime_type": "image/png", "data": "aGVsbG8="}
+    img = ImageContent(mime_type="image/png", data="aGVsbG8=")
 
     def handler(event, ctx):
         return InputEventResult(action="transform", images=[img])
@@ -160,6 +165,7 @@ async def test_emit_input_transform_updates_images():
     result = await runner.emit_input(InputEvent(text="hello"))
     assert result.action == "transform"
     # InputEventResult 经模型校验——images 元素是 ImageContent 实例
+    assert result.images is not None
     assert len(result.images) == 1
     assert result.images[0].mime_type == "image/png"
     assert result.images[0].data == "aGVsbG8="

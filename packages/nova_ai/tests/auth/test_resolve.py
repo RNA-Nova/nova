@@ -4,20 +4,7 @@ import asyncio
 import time
 
 import pytest
-from nova_protocol import (
-    AbortController,
-    AbortedError,
-    ApiKeyAuth,
-    ApiKeyAuthInput,
-    ApiKeyCredential,
-    AuthResult,
-    ModelAuth,
-    NovaErrorKind,
-    OAuthAuth,
-    OAuthCredential,
-    ProviderAuth,
-)
-
+from nova_ai.auth import ApiKeyAuth, ApiKeyAuthInput, OAuthAuth, ProviderAuth
 from nova_ai.auth.context import default_provider_auth_context
 from nova_ai.auth.credential_store import InMemoryCredentialStore
 from nova_ai.auth.helpers import env_api_key_auth
@@ -27,6 +14,14 @@ from nova_ai.auth.resolve import (
     resolve_provider_auth,
 )
 from nova_ai.utils.errors import RequestTimeoutError
+from nova_async import AbortController, AbortedError
+from nova_protocol import (
+    ApiKeyCredential,
+    AuthResult,
+    ModelAuth,
+    NovaErrorKind,
+    OAuthCredential,
+)
 from tests._helpers.auth import (
     api_key_credential,
     never_login,

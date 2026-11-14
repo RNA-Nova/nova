@@ -8,8 +8,8 @@ import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from nova_async import TaskTracker, await_with_signal
-from nova_protocol import (
+from nova_async import AbortedError, AbortSignal, TaskTracker, await_with_signal
+from nova_exec_protocol import (
     ENVIRONMENT_CONFIG_READ,
     ENVIRONMENT_INFO,
     ENVIRONMENT_STATUS,
@@ -22,8 +22,6 @@ from nova_protocol import (
     PROCESS_START,
     PROCESS_TERMINATE,
     PROTOCOL_VERSION,
-    AbortedError,
-    AbortSignal,
     ByteChunk,
     EnvironmentConfigReadParams,
     EnvironmentConfigReadResponse,
@@ -41,9 +39,10 @@ from nova_protocol import (
     NetworkPolicyRequestParams,
     NetworkPolicyRequestResponse,
     ProcessTerminateParams,
-    ResolvedEnvironment,
 )
 from pydantic import ValidationError
+
+from nova_exec_server_client.environments import ResolvedEnvironment
 
 from .errors import (
     JSON_RPC_INVALID_PARAMS,

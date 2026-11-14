@@ -4,10 +4,12 @@ import asyncio
 from typing import Any, Dict, List
 
 import pytest
+from nova_protocol import CustomAgentMessage
+
+from nova_harness.core.agent_session.agent import AgentSession
 from nova_harness.core.agent_session.controllers.user_tools import UserToolController
 from nova_harness.core.domains.user_tools import UserToolManager
-from nova_harness.types.resources.user_tools import UserToolDefinition
-from nova_protocol import CustomAgentMessage
+from nova_harness.resources.user_tools import UserToolDefinition
 
 
 class FakeMessage(CustomAgentMessage):
@@ -38,41 +40,23 @@ def make_tool(name: str, text: str = "ok", delay: float = 0) -> UserToolDefiniti
     )
 
 
-class FakeSession:
-    """UserToolController 需要的最小会话面。"""
+def make_session(is_streaming: bool = False):
+    from unittest.mock import MagicMock
 
-    def __init__(self, is_streaming: bool = False):
-        self.is_streaming = is_streaming
-        self._pending_session_messages: List[CustomAgentMessage] = []
-        self._state_messages: List[CustomAgentMessage] = []
-        self._appended: List[CustomAgentMessage] = []
-        self._emitted: List[Any] = []
-
-    def _emit(self, event: Any) -> None:
-        self._emitted.append(event)
-
-    class _Agent:
-        def __init__(self, outer):
-            self.state = type("State", (), {"messages": outer._state_messages})()
-
-    @property
-    def agent(self):
-        return FakeSession._Agent(self)
-
-    class _SessionManager:
-        def __init__(self, outer):
-            self._outer = outer
-
-        def append_message(self, message):
-            self._outer._appended.append(message)
-            return "entry-id"
-
-    @property
-    def session_manager(self):
-        return FakeSession._SessionManager(self)
+    session = MagicMock()
+    session.is_streaming = is_streaming
+    session._pending_session_messages = []
+    session._state_messages = []
+    session._appended = []
+    session._emitted = []
+    session._emit = lambda event: session._emitted.append(event)
+    session.agent.state.messages = session._state_messages
+    session.session_manager.append_message.side_effect = (
+        lambda message: session._appended.append(message) or "entry-id"
+    )
+    return session
 
 
-# ---------------------------------------------------------------------------
 # Manager
 # ---------------------------------------------------------------------------
 
@@ -125,6 +109,7 @@ async def test_manager_invoke_passes_params_and_events():
     )
     assert received == {"q": "nova"}
     assert events == [("progress", {"step": 1})]
+    assert isinstance(message, FakeMessage)
     assert message.text == "done"
 
 
@@ -137,10 +122,11 @@ async def test_manager_invoke_passes_params_and_events():
 async def test_controller_invoke_records_message_when_idle():
     manager = UserToolManager()
     manager.register(make_tool("fake"))
-    session = FakeSession(is_streaming=False)
+    session = make_session(is_streaming=False)
     controller = UserToolController(session, manager)
 
     message = await controller.invoke("fake")
+    assert isinstance(message, FakeMessage)
     assert message.text == "ok"
     # 非流式：直接双写 agent state + session manager
     assert session._state_messages == [message]
@@ -158,7 +144,7 @@ async def test_controller_invoke_records_message_when_idle():
 async def test_controller_pending_and_flush_during_streaming():
     manager = UserToolManager()
     manager.register(make_tool("fake"))
-    session = FakeSession(is_streaming=True)
+    session = make_session(is_streaming=True)
     controller = UserToolController(session, manager)
 
     message = await controller.invoke("fake")
@@ -192,7 +178,7 @@ async def test_controller_abort_cascades_by_name():
     manager.register(
         UserToolDefinition(name="slow", description="慢", execute=_execute)
     )
-    session = FakeSession()
+    session = make_session()
     controller = UserToolController(session, manager)
 
     task = asyncio.create_task(controller.invoke("slow"))
@@ -212,7 +198,7 @@ async def test_controller_abort_all():
     manager = UserToolManager()
     manager.register(make_tool("a", delay=5))
     manager.register(make_tool("b", delay=5))
-    session = FakeSession()
+    session = make_session()
     controller = UserToolController(session, manager)
 
     task_a = asyncio.create_task(controller.invoke("a"))

@@ -32,8 +32,7 @@ def test_escaped_quote_in_string():
 
 def test_models_json_with_comments_loads(tmp_path):
 
-    from nova_harness.model import ModelRuntime
-
+    from nova_harness.model.runtime import ModelRuntime
     from tests._helpers.auth_storage import auth_storage_in_memory
 
     models_path = tmp_path / "models.json"
@@ -56,8 +55,7 @@ def test_models_json_with_comments_loads(tmp_path):
 
 
 def test_invalid_json_still_reports_error(tmp_path):
-    from nova_harness.model import ModelRuntime
-
+    from nova_harness.model.runtime import ModelRuntime
     from tests._helpers.auth_storage import auth_storage_in_memory
 
     models_path = tmp_path / "models.json"

@@ -2,6 +2,11 @@
 
 from typing import List
 
+from nova_ai.api_impls._shared import (
+    build_copilot_dynamic_headers,
+    has_copilot_vision_input,
+    infer_copilot_initiator,
+)
 from nova_protocol import (
     AssistantMessage,
     ImageContent,
@@ -9,12 +14,6 @@ from nova_protocol import (
     TextContent,
     ToolResultMessage,
     UserMessage,
-)
-
-from nova_ai.api_impls._shared import (
-    build_copilot_dynamic_headers,
-    has_copilot_vision_input,
-    infer_copilot_initiator,
 )
 
 

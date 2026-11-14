@@ -11,8 +11,13 @@ from __future__ import annotations
 
 from typing import Literal
 
+from nova_server.protocol.items import (
+    AgentMessageItem,
+    ItemStatus,
+    NovaItem,
+    ThinkingItem,
+)
 from nova_server.protocol.methods.shapes import SessionStateResult, SyncSessionResult
-from nova_server.types.items import AgentMessageItem, NovaItem, ThinkingItem
 
 
 class FakePackageItem(NovaItem):
@@ -61,10 +66,14 @@ class TestWireItemRoundtrip:
         items = _roundtrip(
             [
                 ThinkingItem(
-                    id="a:th0", status="done", source="agent", ts=1, text="思考"
+                    id="a:th0",
+                    status=ItemStatus.DONE,
+                    source="agent",
+                    ts=1,
+                    text="思考",
                 ),
                 AgentMessageItem(
-                    id="a:t1", status="done", source="agent", ts=1, text="正文"
+                    id="a:t1", status=ItemStatus.DONE, source="agent", ts=1, text="正文"
                 ),
             ]
         )

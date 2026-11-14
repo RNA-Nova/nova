@@ -24,11 +24,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Awaitable, Callable, Literal
 
-from nova_protocol import (
-    ApprovalPolicy,
-    NetworkPolicyDecision,
-    NetworkPolicyRequestParams,
-)
+from nova_exec_policy import ApprovalPolicy
+from nova_exec_protocol import NetworkPolicyDecision, NetworkPolicyRequestParams
 
 #: deny 理由（进审计通知，面向用户）
 REASON_NOT_LISTED = "主机不在网络放行名单"

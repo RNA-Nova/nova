@@ -7,12 +7,20 @@
 import asyncio
 
 import pytest
-from nova_harness.events.agent import ToolExecutionStartEvent
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods.state import ServerState
 from nova_server.server import RpcServer
 from nova_server.transport import MemoryTransport
+
+
+async def _read(transport: MemoryTransport):
+    response = await transport.read()
+    assert response is not None
+    return response
+
+
+from nova_harness.events.agent import ToolExecutionStartEvent
 
 
 class FakeSession:
@@ -58,7 +66,7 @@ async def _initialize(client_t, req_id="init"):
     await client_t.write(
         {"jsonrpc": "2.0", "id": req_id, "method": "initialize", "params": {}}
     )
-    resp = await asyncio.wait_for(client_t.read(), timeout=1.0)
+    resp = await asyncio.wait_for(_read(client_t), timeout=1.0)
     assert resp["id"] == req_id
 
 
@@ -84,8 +92,8 @@ async def test_two_clients_same_request_id_isolated(running_server):
         {"jsonrpc": "2.0", "id": 1, "method": "echo", "params": {"who": "b"}}
     )
 
-    resp_a = await asyncio.wait_for(client_a.read(), timeout=1.0)
-    resp_b = await asyncio.wait_for(client_b.read(), timeout=1.0)
+    resp_a = await asyncio.wait_for(_read(client_a), timeout=1.0)
+    resp_b = await asyncio.wait_for(_read(client_b), timeout=1.0)
     assert resp_a["result"] == {"who": "a"}
     assert resp_b["result"] == {"who": "b"}
 
@@ -103,16 +111,16 @@ async def test_events_gated_by_initialize(running_server, methods):
 
     event = ToolExecutionStartEvent(tool_call_id="t1", tool_name="bash", args={})
     session.emit(event)
-    resp_a = await asyncio.wait_for(client_a.read(), timeout=1.0)
+    resp_a = await asyncio.wait_for(_read(client_a), timeout=1.0)
     assert resp_a["method"] == "agent/event"
     await asyncio.sleep(0.01)
     assert client_b._inbox == []  # B 未握手，门外
 
     await _initialize(client_b)  # B 握手后进扇出集
     session.emit(event)
-    resp_b = await asyncio.wait_for(client_b.read(), timeout=1.0)
+    resp_b = await asyncio.wait_for(_read(client_b), timeout=1.0)
     assert resp_b["method"] == "agent/event"
-    resp_a2 = await asyncio.wait_for(client_a.read(), timeout=1.0)
+    resp_a2 = await asyncio.wait_for(_read(client_a), timeout=1.0)
     assert resp_a2["method"] == "agent/event"
 
 
@@ -142,7 +150,7 @@ async def test_cancel_request_scoped_to_own_connection(running_server, methods):
     await client_b.write(
         {"jsonrpc": "2.0", "id": 9, "method": "cancelRequest", "params": {"id": 1}}
     )
-    resp_b = await asyncio.wait_for(client_b.read(), timeout=1.0)
+    resp_b = await asyncio.wait_for(_read(client_b), timeout=1.0)
     assert resp_b["result"] == {"success": True, "cancelled": False}
 
     # A 取消自己的调用——生效
@@ -151,7 +159,7 @@ async def test_cancel_request_scoped_to_own_connection(running_server, methods):
     )
     resps = {}
     for _ in range(2):
-        resp = await asyncio.wait_for(client_a.read(), timeout=1.0)
+        resp = await asyncio.wait_for(_read(client_a), timeout=1.0)
         resps[resp["id"]] = resp
     assert resps[2]["result"] == {"success": True, "cancelled": True}
     assert resps[1]["error"]["code"] == -32800
@@ -171,8 +179,8 @@ async def test_events_carry_seq_anchor(running_server, methods):
         session.emit(
             ToolExecutionStartEvent(tool_call_id=f"t{i}", tool_name="bash", args={})
         )
-    first = await asyncio.wait_for(client_a.read(), timeout=1.0)
-    second = await asyncio.wait_for(client_a.read(), timeout=1.0)
+    first = await asyncio.wait_for(_read(client_a), timeout=1.0)
+    second = await asyncio.wait_for(_read(client_a), timeout=1.0)
 
     p1, p2 = first["params"], second["params"]
     assert p1["seq"] >= 1 and p2["seq"] == p1["seq"] + 1  # 单调递增
@@ -249,7 +257,7 @@ async def test_inflight_overload_returns_32004(methods):
 
     # 超限请求：立即 -32004
     await client_t.write({"jsonrpc": "2.0", "id": 3, "method": "echo", "params": {}})
-    resp = await asyncio.wait_for(client_t.read(), timeout=1.0)
+    resp = await asyncio.wait_for(_read(client_t), timeout=1.0)
     assert resp["id"] == 3 and resp["error"]["code"] == -32004
 
     # 超限通知：静默丢弃（无帧、无异常）
@@ -261,7 +269,7 @@ async def test_inflight_overload_returns_32004(methods):
     blocker.set()
     resps = {}
     for _ in range(2):
-        r = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        r = await asyncio.wait_for(_read(client_t), timeout=1.0)
         resps[r["id"]] = r
     assert resps[1]["result"] == {"slow": True}
     assert resps[2]["result"] == {"slow": True}
@@ -288,7 +296,7 @@ async def test_loop_lag_probe_fires_on_blocked_loop(methods, capfd):
     await client_t.write(
         {"jsonrpc": "2.0", "id": 1, "method": "blocking", "params": {}}
     )
-    resp = await asyncio.wait_for(client_t.read(), timeout=1.0)
+    resp = await asyncio.wait_for(_read(client_t), timeout=1.0)
     assert resp["result"] == {"success": True}
 
     await asyncio.sleep(0.08)  # 探针再醒一拍（覆盖阻塞后的漂移观测）
@@ -315,11 +323,11 @@ async def test_deprecated_method_emits_notice_before_response(methods):
         await client_t.write(
             {"jsonrpc": "2.0", "id": 1, "method": "old_method", "params": {}}
         )
-        notice = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        notice = await asyncio.wait_for(_read(client_t), timeout=1.0)
         assert notice.get("method") == "system/deprecationNotice"
         assert notice["params"]["method"] == "old_method"
         assert notice["params"]["details"] == "请改用 new_method"
-        resp = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        resp = await asyncio.wait_for(_read(client_t), timeout=1.0)
         assert resp["id"] == 1
         assert resp["result"] == {"ok": True}
     finally:
@@ -339,7 +347,7 @@ async def test_non_deprecated_method_no_notice(methods):
         await client_t.write(
             {"jsonrpc": "2.0", "id": 1, "method": "echo", "params": {}}
         )
-        first = await asyncio.wait_for(client_t.read(), timeout=1.0)
+        first = await asyncio.wait_for(_read(client_t), timeout=1.0)
         assert first.get("id") == 1  # 是响应不是通知
         assert (
             "method" not in first or first.get("method") != "system/deprecationNotice"

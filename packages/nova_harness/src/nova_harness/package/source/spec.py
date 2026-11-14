@@ -20,12 +20,12 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
+from nova_harness.config.settings.models import PackageSourceSpec
 from nova_harness.package.source._semver import parse_version_spec
-from nova_harness.types.config.settings import PackageSourceSpec
-from nova_harness.types.package import PackageFilter, PackageSource
+from nova_harness.package.types import PackageFilter, PackageSource
 
 # npm dist-tag 名的基本形态校验（npm 约定 tag 不与 semver 冲突；
 # 解析期只做语法 sanity——存在性由 resolver 查询 registry 时校验）。
@@ -424,8 +424,8 @@ class PackageSourceCollection:
 
     def resolve(
         self,
-        user_sources: List[PackageSourceSpec],
-        project_sources: List[PackageSourceSpec],
+        user_sources: Sequence[PackageSourceSpec],
+        project_sources: Sequence[PackageSourceSpec],
     ) -> ResolvedScopedSources:
         """返回跨 scope 去重后的 source 列表。
 

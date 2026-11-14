@@ -8,12 +8,11 @@
 import httpx
 import pytest
 import respx
-from nova_protocol import KnownApi, Model, ModelCost, OAuthCredential
-
 from nova_ai.catalog_impls.models_dev import MODELS_DEV_API, ModelsDevCatalog
 from nova_ai.catalog_impls.pi_dev import PI_DEV_CATALOG_BASE_URL, PiDevCatalog
 from nova_ai.gateway.provider import RefreshModelsContext
 from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
+from nova_protocol import KnownApi, Model, ModelCost, OAuthCredential
 from tests._helpers.auth import oauth_credential
 
 pytestmark = pytest.mark.asyncio

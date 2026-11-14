@@ -1,8 +1,7 @@
 """DiagnosticsCollector（gateway/diagnostics.py）测试——双通道装置。"""
 
-from nova_protocol import NovaDiagnostic, WarningKind
-
 from nova_ai.gateway import DiagnosticsCollector
+from nova_protocol import NovaDiagnostic, WarningKind
 
 
 def _d(message: str = "x") -> NovaDiagnostic:

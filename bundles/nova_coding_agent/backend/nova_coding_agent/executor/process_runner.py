@@ -18,8 +18,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator, List, Optional, Protocol
 
-from nova_coding_agent.executor.provision import is_ssh_url, parse_ssh_target
 from nova_harness.core.utils.binaries import resolve_binary
+
+from nova_coding_agent.executor.provision import is_ssh_url, parse_ssh_target
 
 
 class ProcessSession(Protocol):

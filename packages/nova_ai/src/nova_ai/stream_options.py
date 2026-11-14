@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from nova_async import AbortSignal
 from nova_protocol import (
-    AbortSignal,
     CacheRetention,
     ClientIdentity,
     ModelBase,

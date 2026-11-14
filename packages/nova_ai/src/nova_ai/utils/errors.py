@@ -24,7 +24,8 @@ from typing import Any, List, Optional
 
 import httpx
 import httpx2
-from nova_protocol import RETRYABLE_ERROR_KINDS, NovaErrorKind, redact_secrets
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_protocol import RETRYABLE_ERROR_KINDS, NovaErrorKind
 
 MAX_PROVIDER_ERROR_BODY_CHARS = 4000
 MAX_NORMALIZED_MESSAGE_CHARS = 2048

@@ -16,18 +16,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional
 
-from nova_async import TaskTracker
+from nova_ai.auth import AuthInteraction, LoginCancelledError
+from nova_async import AbortSignal, TaskTracker, is_aborted
+from nova_protocol import AuthEvent, AuthorizationRequest, AuthPrompt
+
 from nova_harness.config.auth.acquisition import acquire_authorization_code
-from nova_harness.types.ui.context import UIContext
-from nova_protocol import (
-    AbortSignal,
-    AuthEvent,
-    AuthInteraction,
-    AuthorizationRequest,
-    AuthPrompt,
-    LoginCancelledError,
-    is_aborted,
-)
+from nova_harness.ui.context import UIContext
 
 
 class UIAuthInteraction(AuthInteraction):
@@ -56,12 +50,17 @@ class UIAuthInteraction(AuthInteraction):
         if not self.ui.has_capability("host:openUrl"):
             return
         try:
+            # 同步 notify 可能运行在没有事件循环的上下文；此时无法派发异步
+            # UI 请求，直接跳过，避免先造协程再泄漏。
+            asyncio.get_running_loop()
             # 即发即答（执行调用无 UI 生命周期负担）：全局作用域（登录不归
             # 某个 run），fire-and-forget——打开失败不影响流程
             self._tasks.spawn(
                 self.ui.request("host:openUrl", {"url": url}, scope="global"),
                 name="host:openUrl",
             )
+        except RuntimeError:
+            return
         except Exception:
             pass
 

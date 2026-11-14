@@ -7,9 +7,8 @@ kimi-coding 支持 prompt_cache_key（请求体 extra_body）；其余 provider
 import asyncio
 
 import pytest
-from nova_protocol import CacheRetention, Context, UserMessage
-
 from nova_ai.stream_options import SimpleStreamOptions
+from nova_protocol import CacheRetention, Context, UserMessage
 
 from ._helpers.auth import build_manager, has_credential
 from ._helpers.probes import collect_probes

@@ -9,12 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from nova_harness.types.resources.user_tools import (
+from nova_protocol import CustomAgentMessage
+
+from nova_harness.resources.user_tools import (
     UserToolDefinition,
     UserToolEventCallback,
     UserToolInfo,
 )
-from nova_protocol import CustomAgentMessage
 
 
 @dataclass

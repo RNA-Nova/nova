@@ -2,6 +2,10 @@
 
 import httpx
 import pytest
+from nova_ai.gateway.catalog import CatalogError
+from nova_ai.gateway.provider import RefreshModelsContext
+from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
+from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
 from nova_protocol import (
     KnownApi,
     Model,
@@ -12,11 +16,6 @@ from nova_protocol import (
     ThinkingFormat,
     WarningKind,
 )
-
-from nova_ai.gateway.catalog import CatalogError
-from nova_ai.gateway.provider import RefreshModelsContext
-from nova_ai.providers.kimi_coding.catalog import BASE_URL, kimi_personalize
-from nova_ai.providers.kimi_coding.provider import kimi_coding_provider
 from tests._helpers.auth import api_key_credential, oauth_credential
 
 pytestmark = pytest.mark.asyncio

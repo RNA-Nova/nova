@@ -6,6 +6,9 @@ import time
 import uuid
 from typing import Any
 
+from nova_protocol import AgentMessage, AssistantMessage
+
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.events import (
     AGENT_END,
@@ -31,8 +34,6 @@ from nova_harness.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from nova_harness.types.protocols import AgentSessionProtocol
-from nova_protocol import AgentMessage
 
 
 class EventController:
@@ -205,6 +206,8 @@ class EventController:
 
         检测失败/无 miss/门控关闭均静默——提醒通道永不影响主链路。
         """
+        if not isinstance(message, AssistantMessage):
+            return
         session = self._session
         settings_manager = getattr(session, "settings_manager", None)
         if settings_manager is None:

@@ -7,8 +7,26 @@ Compaction 与分支摘要模块全面测试。
 
 from typing import Literal, Optional
 
-import nova_harness.core.domains.compaction.compaction as compaction_module
 import pytest
+from nova_ai import AssistantMessageEventStream, SimpleStreamOptions
+from nova_protocol import (
+    AssistantMessage,
+    Context,
+    CustomAgentMessage,
+    DoneEvent,
+    KnownApi,
+    KnownProvider,
+    Model,
+    ModelCost,
+    StopReason,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+)
+
+import nova_harness.core.domains.compaction.compaction as compaction_module
 from nova_harness.core.domains.compaction.branch_summarization import (
     collect_entries_for_branch_summary,
     prepare_branch_entries,
@@ -25,6 +43,7 @@ from nova_harness.core.domains.compaction.compaction import (
     prepare_compaction,
     should_compact,
 )
+from nova_harness.core.domains.compaction.models import CompactionSettings
 from nova_harness.core.domains.compaction.utils import (
     compute_file_lists,
     create_file_ops,
@@ -32,38 +51,22 @@ from nova_harness.core.domains.compaction.utils import (
     format_file_operations,
     serialize_conversation,
 )
-from nova_harness.sessions import SessionManager
-from nova_harness.types.compaction.compaction import CompactionSettings
-from nova_protocol import (
-    AssistantMessage,
-    Context,
-    CustomAgentMessage,
-    DoneEvent,
-    KnownApi,
-    KnownProvider,
-    Model,
-    ModelCost,
-    TextContent,
-    ToolCall,
-    ToolResultMessage,
-    Usage,
-    UserMessage,
-)
-
-from nova_ai import AssistantMessageEventStream, SimpleStreamOptions
+from nova_harness.sessions.manager import SessionManager
 
 
 def _user(text: str) -> UserMessage:
     return UserMessage(role="user", content=[TextContent(type="text", text=text)])
 
 
-def _assistant(text: str, usage: Usage = None, model: str = "test") -> AssistantMessage:
+def _assistant(
+    text: str, usage: Usage | None = None, model: str = "test"
+) -> AssistantMessage:
     return AssistantMessage(
         role="assistant",
         content=[TextContent(type="text", text=text)],
         provider="test",
         model=model,
-        stop_reason="stop",
+        stop_reason=StopReason.STOP,
         usage=usage or Usage(),
     )
 
@@ -80,7 +83,7 @@ def _tool_call(name: str, path: str) -> AssistantMessage:
         ],
         provider="test",
         model="test",
-        stop_reason="toolUse",
+        stop_reason=StopReason.TOOL_USE,
     )
 
 
@@ -130,7 +133,7 @@ def _make_model(context_window: int = 128000, max_tokens: int = 4096) -> Model:
 
 def _summary_assistant(
     text: str = "summary",
-    stop_reason: str = "stop",
+    stop_reason: StopReason = StopReason.STOP,
     error_message: Optional[str] = None,
 ) -> AssistantMessage:
     return AssistantMessage(
@@ -146,7 +149,7 @@ def _summary_assistant(
 
 def _stream_with_result(result: AssistantMessage) -> AssistantMessageEventStream:
     stream = AssistantMessageEventStream()
-    stream.push(DoneEvent(reason=result.stop_reason, message=result))
+    stream.push(DoneEvent(reason=StopReason.STOP, message=result))
     return stream
 
 
@@ -617,7 +620,9 @@ async def test_generate_summary_raises_on_error(monkeypatch):
     """LLM 返回 stop_reason == error 时抛出异常。"""
 
     async def fake_complete(*a, **k):
-        return _summary_assistant("bad", stop_reason="error", error_message="boom")
+        return _summary_assistant(
+            "bad", stop_reason=StopReason.ERROR, error_message="boom"
+        )
 
     monkeypatch.setattr(compaction_module, "complete_summarization", fake_complete)
 
@@ -668,6 +673,7 @@ async def testcomplete_summarization_with_async_stream_fn():
     result = await compaction_module.complete_summarization(
         model, context, options, stream_fn
     )
+    assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == "async summary"
     assert called["model"] is model
 
@@ -690,7 +696,9 @@ def test_prepare_compaction_split_turn(session):
     assert prep.is_split_turn is True
     assert prep.first_kept_entry_id == a1
     assert any(
-        m.role == "user" and m.content[0].text == "q1"
+        isinstance(m, UserMessage)
+        and isinstance(m.content[0], TextContent)
+        and m.content[0].text == "q1"
         for m in prep.turn_prefix_messages
     )
 

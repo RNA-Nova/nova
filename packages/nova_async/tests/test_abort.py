@@ -7,8 +7,7 @@
 import asyncio
 
 import pytest
-from nova_async import AbortScope, await_with_abort
-from nova_protocol import AbortController, AbortedError
+from nova_async import AbortController, AbortedError, AbortScope, await_with_abort
 
 pytestmark = pytest.mark.asyncio
 

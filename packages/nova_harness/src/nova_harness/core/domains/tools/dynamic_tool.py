@@ -14,13 +14,15 @@ import inspect
 from typing import Any, Dict, Optional
 
 from nova_agent import AgentTool
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.tools import (
+from nova_async import AbortSignal
+from nova_protocol import AgentToolResult, TextContent
+
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.tools import (
     NULL_TOOL_EXEC_CONTEXT,
     ToolContextProvider,
     ToolDefinition,
 )
-from nova_protocol import AbortSignal, AgentToolResult, TextContent
 
 
 class DynamicTool(AgentTool):
@@ -121,7 +123,7 @@ def create_tool_definition_from_agent_tool(tool: AgentTool) -> ToolDefinition:
         name=tool.name,
         label=getattr(tool, "label", None) or tool.name,
         description=getattr(tool, "description", "") or "",
-        parameters=getattr(tool, "parameters", None),
+        parameters=getattr(tool, "parameters", None) or {},
         prepare_arguments=getattr(tool, "prepare_arguments", None),
         execute=execute,
         execution_mode=getattr(tool, "execution_mode", None),

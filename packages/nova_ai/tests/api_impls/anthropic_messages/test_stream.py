@@ -11,10 +11,11 @@ import asyncio
 import json
 
 import httpx2
+import nova_ai.api_impls.anthropic_messages._stream as stream_module
 import pytest
+from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
+from nova_async import AbortController, AbortedError
 from nova_protocol import (
-    AbortController,
-    AbortedError,
     Context,
     ErrorEvent,
     KnownApi,
@@ -27,9 +28,6 @@ from nova_protocol import (
     ToolCall,
     UserMessage,
 )
-
-import nova_ai.api_impls.anthropic_messages._stream as stream_module
-from nova_ai.api_impls.anthropic_messages import AnthropicOptions, stream
 from tests._helpers.fake_llm import (
     AnthropicScriptedStream,
     RequestCapture,

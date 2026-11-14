@@ -24,11 +24,13 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_async import AbortController, AbortedError
+from nova_exec_protocol import InitializeResponse
+
 from nova_exec_server_client import ExecutorClient, ReconnectStrategy
 from nova_exec_server_client.fs import FileSystemManager
 from nova_exec_server_client.recovery import ManagedTransport
 from nova_exec_server_client.transport import _JsonRpcTransport
-from nova_protocol import AbortController, AbortedError, InitializeResponse
 
 INIT_OK = {"sessionId": "fake-session", "protocolVersion": "1.13"}
 

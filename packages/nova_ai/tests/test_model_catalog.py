@@ -1,14 +1,13 @@
 """模型目录运行时测试：身份盖戳、拍平与生成时间锚点。"""
 
 import pytest
-from nova_protocol import ModelFields
-
 from nova_ai.model_catalog import (
     builtin_catalog_generated_at,
     finalize_catalog_models,
     flatten_chat_model_catalog,
     flatten_image_model_catalog,
 )
+from nova_protocol import ModelFields
 
 
 def _fields(model_id, **overrides):

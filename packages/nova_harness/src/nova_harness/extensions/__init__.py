@@ -1,27 +1,4 @@
-"""Nova Harness 扩展系统公共入口。
+"""扩展加载、运行、公共数据类型与结构化接口。
 
-对外暴露 ``ExtensionRunner``、``load_extensions``、``NovaExtensionAPI`` 等核心能力。
+入口保持轻量；公共数据聚合在 ``extensions.types``。
 """
-
-from nova_harness.extensions.api import NovaExtensionAPI, create_extension_api
-from nova_harness.extensions.loader import (
-    ExtensionLoader,
-    ExtensionLoadError,
-    load_extensions,
-)
-from nova_harness.extensions.runner import (
-    ExtensionRunner,
-    emit_project_trust_event,
-    emit_session_shutdown_event,
-)
-
-__all__ = [
-    "ExtensionRunner",
-    "ExtensionLoader",
-    "ExtensionLoadError",
-    "NovaExtensionAPI",
-    "create_extension_api",
-    "emit_project_trust_event",
-    "emit_session_shutdown_event",
-    "load_extensions",
-]

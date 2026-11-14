@@ -2,11 +2,12 @@
 
 import asyncio
 
+from nova_harness.events.results import ToolCallEventResult
+
 from nova_coding_agent.adjudication.delegation import (
     DelegationGate,
     extract_agent_names,
 )
-from nova_harness.events.results import ToolCallEventResult
 
 
 def _run(coro):

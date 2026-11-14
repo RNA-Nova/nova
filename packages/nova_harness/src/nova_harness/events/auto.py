@@ -5,9 +5,10 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from nova_harness.types.compaction.compaction import CompactionResult
 from nova_protocol import ModelThinkingLevel, NovaBaseModel
 from pydantic import Field
+
+from nova_harness.core.domains.compaction.models import CompactionResult
 
 from .constants import (
     AUTO_COMPACTION_END,
@@ -122,7 +123,7 @@ class ItemEmissionEvent(NovaBaseModel):
     """包级 item 发射信封（内部总线专用，**不上线**）。
 
     用户工具等包代码经 ``AgentSession.emit_item_*`` 发射呈现原子；core 对
-    载荷全程不透明（``item`` 约定为 ``nova_server.types.items.NovaItem``
+    载荷全程不透明（``item`` 约定为 ``nova_server.protocol.items.NovaItem``
     子类，core 不 import 不解读——类型校验在 server 侧 reducer 承接时进行）。
     ``completed`` 无相位：定稿走 record 消息路径，由 reducer 调消息的
     ``to_item()`` 产出权威终态。

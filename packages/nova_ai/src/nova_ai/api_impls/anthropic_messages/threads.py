@@ -19,7 +19,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
-from nova_protocol import AbortSignal, AssistantMessage, Context, Model, is_aborted
+from nova_async import AbortSignal, is_aborted
+from nova_protocol import AssistantMessage, Context, Model
 
 from ...session_resources import register_session_resource_cleanup
 from ...utils.diagnostics import append_diagnostic

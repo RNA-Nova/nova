@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from nova_harness.core.agent_session import AgentSessionRuntime
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 __all__ = [
     "RuntimeManager",

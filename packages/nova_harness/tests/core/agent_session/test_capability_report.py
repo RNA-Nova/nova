@@ -19,10 +19,10 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 from nova_harness.core.agent_session.agent import AgentSession
-from nova_harness.types.extensions.extension import RegisteredCommand
-from nova_harness.types.extensions.loading import Extension
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.extensions.extension import RegisteredCommand
+from nova_harness.extensions.loading import Extension
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.sessions.config import AgentSessionConfig
 
 
 def _extension(name: str, commands: Optional[List[str]] = None) -> Extension:
@@ -120,6 +120,7 @@ def test_extensions_report_statuses_and_first_build_filter():
         disabled_extension_names={"disabled_ext"},
     )
     # 首建过滤生效：名单外（ext_b）不进注册表
+    assert session._extension_runner is not None
     assert [e.name for e in session._extension_runner.extensions] == ["ext_a"]
     assert _report_by_name(session, "extensions") == {
         "ext_a": "ok",

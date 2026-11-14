@@ -3,6 +3,9 @@
 import asyncio
 
 import pytest
+from nova_async import AbortController
+from nova_protocol import AuthEvent, AuthPrompt, AuthPromptOption
+
 from nova_harness.config.auth.guidance import (
     format_no_api_key_found_message,
     format_no_auth_message,
@@ -11,9 +14,8 @@ from nova_harness.config.auth.guidance import (
     format_oauth_reauth_message,
 )
 from nova_harness.config.auth.interaction import LoginCancelledError, UIAuthInteraction
-from nova_harness.types.ui.context import UIContext
-from nova_harness.types.ui.primitives import UIResponse
-from nova_protocol import AbortController, AuthEvent, AuthPrompt, AuthPromptOption
+from nova_harness.ui.context import UIContext
+from nova_harness.ui.primitives import UIResponse
 
 # ---------------------------------------------------------------------------
 # guidance
@@ -61,15 +63,22 @@ class _FakeUI(UIContext):
 
     def __init__(self, responses=None):
         self._responses = responses or {}
+        self._capabilities: set[str] | None = None
         self.messages = []
         self.statuses = []
         self.open_urls = []
 
     @property
     def capabilities(self):
-        return {"select", "input", "confirm", "notify", "host:openUrl"}
+        return self._capabilities or {
+            "select",
+            "input",
+            "confirm",
+            "notify",
+            "host:openUrl",
+        }
 
-    async def request(self, method, params, scope=None):
+    async def request(self, method, params, *, scope=None):
         if method == "host:openUrl":
             self.open_urls.append(params.get("url"))
             return UIResponse(value={"opened": True})
@@ -146,7 +155,7 @@ async def test_prompt_task_cancellation_aborts_pending_request():
     UIAuthInteraction 把 task 取消翻译为流程的取消词汇。"""
 
     class _SlowUI(_FakeUI):
-        async def _respond(self, method):
+        async def request(self, method, params, *, scope=None):
             await asyncio.sleep(10)
             return UIResponse(value="never")
 
@@ -245,7 +254,7 @@ def test_browser_open_without_capability_noop():
 
     async def _run():
         ui = _FakeUI()
-        ui.__class__.capabilities = property(lambda self: {"select", "input"})
+        ui._capabilities = {"select", "input"}
         interaction = UIAuthInteraction(ui)
         interaction.notify(AuthEvent(type="auth_url", url="https://auth.example/x"))
         await asyncio.sleep(0)

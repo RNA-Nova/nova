@@ -165,6 +165,8 @@ def is_ignored_by_specs(
     target = rel_path + "/" if is_dir else rel_path
     ignored = False
     for spec, prefix in specs:
+        if spec is None:
+            continue
         # 只考虑可能匹配该路径的规则前缀范围
         if prefix and not (target == prefix or target.startswith(prefix)):
             continue

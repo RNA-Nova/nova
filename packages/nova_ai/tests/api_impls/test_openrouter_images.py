@@ -6,8 +6,10 @@ import json
 import httpx
 import pytest
 import respx
+from nova_ai.api_impls.openrouter_images import generate_images
+from nova_ai.stream_options import ImagesOptions
+from nova_async import AbortController
 from nova_protocol import (
-    AbortController,
     ClientAttribution,
     ClientIdentity,
     ImageContent,
@@ -17,9 +19,6 @@ from nova_protocol import (
     ModelCost,
     TextContent,
 )
-
-from nova_ai.api_impls.openrouter_images import generate_images
-from nova_ai.stream_options import ImagesOptions
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -291,7 +290,7 @@ async def test_openrouter_images_cache_read_and_write_are_independent():
 @pytest.mark.asyncio
 @respx.mock
 async def test_openrouter_images_abort_error_is_redacted():
-    from nova_protocol import AbortedError
+    from nova_async import AbortedError
 
     async def on_payload(_params, _model):
         raise AbortedError("Bearer sk-live-FAKE-REVIEW-SECRET")

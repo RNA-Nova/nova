@@ -9,17 +9,16 @@
 import json
 
 import pytest
+
 from nova_harness.core.runtime_manager.assembly import create_agent_session_runtime
-from nova_harness.types.session.config import CreateAgentSessionOptions
+from nova_harness.sessions.config import CreateAgentSessionOptions
 
 
 @pytest.mark.asyncio
 async def test_trust_project_persists_and_flips(tmp_path, monkeypatch):
     """trust_project：内存翻转 + trust.json 落盘（重启不忘）。"""
     monkeypatch.setenv("HOME", str(tmp_path))  # trust.json 落到隔离 HOME
-    rt = await create_agent_session_runtime(
-        CreateAgentSessionOptions(cwd=str(tmp_path))
-    )
+    rt = await create_agent_session_runtime(CreateAgentSessionOptions(cwd=tmp_path))
     try:
         session = rt.session
         assert session.settings_manager.is_project_trusted() is False
@@ -41,9 +40,7 @@ async def test_trust_project_persists_and_flips(tmp_path, monkeypatch):
 async def test_reload_emits_session_reloaded(tmp_path, monkeypatch):
     """session.reload() 末尾发射 session_reloaded（前端刷新包 UI 贡献）。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    rt = await create_agent_session_runtime(
-        CreateAgentSessionOptions(cwd=str(tmp_path))
-    )
+    rt = await create_agent_session_runtime(CreateAgentSessionOptions(cwd=tmp_path))
     try:
         events = []
         rt.session.subscribe(lambda e: events.append(getattr(e, "type", None)))

@@ -57,7 +57,7 @@
 pip install nova-ai
 ```
 
-要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`httpx2>=2.0,<3`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。
+要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`httpx2>=2.0,<3`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。模型目录构建管线已收编为包内 `nova_ai.catalog`，无需另装目录包。
 
 在 monorepo 仓库内开发时，使用根目录的 pixi 统一环境（editable 安装全部子包）：
 
@@ -466,8 +466,7 @@ if message.stop_reason == StopReason.ERROR:
 
 ```python
 from nova_ai import SimpleStreamOptions
-from nova_protocol import AbortController
-
+from nova_async import AbortController
 controller = AbortController()
 options = SimpleStreamOptions(signal=controller.signal)
 
@@ -497,8 +496,8 @@ provider 负责自己的 HTTP 与资源清理，调用方负责消费关系：�
 
 ```python
 from nova_ai import create_models_manager, create_provider, env_api_key_auth
-from nova_protocol import Model, ModelCost, ProviderAuth
-from nova_ai.api_impls import openai_completions
+from nova_ai.auth import ProviderAuth
+from nova_protocol import Model, ModelCostfrom nova_ai.api_impls import openai_completions
 
 model = Model(
     id="my-model",
@@ -586,8 +585,18 @@ model = Model(
 
 ## 开发
 
+### 模型目录构建（包内 `catalog/`）
+
+`nova_ai.catalog` 对位 pi `packages/ai/catalog/`：`providers/` 管各家构建钩子，`families/` 管族级事实，`sources/` 管薄拉取与翻译，`define.py` 管构建词汇，`build.py` 统一编排，`generate.py` 负责生成事务，`model_data.py` 负责产物与校验。目录子包只依赖 `nova_protocol` 与自身，AI 运行时单向复用其中的字段盖戳、站翻译与输入限制纯算法。
+
+生成物写入本包 `src/nova_ai/providers/data/*.json`、各 provider 的 `models.py` 与 `models_generated.py`。数据键使用 `chat:<id>` / `image:<id>` / `classifier:<id>`，允许同 id 的不同操作条目并存。OpenRouter 当前构建图像与分类目录，不构建聊天目录；Ark 账户状态只在运行时 personalize 消费，不进入公共种子。
+
 ```bash
-# monorepo 根目录：安装 dev 环境后跑本包测试（排除真实 API 集成测试）
+# monorepo 根目录：生成并做离线一致性对账
+pixi run -e dev generate-models   # 默认 --strict，上游失败不提交
+pixi run -e dev check-model-data
+
+# 安装 dev 环境后跑本包全部非集成测试（含 catalog/ 目录管线）
 pixi run -e dev test-ai
 
 # 或在子包内直接跑

@@ -5,7 +5,6 @@ import stat
 
 import pytest
 from nova_protocol import ApiKeyCredential
-
 from tests.integration._helpers import auth as auth_helpers
 from tests.integration._helpers.auth import AuthJsonCredentialStore
 

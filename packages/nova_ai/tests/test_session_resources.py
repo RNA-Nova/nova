@@ -1,7 +1,6 @@
 """session_resources.py 测试——会话级资源清理注册处（pi session-resources 对位）。"""
 
 import pytest
-
 from nova_ai.session_resources import (
     cleanup_session_resources,
     register_session_resource_cleanup,

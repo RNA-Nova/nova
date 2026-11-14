@@ -32,7 +32,7 @@ import asyncio
 import logging
 from typing import Any, Coroutine, Optional, Set
 
-from nova_protocol import AbortedError
+from .signal import AbortedError
 
 logger = logging.getLogger(__name__)
 

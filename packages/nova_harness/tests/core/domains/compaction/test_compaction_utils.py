@@ -4,20 +4,22 @@ compaction/utils.py 单元测试。
 覆盖文件操作提取、对话序列化、文件列表计算与格式化。
 """
 
+from nova_protocol import (
+    AssistantMessage,
+    StopReason,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+
 from nova_harness.core.domains.compaction.utils import (
     compute_file_lists,
     create_file_ops,
     extract_file_ops_from_message,
     format_file_operations,
     serialize_conversation,
-)
-from nova_protocol import (
-    AssistantMessage,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
-    ToolResultMessage,
-    UserMessage,
 )
 
 
@@ -31,7 +33,7 @@ def _assistant(text: str) -> AssistantMessage:
         content=[TextContent(type="text", text=text)],
         provider="test",
         model="test",
-        stop_reason="stop",
+        stop_reason=StopReason.STOP,
     )
 
 
@@ -47,7 +49,7 @@ def _tool_call(name: str, path: str) -> AssistantMessage:
         ],
         provider="test",
         model="test",
-        stop_reason="toolUse",
+        stop_reason=StopReason.TOOL_USE,
     )
 
 
@@ -125,7 +127,7 @@ def test_serialize_conversation_includes_thinking_and_tool_calls():
         ],
         provider="test",
         model="test",
-        stop_reason="stop",
+        stop_reason=StopReason.STOP,
     )
 
     text = serialize_conversation([user, assistant])

@@ -12,19 +12,17 @@ from typing import Dict, List, Optional, Tuple
 from nova_harness.core.utils.files import canonicalize_path
 from nova_harness.core.utils.frontmatter import parse_frontmatter
 from nova_harness.package.resolve.discovery import collect_prompt_entries
+from nova_harness.resources.diagnostics import ResourceCollision, ResourceDiagnostic
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.prompts import (
+    LoadPromptTemplatesOptions,
+    PromptTemplate,
+    PromptTemplateLoadResult,
+)
 from nova_harness.resources.source_info import (
     default_source_info_for_path,
     find_source_info_for_path,
     source_info_from_metadata,
-)
-from nova_harness.types.resources.diagnostics import (
-    ResourceCollision,
-    ResourceDiagnostic,
-)
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.prompts import (
-    LoadPromptTemplatesOptions,
-    PromptTemplate,
 )
 
 # ---------------------------------------------------------------------------
@@ -274,7 +272,11 @@ def load_prompt_templates(
         # 无 metadata 的显式路径：按标准资源根位置合成默认 SourceInfo
         # （对齐 TS getDefaultSourceInfoForPath）。
         info = default_source_info_for_path(
-            resolved, agent_dir=options.agent_dir, cwd=resolved_cwd
+            resolved,
+            agent_dir=(
+                str(options.agent_dir) if options.agent_dir is not None else None
+            ),
+            cwd=str(resolved_cwd),
         )
         if info.scope == "user":
             return {"source": "user", "label": "(user)", "source_info": info}
@@ -287,7 +289,7 @@ def load_prompt_templates(
         }
 
     for raw_path in prompt_paths:
-        resolved_path = _resolve_prompt_path(raw_path, resolved_cwd)
+        resolved_path = _resolve_prompt_path(str(raw_path), str(resolved_cwd))
 
         if not os.path.exists(resolved_path):
             continue
@@ -340,7 +342,7 @@ def load_prompt_templates(
 
 def _dedupe_prompts(
     prompts: List[PromptTemplate],
-) -> Dict[str, List[PromptTemplate] | List[ResourceDiagnostic]]:
+) -> PromptTemplateLoadResult:
     """去重提示词模板并记录冲突。"""
     seen: Dict[str, PromptTemplate] = {}
     diagnostics: List[ResourceDiagnostic] = []
@@ -372,7 +374,7 @@ def _dedupe_prompts(
 
 def load_prompt_templates_with_diagnostics(
     options: Optional[LoadPromptTemplatesOptions] = None,
-) -> Dict[str, List[PromptTemplate] | List[ResourceDiagnostic]]:
+) -> PromptTemplateLoadResult:
     """加载并去重提示词模板，返回模板列表与诊断信息。"""
     load_diagnostics: List[ResourceDiagnostic] = []
     all_prompts = load_prompt_templates(options, diagnostics=load_diagnostics)

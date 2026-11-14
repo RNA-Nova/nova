@@ -215,18 +215,20 @@ codex 的 Rust 协议层（`EventMsg` 家族）含 `Error/Warning/GuardianWarnin
 终态图：
 
 ```
-nova_protocol/                    # 线上词汇（纯形状 + 登记制行为件）
+nova_protocol/                    # 共享领域纯数据（无行为登记制）
 ├── enums.py                      # NovaErrorKind / WarningKind / RETRYABLE_ERROR_KINDS
 ├── events.py / agent_events.py   # ErrorEvent（既有）/ WarningEvent（定义先行，联合后补）
-├── diagnostics.py                # NovaDiagnostic（装配诊断形状）
-├── exec_server_*.py              # exec-server 词汇域六模块（config/environment/intent/policy/verdict/wire）
-└── sanitize.py                   # redact_secrets 出口清洗器（登记制纯函数件）
+└── diagnostics.py                # NovaDiagnostic（装配诊断形状）
 nova_ai/                          # 行为层
 ├── utils/errors.py               # 归一枢纽（对位 codex error.rs）
+├── utils/sanitize.py             # redact_secrets 出口清洗器（由枢纽迁出，待实施）
 ├── auth/resolve.py               # ModelsError
 ├── auth/oauth/errors.py          # OAuthFlowError
 ├── gateway/catalog.py            # CatalogError
 └── api_impls/_shared/retry.py    # 传输重试（结构嗅探，不动区）
+nova_async/signal.py              # 取消词汇（由枢纽迁出，待实施）
+nova_exec_protocol/               # executor 独立版本线上 wire（待建）
+nova_exec_policy/                 # 执行策略与权限算法（待建）
 docs/crosscutting/diagnostics-modeling.md  # 诊断家族地图（分散架构的可读性补偿）
 ```
 

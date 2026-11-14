@@ -8,6 +8,10 @@ write/edit 保护路径、ApprovalFlow 四结局（never 档/无 UI fail-closed�
 import asyncio
 
 import pytest
+from nova_exec_policy import ApprovalPolicy, ExecPolicyAmendment
+from nova_exec_policy.policy import Decision, Policy, PrefixPattern, PrefixRule
+from nova_harness.core.agent_session.controllers.execution import ReviewDecision
+
 from nova_coding_agent.adjudication.approval import (
     _CHOICE_FOREVER,
     _CHOICE_NO,
@@ -16,8 +20,6 @@ from nova_coding_agent.adjudication.approval import (
     ApprovalFlow,
 )
 from nova_coding_agent.adjudication.engine import AdjudicationEngine
-from nova_protocol import ApprovalPolicy, ExecPolicyAmendment, ReviewDecision
-from nova_protocol.exec_server_policy import Decision, Policy, PrefixPattern, PrefixRule
 
 
 def _run(coro):

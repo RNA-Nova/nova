@@ -10,8 +10,9 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from nova_protocol import AssistantMessage, NovaBaseModel, TextContent
+
 from nova_harness import create_agent_session
-from nova_protocol import NovaBaseModel
 
 
 class _SampleModel(NovaBaseModel):
@@ -60,13 +61,11 @@ async def test_create_agent_session_and_prompt():
         assert messages[0].role == "user"
 
         last = messages[-1]
-        assert last.role == "assistant"
+        assert isinstance(last, AssistantMessage)
         assert last.stop_reason != "error"
         assert not last.error_message
 
         text_parts = [
-            c.text
-            for c in last.content
-            if getattr(c, "type", None) == "text" and getattr(c, "text", None)
+            c.text for c in last.content if isinstance(c, TextContent) and c.text
         ]
         assert text_parts, "真实模型调用应返回非空文本内容"

@@ -6,11 +6,13 @@
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Callable, Collection, Dict, List, Optional, Set
 
 import pathspec
+
 from nova_harness.core.utils.git import find_git_root
 from nova_harness.package.manifest import read_manifest, resolve_extension_entries
+from nova_harness.package.types import RESOURCE_TYPE_DIRS, NovaManifest, ResourceType
 from nova_harness.package.utils import (
     is_ignored_by_specs,
     iter_sorted_entries,
@@ -23,7 +25,6 @@ from nova_harness.package.validation import (
     is_tool_dir,
     is_user_tool_dir,
 )
-from nova_harness.types.package import RESOURCE_TYPE_DIRS, NovaManifest, ResourceType
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ def matches_exact_pattern(file_path: str, pattern: str, base_dir: str) -> bool:
 
 
 def apply_patterns(
-    all_paths: List[str], patterns: List[str], base_dir: str
+    all_paths: Collection[str], patterns: List[str], base_dir: str
 ) -> Set[str]:
     """应用 override 模式返回启用路径集合。"""
     includes: List[str] = []
@@ -202,7 +203,7 @@ def apply_patterns(
 
 
 def apply_autoload_disabled_patterns(
-    all_paths: List[str], patterns: List[str], base_dir: str
+    all_paths: Collection[str], patterns: List[str], base_dir: str
 ) -> Dict[str, bool]:
     """``autoload=false`` 的 delta 过滤：返回 ``{path: enabled}`` 映射。
 
@@ -734,7 +735,7 @@ def collect_all_package_entries(
     }
 
 
-RESOURCE_DISCOVERY: dict[ResourceType, callable] = {
+RESOURCE_DISCOVERY: dict[ResourceType, Callable[..., Any]] = {
     ResourceType.EXTENSIONS: collect_extension_entries,
     ResourceType.SKILLS: collect_skill_entries,
     ResourceType.PROMPTS: collect_prompt_entries,
@@ -746,7 +747,7 @@ RESOURCE_DISCOVERY: dict[ResourceType, callable] = {
 
 # 顶层自动发现的扫描函数。与包内收集的唯一差异在 prompts：顶层只收当前
 # 层级（对齐 TS collectAutoPromptEntries），包内才递归子目录。
-RESOURCE_AUTO_DISCOVERY: dict[ResourceType, callable] = {
+RESOURCE_AUTO_DISCOVERY: dict[ResourceType, Callable[..., Any]] = {
     **RESOURCE_DISCOVERY,
     ResourceType.PROMPTS: collect_auto_prompt_entries,
 }

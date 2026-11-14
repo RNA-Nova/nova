@@ -8,15 +8,19 @@ execute）由 nova_agent 的 test_before_tool_call_args_mutation_flows_to_execut
 钉住。
 """
 
+import inspect
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from nova_agent import BeforeToolCallContext
+
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import TOOL_CALL
+from nova_harness.extensions.actions import ExtensionContextActions
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
 from nova_harness.extensions.runner import ExtensionRunner
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
-from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.sessions.config import AgentSessionConfig
 
 
 def _minimal_runtime() -> ExtensionRuntime:
@@ -40,7 +44,7 @@ def _minimal_runtime() -> ExtensionRuntime:
         "set_thinking_level",
     ):
         setattr(runtime, name, lambda *args, **kwargs: None)
-    runtime.context_actions = SimpleNamespace(
+    runtime.context_actions = ExtensionContextActions(
         get_model=lambda: None,
         is_idle=lambda: True,
         is_project_trusted=lambda: True,
@@ -105,11 +109,14 @@ async def test_tool_call_args_mutation_reaches_caller_dict():
     session = AgentSession(_make_config())
     session._extension_runner = runner
 
-    hook_ctx = SimpleNamespace(
-        tool_call=SimpleNamespace(id="tc1", name="bash"),
-        args={"command": "rm -rf /tmp/x"},
-    )
-    result = await session.agent.before_tool_call(hook_ctx, None)
+    hook_ctx = MagicMock(spec=BeforeToolCallContext)
+    hook_ctx.tool_call = SimpleNamespace(id="tc1", name="bash")
+    hook_ctx.args = {"command": "rm -rf /tmp/x"}
+    before_tool_call = session.agent.before_tool_call
+    assert before_tool_call is not None
+    result = before_tool_call(hook_ctx, None)
+    if inspect.isawaitable(result):
+        result = await result
 
     assert result is None  # 未拦截
     assert hook_ctx.args["command"] == "sandbox-exec -- rm -rf /tmp/x"
@@ -141,10 +148,13 @@ async def test_tool_call_later_handler_sees_earlier_mutation():
     session = AgentSession(_make_config())
     session._extension_runner = runner
 
-    hook_ctx = SimpleNamespace(
-        tool_call=SimpleNamespace(id="tc1", name="bash"),
-        args={"command": "ls"},
-    )
-    await session.agent.before_tool_call(hook_ctx, None)
+    hook_ctx = MagicMock(spec=BeforeToolCallContext)
+    hook_ctx.tool_call = SimpleNamespace(id="tc2", name="bash")
+    hook_ctx.args = {"command": "ls"}
+    before_tool_call = session.agent.before_tool_call
+    assert before_tool_call is not None
+    result = before_tool_call(hook_ctx, None)
+    if inspect.isawaitable(result):
+        await result
 
     assert seen == [{"command": "ls", "env": {"A": "1"}}]

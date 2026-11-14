@@ -2,11 +2,16 @@
 Settings utilities for merging and migration.
 """
 
-from nova_harness.types.config.settings import Settings
+from typing import TypeVar
+
 from pydantic import BaseModel
 
+from nova_harness.config.settings.models import Settings
 
-def deep_merge_settings(base: Settings, overrides: Settings) -> Settings:
+SettingsT = TypeVar("SettingsT", bound=BaseModel)
+
+
+def deep_merge_settings(base: SettingsT, overrides: SettingsT) -> SettingsT:
     """Deep merge settings: overrides take precedence, nested objects merge recursively.
 
     按 ``model_fields_set`` 判定"显式提供"（对齐 TS：``undefined`` 跳过、

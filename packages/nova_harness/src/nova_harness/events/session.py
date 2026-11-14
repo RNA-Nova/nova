@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, List, Literal, Optional
 
-from nova_harness.types.compaction.compaction import CompactionPreparation
-from nova_harness.types.session.entries import SessionEntry
 from nova_protocol import NovaBaseModel
 from pydantic import Field
+
+from nova_harness.core.domains.compaction.models import CompactionPreparation
+from nova_harness.sessions.entries import SessionEntry
 
 from .constants import (
     COMPACTION_END,

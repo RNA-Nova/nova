@@ -78,7 +78,7 @@ async def demo_custom():
         max_tokens=4096,
     )
     from nova_ai.auth.helpers import env_api_key_auth
-    from nova_protocol import ProviderAuth
+    from nova_ai.auth import ProviderAuth
 
     provider = create_provider(
         id="my-provider",

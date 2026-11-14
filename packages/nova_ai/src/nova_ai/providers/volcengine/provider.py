@@ -2,11 +2,11 @@
 
 from typing import cast
 
-from nova_catalog.providers.volcengine import (
+from nova_ai.auth import ProviderAuth
+from nova_ai.catalog.providers.volcengine import (
     PINNED_MODEL_IDS,
     materialize_volcengine_fields,
 )
-from nova_protocol import ProviderAuth
 
 from ...auth.helpers import env_api_key_auth
 from ...gateway import Provider, ProviderStreams, create_provider

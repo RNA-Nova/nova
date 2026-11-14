@@ -5,8 +5,9 @@ nova_protocol `append_rule_line_text`，咨询式文件锁与落盘归 RulesStor
 amend.rs 自带 `appends_rule_without_duplicate_newline` 的文件面。
 """
 
+from nova_exec_policy import ExecPolicyAmendment
+
 from nova_harness.core.harness.environments import RulesStore
-from nova_protocol import ExecPolicyAmendment
 
 
 def test_append_amendment_dedupes_existing_rule(tmp_path):

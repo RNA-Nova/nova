@@ -45,7 +45,7 @@ def test_list_installed_agents_no_packages(tmp_path: Path) -> None:
 def _fake_metadata(pkg_dir: Path):
     from datetime import datetime, timezone
 
-    from nova_harness.types.package.manifest import PackageMetadata
+    from nova_harness.package.models import PackageMetadata
 
     return PackageMetadata(
         name="nova-coding-agent",

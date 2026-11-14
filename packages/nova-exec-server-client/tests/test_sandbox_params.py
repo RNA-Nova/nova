@@ -1,7 +1,7 @@
 """沙箱上下文与进程启动参数的 wire 形态测试（序列化正确性，无需传输层）"""
 
 import pytest
-from nova_protocol import (
+from nova_exec_protocol import (
     ExecExternalPermissionProfile,
     ExecFileSystemPath,
     ExecManagedPermissionProfile,
@@ -60,7 +60,7 @@ def test_policy_context_is_the_only_directory_carrier():
     """任意策略形态（含 project_roots 符号/相对 glob）线上都只有
     policyContext 一种承载；平铺键永不出现（v1.11 终态，对位 codex
     841b5490b2 的终态化）"""
-    from nova_protocol.exec_server_wire import (
+    from nova_exec_protocol.wire import (
         ExecFileSystemPath,
         ExecFileSystemSandboxEntry,
         ExecManagedPermissionProfile,
@@ -194,7 +194,7 @@ def test_invalid_profile_type_rejected():
 def test_sandbox_override_wire_round_trip():
     """sandboxOverride 三态线上往返 + 缺省省略（v1.13，对位 codex 622e9e3696 与
     RS protocol 测试语义）：默认/None 不上线；三态 camelCase 值序列化后可回读。"""
-    from nova_protocol import SandboxOverride
+    from nova_exec_protocol import SandboxOverride
 
     ctx = FileSystemSandboxContext.read_only("/tmp/proj")
     # 缺省（None ≡ RS NoOverride）→ exclude_none 出货路径省略

@@ -2,9 +2,8 @@
 
 from typing import Optional
 
-from nova_protocol import AssistantMessage, KnownApi, NovaErrorKind, StopReason, Usage
-
 from nova_ai.utils.overflow import is_context_overflow, is_recoverable_length
+from nova_protocol import AssistantMessage, KnownApi, NovaErrorKind, StopReason, Usage
 
 
 def _message(

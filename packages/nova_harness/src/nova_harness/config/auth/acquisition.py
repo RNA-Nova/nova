@@ -24,16 +24,11 @@ import os
 from typing import Any, Awaitable, Callable, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
-from nova_async import await_with_signal
-from nova_harness.types.ui.context import UIContext
-from nova_protocol import (
-    AbortedError,
-    AbortSignal,
-    AuthorizationRequest,
-    AuthPrompt,
-    LoginCancelledError,
-    is_aborted,
-)
+from nova_ai.auth import LoginCancelledError
+from nova_async import AbortedError, AbortSignal, await_with_signal, is_aborted
+from nova_protocol import AuthorizationRequest, AuthPrompt
+
+from nova_harness.ui.context import UIContext
 
 
 def _first_qs(parsed: dict, key: str) -> Optional[str]:

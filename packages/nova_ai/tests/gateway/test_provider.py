@@ -7,6 +7,12 @@
 from typing import Any, Dict, List, Optional
 
 import pytest
+from nova_ai.providers import create_provider
+from nova_ai.stream_options import StreamOptions
+from nova_ai.streaming import (
+    AssistantMessageEventStream,
+    create_assistant_message_event_stream,
+)
 from nova_protocol import (
     AssistantMessage,
     Context,
@@ -16,13 +22,6 @@ from nova_protocol import (
     StopReason,
     Usage,
     UserMessage,
-)
-
-from nova_ai.providers import create_provider
-from nova_ai.stream_options import StreamOptions
-from nova_ai.streaming import (
-    AssistantMessageEventStream,
-    create_assistant_message_event_stream,
 )
 
 

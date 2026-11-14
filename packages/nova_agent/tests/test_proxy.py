@@ -7,8 +7,8 @@ import httpx
 import pytest
 import respx
 from _helpers.messages import text_of
+from nova_async import AbortController
 from nova_protocol import (
-    AbortController,
     Context,
     NovaErrorKind,
     RedactedString,

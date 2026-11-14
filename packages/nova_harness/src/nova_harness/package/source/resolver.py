@@ -27,6 +27,7 @@ from nova_harness.config.defaults import (
     PACKAGES_DIR_NAME,
 )
 from nova_harness.core.utils.child_process import hidden_console_kwargs
+from nova_harness.package.progress import ProgressAction, ProgressEventType
 from nova_harness.package.source._semver import (
     NpmRange,
     NpmRangeUnion,
@@ -34,8 +35,8 @@ from nova_harness.package.source._semver import (
     parse_version_spec,
 )
 from nova_harness.package.source.spec import PackageSource
+from nova_harness.package.types import ProgressEvent
 from nova_harness.package.utils import is_offline_mode_enabled
-from nova_harness.types.package import ProgressEvent
 
 # Git 命令默认超时（秒）。克隆/更新在网络异常时不应无限 hang 住。
 GIT_COMMAND_TIMEOUT = 60
@@ -98,8 +99,8 @@ class SourceResolver:
 
     def _emit_progress(
         self,
-        event_type: str,
-        action: str,
+        event_type: ProgressEventType,
+        action: ProgressAction,
         source: str,
         message: str,
         percent: Optional[float] = None,

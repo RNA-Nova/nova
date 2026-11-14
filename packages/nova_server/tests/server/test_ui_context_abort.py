@@ -6,6 +6,14 @@
 """
 
 import asyncio
+
+
+async def _read(transport):
+    response = await transport.read()
+    assert response is not None
+    return response
+
+
 import time
 
 import pytest
@@ -64,7 +72,7 @@ async def test_broadcast_survives_single_connection_loss(ui_env):
     conn_b, client_b = _make_conn(registry, {"select"})
 
     task = asyncio.create_task(ui.request("select", {"title": "t", "options": ["a"]}))
-    frame_b = await asyncio.wait_for(client_b.read(), timeout=1.0)
+    frame_b = await asyncio.wait_for(_read(client_b), timeout=1.0)
 
     ui.connection_closed(conn_a)  # A 死了，B 还在
     assert not task.done()
@@ -95,7 +103,7 @@ async def test_scope_arbitration_sends_ui_cancel_and_resolves(ui_env):
     _, client = _make_conn(registry, {"select"})
 
     task = asyncio.create_task(ui.request("select", {"title": "t"}, scope="run:r1"))
-    frame = await asyncio.wait_for(client.read(), timeout=1.0)
+    frame = await asyncio.wait_for(_read(client), timeout=1.0)
     assert frame["method"] == "ui/request"
 
     ui.cancel_scope("run:r1")  # run 终结 → 仲裁
@@ -103,7 +111,7 @@ async def test_scope_arbitration_sends_ui_cancel_and_resolves(ui_env):
     assert resp.cancelled is True
 
     # 帧序列：ui/request 之后应有 ui/cancel
-    cancel = await asyncio.wait_for(client.read(), timeout=1.0)
+    cancel = await asyncio.wait_for(_read(client), timeout=1.0)
     assert cancel["method"] == "ui/cancel"
     assert cancel["params"]["id"] == frame["params"]["id"]
 
@@ -115,7 +123,7 @@ async def test_scope_arbitration_spares_other_scopes(ui_env):
     _, client = _make_conn(registry, {"select"})
 
     task = asyncio.create_task(ui.request("select", {"title": "t"}, scope="run:other"))
-    await asyncio.wait_for(client.read(), timeout=1.0)
+    await asyncio.wait_for(_read(client), timeout=1.0)
 
     ui.cancel_scope("run:r1")  # 清别的 run
     await asyncio.sleep(0.02)
@@ -134,13 +142,13 @@ async def test_task_cancellation_sends_ui_cancel_and_propagates(ui_env):
     _, client = _make_conn(registry, {"select"})
 
     task = asyncio.create_task(ui.request("select", {"title": "t"}))
-    frame = await asyncio.wait_for(client.read(), timeout=1.0)
+    frame = await asyncio.wait_for(_read(client), timeout=1.0)
     assert frame["method"] == "ui/request"
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=1.0)
 
-    cancel = await asyncio.wait_for(client.read(), timeout=1.0)
+    cancel = await asyncio.wait_for(_read(client), timeout=1.0)
     assert cancel["method"] == "ui/cancel"
     assert ui._pending == {}

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Dict, Optional
+
+from nova_protocol import ModelsStoreEntry
 
 from nova_harness.config.defaults import MODELS_STORE_FILE_NAME, get_agent_dir
 from nova_harness.config.storage import FileStorageBackend
-from nova_protocol import ModelsStoreEntry
 
 
 class FileModelsStore:
@@ -23,7 +25,7 @@ class FileModelsStore:
         if path is None:
             path = os.path.join(get_agent_dir(), MODELS_STORE_FILE_NAME)
         self._storage = FileStorageBackend(
-            path,
+            Path(path),
             file_mode=0o600,
             dir_mode=0o700,
             initial_content="{}",

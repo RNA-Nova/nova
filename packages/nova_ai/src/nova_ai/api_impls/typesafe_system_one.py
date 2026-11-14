@@ -12,9 +12,9 @@ import math
 import time
 from typing import Any, Dict, Mapping, Optional
 
-from nova_async import await_with_abort
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_async import AbortedError, await_with_abort, is_aborted
 from nova_protocol import (
-    AbortedError,
     ClassifierAnswer,
     ClassifierBoolAnswer,
     ClassifierChoiceAnswer,
@@ -25,8 +25,6 @@ from nova_protocol import (
     ClassifierStopReason,
     KnownClassifierApi,
     Usage,
-    is_aborted,
-    redact_secrets,
 )
 
 from ..stream_options import ClassifierOptions, ModelIdentity, ProviderResponse

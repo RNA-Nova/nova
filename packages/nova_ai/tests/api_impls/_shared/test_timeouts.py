@@ -6,8 +6,6 @@ from typing import AsyncIterator
 import httpx
 import httpx2
 import pytest
-from nova_protocol import NovaErrorKind
-
 from nova_ai.api_impls._shared.timeouts import (
     CONNECT_TIMEOUT_S,
     DEFAULT_STREAM_TIMEOUT_S,
@@ -17,6 +15,7 @@ from nova_ai.api_impls._shared.timeouts import (
     idle_timeout_of,
 )
 from nova_ai.utils.errors import RequestTimeoutError
+from nova_protocol import NovaErrorKind
 
 
 class TestKnobSemantics:

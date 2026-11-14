@@ -5,11 +5,14 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Literal, Optional
 
 import pytest
-from nova_harness.types.resources.user_tools import UserToolInfo
 from nova_protocol import CustomAgentMessage
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import user_tools as st_methods
 from nova_server.protocol.methods.state import ServerState
+
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from nova_harness.resources.user_tools import UserToolInfo
+from nova_harness.ui import NoOpUIContext
 
 
 class FakeToolMessage(CustomAgentMessage):
@@ -47,15 +50,15 @@ class FakeSession:
         self.calls.append(("abort_user_tool", name))
 
 
-class FakeRuntime:
+class FakeRuntime(AgentSessionRuntime):
     def __init__(self, session):
-        self.session = session
+        self._session = session
 
 
 @pytest.fixture
 def registry():
     session = FakeSession()
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     state.set_runtime(FakeRuntime(session))
     reg = MethodRegistry()
     st_methods.register(reg, state)
@@ -69,8 +72,10 @@ async def _call(registry, method: str, params: Optional[Dict[str, Any]] = None):
     return resp
 
 
-def _result(resp) -> Dict[str, Any]:
+def _result(resp) -> Any:
+    """JSON-RPC result 是自由载荷，具体形状由各方法测试断言。"""
     assert resp.error is None, f"unexpected error: {resp.error}"
+    assert resp.result is not None
     return resp.result
 
 

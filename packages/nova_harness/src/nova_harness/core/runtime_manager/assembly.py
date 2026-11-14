@@ -36,17 +36,18 @@ from nova_harness.model.resolver import (
     resolve_thinking_level,
     restore_model_from_session,
 )
-from nova_harness.package import PackageManager
+from nova_harness.package.manager import PackageManager
+from nova_harness.package.progress import ProgressCallback
 from nova_harness.package.validation import is_agent_file
-from nova_harness.sessions import SessionManager
-from nova_harness.types.package.progress import ProgressCallback
-from nova_harness.types.session.config import CreateAgentSessionOptions
-from nova_harness.types.session.factory import (
+from nova_harness.sessions.config import CreateAgentSessionOptions
+from nova_harness.sessions.factory import (
     CreateAgentSessionResult,
     CreateAgentSessionRuntimeOptions,
     CreateAgentSessionRuntimeResult,
 )
-from nova_harness.types.ui import NoOpUIContext
+from nova_harness.sessions.manager import SessionManager
+from nova_harness.sessions.protocol import SessionManagerProtocol
+from nova_harness.ui import NoOpUIContext
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -100,7 +101,7 @@ def _resolve_on_progress(
 
 async def create_agent_session_from_services(
     services: AgentSessionServices,
-    session_manager: SessionManager,
+    session_manager: SessionManagerProtocol,
     options: Optional[CreateAgentSessionOptions] = None,
 ) -> CreateAgentSessionResult:
     """从已创建的服务集合创建 AgentSession。"""
@@ -228,8 +229,8 @@ async def create_agent_session_runtime(
     ) -> CreateAgentSessionRuntimeResult:
         runtime_services = await create_agent_session_services(
             CreateAgentSessionOptions(
-                cwd=runtime_options.cwd,
-                agent_dir=runtime_options.agent_dir,
+                cwd=Path(runtime_options.cwd),
+                agent_dir=Path(runtime_options.agent_dir),
                 auth_storage=services.auth_storage,
                 settings_manager=services.settings_manager,
                 model_runtime=services.model_runtime,

@@ -8,10 +8,24 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from nova_harness.config.defaults import get_agent_dir
 from nova_harness.extensions.event_bus import ExtensionEventBus
+from nova_harness.extensions.loading import ExtensionRuntime
+from nova_harness.package.types import (
+    PathMetadata,
+    ResolvedPaths,
+    SourceOrigin,
+    SourceScope,
+)
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.context_files import ContextFile
+from nova_harness.resources.diagnostics import ResourceCollision, ResourceDiagnostic
+from nova_harness.resources.extension_paths import (
+    ResourceExtensionPathEntry,
+    ResourceExtensionPaths,
+)
 from nova_harness.resources.loaders.agent_config import load_agent_config_from_yaml
 from nova_harness.resources.loaders.context_files import load_project_context_files
 from nova_harness.resources.loaders.extensions import load_extensions
@@ -22,38 +36,17 @@ from nova_harness.resources.loaders.prompt_templates import (
 from nova_harness.resources.loaders.skills import load_skills
 from nova_harness.resources.loaders.tools import ToolLoader
 from nova_harness.resources.loaders.user_tools import UserToolLoader
-from nova_harness.resources.source_info import source_info_from_extension_entry
-from nova_harness.types.extensions.loading import ExtensionRuntime
-from nova_harness.types.package import (
-    PathMetadata,
-    ResolvedPaths,
-    SourceOrigin,
-    SourceScope,
-)
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.context_files import ContextFile
-from nova_harness.types.resources.diagnostics import (
-    ResourceCollision,
-    ResourceDiagnostic,
-)
-from nova_harness.types.resources.extension_paths import (
-    ResourceExtensionPathEntry,
-    ResourceExtensionPaths,
-)
-from nova_harness.types.resources.loader import DefaultResourceLoaderOptions
-from nova_harness.types.resources.personas import Persona, SourceInfo
-from nova_harness.types.resources.prompts import (
+from nova_harness.resources.options import DefaultResourceLoaderOptions
+from nova_harness.resources.personas import Persona, SourceInfo
+from nova_harness.resources.prompts import (
     LoadPromptTemplatesOptions,
     PromptTemplate,
     ResolvedResource,
 )
-from nova_harness.types.resources.skills import Skill
-from nova_harness.types.resources.tools import (
-    NULL_TOOL_SETTINGS,
-    ToolContext,
-    ToolDefinition,
-)
-from nova_harness.types.session.factory import LoadedExtensionsResult
+from nova_harness.resources.skills import Skill
+from nova_harness.resources.source_info import source_info_from_extension_entry
+from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext, ToolDefinition
+from nova_harness.sessions.factory import LoadedExtensionsResult
 
 
 class ResourceLoader(ABC):
@@ -108,9 +101,15 @@ class ResourceLoader(ABC):
     def get_context_files(self) -> List[ContextFile]:
         """获取项目上下文文件列表（如 ``AGENTS.md`` / ``CLAUDE.md``）。"""
 
+    def get_disabled_extension_names(self) -> Set[str]:
+        """被 settings 裁掉的扩展注册名；自定义 loader 默认无此信息。"""
+        return set()
+
     @abstractmethod
-    async def reload(self) -> None:
-        """重新加载所有资源"""
+    async def reload(
+        self, pre_trust_extensions: Optional[LoadedExtensionsResult] = None
+    ) -> None:
+        """重新加载所有资源；可选复用预加载的信任裁决扩展。"""
 
     @abstractmethod
     def extend_resources(self, paths: ResourceExtensionPaths) -> None:
@@ -450,7 +449,11 @@ class DefaultResourceLoader(ResourceLoader):
             context_files = load_project_context_files(
                 self._cwd,
                 self._agent_dir,
-                project_trusted=self._settings_manager.is_project_trusted(),
+                project_trusted=(
+                    self._settings_manager.is_project_trusted()
+                    if self._settings_manager is not None
+                    else True
+                ),
             )
         if self._context_files_override is not None:
             context_files = self._context_files_override(context_files)
@@ -474,7 +477,7 @@ class DefaultResourceLoader(ResourceLoader):
         resolved_resources = (
             self._resolved_paths.prompts if self._resolved_paths else []
         )
-        paths: List[str] = []
+        paths: List[str | Path] = []
         if not self._no_prompt_templates:
             # 只加载 enabled 的 resolver 资源；disabled（filters/override 排除）
             # 不进入路径列表（与其他四类加载器的过滤语义一致）。
@@ -495,8 +498,8 @@ class DefaultResourceLoader(ResourceLoader):
         )
         if self._prompts_override is not None:
             result = self._prompts_override(result)
-        self._prompts = result["prompts"]  # type: ignore[assignment]
-        self._prompt_diagnostics.extend(result["diagnostics"])  # type: ignore[arg-type]
+        self._prompts = result["prompts"]
+        self._prompt_diagnostics.extend(result["diagnostics"])
 
     def _reload_agents(self, resolved_resources: List[ResolvedResource]) -> None:
         """加载 agent 组合声明（``<name>.yaml``——一文件一 agent）。
@@ -519,8 +522,8 @@ class DefaultResourceLoader(ResourceLoader):
             config.source_info = SourceInfo(
                 path=resource.path,
                 source=metadata.source,
-                scope=getattr(metadata.scope, "value", metadata.scope),
-                origin=getattr(metadata.origin, "value", metadata.origin),
+                scope=metadata.scope.value,
+                origin=metadata.origin.value,
                 base_dir=metadata.base_dir,
             )
             existing = agents.get(config.name)

@@ -40,8 +40,8 @@ from _helpers.messages import (
     user_message,
 )
 from nova_ai import AssistantMessageEventStream, SimpleStreamOptions
+from nova_async import AbortController
 from nova_protocol import (
-    AbortController,
     AgentToolResult,
     CustomAgentMessage,
     DoneEvent,

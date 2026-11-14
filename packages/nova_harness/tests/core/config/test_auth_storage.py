@@ -3,18 +3,19 @@ AuthStorage 测试。
 """
 
 import pytest
-from nova_harness.config.auth.storage import AuthStorage
-from nova_protocol import ApiKeyCredential, OAuthCredential
+from nova_protocol import ApiKeyCredential, OAuthCredential, RedactedString
 
+from nova_harness.config.auth.storage import AuthStorage
 from tests._helpers.auth_storage import auth_storage_in_memory
 
 
 def test_write_read_delete_roundtrip():
     storage = auth_storage_in_memory({})
-    storage.write("openai", ApiKeyCredential(key="sk-test"))
+    storage.write("openai", ApiKeyCredential(key=RedactedString("sk-test")))
     assert storage.has("openai") is True
     cred = storage.read("openai")
     assert cred is not None
+    assert isinstance(cred, ApiKeyCredential)
     assert cred.type == "api_key"
     assert cred.key == "sk-test"
 
@@ -54,7 +55,7 @@ def test_credential_store_api_key_read_resolves_env(monkeypatch):
     """存储的 ``$ENV`` 引用在 read 时解析为环境变量值。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     storage = auth_storage_in_memory({})
-    storage.write("openai", ApiKeyCredential(key="$OPENAI_API_KEY"))
+    storage.write("openai", ApiKeyCredential(key=RedactedString("$OPENAI_API_KEY")))
 
     cred = storage.read("openai")
     assert cred is not None
@@ -65,28 +66,37 @@ def test_credential_store_api_key_read_resolves_env(monkeypatch):
 def test_credential_store_api_key_literal_passthrough():
     """裸字符串按字面量处理，不再隐式查找同名环境变量。"""
     storage = auth_storage_in_memory({})
-    storage.write("openai", ApiKeyCredential(key="sk-literal"))
+    storage.write("openai", ApiKeyCredential(key=RedactedString("sk-literal")))
 
     cred = storage.read("openai")
     assert cred is not None
+    assert isinstance(cred, ApiKeyCredential)
     assert cred.key == "sk-literal"
 
 
 def test_credential_store_oauth_roundtrip():
     storage = auth_storage_in_memory({})
-    cred = OAuthCredential(access="a", refresh="r", expires=1)
+    cred = OAuthCredential(
+        access=RedactedString("a"), refresh=RedactedString("r"), expires=1
+    )
     storage.write("codex", cred)
 
     read = storage.read("codex")
     assert read is not None
     assert read.type == "oauth"
+    assert isinstance(read, OAuthCredential)
     assert read.access == "a"
 
 
 def test_credential_store_list_and_delete():
     storage = auth_storage_in_memory({})
-    storage.write("openai", ApiKeyCredential(key="k1"))
-    storage.write("codex", OAuthCredential(access="a", refresh="r", expires=1))
+    storage.write("openai", ApiKeyCredential(key=RedactedString("k1")))
+    storage.write(
+        "codex",
+        OAuthCredential(
+            access=RedactedString("a"), refresh=RedactedString("r"), expires=1
+        ),
+    )
 
     infos = storage.list()
     assert {info.provider_id for info in infos} == {"openai", "codex"}
@@ -102,7 +112,7 @@ def test_credential_store_runtime_override_takes_priority_on_read():
     storage.set_runtime_api_key("openai", "runtime")
 
     cred = storage.read("openai")
-    assert cred is not None
+    assert isinstance(cred, ApiKeyCredential)
     assert cred.key == "runtime"
 
 
@@ -133,7 +143,9 @@ def test_auth_storage_persists_oauth_to_file(tmp_path):
     auth_path = tmp_path / "auth.json"
     storage = AuthStorage.create(auth_path)
     cred = OAuthCredential(
-        access="access-token", refresh="refresh-token", expires=9999999999
+        access=RedactedString("access-token"),
+        refresh=RedactedString("refresh-token"),
+        expires=9999999999,
     )
     storage.write("codex", cred)
 
@@ -149,16 +161,23 @@ def test_auth_storage_persists_oauth_to_file(tmp_path):
 def test_auth_storage_write_updates_file(tmp_path):
     auth_path = tmp_path / "auth.json"
     storage = AuthStorage.create(auth_path)
-    expired = OAuthCredential(access="old", refresh="r", expires=1)
+    expired = OAuthCredential(
+        access=RedactedString("old"), refresh=RedactedString("r"), expires=1
+    )
     storage.write("codex", expired)
 
     storage.write(
-        "codex", OAuthCredential(access="new", refresh="r", expires=9999999999)
+        "codex",
+        OAuthCredential(
+            access=RedactedString("new"),
+            refresh=RedactedString("r"),
+            expires=9999999999,
+        ),
     )
 
     reloaded = AuthStorage.create(auth_path)
     read = reloaded.read("codex")
-    assert read is not None
+    assert isinstance(read, OAuthCredential)
     assert read.access == "new"
 
 
@@ -175,6 +194,7 @@ def test_read_uses_credential_env_for_resolution(monkeypatch):
         }
     )
     cred = storage.read("p")
+    assert isinstance(cred, ApiKeyCredential)
     assert cred.key == "from-credential"
 
 
@@ -185,6 +205,7 @@ def test_read_unresolvable_key_becomes_none():
     )
     cred = storage.read("p")
     assert cred is not None
+    assert isinstance(cred, ApiKeyCredential)
     assert cred.key is None
 
 
@@ -202,7 +223,7 @@ def test_write_rereads_file_inside_lock(tmp_path):
         encoding="utf-8",
     )
 
-    storage.write("mine", ApiKeyCredential(key="k-mine"))
+    storage.write("mine", ApiKeyCredential(key=RedactedString("k-mine")))
 
     on_disk = _json.loads(auth_path.read_text(encoding="utf-8"))
     assert "other" in on_disk  # 外部写入未被覆盖
@@ -273,7 +294,9 @@ def test_write_preserves_unparseable_entries(tmp_path):
 
     from nova_protocol.auth import ApiKeyCredential
 
-    storage.write("new-provider", ApiKeyCredential(type="api_key", key="new-key"))
+    storage.write(
+        "new-provider", ApiKeyCredential(type="api_key", key=RedactedString("new-key"))
+    )
     on_disk = _json.loads(auth_path.read_text(encoding="utf-8"))
     assert on_disk["new-provider"]["key"] == "new-key"
     assert on_disk["victim"] == {"type": "apiKey", "key": "legacy"}
@@ -286,7 +309,7 @@ def test_read_picks_up_external_file_changes(tmp_path):
 
     auth_path = tmp_path / "auth.json"
     storage = AuthStorage.create(auth_path)
-    storage.write("mine", ApiKeyCredential(key="k-mine"))
+    storage.write("mine", ApiKeyCredential(key=RedactedString("k-mine")))
 
     # 模拟另一个进程写入
     auth_path.write_text(
@@ -294,23 +317,26 @@ def test_read_picks_up_external_file_changes(tmp_path):
     )
 
     cred = storage.read("other")
-    assert cred is not None and cred.key == "k-other"
+    assert isinstance(cred, ApiKeyCredential)
+    assert cred.key == "k-other"
 
 
 def test_write_failure_keeps_memory_and_file_consistent(tmp_path, monkeypatch):
     """写盘失败时内存快照不得先行更新（失败路径内存与文件不分叉）。"""
     auth_path = tmp_path / "auth.json"
     storage = AuthStorage.create(auth_path)
-    storage.write("mine", ApiKeyCredential(key="k-before"))
+    storage.write("mine", ApiKeyCredential(key=RedactedString("k-before")))
 
     def _boom(*_args, **_kwargs):
         raise OSError("disk full")
 
     monkeypatch.setattr("os.replace", _boom)
     with pytest.raises(OSError):
-        storage.write("mine", ApiKeyCredential(key="k-after"))
+        storage.write("mine", ApiKeyCredential(key=RedactedString("k-after")))
 
-    assert storage.read("mine").key == "k-before"  # 内存仍是写前快照
+    read = storage.read("mine")
+    assert isinstance(read, ApiKeyCredential)
+    assert read.key == "k-before"  # 内存仍是写前快照
     import json as _json
 
     on_disk = _json.loads(auth_path.read_text(encoding="utf-8"))

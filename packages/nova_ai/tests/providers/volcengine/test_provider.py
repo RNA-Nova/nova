@@ -1,15 +1,14 @@
 """Volcengine 模型目录测试"""
 
-from nova_protocol import ModelCost
-
 from nova_ai import VOLCENGINE_MODELS
+from nova_protocol import ModelCost
 
 
 class TestVolcengineModels:
     """Volcengine 模型数据测试"""
 
     def test_models_exist(self):
-        # 生成目录（nova_catalog.generate）：models.dev v2 在售 + 钉住的 260425 对
+        # 生成目录（nova_ai.catalog.generate）：models.dev v2 在售 + 钉住的 260425 对
         # （v2 deprecated 过滤掉 doubao-seed-2-0-pro/code-preview 两款）
         assert VOLCENGINE_MODELS
         assert "deepseek-v3-2-251201" not in VOLCENGINE_MODELS  # 已下线

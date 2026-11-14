@@ -8,9 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
 from nova_harness.core import AgentSession
 from nova_harness.events import EntryAppendedEvent
-from nova_harness.types.session.config import AgentSessionConfig
+from nova_harness.sessions.config import AgentSessionConfig
 
 
 def _make_config() -> AgentSessionConfig:
@@ -37,6 +38,7 @@ def _make_config() -> AgentSessionConfig:
 @pytest.mark.asyncio
 async def test_append_entry_emits_entry_appended_with_entry():
     session = AgentSession(_make_config())
+    session.session_manager = MagicMock()
 
     entry = SimpleNamespace(
         id="e1", type="custom", custom_type="git_status", data={"branch": "main"}
@@ -49,14 +51,13 @@ async def test_append_entry_emits_entry_appended_with_entry():
 
     captured = {}
 
-    class FakeRunner:
-        def bind_core(self, actions, context_actions, provider_actions):
-            captured["actions"] = actions
-
-        def emit_error(self, *args, **kwargs):
-            pass
-
-    session._bind_extension_core(FakeRunner())
+    runner = MagicMock()
+    runner.bind_core.side_effect = (
+        lambda actions, context_actions, provider_actions: captured.__setitem__(
+            "actions", actions
+        )
+    )
+    session._bind_extension_core(runner)
     entry_id = captured["actions"].append_entry("git_status", {"branch": "main"})
 
     assert entry_id == "e1"
@@ -66,13 +67,16 @@ async def test_append_entry_emits_entry_appended_with_entry():
     appended = [e for e in received if isinstance(e, EntryAppendedEvent)]
     assert len(appended) == 1
     assert appended[0].entry is entry
-    assert appended[0].entry.custom_type == "git_status"
+    appended_entry = appended[0].entry
+    assert appended_entry is not None
+    assert appended_entry.custom_type == "git_status"
 
 
 @pytest.mark.asyncio
 async def test_append_entry_no_event_when_entry_missing():
     """条目取不到（防御）：不发射事件，但仍返回 entry_id。"""
     session = AgentSession(_make_config())
+    session.session_manager = MagicMock()
     session.session_manager.append_custom_entry.return_value = "ghost"
     session.session_manager.get_entry.return_value = None
 
@@ -81,14 +85,13 @@ async def test_append_entry_no_event_when_entry_missing():
 
     captured = {}
 
-    class FakeRunner:
-        def bind_core(self, actions, context_actions, provider_actions):
-            captured["actions"] = actions
-
-        def emit_error(self, *args, **kwargs):
-            pass
-
-    session._bind_extension_core(FakeRunner())
+    runner = MagicMock()
+    runner.bind_core.side_effect = (
+        lambda actions, context_actions, provider_actions: captured.__setitem__(
+            "actions", actions
+        )
+    )
+    session._bind_extension_core(runner)
     entry_id = captured["actions"].append_entry("t", None)
 
     assert entry_id == "ghost"

@@ -32,18 +32,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from nova_harness.core.utils.files import canonicalize_path
+from nova_harness.resources.diagnostics import ResourceCollision, ResourceDiagnostic
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.prompts import ResolvedResource
 from nova_harness.resources.source_info import (
     find_source_info_for_path,
     source_info_from_metadata,
 )
+from nova_harness.resources.user_tools import UserToolDefinition, UserToolResource
 from nova_harness.sessions.message_types import register_message_types
-from nova_harness.types.resources.diagnostics import (
-    ResourceCollision,
-    ResourceDiagnostic,
-)
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.prompts import ResolvedResource
-from nova_harness.types.resources.user_tools import UserToolDefinition, UserToolResource
 
 if TYPE_CHECKING:
     from nova_harness.core.agent_session.agent import AgentSession
@@ -235,7 +232,7 @@ class UserToolLoader:
                     collision=ResourceCollision(
                         resource_type="user_tool",
                         name=tool_name,
-                        winner_path=winner_dir,
+                        winner_path=winner_dir or "",
                         loser_path=loser_dir,
                     ),
                 )

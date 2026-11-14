@@ -16,7 +16,7 @@ import asyncio
 import sys
 
 from nova_harness.config.defaults import CONFIG_DIR_NAME
-from nova_harness.package import PackageManager
+from nova_harness.package.manager import PackageManager
 from nova_harness.package.scaffold import scaffold_pyproject_nova_section
 
 

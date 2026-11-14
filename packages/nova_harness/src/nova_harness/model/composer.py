@@ -14,28 +14,20 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from nova_harness.config.resolve import (
-    get_config_value_env_var_names,
-    is_command_config_value,
-    is_config_value_configured,
-    resolve_config_value_or_throw,
-    resolve_headers_or_throw,
-)
-from nova_harness.model.helpers import apply_model_override, merge_compat
-from nova_harness.types.model import (
-    ExtensionOAuthConfig,
-    ModelDefinition,
-    ProviderConfig,
-    ProviderConfigInput,
-)
-from nova_protocol import (
-    AnyModel,
+from nova_ai import ImagesOptions, Provider, RefreshModelsContext, create_provider
+from nova_ai.auth import (
     ApiKeyAuth,
     ApiKeyAuthInput,
+    AuthInteraction,
+    OAuthAuth,
+    ProviderAuth,
+)
+from nova_async import is_aborted
+from nova_protocol import (
+    AnyModel,
     ApiKeyCredential,
     AssistantImages,
     AuthCheck,
-    AuthInteraction,
     AuthPrompt,
     AuthResult,
     Context,
@@ -43,14 +35,27 @@ from nova_protocol import (
     ImagesContext,
     KnownApi,
     Model,
+    ModelAuth,
     ModelCost,
-    OAuthAuth,
     OAuthCredential,
-    ProviderAuth,
-    is_aborted,
+    ProviderHeaders,
+    RedactedString,
 )
 
-from nova_ai import ImagesOptions, Provider, RefreshModelsContext, create_provider
+from nova_harness.config.resolve import (
+    get_config_value_env_var_names,
+    is_command_config_value,
+    is_config_value_configured,
+    resolve_config_value_or_throw,
+    resolve_headers_or_throw,
+)
+from nova_harness.model.config import (
+    ExtensionOAuthConfig,
+    ModelDefinition,
+    ProviderConfig,
+    ProviderConfigInput,
+)
+from nova_harness.model.helpers import apply_model_override, merge_compat
 
 # 协议实现注册表（模块路径，get_api_impl 惰性物化——SDK 重依赖
 # 按首次使用加载，对齐 nova_ai.api_impls 的惰性纪律）
@@ -126,8 +131,8 @@ def model_from_json(
     # 请求时由 ModelRuntime 的 model_headers_resolver 解析注入
     # （对齐 TS modelFromJson 的 headers: undefined）
     default_cost = ModelCost(input=0.0, output=0.0, cache_read=0.0, cache_write=0.0)
-    input_tuple: tuple[Literal["text", "image"], ...] = (
-        tuple(definition.input) if definition.input else ("text",)
+    input_types: List[Literal["text", "image"]] = (
+        list(definition.input) if definition.input else ["text"]
     )
 
     return Model(
@@ -137,7 +142,7 @@ def model_from_json(
         provider=provider_id,
         base_url=base_url,
         reasoning=definition.reasoning or False,
-        input_types=input_tuple,
+        input_types=input_types,
         cost=definition.cost or default_cost,
         context_window=definition.context_window or 128000,
         max_tokens=definition.max_tokens or 16384,
@@ -261,9 +266,11 @@ def apply_extension(
                 base_url=base_url,
                 reasoning=definition.reasoning or False,
                 input_types=(
-                    tuple(definition.input)
+                    list(definition.input)
                     if definition.input
-                    else (defaults.input_types if defaults is not None else ("text",))
+                    else (
+                        list(defaults.input_types) if defaults is not None else ["text"]
+                    )
                 ),
                 cost=definition.cost
                 or (defaults.cost if defaults is not None else ModelCost()),
@@ -368,7 +375,7 @@ def _with_configured_auth(
 ) -> AuthResult:
     """给解析结果合并配置头，并按需注入 Authorization（对齐 TS withConfiguredAuth）。"""
     headers = resolve_headers_or_throw(raw_headers, f'provider "{provider_id}"', env)
-    merged: Dict[str, str] = {
+    merged: ProviderHeaders = {
         **(result.auth.get("headers") or {}),
         **(headers or {}),
     }
@@ -377,7 +384,7 @@ def _with_configured_auth(
         if not api_key:
             raise ValueError("authHeader requires a resolved API key")
         merged["Authorization"] = f"Bearer {api_key}"
-    auth = dict(result.auth)
+    auth = result.auth.copy()
     if merged:
         auth["headers"] = merged
     elif "headers" in auth:
@@ -430,7 +437,10 @@ def compose_api_key_auth(
             )
             if inherited is not None:
                 result = await inherited.resolve(
-                    {"ctx": ctx, "credential": ApiKeyCredential(key=key)}
+                    {
+                        "ctx": ctx,
+                        "credential": ApiKeyCredential(key=RedactedString(key)),
+                    }
                 )
             else:
                 result = AuthResult(auth={"api_key": key}, source="configured API key")
@@ -484,7 +494,7 @@ def compose_api_key_auth(
         key = await interaction.prompt(
             AuthPrompt(type="secret", message="Enter API key")
         )
-        return ApiKeyCredential(key=key)
+        return ApiKeyCredential(key=RedactedString(key))
 
     name = inherited.name if inherited is not None else "API key"
     return ApiKeyAuth(name=name, resolve=resolve, login=login, check=check)
@@ -507,7 +517,7 @@ def adapt_oauth(config: ExtensionOAuthConfig) -> OAuthAuth:
             return updated
         return OAuthCredential.model_validate({**dict(updated), "type": "oauth"})
 
-    async def to_auth(credential: OAuthCredential) -> Dict[str, Any]:
+    async def to_auth(credential: OAuthCredential) -> ModelAuth:
         return {"api_key": config.get_api_key(credential)}
 
     return OAuthAuth(
@@ -541,7 +551,7 @@ def compose_oauth_auth(
     raw_headers = _configured_headers(config, extension)
     auth_header = _configured_auth_header(config, extension)
 
-    async def to_auth(credential: Any) -> Dict[str, Any]:
+    async def to_auth(credential: Any) -> ModelAuth:
         auth = await oauth.to_auth(credential)
         result = _with_configured_auth(
             AuthResult(auth=auth),
@@ -598,7 +608,7 @@ class _ComposedStreams:
             and _api_name(model.api) == self._extension_api
         ):
             return self._stream_fn(model, context, options)
-        if self._base_supports(model):
+        if self._base is not None and self._base_supports(model):
             if simple:
                 return self._base.stream_simple(model, context, options)
             return self._base.stream(model, context, options)

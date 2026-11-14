@@ -6,15 +6,19 @@
 - 用户级/项目级/显式路径（其余 origin 与无 source_info）始终放行。
 """
 
+from typing import Literal
+
 from nova_harness.core.domains.skills import (
     filter_skills_by_whitelist,
     is_package_skill,
 )
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.resources.skills import Skill
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.resources.skills import Skill
 
 
-def _skill(name: str, origin: str | None) -> Skill:
+def _skill(
+    name: str, origin: Literal["package", "top-level", "local", "auto"] | None
+) -> Skill:
     source_info = (
         None if origin is None else SourceInfo(path=f"/tmp/{name}", origin=origin)
     )

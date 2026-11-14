@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from nova_protocol import (
+from nova_exec_protocol import (
     FS_READ_STREAM_CHUNK,
     HTTP_REQUEST_BODY_DELTA,
     PROCESS_CLOSED,

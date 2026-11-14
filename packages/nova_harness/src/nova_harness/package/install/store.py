@@ -28,7 +28,7 @@ from nova_harness.package.manifest import (
     resolve_package_dependencies,
 )
 from nova_harness.package.source.spec import get_package_identity
-from nova_harness.types.package import PackageMetadata, PackageSource
+from nova_harness.package.types import PackageMetadata, PackageSource
 
 
 def metadata_dedup_key(pkg: PackageMetadata, base_dir: str) -> str:

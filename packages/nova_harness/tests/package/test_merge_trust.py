@@ -10,7 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from nova_harness.package import PackageManager
+
+from nova_harness.package.manager import PackageManager
 
 
 @pytest.fixture(autouse=True)

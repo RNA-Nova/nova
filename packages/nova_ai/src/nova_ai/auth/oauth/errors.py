@@ -3,7 +3,8 @@
 from typing import Any, Dict, Optional
 
 import httpx
-from nova_protocol import NovaErrorKind, redact_secrets
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_protocol import NovaErrorKind
 from pydantic import ValidationError
 
 

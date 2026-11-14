@@ -2,8 +2,9 @@
 
 from typing import Any, Optional
 
-from nova_harness.model.attribution import merge_provider_attribution_headers
 from nova_protocol import KnownApi, Model, ModelCost
+
+from nova_harness.model.attribution import merge_provider_attribution_headers
 
 
 class _FakeSettingsManager:

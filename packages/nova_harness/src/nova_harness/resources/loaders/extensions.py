@@ -12,11 +12,11 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from nova_harness.extensions.api import NovaExtensionAPI
 from nova_harness.extensions.event_bus import ExtensionEventBus
 from nova_harness.extensions.loader import ExtensionLoader, ExtensionLoadError
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.resources.diagnostics import ResourceDiagnostic
+from nova_harness.resources.prompts import ResolvedResource
 from nova_harness.resources.source_info import source_info_from_metadata
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
-from nova_harness.types.resources.diagnostics import ResourceDiagnostic
-from nova_harness.types.resources.prompts import ResolvedResource
-from nova_harness.types.session.factory import LoadedExtensionsResult
+from nova_harness.sessions.factory import LoadedExtensionsResult
 
 
 def _default_api_factory(

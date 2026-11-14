@@ -20,23 +20,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from nova_coding_agent.ui_primitives import notify_message, select
-from nova_harness.core.agent_session.controllers.orchestrator import ApprovalAction
-from nova_harness.core.harness.environments import RulesStore
-from nova_protocol import (
-    ApprovalPolicy,
-    Decision,
-    ExecPolicyAmendment,
-    ReviewDecision,
-    ReviewDecisionPayload,
-)
-from nova_protocol.exec_server_policy import (
+from nova_exec_policy import ApprovalPolicy, Decision, ExecPolicyAmendment
+from nova_exec_policy.policy import (
     PatternToken,
     Policy,
     PrefixPattern,
     PrefixRule,
     PrefixRuleMatch,
 )
+from nova_harness.core.agent_session.controllers.execution import (
+    ReviewDecision,
+    ReviewDecisionPayload,
+)
+from nova_harness.core.agent_session.controllers.orchestrator import ApprovalAction
+from nova_harness.core.harness.environments import RulesStore
+
+from nova_coding_agent.ui_primitives import notify_message, select
 
 _CHOICE_ONCE = "允许一次"
 _CHOICE_SESSION = "本会话都允许"

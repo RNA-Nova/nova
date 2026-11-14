@@ -30,19 +30,19 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from nova_protocol import (
-    LOCAL_ENVIRONMENT_ID,
+from nova_exec_policy import (
     MAX_ENVIRONMENT_ID_LENGTH,
     ApprovalPolicy,
     ExecutorConfig,
     ExecutorEnvironment,
-    NetworkMode,
     NetworkProxySettings,
     SandboxMode,
     SandboxWorkspaceWriteConfig,
 )
+from nova_exec_protocol import NetworkMode
 from pydantic import BaseModel, ValidationError
 
+from .environment_id import LOCAL_ENVIRONMENT_ID
 from .errors import ConfigError
 
 logger = logging.getLogger(__name__)

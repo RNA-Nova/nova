@@ -20,6 +20,8 @@ from nova_harness.config.defaults import (
     PATH_PACKAGES_DIR_NAME,
     get_project_base_dir,
 )
+from nova_harness.config.protocol import SettingsReaderProtocol
+from nova_harness.config.settings.models import PackageSourceSpec, Settings
 from nova_harness.package.install.store import (
     basename,
     install_path_for_source,
@@ -43,9 +45,7 @@ from nova_harness.package.source.spec import (
     parse_package_source_spec,
     parse_source,
 )
-from nova_harness.package.utils import is_ignored_by_specs, load_ignore_specs
-from nova_harness.types.config.settings import PackageSourceSpec, Settings
-from nova_harness.types.package import (
+from nova_harness.package.types import (
     TOP_LEVEL_RESOURCE_TYPE_DIRS,
     NovaManifest,
     PackageFilter,
@@ -56,9 +56,9 @@ from nova_harness.types.package import (
     SourceOrigin,
     SourceScope,
 )
-from nova_harness.types.protocols import SettingsReaderProtocol
-from nova_harness.types.resources.diagnostics import ResourceDiagnostic
-from nova_harness.types.resources.prompts import ResolvedResource
+from nova_harness.package.utils import is_ignored_by_specs, load_ignore_specs
+from nova_harness.resources.diagnostics import ResourceDiagnostic
+from nova_harness.resources.prompts import ResolvedResource
 
 logger = logging.getLogger(__name__)
 

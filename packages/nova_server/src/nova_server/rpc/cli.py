@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from nova_harness.core.utils.child_process import kill_tracked_detached_children
-from nova_harness.core.utils.output_guard import OutputGuard
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import (
@@ -25,6 +23,9 @@ from nova_server.protocol.methods import (
 from nova_server.protocol.methods.state import ServerState
 from nova_server.server import RpcServer
 from nova_server.transport import StdioTransport
+
+from nova_harness.core.utils.child_process import kill_tracked_detached_children
+from nova_harness.core.utils.output_guard import OutputGuard
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -153,12 +154,13 @@ async def _async_main() -> int:
 
 async def _serve_websocket(server: RpcServer, listen: str, args: Any) -> None:
     """WS 多客户端形态：acceptor 每接入一条即 ``add_connection``。"""
-    from nova_harness.config.defaults import get_agent_dir
     from nova_server.transport.websocket import (
         WebSocketAcceptor,
         _is_loopback,
         provision_token,
     )
+
+    from nova_harness.config.defaults import get_agent_dir
 
     authority = listen[len("ws://") :]
     host, _, port_text = authority.rpartition(":")

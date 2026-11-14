@@ -61,7 +61,7 @@ LLM 工具链每层都有明确归属，用户工具平行复制：
 ```
 LLM 工具                                        用户工具
 ─────────────────────────────────────         ─────────────────────────────────────
-types/resources/tools.py                      types/resources/user_tools.py
+resources/tools.py                            resources/user_tools.py
   ToolDefinition                                UserToolDefinition / UserTool 协议
 resources/loaders/tools.py                    resources/loaders/user_tools.py
   ToolLoader（executor.py 动态 import）          UserToolLoader（同款动态 import）
@@ -79,7 +79,7 @@ agent_session/controllers/tools.py            agent_session/controllers/user_too
 - 执行引擎 → `nova_coding_agent/src/nova_coding_agent/bash/engine.py`，
   LLM bash 工具（`tools/bash.py`）与会话 bash
   （`user_tools/bash.py`）在 bundle 内共享同一引擎；
-- `types/extensions/process.py` 只保留扩展 spawn hook 契约
+- `extensions/process.py` 只保留扩展 spawn hook 契约
   （`BashSpawnContext`/`BashSpawnHook`/`SpawnHookAware`）——那是扩展 API
   的契约面，不是工具实现；`BashResult`/`BashOperations` 随引擎入 bundle；
 - `BashExecutionMessage` → `nova_coding_agent/bash/message.py`，
@@ -92,7 +92,7 @@ agent_session/controllers/tools.py            agent_session/controllers/user_too
 
 - `CustomAgentMessage`（nova_agent 层）**不改动**——它是跨包基类，不认识
   harness 的上下文概念；
-- 在 harness 的 `core/types/messages.py` 定义协议：
+- 在 harness 的 `sessions/messages.py` 定义协议：
 
 ```python
 class ContextInjectable(Protocol):
@@ -110,7 +110,7 @@ class ContextInjectable(Protocol):
 
 ## 6. UserTool 协议与定义
 
-`core/types/resources/user_tools.py`：
+`resources/user_tools.py`：
 
 ```python
 class UserToolMessage(Protocol):

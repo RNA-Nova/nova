@@ -6,7 +6,7 @@
   （``AbortScope``）包住请求，举旗即杀断在飞连接抛 ``AbortedError``；
 - ``fetch_json``：async GET + 重试 + 非 200 raise + ``.json()``
   （运行期目录拉取；每次尝试走 ``request_with_abort``，尝试之间检查 abort
-  并可中断退避）。构建期单次 GET 归 ``nova_catalog``，不反向复用本模块。
+  并可中断退避）。构建期单次 GET 归 ``nova_ai.catalog``，不反向复用本模块。
 
 传输错误统一包装为 ``RuntimeError``——调用方按 RuntimeError 识别传输
 失败并重试，无需感知 httpx 异常族。
@@ -17,8 +17,14 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import httpx
-from nova_async import abortable_sleep, await_with_abort, backoff_delay_ms
-from nova_protocol import AbortedError, AbortSignal, is_aborted
+from nova_async import (
+    AbortedError,
+    AbortSignal,
+    abortable_sleep,
+    await_with_abort,
+    backoff_delay_ms,
+    is_aborted,
+)
 
 _FETCH_UA = "nova-ai-model-data/0.1 (+https://github.com/RNA-Nova/nova)"
 _ATTEMPT_TIMEOUT_S = 4.0

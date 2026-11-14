@@ -10,7 +10,7 @@ import importlib.util
 import os
 from typing import Any, Dict, List, Optional, Set
 
-from nova_harness.types.ui.primitives import UIResponse
+from nova_harness.ui.primitives import UIResponse
 
 
 def _load_question_tool():
@@ -22,7 +22,7 @@ def _load_question_tool():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
     context = ToolContext(cwd=os.getcwd(), settings=NULL_TOOL_SETTINGS)
     return module, module.Tool(context)
@@ -53,8 +53,8 @@ class _ScriptedUI:
 
 
 def _exec_ctx(ui: Optional[_ScriptedUI], has_ui: bool):
-    from nova_harness.types.resources.tools import ToolExecContext
-    from nova_harness.types.ui import NoOpUIContext
+    from nova_harness.resources.tools import ToolExecContext
+    from nova_harness.ui import NoOpUIContext
 
     return ToolExecContext(ui=ui or NoOpUIContext(), has_ui=has_ui)
 

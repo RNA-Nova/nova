@@ -20,11 +20,11 @@ from nova_harness.config.defaults import get_agent_dir, get_project_base_dir
 from nova_harness.events import ExtensionErrorEvent
 from nova_harness.extensions.api import NovaExtensionAPI
 from nova_harness.extensions.event_bus import ExtensionEventBus
-from nova_harness.types.extensions import SourceOrigin, SourceScope
-from nova_harness.types.extensions.loading import Extension, ExtensionRuntime
-from nova_harness.types.resources.loader import ExtensionFactory
-from nova_harness.types.resources.personas import SourceInfo
-from nova_harness.types.session.factory import LoadedExtensionsResult
+from nova_harness.extensions.loading import Extension, ExtensionRuntime
+from nova_harness.extensions.types import SourceOrigin, SourceScope
+from nova_harness.resources.options import ExtensionFactory
+from nova_harness.resources.personas import SourceInfo
+from nova_harness.sessions.factory import LoadedExtensionsResult
 
 DEFAULT_FACTORY_NAMES = ("extension", "load")
 
@@ -240,7 +240,7 @@ class ExtensionLoader:
             path=str(path),
             resolved_path=resolved,
             name=name,
-            source_info=_create_source_info(path, self.cwd, self.agent_dir),
+            source_info=_create_source_info(path, Path(self.cwd), self.agent_dir),
         )
         self._factories[resolved] = factory
 
@@ -309,14 +309,15 @@ class ExtensionLoader:
             except ExtensionLoadError as exc:
                 error = {"path": str(path), "error": str(exc)}
                 errors.append(error)
-                runtime.event_bus.emit(
-                    "extension_error",
-                    ExtensionErrorEvent(
-                        extension_path=str(path),
-                        event="load",
-                        error=str(exc),
-                    ),
-                )
+                if runtime.event_bus is not None:
+                    runtime.event_bus.emit(
+                        "extension_error",
+                        ExtensionErrorEvent(
+                            extension_path=str(path),
+                            event="load",
+                            error=str(exc),
+                        ),
+                    )
         return extensions, errors
 
 

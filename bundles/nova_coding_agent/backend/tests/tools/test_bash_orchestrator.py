@@ -5,8 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from nova_coding_agent.executor import BackendSelection, SpawnPolicy
-from nova_coding_agent.orchestration import AdjudicationAssembly
 from nova_harness.core.agent_session.controllers.orchestrator import (
     ExecAttemptOutput,
     Orchestrator,
@@ -14,6 +12,9 @@ from nova_harness.core.agent_session.controllers.orchestrator import (
     SandboxAttempt,
 )
 from tools.bash import _KEEP_POLICY, _BashExecRuntime
+
+from nova_coding_agent.executor import BackendSelection, SpawnPolicy
+from nova_coding_agent.orchestration import AdjudicationAssembly
 
 
 def _run(coro):
@@ -53,11 +54,14 @@ def _patch_selection(sandboxed: bool):
 
 def _orchestrator():
     async def approve(action, ctx):
-        from nova_protocol import ReviewDecision, ReviewDecisionPayload
+        from nova_harness.core.agent_session.controllers.execution import (
+            ReviewDecision,
+            ReviewDecisionPayload,
+        )
 
         return ReviewDecisionPayload(decision=ReviewDecision.APPROVED)
 
-    from nova_protocol import ApprovalPolicy
+    from nova_exec_policy import ApprovalPolicy
 
     return Orchestrator(approval_policy=ApprovalPolicy.NEVER, request_approval=approve)
 
@@ -137,9 +141,10 @@ def test_orchestrated_path_passes_all_params_to_engine():
     """编排路径 params 直通（回归：OrchestratorRequest 曾只装 command/cwd，
     timeout/signal/on_update/spawn_hook/env 静默丢失——bash.py 的编排分支）。
     回退修复即红（stub 收到的 timeout/signal/on_update 全为 None）。"""
-    import nova_coding_agent.orchestration as orch_mod
-    from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+    from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
     from tools.bash import Tool
+
+    import nova_coding_agent.orchestration as orch_mod
 
     recorded: dict = {}
 
@@ -215,8 +220,12 @@ def test_orchestrated_path_passes_all_params_to_engine():
 def test_approval_action_carries_proposed_amendment():
     """approval_action 从缓存的 requirement 带出"永远允许"写回候选
     （orchestrator 先调 exec_approval_requirement 后调 approval_action）。"""
+    from nova_exec_policy import ExecPolicyAmendment
+    from nova_harness.core.agent_session.controllers.execution import (
+        ExecApprovalRequirement,
+    )
+
     import nova_coding_agent.orchestration as orch_mod
-    from nova_protocol import ExecApprovalRequirement, ExecPolicyAmendment
 
     requirement = ExecApprovalRequirement.needs_approval(
         proposed_amendment=ExecPolicyAmendment(command=("rm", "-rf"))
@@ -240,7 +249,7 @@ def test_approval_action_carries_proposed_amendment():
 
 def test_should_bypass_approval_codex_default():
     """should_bypass_approval 对位 sandboxing.rs:333：已批过/never 档 → 不重问。"""
-    from nova_protocol import ApprovalPolicy
+    from nova_exec_policy import ApprovalPolicy
 
     runtime = _BashExecRuntime(_FakeTool([]), "ls", "/tmp")
     assert runtime.should_bypass_approval(ApprovalPolicy.NEVER, False) is True

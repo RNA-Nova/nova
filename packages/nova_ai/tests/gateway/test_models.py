@@ -4,23 +4,7 @@ import asyncio
 from typing import Any, Dict, Optional
 
 import pytest
-from nova_protocol import (
-    AbortSignal,
-    ApiKeyAuth,
-    ApiKeyCredential,
-    AuthorizationRequest,
-    Context,
-    ErrorEvent,
-    KnownApi,
-    Model,
-    ModelAuth,
-    ModelCost,
-    OAuthAuth,
-    OAuthCredential,
-    ProviderAuth,
-    UserMessage,
-)
-
+from nova_ai.auth import ApiKeyAuth, OAuthAuth, ProviderAuth
 from nova_ai.auth.credential_store import InMemoryCredentialStore
 from nova_ai.auth.helpers import env_api_key_auth
 from nova_ai.auth.resolve import ModelsError
@@ -29,6 +13,19 @@ from nova_ai.providers import create_provider
 from nova_ai.stream_options import SimpleStreamOptions, StreamOptions
 from nova_ai.streaming import create_assistant_message_event_stream
 from nova_ai.utils.errors import RequestTimeoutError
+from nova_async import AbortSignal
+from nova_protocol import (
+    ApiKeyCredential,
+    AuthorizationRequest,
+    Context,
+    ErrorEvent,
+    KnownApi,
+    Model,
+    ModelAuth,
+    ModelCost,
+    OAuthCredential,
+    UserMessage,
+)
 from tests._helpers.auth import api_key_credential, oauth_credential
 from tests._helpers.callback_refresh import callback_refresh
 

@@ -8,27 +8,28 @@ import os
 import re
 import secrets
 from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, List, Optional, Set, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import uuid6
+from nova_protocol import AgentMessage, AssistantMessage, UserMessage
+from pydantic import Field, TypeAdapter
+
 from nova_harness.config.defaults import SESSIONS_DIR_NAME, get_agent_dir
+from nova_harness.core.domains.compaction.branch_summary import SessionEntry
 from nova_harness.core.utils.messages import (
     create_branch_summary_message,
     create_compaction_summary_message,
     create_custom_message,
 )
-from nova_harness.sessions.message_types import get_session_message_type
-from nova_harness.types.compaction.branch_summary import SessionEntry
-from nova_harness.types.messages import OpaqueUserToolMessage
-from nova_harness.types.session.context import SessionContext
-from nova_harness.types.session.entries import (
+from nova_harness.sessions.context import SessionContext
+from nova_harness.sessions.entries import (
     CompactionEntry,
     FileEntry,
     SessionHeader,
     SessionMessageEntry,
 )
-from nova_protocol import AgentMessage
-from pydantic import Field, TypeAdapter
+from nova_harness.sessions.message_types import get_session_message_type
+from nova_harness.sessions.messages import OpaqueUserToolMessage
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,7 @@ def parse_session_entries(content: str) -> List[FileEntry]:
 
 
 def get_latest_compaction_entry(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
 ) -> Optional[CompactionEntry]:
     """获取最新的压缩条目"""
     for entry in reversed(entries):
@@ -243,7 +244,7 @@ def session_entry_to_context_messages(entry: SessionEntry) -> List[AgentMessage]
 
 
 def _build_entry_index(
-    entries: List[SessionEntry], by_id: Optional[Dict[str, SessionEntry]]
+    entries: Sequence[SessionEntry], by_id: Optional[Dict[str, SessionEntry]]
 ) -> Dict[str, SessionEntry]:
     if by_id is not None:
         return by_id
@@ -251,7 +252,7 @@ def _build_entry_index(
 
 
 def _build_session_path(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     leaf_id: Any,
     by_id: Optional[Dict[str, SessionEntry]],
 ) -> List[SessionEntry]:
@@ -287,13 +288,13 @@ def _get_session_context_settings(
             thinking_level = entry.thinking_level
         elif entry.type == "model_change":
             model = (entry.provider, entry.model_id)
-        elif entry.type == "message" and entry.message.role == "assistant":
+        elif entry.type == "message" and isinstance(entry.message, AssistantMessage):
             model = (entry.message.provider, entry.message.model)
     return thinking_level, model
 
 
 def build_context_entries(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     leaf_id: Any = _USE_LAST_ENTRY,
     by_id: Optional[Dict[str, SessionEntry]] = None,
 ) -> List[SessionEntry]:
@@ -328,7 +329,7 @@ def build_context_entries(
 
 
 def build_session_context(
-    entries: List[SessionEntry],
+    entries: Sequence[SessionEntry],
     leaf_id: Any = _USE_LAST_ENTRY,
     by_id: Optional[Dict[str, SessionEntry]] = None,
 ) -> SessionContext:
@@ -452,7 +453,7 @@ def message_activity_time(entry: FileEntry) -> Optional[float]:
     if entry.type != "message":
         return None
     message = entry.message
-    if message.role not in ("user", "assistant"):
+    if not isinstance(message, (UserMessage, AssistantMessage)):
         return None
 
     # 消息自带的时间戳是 epoch 毫秒

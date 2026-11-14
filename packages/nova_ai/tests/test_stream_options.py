@@ -3,20 +3,14 @@
 from typing import Any, Callable
 
 import pytest
-from nova_protocol import (
-    AbortController,
-    CacheRetention,
-    Model,
-    ThinkingLevel,
-    Transport,
-)
-
 from nova_ai.stream_options import (
     ModelIdentity,
     SimpleStreamOptions,
     StreamOptions,
     ThinkingBudgets,
 )
+from nova_async import AbortController
+from nova_protocol import CacheRetention, Model, ThinkingLevel, Transport
 
 
 def _with_unknown_fields(factory: Callable[..., Any], **kwargs: Any) -> Any:

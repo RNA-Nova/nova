@@ -45,6 +45,8 @@ def _with_defs(schema: dict, fragment: dict) -> dict:
 
 
 class Wire:
+    cwd: str
+    agent_dir: str
     """最小黑盒客户端：NDJSON 请求/响应 + 通知捕获 + 反向原语应答。
 
     单线程顺序模型：``call`` 在等待响应期间消化间插的通知（事件入
@@ -174,9 +176,11 @@ def _spawn_backend(extra_args: list[str] | None = None) -> subprocess.Popen:
         bufsize=1,
         env=env,
     )
+    stderr = proc.stderr
+    assert stderr is not None
     # stderr 排干线程（异常栈不进协议通道；防止管道缓冲写满死锁）
     threading.Thread(
-        target=lambda: [line for line in proc.stderr],
+        target=lambda: [line for line in stderr],
         daemon=True,
     ).start()
     return proc

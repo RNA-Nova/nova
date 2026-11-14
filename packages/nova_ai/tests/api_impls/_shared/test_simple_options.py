@@ -1,9 +1,8 @@
 """_shared/simple_options.py 的采样分层与公共选项转发测试。"""
 
-from nova_protocol import Context, KnownApi, Model, ModelCost, ThinkingLevel
-
 from nova_ai.api_impls._shared.simple_options import build_base_options
 from nova_ai.stream_options import SimpleStreamOptions
+from nova_protocol import Context, KnownApi, Model, ModelCost, ThinkingLevel
 
 
 def _model() -> Model:

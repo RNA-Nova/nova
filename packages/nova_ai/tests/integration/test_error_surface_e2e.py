@@ -7,11 +7,11 @@ import asyncio
 import os
 
 import pytest
-from nova_protocol import AbortController, Context, StopReason, UserMessage
-
 from nova_ai import builtin_models
 from nova_ai.api_impls.openai_completions import OpenAICompletionsOptions
 from nova_ai.stream_options import SimpleStreamOptions
+from nova_async import AbortController
+from nova_protocol import Context, StopReason, UserMessage
 
 from ._helpers.auth import build_manager, has_credential
 from ._helpers.probes import collect_probes

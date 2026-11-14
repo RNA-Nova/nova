@@ -17,19 +17,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from nova_protocol import (
+from nova_exec_policy import (
     ApprovalPolicy,
     Decision,
-    ExecApprovalRequirement,
     ExecPolicyAmendment,
     intent_from_shell,
     is_dangerous_command,
 )
-from nova_protocol.exec_server_policy import (
+from nova_exec_policy.policy import (
     Evaluation,
     HeuristicsRuleMatch,
     Policy,
     PrefixRuleMatch,
+)
+from nova_harness.core.agent_session.controllers.execution import (
+    ExecApprovalRequirement,
 )
 
 # write/edit 保护路径片段（permission_gate 旧表收编——子串匹配）

@@ -6,9 +6,8 @@
 import asyncio
 
 import pytest
-from nova_protocol import Context, UserMessage
-
 from nova_ai.stream_options import SimpleStreamOptions
+from nova_protocol import Context, UserMessage
 
 from ._helpers.auth import build_manager
 from ._helpers.probes import Probe, collect_probes

@@ -15,11 +15,9 @@ from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, Optional, Protocol
 
-from nova_async import TaskTracker, await_with_signal
-from nova_protocol import (
+from nova_async import AbortedError, AbortSignal, TaskTracker, await_with_signal
+from nova_exec_protocol import (
     NETWORK_POLICY_REQUEST,
-    AbortedError,
-    AbortSignal,
     NetworkPolicyDecision,
     NetworkPolicyRequestResponse,
 )

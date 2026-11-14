@@ -8,6 +8,9 @@ from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods import settings as settings_methods
 from nova_server.protocol.methods.state import ServerState
 
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from nova_harness.ui import NoOpUIContext
+
 
 class FakeSettingsManager:
     """记录调用的 SettingsManager 替身（内存合并语义）。"""
@@ -29,15 +32,15 @@ class FakeSettingsManager:
         self._data.update(partial)
 
 
-class FakeRuntime:
+class FakeRuntime(AgentSessionRuntime):
     def __init__(self, manager):
-        self.services = SimpleNamespace(settings_manager=manager)
+        self._services = SimpleNamespace(settings_manager=manager)
 
 
 @pytest.fixture
 def registry():
     manager = FakeSettingsManager()
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     state.set_runtime(FakeRuntime(manager))
     reg = MethodRegistry()
     settings_methods.register(reg, state)
@@ -112,7 +115,7 @@ class FakePatternSettingsManager(FakeSettingsManager):
 @pytest.fixture
 def pattern_registry():
     manager = FakePatternSettingsManager()
-    state = ServerState(ui_context=SimpleNamespace())
+    state = ServerState(ui_context=NoOpUIContext())
     # runtime 无 session 属性——重解析步骤应安全跳过
     state.set_runtime(FakeRuntime(manager))
     reg = MethodRegistry()

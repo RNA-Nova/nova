@@ -10,8 +10,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from nova_harness.core.agent_session.controllers.retry import RetryController
 from nova_protocol import AssistantMessage, Model, ModelCost, NovaErrorKind, Usage
+
+from nova_harness.core.agent_session.controllers.retry import RetryController
 
 
 def _model() -> Model:
@@ -40,7 +41,7 @@ def _assistant(**overrides) -> AssistantMessage:
         stop_reason="error",
         error_message="boom",
     )
-    return AssistantMessage(**(base | overrides))
+    return AssistantMessage.model_validate(base | overrides)
 
 
 def _session(

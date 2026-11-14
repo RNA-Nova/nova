@@ -12,7 +12,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
-from nova_protocol import AssistantMessage, redact_secrets
+from nova_ai.utils.sanitize import REDACTED_SECRET, redact_secrets
+from nova_protocol import AssistantMessage
 
 
 def _redact_value(value: Any) -> Any:

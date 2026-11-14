@@ -1,11 +1,13 @@
 """environments 子域测试——选择解析链（升格链）+ 规则写门"""
 
 import pytest
+from nova_exec_policy import ExecutorConfig, ExecutorEnvironment
+from nova_exec_server_client.environments import ResolvedEnvironment
+
 from nova_harness.core.harness.environments import (
     RulesStore,
     resolve_environment_selection,
 )
-from nova_protocol import ExecutorConfig, ExecutorEnvironment, ResolvedEnvironment
 
 
 def _config(**kwargs) -> ExecutorConfig:
@@ -63,7 +65,7 @@ def test_config_default_then_local():
 
 def allow_all(_cmd):
     """对位 codex basic.rs 的兜底惯例（无命中命令由启发式兜底决定）"""
-    from nova_protocol import Decision
+    from nova_exec_policy import Decision
 
     return Decision.ALLOW
 
@@ -71,19 +73,25 @@ def allow_all(_cmd):
 def test_rules_store_missing_file_is_empty_policy(tmp_path):
     store = RulesStore(tmp_path)
     policy = store.load()
-    assert policy.check(("rm", "-rf", "/"), allow_all).decision.value == "allow"
+    decision = policy.check(("rm", "-rf", "/"), allow_all).decision
+    assert decision is not None
+    assert decision.value == "allow"
 
 
 def test_rules_store_amend_roundtrip(tmp_path):
-    from nova_protocol import ExecPolicyAmendment
+    from nova_exec_policy import ExecPolicyAmendment
 
     store = RulesStore(tmp_path)
     line = store.append_amendment(ExecPolicyAmendment(command=("git", "push")))
     assert line == 'prefix_rule(pattern=["git", "push"], decision="allow")'
 
     policy = store.load()
-    assert policy.check(("git", "push", "origin")).decision.value == "allow"
-    assert policy.check(("rm", "-rf", "/"), allow_all).decision.value == "allow"
+    decision = policy.check(("git", "push", "origin")).decision
+    assert decision is not None
+    assert decision.value == "allow"
+    fallback = policy.check(("rm", "-rf", "/"), allow_all).decision
+    assert fallback is not None
+    assert fallback.value == "allow"
 
     store.append_amendment(ExecPolicyAmendment(command=("echo",)))
     policy = store.load()

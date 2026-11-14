@@ -148,9 +148,8 @@ def test_oauth_flow_modules_are_not_eagerly_imported():
 
 
 def test_image_public_surface_imports():
-    import nova_protocol
-
     import nova_ai
+    import nova_protocol
 
     for name in ("ImageModel", "ImagesContext", "AssistantImages", "ImagesStopReason"):
         assert hasattr(nova_protocol, name)
@@ -168,9 +167,8 @@ def test_api_impls_dir_includes_lazy_option_union():
 
 
 def test_classifier_public_surface_imports():
-    import nova_protocol
-
     import nova_ai
+    import nova_protocol
 
     for name in (
         "ClassifierModel",

@@ -20,7 +20,7 @@ from nova_protocol import (
     Usage,
 )
 
-from .base import AgentToolCall
+from .tool import AgentToolCall
 
 
 @dataclass(frozen=True)

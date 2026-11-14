@@ -1,18 +1,17 @@
 """请求身份合并、User-Agent 与 provider 归因头测试。"""
 
+from nova_ai.api_impls._shared.identity import (
+    NOVA_ATTRIBUTION,
+    format_user_agent,
+    get_identity_headers,
+    merge_client_identity,
+)
 from nova_protocol import (
     ClientAttribution,
     ClientIdentity,
     Model,
     ModelCost,
     UserAgentCustom,
-)
-
-from nova_ai.api_impls._shared.identity import (
-    NOVA_ATTRIBUTION,
-    format_user_agent,
-    get_identity_headers,
-    merge_client_identity,
 )
 
 

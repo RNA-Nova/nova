@@ -6,14 +6,17 @@
 import asyncio
 
 import pytest
-from nova_harness.events.agent import ToolExecutionStartEvent
-from nova_harness.types.ui.context import UIContext
-from nova_harness.types.ui.primitives import UIResponse
 from nova_server.connection import ConnectionOrigin
 from nova_server.protocol import MethodRegistry
 from nova_server.protocol.methods.state import ServerState
 from nova_server.server import RpcServer
 from nova_server.transport import MemoryTransport
+
+from nova_harness.core.agent_session.runtime import AgentSessionRuntime
+from nova_harness.events.agent import ToolExecutionStartEvent
+from nova_harness.ui import NoOpUIContext
+from nova_harness.ui.context import UIContext
+from nova_harness.ui.primitives import UIResponse
 
 
 class FakeSession:
@@ -36,11 +39,11 @@ class FakeSession:
             listener(event)
 
 
-class FakeRuntime:
+class FakeRuntime(AgentSessionRuntime):
     """模拟 AgentSessionRuntime。"""
 
     def __init__(self, session):
-        self.session = session
+        self._session = session
         self._rebind = None
         self.disposed = False
 
@@ -51,7 +54,7 @@ class FakeRuntime:
         if self._rebind is not None:
             await self._rebind(session)
 
-    def dispose(self):
+    async def dispose(self):
         self.disposed = True
 
 
@@ -66,7 +69,7 @@ class FakeUIContext(UIContext):
     def capabilities(self):
         return set()
 
-    async def request(self, method, params, signal=None):
+    async def request(self, method, params, *, scope=None):
         return UIResponse()
 
     def notify(self, method, params):

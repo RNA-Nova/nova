@@ -7,9 +7,10 @@ import base64
 
 import pytest
 from fake_transport import FakeTransport
+from nova_exec_protocol import MAX_WRITE_STREAM_CHUNK_BYTES, FileSystemSandboxContext
+
 from nova_exec_server_client import FileSystemError, ProtocolError
 from nova_exec_server_client.fs import FileSystemManager
-from nova_protocol import MAX_WRITE_STREAM_CHUNK_BYTES, FileSystemSandboxContext
 
 
 def make_fs(responses: dict | None = None) -> tuple[FileSystemManager, FakeTransport]:

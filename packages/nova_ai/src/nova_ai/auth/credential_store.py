@@ -6,7 +6,8 @@
 
 from typing import Dict, List, Optional
 
-from nova_protocol import Credential, CredentialInfo, CredentialStore
+from nova_ai.auth import CredentialStore
+from nova_protocol import Credential, CredentialInfo
 
 
 class InMemoryCredentialStore(CredentialStore):

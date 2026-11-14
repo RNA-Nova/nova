@@ -9,6 +9,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
 from nova_coding_agent.executor.process_runner import (
     ExecutorProcessRunner,
     LocalProcessRunner,
@@ -172,7 +173,7 @@ class TestExecutorProcessRunner:
 
     def test_spawn_passes_signal_to_start_and_session(self):
         """spawn 的 signal 透传 SDK process/start 并随会话持有（流读取用）。"""
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         handle = _FakeHandle([], exit_code=0)
         client = _FakeClient(handle)
@@ -184,7 +185,7 @@ class TestExecutorProcessRunner:
 
     def test_stdout_lines_passes_signal_to_stream(self):
         """会话行流把 signal 透进 SDK 流式读取（流停由 signal 的分工）。"""
-        from nova_protocol import AbortController
+        from nova_async import AbortController
 
         handle = _FakeHandle([("stdout", b"a\n")], exit_code=0)
         ctl = AbortController()

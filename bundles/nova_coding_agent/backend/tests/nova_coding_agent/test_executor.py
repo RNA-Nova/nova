@@ -7,6 +7,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from nova_async import AbortController
+
 from nova_coding_agent.executor import (
     BackendSelection,
     ExecutorBashOperations,
@@ -15,7 +17,6 @@ from nova_coding_agent.executor import (
     reset_backend_selection,
     set_backend_selection,
 )
-from nova_protocol import AbortController
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +39,9 @@ class TestBackendSelection:
         home.mkdir()
         text = f'sandbox_mode = "{mode}"\n' if mode else ""
         (home / "config.toml").write_text(text)
-        import nova_coding_agent.executor.runtime as runtime_mod
         from nova_exec_server_client import load_executor_config
+
+        import nova_coding_agent.executor.runtime as runtime_mod
 
         monkeypatch.setattr(
             runtime_mod,
@@ -74,7 +76,7 @@ class TestBashToolBackendResolution:
         import importlib.util
         import os
 
-        from nova_harness.types.resources.tools import NULL_TOOL_SETTINGS, ToolContext
+        from nova_harness.resources.tools import NULL_TOOL_SETTINGS, ToolContext
 
         tool_path = os.path.join(
             os.path.dirname(__file__), "..", "..", "tools", "bash.py"

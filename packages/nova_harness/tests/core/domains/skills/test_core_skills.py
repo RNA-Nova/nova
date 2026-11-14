@@ -7,7 +7,7 @@ from nova_harness.core.domains.skills import (
     list_skill_commands,
     parse_skill_block,
 )
-from nova_harness.types.resources.skills import Skill
+from nova_harness.resources.skills import Skill
 
 
 def _make_skill(tmp_path, name, description="desc", disabled=False):

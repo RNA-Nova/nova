@@ -9,14 +9,12 @@ import asyncio
 import socket
 
 import pytest
+from nova_ai.auth import LoginCancelledError
+from nova_async import AbortController
+from nova_protocol import AuthorizationRequest, AuthPrompt
+
 from nova_harness.config.auth.acquisition import acquire_authorization_code
-from nova_harness.types.ui.context import UIContext, UIResponse
-from nova_protocol import (
-    AbortController,
-    AuthorizationRequest,
-    AuthPrompt,
-    LoginCancelledError,
-)
+from nova_harness.ui.context import UIContext, UIResponse
 
 
 def _free_port() -> int:
@@ -40,7 +38,7 @@ class _FakeUI(UIContext):
             caps.add("host:listenOnce")
         return caps
 
-    async def request(self, method, params, scope=None):
+    async def request(self, method, params, *, scope=None):
         if method == "host:listenOnce":
             self.listen_calls.append(params)
             # 模拟宿主收货：直接以预置应答落定
@@ -69,6 +67,7 @@ def _request(
 async def _http_get(port: int, path: str) -> int:
     """真实发一个 GET 到本地服务器（urllib 同步转线程）。"""
 
+    import urllib.error
     import urllib.request
 
     def _do() -> int:

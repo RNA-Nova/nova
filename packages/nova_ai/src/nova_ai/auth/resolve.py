@@ -20,7 +20,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
 
+from nova_ai.auth import (
+    ApiKeyAuth,
+    AuthContext,
+    CredentialStore,
+    OAuthAuth,
+    ProviderAuth,
+)
 from nova_async import (
+    AbortedError,
+    AbortSignal,
     KeyedLockFactory,
     TaskTracker,
     await_with_abort,
@@ -28,18 +37,11 @@ from nova_async import (
     operation_signal,
 )
 from nova_protocol import (
-    AbortedError,
-    AbortSignal,
-    ApiKeyAuth,
     ApiKeyCredential,
-    AuthContext,
     AuthResult,
     Credential,
-    CredentialStore,
     NovaErrorKind,
-    OAuthAuth,
     OAuthCredential,
-    ProviderAuth,
     ProviderEnv,
     RedactedString,
 )

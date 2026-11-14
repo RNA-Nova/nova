@@ -16,9 +16,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from nova_harness.package import PackageManager
+
 from nova_harness.package.install.installer import PackageInstaller
-from nova_harness.package.manager import SourceScope
+from nova_harness.package.manager import PackageManager, SourceScope
 
 
 @pytest.fixture()

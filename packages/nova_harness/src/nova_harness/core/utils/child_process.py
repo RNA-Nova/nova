@@ -10,12 +10,18 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Dict, Set
+from typing import Set, TypedDict
 
 _tracked_detached_child_pids: Set[int] = set()
 
 
-def hidden_console_kwargs() -> Dict[str, int]:
+class HiddenConsoleKwargs(TypedDict, total=False):
+    """``hidden_console_kwargs`` 可产生的精确关键字集合。"""
+
+    creationflags: int
+
+
+def hidden_console_kwargs() -> HiddenConsoleKwargs:
     """Windows 子进程不弹控制台窗口的 Popen kwargs（POSIX 返回空 dict）。
 
     打包形态下后端自身以隐藏控制台运行（TUI 侧 spawn 带 windowsHide），
@@ -56,7 +62,7 @@ def kill_process_tree(pid: int, sig: "int | None" = None) -> None:
         # 缺省强杀信号：Windows 的 signal 模块没有 SIGKILL（其 kill 语义
         # 由上面的 taskkill 分支承载，sig 不被消费）——默认值不能写在
         # 签名上，否则导入期就在 Windows 炸 AttributeError
-        sig = getattr(signal, "SIGKILL", signal.SIGTERM)
+        sig = int(getattr(signal, "SIGKILL", signal.SIGTERM))
     if sys.platform == "win32":
         try:
             subprocess.Popen(

@@ -8,13 +8,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from nova_protocol import (
+from nova_async import AbortSignal
+from nova_exec_protocol import (
     PROCESS_READ,
     PROCESS_SIGNAL,
     PROCESS_START,
     PROCESS_TERMINATE,
     PROCESS_WRITE,
-    AbortSignal,
     ExecEnvPolicy,
     ExecMetadata,
     FileSystemSandboxContext,

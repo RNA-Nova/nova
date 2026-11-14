@@ -4,10 +4,10 @@
 
 > 协议层 = 后端 ↔ 前端（TUI/Web/将来任何语言客户端）之间的线上契约与其演化纪律。本文是这层建模的**总图与单一约定点**。
 > 分工：`docs/crosscutting/data-modeling.md` 管类型住所与表示选型（协议层类型同样遵守）；`docs/crosscutting/diagnostics-modeling.md` 管错误/警告/诊断/日志/遥测的诊断与观测家族；`docs/crosscutting/testing-modeling.md` 管测试通用标准；**本文管协议层的分层、正典源、握手、演化、线上错误、传输、事件/条目、生成物与协议测试**。
-> 骨架以 codex 三层协议栈（`protocol` 词汇枢纽 → `app-server-protocol` 边界契约 → `app-server` + 独立传输 crate）为第一参考。
+> 骨架以 codex 的协议栈分工为第一参考：`protocol` 管共享领域语言，`app-server-protocol` 与 `exec-server-protocol` 分管外部边界，`execpolicy`/`async-utils` 等机制独立。我们学习其职责分层，不复刻 `codex-protocol` 较宽的行为与依赖面。
 > 状态：**目标态定稿**。【现状】= 已建成；【待补】= 设计已定、排期未做。
 
-**总纲**：三层切分、依赖单向——**词汇枢纽（`nova_protocol`，零行为零 JSON-RPC 概念）→ 边界协议包（`nova_server/protocol`：信封 + 方法形状 + 线上词汇 + schema 导出）→ 行为服务器（`nova_server`：分派/状态/桥接）+ 独立传输层（`nova_server/transport`）**。线上契约的一切事实各有一个正典源，演化走机制不走约定。
+**总纲**：共享数据与外部协议分家、依赖单向——**共享领域数据枢纽（`nova_protocol`，零行为、零 JSON-RPC 信封）+ 各表面独立边界契约 + 行为宿主与独立传输**。前端 RPC 归 `nova_server/protocol`（包内），executor wire 归独立 `nova_exec_protocol`；每条边界各自版本化，线上事实各有一个正典源。
 
 ## 一、分层与目录组织
 
@@ -15,12 +15,13 @@
 
 | 层 | codex | nova | 纪律 |
 |---|---|---|---|
-| 词汇枢纽 | `codex-protocol`（README 明文"minimal dependencies、无业务逻辑"） | `nova_protocol`（纯洁性审计机械执法） | 零行为、零 JSON-RPC 概念——信封/方法表/传输概念**不得**进枢纽 |
-| 边界协议包 | `codex-app-server-protocol`（信封 + 方法宏表 + v1/v2 payload + 投影 + schema 导出） | `nova_server/protocol/`（`jsonrpc.py` 信封 + `methods/shapes.py` 形状 + `serialize.py` 事件桥 + `schema_export.py` 导出 + `types/items.py` 线上 item） | 一个**表面**一个协议包：JSON-RPC over stdio/WS 是当前唯一表面；将来 exec-server/MCP 等新表面各立协议包与版本线，演进互不阻塞 |
+| 共享领域数据 | `codex-protocol` 的共享模型/会话/权限词汇 | `nova_protocol` 的 LLM/Agent/Auth 公共数据、ID 与诊断词汇 | 零行为、零 JSON-RPC 信封、零外部版本协议；Shape/validator/平凡序列化转换可住，行为与算法不得入住 |
+| 前端边界协议 | `codex-app-server-protocol`（信封 + v1/v2 payload + 投影 + schema 导出） | `nova_server/protocol/`（包内：`jsonrpc.py` + `methods/shapes.py` + `serialize.py` + `schema_export.py` + `items.py`/`notifications.py` 线上词汇） | Python 消费方均在 `nova_server` 内，TS 走生成物，故不另拆发行包；线上 item/notification 与 RPC 同属一个版本边界 |
+| executor 边界协议 | `codex-exec-server-protocol` | 独立 `nova_exec_protocol`（待建；现词汇在 `nova_protocol/exec_server_wire.py`，待迁） | 独立 `PROTOCOL_VERSION`、多方直接消费、Python/Rust 金标；只放 wire，不放策略算法 |
 | 行为服务器 | `codex-app-server`（分派/会话状态/桥接） | `nova_server`（`server.py`/`connection.py`/`reduction/`） | 协议语义在这里终止——handler 不认识信封 |
 | 传输 | `codex-app-server-transport`（独立 crate，`TransportEvent` 三变体：连接开/关/入站消息） | `nova_server/transport/`（`base`/`stdio`/`websocket`/`memory`）【现状】 | 传输对服务器只暴露连接事件与写口；in-process 测试传输与真实传输同构 |
 
-**目录组织红线**：传输不进协议包；协议包不进服务器业务；服务器不直接向 socket 写字节（一切出站经信封与传输）。
+**目录组织红线**：传输不进协议包；协议包不进服务器业务；服务器不直接向 socket 写字节（一切出站经信封与传输）。外部版本协议不进共享数据枢纽；共享数据可经 `reduction`/`shapes` 引用上线，组件内部类型不得直接上线。
 
 ## 二、单一正典源：方法形状
 
@@ -40,7 +41,7 @@ codex 对位：`common.rs` 一张宏表（157 条 client 方法 + 11 条 server 
 
 **事件**【现状】`AgentEvent` 判别联合（住 `nova_protocol/agent_events.py`）+ `serialize.py` **哑管道直通**（`{type, data}` 信封，零呈现加工——前端自行映射渲染模型；唯一加工是 JSON 安全兜底）。codex 同款：core 事件枚举 + 投影集中。
 
-**条目**【现状】`types/items.py` 的 `WireItem` 开放集：框架六变体判别联合 + `CustomItem` 兜底（`type` 开放字符串 + 额外字段透传）。**开放集纪律**（codex 同款）：不给主联合加 `Unknown` 变体（未知 type 直接校验失败）；第三方词汇走**命名空间子通道**——包级 item 的 `type` 必须带包命名空间前缀（`<包名>.<类型名>`，codex 的 `ExtensionItem.kind = "<namespace>.<kind>"` 对位）。
+**条目**【现状】`WireItem` 开放集：框架六变体判别联合 + `CustomItem` 兜底（`type` 开放字符串 + 额外字段透传）。住 `nova_server/protocol/items.py`。**开放集纪律**（codex 同款）：不给主联合加 `Unknown` 变体（未知 type 直接校验失败）；第三方词汇走**命名空间子通道**——包级 item 的 `type` 必须带包命名空间前缀（`<包名>.<类型名>`，codex 的 `ExtensionItem.kind = "<namespace>.<kind>"` 对位）。
 
 **投影纪律**（codex `event_mapping.rs` 纯函数 + 一处副作用处理器的对位）：core→线上的翻译集中一处（我们的 `reduction/`）；**显式吞掉必须写理由**（codex 对 PatchApplyBegin/End 的空 arm 注释是范本）；live 通知与历史重建**共用同一构造器**（codex `item_builders.rs` 两路共享防漂移——我们的 reduction 同此纪律）。
 
@@ -118,7 +119,7 @@ codex 对位的成熟形态（**待补方向**）：反向请求与正向**并�
 
 | 项 | 状态 |
 |---|---|
-| 三层切分 + 依赖单向 | 【现状】（纯洁性审计执法） |
+| 共享数据 / 边界协议 / 行为宿主分层 + 依赖单向 | 【现状】 |
 | 方法形状单一正典源（签名即契约，三方共用） | 【现状】 |
 | 信封哑容器 / 事件哑管道 / WireItem 开放集 | 【现状】 |
 | initialize major/minor 握手 | 【现状】 |

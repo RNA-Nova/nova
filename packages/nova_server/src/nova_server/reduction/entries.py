@@ -16,28 +16,35 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
-from nova_harness.core.utils.messages import (
-    create_custom_message,
-    extract_text_from_content,
+from nova_protocol import (
+    AgentToolResult,
+    AssistantMessage,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
 )
-from nova_harness.types.session.entries import (
-    BranchSummaryEntry,
-    CompactionEntry,
-    CustomEntry,
-    CustomMessageEntry,
-    SessionEntry,
-    SessionMessageEntry,
-)
-from nova_protocol import AgentToolResult, ToolCall
-from nova_server.types.items import (
+from nova_server.protocol.items import (
     BranchSummaryItem,
     CompactionItem,
     CustomItem,
     ItemStatus,
     NovaItem,
     ToolCallItem,
+)
+
+from nova_harness.core.utils.messages import (
+    create_custom_message,
+    extract_text_from_content,
+)
+from nova_harness.sessions.entries import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomEntry,
+    CustomMessageEntry,
+    SessionEntry,
+    SessionMessageEntry,
 )
 
 from .mapping import (
@@ -50,7 +57,7 @@ from .mapping import (
 )
 
 
-def entries_to_items(entries: List[SessionEntry]) -> List[NovaItem]:
+def entries_to_items(entries: Sequence[SessionEntry]) -> List[NovaItem]:
     """把当前分支条目序列翻译为 item 清单（syncSession 的转录段）。"""
     # 配对表先行：toolResult 条目按 tool_call_id 收编（顺序上结果在调用之后，
     # 但树导航回返等场景不做顺序假设——先全量收集再按序产出）
@@ -58,7 +65,7 @@ def entries_to_items(entries: List[SessionEntry]) -> List[NovaItem]:
     for entry in entries:
         if isinstance(entry, SessionMessageEntry):
             message = entry.message
-            if getattr(message, "role", None) == "toolResult":
+            if isinstance(message, ToolResultMessage):
                 tool_results[message.tool_call_id] = message
 
     items: List[NovaItem] = []
@@ -121,12 +128,11 @@ def _message_entry_to_items(
     entry: SessionMessageEntry, tool_results: Dict[str, Any]
 ) -> List[NovaItem]:
     message = entry.message
-    role = getattr(message, "role", None)
-    if role == "user":
+    if isinstance(message, UserMessage):
         return [user_message_to_item(message, entry.id)]
-    if role == "assistant":
+    if isinstance(message, AssistantMessage):
         return _assistant_entry_to_items(entry, tool_results)
-    if role == "toolResult":
+    if isinstance(message, ToolResultMessage):
         return []  # 已被 ToolCall 配对吸收
     # 包级消息（bashExecution 等注册类 / opaqueUserTool 降级形态）
     item = message_to_final_item(message, entry.id)

@@ -37,10 +37,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
+
 from nova_harness.config.defaults import get_agent_dir
-from nova_harness.types.protocols import ResourceLoaderProtocol
-from nova_harness.types.resources.agents import AgentConfig
-from nova_harness.types.resources.selection import CapabilitySelection
+from nova_harness.resources.agents import AgentConfig
+from nova_harness.resources.protocol import ResourceLoaderProtocol
+from nova_harness.resources.selection import CapabilitySelection
 
 BASE_AGENT_NAME = "base_agent"
 """无可用 agent 时的兜底名（注册表为空时的合并默认）。"""

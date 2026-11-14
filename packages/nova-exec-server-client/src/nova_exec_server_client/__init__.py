@@ -2,11 +2,18 @@
 
 # 线型（environment_status() 的返回类型）以别名入驻——包顶 `EnvironmentStatus`
 # 归连接状态型（environments.py），遮蔽修复（审计范围C C1）
-from nova_protocol import (
-    LOCAL_ENVIRONMENT_ID,
+from nova_exec_policy import (
+    ApprovalPolicy,
+    ExecutorConfig,
+    ExecutorEnvironment,
+    NetworkProxySettings,
+    ResolvedExecutionPolicy,
+    SandboxMode,
+    SandboxWorkspaceWriteConfig,
+)
+from nova_exec_protocol import (
     NETWORK_POLICY_DECISION,
     NETWORK_POLICY_REQUEST,
-    ApprovalPolicy,
     EnvironmentCapabilities,
     EnvironmentConfigLayer,
     EnvironmentConfigLayerStack,
@@ -14,9 +21,9 @@ from nova_protocol import (
     EnvironmentConfigReadResponse,
     EnvironmentInfo,
 )
-from nova_protocol import EnvironmentStatus
-from nova_protocol import EnvironmentStatus as WireEnvironmentStatus
-from nova_protocol import (
+from nova_exec_protocol import EnvironmentStatus
+from nova_exec_protocol import EnvironmentStatus as WireEnvironmentStatus
+from nova_exec_protocol import (
     ExecEnvPolicy,
     ExecFileSystemPath,
     ExecFileSystemSandboxEntry,
@@ -25,8 +32,6 @@ from nova_protocol import (
     ExecPermissionProfile,
     ExecServerNetworkPolicyRequest,
     ExecServerNetworkProtocol,
-    ExecutorConfig,
-    ExecutorEnvironment,
     FileSystemAccessMode,
     FileSystemSandboxContext,
     HttpHeader,
@@ -43,15 +48,10 @@ from nova_protocol import (
     NetworkPolicyRequestParams,
     NetworkPolicyRequestResponse,
     NetworkProxyAuditMetadata,
-    NetworkProxySettings,
     NetworkSandboxPolicy,
     RemoteNetworkProxyConfig,
     RemoteNetworkProxyLaunchConfig,
-    ResolvedEnvironment,
-    ResolvedExecutionPolicy,
-    SandboxMode,
     SandboxOverride,
-    SandboxWorkspaceWriteConfig,
     ShellSnapshotRequest,
     WindowsSandboxLevel,
     WindowsSandboxProxySettingsMode,
@@ -63,6 +63,7 @@ from .config import (
     default_exec_server_home,
     load_executor_config,
 )
+from .environment_id import LOCAL_ENVIRONMENT_ID, ResolvedEnvironment
 from .environments import (
     EnvironmentConnectionState,
     EnvironmentManager,

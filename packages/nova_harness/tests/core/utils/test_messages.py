@@ -3,7 +3,16 @@
 """
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, cast
+
+from nova_protocol import (
+    AgentMessage,
+    AssistantMessage,
+    CustomAgentMessage,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+)
 
 from nova_harness.core.utils.messages import (
     convert_to_llm,
@@ -11,12 +20,11 @@ from nova_harness.core.utils.messages import (
     create_compaction_summary_message,
     create_custom_message,
 )
-from nova_harness.types.messages import (
+from nova_harness.sessions.messages import (
     BranchSummaryMessage,
     CompactionSummaryMessage,
     CustomMessage,
 )
-from nova_protocol import AssistantMessage, CustomAgentMessage, TextContent, UserMessage
 
 
 class FakeInjectableMessage(CustomAgentMessage):
@@ -68,6 +76,7 @@ def test_convert_to_llm_injectable():
     assert isinstance(result[0], UserMessage)
     assert result[0].role == "user"
     assert result[0].timestamp == 123
+    assert isinstance(result[0].content[0], TextContent)
     assert result[0].content[0].text == "注入文本"
 
 
@@ -142,7 +151,9 @@ def test_convert_to_llm_branch_summary():
     result = convert_to_llm([msg])
     assert len(result) == 1
     assert result[0].role == "user"
-    text = result[0].content[0].text
+    text = result[0].content[0]
+    assert isinstance(text, TextContent)
+    text = text.text
     assert "s" in text
     assert "summary of a branch" in text
 
@@ -151,7 +162,9 @@ def test_convert_to_llm_compaction_summary():
     msg = CompactionSummaryMessage(summary="cs", tokens_before=100, timestamp=789)
     result = convert_to_llm([msg])
     assert len(result) == 1
-    text = result[0].content[0].text
+    text = result[0].content[0]
+    assert isinstance(text, TextContent)
+    text = text.text
     assert "cs" in text
     assert "compacted" in text
 
@@ -161,7 +174,7 @@ def test_convert_to_llm_standard_roles():
     assistant = AssistantMessage(
         role="assistant", content=[], provider="p", model="m", timestamp=20
     )
-    tool = type("ToolResultMsg", (), {"role": "toolResult", "timestamp": 30})()
+    tool = ToolResultMessage(role="toolResult", timestamp=30)
     result = convert_to_llm([user, assistant, tool])
     assert len(result) == 3
     assert result[0] is user
@@ -173,5 +186,6 @@ def test_convert_to_llm_unknown_role_skipped():
     class UnknownMsg:
         role = "unknown"
 
-    result = convert_to_llm([UnknownMsg()])
+    # 故意投入契约外的未知角色，验证边界跳过而非构造时校验。
+    result = convert_to_llm([cast(AgentMessage, UnknownMsg())])
     assert len(result) == 0

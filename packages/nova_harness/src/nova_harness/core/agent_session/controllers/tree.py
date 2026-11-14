@@ -4,17 +4,20 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
 
+from nova_async import AbortController
+
 from nova_harness.core.agent_session.controllers.compaction import (
     get_summarization_request_auth,
 )
+from nova_harness.core.agent_session.protocol import AgentSessionProtocol
 from nova_harness.core.domains.compaction import branch_summarization as _branch_module
+from nova_harness.core.domains.compaction.branch_summary import (
+    GenerateBranchSummaryOptions,
+)
 from nova_harness.core.utils.messages import extract_text_from_content
 from nova_harness.events import SessionReplacedEvent, SessionTreeEvent
 from nova_harness.events.constants import SESSION_BEFORE_TREE
-from nova_harness.types.compaction.branch_summary import GenerateBranchSummaryOptions
-from nova_harness.types.protocols import AgentSessionProtocol
-from nova_harness.types.session.options import NavigateOptions
-from nova_protocol import AbortController
+from nova_harness.sessions.options import NavigateOptions
 
 
 class TreeNavigator:
@@ -102,8 +105,11 @@ class TreeNavigator:
             summary_text: Optional[str] = None
             summary_details: Any = None
             if summarize and collect_result.entries and extension_summary is None:
+                model = self._session.model
+                if model is None:
+                    raise RuntimeError("No model available for summarization")
                 api_key, headers, env = await get_summarization_request_auth(
-                    self._session, self._session.model, required=True
+                    self._session, model, required=True
                 )
 
                 branch_settings = (
@@ -113,7 +119,7 @@ class TreeNavigator:
                 result = await _branch_module.generate_branch_summary(
                     collect_result.entries,
                     GenerateBranchSummaryOptions(
-                        model=self._session.model,
+                        model=model,
                         api_key=api_key,
                         headers=headers,
                         env=env,

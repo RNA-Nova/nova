@@ -8,14 +8,18 @@ from typing import Any, Dict
 from unittest.mock import MagicMock
 
 import pytest
-from nova_harness.config import AuthStorage, SettingsManager
+from nova_ai.gateway.models import ModelsRefreshResult
+
+from nova_harness.config.auth.storage import AuthStorage
+from nova_harness.config.settings.manager import SettingsManager
 from nova_harness.core.agent_session.services import (
     AgentSessionServices,
     CreateAgentSessionRuntimeResult,
 )
-from nova_harness.model import ModelRuntime
-from nova_harness.resources.loader import ResourceLoader
-from nova_harness.types.session.diagnostics import AgentSessionRuntimeDiagnostic
+from nova_harness.model.runtime import ModelRuntime
+from nova_harness.package.manager import PackageManager
+from nova_harness.resources.loader import DefaultResourceLoader, ResourceLoader
+from nova_harness.sessions.diagnostics import AgentSessionRuntimeDiagnostic
 
 
 class _DummyResourceLoader(ResourceLoader):
@@ -24,14 +28,17 @@ class _DummyResourceLoader(ResourceLoader):
     def __init__(self, agent_names=None):
         self._agent_names = agent_names or []
 
-    async def reload(self) -> None:
+    async def reload(self, pre_trust_extensions=None) -> None:
         pass
 
     def extend_resources(self, paths: Any) -> None:
         pass
 
+    @property
     def event_bus(self) -> Any:
-        return MagicMock()
+        from nova_harness.extensions.event_bus import ExtensionEventBus
+
+        return ExtensionEventBus()
 
     def get_agent_names(self) -> list:
         return list(self._agent_names)
@@ -70,7 +77,7 @@ class _DummyModelRuntime(ModelRuntime):
         pass
 
     async def refresh(self, allow_network=None, signal=None):  # noqa: D102
-        return {"aborted": False, "errors": {}}
+        return ModelsRefreshResult(aborted=False, errors={}, diagnostics={})
 
 
 def test_services_fields(tmp_path):
@@ -191,5 +198,7 @@ async def test_services_create_forwards_on_progress_to_package_manager(tmp_path)
         on_progress=callback,
     )
 
+    assert isinstance(services.resource_loader, DefaultResourceLoader)
     package_manager = services.resource_loader._package_manager
+    assert isinstance(package_manager, PackageManager)
     assert package_manager._on_progress is callback

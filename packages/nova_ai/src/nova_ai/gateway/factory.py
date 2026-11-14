@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional, Sequence
 
+from nova_ai.auth import ProviderAuth
 from nova_protocol import (
     AnyModel,
     AssistantImages,
@@ -14,7 +15,6 @@ from nova_protocol import (
     ImageModel,
     ImagesContext,
     Model,
-    ProviderAuth,
     ProviderHeaders,
 )
 
