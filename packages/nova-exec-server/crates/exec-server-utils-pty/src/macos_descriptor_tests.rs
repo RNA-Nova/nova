@@ -112,7 +112,10 @@ async fn inherited_descriptors_survive_native_and_executable_text_spawns() -> an
             command
         } else {
             let script = directory.path().join("executable-text");
-            nova_exec_server_utils_cargo_bin::write_executable(&script, &format!("/bin/cat {descriptor}\n"))?;
+            nova_exec_server_utils_cargo_bin::write_executable(
+                &script,
+                &format!("/bin/cat {descriptor}\n"),
+            )?;
             Command::new(script)
         };
         command

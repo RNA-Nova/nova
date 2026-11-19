@@ -1058,7 +1058,10 @@ mod tests {
         let outcome = walk_root(root, walk_options()).await;
         std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o755))?;
         assert!(
-            outcome.errors.iter().any(|e| e.path.to_string().contains("bad")),
+            outcome
+                .errors
+                .iter()
+                .any(|e| e.path.to_string().contains("bad")),
             "读失败的目录必须进 errors：{:?}",
             outcome.errors
         );

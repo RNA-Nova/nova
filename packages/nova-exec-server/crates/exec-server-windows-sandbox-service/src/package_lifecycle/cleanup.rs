@@ -109,8 +109,11 @@ pub(super) fn clean_up(
             if local_runtime_root.is_none() {
                 log_cleanup("skipping local runtime cache: cache home has no profile parent");
             }
-            let mut runtime_roots =
-                vec![(desktop.cache_home.as_path(), "nova-exec-server-runtimes", "cache home")];
+            let mut runtime_roots = vec![(
+                desktop.cache_home.as_path(),
+                "nova-exec-server-runtimes",
+                "cache home",
+            )];
             if let Some(root) = local_runtime_root.as_deref() {
                 runtime_roots.push((root, "runtimes", "runtime root"));
             }

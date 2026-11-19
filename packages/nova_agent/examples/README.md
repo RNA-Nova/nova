@@ -13,10 +13,9 @@
 |------|------|
 | `01_quickstart.py` | Agent 最小用法：创建、订阅事件、prompt、状态查看 |
 | `02_custom_tools.py` | 继承 `AgentTool` 实现自定义工具；JSON Schema 校验与类型矫正（coercion） |
-| `03_hooks.py` | 五个 hook：工具 before/after、`prepare_request`、`prepare_next_turn`、`finish_turn` |
+| `03_hooks.py` | 六个 hook：工具 before/after、`on_message_end`、`prepare_request`、`prepare_next_turn`、`finish_turn` |
 | `04_steering_followup.py` | `steer()` 运行中插入、`follow_up()` 停止前排队、队列 drain 模式 |
 | `05_abort_continue.py` | `abort()` 取消 run、`wait_for_idle()` 的 shield 语义、`continue_()` 继续 |
-| `06_agent_loop_lowlevel.py` | 低层 facade：`agent_loop()` 返回 `AgentEventStream`，自管状态 |
 
 各场景完整的事件序列见包根 [`README.md`](../README.md) 的「事件流」一节。
 

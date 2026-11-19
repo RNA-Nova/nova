@@ -31,10 +31,8 @@ pub(crate) fn launcher() -> Option<BundledBwrapLauncher> {
     // 布局探测），这里只保留"可执行文件相邻资源目录"的 legacy 查找路径。
     // 对位 codex d9960e12bb：bazel 候选与查找路径改经 find_program 共享，
     // cwd/env 显式化（本进程语境即 Path::new(".") + 进程环境）。
-    find_program(&current_exe, Path::new("."), |key| {
-        std::env::var_os(key)
-    })
-    .map(|program| BundledBwrapLauncher { program })
+    find_program(&current_exe, Path::new("."), |key| std::env::var_os(key))
+        .map(|program| BundledBwrapLauncher { program })
 }
 
 /// Discover the bundled fallback for an explicit launcher and its environment.

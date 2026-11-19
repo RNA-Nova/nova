@@ -4,10 +4,13 @@ run 终结（含续话 drain）后在 finally 中双发：Bus 2（``_emit``）�
 （runner）。正常结束、异常路径均发射；无 runner 时仅 Bus 2。
 """
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nova_agent import AgentRun
+from nova_async import AbortController
 
 from nova_harness.core import AgentSession
 from nova_harness.events.constants import AGENT_SETTLED
@@ -85,9 +88,18 @@ def _make_config() -> AgentSessionConfig:
     )
 
 
-def _runner_with_settled_handler(received):
+def _completed_run() -> AgentRun:
+    run = AgentRun(abort_controller=AbortController())
+    run.events.end(result=[])
+    run.task = asyncio.create_task(asyncio.sleep(0))
+    return run
+
+
+def _runner_with_settled_handler(received, settled=None):
     def handler(event, ctx):
         received.append(event)
+        if settled is not None:
+            settled.set()
 
     ext = Extension(path="watcher", handlers={AGENT_SETTLED: [handler]})
     return ExtensionRunner(
@@ -102,15 +114,17 @@ def _runner_with_settled_handler(received):
 @pytest.mark.asyncio
 async def test_settled_fires_after_run_on_both_channels():
     received = []
+    settled = asyncio.Event()
     session = AgentSession(_make_config())
     session.agent = MagicMock()
-    session.agent.prompt = AsyncMock()
+    session.agent.prompt = MagicMock(return_value=_completed_run())
     session.agent.has_queued_messages.return_value = False
-    session._extension_runner = _runner_with_settled_handler(received)
+    session._extension_runner = _runner_with_settled_handler(received, settled)
     bus_events = []
     session._emit = lambda event: bus_events.append(event)
 
     await session._run_agent_prompt([])
+    await settled.wait()
 
     assert [e.type for e in received] == [AGENT_SETTLED]
     assert [e.type for e in bus_events] == [AGENT_SETTLED]
@@ -122,11 +136,15 @@ async def test_settled_fires_after_run_on_both_channels():
 async def test_settled_fires_after_prompt_completes():
     """时序：settled 在 agent.prompt 完成之后发射。"""
     order = []
+    settled = asyncio.Event()
     session = AgentSession(_make_config())
-    session.agent.prompt = AsyncMock(side_effect=lambda *a: order.append("prompt"))
+    session.agent.prompt = (
+        lambda input, images=None: order.append("prompt") or _completed_run()
+    )
 
     def handler(event, ctx):
         order.append(event.type)
+        settled.set()
 
     ext = Extension(path="watcher", handlers={AGENT_SETTLED: [handler]})
     session._extension_runner = ExtensionRunner(
@@ -139,6 +157,7 @@ async def test_settled_fires_after_prompt_completes():
     session._emit = lambda event: None
 
     await session._run_agent_prompt([])
+    await settled.wait()
     assert order == ["prompt", AGENT_SETTLED]
 
 
@@ -146,14 +165,16 @@ async def test_settled_fires_after_prompt_completes():
 async def test_settled_fires_on_exception():
     """异常路径（含 abort/错误）：finally 保证 settled 照常双发。"""
     received = []
+    settled = asyncio.Event()
     session = AgentSession(_make_config())
-    session.agent.prompt = AsyncMock(side_effect=RuntimeError("boom"))
-    session._extension_runner = _runner_with_settled_handler(received)
+    session.agent.prompt = MagicMock(side_effect=RuntimeError("boom"))
+    session._extension_runner = _runner_with_settled_handler(received, settled)
     bus_events = []
     session._emit = lambda event: bus_events.append(event)
 
     with pytest.raises(RuntimeError):
         await session._run_agent_prompt([])
+    await settled.wait()
 
     assert [e.type for e in received] == [AGENT_SETTLED]
     assert [e.type for e in bus_events] == [AGENT_SETTLED]
@@ -163,6 +184,7 @@ async def test_settled_fires_on_exception():
 async def test_settled_without_runner_bus_only():
     session = AgentSession(_make_config())
     session._extension_runner = None
+    session.agent.prompt = MagicMock(return_value=_completed_run())
     bus_events = []
     session._emit = lambda event: bus_events.append(event)
 

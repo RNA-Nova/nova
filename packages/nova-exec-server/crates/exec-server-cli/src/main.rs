@@ -1,6 +1,9 @@
 use anyhow::Context;
 use anyhow::Result;
+mod aws_auth;
 use clap::Parser;
+use clap::Subcommand;
+use clap::ValueEnum;
 use std::path::PathBuf;
 
 use nova_exec_server::ExecServerRuntimePaths;
@@ -17,6 +20,35 @@ const OTEL_SERVICE_NAME: &str = "nova-exec-server";
 #[command(name = "nova-exec-server")]
 #[command(about = "Nova remote executor service")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<ExecServerSubcommand>,
+
+    /// 将本执行端注册到 Nova Registry，而非只监听本地传输。
+    #[arg(long, value_name = "URL", requires = "environment_id")]
+    remote: Option<String>,
+
+    /// Registry 中预先 enrollment 的环境 ID。
+    #[arg(long, value_name = "ID", env = "NOVA_EXEC_SERVER_ENVIRONMENT_ID")]
+    environment_id: Option<String>,
+
+    /// 远程注册后的承载协议：Noise Relay 或带鉴权的 Direct WebSocket。
+    #[arg(long, value_enum, default_value = "noise")]
+    remote_transport: RemoteTransportArg,
+
+    /// Nova Registry 的节点 token；也可用环境变量注入。
+    #[arg(long, env = "NOVA_EXEC_SERVER_REGISTRY_TOKEN", hide_env_values = true)]
+    registry_token: Option<String>,
+
+    /// 使用 AWS SigV4 签名 Direct 注册与 WebSocket 握手。
+    #[arg(long, requires = "remote")]
+    aws_sigv4: bool,
+    #[arg(long, requires = "aws_sigv4")]
+    aws_profile: Option<String>,
+    #[arg(long, requires = "aws_sigv4")]
+    aws_region: Option<String>,
+    #[arg(long, default_value = "execute-api", requires = "aws_sigv4")]
+    aws_service: String,
+
     /// Transport endpoint URL. Supported values: `ws://IP:PORT` (default), `stdio`/`stdio://`.
     /// （wss 不支持：服务端只做回环承载，TLS 归上层隧道/中继层。
     /// 默认值对位 codex 与 transport.rs 的 DEFAULT_LISTEN_URL——`:0` 临时端口，
@@ -57,8 +89,8 @@ struct Cli {
 
     /// Linux PID namespace: isolate (default) or inherit. Inherit allows signals to
     /// other same-UID processes; enable only when provisioning a dedicated environment.
-    /// （对位 codex 39f4277087 `exec_server_command.rs` 同名旗标；nova CLI 无
-    /// subcommand，故不带 codex 的 global = true）
+    /// （对位 codex 39f4277087 `exec_server_command.rs` 同名旗标；nova 本地监听与
+    /// forward 子命令共用该启动策略）
     #[arg(long, value_name = "MODE", default_value = "isolate")]
     linux_sandbox_pid_namespace: nova_exec_server_sandboxing::LinuxSandboxPidNamespace,
 
@@ -74,6 +106,51 @@ struct Cli {
     /// stdio 形态下 stdin 本就是传输线，EOF 自然结束服务，此旗标为 no-op。
     #[arg(long, env = nova_exec_server::NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE_ENV_VAR)]
     exit_on_stdin_close: bool,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+enum ExecServerSubcommand {
+    /// 将远程 Noise Relay 流转发到一个已运行的回环 exec-server。
+    Forward(ForwardArgs),
+}
+
+#[derive(Clone, Debug, clap::Args)]
+struct ForwardArgs {
+    #[arg(long, value_name = "WS_URL")]
+    connect: String,
+    #[arg(long, value_name = "URL")]
+    remote: String,
+    #[arg(long, value_name = "ID", env = "NOVA_EXEC_SERVER_ENVIRONMENT_ID")]
+    environment_id: String,
+    #[arg(long, env = "NOVA_EXEC_SERVER_REGISTRY_TOKEN", hide_env_values = true)]
+    registry_token: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+enum RemoteTransportArg {
+    #[default]
+    Noise,
+    Direct,
+}
+
+enum RemoteAuth {
+    NovaToken(String),
+    AwsSigV4 {
+        profile: Option<String>,
+        region: Option<String>,
+        service: String,
+    },
+}
+
+enum RunMode {
+    Local,
+    Remote {
+        base_url: String,
+        environment_id: String,
+        transport: RemoteTransportArg,
+        auth: RemoteAuth,
+    },
+    Forward(ForwardArgs),
 }
 
 /// 安装 stderr 日志 + otel 输出 layer（对位 codex exec_server_telemetry::init
@@ -232,6 +309,35 @@ fn assemble_otel_provider() -> Option<nova_exec_server_otel::OtelProvider> {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn allowed_symlinked_nova_home_from_config()
+-> Option<nova_exec_server_utils_absolute_path::AbsolutePathBuf> {
+    let home = nova_exec_server_utils_home_dir::find_nova_exec_server_home().ok()?;
+    let config_text = std::fs::read_to_string(home.join("config.toml")).ok()?;
+    if !allow_symlinked_nova_home_enabled(&config_text) {
+        return None;
+    }
+
+    // 保留 NOVA_EXEC_SERVER_HOME 配置的别名形式，但其规范化目标必须等于
+    // 实际 executor home（对位 codex allowed_symlinked_codex_home）。
+    let configured_alias = std::env::var_os("NOVA_EXEC_SERVER_HOME")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| {
+            nova_exec_server_utils_absolute_path::AbsolutePathBuf::from_absolute_path(path).ok()
+        })
+        .filter(|path| path.canonicalize().ok().as_ref() == Some(&home));
+    Some(configured_alias.unwrap_or(home))
+}
+
+#[cfg(target_os = "macos")]
+fn allow_symlinked_nova_home_enabled(config_text: &str) -> bool {
+    config_text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|config| config.get("allow_symlinked_nova_home")?.as_bool())
+        .unwrap_or(false)
+}
+
 fn main() -> Result<()> {
     // 对位 codex arg0/src/lib.rs:61：启动早期注册/分派 spawn setup helper——
     // Linux 下 pipe/PTY spawn 的原生启动（免 fork 主进程）依赖它；argv1 为
@@ -306,6 +412,41 @@ fn main() -> Result<()> {
 #[tokio::main]
 async fn run_server() -> Result<()> {
     let cli = Cli::parse();
+    let run_mode = if let Some(ExecServerSubcommand::Forward(args)) = cli.command.clone() {
+        if cli.remote.is_some() || cli.aws_sigv4 {
+            anyhow::bail!("forward cannot be combined with top-level --remote or --aws-sigv4");
+        }
+        RunMode::Forward(args)
+    } else if let Some(base_url) = cli.remote.clone() {
+        let environment_id = cli
+            .environment_id
+            .clone()
+            .context("--remote requires --environment-id")?;
+        let auth = if cli.aws_sigv4 {
+            if cli.remote_transport != RemoteTransportArg::Direct {
+                anyhow::bail!("--aws-sigv4 requires --remote-transport direct");
+            }
+            RemoteAuth::AwsSigV4 {
+                profile: cli.aws_profile.clone(),
+                region: cli.aws_region.clone(),
+                service: cli.aws_service.clone(),
+            }
+        } else {
+            let token = cli
+                .registry_token
+                .clone()
+                .context("--remote requires --registry-token or NOVA_EXEC_SERVER_REGISTRY_TOKEN")?;
+            RemoteAuth::NovaToken(token)
+        };
+        RunMode::Remote {
+            base_url,
+            environment_id,
+            transport: cli.remote_transport,
+            auth,
+        }
+    } else {
+        RunMode::Local
+    };
 
     // 对位 codex 39f4277087 exec_server_command.rs：鉴权旗标组先折叠成
     // settings（组合非法在此即报错）；默认 None = 无鉴权，保持现状。
@@ -342,44 +483,132 @@ async fn run_server() -> Result<()> {
         .executor_self_exe
         .or_else(|| std::env::current_exe().ok())
         .context("executor self executable path is not configured")?;
-    // 对位 codex arg0 `linux_sandbox_exe_path`：helper 路径缺省时自我回退——
-    // 优先每进程临时目录里的软链别名（basename 即分派名，无 --argv0 的老
-    // bwrap 也能触发）；别名建不了退化为二进制本体（现代 bwrap 经 --argv0
-    // 注入 magic 名照常分派）。裁点：codex 的别名目录带跨进程锁，我们收窄
-    // 为进程私有 TempDir（无跨进程共享面）。
+    // 对位 codex arg0 `linux_sandbox_exe_path`：helper 路径缺省时建
+    // `nova-linux-sandbox` 软链别名（basename 即分派名，无 --argv0 的老
+    // bwrap 也能触发）。别名落在 executor home 的受限目录并持锁存活，
+    // 不使用会被按龄清理的系统临时目录。
     #[cfg(target_os = "linux")]
     let (executor_linux_sandbox_exe, _alias_guard) = match cli.executor_linux_sandbox_exe {
         Some(path) => (Some(path), None),
-        None => match create_linux_sandbox_alias(executor_self_exe.as_path()) {
-            Some((alias, guard)) => (Some(alias), Some(guard)),
-            None => (Some(executor_self_exe.clone()), None),
-        },
+        None => {
+            let (alias, guard) = create_linux_sandbox_alias(executor_self_exe.as_path())?;
+            (Some(alias), Some(guard))
+        }
     };
     #[cfg(not(target_os = "linux"))]
     let executor_linux_sandbox_exe = cli.executor_linux_sandbox_exe;
     let runtime_paths = ExecServerRuntimePaths::new(executor_self_exe, executor_linux_sandbox_exe)?
         .with_linux_sandbox_pid_namespace(cli.linux_sandbox_pid_namespace)
         .with_proxy_private_ips_via_upstream(cli.proxy_private_ips_via_upstream);
+    #[cfg(target_os = "macos")]
+    let runtime_paths =
+        runtime_paths.with_allowed_symlinked_nova_home(allowed_symlinked_nova_home_from_config());
 
-    // 本地模式：WS 回环 / stdio 承载；入站鉴权机制在、默认关
-    // （--ws-auth 不传即无鉴权；stdio 形态下配鉴权会被传输层拒绝）。
-    // 父死子随 leash 仅 WS 托管场景挂（stdio 形态 stdin 是传输线，EOF 已由
-    // 传输层自然结束服务）；SIGINT/SIGTERM 经 run_until_shutdown 优雅返回。
-    let parent_stdin_leash = cli.exit_on_stdin_close && !cli.listen.starts_with("stdio");
-    let result = run_until_shutdown(
-        run_main_with_telemetry(
-            &cli.listen,
-            runtime_paths,
-            telemetry,
-            nova_exec_server_http_client::HttpClientFactory::new(
+    let result = match run_mode {
+        RunMode::Local => {
+            // 本地模式：WS 回环 / stdio 承载；入站鉴权机制在、默认关。
+            let parent_stdin_leash = cli.exit_on_stdin_close && !cli.listen.starts_with("stdio");
+            run_until_shutdown(
+                run_main_with_telemetry(
+                    &cli.listen,
+                    runtime_paths,
+                    telemetry,
+                    nova_exec_server_http_client::HttpClientFactory::new(
+                        nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+                    ),
+                    cli.request_dispatch_mode,
+                    websocket_auth,
+                ),
+                parent_stdin_leash,
+            )
+            .await
+        }
+        RunMode::Remote {
+            base_url,
+            environment_id,
+            transport,
+            auth,
+        } => {
+            let transport = match transport {
+                RemoteTransportArg::Noise => nova_exec_server::RemoteEnvironmentTransport::Noise,
+                RemoteTransportArg::Direct => nova_exec_server::RemoteEnvironmentTransport::Direct,
+            };
+            let factory = nova_exec_server_http_client::HttpClientFactory::new(
                 nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
-            ),
-            cli.request_dispatch_mode,
-            websocket_auth,
-        ),
-        parent_stdin_leash,
-    )
-    .await;
+            );
+            let auth = match auth {
+                RemoteAuth::NovaToken(token) => {
+                    nova_exec_server::RegistryBearerAuth::shared(&token)?
+                }
+                RemoteAuth::AwsSigV4 {
+                    profile,
+                    region,
+                    service,
+                } => {
+                    aws_auth::aws_sigv4_auth_provider(
+                        nova_exec_server_aws_auth::AwsAuthConfig {
+                            profile,
+                            region,
+                            service,
+                        },
+                        factory.clone(),
+                    )
+                    .await?
+                }
+            };
+            let mut config = nova_exec_server::RemoteEnvironmentConfig::new_with_transport(
+                base_url,
+                environment_id,
+                transport,
+                auth,
+                factory,
+            )?
+            .with_telemetry(telemetry);
+            config.request_dispatch_mode = cli.request_dispatch_mode;
+            run_until_shutdown(
+                async move {
+                    nova_exec_server::run_remote_environment_until_shutdown(
+                        config,
+                        runtime_paths,
+                        std::future::pending(),
+                    )
+                    .await
+                    .map_err(
+                        |error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) },
+                    )
+                },
+                cli.exit_on_stdin_close,
+            )
+            .await
+        }
+        RunMode::Forward(args) => {
+            let auth = nova_exec_server::RegistryBearerAuth::shared(&args.registry_token)?;
+            let config = nova_exec_server::RemoteEnvironmentConfig::new(
+                args.remote,
+                args.environment_id,
+                auth,
+                nova_exec_server_http_client::HttpClientFactory::new(
+                    nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+                ),
+            )?
+            .with_telemetry(telemetry);
+            run_until_shutdown(
+                async move {
+                    nova_exec_server::run_remote_environment_forward_until_shutdown(
+                        config,
+                        args.connect,
+                        std::future::pending(),
+                    )
+                    .await
+                    .map_err(
+                        |error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) },
+                    )
+                },
+                cli.exit_on_stdin_close,
+            )
+            .await
+        }
+    };
 
     // 退出前 flush：把队列里剩的指标推完再走（provider 有界关闭语义）——
     // 信号/父死路径也能走到这里（此前信号走默认 disposition，flush 永远跳过）
@@ -394,17 +623,168 @@ async fn run_server() -> Result<()> {
     Ok(())
 }
 
-/// 建主二进制的 `nova-linux-sandbox` 软链别名（每进程临时目录，随进程退出
-/// 自动清理）。对位 codex arg0 crate 的别名段；其跨进程锁文件收窄掉——
-/// 进程私有目录无共享面。
+/// 别名目录与锁文件的存活守卫：目录随进程退出清理，锁随文件关闭释放。
+#[cfg(target_os = "linux")]
+struct LinuxSandboxAliasGuard {
+    _temp_dir: tempfile::TempDir,
+    _lock_file: std::fs::File,
+}
+
+/// 建主二进制的 `nova-linux-sandbox` 软链别名（对位 codex arg0 的别名段）。
+///
+/// 目录固定为 `<executor home>/tmp/arg0/<每进程目录>`，权限 0700；释放前
+/// 先清理未被其他进程持有的陈旧目录。release 下拒绝把别名放进系统临时
+/// 目录——该位置会被按龄清理，长命服务的别名可能中途消失。
 #[cfg(target_os = "linux")]
 fn create_linux_sandbox_alias(
     self_exe: &std::path::Path,
-) -> Option<(std::path::PathBuf, tempfile::TempDir)> {
-    let guard = tempfile::tempdir().ok()?;
-    let alias = guard
+) -> std::io::Result<(std::path::PathBuf, LinuxSandboxAliasGuard)> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let executor_home = nova_exec_server_utils_home_dir::find_nova_exec_server_home()?;
+    #[cfg(not(debug_assertions))]
+    {
+        let temp_root = std::env::temp_dir();
+        if executor_home.as_path().starts_with(&temp_root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "refusing to create Linux sandbox alias under temporary dir {} (executor home: {})",
+                    temp_root.display(),
+                    executor_home.display()
+                ),
+            ));
+        }
+    }
+
+    let temp_root = executor_home.join("tmp").join("arg0");
+    std::fs::create_dir_all(&temp_root)?;
+    std::fs::set_permissions(&temp_root, std::fs::Permissions::from_mode(0o700))?;
+    if let Err(error) = janitor_cleanup(temp_root.as_path()) {
+        eprintln!("warning: failed to clean up stale Linux sandbox alias dirs: {error}");
+    }
+
+    let temp_dir = tempfile::Builder::new()
+        .prefix("nova-exec-server-arg0")
+        .tempdir_in(&temp_root)?;
+    let lock_file = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(temp_dir.path().join(".lock"))?;
+    lock_file_exclusive(&lock_file)?;
+
+    let alias = temp_dir
         .path()
         .join(nova_exec_server_sandboxing::landlock::NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0);
-    std::os::unix::fs::symlink(self_exe, &alias).ok()?;
-    Some((alias, guard))
+    std::os::unix::fs::symlink(self_exe, &alias)?;
+    Ok((
+        alias,
+        LinuxSandboxAliasGuard {
+            _temp_dir: temp_dir,
+            _lock_file: lock_file,
+        },
+    ))
+}
+
+/// 清理未被其他进程持有的陈旧别名目录（对位 codex arg0 的 janitor）。
+#[cfg(target_os = "linux")]
+fn janitor_cleanup(temp_root: &std::path::Path) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(temp_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let lock_path = path.join(".lock");
+        let lock_file = match std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(lock_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if lock_file_exclusive(&lock_file).is_err() {
+            // 锁仍被活进程持有：目录不能删；文件关闭即释放测试锁。
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            // 允许 read_dir 与删除之间的正常 TOCTOU 竞态。
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn lock_file_exclusive(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_alias_tests {
+    use super::janitor_cleanup;
+    use super::lock_file_exclusive;
+    use std::fs;
+
+    #[test]
+    fn janitor_removes_only_unlocked_alias_directories() {
+        let root = tempfile::tempdir().expect("temp root");
+        let unlocked = root.path().join("unlocked");
+        let locked = root.path().join("locked");
+        fs::create_dir_all(&unlocked).expect("create unlocked dir");
+        fs::create_dir_all(&locked).expect("create locked dir");
+        fs::write(unlocked.join(".lock"), b"").expect("write unlocked lock");
+        fs::write(locked.join(".lock"), b"").expect("write locked lock");
+
+        let held = fs::File::options()
+            .read(true)
+            .write(true)
+            .open(locked.join(".lock"))
+            .expect("open held lock");
+        lock_file_exclusive(&held).expect("hold alias lock");
+
+        janitor_cleanup(root.path()).expect("janitor cleanup");
+        assert!(!unlocked.exists(), "unlocked directory must be removed");
+        assert!(locked.exists(), "locked directory must survive");
+
+        drop(held);
+        janitor_cleanup(root.path()).expect("cleanup after release");
+        assert!(!locked.exists(), "released directory must be removed");
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod symlink_config_tests {
+    use super::allow_symlinked_nova_home_enabled;
+
+    #[test]
+    fn parses_symlink_opt_out_flag() {
+        assert!(allow_symlinked_nova_home_enabled(
+            "allow_symlinked_nova_home = true\n"
+        ));
+        assert!(!allow_symlinked_nova_home_enabled(
+            "allow_symlinked_nova_home = false\n"
+        ));
+        assert!(!allow_symlinked_nova_home_enabled(
+            "allow_symlinked_nova_home = \"yes\"\n"
+        ));
+        assert!(!allow_symlinked_nova_home_enabled("[otel]\n"));
+        assert!(!allow_symlinked_nova_home_enabled("not valid toml"));
+    }
 }

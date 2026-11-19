@@ -1631,7 +1631,8 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
         let profile =
             PermissionProfile::from_runtime_permissions(policy, NetworkSandboxPolicy::Enabled);
         let mut command = std::process::Command::new(&bwrap);
-        command.args("--unshare-user --uid 0 --gid 0 --die-with-parent --tmpfs /".split_whitespace());
+        command
+            .args("--unshare-user --uid 0 --gid 0 --die-with-parent --tmpfs /".split_whitespace());
         command.args(
             "--ro-bind /usr /usr --ro-bind /etc /etc --proc /proc --dev /dev".split_whitespace(),
         );
@@ -1687,7 +1688,10 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
     }
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, b"root-metadata-denials-held\n");
-    assert_eq!(std::fs::read_to_string(work.join("marker")).unwrap(), "good");
+    assert_eq!(
+        std::fs::read_to_string(work.join("marker")).unwrap(),
+        "good"
+    );
     assert!(!private.join("reopened/changed").exists());
 
     let script = r#"

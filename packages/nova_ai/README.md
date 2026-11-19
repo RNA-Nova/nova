@@ -5,7 +5,7 @@
 ## 特性
 
 - **统一流式接口**：聊天调用返回同一个 `AssistantMessageEventStream`，文本、思考、工具调用以增量事件产出；`stream()` 同步返回事件流，鉴权解析在后台进行，失败编码为错误事件而非抛出。
-- **内置 6 家 provider**：Anthropic、Volcengine（火山方舟）、Moonshot AI（国际/国内双端点）、Kimi Coding、OpenRouter（图像与分类）；聊天覆盖 OpenAI Completions 与 Anthropic Messages，任意 OpenAI 兼容端点可经 `create_provider()` 接入。
+- **内置 6 家 provider**：Anthropic、Volcengine（火山方舟）、Moonshot AI（国际/国内双端点）、Kimi Coding、OpenRouter（图像与分类）；聊天覆盖 OpenAI Completions、Anthropic Messages 与 Nova Gateway，任意 OpenAI 兼容端点可经 `create_provider()` 接入。
 - **图像生成结果**：OpenRouter 图像模型经 `generate_images()` 返回独立 `AssistantImages`，文本与 base64 图像块、usage/cost、错误和取消均有明确终态。
 - **结构化分类结果**：OpenRouter 分类模型经 `classify()` 返回独立 `ClassifierResult`，支持 choice、score、bool 三类问题与逐 ID 答案。
 - **鉴权解析链**：调用方 `api_key` 覆盖 → 已存储 credential（OAuth 过期自动刷新）→ 环境变量；内置 Kimi device code 与 OpenAI Codex（浏览器 + device code）OAuth 登录流程。
@@ -47,7 +47,7 @@
 | Kimi Coding | `kimi-coding` | `https://api.kimi.com/coding/v1` | `KIMI_API_KEY` 或 OAuth 登录 |
 | OpenRouter（图像与分类） | `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 
-聊天协议实现为 `api_impls/anthropic_messages`（Anthropic，基于官方 `anthropic` SDK）与 `api_impls/openai_completions`（其余聊天 provider——含 kimi-coding，与官方 Kimi Code 客户端同协议，基于官方 `openai` SDK）。OpenRouter 图像生成由 `api_impls/openrouter_images` 以非流式 Chat Completions 承载，分类由 `api_impls/typesafe_system_one` 以 System One 承载。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
+聊天协议实现为 `api_impls/anthropic_messages`（基于官方 `anthropic` SDK）、`api_impls/openai_completions`（基于官方 `openai` SDK）与 `api_impls/nova_gateway`（基于独立 `nova-gateway-client` SDK，将公开 DTO 重建为标准事件流）。OpenRouter 图像生成由 `api_impls/openrouter_images` 以非流式 Chat Completions 承载，分类由 `api_impls/typesafe_system_one` 以 System One 承载。其他 OpenAI 兼容端点（DeepSeek、OpenRouter、Together、vLLM、LM Studio 等）可经 `create_provider()` 接入，兼容层会按 base_url 自动适配，见[自定义 Provider](#自定义-provider)。
 
 内置模型目录是构建期生成的静态数据（模型 id、类型、输入/输出模态、上下文窗口、费率、思考级别表等），随包发布、离线可用。
 
@@ -57,7 +57,7 @@
 pip install nova-ai
 ```
 
-要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`httpx2>=2.0,<3`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（单装 `nova-ai` 无法 import，需同装——monorepo 内经 pixi 一把装齐）。模型目录构建管线已收编为包内 `nova_ai.catalog`，无需另装目录包。
+要求 Python `>=3.13,<3.14`。运行时依赖：`openai>=2.0,<3.10.0`、`anthropic>=1.0`、`pydantic>=2.0`、`json-repair>=0.58.4`、`httpx>=0.27`、`httpx2>=2.0,<3`、`anyio>=4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog`/`nova-gateway-protocol`/`nova-gateway-client` 为运行时硬依赖（monorepo 内经 pixi 一把装齐）。模型目录知识与生成管线独立为 `nova_catalog`，本包消费其生成的本地模型目录与共享纯算法。
 
 在 monorepo 仓库内开发时，使用根目录的 pixi 统一环境（editable 安装全部子包）：
 
@@ -585,18 +585,19 @@ model = Model(
 
 ## 开发
 
-### 模型目录构建（包内 `catalog/`）
+### 模型目录构建（Catalog 通用构建 + AI 专用生成）
 
-`nova_ai.catalog` 对位 pi `packages/ai/catalog/`：`providers/` 管各家构建钩子，`families/` 管族级事实，`sources/` 管薄拉取与翻译，`define.py` 管构建词汇，`build.py` 统一编排，`generate.py` 负责生成事务，`model_data.py` 负责产物与校验。目录子包只依赖 `nova_protocol` 与自身，AI 运行时单向复用其中的字段盖戳、站翻译与输入限制纯算法。
+`packages/nova_catalog` 对位 pi `packages/ai/catalog/`：`providers/` 管各家构建钩子，`families/` 管族级事实，`sources/` 管薄拉取与翻译，`define.py` 管构建词汇，`build.py` 统一编排。它只依赖 `nova_protocol` 与自身，不认识本包的目录结构、代码模板或生成物校验。
 
-生成物写入本包 `src/nova_ai/providers/data/*.json`、各 provider 的 `models.py` 与 `models_generated.py`。数据键使用 `chat:<id>` / `image:<id>` / `classifier:<id>`，允许同 id 的不同操作条目并存。OpenRouter 当前构建图像与分类目录，不构建聊天目录；Ark 账户状态只在运行时 personalize 消费，不进入公共种子。
+本包 `scripts/generate.py` 调用通用构建结果，自己完成 AI 专用 Python 模板、默认输出路径和生成事务；`scripts/model_data.py` 对位 pi `scripts/model-data.ts`，统一负责 provider/shard/JSON/manifest 对账与严格模型字段校验，`scripts/check_model_data.py` 是离线门禁。生成物写入 `src/nova_ai/providers/data/*.json`、各 provider 的 `models.py` 与 `models_generated.py`。数据键使用 `chat:<id>` / `image:<id>` / `classifier:<id>`，允许同 id 的不同操作条目并存。OpenRouter 当前构建图像与分类目录，不构建聊天目录；Ark 账户状态只在运行时 personalize 消费，不进入公共种子。
 
 ```bash
 # monorepo 根目录：生成并做离线一致性对账
 pixi run -e dev generate-models   # 默认 --strict，上游失败不提交
 pixi run -e dev check-model-data
 
-# 安装 dev 环境后跑本包全部非集成测试（含 catalog/ 目录管线）
+# 目录管线与本包非集成测试分别运行
+pixi run -e dev test-catalog
 pixi run -e dev test-ai
 
 # 或在子包内直接跑

@@ -100,20 +100,21 @@ pub fn create_cwd_junction(requested_cwd: &Path, log_dir: Option<&Path>) -> Opti
         &format!("junction: creating via cmd /c mklink /J {link_quoted} {target_quoted}"),
         log_dir,
     );
-    let output = match nova_exec_server_windows_sandbox::background_command::background_command("cmd")
-        .raw_arg("/c")
-        .raw_arg("mklink")
-        .raw_arg("/J")
-        .raw_arg(&link_quoted)
-        .raw_arg(&target_quoted)
-        .output()
-    {
-        Ok(output) => output,
-        Err(err) => {
-            log_note(&format!("junction: mklink failed to run: {err}"), log_dir);
-            return None;
-        }
-    };
+    let output =
+        match nova_exec_server_windows_sandbox::background_command::background_command("cmd")
+            .raw_arg("/c")
+            .raw_arg("mklink")
+            .raw_arg("/J")
+            .raw_arg(&link_quoted)
+            .raw_arg(&target_quoted)
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                log_note(&format!("junction: mklink failed to run: {err}"), log_dir);
+                return None;
+            }
+        };
     if output.status.success() && junction_path.exists() {
         log_note(
             &format!(

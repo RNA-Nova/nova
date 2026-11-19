@@ -12,9 +12,7 @@ import asyncio
 from contextlib import suppress
 
 from nova_ai import EventStream
-from nova_async import (
-    AbortedError,
-)
+from nova_async import AbortedError
 from nova_protocol import (
     AgentToolResult,
     DoneEvent,
@@ -110,7 +108,7 @@ async def main():
     agent.set_tools([SlowTool()])
 
     # 等工具真正开始后 abort；另取消一个 idle waiter，验证 shield 不传染给 run
-    run_task = asyncio.create_task(agent.prompt("开始"))
+    run_task = agent.prompt("开始")
     await started.wait()
     agent.abort()
     idle_waiter = asyncio.create_task(agent.wait_for_idle())

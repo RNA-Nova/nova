@@ -14,7 +14,7 @@
 - **codex 实证（第一参考）**：`codex-protocol` 集中共享领域语言；`app-server-protocol` 与 `exec-server-protocol` 分别守外部版本边界；`execpolicy`、`async-utils` 等机制独立成 crate。我们学习的是这种**领域词汇 / 外部协议 / 行为机制**的分工，不是复刻其所有类型或 crate 数量。
 - **包内组织实证**：Codex 不设统一的公共类型收容层。`core/tools/sandboxing.rs` 把审批类型、trait、默认值计算与沙箱辅助放在一起；`orchestrator.rs` 把结果类型放在编排器旁；`execpolicy/decision.rs` 让值对象跟随策略机制；`app-server-protocol/protocol/v2/` 按 thread/turn/item/config 等线上领域分文件。`config/src/types.rs` 与 `thread-store/src/types.rs` 则表明：只有当一个领域确有内聚的公共类型族时，才可集中成领域类型模块。结论是**行为域优先、类型跟随语义、公共面显式收窄、文件不按行数机械拆分**。
 - **平台优先**：codex 的自建只补平台空缺——`CancellationToken`/`TaskTracker` 来自 tokio-util，`async-utils` 仅装平台没有的 `or_cancel`。我们的对应物：stdlib/asyncio 没有的才自建，建即按 §二选址；取消词汇与等待机制统一归 `nova_async`，不在数据枢纽另留一份。
-- **Python 粒度换算**：Rust crate 边界在 Python 没有编译器等价物。默认边界是**包内模块 + 审计测试**；只有真实依赖需要时才升格为发行包。`nova_ai.catalog` 已因只有 `nova_ai` 一个生产消费者而收回 `nova_ai/catalog`，不得为形式对齐再次拆出。
+- **Python 粒度换算**：Rust crate 边界在 Python 没有编译器等价物。默认边界是**包内模块 + 审计测试**；只有真实依赖需要时才升格为发行包。`nova_catalog` 因通用模型知识与构建机制具有独立边界而单独成包；`nova_ai` 与 `nova_gateway` 各自拥有消费方专用生成器，Catalog 不反向知道任何消费方。
 - **工具锚点**：import-linter（Python 正典，layers / forbidden / independence 契约；Java ArchUnit、TS dependency-cruiser、Rust cargo workspace 对位）。审计条数超出手写维护力时引入 import-linter，不自造契约语言。
 
 ## 二、住所三层（新模块/新包的判定序）
@@ -58,7 +58,7 @@
 - **领域公共模块**：`definition.py` 放公共行为定义，`ports.py` 放宿主接口，`entries.py` 放落盘条目，`models.py` 仅限明确的数据模型；名称必须指向领域，不设 `base.py`、`common.py`、`misc.py`。
 - **`protocol/`（可选）**：只放外部版本化线上契约——JSON-RPC、wire DTO、方法、通知、握手、版本、Schema 及其 item。普通 Python API 不叫 protocol。
 - **`utils/` / `_shared/`**：分别放同包共享函数族与子系统私有实现，不装包级公共类型；单消费方函数与类型留在使用点。
-- **不强制统一目录**：`nova_ai` 按 gateway/auth/catalog 等领域组织，`nova_async` 按机制分文件，`nova_exec_policy` 按策略与权限分目录。
+- **不强制统一目录**：`nova_ai` 按 gateway/auth/providers 等领域组织，`nova_catalog` 按 providers/families/sources 等目录生产域组织，`nova_async` 按机制分文件，`nova_exec_policy` 按策略与权限分目录。
 
 ### 3. 目标结构正例
 
@@ -85,9 +85,11 @@
 
 ## 四、依赖方向
 
-- **共享数据与主线**：`nova_protocol`（共享领域纯数据，零兄弟包依赖）< `nova_ai`（含包内 `catalog/`）< `nova_agent` < `nova_harness` < `nova_server` < `nova_coding_agent`（bundle）；`nova_async` 是独立取消/等待机制包，供各运行时向下消费。
+- **共享数据与主线**：`nova_protocol`（共享领域纯数据，零兄弟包依赖）< `nova_catalog`（模型目录知识与生成管线）< `nova_ai` < `nova_agent` < `nova_harness` < `nova_server` < `nova_coding_agent`（bundle）；`nova_async` 是独立取消/等待机制包，供各运行时向下消费。
 - **executor 子图**：`nova_exec_protocol` 只放版本化 wire DTO；`nova_exec_policy` 依赖 `nova_exec_protocol` 与 `nova_protocol`；`nova-exec-server-client` 依赖 `nova_exec_protocol`、`nova_exec_policy`、`nova_async`；`nova_harness` 在上方组合 client、协议与策略。client 保持连接层，不把策略算法塞回去。
-- **包内目录方向**：`nova_ai.catalog` 只依赖 `nova_protocol` 与自身，不得 import AI 运行时，由 `packages/nova_ai/tests/catalog/test_structure.py` 机械执法。
+- **目录包方向**：`nova_catalog` 只依赖 `nova_protocol` 与自身，不得 import AI 运行时或目录站服务，也不得在路径/模板字符串中反向指名消费方，由 `packages/nova_catalog/tests/test_structure.py` 机械执法；`nova_ai/scripts` 向下调用通用构建，自行生成并校验 AI 专用产物（含 JSON/manifest 与严格字段校验）。
+- **观测子图**：`nova_logging` 以 `structlog` 承载共享 formatter/context/handler 与队列生命周期（已落地）；`nova_telemetry`（目标态）以 OpenTelemetry Python 承载版本化 schema、no-op/in-memory/OTLP adapter；二者均不得反向依赖 `nova_ai`，secret 清洗由组合根注入。**不立 `nova_observability` 伞包**——日志、遥测和业务分析变更理由不同；OTLP 只是 `nova_telemetry` 的内部 adapter，不另立 `nova_otel` 包。`nova_analytics` 只有在真实产品分析需求出现时才允许立项，不得为了“可观测性完整”预建。
+- **Gateway 子图**：`nova_gateway_protocol` 只依赖 `nova_protocol`，持有独立版本化公开 DTO/事件/Schema；`nova_gateway_client` 只依赖 Gateway 协议与 `nova_protocol`，返回公开 DTO 事件流，不得 import `nova_ai`、`nova_async` 或服务端；`nova_ai/api_impls/nova_gateway` 调用官方 client，把公开事件重建为标准 `AssistantMessageEventStream`；`nova_gateway` 服务端向下组合 `nova_ai`、`nova_async`、`nova_catalog` 与 Gateway 协议。单向链为 `nova_gateway → nova_ai → nova_gateway_client → nova_gateway_protocol → nova_protocol`，client/server 均不得依赖 `nova_agent`、`nova_harness` 或 `nova_server`；公共目录只发布构建产物，不公开账户个性化运行时目录。
 - **只许向下**：任何模块不得 import 上层（如 `utils/` 不得 import `gateway/`、`providers/`）；族文件之间避免互引，必须互引时族内也按向下排序。
 - **破环归位**：循环依赖是设计错误；合法破环走 `typing.Protocol` 反向契约或事件通道（形状纪律归 `docs/crosscutting/data-modeling.md`），不靠局部 import 苟过去。
 
@@ -105,7 +107,7 @@
 - **枢纽纯洁性审计**（`nova_protocol/tests/test_purity.py`）：零兄弟 import、零行为 IO、依赖最小；终态不设行为白名单，公共 Callable 配置、服务 Protocol 与算法模块均不得入住。
 - **包级住所审计**：每个行为包一测试——`utils/`（及 `_shared/`）逐模块断言 docstring 首行族声明存在 + 登记清单对账（清单住测试内）；**未登记的新模块即红**。
 - **依赖方向审计**：包级 import 扫描断言 §四拓扑——上行与跨级私拉即红。
-- **机制族单点核对**：取消/等待机制件单点归 `nova_async`——旧路径（`nova_ai/utils/abort`、`nova_protocol.task_tracker`、`nova_protocol.signal`、`nova_ai.auth.refresh_locks`、`nova_ai.gateway.deadline`）引用归零；exec wire 与策略旧路径 `nova_protocol.exec_server_*` 引用归零。
+- **机制族单点核对**：取消/等待机制件单点归 `nova_async`——旧路径（`nova_ai/utils/abort`、`nova_protocol.task_tracker`、`nova_protocol.signal`、`nova_ai.auth.refresh_locks`、`nova_ai.gateway.deadline`）引用归零；通用目录知识与构建单点归 `nova_catalog`，AI 专用生成与校验单点归 `nova_ai/scripts`——旧路径 `nova_ai.catalog`、`nova_catalog.generate` 与 `nova_catalog.model_data` 引用归零；exec wire 与策略旧路径 `nova_protocol.exec_server_*` 引用归零。
 - **包内住所审计**：`protocol/` 只含外部版本契约；公共类型必须能指出语义所属领域，单模块私有类型不得上移至公共目录。
 
 ## 七、测试要求

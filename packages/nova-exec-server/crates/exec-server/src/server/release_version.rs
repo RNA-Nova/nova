@@ -23,8 +23,7 @@ mod tests {
 
         assert_eq!(info.executor_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(
-            serde_json::to_value(&info).expect("environment info should serialize")
-                ["executorVersion"],
+            serde_json::to_value(&info).expect("environment info should serialize")["executorVersion"],
             serde_json::json!(env!("CARGO_PKG_VERSION"))
         );
     }

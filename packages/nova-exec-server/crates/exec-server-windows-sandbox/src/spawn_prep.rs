@@ -708,8 +708,12 @@ mod tests {
             )
             .expect("managed permission profile");
 
-        let roots =
-            legacy_session_capability_roots(&permissions, &workspace, &HashMap::new(), &sandbox_home);
+        let roots = legacy_session_capability_roots(
+            &permissions,
+            &workspace,
+            &HashMap::new(),
+            &sandbox_home,
+        );
 
         assert!(roots.contains(&dunce::canonicalize(&workspace).expect("workspace")));
         assert!(roots.contains(&dunce::canonicalize(&active_root).expect("active root")));

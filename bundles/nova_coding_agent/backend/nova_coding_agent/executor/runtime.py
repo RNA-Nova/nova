@@ -30,9 +30,9 @@ class BackendSelection:
 
     backend: str  # "local" | "executor"
     url: Optional[str] = None  # executor 远程地址（None = 本地回环 spawn）
-    # SSH 远程的执行 cwd（远程文件系统与本地无关，不能用本地 cwd）
+    # 远程执行 cwd（远程文件系统与本地无关，不能用本地 cwd）
     remote_cwd: Optional[str] = None
-    # SSH 远程家目录（~ 展开用）
+    # 远程家目录（~ 展开用）
     remote_home: Optional[str] = None
     # 随 process/start 下发的沙箱/网络策略（策略归 Nova 设置，执行归 executor）
     spawn_policy: Optional[SpawnPolicy] = None

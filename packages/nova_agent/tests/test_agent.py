@@ -263,7 +263,7 @@ async def test_agent_abort_during_tool_execution(dummy_model):
     events: List[str] = []
     agent.subscribe(lambda e, signal=None: events.append(e.type))
 
-    task = asyncio.create_task(agent.prompt("run"))
+    task = agent.prompt("run")
     await started.wait()
     agent.abort()
     await task
@@ -402,51 +402,56 @@ async def test_agent_prompt_without_model_raises():
 
 
 @pytest.mark.asyncio
-async def test_agent_listeners_called_in_subscription_order(dummy_model):
-    """监听器按订阅顺序逐个被调用（dict 保序）。"""
+async def test_agent_listeners_preserve_order_per_observer(dummy_model):
+    """每个观察者独立保序接收同一事件序列，不要求跨观察者交错顺序。"""
     agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
+    first_done = asyncio.Event()
+    second_done = asyncio.Event()
+    first: List[str] = []
+    second: List[str] = []
 
-    calls: List[str] = []
-    agent.subscribe(lambda e, signal=None: calls.append("first"))
-    agent.subscribe(lambda e, signal=None: calls.append("second"))
+    def on_event(done, events):
+        def listener(event, signal=None):
+            events.append(event.type)
+            if event.type == "agent_end":
+                done.set()
 
+        return listener
+
+    agent.subscribe(on_event(first_done, first))
+    agent.subscribe(on_event(second_done, second))
     await agent.prompt("hi")
+    await asyncio.gather(first_done.wait(), second_done.wait())
 
-    assert len(calls) > 0
-    assert len(calls) % 2 == 0
-    assert calls == ["first", "second"] * (len(calls) // 2)
+    assert first == second
+    assert first[0] == "agent_start"
+    assert first[-1] == "agent_end"
 
 
 @pytest.mark.asyncio
-async def test_agent_listener_unsubscribe_during_dispatch(dummy_model):
-    """监听器在回调中退订其他监听器，不应打断或破坏本次派发（快照迭代）。"""
+async def test_agent_listener_unsubscribe_stops_future_events(dummy_model):
+    """退订后不再递件，其他观察者不受影响。"""
     agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
     agent.set_model(dummy_model)
+    first_done = asyncio.Event()
+    first: List[str] = []
+    second: List[str] = []
 
-    seen: List[tuple] = []
-    holder: dict = {}
+    def first_listener(event, signal=None):
+        first.append(event.type)
+        if event.type == "agent_end":
+            first_done.set()
 
-    def second(event, signal=None):
-        seen.append(("second", event.type))
-
-    def first(event, signal=None):
-        seen.append(("first", event.type))
-        holder["unsub_second"]()
-
-    holder["unsub_second"] = agent.subscribe(second)
-    agent.subscribe(first)
-
+    unsubscribe = agent.subscribe(lambda event, signal: second.append(event.type))
+    unsubscribe()
+    agent.subscribe(first_listener)
     await agent.prompt("hi")
+    await first_done.wait()
 
-    # 快照按事件派发：second 在 agent_start 派发期间被退订，
-    # 该事件不受影响（second 已收到），从下一个事件起不再收到。
-    second_events = [t for name, t in seen if name == "second"]
-    first_events = [t for name, t in seen if name == "first"]
-    assert second_events == ["agent_start"]
-    assert len(first_events) > len(second_events)
-    assert first_events[0] == "agent_start"
-    assert "agent_end" in first_events
+    assert second == []
+    assert first[0] == "agent_start"
+    assert first[-1] == "agent_end"
 
 
 @pytest.mark.asyncio
@@ -608,7 +613,7 @@ async def test_wait_for_idle_shielded_from_cancellation(dummy_model):
 
     agent = Agent(stream_fn=slow_stream)
     agent.set_model(dummy_model)
-    run_task = agent.start_prompt("hi")
+    run_task = agent.prompt("hi")
     await started.wait()
 
     waiter = asyncio.create_task(agent.wait_for_idle())

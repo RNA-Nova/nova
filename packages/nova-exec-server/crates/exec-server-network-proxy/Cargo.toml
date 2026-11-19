@@ -33,6 +33,7 @@ rama-net = { workspace = true }
 rama-socks5 = { workspace = true }
 rama-tcp = { workspace = true }
 rama-tls-rustls = { workspace = true }
+rand = { workspace = true }
 
 [target.'cfg(target_family = "unix")'.dependencies]
 rama-unix = { workspace = true }

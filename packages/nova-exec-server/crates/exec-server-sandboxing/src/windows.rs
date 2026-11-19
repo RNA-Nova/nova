@@ -271,8 +271,10 @@ pub fn resolve_windows_elevated_filesystem_overrides(
         .needs_direct_runtime_enforcement(network_sandbox_policy, sandbox_policy_cwd);
     let has_explicit_write_carveouts = split_writable_roots.iter().any(|writable_root| {
         writable_root.read_only_subpaths.iter().any(|path| {
-            file_system_sandbox_policy
-                .has_explicit_non_write_entry_for_local_path_with_cwd(path.as_path(), sandbox_policy_cwd)
+            file_system_sandbox_policy.has_explicit_non_write_entry_for_local_path_with_cwd(
+                path.as_path(),
+                sandbox_policy_cwd,
+            )
         })
     });
     let normalize_path = |path: PathBuf| dunce::canonicalize(&path).unwrap_or(path);

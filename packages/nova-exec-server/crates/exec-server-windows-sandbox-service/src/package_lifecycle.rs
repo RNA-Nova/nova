@@ -83,7 +83,8 @@ impl PackageLifecycle {
         if let Some(previous) = previous {
             // A missing watcher does not retire its owner; other clients can use elevated setup.
             ensure!(
-                previous.user_sid == record.user_sid && previous.sandbox_home == record.sandbox_home,
+                previous.user_sid == record.user_sid
+                    && previous.sandbox_home == record.sandbox_home,
                 crate::ipc::ServiceUnavailable(
                     "installation is already registered to a different owner or home"
                 )
@@ -242,8 +243,9 @@ impl PackageLifecycle {
     }
 
     pub(crate) fn clean_up(&self) -> Result<()> {
-        let _setup_lock =
-            nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+        let _setup_lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(
+            /*timeout_ms*/ 5_000,
+        )?;
         if let Some(record) = crate::installation_record::load_runtime()? {
             return registered::clean_up(self, record);
         }

@@ -165,7 +165,6 @@ fn load_traceparent_context() -> Option<Context> {
     }
 }
 
-
 fn tracestate_entries() -> &'static RwLock<BTreeMap<String, BTreeMap<String, String>>> {
     TRACESTATE_ENTRIES.get_or_init(|| RwLock::new(BTreeMap::new()))
 }

@@ -322,12 +322,16 @@ fn transform_additional_permissions_preserves_denied_entries() {
                 missing_path_behavior: None,
             },
             FileSystemSandboxEntry {
-                path: FileSystemPath::Path { path: denied_path.into() },
+                path: FileSystemPath::Path {
+                    path: denied_path.into()
+                },
                 access: FileSystemAccessMode::Deny,
                 missing_path_behavior: None,
             },
             FileSystemSandboxEntry {
-                path: FileSystemPath::Path { path: allowed_path.into() },
+                path: FileSystemPath::Path {
+                    path: allowed_path.into()
+                },
                 access: FileSystemAccessMode::Write,
                 missing_path_behavior: None,
             },
@@ -351,7 +355,9 @@ fn managed_mitm_ca_bundle_becomes_readable_for_restricted_sandbox() {
             .expect("absolute managed bundle path");
     let permission_profile = PermissionProfile::from_runtime_permissions(
         &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-            path: FileSystemPath::Path { path: cwd.clone().into() },
+            path: FileSystemPath::Path {
+                path: cwd.clone().into(),
+            },
             access: FileSystemAccessMode::Read,
             missing_path_behavior: None,
         }]),
@@ -711,7 +717,10 @@ fn wrapper_runtime_selection_uses_the_parent_not_environment_overrides() {
         assert_eq!(
             env,
             if registered_core {
-                HashMap::from([("NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE".into(), "1".into())])
+                HashMap::from([(
+                    "NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE".into(),
+                    "1".into(),
+                )])
             } else {
                 HashMap::new()
             }

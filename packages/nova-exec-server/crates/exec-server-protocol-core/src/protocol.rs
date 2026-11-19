@@ -4,14 +4,14 @@
 // events、SessionSource、TokenUsage、GranularApprovalConfig 等）按 nova 纯度
 // 边界不镜像（agent 层词汇归 py 侧 nova_protocol）；文件内测试同理只恢复覆盖
 // 已镜像词汇的用例。
-use std::path::Path;
-use std::path::PathBuf;
-use std::str::FromStr;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Error as _;
+use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
 use strum_macros::Display;
 use tracing::error;
 use ts_rs::TS;
@@ -637,10 +637,7 @@ mod tests {
             vec![
                 (
                     canonical_cwd,
-                    vec![
-                        expected_dot_nova.to_path_buf(),
-                        expected_docs.to_path_buf()
-                    ],
+                    vec![expected_dot_nova.to_path_buf(), expected_docs.to_path_buf()],
                 ),
                 (expected_docs_public.to_path_buf(), Vec::new()),
             ]

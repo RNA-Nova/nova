@@ -24,6 +24,11 @@ pixi install --environment dev
 ```bash
 # 运行测试（在每个子包目录下独立执行，避免 tests 包名冲突）
 pixi run -e dev test-ai
+pixi run -e dev test-catalog
+pixi run -e dev test-gateway-protocol
+pixi run -e dev test-gateway-client
+pixi run -e dev test-gateway
+pixi run -e dev test-logging
 pixi run -e dev test-agent
 pixi run -e dev test-async
 pixi run -e dev test-harness
@@ -82,13 +87,15 @@ poetry install
 poetry run pytest tests -m "not integration"
 ```
 
-### 可执行脚本（由 `nova_harness` 与 `nova_server` 注册）
+### 可执行脚本（由 `nova_harness`、`nova_server` 与 `nova_gateway` 注册）
 
 安装后环境中会新增以下命令：
 
 ```bash
 nova-harness              # 入口占位（当前仅 --version / help；headless 执行引擎位于 nova_server/exec/——协议客户端形态，暂无独立 CLI）
 nova-server               # 启动 JSON-RPC 服务器（stdio/WS）
+nova-gateway serve --config gateway.yaml
+nova-gateway generate-catalog --config gateway.yaml --output-dir ./public-catalog
 nova-pkg list             # 列出已安装的包/定义/工具
 nova-pkg install <path>      # 支持 path:/git:/npm: 三种源（npm 源支持精确版本、^/~ range、x-range/通配段、比较器集、|| 并集与 hyphen range，省略 = latest）
 nova-pkg uninstall <name>
@@ -121,23 +128,32 @@ npm link           # 全局注册 `nova` 命令
 - Python 测试目录结构：
   - `packages/nova_protocol/tests/`
   - `packages/nova_async/tests/`
-  - `packages/nova_ai/tests/`（含 `catalog/` 目录管线测试）
+  - `packages/nova_catalog/tests/`（通用目录构建与依赖方向审计）
+  - `packages/nova_gateway_protocol/tests/`（公开 DTO/事件/Schema 与依赖方向）
+  - `packages/nova_gateway_client/tests/`（独立 DTO/SSE、目录、重试退避、响应/异常、独立流生命周期、真实 loopback 超时与依赖方向）
+  - `packages/nova_gateway/tests/`（原生/OpenAI 端点、公共目录、断连关停与依赖方向）
+  - `packages/nova_ai/tests/`（含 `scripts/` AI 专用生成与对账、`api_impls/nova_gateway/` 公开 DTO → 标准事件流适配测试）
   - `packages/nova_agent/tests/`
   - `packages/nova_harness/tests/`
   - `packages/nova_server/tests/`
-  - `packages/nova-exec-server-client/tests/`
+  - `packages/nova_exec_server_client/tests/`
   - `bundles/nova_coding_agent/backend/tests/`
 - **TS 测试（node:test + tsx）**：统一收在包根 `tests/`（**镜像 src 子路径**——`tests/modes/tui/controllers/keymap.test.ts` ↔ `src/modes/tui/controllers/keymap.ts`）——
   - `packages/nova_client/`：`npm test`（`tsx --test "tests/**/*.test.ts"`）
   - `bundles/nova_coding_agent/`：Python 侧 pytest + TS 侧 `npm test`（`tsx --test "tests/**/*.test.ts"`，渲染器与其算法测试，如 `tests/tools/edit.test.ts` 与 `tests/lib/edit-preview.test.ts`）；`npm run typecheck` 单独类型检查
 - 真实 API 集成测试已用 `pytest.mark.integration` 标记；`nova_ai` 与 `nova_harness` 的集成测试需要 `VOLCENGINE_API_KEY` 等环境变量。
-- 已通过 pixi 安装 dev 环境并验证：八个套件非集成测试全部通过（计数随开发漂移，以实跑为准）；修改关键逻辑后应在对应子包内运行测试并确认结果。
+- 已通过 pixi 安装 dev 环境并验证：各套件非集成测试全部通过（计数随开发漂移，以实跑为准）；修改关键逻辑后应在对应子包内运行测试并确认结果。
 
 运行方式：
 
 ```bash
 # 使用 pixi（推荐）
 pixi run -e dev test-ai
+pixi run -e dev test-catalog
+pixi run -e dev test-gateway-protocol
+pixi run -e dev test-gateway-client
+pixi run -e dev test-gateway
+pixi run -e dev test-logging
 pixi run -e dev test-agent
 pixi run -e dev test-harness
 pixi run -e dev test-coding

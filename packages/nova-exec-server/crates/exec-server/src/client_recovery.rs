@@ -1,3 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -55,6 +58,8 @@ const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 // client and server start their disconnect clocks independently.
 const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(25);
 const SESSION_RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+const REGISTRY_RECOVERY_INITIAL_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+const REGISTRY_RECOVERY_MAX_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const NETWORK_POLICY_DENIAL_REASON: &str = "not_allowed";
 
 struct ClientRequestOutcome {
@@ -458,7 +463,8 @@ impl Inner {
             .reconnect_strategy
             .as_ref()
             .ok_or_else(|| ExecServerError::Protocol("missing reconnect strategy".to_string()))?;
-        let (connection, options) = reconnect_strategy.resume(session_id).await?;
+        let attempt = reconnect_strategy.resume(session_id).await?;
+        let (connection, options, _attempt_permit) = attempt.into_parts();
         let (rpc_client, events_rx) = RpcClient::new(connection);
         let rpc_client = Arc::new(rpc_client);
         let client = ExecServerClient {
@@ -790,6 +796,39 @@ impl ExecServerClient {
     }
 }
 
+pub(crate) fn registry_recovery_retry_delay(retry_key: &str, attempt: u32) -> Duration {
+    let multiplier = 1_u32.checked_shl(attempt.min(4)).unwrap_or(u32::MAX);
+    let base_delay = REGISTRY_RECOVERY_INITIAL_RETRY_INTERVAL
+        .saturating_mul(multiplier)
+        .min(REGISTRY_RECOVERY_MAX_RETRY_INTERVAL);
+    let base_millis = base_delay.as_millis() as u64;
+    let mut hasher = DefaultHasher::new();
+    retry_key.hash(&mut hasher);
+    attempt.hash(&mut hasher);
+    Duration::from_millis(base_millis + hasher.finish() % (base_millis / 2 + 1))
+}
+
+pub(crate) fn is_retryable_registry_error(error: &ExecServerError) -> bool {
+    matches!(
+        error,
+        ExecServerError::EnvironmentRegistryRequest(error)
+            if error.is_connect()
+                || error.is_timeout()
+                || error.is_body()
+                || matches!(
+                    error,
+                    nova_exec_server_http_client::RouteAwareRequestError::Request(error)
+                        if error.is_decode()
+                )
+    ) || matches!(
+        error,
+        ExecServerError::EnvironmentRegistryHttp { status, .. }
+            if status.is_server_error()
+                || *status == http::StatusCode::REQUEST_TIMEOUT
+                || *status == http::StatusCode::TOO_MANY_REQUESTS
+    )
+}
+
 pub(crate) fn is_retryable_recovery_error(error: &ExecServerError) -> bool {
     is_transport_closed_error(error)
         || matches!(
@@ -798,6 +837,7 @@ pub(crate) fn is_retryable_recovery_error(error: &ExecServerError) -> bool {
                 | ExecServerError::WebSocketConnect { .. }
                 | ExecServerError::InitializeTimedOut { .. }
         )
+        || is_retryable_registry_error(error)
         || matches!(
             error,
             ExecServerError::Server { code, .. }

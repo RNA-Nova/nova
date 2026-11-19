@@ -1,0 +1,6 @@
+pub use nova_exec_server_relay_protocol::EnvironmentRegistryConnectRequest;
+pub use nova_exec_server_relay_protocol::EnvironmentRegistryConnectResponse;
+pub use nova_exec_server_relay_protocol::EnvironmentRegistryHarnessKeyValidationRequest;
+pub use nova_exec_server_relay_protocol::EnvironmentRegistryHarnessKeyValidationResponse;
+pub use nova_exec_server_relay_protocol::EnvironmentRegistryRegistrationRequest;
+pub use nova_exec_server_relay_protocol::EnvironmentRegistryRegistrationResponse;

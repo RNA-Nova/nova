@@ -86,6 +86,7 @@ class AgentSessionProtocol(Protocol):
     _tools: Any
     _compaction: Any
     _current_run_id: Optional[str]
+    _tasks: Any
 
     async def abort(self) -> None: ...
     def _is_command_allowed(self, name: str) -> bool: ...

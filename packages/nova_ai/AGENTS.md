@@ -28,20 +28,20 @@
 | 数据建模 | `pydantic` v2 + `dataclass`（按根 `AGENTS.md` 决策顺序选型） |
 | 异步运行时 | `asyncio` |
 | 开发依赖 | `pytest`、`pytest-asyncio` |
-| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async` 为运行时硬依赖（需同装），Catalog 已收编为包内 `nova_ai.catalog` |
+| 关键运行时依赖 | `openai >= 2.0, < 3.10.0`（3.10.0 引入流式收尾回归，暂避，上游修复后放开）、`anthropic >= 1.0`（稳定线为界——httpx2 底座 1.x 全程，0.x pre-stable 不支持）、`pydantic >= 2.0`、`json-repair >= 0.58.4`、`httpx`、`anyio >= 4.11`（CancelScope 桥）；兄弟包 `nova-protocol`/`nova-async`/`nova-catalog`/`nova-gateway-protocol`/`nova-gateway-client` 为运行时硬依赖（需同装） |
 
-**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `ai-catalog-py` 腿覆盖（ubuntu 单平台：nova_ai 非集成 + nova_ai.catalog + 模型数据门禁）；尚无线级/真实 API 的集成腿与三平台矩阵。
+**未使用** Mypy、Tox、Makefile、Docker。monorepo 根的 GitHub Actions（`.github/workflows/ci.yml`）现有四腿：`executor-rust` / `executor-py` / `coding-agent-py` / `blob-size`——本包经 `ai-catalog-py` 腿覆盖（ubuntu 单平台：nova_catalog 密封测试 + nova_ai 非集成 + 模型数据门禁）；尚无线级/真实 API 的集成腿与三平台矩阵。
 
 ---
 
 ## 代码组织与模块划分
 
-源码位于 `src/nova_ai/`；**构建期模型目录管线为包内 `catalog/` 子包**
-（对位 pi `packages/ai/catalog/`——知识归 `catalog/providers/` 各家定义、
-族事实归 `catalog/families/`、薄拉取归 `catalog/sources/`、词汇归
-`catalog/define.py`、引擎归 `catalog/build.py`、入口归
-`catalog/generate.py`。目录子包只依赖 `nova_protocol` 与自身，不 import
-本包运行时；AI 运行时可单向复用目录纯算法，包级依赖环不复存在）：
+源码位于 `src/nova_ai/`。**通用目录知识与构建归独立
+`packages/nova_catalog`**（对位 pi `packages/ai/catalog/`）：它只依赖
+`nova_protocol` 与自身，不知道本包的目录结构或代码模板。本包
+`scripts/generate.py` 调用 `build_catalog()`，自行生成 AI 专用 Python 目录；
+`scripts/model_data.py` 统一负责 provider/shard/JSON/manifest 与严格字段校验，
+运行时单向复用字段盖戳、站翻译与输入限制等纯算法。包内结构如下：
 
 ```
 src/nova_ai/
@@ -53,12 +53,10 @@ src/nova_ai/
 ├── model_catalog.py         # 模型目录运行时机器：flatten_chat/image/classifier_model_catalog（typed key 拍平）+
 │                            #   finalize_catalog_models（运行时盖戳单点）+
 │                            #   builtin_catalog_generated_at（新鲜度竞速锚点）；
-│                            #   字段盖戳辅助归 nova_ai.catalog.define（构建/运行复用）；
+│                            #   字段盖戳辅助归 nova_catalog.define（构建/运行复用）；
 │                            #   pi.dev 成品不重复修正，models.dev 原料经
 │                            #   刷新策略闭包持有 materialize 回调（火山）
-├── models_generated.py      # 生成的模型目录聚合器
-├── catalog/                 # 包内目录构建管线：providers / families / sources / define / build /
-│                            #   generate / model_data；只依赖 nova_protocol 与自身
+├── models_generated.py      # 生成的模型目录聚合器（生成器归本包 scripts/generate.py）
 ├── testkit/                 # 跨包共享契约测试设施（store_contracts；各包 tests/contracts/ 实例化）
 ├── gateway/                 # ModelsManager 网关层（对齐 TS models.ts + models-store.ts）
 │   ├── models.py            # ModelsManager 集合 + create_models_manager（auth 网关 + provider 注册表 +
@@ -104,22 +102,24 @@ src/nova_ai/
 │   │                        #   constrained.py（Anthropic 限制词表；共享引擎归 _shared）+
 │   │                        #   threads.py（message threads 服务端续接——台账/指纹/
 │   │                        #   建线-续接-拒回退三态，pi a758f3ae4 对位）
+│   ├── nova_gateway/        # Nova Gateway（独立 nova-gateway-client SDK → 标准事件流）
+│   │                        #   _stream / events / options；client 只产公开 DTO，AI 在这里重建
 │   ├── openrouter_images.py # OpenRouter 非流式图像生成（ProviderImages / AssistantImages）
 │   └── typesafe_system_one.py # System One 非流式分类（ProviderClassifier / ClassifierResult）
 ├── session_resources.py     # 会话级资源清理注册处（threads 台账等——pi
 │                            #   session-resources.ts 对位）
 ├── catalog_impls/           # 目录站策略枚举（CatalogService 内置实现，对位 api_impls/）
 │   ├── models_dev.py        # ModelsDevCatalog（v2 单体目录切片 + 实例级 60s 缓存——
-│   │                        #   翻译委托 nova_ai.catalog.sources.models_dev，全仓单点）
+│   │                        #   翻译委托 nova_catalog.sources.models_dev，全仓单点）
 │   └── pi_dev.py            # PiDevCatalog（per-provider 目录 + 真条件请求 ETag/304）
 ├── providers/               # 内置 provider 工厂与静态模型目录（纯装配层：数据 + 工厂 + 知识 + 私活）
 │   ├── all.py               # builtin_providers() / builtin_models() + chat/image/classifier 目录读取
 │   ├── anthropic/           # models.py + provider.py（pi.dev 全供，零运行时 corrections——
-│   │                        #   种子知识归 nova_ai.catalog/providers/）
+│   │                        #   种子知识归 nova_catalog/providers/）
 │   ├── kimi_coding/         # models.py + provider.py + catalog.py（personalize 钩子：
 │   │                        #   managed 订阅源拉取+翻译+覆盖式合并——名单+活字段，
 │   │                        #   未收录跳过+诊断；账户层零修正；openai-completions 协议）
-│   ├── moonshotai/          # models.py + provider.py（知识全归 nova_ai.catalog DEF；
+│   ├── moonshotai/          # models.py + provider.py（知识全归 nova_catalog DEF；
 │   │                        #   运行时零修正文件）
 │   ├── moonshotai_cn/       # 同上（DEF 共享 moonshotai 定义件）
 │   ├── openrouter/          # models.py + provider.py（图像与分类目录 + 两类非流式调用）
@@ -168,8 +168,8 @@ from nova_async import ...` 消费；取消词汇（`AbortSignal`/`AbortControll
    所有流式调用返回 `AssistantMessageEventStream`（`streaming.py`）。生产者 `push(event)`，消费者 `async for` 迭代；收到 `DoneEvent` / `ErrorEvent` 时解析出最终 `AssistantMessage`，可用 `await stream.result()` 获取。多个 result 等待者经 `asyncio.shield` 共享终值，单个等待者取消不毒化 Future；本流见证的响应由流写入 `duration_ms`，旧/延迟消息不盖戳。`end()` 后不可再迭代。
    `drive()` 以流为属主持有 1:1 驱动 Task，并在驱动退出时关流；但 `result()` 返回不等于驱动或 transport 已收尾。provider 负责自己的 HTTP、driver 与资源清理，消费者负责在提前退出（abandonment）时发出取消通知并 join——正常完成、abort、外部取消与监听器异常都必须让请求落定。`stream.task` 是等待与硬取消兜底口，不能只凭 `stream.done` 推断资源已释放。
 
-3. **协议实现（聊天两个 + 非流式图像/分类）**
-   `api_impls/openai_completions/`（官方 `openai.AsyncOpenAI`）与 `api_impls/anthropic_messages/`（官方 `anthropic.AsyncAnthropic`，httpx2 底座）——模块即满足 `ProviderStreams` 契约；分件同构（compat / messages / client / params / _stream，openai 另有 reasoning）。非流式操作由 `openrouter_images.py` 与 `typesafe_system_one.py` 分别满足 `ProviderImages` / `ProviderClassifier`，错误与取消直接落在 `AssistantImages` / `ClassifierResult`。openai_completions 的实现要点：
+3. **协议实现（聊天三个 + 非流式图像/分类）**
+   `api_impls/openai_completions/`（官方 `openai.AsyncOpenAI`）、`api_impls/anthropic_messages/`（官方 `anthropic.AsyncAnthropic`，httpx2 底座）与 `api_impls/nova_gateway/`（独立 `nova-gateway-client` SDK）——模块即满足 `ProviderStreams` 契约；Nova Gateway 的 client 只产公开 DTO，`_stream` / `events` / `options` 在本包完成 partial、标准事件、取消与错误归一，依赖单向为 `nova_ai → nova_gateway_client → nova_gateway_protocol`。非流式操作由 `openrouter_images.py` 与 `typesafe_system_one.py` 分别满足 `ProviderImages` / `ProviderClassifier`，错误与取消直接落在 `AssistantImages` / `ClassifierResult`。openai_completions 的实现要点：
    - `detect_compat` / `get_compat` 按 provider/base_url 自动检测兼容标志（`store`、`developer` 角色、`reasoning_effort`、max_tokens 字段名、strict 模式等），`model.compat` 显式配置优先。
    - 流式 thinking/text 采用**双槽位合并**（整条流复用一个 thinking 块 + 一个 text 块，对齐 TS）。
    - reasoning 参数按 `thinking_format` 分派（openai / deepseek / zai / together / openrouter / ant-ling / qwen / qwen-chat-template / chat-template / baseten / string-thinking），支持 `thinking_level_map` 映射与 `off` 显式 null 语义。
@@ -228,14 +228,13 @@ pixi run -e dev isort src tests
 
 ## 测试说明
 
-测试位于 `tests/`（组织细则见根 `docs/crosscutting/testing-modeling.md` 第一节——目录镜像 src、命名与密度条款）：
+测试位于 `tests/`（组织细则见根 `docs/crosscutting/testing-modeling.md` 第一节——目录镜像 src、命名与密度条款）。通用构建测试归 `packages/nova_catalog/tests/`；AI 专用生成与对账测试归本包 `tests/scripts/`：
 
 ```
 tests/
+├── scripts/         # AI 生成器、provider/shard/JSON/manifest 对账与默认输出路径
 ├── gateway/         # ModelsManager 集合 / Provider 单元 / 刷新机器 / 刷新策略
 │                    #   （test_strategies.py：overlay 六件套 + personalized 钩子形态）/ 站路由
-├── catalog/         # 包内目录管线：sources / providers / families / build / generate /
-│                    #   model_data / reasoning / input_limits + 包内依赖方向审计
 ├── catalog_impls/   # 公开站实现（pi_dev / models_dev）+ HTTP 级用例（respx）
 ├── api_impls/       # 协议实现（openai_completions / anthropic_messages 各切面 + _shared +
 │                    #   openrouter_images / typesafe_system_one 非流式操作）
@@ -260,6 +259,7 @@ tests/
 ```bash
 cd packages/nova_ai
 pixi run -e dev pytest tests -m "not integration"   # 默认套件（密封，零网络）
+pixi run -e dev test-catalog                        # 独立目录管线测试（在仓库根执行）
 pixi run -e dev test-integration                    # 特性契约 e2e（真实 API，用 ~/.nova/agent/auth.json 与 env 凭据）
 pixi run -e dev check-live                          # 全模型可用性巡检（运维面，报告制）
 ```
@@ -286,10 +286,11 @@ pixi run -e dev check-live                          # 全模型可用性巡检�
 - **新增类型先想选址与选型**：跨组件边界的纯数据词汇进 `nova_protocol` 枢纽（消费方一律 `
 from nova_protocol import X`，本包不中转再导出）；组件内部类型留本包。表示选型按根 `AGENTS.md` 的"数据建模"决策顺序（可变性 → 序列化 → 校验价值 → 禁用项）选定 `NovaBaseModel` / dataclass / TypedDict / Protocol。
 - **新增 provider**：
-  1. `providers/<name>/models.py` 写静态模型目录，`provider.py` 用 `create_provider()` + `env_api_key_auth()`（或自定义 auth）构造工厂；
-  2. `providers/all.py` 加入 `builtin_providers()`；
-  3. `utils/env.py` 补环境变量映射；
-  4. `nova_ai/__init__.py` 与 `providers/__init__.py` 补导出。
+  1. 在 `nova_catalog/providers/<name>.py` 定义模型知识与构建钩子，并在 `nova_catalog/providers/__init__.py` 注册；运行 `pixi run -e dev generate-models` 产出本包静态目录；
+  2. 在本包 `providers/<name>/provider.py` 用 `create_provider()` + `env_api_key_auth()`（或自定义 auth）构造工厂；
+  3. `providers/all.py` 加入 `builtin_providers()`；
+  4. `utils/env.py` 补环境变量映射；
+  5. `nova_ai/__init__.py` 与 `providers/__init__.py` 补导出。
 - **新增 API 协议**：在 `api_impls/` 新建模块，导出 `stream` / `stream_simple`（模块即满足 `ProviderStreams` 契约），失败一律编码进返回的事件流而不是抛出。
 - **修改消息类型需谨慎**：`nova_protocol` 的 `messages.py` 与 `content.py` 是整个 monorepo 的公共契约。
 - **流式事件不可复用**：`AssistantMessageEventStream` 收到 `DoneEvent`/`ErrorEvent` 或 `end()` 后队列即关闭。

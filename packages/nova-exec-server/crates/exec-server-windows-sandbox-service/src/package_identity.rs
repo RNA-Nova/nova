@@ -57,11 +57,13 @@ pub(crate) fn authorize_client_process(pipe: HANDLE) -> Result<AuthorizedClientP
     }
     let process = OwnedHandle(process);
 
-    let client_family = unsafe { nova_exec_server_windows_sandbox::process_package_family(process.0) }
-        .context("read provisioning client package identity")?;
-    let service_family =
-        unsafe { nova_exec_server_windows_sandbox::process_package_family(Threading::GetCurrentProcess()) }
-            .context("read provisioning service package identity")?;
+    let client_family =
+        unsafe { nova_exec_server_windows_sandbox::process_package_family(process.0) }
+            .context("read provisioning client package identity")?;
+    let service_family = unsafe {
+        nova_exec_server_windows_sandbox::process_package_family(Threading::GetCurrentProcess())
+    }
+    .context("read provisioning service package identity")?;
     match client_family {
         Some(client_family) => match service_family.as_deref() {
             Some(service_family) if client_family != service_family => {
@@ -70,7 +72,7 @@ pub(crate) fn authorize_client_process(pipe: HANDLE) -> Result<AuthorizedClientP
             Some(_) => {}
             #[cfg(debug_assertions)]
             None if FOREGROUND_MODE.load(Ordering::Acquire)
-                && is_debug_trusted_codex_package_family(&client_family) => {}
+                && is_debug_trusted_nova_package_family(&client_family) => {}
             #[cfg(debug_assertions)]
             None if FOREGROUND_MODE.load(Ordering::Acquire) => {
                 bail!("provisioning client does not belong to a trusted package family")
@@ -99,10 +101,12 @@ pub(crate) fn authorize_client(
             .context("open the provisioning client process token");
     }
     let process_token = OwnedHandle(process_token);
-    let process_user = unsafe { nova_exec_server_windows_sandbox::get_user_sid_bytes(process_token.0) }
-        .context("read the client process user")?;
-    let impersonated_user = unsafe { nova_exec_server_windows_sandbox::get_user_sid_bytes(client_token) }
-        .context("read the impersonated client user")?;
+    let process_user =
+        unsafe { nova_exec_server_windows_sandbox::get_user_sid_bytes(process_token.0) }
+            .context("read the client process user")?;
+    let impersonated_user =
+        unsafe { nova_exec_server_windows_sandbox::get_user_sid_bytes(client_token) }
+            .context("read the impersonated client user")?;
     if process_user != impersonated_user {
         bail!("provisioning client process does not belong to the impersonated user");
     }
@@ -110,16 +114,16 @@ pub(crate) fn authorize_client(
     Ok(())
 }
 
-// debug 联调通道：前台调试（未打包）服务没有包家族可供相等校验，此时仍允许
-// codex 打包客户端接入联调。行为保留——白名单维持 codex 包族；正式打包服务
-// 走上面的家族相等校验，不经过这里。
+// debug 联调通道：前台调试（未打包）服务没有包家族可供相等校验，此时允许
+// Nova 打包客户端接入联调。行为边界——只接受 Nova 包族；正式打包服务走
+// 上面的家族相等校验，不经过这里。
 #[cfg(debug_assertions)]
-fn is_debug_trusted_codex_package_family(package_family: &str) -> bool {
+fn is_debug_trusted_nova_package_family(package_family: &str) -> bool {
     matches!(
         package_family,
-        "OpenAI.Codex_3k8sg7r9htsxt"
-            | "OpenAI.CodexAlpha_3k8sg7r9htsxt"
-            | "OpenAI.CodexBeta_3k8sg7r9htsxt"
-            | "OpenAI.CodexNightly_3k8sg7r9htsxt"
+        "Nova.ExecServer_3k8sg7r9htsxt"
+            | "Nova.ExecServerAlpha_3k8sg7r9htsxt"
+            | "Nova.ExecServerBeta_3k8sg7r9htsxt"
+            | "Nova.ExecServerNightly_3k8sg7r9htsxt"
     )
 }

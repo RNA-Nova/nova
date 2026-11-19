@@ -85,6 +85,6 @@ def anthropic_provider() -> "Provider":
         api=cast(ProviderStreams, anthropic_messages),
         auth=ProviderAuth(api_key=_anthropic_api_key_auth()),
         # 运行时 pi.dev 全供（api/级别表/compat）——无运行时 corrections；
-        # 种子知识归 nova_ai.catalog/providers/anthropic.py 的 DEF
+        # 种子知识归 nova_catalog/providers/anthropic.py 的 DEF
         catalog_source="pi.dev",
     )

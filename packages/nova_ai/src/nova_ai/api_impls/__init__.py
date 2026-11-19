@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 _LAZY_MODULES = {
     "openai_completions": "nova_ai.api_impls.openai_completions",
     "anthropic_messages": "nova_ai.api_impls.anthropic_messages",
+    "nova_gateway": "nova_ai.api_impls.nova_gateway",
     "openrouter_images": "nova_ai.api_impls.openrouter_images",
     "typesafe_system_one": "nova_ai.api_impls.typesafe_system_one",
 }

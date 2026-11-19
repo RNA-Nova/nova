@@ -21,6 +21,7 @@ pub struct MetricsConfig {
     pub(crate) export_interval: Option<Duration>,
     pub(crate) runtime_reader: bool,
     pub(crate) default_tags: BTreeMap<String, String>,
+    pub(crate) http_client_factory: nova_exec_server_http_client::HttpClientFactory,
 }
 
 impl MetricsConfig {
@@ -38,6 +39,9 @@ impl MetricsConfig {
             export_interval: None,
             runtime_reader: false,
             default_tags: BTreeMap::new(),
+            http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+                nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+            ),
         }
     }
 
@@ -56,6 +60,9 @@ impl MetricsConfig {
             export_interval: None,
             runtime_reader: false,
             default_tags: BTreeMap::new(),
+            http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+                nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+            ),
         }
     }
 
@@ -68,6 +75,15 @@ impl MetricsConfig {
     /// Enable a manual reader for on-demand runtime snapshots.
     pub fn with_runtime_reader(mut self) -> Self {
         self.runtime_reader = true;
+        self
+    }
+
+    /// 指定 OTLP 与导出策略共用的 HTTP 工厂。
+    pub fn with_http_client_factory(
+        mut self,
+        factory: nova_exec_server_http_client::HttpClientFactory,
+    ) -> Self {
+        self.http_client_factory = factory;
         self
     }
 

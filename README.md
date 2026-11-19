@@ -11,7 +11,12 @@ nova/
 ├── packages/
 │   ├── nova_protocol/        # 词汇枢纽（纯形状零行为：消息/事件/模型/鉴权/取消原语/
 │   │                         #   报告词汇——全仓类型的单一正典源）
+│   ├── nova_catalog/         # 独立模型目录知识、数据源与生成管线
 │   ├── nova_ai/              # 统一的 LLM 提供商抽象层（多厂商流式调用/注册表/鉴权）
+│   ├── nova_gateway_protocol/ # Gateway 公开 DTO、SSE 事件、版本与 Schema
+│   ├── nova_gateway_client/  # 独立 Gateway 官方 SDK（公开 DTO 事件流，不依赖 nova_ai）
+│   ├── nova_gateway/         # Nova 原生模型服务、公共目录站、OpenAI 兼容适配
+│   ├── nova_logging/         # 结构化日志上下文、formatter、有界队列与关停排干
 │   ├── nova_agent/           # 事件驱动的异步 Agent 框架（Agent 类/agent_loop/事件）
 │   ├── nova_harness/         # 高阶 Agent SDK（AgentSession、会话树、压缩、资源加载、
 │   │                         #   包管理、RuntimeManager、Project Trust）
@@ -21,9 +26,8 @@ nova/
 │   ├── nova-exec-server/     # 通用执行后端（Rust：进程/文件系统/PTY + 三平台沙箱
 │   │                         #   + 托管网络沙箱；协议即产品，线上契约见
 │   │                         #   packages/nova-exec-server/PROTOCOL.md）
-│   ├── nova-exec-server-client/  # executor 的 Python SDK（薄客户端：双传输 +
-│   │                         #   TransportPool 控制/数据面分离 + 版本协商）
-│   └── nova-agent-rs/        # Rust 协议线端口（线上事件/错误词汇的 Rust 镜像）
+│   └── nova_exec_server_client/  # executor 的 Python SDK（薄客户端：双传输 +
+│                             #   TransportPool 控制/数据面分离 + 版本协商）
 ├── bundles/
 │   └── nova_coding_agent/    # 官方编程 Agent bundle（5 个 agent 组合声明、10 个本地
 │                             #   工具、6 个扩展——含 adjudication 裁决子系统）
@@ -39,9 +43,16 @@ nova/
 - **nova_protocol**：全仓词汇枢纽。LLM 消息/内容/模型/流式事件/枚举/compat/
   auth 词汇、agent 循环事件与消息、取消原语、报告词汇（错误分类/警告事件/装配
   诊断）、secret 清洗——纯形状零行为，纯洁性审计机械执法。
+- **nova_catalog**：通用模型目录知识与构建编排；`nova_ai` 和 `nova_gateway`
+  各自调用构建结果，自己生成并校验消费方专用产物。
 - **nova_ai**：多厂商（OpenAI/Anthropic/Volcengine/Moonshot/Kimi 等）统一的流式
   调用、模型注册表与鉴权链（runtime override → 存储凭据 → 环境变量 → OAuth），
-  OpenAI Completions 与 Anthropic Messages 双协议实现。
+  OpenAI Completions、Anthropic Messages 与 Nova Gateway 协议实现。
+- **nova_gateway_protocol / nova_gateway_client / nova_gateway**：独立公开协议、
+  官方客户端 SDK 与模型服务端。提供 Nova 原生 SSE、公共目录和 OpenAI 兼容入口；
+  下游只传 `provider/id`，不接触上游地址或凭据。
+- **nova_logging**：共享 structlog 上下文与 formatter、多 sink/目标级过滤、
+  有界 stdlib 队列、flush/超时关停和运行统计；不依赖任何 Nova 业务包。
 - **nova_agent**：核心框架。`Agent` 类、事件订阅/发布、`agent_loop` 异步循环、
   生命周期管理、工具校验与执行。
 - **nova_harness**：高阶 SDK。`AgentSession`、会话树（分支/fork/导航）、上下文
@@ -60,7 +71,7 @@ nova/
 
 ## 技术栈
 
-- Python `>=3.13,<3.14`（各子包）+ Rust（nova-exec-server、nova-agent-rs）
+- Python `>=3.13,<3.14`（各子包）+ Rust（nova-exec-server）
   + TypeScript（nova-client）
 - **pixi** 统一环境管理（根 `pyproject.toml` 的 `[tool.pixi.*]` workspace）；
   各子包保留 Poetry 配置兼容
@@ -77,8 +88,8 @@ curl -fsSL https://pixi.sh/install.sh | bash
 pixi install --environment dev
 
 # 跑测试（各子包）
-pixi run -e dev test-all        # 全部七个套件
-pixi run -e dev test-harness    # 单个（test-ai / test-agent / test-server / ...）
+pixi run -e dev test-all        # 全部套件
+pixi run -e dev test-harness    # 单个（test-ai / test-catalog / test-gateway / test-agent / test-server / ...）
 
 # nova-exec-server（Rust 侧）
 cd packages/nova-exec-server

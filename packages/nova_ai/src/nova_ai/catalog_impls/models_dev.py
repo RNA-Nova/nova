@@ -5,7 +5,7 @@
 - 实例持 60s 去重缓存——一轮刷新的多个 provider 共享一次下载
   （缓存属主 = 实例，组合根负责共享，无模块全局）；
 - 无 per-provider 条件请求语义——``validator`` 收下但忽略；
-- 翻译唯一点在构建管线（``nova_ai.catalog.sources.models_dev.models_dev_to_nova``，
+- 翻译唯一点在构建管线（``nova_catalog.sources.models_dev.models_dev_to_nova``，
   v2 形状）——本模块不复刻第二份翻译（v1 双轨已退役）。
 """
 
@@ -14,10 +14,11 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, cast
 
-from nova_ai.catalog.sources.models_dev import MODELS_DEV_API
-from nova_ai.catalog.sources.models_dev import models_dev_to_nova as _models_dev_to_nova
 from nova_async import AbortedError, AbortSignal, is_aborted
 from nova_protocol import ModelFields
+
+from nova_catalog.sources.models_dev import MODELS_DEV_API
+from nova_catalog.sources.models_dev import models_dev_to_nova as _models_dev_to_nova
 
 from ..gateway.catalog import CatalogOutcome
 from ..utils.http import fetch_json

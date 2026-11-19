@@ -35,6 +35,8 @@ json-repair = ">=0.58.4"
 httpx = ">=0.27.0"
 # Anthropic 1.x 的 HTTP 底座；本包在 retry/timeouts/errors 中直接消费。
 httpx2 = ">=2.0,<3"
+# 兄弟包 nova-protocol / nova-async / nova-catalog / nova-gateway-protocol /
+# nova-gateway-client 统一由根 pyproject.toml editable 安装。
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.1"
@@ -54,7 +56,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 target-version = ['py313']
-# 生成物由 nova_ai.catalog 管线产出，格式以生成器为准——排除出 black/isort
+# 生成物由 nova_ai.scripts.generate 产出，格式以生成器为准——排除出 black/isort
 extend-exclude = 'src/nova_ai/(models_generated\.py|providers/data|providers/(anthropic|kimi_coding|moonshotai|moonshotai_cn|openrouter|volcengine)/models\.py)'
 
 [tool.isort]

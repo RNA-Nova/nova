@@ -228,7 +228,10 @@ fn bounded_shutdown_survives_worker_guard_page_failure() {
         .arg("--nocapture")
         .arg("--test-threads=1")
         .env("NOVA_EXEC_SERVER_OTEL_GUARD_PAGE_FAILURE_CHILD", "1")
-        .env("NOVA_EXEC_SERVER_OTEL_GUARD_PAGE_FAILURE_OBSERVED", &observed_path);
+        .env(
+            "NOVA_EXEC_SERVER_OTEL_GUARD_PAGE_FAILURE_OBSERVED",
+            &observed_path,
+        );
 
     let output = subprocess
         .output()

@@ -30,6 +30,8 @@ pub struct OtelSettings {
     pub runtime_metrics: bool,
     pub span_attributes: BTreeMap<String, String>,
     pub tracestate: BTreeMap<String, BTreeMap<String, String>>,
+    /// 共享 HTTP 路由与网络策略工厂（OTLP  exporters 与 exec 流量同栈）。
+    pub http_client_factory: nova_exec_server_http_client::HttpClientFactory,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -89,9 +91,7 @@ pub struct StatsigMetricsSettings {
 
 /// `~/.nova/exec-server/config.toml` 的 `[otel]` 段。
 ///
-/// 形状对位 codex `OtelConfigToml`（本批只接 metrics 出口；`exporter`/
-/// `trace_exporter` 字段解析后忽略并告警——traces/logs 的 subscriber 接线
-/// 归后续批次）。其余键（批次 1 的沙箱/网络/环境词汇）共存于同一文件，
+/// 形状对位 codex `OtelConfigToml`。其余键（沙箱/网络/环境词汇）共存于同一文件，
 /// 本结构只投影 `[otel]` 段。
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(default)]
@@ -100,10 +100,10 @@ pub struct OtelFileConfig {
     pub environment: Option<String>,
     /// metrics 出口（缺席 = 全静默 noop）。
     pub metrics_exporter: OtelExporter,
-    /// traces/logs 出口（本批未接——解析后忽略并告警）。
-    pub exporter: Option<toml::Value>,
-    /// 同上的 trace 出口。
-    pub trace_exporter: Option<toml::Value>,
+    /// logs 出口（缺席 = 不安装 logger layer）。
+    pub exporter: OtelExporter,
+    /// traces 出口（缺席 = 不安装 tracer provider）。
+    pub trace_exporter: OtelExporter,
 }
 
 /// 从 executor 配置根装配遥测设置（对位 codex `build_provider` 的配置→装配形状）。
@@ -112,12 +112,6 @@ pub struct OtelFileConfig {
 /// - 配置根的其余段（sandbox/network/environments 词汇）不被本函数触碰。
 pub fn load_otel_settings(executor_home: &std::path::Path) -> std::io::Result<OtelSettings> {
     let config = read_otel_file_config(executor_home)?;
-    if config.exporter.is_some() || config.trace_exporter.is_some() {
-        // 用 eprintln 而非 tracing::warn!：本函数的唯一生产调用方是 CLI 的
-        // assemble_otel_provider，运行在 install_stderr_logging 之前——
-        // 此间 tracing 会落进无 subscriber 真空被丢弃。
-        eprintln!("[otel] 的 exporter/trace_exporter 字段本批未接（忽略——traces/logs 接线归后续批次）");
-    }
     Ok(OtelSettings {
         environment: config
             .environment
@@ -128,12 +122,15 @@ pub fn load_otel_settings(executor_home: &std::path::Path) -> std::io::Result<Ot
             .unwrap_or_else(|| "production".to_string()),
         service_name: "nova-exec-server".to_string(),
         service_version: env!("CARGO_PKG_VERSION").to_string(),
-        exporter: OtelExporter::None,
-        trace_exporter: OtelExporter::None,
+        exporter: config.exporter,
+        trace_exporter: config.trace_exporter,
         metrics_exporter: config.metrics_exporter,
         runtime_metrics: false,
         span_attributes: BTreeMap::new(),
         tracestate: BTreeMap::new(),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     })
 }
 
@@ -142,7 +139,7 @@ fn read_otel_file_config(executor_home: &std::path::Path) -> std::io::Result<Ote
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(OtelFileConfig::default())
+            return Ok(OtelFileConfig::default());
         }
         Err(error) => return Err(error),
     };
@@ -223,5 +220,25 @@ metrics_exporter = { OtlpHttp = { endpoint = "https://otel.example.com:4318", pr
         };
         assert_eq!(endpoint, "https://otel.example.com:4318");
         assert!(matches!(protocol, OtelHttpProtocol::Json));
+    }
+
+    #[test]
+    fn logs_and_traces_sections_map_to_settings() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("config.toml"),
+            r#"
+[otel]
+exporter = { OtlpHttp = { endpoint = "http://127.0.0.1:4318/v1/logs", protocol = "Json" } }
+trace_exporter = { OtlpHttp = { endpoint = "http://127.0.0.1:4318/v1/traces", protocol = "Binary" } }
+"#,
+        )
+        .expect("write config");
+        let settings = load_otel_settings(temp.path()).expect("load settings");
+        assert!(matches!(settings.exporter, OtelExporter::OtlpHttp { .. }));
+        assert!(matches!(
+            settings.trace_exporter,
+            OtelExporter::OtlpHttp { .. }
+        ));
     }
 }

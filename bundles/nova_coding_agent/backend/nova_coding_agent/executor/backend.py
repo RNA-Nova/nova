@@ -33,9 +33,8 @@ from .manager import ExecutorClientManager
 class ExecutorBashOperations:
     """经 executor 执行的 bash 后端（本地回环或远程同形）。
 
-    ``remote_cwd``：SSH 远程后端的执行 cwd——远程文件系统与本地无关，
-    调用方传入的本地 cwd 不能用（设计定案：按会话隔离的远程工作区，
-    /executor 切换时确定并记忆）。
+    ``remote_cwd``：远程后端的显式执行 cwd——远程文件系统与本地无关，
+    调用方传入的本地 cwd 不能混用；未提供时保持调用方 cwd。
     """
 
     def __init__(
@@ -89,8 +88,7 @@ class ExecutorBashOperations:
             except Exception:
                 pass
 
-        # 执行 cwd：SSH 远程用 remote_cwd（远程文件系统与本地无关）；
-        # 本地/本地沙箱用调用方 cwd
+        # 远程后端存在显式 remote_cwd 时使用远程路径；否则沿用调用方 cwd
         effective_cwd = self._remote_cwd or cwd
         start_params: Dict[str, Any] = {
             "argv": [shell, "-c", command],

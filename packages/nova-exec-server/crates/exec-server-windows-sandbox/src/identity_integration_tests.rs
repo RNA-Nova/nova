@@ -207,7 +207,10 @@ fn credential_setup_reconciles_policy_and_repairs_accounts() -> Result<()> {
             fs::write(path, bytes)?;
         }
         let env = HashMap::from([
-            ("NOVA_EXEC_SERVER_WINDOWS_SANDBOX_PROXY_PORTS".into(), ports.into()),
+            (
+                "NOVA_EXEC_SERVER_WINDOWS_SANDBOX_PROXY_PORTS".into(),
+                ports.into(),
+            ),
             (
                 "NOVA_EXEC_SERVER_NETWORK_ALLOW_LOCAL_BINDING".into(),
                 u8::from(desired_binding).to_string(),

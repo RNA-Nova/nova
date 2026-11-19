@@ -8,6 +8,8 @@ from nova_protocol import (
     ClientIdentity,
     ModelThinkingLevel,
     SystemMessage,
+    Tool,
+    ToolReference,
     UserMessage,
 )
 
@@ -97,9 +99,11 @@ async def test_finish_turn_end_runs_before_turn_end_and_preserves_queues(dummy_m
 
     agent = Agent(stream_fn=stream, finish_turn=finish)
     agent.set_model(dummy_model)
-    agent.subscribe(lambda event, _signal: observed.append(event.type))
-    await agent.prompt("run")
-    assert observed[-3:] == ["finish", "turn_end", "agent_end"]
+    run = agent.prompt("run")
+    await run
+    event_types = [event.type async for event in run.events]
+    assert observed == ["finish"]
+    assert event_types[-2:] == ["turn_end", "agent_end"]
     assert stream_calls == 1
     assert agent.has_queued_messages()
 
@@ -258,3 +262,52 @@ async def test_prepare_request_can_replace_request_context(dummy_model):
     await agent.prompt("original")
 
     assert [message.content for message in seen] == ["prepared"]
+
+
+@pytest.mark.asyncio
+async def test_pending_system_message_merges_current_tool_declaration(dummy_model):
+    agent = Agent(
+        stream_fn=lambda m, c, o: text_stream(m, "ok"),
+        initial_state={"system_prompt": "base"},
+    )
+    agent.set_model(dummy_model)
+    agent.set_tools([EchoTool()])
+
+    await agent.prompt(
+        [
+            SystemMessage(content="", sections={"skills": "<skills>x</skills>"}),
+            UserMessage(content="hi"),
+        ]
+    )
+
+    pending = agent.state.messages[1]
+    assert isinstance(pending, SystemMessage)
+    assert pending.sections == {"skills": "<skills>x</skills>"}
+    assert [tool.name for tool in pending.tools_added or []] == ["echo"]
+    assert pending.tools_removed is None
+
+
+@pytest.mark.asyncio
+async def test_pending_tool_declarations_are_rewritten_to_executable_set(dummy_model):
+    agent = Agent(
+        stream_fn=lambda m, c, o: text_stream(m, "ok"),
+        initial_state={"tools": [EchoTool()]},
+    )
+    agent.set_model(dummy_model)
+    pending_claim = SystemMessage(
+        content="",
+        sections={"note": "<note>x</note>"},
+        tools_added=[Tool(name="second", description="second", parameters={})],
+        tools_removed=[ToolReference(name="echo")],
+    )
+
+    await agent.prompt([pending_claim, UserMessage(content="hi")])
+
+    pending = agent.state.messages[1]
+    assert isinstance(pending, SystemMessage)
+    assert pending.sections == {"note": "<note>x</note>"}
+    assert pending.tools_added is None
+    assert pending.tools_removed is None
+    baseline = agent.state.messages[0]
+    assert isinstance(baseline, SystemMessage)
+    assert [tool.name for tool in baseline.tools_added or []] == ["echo"]

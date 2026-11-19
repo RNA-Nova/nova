@@ -1,11 +1,13 @@
 #![allow(clippy::expect_used)]
 
+use futures::SinkExt;
+use futures::StreamExt;
+use nova_exec_server_http_client::HttpClientFactory;
+use nova_exec_server_http_client::OutboundProxyPolicy;
 use nova_exec_server_protocol::JSONRPCError;
 use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_protocol::JSONRPCMessage;
 use nova_exec_server_protocol::JSONRPCResponse;
-use nova_exec_server_http_client::HttpClientFactory;
-use nova_exec_server_http_client::OutboundProxyPolicy;
 use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
 use nova_exec_server_protocol_core::permissions::FileSystemPath;
@@ -14,8 +16,6 @@ use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
 use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
 use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
 use nova_exec_server_utils_path_uri::PathUri;
-use futures::SinkExt;
-use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;

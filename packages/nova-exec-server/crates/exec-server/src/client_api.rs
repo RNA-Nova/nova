@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -9,8 +10,10 @@ use crate::ExecServerError;
 use crate::HttpRequestParams;
 use crate::HttpRequestResponse;
 use crate::HttpResponseBodyStream;
+use crate::NoiseChannelIdentity;
+use crate::NoiseChannelPublicKey;
 
-pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Connection options for any exec-server client transport.
@@ -30,6 +33,33 @@ pub struct RemoteExecServerConnectArgs {
     pub initialize_timeout: Duration,
     pub resume_session_id: Option<String>,
     pub http_client_factory: HttpClientFactory,
+}
+
+/// Registry 签发的一次物理 Noise 连接材料；URL 与授权只供一次建连使用。
+pub struct NoiseRendezvousConnectBundle {
+    pub websocket_url: String,
+    pub environment_id: String,
+    pub executor_registration_id: String,
+    pub executor_public_key: NoiseChannelPublicKey,
+    pub harness_key_authorization: String,
+}
+
+pub struct NoiseRendezvousConnectArgs {
+    pub bundle: NoiseRendezvousConnectBundle,
+    pub harness_identity: NoiseChannelIdentity,
+    pub client_name: String,
+    pub connect_timeout: Duration,
+    pub initialize_timeout: Duration,
+    pub resume_session_id: Option<String>,
+    pub http_client_factory: HttpClientFactory,
+}
+
+/// 每次物理重连都现取新的 Registry 授权，不缓存一次性 URL。
+pub trait NoiseRendezvousConnectProvider: Send + Sync {
+    fn connect_bundle(
+        &self,
+        harness_public_key: NoiseChannelPublicKey,
+    ) -> BoxFuture<'_, Result<NoiseRendezvousConnectBundle, ExecServerError>>;
 }
 
 /// Stdio connection arguments for a command-backed exec-server.
@@ -58,6 +88,10 @@ pub enum ExecServerTransportParams {
         connect_timeout: Duration,
         initialize_timeout: Duration,
     },
+    NoiseRendezvous {
+        provider: Arc<dyn NoiseRendezvousConnectProvider>,
+        identity: NoiseChannelIdentity,
+    },
     #[allow(dead_code)]
     StdioCommand {
         command: StdioExecServerCommand,
@@ -78,6 +112,9 @@ impl std::fmt::Debug for ExecServerTransportParams {
                 .field("connect_timeout", connect_timeout)
                 .field("initialize_timeout", initialize_timeout)
                 .finish(),
+            Self::NoiseRendezvous { .. } => {
+                f.debug_struct("NoiseRendezvous").finish_non_exhaustive()
+            }
             Self::StdioCommand {
                 command,
                 initialize_timeout,

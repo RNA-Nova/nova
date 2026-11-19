@@ -533,7 +533,10 @@ fn apply_inner_command_argv0_for_launcher(
     if supports_argv0 {
         argv.splice(
             command_separator_index..command_separator_index,
-            ["--argv0".to_string(), NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0.to_string()],
+            [
+                "--argv0".to_string(),
+                NOVA_EXEC_SERVER_LINUX_SANDBOX_ARG0.to_string(),
+            ],
         );
         return;
     }

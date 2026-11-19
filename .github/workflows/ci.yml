@@ -187,12 +187,12 @@ jobs:
           python-version: "3.13"
 
       - name: 安装依赖并跑测试（非集成）
-        working-directory: packages/nova-exec-server-client
+        working-directory: packages/nova_exec_server_client
         run: |
           python -m pip install -e ../nova_protocol -e ../nova_async -e ../nova_exec_protocol -e ../nova_exec_policy -e . pytest pytest-asyncio
           python -m pytest tests -q -m "not integration"
 
-  # nova_ai（含包内 Catalog）默认密封测试与生成物门禁
+  # nova_catalog 与 nova_ai 默认密封测试、生成物门禁
   ai-catalog-py:
     name: ai-catalog-py / ubuntu-latest
     runs-on: ubuntu-latest
@@ -206,15 +206,71 @@ jobs:
 
       - name: 安装依赖
         run: |
-          python -m pip install -e packages/nova_protocol -e packages/nova_async -e packages/nova_exec_protocol -e packages/nova_exec_policy -e packages/nova_ai
+          python -m pip install -e packages/nova_protocol -e packages/nova_async -e packages/nova_exec_protocol -e packages/nova_exec_policy -e packages/nova_catalog -e packages/nova_gateway_protocol -e packages/nova_gateway_client -e packages/nova_ai
           python -m pip install pytest pytest-asyncio pytest-timeout pytest-socket respx hypothesis json-repair
 
-      - name: nova_ai 非集成测试（含 Catalog）
+      - name: nova_catalog 密封测试
+        working-directory: packages/nova_catalog
+        run: python -m pytest tests -q
+
+      - name: nova_ai 非集成测试
         working-directory: packages/nova_ai
         run: python -m pytest tests -q -m "not integration"
 
       - name: 模型生成物一致性门禁
-        run: python packages/nova_ai/scripts/check_model_data.py
+        working-directory: packages/nova_ai
+        run: python -m scripts.check_model_data
+
+  # 日志叶子包三平台矩阵：重点覆盖非 POSIX 文件路径与线程关停。
+  logging-py:
+    name: nova_logging / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖并跑密封测试
+        working-directory: packages/nova_logging
+        run: |
+          python -m pip install -e . pytest pytest-asyncio pytest-timeout pytest-socket
+          python -m pytest tests -q
+
+  # Gateway 公开协议、官方 SDK、服务端与公共目录（全部密封/loopback）
+  gateway-py:
+    name: gateway-py / ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 安装 Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -e packages/nova_protocol -e packages/nova_async -e packages/nova_catalog -e packages/nova_gateway_protocol -e packages/nova_gateway_client -e packages/nova_ai -e packages/nova_logging -e packages/nova_gateway
+          python -m pip install pytest pytest-asyncio pytest-timeout pytest-socket respx hypothesis json-repair
+
+      - name: nova_gateway_protocol 密封测试
+        working-directory: packages/nova_gateway_protocol
+        run: python -m pytest tests -q
+
+      - name: nova_gateway_client 密封与 loopback 测试
+        working-directory: packages/nova_gateway_client
+        run: python -m pytest tests -q
+
+      - name: nova_gateway 密封与 loopback 测试
+        working-directory: packages/nova_gateway
+        run: python -m pytest tests -q
 
   # nova_coding_agent 单元测试（bash 引擎/工具链/executor 接入/策略面）
   coding-agent-py:
@@ -232,7 +288,7 @@ jobs:
       # 清单——子包 pyproject 不声明兄弟 path 依赖，pip 需显式列出）
       - name: 安装依赖并跑测试（非集成）
         run: |
-          python -m pip install -e packages/nova_protocol -e packages/nova_async -e packages/nova_exec_protocol -e packages/nova_exec_policy -e packages/nova-exec-server-client -e packages/nova_ai -e packages/nova_agent -e packages/nova_harness -e packages/nova_server -e bundles/nova_coding_agent
+          python -m pip install -e packages/nova_protocol -e packages/nova_async -e packages/nova_exec_protocol -e packages/nova_exec_policy -e packages/nova_exec_server_client -e packages/nova_gateway_protocol -e packages/nova_gateway_client -e packages/nova_ai -e packages/nova_agent -e packages/nova_harness -e packages/nova_server -e bundles/nova_coding_agent
           python -m pip install pytest pytest-asyncio websockets ripgrep==15.1.0
           python -m pytest bundles/nova_coding_agent/backend/tests -q -m "not integration" -o faulthandler_timeout=120
 

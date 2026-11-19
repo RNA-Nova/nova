@@ -6,7 +6,6 @@ use strum_macros::Display;
 use ts_rs::TS;
 use wildmatch::WildMatchPattern;
 
-
 // 锚点子集保留件（pub API 面，挂账用）：当前全 workspace 无树内消费方。
 #[derive(
     Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize, Display, JsonSchema, TS,

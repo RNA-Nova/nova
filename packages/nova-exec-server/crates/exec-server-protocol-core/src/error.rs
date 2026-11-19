@@ -84,7 +84,6 @@ pub enum ExecErrorDetails {
     LandlockPathFd(#[from] landlock::PathFdError),
 }
 
-
 // 兼容宏：让调用方以 ExecErr::Variant 形态构造错误（同 codex 上游）。
 macro_rules! exec_err_unit_constructors {
     ($($variant:ident),* $(,)?) => {
@@ -118,9 +117,7 @@ impl ExecErr {
         &self.details
     }
 
-    exec_err_unit_constructors!(
-        LandlockSandboxExecutableNotProvided,
-    );
+    exec_err_unit_constructors!(LandlockSandboxExecutableNotProvided,);
 
     exec_err_tuple_constructors!(
         Sandbox(error: SandboxErr),
@@ -156,7 +153,10 @@ impl std::error::Error for ExecErr {
 
 impl From<ExecErrorDetails> for ExecErr {
     fn from(details: ExecErrorDetails) -> Self {
-        Self { details, retry_delay: None }
+        Self {
+            details,
+            retry_delay: None,
+        }
     }
 }
 

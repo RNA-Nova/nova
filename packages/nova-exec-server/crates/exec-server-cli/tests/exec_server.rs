@@ -227,8 +227,14 @@ metrics_exporter = {{ OtlpHttp = {{ endpoint = "{collector_url}/v1/metrics", pro
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
         let mut child = command.spawn()?;
-        let mut stdin = child.stdin.take().context("exec-server stdin was not piped")?;
-        let stdout = child.stdout.take().context("exec-server stdout was not piped")?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("exec-server stdin was not piped")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("exec-server stdout was not piped")?;
         let mut stdout = BufReader::new(stdout);
         send_json_line(
             &mut stdin,

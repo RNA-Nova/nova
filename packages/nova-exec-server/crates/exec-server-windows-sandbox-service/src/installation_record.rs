@@ -60,7 +60,8 @@ pub(crate) fn is_current_package_family(record: &InstallationRecord) -> Result<b
 }
 
 pub(crate) fn save(mut record: InstallationRecord) -> Result<InstallationRecord> {
-    let _setup_lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+    let _setup_lock =
+        nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
 
     record.runtime = None;
     if let Some(current) = load_runtime()? {

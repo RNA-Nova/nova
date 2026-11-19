@@ -44,13 +44,16 @@
   不镜像（otel crate README 在案）；锚点 `otel/tests/suite/snapshot.rs`
   后两例（`manager_snapshot_metrics_*`/`manager_turn_cost_*`）随该面未移植
   （snapshot.rs 文件头有裁点注释）。
-- **远程环境注册面**：Noise 协议、`environment/accepted.rs`（host-accepted
-  WebSocket）、`environment/connect_options.rs`（RemoteEnvironmentOptions
-  http_headers）、cloud registry 注册/forward 子命令、
-  `client/connection_failure.rs`（双变体塌缩为 String，已核实 nova WS 路径
-  不丢重试覆盖）、`client_refresh_tests.rs`/`client_transport_tests.rs`——
-  codex 云生态的 executor 注册/托管面不镜像；nova 的远程执行归 Python 侧
-  SSH/executor 体系（`executor_switch` 扩展）。
+- **远程环境注册面主链已恢复**：Noise 两端、Registry 注册/连接/验证、Rendezvous
+  接入、forwarder、Direct 端点与远程 runner 已移植；自有 `relay-protocol` crate
+  承载公开 DTO/Protobuf，`relay-server` crate 提供 Nova 自有 SQLite Registry 与
+  密文 WS Rendezvous。鉴权替换为 Nova enrollment bearer token，Noise prologue
+  与 Protobuf package 使用 Nova 品牌域，Python 经 `nova-exec-relay-client --stdio`
+  复用 ExecutorClient。真实 Rust 端到端已覆盖 enroll→远程节点→Noise harness→进程输出。
+  host-accepted WebSocket 已恢复初始接管、替换 socket 与原会话恢复，7 项真实套件全绿；
+  `aws-auth` crate 与 CLI SigV4 provider/旗标已恢复，签名和网络策略测试通过。
+  Nova 自有公共服务只提供 Noise Registry/Rendezvous；Direct 使用 codex 对位的外部
+  Registry/acceptor，不再为自有服务发明另一套 Direct 数据面。旧“整面不镜像”裁决作废。
 - **Windows 沙箱 CI 环境弱化三处**（均为 GHA 托管 runner 与 codex 自管
   runner 池的环境差，带 TODO，真机/自管环境可恢复）：
   `unified_exec/tests.rs` 三个 legacy 后端用例 CI 跳门（:675/:753/:1046——
@@ -60,33 +63,31 @@
   5s→30s（`unified_exec/tests.rs:489`——托管 runner Defender 扫描冷启动）。
   与 ci.yml 既有两个排除项（root_metadata 嵌套盲区、
   legacy_capture_cancellation pwsh7 盲区）同类。
-- **Windows 执行别名同名**（挂账待核）：`runtime_ownership.rs` 的
-  `APP_CORE_RUNNER_ALIAS = "nova-command-runner.exe"` 与 helper exe 同名
+- **Windows 执行别名同名已闭环**：`runtime_ownership.rs` 的
+  `APP_CORE_RUNNER_ALIAS = "nova-core-command-runner.exe"`，与 helper exe 区分
   （锚点刻意不同名：`codex-core-command-runner.exe` ≠ `codex-command-runner.exe`）。
-  Rust 侧全树走 const 自洽；执行别名是 MSIX 清单的外部契约，待 nova MSIX
-  打包工程核对 `<uap3:ExecutionAlias>` 声明。
-- **`EXIT_ON_STDIN_CLOSE` 无 spawn 方注入**：codex 由宿主 spawn 托管
-  executor 时注入该 env 实现父死子随；nova 侧目前仅有手工 CLI flag/env
-  （`NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE`），spawn 方注入归上层 SDK/包
-  体系（出口挂账）。
+  MSIX 清单 `<uap3:ExecutionAlias>` 仍待打包工程核对（真机验证待工具链）。
+- **`EXIT_ON_STDIN_CLOSE` 注入已闭环**：本地 WS spawn 显式注入
+  `NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE=1`，并把子进程 stdin 保持为父进程私管，
+  父进程死亡/管道关闭时 executor 收到 EOF 退出（对位 ParentLifetime::StdinPipe）。
+  spawn 回归断言同时覆盖环境变量与 `stdin=PIPE`。
 - **句柄表 per-id 在飞预约层**（`file_handle.rs` 模块头注释在案）：并发同名
   ID 的打开在碰文件之前即拒（先到者胜）——codex 上游仅靠落表复查（后到者
   胜，败者的开门副作用已发生）。nova 有意多加的一层加固，消除败者截断
   副作用；行为差异方向是收紧而非放宽。
 - **推送式 fs/readStream 断线/放弃语义**（nova 自有通道，锚点为拉循环）：
   推送路由按 handle_id 键控；客户端放弃即 best-effort fs/close（对位锚点
-  拉模式的 drop 收摊）；close→同名重开的代际防护（条目代际校验）为 nova
-  自有加固（锚点拉模式无长驻服务端任务，天然无此竞态）；残余窗口
-  = 代际判定与阻塞 notify 间隔，彻底闭合需协议级流令牌（明认取舍）。
+  拉模式的 drop 收摊）；close→同名重开的代际防护已升级为**每条目操作锁**——
+  读通知/写落盘与 close/reopen 串行化，原“代际判定与阻塞 notify 间隔”残余
+  窗口已闭合（不再需要协议级流令牌）。写侧单块在飞窗口同样由该锁闭合。
 - **prewarm_shell_snapshot 裁点**：锚点 `process.rs` trait 默认方法 +
   `local_process.rs` 实现 + `CapturePurpose::Prewarm` + 3 个用例——锚点
   唯一生产调用方在 codex core（unified_exec，未镜像面）；nova 无进程内
   Rust 调用方，py 侧若需要应新增线上方法（届时恢复）。
-- **Windows managed-network 测试跳门两簇**：`process_sandbox_tests.rs` 的
-  `managed_network_honors_windows_sandbox_level` 双用例与 network-proxy
-  `tests/windows_stable_ingress.rs` 主路由测试均 `#[ignore]`——windows
-  共享 ingress 未移植（`network_proxy_restricting_sid` 恒 None 占位，
-  proxy.rs 有裁点注释），恢复 ingress 批次需一并恢复。
+- **Windows managed-network 共享 ingress 已闭环**：`windows_proxy_ingress` /
+  `windows_tcp_attribution` 已移植并接入共享路由与 restricting SID 门控；
+  `network_proxy_restricting_sid` 由活动路由颁发。相关 `#[ignore]` 主路由测试
+  仍待 Windows 真机/工具链恢复（本机缺 MinGW 头文件）。
 - **arg0 启动面三处未镜像**：16MiB 线程栈预算（`THREAD_STACK_SIZE_BYTES`，
   nova `#[tokio::main]` 默认栈）、`load_dotenv`（`~/.codex/.env` 过滤
   `CODEX_` 前缀——codex 产品启动序）、`apply_patch` argv0/argv1 分派臂与
@@ -94,31 +95,31 @@
 - **linux-sandbox 别名目录跨进程锁收窄**：codex 的 `nova-linux-sandbox`
   软链别名目录带跨进程锁文件；nova 收窄为进程私有 TempDir（无跨进程
   共享面，CLI main.rs 就地注释在案）。
-- **MSIX 外部契约族**（与执行别名挂账并案）：`package_identity.rs` 的
-  debug 联调白名单保留 `OpenAI.Codex*` 包族（就地注释在案）——发布打包
-  时随执行别名一并核对。
+- **MSIX 外部契约族已闭环**：`package_identity.rs` 的 debug 联调白名单已改为
+  `Nova.ExecServer*` 包族，不再保留 `OpenAI.Codex*`；执行别名已改为
+  `nova-core-command-runner.exe`（与 helper exe 区分）。
+  发布打包时仍需核对 MSIX 清单与包家族一致性（真机验证待工具链）。
 - **遥测面小裁点组**：`EnvironmentInfo::local_temporary_directories()`
   公开方法（消费方在 codex core environment_selection，逻辑已内联进
   `local()`）；`EnvironmentNetworkPolicy.requires_proxy` 字段（消费方在
-  codex-core orchestrator）；otel `network_policy.rs` OTLP 导出策略门控面；
-  otel `exporter`/`trace_exporter` 字段本批未接（`load_otel_settings`
-  有 warn—— traces/logs 接线归后续批次）。
+  codex-core orchestrator）；otel `network_policy.rs` OTLP 导出策略门控已移植
+  （`PolicyExporter` + 可吊销 `RuntimeHttpClient`）；`exporter`/`trace_exporter`
+  配置字段已接通，OTLP HTTP 已改回共享 route-aware client（原直接 reqwest 已替换）。
 - **遥测命名家族约定**：shell snapshot 指标名按 `exec_server_shell_snapshot_*`
   家族（与同文件 `exec_server_*`（计数加 `_total`）惯例一致，R1 更名期
   决策），不按 `codex.*`→`nova.*` 逐字映射为 `nova.shell_snapshot.*`；
   span/事件名统一 `nova.exec_server.*`。
 - **行为等价归一挂账（不逐条立项）**：`dirs_next`→`dirs`（env.rs 同一
-  Known Folder 语义）；`RetainedOutputChunk(Vec<u8>)` 对锚点
-  `ProcessOutputChunk(ByteChunk)`（协议面语义等价，存储/读取各多一次
-  深拷贝——性能保真差，R1 期历史决策）；`LocalProcess`/`RemoteProcess`
-  可见性 `pub(crate)`→`pub`（tests 消费方需要，锚点 crate 私有）；
-  CLI EnvFilter 默认 `warn`（锚点兜底 `error` + otel SDK 静音——otel
+  Known Folder 语义）；`RetainedOutputChunk` 已改为直接持有协议 `ByteChunk`
+  （Arc<Vec<u8>>），保留与读取均为 Arc 克隆，消除此前两次深拷贝；
+  `LocalProcess`/`RemoteProcess` 可见性 `pub(crate)`→`pub`（tests 消费方需要，
+  锚点 crate 私有）；CLI EnvFilter 默认 `warn`（锚点兜底 `error` + otel SDK 静音——otel
   layer 自带 allowlist，SDK 噪声不回流出口）；`--strict-config` 面
   （CLI crate 为 nova 自有，codex-config 严格校验面不随）。
-- **seatbelt symlink opt-out 配置源未接入**：`allow_symlinked_nova_home`
-  开关于 executor 存在（`with_allowed_symlinked_nova_home` setter），
-  但无配置读取方、恒 None——seatbelt.rs:449 的文案与 CODEX_UPSTREAM.md
-  本条互为指引；接入配置源（settings/config.toml 归上层）时恢复。
+- **seatbelt symlink opt-out 配置源已接入**：`~/.nova/exec-server/config.toml`
+  的 `allow_symlinked_nova_home = true` 会经 CLI 注入 runtime paths；环境别名
+  仅在规范化目标等于实际 executor home 时保留（对位 codex 同名语义）。
+  原“setter 恒 None”状态已解除。
 - **`sandbox_home` 线上/落盘词汇更名**（对位 codex `codex_home`）：
   provisioning 管道消息（`deny_unknown_fields`）与 InstallationRecord
   注册表 JSON 的字段名同步更名——serde 字段级契约变更，全链自洽
@@ -133,11 +134,10 @@
   替代固定 `sleep(200ms)`（Ctrl-C 后吞命令防护，增强方向）；home-dir
   默认 `~/.nova/exec-server`（超出命名映射的 `/exec-server` 子层，全树
   README/PROTOCOL/CLI/测试自洽）。
-- **linux-sandbox 别名目录位置收窄**：codex 落点 `<home>/tmp/arg0`
-  （0700 权限 + release 下拒绝系统临时目录守卫）；nova 落点为进程私有
-  系统临时目录（权限随 umask，Linux 常 0755）+ 守卫未随——长命服务下
-  别名暴露于 systemd-tmpfiles 按龄清理（/tmp 默认 10d），长跑后沙箱
-  spawn 会突然失败。恢复守卫与落点归 CLI 加固批（另行立项）。
+- **linux-sandbox 别名目录位置与守卫已闭环**：别名落点恢复为 `<executor home>/tmp/arg0`
+  （0700 权限 + release 下拒绝系统临时目录守卫 + 每进程目录锁 + 陈旧目录清理），
+  不再使用会被按龄清理的系统临时目录；janitor 用例覆盖“只删未持锁目录”。
+  Linux 真机/交叉编译验证仍待工具链。
 - **CLI 测试面两件不随迁**：`local_exec_server_ignores_invalid_config_
   without_strict_config`（我方 eprintln 会回显 toml 错误原文片段——与
   锚点"stderr 不含原文"的反向断言冲突，响亮策略系刻意，main.rs:205
@@ -145,13 +145,9 @@
   我方 `run_until_shutdown` 为 Immediate 单形态、未拆
   `run_until_shutdown_with_signals` 接缝，无落点；正常路径已被
   SIGTERM/stdin 两 e2e 覆盖）。
-- **trace 传播测试对 `#[ignore]`**（`rpc.rs` `rpc_client_propagates_current_
-  trace_context` + `client.rs` `process_start_propagates_caller_trace_context_
-  across_background_task`）：锚点正常运行；nova 侧因全局 subscriber 竞态
-  在 cargo test 进程内并行下 4/4 失败（2026-10-14 复评在案：竞态与遥测
-  面无关，是 callsite 兴趣缓存被并发用例写回禁用）——nextest 进程隔离
-  可过，但 ignore 使其哪儿都不跑（覆盖缺口自承在案）。修复路径：
-  先修 callsite 竞态或立 nextest 专属组。
+- **trace 传播测试竞态已闭环**：`rpc.rs` / `client.rs` 的传播用例不再 ignore，
+  通过测试内全局遥测锁把 subscriber/callsite 兴趣缓存的切换串行化，后台任务
+  不再被并发测试缓存为禁用；相关用例在 cargo test 下已恢复并通过。
 - **shell-command 族裁**：`command_safety`/`parse_command`/`powershell`
   （含 `powershell_tree_sitter_tests.rs`）——审批/命令安全分析概念不属于
   通用执行后端（src/lib.rs:3-4 就地注释）。
@@ -163,9 +159,8 @@
   `is_non_public_ip` 再导出未随（消费方在未镜像的 codex core/rmcp-client）；
   `mitm_ca`/`NetworkMitmCaConfig` 线上字段未保留（MITM 整面裁点的一部分，
   `from_effective_config` 的无条件拒绝臂与对应用例连带缺席）；
-  `write_attribution_frame` 双实现（linux-sandbox `proxy_routing.rs` 本地
-  复制 network-proxy `attribution.rs` 的 pub 函数——魔数/上限两端同步
-  靠注释约定，无字节级对锁测试；单侧改动须双改）。
+  `write_attribution_frame` 已单点归 network-proxy，linux-sandbox 仅 import 复用，
+  不再双实现（读写两端共用同一魔数与长度校验）。
 - **http-client 计时器放宽族**（`outbound_proxy_redirect_coverage_tests.rs`
   2s→10s ×6、`route_aware_client_pool_tests.rs` 2s→10s ×2、
   `route_aware_tls_fallback_tests.rs` 5s→15s/120s 等）：3cc7170e/74970e96

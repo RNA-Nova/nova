@@ -1,0 +1,54 @@
+[package]
+name = "nova-exec-server-relay-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "nova_exec_server_relay_server"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "nova-exec-relay-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "nova-dev-ssh-node"
+path = "src/bin/nova-dev-ssh-node.rs"
+
+[[bin]]
+name = "nova-dev-ssh-client"
+path = "src/bin/nova-dev-ssh-client.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["json", "query"] }
+base64 = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+constant_time_eq = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+prost = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+nova-exec-server-relay-protocol = { workspace = true }
+nova-exec-server-http-client = { workspace = true }
+nova-exec-server-websocket-client = { workspace = true }
+nova-exec-server-utils-home-dir = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+nova-exec-server = { workspace = true }
+nova-exec-server-utils-path-uri = { workspace = true }

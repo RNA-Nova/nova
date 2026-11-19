@@ -49,6 +49,36 @@ from .execution_gate import ToolExecutionGate
 logger = logging.getLogger(__name__)
 
 
+class _ToolBatchEvents:
+    """工具批事件闸；作用域关闭后，迟到 task 不得再触碰外部消费者。"""
+
+    def __init__(self, sink: AgentEventSink) -> None:
+        self._sink = sink
+        self._open = True
+
+    async def emit(self, event) -> None:
+        if self._open:
+            await self._sink(event)
+
+    def close(self) -> None:
+        self._open = False
+
+
+async def _finish_tool_batch(tracker: TaskTracker, events: _ToolBatchEvents) -> None:
+    """先关事件闸再取消排水；取消抵抗的任务不得造成无界等待。"""
+
+    events.close()
+    tracker.close()
+    tracker.cancel_all()
+    try:
+        async with asyncio.timeout(0.1):
+            await tracker.wait()
+    except TimeoutError:
+        logger.warning(
+            "Tool batch cleanup exceeded 100ms; proceeding with terminal events"
+        )
+
+
 async def execute_tool_calls(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
@@ -116,52 +146,79 @@ async def _execute_tool_calls_sequential(
     signal: Optional[AbortSignal],
     emit: AgentEventSink,
 ) -> ExecutedToolCallBatch:
-    """Execute tool calls one by one."""
+    """逐个执行；每次调用都有独立取消边界和统一事件闸。"""
     finalized_calls: List[AgentToolCallOutcome] = []
     messages: List[ToolResultMessage] = []
+    events = _ToolBatchEvents(emit)
+    emit = events.emit
+    tracker = TaskTracker(name="agent-tool-sequential")
+    current_tool_call: Optional[AgentToolCall] = None
 
-    for tool_call in tool_calls:
-        await emit(
-            ToolExecutionStartEvent(
-                tool_call_id=tool_call.id,
-                tool_name=tool_call.name,
-                args=tool_call.arguments,
+    try:
+        for tool_call in tool_calls:
+            current_tool_call = tool_call
+            await emit(
+                ToolExecutionStartEvent(
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    args=tool_call.arguments,
+                )
             )
+
+            preparation = await _prepare_tool_call(
+                current_context, assistant_message, tool_call, config, signal
+            )
+            if preparation.kind == "immediate":
+                finalized = AgentToolCallOutcome(
+                    tool_call=tool_call,
+                    result=preparation.result,
+                    is_error=preparation.is_error,
+                )
+                await _emit_tool_execution_end(finalized, emit)
+            else:
+                # 闭包捕获时保留 prepared 判别结果，不让下轮 preparation 变宽类型。
+                prepared = preparation
+
+                async def execute() -> AgentToolCallOutcome:
+                    executed = await _execute_prepared_tool_call(prepared, signal, emit)
+                    finalized = await _finalize_executed_tool_call(
+                        current_context,
+                        assistant_message,
+                        prepared,
+                        executed,
+                        config,
+                        signal,
+                    )
+                    await _emit_tool_execution_end(finalized, emit)
+                    return finalized
+
+                task = tracker.spawn(execute())
+                assert task is not None  # 台账仅在函数收尾时关闭
+                finalized = await asyncio.shield(task)
+
+            tool_result_message = _create_tool_result_message(finalized)
+            await _emit_tool_result_message(tool_result_message, emit)
+            finalized_calls.append(finalized)
+            messages.append(tool_result_message)
+
+            if is_aborted(signal):
+                break
+
+        return ExecutedToolCallBatch(
+            messages=messages,
+            terminate=_should_terminate_tool_batch(finalized_calls),
         )
-
-        preparation = await _prepare_tool_call(
-            current_context, assistant_message, tool_call, config, signal
-        )
-        if preparation.kind == "immediate":
-            finalized = AgentToolCallOutcome(
-                tool_call=tool_call,
-                result=preparation.result,
-                is_error=preparation.is_error,
+    except (AbortedError, asyncio.CancelledError):
+        # 工具已被取消时也必须有终态和 toolResult，不能只结束 run。
+        if current_tool_call is not None:
+            finalized = _aborted_tool_outcome(current_tool_call)
+            await _emit_tool_execution_end(finalized, emit)
+            await _emit_tool_result_message(
+                _create_tool_result_message(finalized), emit
             )
-        else:
-            executed = await _execute_prepared_tool_call(preparation, signal, emit)
-            finalized = await _finalize_executed_tool_call(
-                current_context,
-                assistant_message,
-                preparation,
-                executed,
-                config,
-                signal,
-            )
-
-        await _emit_tool_execution_end(finalized, emit)
-        tool_result_message = _create_tool_result_message(finalized)
-        await _emit_tool_result_message(tool_result_message, emit)
-        finalized_calls.append(finalized)
-        messages.append(tool_result_message)
-
-        if is_aborted(signal):
-            break
-
-    return ExecutedToolCallBatch(
-        messages=messages,
-        terminate=_should_terminate_tool_batch(finalized_calls),
-    )
+        raise
+    finally:
+        await _finish_tool_batch(tracker, events)
 
 
 async def _execute_tool_calls_parallel(
@@ -182,104 +239,114 @@ async def _execute_tool_calls_parallel(
     finalized_entries: List[
         Union[AgentToolCallOutcome, Callable[[], Awaitable[AgentToolCallOutcome]]]
     ] = []
-
-    for tool_call in tool_calls:
-        await emit(
-            ToolExecutionStartEvent(
-                tool_call_id=tool_call.id,
-                tool_name=tool_call.name,
-                args=tool_call.arguments,
-            )
-        )
-
-        preparation = await _prepare_tool_call(
-            current_context, assistant_message, tool_call, config, signal
-        )
-        if preparation.kind == "immediate":
-            finalized = AgentToolCallOutcome(
-                tool_call=tool_call,
-                result=preparation.result,
-                is_error=preparation.is_error,
-            )
-            await _emit_tool_execution_end(finalized, emit)
-            finalized_entries.append(finalized)
-            if is_aborted(signal):
-                break
-            continue
-
-        def _make_executor(
-            prep: PreparedToolCallModel,
-        ) -> Callable[[], Awaitable[AgentToolCallOutcome]]:
-            # sequential 声明的工具取写门（独占），其余读门（重叠）
-            write = prep.tool.execution_mode == "sequential"
-
-            async def executor() -> AgentToolCallOutcome:
-                admitted = await _acquire_gate_or_aborted(gate, write, signal)
-                if not admitted:
-                    # 等门期间被 abort：不起跑，直接产出 aborted 结果
-                    finalized = AgentToolCallOutcome(
-                        tool_call=prep.tool_call,
-                        result=_create_error_tool_result("Operation aborted"),
-                        is_error=True,
-                    )
-                    await _emit_tool_execution_end(finalized, emit)
-                    return finalized
-                try:
-                    executed = await _execute_prepared_tool_call(prep, signal, emit)
-                    finalized = await _finalize_executed_tool_call(
-                        current_context,
-                        assistant_message,
-                        prep,
-                        executed,
-                        config,
-                        signal,
-                    )
-                finally:
-                    await gate.release(write)
-                # after 已在门内产生终态；end/result 通知不再占用执行门，
-                # 避免慢监听器饿死后续 sequential 工具。
-                await _emit_tool_execution_end(finalized, emit)
-                return finalized
-
-            return executor
-
-        finalized_entries.append(_make_executor(preparation))
-        if is_aborted(signal):
-            break
-
-    # 同一工具批一本账：任何异常都先落闸、取消 sibling、排水后再传播。
+    entry_tool_calls: List[AgentToolCall] = []
+    events = _ToolBatchEvents(emit)
+    emit = events.emit
     tracker = TaskTracker(name="agent-tool-batch")
     tasks = []
-    for entry in finalized_entries:
-        task = tracker.spawn(_async_resolve(entry))
-        if task is not None:
-            tasks.append(task)
+
     try:
+        for tool_call in tool_calls:
+            await emit(
+                ToolExecutionStartEvent(
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    args=tool_call.arguments,
+                )
+            )
+
+            preparation = await _prepare_tool_call(
+                current_context, assistant_message, tool_call, config, signal
+            )
+            if preparation.kind == "immediate":
+                finalized = AgentToolCallOutcome(
+                    tool_call=tool_call,
+                    result=preparation.result,
+                    is_error=preparation.is_error,
+                )
+                await _emit_tool_execution_end(finalized, emit)
+                finalized_entries.append(finalized)
+                entry_tool_calls.append(tool_call)
+                if is_aborted(signal):
+                    break
+                continue
+
+            def _make_executor(
+                prep: PreparedToolCallModel,
+            ) -> Callable[[], Awaitable[AgentToolCallOutcome]]:
+                # sequential 声明的工具取写门（独占），其余读门（重叠）
+                write = prep.tool.execution_mode == "sequential"
+
+                async def executor() -> AgentToolCallOutcome:
+                    admitted = await _acquire_gate_or_aborted(gate, write, signal)
+                    if not admitted:
+                        # 等门期间被 abort：不起跑，直接产出 aborted 结果
+                        finalized = _aborted_tool_outcome(prep.tool_call)
+                        await _emit_tool_execution_end(finalized, emit)
+                        return finalized
+                    try:
+                        executed = await _execute_prepared_tool_call(prep, signal, emit)
+                        finalized = await _finalize_executed_tool_call(
+                            current_context,
+                            assistant_message,
+                            prep,
+                            executed,
+                            config,
+                            signal,
+                        )
+                    finally:
+                        await gate.release(write)
+                    # after 已在门内产生终态；end/result 通知不再占用执行门，
+                    # 避免慢监听器饿死后续 sequential 工具。
+                    await _emit_tool_execution_end(finalized, emit)
+                    return finalized
+
+                return executor
+
+            finalized_entries.append(_make_executor(preparation))
+            entry_tool_calls.append(tool_call)
+            if is_aborted(signal):
+                break
+
+        # 同一工具批一本账：任何异常都先落闸、取消 sibling、排水后再传播。
+        tasks = []
+        for entry in finalized_entries:
+            task = tracker.spawn(_async_resolve(entry))
+            if task is not None:
+                tasks.append(task)
         ordered_finalized = await asyncio.gather(*tasks)
-    except BaseException:
-        tracker.close()
-        tracker.cancel_all()
-        try:
-            async with asyncio.timeout(0.1):
-                await tracker.wait()
-        except TimeoutError:
-            logger.warning(
-                "Tool batch cleanup exceeded 100ms; proceeding with terminal events"
+
+        messages: List[ToolResultMessage] = []
+        for finalized in ordered_finalized:
+            tool_result_message = _create_tool_result_message(finalized)
+            await _emit_tool_result_message(tool_result_message, emit)
+            messages.append(tool_result_message)
+
+        return ExecutedToolCallBatch(
+            messages=messages,
+            terminate=_should_terminate_tool_batch(ordered_finalized),
+        )
+    except (AbortedError, asyncio.CancelledError):
+        # 取消与完成竞速时，已完成的任务保留结果，其余补 aborted 终态。
+        for entry, entry_tool_call, task in zip(
+            finalized_entries, entry_tool_calls, tasks
+        ):
+            if isinstance(entry, AgentToolCallOutcome):
+                continue
+            try:
+                if task.done():
+                    finalized = task.result()
+                else:
+                    finalized = _aborted_tool_outcome(entry_tool_call)
+            except (AbortedError, asyncio.CancelledError):
+                finalized = _aborted_tool_outcome(entry_tool_call)
+            await _emit_tool_execution_end(finalized, emit)
+            await _emit_tool_result_message(
+                _create_tool_result_message(finalized), emit
             )
         raise
-    tracker.close()
-    await tracker.wait()
-
-    messages: List[ToolResultMessage] = []
-    for finalized in ordered_finalized:
-        tool_result_message = _create_tool_result_message(finalized)
-        await _emit_tool_result_message(tool_result_message, emit)
-        messages.append(tool_result_message)
-
-    return ExecutedToolCallBatch(
-        messages=messages,
-        terminate=_should_terminate_tool_batch(ordered_finalized),
-    )
+    finally:
+        await _finish_tool_batch(tracker, events)
 
 
 async def _acquire_gate_or_aborted(
@@ -498,7 +565,14 @@ async def _execute_prepared_tool_call(
         if pending:
             for task in pending:
                 task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
+            join = asyncio.gather(*pending, return_exceptions=True)
+            try:
+                async with asyncio.timeout(0.1):
+                    await asyncio.shield(join)
+            except TimeoutError:
+                logger.warning(
+                    "Tool update cleanup exceeded 100ms; detaching from updates"
+                )
 
 
 async def _finalize_executed_tool_call(
@@ -584,6 +658,15 @@ async def _finalize_executed_tool_call(
     )
 
 
+def _aborted_tool_outcome(tool_call: AgentToolCall) -> AgentToolCallOutcome:
+    """构造用户取消的工具终态；duration_ms 无法可靠归因时保持缺席。"""
+    return AgentToolCallOutcome(
+        tool_call=tool_call,
+        result=_create_error_tool_result("Operation aborted"),
+        is_error=True,
+    )
+
+
 def _should_terminate_tool_batch(
     finalized_calls: List[AgentToolCallOutcome],
 ) -> bool:
@@ -646,20 +729,6 @@ async def run_tool_call(
     未知工具、参数错误、拦截与执行异常都以 ``is_error=True`` 结果返回。
     供工具内部的嵌套调用使用，使权限等钩子对子调用同样生效。
     """
-    preparation = await _prepare_tool_call(
-        options.context,
-        options.assistant_message,
-        tool_call,
-        options,
-        options.signal,
-        options.tools,
-    )
-    if preparation.kind == "immediate":
-        return AgentToolCallOutcome(
-            tool_call=tool_call,
-            result=preparation.result,
-            is_error=preparation.is_error,
-        )
 
     async def emit(event) -> None:
         if (
@@ -668,12 +737,40 @@ async def run_tool_call(
         ):
             await invoke_hook(options.on_update, event.partial_result)
 
-    executed = await _execute_prepared_tool_call(preparation, options.signal, emit)
-    return await _finalize_executed_tool_call(
-        options.context,
-        options.assistant_message,
-        preparation,
-        executed,
-        options,
-        options.signal,
-    )
+    events = _ToolBatchEvents(emit)
+    tracker = TaskTracker(name="agent-tool-call")
+
+    async def execute() -> AgentToolCallOutcome:
+        preparation = await _prepare_tool_call(
+            options.context,
+            options.assistant_message,
+            tool_call,
+            options,
+            options.signal,
+            options.tools,
+        )
+        if preparation.kind == "immediate":
+            return AgentToolCallOutcome(
+                tool_call=tool_call,
+                result=preparation.result,
+                is_error=preparation.is_error,
+            )
+
+        executed = await _execute_prepared_tool_call(
+            preparation, options.signal, events.emit
+        )
+        return await _finalize_executed_tool_call(
+            options.context,
+            options.assistant_message,
+            preparation,
+            executed,
+            options,
+            options.signal,
+        )
+
+    try:
+        task = tracker.spawn(execute())
+        assert task is not None  # 台账仅在函数收尾时关闭
+        return await asyncio.shield(task)
+    finally:
+        await _finish_tool_batch(tracker, events)

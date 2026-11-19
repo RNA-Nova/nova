@@ -18,13 +18,17 @@
 //!   但 `NetworkPolicyRequest.cancellation` 字段与"撤销原因落点"接线在 exec-server 的
 //!   client_recovery 面（锚点由 exec-server 记录原因再丢决策 future），归 exec-server
 //!   批次——本 crate 只先备词汇，字段不镜像（避免 struct 字面量构造点跨 crate 破坏）。
-//! - Windows 专属面（`windows_proxy_ingress` / `windows_tcp_attribution`）未移植；
-//!   `network_proxy_restricting_sid` 保留 cfg(windows) 占位（恒 None）。
+//! - Windows 共享 ingress 已移植（`windows_proxy_ingress` / `windows_tcp_attribution`）；
+//!   `network_proxy_restricting_sid` 由共享路由颁发，路由注销由 active_route 守卫。
 
 mod attribution;
 mod authorization_path;
 mod config;
 mod connect_policy;
+#[cfg(target_os = "windows")]
+mod windows_proxy_ingress;
+#[cfg(target_os = "windows")]
+mod windows_tcp_attribution;
 // 对位 codex 39f4277087：监听器/连接生命周期优雅关闭（drain 语义，取代 JoinHandle::abort）。
 mod connection_lifecycle;
 // 对位 codex 529cd6b860：域名通配匹配器（替代 globset 域名匹配路径）。

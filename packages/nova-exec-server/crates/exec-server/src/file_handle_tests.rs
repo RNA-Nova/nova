@@ -99,7 +99,7 @@ async fn close_releases_capacity_while_the_file_is_still_in_use() -> Result<()> 
             .await?;
     }
     let retained = manager.get("0")?;
-    manager.close("0");
+    manager.close("0").await;
     manager
         .open("next".to_string(), ready(Ok(File::from_std(file))))
         .await?;
@@ -442,7 +442,7 @@ async fn read_stream_oversized_block_is_split_into_wire_sized_reads(
         .flat_map(|(_, bytes, _)| bytes)
         .collect();
     assert_eq!(reassembled, data);
-    manager.close("big-read");
+    manager.close("big-read").await;
     Ok(())
 }
 
@@ -486,14 +486,16 @@ async fn close_if_generation_only_removes_the_matching_generation() -> Result<()
         )
         .await?;
     // 非本代：不动
-    manager.close_if_generation("gen", first_generation + 1);
+    manager
+        .close_if_generation("gen", first_generation + 1)
+        .await;
     assert_eq!(
         manager.handle_generation("gen"),
         Some(first_generation),
         "foreign generation must not remove the entry"
     );
     // 本代：摘除
-    manager.close_if_generation("gen", first_generation);
+    manager.close_if_generation("gen", first_generation).await;
     assert_eq!(manager.handle_generation("gen"), None);
 
     // 同名重开换代际；旧代际的收尾摘除不动新条目
@@ -504,7 +506,7 @@ async fn close_if_generation_only_removes_the_matching_generation() -> Result<()
         )
         .await?;
     assert_ne!(first_generation, second_generation);
-    manager.close_if_generation("gen", first_generation);
+    manager.close_if_generation("gen", first_generation).await;
     assert_eq!(
         manager.handle_generation("gen"),
         Some(second_generation),
@@ -526,7 +528,7 @@ async fn write_stream_task_close_after_reopen_keeps_the_new_entry() -> Result<()
         .await?;
     // 客户端 close 摘旧条目（写任务 channel 对端掉落，旧任务将被唤醒收尾），
     // 随即同名重开普通句柄——无代际防护时旧任务的尾 close 会摘掉这个新条目。
-    manager.close("w-race");
+    manager.close("w-race").await;
     manager
         .open(
             "w-race".to_string(),
@@ -561,8 +563,9 @@ async fn read_stream_superseded_stops_quietly_without_touching_the_new_entry() -
         )
         .await?;
 
-    // 首块发射期间完成 close→同名重开（emit 闭包内驱动，时序确定性）
-    let driver = manager.clone();
+    // 首块发射期间后台完成 close→同名重开（不得在 emit 内自 await close，
+    // 否则与条目操作锁形成自死锁）。
+    let driver = std::sync::Arc::new(manager.clone());
     let mut reopened = false;
     let (total_bytes, error, superseded) = super::stream_file_blocks(
         &manager,
@@ -574,17 +577,21 @@ async fn read_stream_superseded_stops_quietly_without_touching_the_new_entry() -
         async move |_seq, _bytes, _eof| {
             if !reopened {
                 reopened = true;
-                driver.close("r-race");
-                let mut new_file = tempfile::tempfile().expect("new file");
-                new_file.write_all(b"b").expect("write new file");
-                new_file.flush().expect("flush new file");
-                driver
-                    .open(
-                        "r-race".to_string(),
-                        ready(Ok(File::from_std(new_file.try_clone().expect("clone")))),
-                    )
-                    .await
-                    .expect("reopen under the same id");
+                let driver = driver.clone();
+                tokio::spawn(async move {
+                    driver.close("r-race").await;
+                    let mut new_file = tempfile::tempfile().expect("new file");
+                    new_file.write_all(b"b").expect("write new file");
+                    new_file.flush().expect("flush new file");
+                    driver
+                        .open(
+                            "r-race".to_string(),
+                            ready(Ok(File::from_std(new_file.try_clone().expect("clone")))),
+                        )
+                        .await
+                        .expect("reopen under the same id");
+                });
+                tokio::task::yield_now().await;
             }
             true
         },
@@ -620,7 +627,7 @@ async fn read_stream_plain_close_still_finishes_with_unknown_handle_error() -> R
         )
         .await?;
 
-    let driver = manager.clone();
+    let driver = std::sync::Arc::new(manager.clone());
     let mut closed = false;
     let (_total_bytes, error, superseded) = super::stream_file_blocks(
         &manager,
@@ -632,7 +639,8 @@ async fn read_stream_plain_close_still_finishes_with_unknown_handle_error() -> R
         async move |_seq, _bytes, _eof| {
             if !closed {
                 closed = true;
-                driver.close("r-close");
+                let driver = driver.clone();
+                tokio::spawn(async move { driver.close("r-close").await });
             }
             true
         },
@@ -780,5 +788,60 @@ async fn read_stream_non_not_found_read_error_reaches_done() -> Result<()> {
     );
     // 读失败的关句柄语义保留（与本代一致）
     assert_eq!(manager.handle_generation("r-err"), None);
+    Ok(())
+}
+
+/// 条目操作锁闭合 check-then-act：chunk 通知尚未落定时，close 不得摘除并允许
+/// 同名重开；通知释放后 close 才能继续，随后重开成功。
+#[tokio::test]
+async fn close_waits_for_inflight_chunk_notification() -> Result<()> {
+    let manager = FileHandleManager::default();
+    let mut file = tempfile::tempfile()?;
+    file.write_all(b"x")?;
+    let (_id, generation) = manager
+        .open("read-lock".to_string(), ready(Ok(File::from_std(file))))
+        .await?;
+
+    let emit_started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let release = std::sync::Arc::new(tokio::sync::Notify::new());
+    let manager_clone = manager.clone();
+    let emit_started_task = emit_started.clone();
+    let release_task = release.clone();
+    let stream = tokio::spawn(async move {
+        super::stream_file_blocks(
+            &manager_clone,
+            "read-lock",
+            generation,
+            /*offset*/ 0,
+            /*len*/ None,
+            /*block_size*/ 1,
+            async move |_seq, _bytes, _eof| {
+                emit_started_task.notify_one();
+                release_task.notified().await;
+                true
+            },
+        )
+        .await
+    });
+
+    emit_started.notified().await;
+    let close_manager = manager.clone();
+    let close = tokio::spawn(async move { close_manager.close("read-lock").await });
+    tokio::task::yield_now().await;
+    assert!(
+        !close.is_finished(),
+        "close must wait for the in-flight chunk notification"
+    );
+
+    release.notify_one();
+    close.await.expect("close should finish after notification");
+    let _ = stream.await.expect("stream should finish");
+    let (_id, new_generation) = manager
+        .open(
+            "read-lock".to_string(),
+            ready(Ok(File::from_std(tempfile::tempfile()?))),
+        )
+        .await?;
+    assert_ne!(generation, new_generation);
     Ok(())
 }

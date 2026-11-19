@@ -3,7 +3,8 @@
 from typing import cast
 
 from nova_ai.auth import ProviderAuth
-from nova_ai.catalog.providers.volcengine import (
+
+from nova_catalog.providers.volcengine import (
     PINNED_MODEL_IDS,
     materialize_volcengine_fields,
 )

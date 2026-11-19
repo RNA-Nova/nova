@@ -308,6 +308,7 @@ impl MetricsClient {
             export_interval,
             runtime_reader,
             default_tags,
+            ref http_client_factory,
         } = config;
 
         validate_tags(&default_tags)?;
@@ -340,18 +341,22 @@ impl MetricsClient {
             MetricsExporter::Otlp(exporter) => {
                 // 对位 codex 28b91c7c31：先按
                 // OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE 环境变量选出
-                // 聚合时序，再传入 exporter 构造。
-                // 裁点：上游该分支同时把 exporter 包进
-                // `crate::network_policy::PolicyExporter`——nova 的 otel 未镜像
-                // network_policy 面，故只移植 temporality 选择逻辑本身，保留
-                // nova 现有 exporter 构造形态。
+                // 聚合时序，再传入 exporter 构造； exporter 经 network_policy
+                // 包装，吊销时拒绝导出。
                 let temporality = otlp_metrics_temporality(
                     &exporter,
                     std::env::var("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
                         .ok()
                         .as_deref(),
                 );
-                let exporter = build_otlp_metric_exporter(exporter, temporality)?;
+                let exporter = crate::network_policy::PolicyExporter {
+                    exporter: build_otlp_metric_exporter(
+                        exporter,
+                        temporality,
+                        &http_client_factory,
+                    )?,
+                    policy: http_client_factory.network_policy().clone(),
+                };
                 build_provider(resource, exporter, export_interval, runtime_reader.clone())
             }
         };
@@ -594,6 +599,7 @@ fn otlp_metrics_temporality(exporter: &OtelExporter, preference: Option<&str>) -
 fn build_otlp_metric_exporter(
     exporter: OtelExporter,
     temporality: Temporality,
+    factory: &nova_exec_server_http_client::HttpClientFactory,
 ) -> Result<opentelemetry_otlp::MetricExporter> {
     match exporter {
         OtelExporter::None => Err(MetricsError::ExporterDisabled),
@@ -647,7 +653,17 @@ fn build_otlp_metric_exporter(
                 .with_protocol(protocol)
                 .with_headers(headers);
 
-            if let Some(tls) = tls.as_ref() {
+            if factory.network_policy().is_managed() {
+                let client = crate::otlp::build_async_http_client(
+                    factory,
+                    tls.as_ref(),
+                    OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
+                )
+                .map_err(|err| MetricsError::InvalidConfig {
+                    message: err.to_string(),
+                })?;
+                exporter_builder = exporter_builder.with_http_client(client);
+            } else if let Some(tls) = tls.as_ref() {
                 let client =
                     crate::otlp::build_http_client(tls, OTEL_EXPORTER_OTLP_METRICS_TIMEOUT)
                         .map_err(|err| MetricsError::InvalidConfig {

@@ -143,9 +143,8 @@ async fn exec_server_environment_config_read_rejects_empty_selectors() -> anyhow
         .send_notification("initialized", serde_json::json!({}))
         .await?;
 
-    let cwd = nova_exec_server_utils_path_uri::PathUri::from_host_native_path(
-        &std::env::temp_dir(),
-    )?;
+    let cwd =
+        nova_exec_server_utils_path_uri::PathUri::from_host_native_path(&std::env::temp_dir())?;
     for (config_paths, expected_message) in [
         (
             serde_json::json!([]),
@@ -169,15 +168,17 @@ async fn exec_server_environment_config_read_rejects_empty_selectors() -> anyhow
                 }),
             )
             .await?;
-        let JSONRPCMessage::Error(nova_exec_server_protocol::JSONRPCError {
-            id, error, ..
-        }) = server.next_event().await?
+        let JSONRPCMessage::Error(nova_exec_server_protocol::JSONRPCError { id, error, .. }) =
+            server.next_event().await?
         else {
             panic!("expected JSON-RPC error response");
         };
         assert_eq!(id, request_id);
         assert_eq!(error.code, -32602, "configPaths={config_paths}");
-        assert_eq!(error.message, expected_message, "configPaths={config_paths}");
+        assert_eq!(
+            error.message, expected_message,
+            "configPaths={config_paths}"
+        );
     }
 
     server.shutdown().await?;

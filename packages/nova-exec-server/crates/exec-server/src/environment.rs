@@ -1,10 +1,9 @@
 //! 具体执行/文件系统环境（对位 codex `environment.rs`）。
 //!
-//! Noise 供给/能力根两件随挂账剔除：供给状态机
-//! （`report_environment_provisioning_status`/`materialize_pending_*`）与
-//! capability roots（`EnvironmentReadyInfo`/`selected_capability_roots`/
-//! `discover_capability_roots`）不进入本文件——远程能力发现归 nova 资源体系
-//! 远程化时按 nova 语义重做。
+//! Noise 远程接入已恢复；能力根发现仍不进入本文件——远程能力发现归
+//! nova 资源体系远程化时按 nova 语义重做。
+
+mod accepted;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,6 +19,9 @@ use tracing::Instrument as _;
 use tracing::instrument::WithSubscriber as _;
 
 use crate::DefaultEnvironmentProvider;
+use crate::EnvironmentConfigReadParams;
+use crate::EnvironmentConfigReadResponse;
+use crate::EnvironmentInfo;
 use crate::EnvironmentProvider;
 use crate::EnvironmentProviderFuture;
 use crate::ExecBackend;
@@ -32,6 +34,7 @@ use crate::LocalFileSystem;
 use crate::LocalProcess;
 use crate::PreparedEnvironmentManager;
 use crate::PreparedEnvironmentSource;
+use crate::RouteAwareHttpClient;
 use crate::client::LazyRemoteExecServerClient;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
@@ -42,10 +45,6 @@ use crate::environment_provider::normalize_exec_server_url;
 use crate::environment_toml::environment_provider_from_config_home;
 use crate::remote_file_system::RemoteFileSystem;
 use crate::remote_process::RemoteProcess;
-use crate::RouteAwareHttpClient;
-use crate::EnvironmentConfigReadParams;
-use crate::EnvironmentConfigReadResponse;
-use crate::EnvironmentInfo;
 
 /// The current connection state for one concrete environment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

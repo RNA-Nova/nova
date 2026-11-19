@@ -868,8 +868,8 @@ include_local = false
         )
         .expect("write config.toml");
 
-        let provider =
-            environment_provider_from_config_home(config_home.path()).expect("environment provider");
+        let provider = environment_provider_from_config_home(config_home.path())
+            .expect("environment provider");
 
         let snapshot = provider.snapshot().await.expect("environments");
         let environment_ids: Vec<_> = snapshot
@@ -887,8 +887,8 @@ include_local = false
     async fn environment_provider_from_config_home_falls_back_when_file_is_missing() {
         let config_home = tempdir().expect("tempdir");
 
-        let provider =
-            environment_provider_from_config_home(config_home.path()).expect("environment provider");
+        let provider = environment_provider_from_config_home(config_home.path())
+            .expect("environment provider");
 
         let snapshot = provider.snapshot().await.expect("environments");
         let environment_ids: Vec<_> = snapshot

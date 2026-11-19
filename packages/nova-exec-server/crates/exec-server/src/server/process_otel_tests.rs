@@ -639,6 +639,9 @@ fn exported_logs(
         runtime_metrics: false,
         span_attributes: BTreeMap::new(),
         tracestate: BTreeMap::new(),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     })
     .expect("OTEL settings")
     .expect("OTEL provider");

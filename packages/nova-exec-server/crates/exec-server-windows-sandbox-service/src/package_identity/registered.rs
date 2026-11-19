@@ -31,11 +31,13 @@ pub(crate) fn authorize_setup_runtime(
 }
 
 fn authorize_runtime_client_process(process: &AuthorizedClientProcess) -> Result<()> {
-    let client_family = unsafe { nova_exec_server_windows_sandbox::process_package_family(process.handle.0) }
-        .context("read runtime registration client package family")?;
-    let service_family =
-        unsafe { nova_exec_server_windows_sandbox::process_package_family(Threading::GetCurrentProcess()) }
-            .context("read runtime registration service package family")?;
+    let client_family =
+        unsafe { nova_exec_server_windows_sandbox::process_package_family(process.handle.0) }
+            .context("read runtime registration client package family")?;
+    let service_family = unsafe {
+        nova_exec_server_windows_sandbox::process_package_family(Threading::GetCurrentProcess())
+    }
+    .context("read runtime registration service package family")?;
     require_runtime_package_family(client_family.as_deref(), service_family.as_deref())?;
     let mut image = [0u16; 32768];
     let mut length = image.len() as u32;
@@ -52,13 +54,11 @@ fn authorize_runtime_client_process(process: &AuthorizedClientProcess) -> Result
     anyhow::ensure!(
         // nova 侧对位：服务调用方为 nova-exec-server（codex 另有
         // codex-code-mode-host.exe，nova 无对应物）
-        ["nova-exec-server.exe"]
-            .iter()
-            .any(|name| {
-                image
-                    .as_os_str()
-                    .eq_ignore_ascii_case(directory.join(name).as_os_str())
-            }),
+        ["nova-exec-server.exe"].iter().any(|name| {
+            image
+                .as_os_str()
+                .eq_ignore_ascii_case(directory.join(name).as_os_str())
+        }),
         "registered Core caller is not from this installed service version"
     );
     Ok(())

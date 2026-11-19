@@ -277,6 +277,33 @@ impl ExecServerHarness {
 }
 
 impl DisconnectableWebSocketProxy {
+    pub(crate) async fn new(websocket_url: &str) -> anyhow::Result<Self> {
+        let upstream = websocket_url
+            .strip_prefix("ws://")
+            .ok_or_else(|| anyhow!("exec-server websocket URL must use ws://"))?
+            .trim_end_matches('/')
+            .to_string();
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let websocket_url = format!("ws://{}", listener.local_addr()?);
+        let (pause_tx, pause_rx) = oneshot::channel();
+        let (blocked_connection_tx, blocked_connection_rx) = oneshot::channel();
+        let (resume_tx, resume_rx) = oneshot::channel();
+        let task = tokio::spawn(run_disconnectable_proxy(
+            listener,
+            upstream,
+            pause_rx,
+            blocked_connection_tx,
+            resume_rx,
+        ));
+        Ok(Self {
+            websocket_url,
+            pause_tx: Some(pause_tx),
+            blocked_connection_rx: Some(blocked_connection_rx),
+            resume_tx: Some(resume_tx),
+            task,
+        })
+    }
+
     pub(crate) fn websocket_url(&self) -> &str {
         &self.websocket_url
     }

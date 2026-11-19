@@ -86,7 +86,9 @@ pub(crate) enum RpcClientEvent {
         request_span: tracing::Span,
     },
     Notification(JSONRPCNotification),
-    Disconnected { reason: Option<String> },
+    Disconnected {
+        reason: Option<String>,
+    },
 }
 
 pub(crate) enum RpcInboundRequestAdmissionError {
@@ -920,7 +922,6 @@ mod tests {
     use tokio::task::JoinSet;
     use tokio::time::timeout;
     use tracing::Instrument;
-    use tracing::instrument::WithSubscriber;
     use tracing_subscriber::filter::filter_fn;
     use tracing_subscriber::prelude::*;
 
@@ -1255,9 +1256,9 @@ mod tests {
     // in-process 并行（cargo test）下与全局 subscriber 竞态，nextest 进程隔离
     // 可过；但 CI 的 nextest 无 --run-ignored 通道，目前哪儿都不跑（覆盖缺口，
     // 恢复需先修测试的 span-id 竞态或为其立 nextest 专属组）
-    #[ignore = "races with global subscriber under in-process parallelism"]
     #[tokio::test(flavor = "current_thread")]
     async fn rpc_client_propagates_current_trace_context() {
+        let _trace_test_guard = crate::TRACING_TEST_LOCK.lock().await;
         let span_exporter = InMemorySpanExporter::default();
         let tracer_provider = SdkTracerProvider::builder()
             .with_simple_exporter(span_exporter)
@@ -1271,6 +1272,8 @@ mod tests {
                 )),
         );
         let dispatch = tracing::Dispatch::new(subscriber);
+        tracing::callsite::rebuild_interest_cache();
+        let _subscriber_guard = tracing::dispatcher::set_default(&dispatch);
         tracing::callsite::rebuild_interest_cache();
         async move {
             let parent_span = tracing::info_span!("outbound-parent");
@@ -1318,12 +1321,12 @@ mod tests {
             assert_ne!(parts[2], expected_parts[2]);
             assert_eq!(trace.tracestate, expected_trace.tracestate);
         }
-        .with_subscriber(dispatch)
         .await
     }
 
     #[tokio::test]
     async fn inbound_request_span_stays_open_until_event_consumption() {
+        let _trace_test_guard = crate::TRACING_TEST_LOCK.lock().await;
         let span_exporter = InMemorySpanExporter::default();
         let tracer_provider = SdkTracerProvider::builder()
             .with_simple_exporter(span_exporter.clone())

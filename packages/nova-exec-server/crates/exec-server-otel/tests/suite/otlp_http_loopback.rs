@@ -404,6 +404,9 @@ fn otlp_http_exporter_sends_logs_to_collector()
         runtime_metrics: false,
         span_attributes: BTreeMap::new(),
         tracestate: BTreeMap::new(),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     })?
     .expect("otel provider");
     let logger_layer = otel.logger_layer().expect("logger layer");
@@ -465,6 +468,9 @@ fn otel_provider_rejects_header_unsafe_configured_tracestate() {
             "example".to_string(),
             BTreeMap::from([("alpha".to_string(), "one\ntwo".to_string())]),
         )]),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     });
 
     let err = result
@@ -535,6 +541,9 @@ fn otlp_http_exporter_sends_traces_to_collector()
                 ("beta".to_string(), "two".to_string()),
             ]),
         )]),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     })?
     .expect("otel provider");
     let tracing_layer = otel.tracing_layer().expect("tracing layer");
@@ -670,6 +679,9 @@ async fn otlp_http_exporter_sends_traces_to_collector_with_bounded_shutdown_in_t
         runtime_metrics: false,
         span_attributes: BTreeMap::new(),
         tracestate: BTreeMap::new(),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     })?
     .expect("otel provider");
     let tracing_layer = otel.tracing_layer().expect("tracing layer");
@@ -762,6 +774,9 @@ fn otlp_http_exporter_times_out_when_collector_stalls_during_bounded_shutdown() 
             runtime_metrics: false,
             span_attributes: BTreeMap::new(),
             tracestate: BTreeMap::new(),
+            http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+                nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+            ),
         })
         .expect("build otel provider")
         .expect("otel provider");
@@ -849,7 +864,7 @@ fn otlp_http_exporter_sends_traces_to_collector_in_current_thread_tokio_runtime(
                 environment: "test".to_string(),
                 service_name: "nova-cli".to_string(),
                 service_version: env!("CARGO_PKG_VERSION").to_string(),
-                    exporter: OtelExporter::None,
+                exporter: OtelExporter::None,
                 trace_exporter: OtelExporter::OtlpHttp {
                     endpoint: format!("http://{addr}/v1/traces"),
                     headers: HashMap::new(),
@@ -860,6 +875,9 @@ fn otlp_http_exporter_sends_traces_to_collector_in_current_thread_tokio_runtime(
                 runtime_metrics: false,
                 span_attributes: BTreeMap::new(),
                 tracestate: BTreeMap::new(),
+                http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+                    nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+                ),
             })
             .map_err(|err| err.to_string())?
             .expect("otel provider");

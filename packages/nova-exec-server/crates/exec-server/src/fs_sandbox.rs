@@ -213,8 +213,9 @@ impl FileSystemSandboxRunner {
                         self.runtime_paths.executor_linux_sandbox_exe.as_deref()
                     },
                     use_legacy_landlock: sandbox_context.use_legacy_landlock,
-                    windows_sandbox_level: windows_sandbox_level
-                        .unwrap_or(nova_exec_server_protocol_core::config_types::WindowsSandboxLevel::Disabled),
+                    windows_sandbox_level: windows_sandbox_level.unwrap_or(
+                        nova_exec_server_protocol_core::config_types::WindowsSandboxLevel::Disabled,
+                    ),
                 },
             })
             .map_err(|err| invalid_request(format!("failed to prepare fs sandbox: {err}")))?;
@@ -979,9 +980,11 @@ mod tests {
     #[test]
     fn sandbox_exec_request_binds_windows_relative_globs_to_policy_cwd() {
         let executor_self_exe = std::env::current_exe().expect("current exe");
-        let runtime_paths =
-            ExecServerRuntimePaths::new(executor_self_exe, /*executor_linux_sandbox_exe*/ None)
-                .expect("runtime paths");
+        let runtime_paths = ExecServerRuntimePaths::new(
+            executor_self_exe,
+            /*executor_linux_sandbox_exe*/ None,
+        )
+        .expect("runtime paths");
         let runner = FileSystemSandboxRunner::new(runtime_paths);
         let selected = tempfile::tempdir().expect("selected directory");
         let selected_cwd = AbsolutePathBuf::from_absolute_path(selected.path()).expect("cwd");
@@ -1050,9 +1053,10 @@ mod tests {
             cwd.as_path(),
         );
 
-        assert!(
-            policy.can_read_local_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
-        );
+        assert!(policy.can_read_local_path_with_cwd(
+            runtime_paths.executor_self_exe.as_path(),
+            cwd.as_path()
+        ));
         assert!(!policy.can_read_local_path_with_cwd(parent.as_path(), cwd.as_path()));
         assert!(!policy.can_read_local_path_with_cwd(sibling.as_path(), cwd.as_path()));
     }
@@ -1084,9 +1088,10 @@ mod tests {
             cwd.as_path(),
         );
 
-        assert!(
-            policy.can_read_local_path_with_cwd(runtime_paths.executor_self_exe.as_path(), cwd.as_path())
-        );
+        assert!(policy.can_read_local_path_with_cwd(
+            runtime_paths.executor_self_exe.as_path(),
+            cwd.as_path()
+        ));
         assert!(policy.can_read_local_path_with_cwd(alias.as_path(), cwd.as_path()));
         assert!(!policy.can_read_local_path_with_cwd(executor_parent.as_path(), cwd.as_path()));
         assert!(!policy.can_read_local_path_with_cwd(alias_parent.as_path(), cwd.as_path()));

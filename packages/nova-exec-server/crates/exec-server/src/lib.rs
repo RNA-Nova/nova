@@ -11,8 +11,10 @@ mod environment;
 mod environment_bootstrap;
 mod environment_config;
 mod environment_provider;
+mod environment_registry;
 mod environment_toml;
 mod file_handle;
+mod forward;
 mod fs_helper;
 mod fs_helper_main;
 mod fs_sandbox;
@@ -21,20 +23,27 @@ mod local_file_system;
 mod local_file_system_read;
 mod local_process;
 mod network_policy_decisions;
+mod noise_channel;
+mod noise_relay;
 mod no_follow;
 mod process;
 mod process_sandbox;
 // 对位 codex 39f4277087：进程生命周期遥测（launch 身份捕获 + 事件发出）
 mod process_telemetry;
 mod regular_file;
+mod registry_auth;
+mod relay;
+mod relay_proto;
+mod relay_writer;
+mod remote;
 mod remote_file_system;
 mod remote_process;
 mod rpc;
 mod rpc_server_requests;
 // 对位 codex 39f4277087 lib.rs `mod rpc_timing;`（响应接收计时 trace_safe 事件）
 mod rpc_timing;
-mod sandbox_selection;
 mod runtime_paths;
+mod sandbox_selection;
 // 对位 codex 3342ee8c07 / d9960e12bb / b5c37c35fd / c2eb1f42a0：沙箱完整性模块
 // （runner 于 c2eb1f42a0 落地，expect dead_code 同步移除）
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -50,10 +59,9 @@ mod shell_snapshot_file;
 #[cfg(unix)]
 mod shell_snapshot_process;
 mod telemetry;
+mod trace_context;
 // 对位 codex origin/main `websocket_pong_watchdog.rs`：pong 看门狗。
-// 上游接线点（noise_relay/harness.rs、relay.rs、relay_writer.rs）均为 nova
-// 未镜像的 relay/remote 面，当前仅移植模块与测试；接入 relay 面后移除此 allow。
-#[allow(dead_code)]
+// 生产接线位于 noise_relay/harness.rs、relay.rs、relay_writer.rs。
 mod websocket_pong_watchdog;
 
 // Shared limits for inbound executor messages across all transports.
@@ -72,11 +80,20 @@ pub use client::ExecServerError;
 pub use client::LazyRemoteExecServerClient;
 pub use client::http_client::HttpResponseBodyStream;
 pub use client::http_client::RouteAwareHttpClient;
+pub use client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 pub use client_api::ExecServerClientConnectOptions;
 pub use client_api::ExecServerTransportParams;
 pub use client_api::HttpClient;
+pub use client_api::NoiseRendezvousConnectArgs;
+pub use client_api::NoiseRendezvousConnectBundle;
+pub use client_api::NoiseRendezvousConnectProvider;
 pub use client_api::RemoteExecServerConnectArgs;
 pub use client_api::StdioExecServerCommand;
+pub use connection::CHANNEL_CAPACITY;
+pub use connection::JsonRpcConnection;
+pub use connection::JsonRpcConnectionEvent;
+pub use connection::JsonRpcTransport;
+pub use connection::WEBSOCKET_KEEPALIVE_INTERVAL;
 pub use environment::Environment;
 pub use environment::EnvironmentConnectionState;
 pub use environment::EnvironmentManager;
@@ -91,10 +108,19 @@ pub use environment_provider::EnvironmentDefault;
 pub use environment_provider::EnvironmentProvider;
 pub use environment_provider::EnvironmentProviderFuture;
 pub use environment_provider::EnvironmentProviderSnapshot;
+pub use environment_registry::EnvironmentRegistryConnectRequest;
+pub use environment_registry::EnvironmentRegistryConnectResponse;
+pub use environment_registry::EnvironmentRegistryHarnessKeyValidationRequest;
+pub use environment_registry::EnvironmentRegistryHarnessKeyValidationResponse;
+pub use environment_registry::EnvironmentRegistryRegistrationRequest;
+pub use environment_registry::EnvironmentRegistryRegistrationResponse;
 pub use fs_helper::NOVA_EXEC_SERVER_FS_HELPER_ARG1;
 pub use fs_helper_main::main as run_fs_helper_main;
 pub use local_file_system::LOCAL_FS;
 pub use local_file_system::LocalFileSystem;
+pub use noise_channel::NoiseChannelError;
+pub use noise_channel::NoiseChannelIdentity;
+pub use nova_exec_server_relay_protocol::NoiseChannelPublicKey;
 pub use local_process::LocalProcess;
 pub use nova_exec_server_file_system::CopyOptions;
 pub use nova_exec_server_file_system::CreateDirectoryOptions;
@@ -197,15 +223,29 @@ pub use protocol::WriteParams;
 pub use protocol::WriteResponse;
 pub use protocol::WriteStatus;
 pub use regular_file::read_sensitive_file_to_string;
+pub use registry_auth::AuthError;
+pub use registry_auth::AuthHeadersFuture;
+pub use registry_auth::AuthProvider;
+pub use registry_auth::AuthProviderFuture;
+pub use registry_auth::RegistryBearerAuth;
+pub use registry_auth::SharedAuthProvider;
+pub use remote::NoiseRendezvousEnvironmentConfig;
+pub use remote::RemoteEnvironmentConfig;
+pub use remote::RemoteEnvironmentTransport;
+pub use remote::run_remote_environment;
+pub use remote::run_remote_environment_forward_until_shutdown;
+pub use remote::run_remote_environment_until_shutdown;
 pub use remote_file_system::RemoteFileSystem;
 pub use remote_process::RemoteProcess;
 pub use runtime_paths::ExecServerRuntimePaths;
 pub use server::ConcurrentRequestLimit;
+pub use server::ConnectionProcessor;
 pub use server::DEFAULT_LISTEN_URL;
 pub use server::ExecServerListenUrlParseError;
 pub use server::RequestDispatchMode;
 pub use server::run_main;
 pub use server::run_main_with_telemetry;
+pub use telemetry::ConnectionTransport;
 pub use telemetry::ExecServerTelemetry;
 
 // 对位 codex c2eb1f42a0：完整性检查入口（纯观测，不影响执行）
@@ -214,3 +254,8 @@ pub use sandbox_integrity::run_integrity_checks;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub async fn run_integrity_checks(_request: &nova_exec_server_sandboxing::SandboxExecRequest) {}
+
+// 测试内全局遥测锁：subscriber/callsite 兴趣缓存是进程级状态，凡会切换
+// subscriber 的测试必须串行，避免后台任务的 span 被并发测试缓存为禁用。
+#[cfg(test)]
+pub(crate) static TRACING_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

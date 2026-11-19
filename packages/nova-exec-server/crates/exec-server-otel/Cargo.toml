@@ -11,12 +11,15 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { workspace = true }
+bytes = { workspace = true }
 nova-exec-server-utils-absolute-path = { path = "../exec-server-utils-absolute-path" }
+nova-exec-server-http-client = { workspace = true }
 nova-exec-server-utils-string = { path = "../exec-server-utils-string" }
 nova-exec-server-protocol-core = { path = "../exec-server-protocol-core" }
 eventsource-stream = { workspace = true }
 gethostname = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs", "metrics", "trace"] }
+opentelemetry-http = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = [
     "grpc-tonic",

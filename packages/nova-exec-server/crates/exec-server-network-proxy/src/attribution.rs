@@ -15,9 +15,8 @@ use tokio::io::AsyncReadExt;
 #[doc(hidden)]
 pub use crate::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
 
-/// 帧魔数：attribution 帧格式标识（nova 自有线上格式——读写两端均为 nova
-/// 自有件且从未发布，魔数取 nova 命名，不再沿用 codex 的 CDX；写入端见
-/// exec-server-linux-sandbox 的 proxy_routing.rs，两端常量必须同步）。
+/// 帧魔数：attribution 帧格式标识（nova 自有线上格式——读写两端统一由
+/// `write_attribution_frame` 单点供给，不再各自维护魔数）。
 /// 与 codex 值的分歧（对位 codex 39f4277087 `attribution.rs`）：锚点为
 /// `\0CDXPXY1`，nova 为 `\0NVXPXY1`——内部信道两端自洽即可，与 codex
 /// 不互通是刻意的。

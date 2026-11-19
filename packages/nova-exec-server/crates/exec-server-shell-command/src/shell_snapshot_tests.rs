@@ -82,7 +82,10 @@ fn snapshot_capture_selects_declarations_and_environment() -> Result<()> {
             )
             .unwrap();
             let output = Command::new(shell)
-                .args(["-c", &format!("readonly NOVA_EXEC_SERVER_THREAD_ID; {script}")])
+                .args([
+                    "-c",
+                    &format!("readonly NOVA_EXEC_SERVER_THREAD_ID; {script}"),
+                ])
                 .env_clear()
                 .env("HOME", dir.path())
                 .env("PATH", "/usr/bin:/bin")

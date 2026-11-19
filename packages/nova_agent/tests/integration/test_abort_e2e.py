@@ -29,7 +29,7 @@ async def test_abort_during_provider_stream_has_aborted_terminal_state(runtime):
             agent.abort()
 
     agent.subscribe(abort_on_update)
-    run = agent.start_prompt("请详细解释量子计算，内容越长越好。")
+    run = agent.prompt("请详细解释量子计算，内容越长越好。")
     await run
 
     assert aborted.is_set()
@@ -49,7 +49,7 @@ async def test_abort_during_tool_execution_finishes_tool_result(runtime):
             tool_started.set()
 
     agent.subscribe(on_event)
-    run = agent.start_prompt("必须调用 slow_tool 工具，调用后保持等待。")
+    run = agent.prompt("必须调用 slow_tool 工具，调用后保持等待。")
     await tool_started.wait()
     agent.abort()
     await run

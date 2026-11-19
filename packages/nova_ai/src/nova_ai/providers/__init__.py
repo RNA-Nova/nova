@@ -6,7 +6,7 @@ Provider 定义包
 - ``<provider>/provider.py``：provider 工厂函数
 - ``<provider>/catalog.py``（可选）：``personalize`` 账户层钩子（动态目录的
   私活——kimi 订阅覆盖 / 火山 ark 筛选；治理归 ``gateway/strategies.py``）
-- 构建知识归 ``nova_ai.catalog/providers/``；models.dev 原料经
+- 构建知识归 ``nova_catalog/providers/``；models.dev 原料经
   ``catalog_materialize`` 回调物化，pi.dev 成品不重复修正
 """
 

@@ -552,8 +552,10 @@ fn host_windows_paths_round_trip_through_file_uris() {
         r"\\?\Volume{00000000-0000-0000-0000-000000000000}\file.txt",
     ] {
         let expected =
-            nova_exec_server_utils_absolute_path::AbsolutePathBuf::from_absolute_path_checked(native)
-                .expect(native);
+            nova_exec_server_utils_absolute_path::AbsolutePathBuf::from_absolute_path_checked(
+                native,
+            )
+            .expect(native);
         let uri = PathUri::from_host_native_path(native).expect(native);
         let restored = PathUri::parse(&uri.to_string()).expect("parse URI");
         assert_eq!(

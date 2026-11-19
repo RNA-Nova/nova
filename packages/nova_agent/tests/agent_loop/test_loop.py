@@ -1246,7 +1246,7 @@ async def test_parallel_tools_run_concurrently(dummy_model):
     agent = Agent(stream_fn=stream_fn, tool_execution="parallel")
     agent.set_model(dummy_model)
     agent.set_tools([BlockingTool()])
-    run = agent.start_prompt("call both")
+    run = agent.prompt("call both")
     await both_started.wait()
     assert set(started) == {"a", "b"}
     assert len(agent.state.pending_tool_calls) == 2
@@ -1287,7 +1287,7 @@ async def test_concurrent_prompt_raises(dummy_model):
 
     agent = Agent(stream_fn=slow_stream)
     agent.set_model(dummy_model)
-    task = agent.start_prompt(UserMessage(role="user", content="hi"))
+    task = agent.prompt(UserMessage(role="user", content="hi"))
     await started.wait()
 
     with pytest.raises(RuntimeError, match="already processing"):

@@ -1,0 +1,13 @@
+{
+  "files": {
+    "anthropic.json": "e383e8c11ac96c00f8d3bef40414b8c1e305107e126b12c358f0c97ca54239c6",
+    "kimi-coding.json": "7edddf092c9db666dcd2b3b67d8745f2c25283dcb2fdef40e714bdf3441c84b4",
+    "moonshotai-cn.json": "1ad562020d10fdce83c6307714c51a652ece9efef06e34e42e9920528049f4b0",
+    "moonshotai.json": "e239fff2b46d182811c0c408ffdd599bcb47b2d2afdcc324a35ca6ee315a64e3",
+    "openrouter.json": "31392a7f21f43cb4018384043f3634c9ef79119cbc95ba32022af6763c547fdc",
+    "volcengine.json": "acfa93e06c6d8bbcf8c58639ca9819844463fcd47a88accdd23823f7596d93c5"
+  },
+  "generatedAt": "2026-11-14T17:31:46+00:00",
+  "schemaVersion": 1,
+  "structureHash": "8e420236782899ab312d431d3d1cf1651b74e5b4a67d5d13cdb66a275eaebe7a"
+}

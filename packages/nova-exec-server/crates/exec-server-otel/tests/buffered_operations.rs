@@ -99,6 +99,9 @@ fn rejected_opt_out_preserves_recording_and_accepted_opt_out_survives_shutdown()
         runtime_metrics: false,
         span_attributes: BTreeMap::from([(String::new(), "invalid".to_string())]),
         tracestate: BTreeMap::new(),
+        http_client_factory: nova_exec_server_http_client::HttpClientFactory::new(
+            nova_exec_server_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
     };
     assert_eq!(
         OtelProvider::try_new(&settings).err().unwrap().to_string(),

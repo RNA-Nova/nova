@@ -18,7 +18,7 @@ import traceback
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
 
-from nova_agent import Agent, QueueMode
+from nova_agent import Agent, AgentRun, QueueMode
 from nova_ai.session_resources import cleanup_session_resources
 from nova_async import AbortController, TaskTracker
 from nova_protocol import (
@@ -161,7 +161,7 @@ class AgentSession(AgentSessionProtocol):
     extension_runner_ref: Optional[Dict[str, Optional[Any]]] = None
     session_start_event: SessionStartEvent = None  # type: ignore[assignment]
     _extension_runner: Optional[ExtensionRunnerProtocol] = None
-    _unsubscribe_agent: Optional[Callable[[], None]] = None
+    _agent_hooks_connected: bool = False
     _event_listeners: List[Callable[[AgentSessionEvent], None]]
     _steering_messages: List[str]
     _follow_up_messages: List[str]
@@ -228,7 +228,7 @@ class AgentSession(AgentSessionProtocol):
 
         self._runtime: Optional[Any] = None
         self._extension_runner: Optional[ExtensionRunnerProtocol] = None
-        self._unsubscribe_agent: Optional[Callable[[], None]] = None
+        self._agent_hooks_connected = False
         self._event_listeners: List[Callable[[AgentSessionEvent], None]] = []
         # 会话级任务台账：listener 派发 / runner.emit / abort shim 等
         # fire-and-forget 的属主（dispose 时落闸 + 级联取消）
@@ -301,7 +301,6 @@ class AgentSession(AgentSessionProtocol):
         self._stats = StatsCollector(self)
         self._slash_handler = SlashInputHandler(self)
 
-        self._subscribe_agent_events()
         self._install_agent_hooks()
         self._bridge_model_diagnostics()
         self._build_runtime()
@@ -310,10 +309,6 @@ class AgentSession(AgentSessionProtocol):
     # -------------------------------------------------------------------------
     # 内部构造
     # -------------------------------------------------------------------------
-
-    def _subscribe_agent_events(self) -> None:
-        """订阅底层 Agent 事件，用于持久化与会话生命周期。"""
-        self._unsubscribe_agent = self.agent.subscribe(self._events.handle)
 
     def _bridge_model_diagnostics(self) -> None:
         """把模型目录刷新的诊断实时缝桥进会话事件（WarningEvent 上主干道）。
@@ -330,6 +325,8 @@ class AgentSession(AgentSessionProtocol):
 
     def _install_agent_hooks(self) -> None:
         """把扩展 runner 的能力挂到 Agent 的工具/续话钩子上。"""
+        self.agent.on_message_end = self._events.on_message_end
+        self._agent_hooks_connected = True
 
         async def before_tool_call(ctx: Any, signal: Optional[Any] = None) -> Any:
             runner = self._extension_runner
@@ -784,11 +781,11 @@ class AgentSession(AgentSessionProtocol):
         # （六个 fs 工具已随后端切换），本地时是本地 cwd（executor 接入定案）
         context.workspace_roots = [remote_cwd] if remote_cwd else [self.cwd]
         # cwd 即执行 cwd（codex environment_context 语义：命令在哪跑写哪）——
-        # SSH 远程后端时用 remote_cwd（远程文件系统与本地无关）
+        # 远程后端存在显式 remote_cwd 时用远程执行 cwd（远程与本地路径不混用）
         if remote_cwd:
             context.cwd = remote_cwd
         # shell 即平台代理（codex environment_context 实证形态——不写独立 OS 字段）；
-        # 远程后端优先用供给探测到的远程登录 shell
+        # 远程后端可由调用方显式提供远程登录 shell
         if remote_shell:
             context.shell = remote_shell
         else:
@@ -1433,19 +1430,17 @@ class AgentSession(AgentSessionProtocol):
         self._sync_system_prompt()
 
     def _disconnect_from_agent(self) -> None:
-        """临时断开与底层 Agent 的事件订阅（用户监听者保留）。"""
-        if self._unsubscribe_agent is not None:
-            try:
-                self._unsubscribe_agent()
-            except Exception:
-                pass
-            self._unsubscribe_agent = None
+        """临时移除执行型消息 hook（压缩等私有循环不进入会话事件）。"""
+        if not self._agent_hooks_connected:
+            return
+        self.agent.on_message_end = None
+        self._agent_hooks_connected = False
 
     def _reconnect_to_agent(self) -> None:
-        """重新连接底层 Agent 事件订阅。"""
-        if self._unsubscribe_agent is not None:
+        """恢复执行型消息 hook。"""
+        if self._agent_hooks_connected:
             return
-        self._subscribe_agent_events()
+        self._install_agent_hooks()
 
     def dispose(self) -> None:
         """释放当前会话占用的资源（含在途派发任务的落闸与级联取消）。"""
@@ -1467,6 +1462,7 @@ class AgentSession(AgentSessionProtocol):
                 pass
 
         self._disconnect_from_agent()
+        self._events.close()
         self._event_listeners = []
         # nova_ai 的会话级资源（Anthropic message threads 台账等）与
         # AgentSession 同寿命；统一在 dispose 终点按 session id 释放。
@@ -1631,24 +1627,39 @@ class AgentSession(AgentSessionProtocol):
     ) -> None:
         """执行一次 Agent prompt，并在之后处理续话/重试/压缩。"""
         try:
-            await self.agent.prompt(messages)
+            await self._drive_agent_run(self.agent.prompt(messages))
             while await self._handle_post_agent_run():
-                await self.agent.continue_()
+                await self._drive_agent_run(self.agent.continue_())
         finally:
             self._user_tools.flush_pending()
             await self._emit_agent_settled()
 
-    async def _emit_agent_settled(self) -> None:
-        """run 终结（含续话 drain）后发射 agent_settled——双发 Bus 2 与扩展面。
+    async def _drive_agent_run(self, run: AgentRun) -> None:
+        """独立驱动系统消费者；其失败会中止 run，扩展观察不会反向阻塞。"""
+        consumer = asyncio.create_task(self._consume_agent_events(run))
+        running_task = run.task
+        assert running_task is not None
+        try:
+            await asyncio.gather(running_task, consumer)
+        except BaseException:
+            self.agent.abort()
+            await self.agent.wait_for_idle()
+            await asyncio.gather(consumer, return_exceptions=True)
+            raise
 
-        对齐 pi ``_emitAgentSettled``：正常结束、abort、异常路径均发射
-        （在 finally 中调用，run 终结即 settled）。
-        """
+    async def _consume_agent_events(self, run: AgentRun) -> None:
+        try:
+            async for event in run.events:
+                await self._events.handle(event)
+        except Exception:
+            self.agent.abort()
+            raise
+
+    async def _emit_agent_settled(self) -> None:
+        """run 终结（含续话 drain）后发射 agent_settled——双发 Bus 2 与扩展面。"""
         event = AgentSettledEvent()
         self._emit(event)
-        runner = self._extension_runner
-        if runner is not None and runner.has_handlers(AGENT_SETTLED):
-            await runner.emit(event)
+        self._events.emit_to_runner(event)
 
     async def _handle_post_agent_run(self) -> bool:
         """检查是否需要续话（重试、压缩或队列消息）。"""

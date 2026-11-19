@@ -38,12 +38,12 @@ use crate::client::http_client::response_body_stream::QueuedHttpBodyDelta;
 use crate::client_api::ExecServerClientConnectOptions;
 use crate::client_api::ExecServerTransportParams;
 use crate::client_api::HttpClient;
-use crate::environment::EnvironmentConnectionState;
-use crate::environment::EnvironmentObservedStatus;
 use crate::client_api::RemoteExecServerConnectArgs;
 use crate::client_api::StdioExecServerConnectArgs;
 use crate::client_transport::ExecServerReconnectStrategy;
 use crate::connection::JsonRpcConnection;
+use crate::environment::EnvironmentConnectionState;
+use crate::environment::EnvironmentObservedStatus;
 use crate::process::ExecProcessEvent;
 use crate::process::ExecProcessEventLog;
 use crate::process::ExecProcessEventReceiver;
@@ -160,6 +160,7 @@ use crate::rpc::RpcClient;
 use crate::rpc_server_requests::MAX_IN_FLIGHT_SERVER_CALLS;
 use nova_exec_server_http_client::HttpClientFactory;
 
+pub(crate) mod accepted;
 pub(crate) mod http_client;
 mod network_policy_audit;
 #[path = "client_recovery.rs"]
@@ -167,6 +168,10 @@ mod recovery;
 #[path = "client_refresh.rs"]
 mod refresh;
 
+pub(crate) use recovery::is_retryable_recovery_error;
+#[cfg(test)]
+pub(crate) use recovery::is_retryable_registry_error;
+pub(crate) use recovery::registry_recovery_retry_delay;
 use refresh::ConnectionAttempt;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -393,7 +398,7 @@ type ConnectionResult = Result<ExecServerClient, Arc<ExecServerError>>;
 
 #[derive(Clone)]
 pub struct LazyRemoteExecServerClient {
-    transport_params: ExecServerTransportParams,
+    transport_params: Option<ExecServerTransportParams>,
     http_client_factory: HttpClientFactory,
     recovery_policy: RecoveryPolicy,
     // Saves the first startup result so callers share it; retryable failures use reconnect.
@@ -411,7 +416,7 @@ impl LazyRemoteExecServerClient {
         http_client_factory: HttpClientFactory,
     ) -> Self {
         Self {
-            transport_params,
+            transport_params: Some(transport_params),
             http_client_factory,
             recovery_policy: RecoveryPolicy::Wait,
             startup: Arc::new(ConnectionAttempt::default()),
@@ -433,7 +438,7 @@ impl LazyRemoteExecServerClient {
         // Stdio starts a process, so keep it lazy until the environment is used.
         if matches!(
             self.transport_params,
-            ExecServerTransportParams::StdioCommand { .. }
+            Some(ExecServerTransportParams::StdioCommand { .. }) | None
         ) {
             return None;
         }
@@ -603,7 +608,10 @@ impl LazyRemoteExecServerClient {
     fn can_reconnect(&self) -> bool {
         matches!(
             self.transport_params,
-            ExecServerTransportParams::WebSocketUrl { .. }
+            Some(
+                ExecServerTransportParams::WebSocketUrl { .. }
+                    | ExecServerTransportParams::NoiseRendezvous { .. }
+            )
         )
     }
 }
@@ -653,16 +661,42 @@ pub enum ExecServerError {
     Closed,
     #[error("{0}")]
     Disconnected(String),
+    #[error("environment unavailable: {0}")]
+    ProvisioningFailed(String),
     #[error("failed to serialize or deserialize exec-server JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("HTTP request failed: {0}")]
     HttpRequest(String),
+    #[error("authentication required: {0}")]
+    AuthenticationRequired(String),
     #[error("exec-server protocol error: {0}")]
     Protocol(String),
+    #[error(
+        "environment `{environment_id}` is already registered with a different provisioning mode"
+    )]
+    ProvisioningModeConflict { environment_id: String },
     #[error("exec-server rejected request ({code}): {message}")]
     Server { code: i64, message: String },
+    #[error("environment registry request failed ({status}{code_suffix}): {message}", code_suffix = .code.as_ref().map(|code| format!(", {code}")).unwrap_or_default())]
+    EnvironmentRegistryHttp {
+        status: http::StatusCode,
+        code: Option<String>,
+        message: String,
+    },
+    #[error("environment registry configuration error: {0}")]
+    EnvironmentRegistryConfig(String),
+    #[error("environment registry authentication error: {0}")]
+    EnvironmentRegistryAuth(String),
+    #[error("environment registry request failed: {0}")]
+    EnvironmentRegistryRequest(#[from] nova_exec_server_http_client::RouteAwareRequestError),
     #[error("exec-server connection attempt failed: {0}")]
     ConnectionAttempt(#[source] Arc<ExecServerError>),
+}
+
+impl From<nova_exec_server_relay_protocol::RelayFrameError> for ExecServerError {
+    fn from(error: nova_exec_server_relay_protocol::RelayFrameError) -> Self {
+        Self::Protocol(error.to_string())
+    }
 }
 
 impl ExecServerClient {
@@ -779,8 +813,7 @@ impl ExecServerClient {
 
     pub async fn exec(&self, params: ExecParams) -> Result<ExecResponse, ExecServerError> {
         // v1.11 终态：process/start 与 fs 方法同一纪律——policyContext 承载策略目录
-        self.call(EXEC_METHOD, &WireExecParams::from(params))
-            .await
+        self.call(EXEC_METHOD, &WireExecParams::from(params)).await
     }
 
     /// 返回缓存的执行端环境元数据；initialize 未捎带时惰性经 environment/info
@@ -921,7 +954,7 @@ impl ExecServerClient {
     ///
     /// 注：上游在此按 `fileWriteStreaming` 能力位本地门控（旧 executor 会把 replace
     /// 打开静默降级为只读句柄）；nova 两侧同仓发布（协议 major 不匹配即拒连），
-    /// 能力门落地在 py 客户端（packages/nova-exec-server-client，对位
+    /// 能力门落地在 py 客户端（packages/nova_exec_server_client，对位
     /// codex e7798c9944），Rust 客户端保持薄转发供集成测试直验服务端行为。
     pub async fn fs_write_block(
         &self,
@@ -1022,8 +1055,11 @@ impl ExecServerClient {
         &self,
         params: FsWriteStreamParams,
     ) -> Result<FsWriteStreamResponse, ExecServerError> {
-        self.call(FS_WRITE_STREAM_METHOD, &WireFsWriteStreamParams::from(params))
-            .await
+        self.call(
+            FS_WRITE_STREAM_METHOD,
+            &WireFsWriteStreamParams::from(params),
+        )
+        .await
     }
 
     /// 推送一个 fs/writeStream 数据块（通知，无响应；seq 须严格连续）。
@@ -1235,7 +1271,7 @@ impl ExecServerClient {
         }
     }
 
-    pub(crate) async fn connect(
+    pub async fn connect(
         connection: JsonRpcConnection,
         options: ExecServerClientConnectOptions,
     ) -> Result<Self, ExecServerError> {
@@ -2111,22 +2147,12 @@ mod tests {
             .expect("json-rpc line should write");
     }
 
-    // 进程内并行的固有污染：本测试的 span callsite 会被并发用例"命中即缓存"
-    // 并行固有限制：span callsite 的兴趣缓存是全局的，并发用例在本测试
-    // rebuild 与建 span 之间会把"禁用"重新写回（进程内无解；Dispatch+
-    // with_subscriber 修法已采用，对位 codex test_support——但它只保证
-    // 事件捕获类断言，本测试断言 outbound span 拿到**新** span id 更严格——
-    // in-process 并行（cargo test）下与全局 subscriber 竞态，nextest 进程隔离
-    // 可过；但 CI 的 nextest 无 --run-ignored 通道，目前哪儿都不跑（覆盖缺口，
-    // 恢复需先修测试的 span-id 竞态或为其立 nextest 专属组）
-    //
-    // T3 遥测面恢复后复评（2026-10-14）：单独跑稳过；`cargo test --lib client::`
-    // 进程内并发 4/4 在 :2233 `assert_ne!(parts[2], expected_parts[2])` 失败——
-    // outbound span 的 callsite 兴趣被并发用例缓存为禁用，traceparent 复用父
-    // span id。竞态与遥测面无关，ignore 保留。
-    #[ignore = "races with global subscriber under in-process parallelism"]
+    // Dispatch 版 set_default，避开单订阅者 fast-path。subscriber 先生效，
+    // 随后重建全局 callsite 兴趣缓存，再创建父子 span；否则并发用例留下的
+    // disabled 缓存会让 outbound span 复用父 span id。
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn process_start_propagates_caller_trace_context_across_background_task() {
+        let _trace_test_guard = crate::TRACING_TEST_LOCK.lock().await;
         let (client_stdin, server_reader) = duplex(1 << 20);
         let (mut server_writer, client_stdout) = duplex(1 << 20);
         let server = tokio::spawn(async move {
@@ -2200,10 +2226,10 @@ mod tests {
                 )),
         );
         let dispatch = tracing::Dispatch::new(subscriber);
-        tracing::callsite::rebuild_interest_cache();
         // Dispatch 版 set_default，避开单订阅者 fast-path（对位 codex 修法）；
         // 订阅者先生效，span 后创建（顺序反了父 span 拿不到 otel 上下文）
         let _subscriber_guard = tracing::dispatcher::set_default(&dispatch);
+        tracing::callsite::rebuild_interest_cache();
         let parent_span = tracing::info_span!("process-start-parent");
         let expected_trace = nova_exec_server_otel::span_w3c_trace_context(&parent_span)
             .expect("parent span should have trace context");
@@ -4174,9 +4200,7 @@ mod tests {
         let (client, server) =
             connect_with_fake_server(move |mut lines, mut server_writer| async move {
                 let request = match read_jsonrpc_line(&mut lines).await {
-                    JSONRPCMessage::Request(request)
-                        if request.method == FS_READ_STREAM_METHOD =>
-                    {
+                    JSONRPCMessage::Request(request) if request.method == FS_READ_STREAM_METHOD => {
                         request
                     }
                     other => panic!("expected fs/readStream request, got {other:?}"),

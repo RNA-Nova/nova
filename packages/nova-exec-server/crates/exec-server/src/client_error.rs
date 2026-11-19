@@ -1,10 +1,7 @@
 //! Classifies typed executor failures without treating error text as a retry signal.
 //!
-//! 对位 codex 39f4277087 `exec-server/src/client_error.rs` 整文件。唯一差异：
-//! environment registry 族错误（`EnvironmentRegistryHttp`/`EnvironmentRegistryRequest`
-//! 等）在 nova 已随 deferred-environment 特性从 `ExecServerError` 裁剪（对位
-//! `client_recovery.rs` 移植 `is_retryable_recovery_error` 时的既有裁剪），故锚点
-//! 中的 `is_retryable_registry_error(error)` 臂在此不存在；其余分类逐行对位。
+//! 对位 codex 39f4277087 `exec-server/src/client_error.rs`；Registry 错误族
+//! 随 Noise Relay 恢复，传输与鉴权失败按各自类型分类。
 
 use std::io::ErrorKind;
 
@@ -14,8 +11,20 @@ use tokio_tungstenite::tungstenite::error::ProtocolError;
 
 use crate::ExecServerError;
 use crate::rpc::SESSION_ALREADY_ATTACHED_ERROR_CODE;
+use nova_exec_server_http_client::NetworkPolicyDenied;
+use nova_exec_server_http_client::RouteAwareRequestError;
 
 impl ExecServerError {
+    pub(crate) fn application_network_policy_denial(&self) -> Option<NetworkPolicyDenied> {
+        match self {
+            Self::ConnectionAttempt(source) => source.application_network_policy_denial(),
+            Self::EnvironmentRegistryRequest(RouteAwareRequestError::Policy(denial)) => {
+                Some(*denial)
+            }
+            _ => None,
+        }
+    }
+
     /// Identifies transient failures that read-only preparation can retry.
     ///
     /// Includes transient handshake responses and connection EOFs, including wrapped

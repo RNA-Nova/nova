@@ -14,6 +14,7 @@ class KnownApi(str, Enum):
     AZURE_OPENAI_RESPONSES = "azure-openai-responses"
     OPENAI_CODEX_RESPONSES = "openai-codex-responses"
     ANTHROPIC_MESSAGES = "anthropic-messages"
+    NOVA_GATEWAY = "nova-gateway"
     BEDROCK_CONVERSE_STREAM = "bedrock-converse-stream"
     GOOGLE_GENERATIVE_AI = "google-generative-ai"
     GOOGLE_GEMINI_CLI = "google-gemini-cli"

@@ -114,7 +114,8 @@ async fn tmpdir_uses_command_environment_over_rpc(
         for name in ["nova-windows-sandbox-setup", "nova-command-runner"] {
             let source = nova_exec_server_utils_cargo_bin::cargo_bin(name)?;
             let destination = resources.join(std::path::Path::new(name).with_extension("exe"));
-            if let Err(error) = nova_exec_server_utils_cargo_bin::copy_executable(&source, &destination)
+            if let Err(error) =
+                nova_exec_server_utils_cargo_bin::copy_executable(&source, &destination)
                 && !((error.kind() == std::io::ErrorKind::PermissionDenied
                     || error.raw_os_error() == Some(32))
                     && destination.is_file())

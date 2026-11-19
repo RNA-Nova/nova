@@ -168,9 +168,9 @@ pi/Claude Code 的标记块训练分布实证安全）；`<environment>` 标记�
 | **随到随执行** | 用户重新拍板 | codex `turn.rs:2370` 对位：toolcall_end 起执行 future；信号与前端时序均验证过可行，本期搁置 |
 | **审批策略化 + 沙箱升级重试** | executor 沙箱档真实启用后 | codex orchestrator 蓝本：审批→沙箱→拒绝升级重试（审批缓存不重复问）；permission_gate 硬编码换成声明式策略 |
 | **模型主动申请**（切后端/提权限） | v1 稳定后 | codex `request_permissions` 对位 |
-| **远程模式实测 + 二进制发布渠道** | ~~阶段一本地模式稳定后~~（远程模式已落地，见七） | 远程走 /ssh 模式（SSH 隧道，非 wss 公网）；**发布渠道仍挂账**——平台缓存件当前靠手工 seeding（`~/.nova/agent/executor/bin/<platform>/`），正式发布走 PyPI wheel 或内网静态目录 |
+| **远程接入与二进制发布渠道** | 需要远程执行时 | 现行路径为既有 ws(s) 端点、Noise Relay，或调用方自行配置的通用 stdio command；Nova 不再提供 SSH 密钥引导、远程二进制上传、工作区创建与隧道供给。正式发布渠道仍挂账 |
 | **web 文件树面板**（远端工作区展示 + 点击下载） | web 宿主落地后 | executor fs 原语全有（readDirectory/walk/readStream） |
-| **远程 rg 加速链**（ProcessRunner 缝） | ~~远程仓库检索体感慢（>10k 文件）~~（已落地，见七·检索加速） | 三级命运：远程 PATH rg（供给探测 `command -v rg` 白嫖）→ 平台缓存上传（可选增强，**不保证**）→ 便携引擎（永远成立的下限，有界并发保序）。缝实现：`executor/process_runner.py`——`ProcessRunner.spawn(argv, cwd)` 双实现（本地 asyncio subprocess / 远程 `process/start` 无壳 argv 直启），`rg --json` 行解析复用 `_collect_with_rg` 零改动，stderr 经 `output_with_stream` 流标签分离保真 |
+| **远程 rg 加速链**（ProcessRunner 缝） | 出现显式的远程二进制路径供给方 | `ProcessRunner.spawn(argv, cwd)` 双实现保留（本地 asyncio subprocess / 远程 `process/start` 无壳 argv 直启）；当前远程 rg/fd 路径缺省为 None，grep/find 落便携引擎，不再随 SSH 供给探测或上传二进制 |
 
 ## 判决记录（R 系列续）
 
@@ -181,7 +181,12 @@ pi/Claude Code 的标记块训练分布实证安全）；`<environment>` 标记�
   重议条件：出现"跨主机检索行为必须字节级可复现"的硬契约（届时走
   缓存上传统一版本，仍不内置）。
 
-## 七、阶段三：SSH 远程供给（/ssh 模式，已落地）
+## 七、历史决策：SSH 远程供给（已移除）
+
+> 本节仅保留设计演进记录，不描述现行能力。Nova 自有 `ssh://` 路由、
+> 管理密钥、远程二进制上传、会话工作区供给及隧道生命周期代码均已删除；
+> 现行远程接入只消费既有 ws(s) 端点、Noise Relay，或 SDK 的通用 stdio
+> command 环境。以下内容是当时实施与验收的历史记录。
 
 远程不监听公网端口、不做公网登陆——**身份层即 SSH**（类 VS Code
 Remote-SSH）：远程 executor 只听 127.0.0.1，传输与身份全部走 SSH
@@ -340,7 +345,7 @@ async），六个 operations 实现参数化在它上面**——本地与远程�
 
 | 后端形态 | effective_cwd | 说明 |
 |---|---|---|
-| SSH 远程 | `remote_cwd`（会话隔离工作区） | 沙箱圈住工作区，出圈即拦 |
+| 显式远程执行上下文 | `remote_cwd` | 沙箱圈住声明的远程执行目录，出圈即拦 |
 | 本地回环 executor（url 空） | 本地 cwd | 执行目录就是本机 cwd |
 | ws:// 直连 | 无 → v1 不沙箱 | 远程 cwd 未知（登记限制） |
 

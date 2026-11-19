@@ -32,7 +32,7 @@ impl SetupRuntime {
 }
 
 /// Package-scoped execution alias declared for the app's sandbox runner.
-pub const APP_CORE_RUNNER_ALIAS: &str = "nova-command-runner.exe";
+pub const APP_CORE_RUNNER_ALIAS: &str = "nova-core-command-runner.exe";
 
 /// The service may register its package only for these managed sandbox accounts.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

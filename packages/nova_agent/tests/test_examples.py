@@ -17,7 +17,6 @@ def test_example_inventory_is_complete():
         "03_hooks.py",
         "04_steering_followup.py",
         "05_abort_continue.py",
-        "06_agent_loop_lowlevel.py",
     ]
 
 

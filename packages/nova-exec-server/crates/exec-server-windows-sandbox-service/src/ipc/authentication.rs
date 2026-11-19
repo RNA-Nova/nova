@@ -79,10 +79,13 @@ fn authenticate_impersonated_client(
 ) -> Result<ClientIdentity> {
     // Pin the group generation through identity capture.
     // Release this lock before the provisioning worker checks machine policy.
-    let _setup_lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+    let _setup_lock =
+        nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
     anyhow::ensure!(
-        nova_exec_server_windows_sandbox::resolve_sid(nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP)
-            .is_ok_and(|current| current == sandbox_sid),
+        nova_exec_server_windows_sandbox::resolve_sid(
+            nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP
+        )
+        .is_ok_and(|current| current == sandbox_sid),
         nova_exec_server_windows_sandbox::SANDBOX_GROUP_CHANGED
     );
     if unsafe { pipes::ImpersonateNamedPipeClient(pipe) } == 0 {
@@ -139,8 +142,9 @@ fn authenticate_impersonated_client(
     let user = unsafe { nova_exec_server_windows_sandbox::get_user_sid_bytes(token.0) }
         .context("read provisioning client identity")?;
     let user_sid = string_from_sid_bytes(&user).map_err(anyhow::Error::msg)?;
-    let account = unsafe { nova_exec_server_windows_sandbox::account_name_from_sid(user.as_ptr() as _) }
-        .context("resolve provisioning client account")?;
+    let account =
+        unsafe { nova_exec_server_windows_sandbox::account_name_from_sid(user.as_ptr() as _) }
+            .context("resolve provisioning client account")?;
     let runtime = crate::package_identity::authorize_setup_runtime(authorized_process, request)?;
     let requested_home = match request {
         ServiceRequest::RegisterInstallation { sandbox_home } => sandbox_home,

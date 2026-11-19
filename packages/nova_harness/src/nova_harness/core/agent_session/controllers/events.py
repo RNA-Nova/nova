@@ -1,10 +1,13 @@
-"""Agent 事件分发与持久化控制。"""
+"""Agent 事件消费、持久化与扩展工作队列。"""
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Optional
 
 from nova_protocol import AgentMessage, AssistantMessage
 
@@ -35,21 +38,76 @@ from nova_harness.events import (
     TurnStartEvent,
 )
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _RunnerWork:
+    event: Any
+    completion: Optional[asyncio.Future[None]] = None
+
 
 class EventController:
-    """封装 AgentSession 的底层 Agent 事件处理、扩展转发与消息持久化。"""
+    """系统事件处理与第三方扩展的独立、有序工作队列。"""
 
     def __init__(self, session: AgentSessionProtocol) -> None:
         self._session = session
         self._turn_index = 0
+        self._runner_queue: asyncio.Queue[_RunnerWork] = asyncio.Queue()
+        self._runner_task: Optional[asyncio.Task[None]] = None
+
+    def _ensure_runner_worker(self) -> None:
+        if self._session._extension_runner is None or self._runner_task is not None:
+            return
+        self._runner_task = self._session._tasks.spawn(
+            self._drain_runner(), name="extension-events"
+        )
+
+    def emit_to_runner(self, event: Any) -> None:
+        """观察型事件只入队，不阻塞系统消费和 Agent 生产。"""
+        if self._session._extension_runner is None:
+            return
+        self._ensure_runner_worker()
+        self._runner_queue.put_nowait(_RunnerWork(event=event))
+
+    async def on_message_end(self, message: AgentMessage, signal: Any = None) -> None:
+        """干预型消息改写：保持顺序并等待完成，但不进入观察订阅。"""
+        if self._session._extension_runner is None:
+            return
+        self._ensure_runner_worker()
+        completion = asyncio.get_running_loop().create_future()
+        self._runner_queue.put_nowait(
+            _RunnerWork(
+                event=MessageEndEvent(message=message),
+                completion=completion,
+            )
+        )
+        await completion
+
+    async def _drain_runner(self) -> None:
+        while True:
+            work = await self._runner_queue.get()
+            completion = work.completion
+            if completion is not None and completion.cancelled():
+                continue
+            try:
+                await self.forward_to_runner(work.event)
+            except Exception as error:
+                if completion is not None and not completion.done():
+                    completion.set_exception(error)
+                else:
+                    logger.error(
+                        "Extension event dispatch failed",
+                        exc_info=(type(error), error, error.__traceback__),
+                    )
+            else:
+                if completion is not None and not completion.done():
+                    completion.set_result(None)
 
     async def handle(self, event: Any, signal: Any = None) -> None:
-        """处理底层 Agent 事件：持久化消息、转发扩展、维护内部状态。"""
+        """处理系统事件；第三方观察分发独立进行。"""
         event_type = getattr(event, "type", None)
 
-        # agent_start 时重置 turn 计数器 + 生成 run 身份（作用域仲裁的
-        # 归属键：本 run 内的挂起 UI 请求按 run:<run_id> 记台账，agent_end
-        # 时服务器仲裁清扫）；agent_end 携带 run_id 上线后清空
         if event_type == AGENT_START:
             self._turn_index = 0
             self._session._current_run_id = uuid.uuid4().hex[:8]
@@ -69,12 +127,10 @@ class EventController:
                     self._session._follow_up_messages.remove(text)
                     self._session._queue.emit_update()
 
-        # 先转发给扩展 runner
-        if self._session._extension_runner is not None:
-            await self.forward_to_runner(event)
+        # message_end 的改写已经经 on_message_end 完成，其余观察事件只入队。
+        if event_type != MESSAGE_END:
+            self.emit_to_runner(event)
 
-        # 再通知外部监听者（agent_start/agent_end 换 harness 版携带 run_id——
-        # 仲裁清扫的归属键上线；agent_end 补充 willRetry）
         if event_type == AGENT_START:
             self._session._emit(
                 AgentStartEvent(run_id=self._session._current_run_id or "")
@@ -87,8 +143,6 @@ class EventController:
                     run_id=self._session._current_run_id or "",
                 )
             )
-            # run 终结：清空 run 身份（仲裁清扫以事件携带的 run_id 为准，
-            # 不受清空时序影响）
             self._session._current_run_id = None
         else:
             self._session._emit(event)
@@ -97,8 +151,6 @@ class EventController:
         if event_type == MESSAGE_END:
             message = getattr(event, "message", None)
             if message is not None:
-                # cache-miss 检测须在持久化之前（entries 不含当前消息）；
-                # assistant 正常结束才有意义（pi addCacheMissNotice 对位）
                 if getattr(message, "role", None) == "assistant" and getattr(
                     message, "stop_reason", None
                 ) not in ("aborted", "error"):
@@ -117,9 +169,21 @@ class EventController:
                             )
                             self._session._retry_attempt = 0
 
-        # turn_end 后递增计数器，供下一轮使用
         if event_type == TURN_END:
             self._turn_index += 1
+
+    def close(self) -> None:
+        """停止扩展工作队列；会话任务台账仍负责统一排水。"""
+        if self._runner_task is not None:
+            self._runner_task.cancel()
+            self._runner_task = None
+
+    async def aclose(self) -> None:
+        """关闭并等待扩展工作队列落定，供测试和显式宿主收尾使用。"""
+        task = self._runner_task
+        self.close()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
 
     async def forward_to_runner(self, event: Any) -> None:
         """把底层 Agent 事件映射为 Nova 扩展事件并分发给 runner。"""
@@ -162,7 +226,6 @@ class EventController:
             )
         elif event_type == MESSAGE_END:
             original_message = getattr(event, "message", None)
-            # runner.emit_message_end 收事件对象（内部做链式改写），不是裸消息
             replacement = await runner.emit_message_end(
                 MessageEndEvent(message=original_message)
             )
@@ -200,12 +263,12 @@ class EventController:
                     is_error=getattr(event, "is_error", False),
                 )
             )
+        else:
+            # agent_settled 与包级开放事件直接透传，不做形状映射。
+            await runner.emit(event)
 
     def _maybe_emit_cache_miss(self, message: AgentMessage) -> None:
-        """message_end 时的 cache-miss 检测与事件发射（settings 门控）。
-
-        检测失败/无 miss/门控关闭均静默——提醒通道永不影响主链路。
-        """
+        """message_end 时的 cache-miss 检测与事件发射（settings 门控）。"""
         if not isinstance(message, AssistantMessage):
             return
         session = self._session

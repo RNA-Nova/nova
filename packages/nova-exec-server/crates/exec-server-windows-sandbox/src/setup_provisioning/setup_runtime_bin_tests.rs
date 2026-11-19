@@ -248,6 +248,8 @@ fn primary_runtime_path_does_not_depend_on_local_app_data() {
 
     assert_eq!(
         runtime_paths(/*local_app_data*/ None, Some(user_profile)),
-        vec![PathBuf::from(r"C:\Users\user\.cache\nova-exec-server-runtimes")]
+        vec![PathBuf::from(
+            r"C:\Users\user\.cache\nova-exec-server-runtimes"
+        )]
     );
 }

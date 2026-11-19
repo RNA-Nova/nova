@@ -22,12 +22,13 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | `docs/architecture.md` | Monorepo 结构、各子包详细组织、路径约定 | 动包结构/跨包改动前 |
 | `docs/crosscutting/data-modeling.md` | 数据建模标准全文（住所/选型/序列化/演化/测试） | 新增或迁移任何类型前 |
 | `docs/boundary/protocol-modeling.md` | 协议层建模标准（分层/正典源/握手/演化/线上错误/传输/生成物） | 新增 RPC 方法/事件/item、动线上契约前 |
-| `docs/crosscutting/diagnostics-modeling.md` | 诊断与可观测性建模标准（错误/警告/通知/诊断/日志/遥测：分类学/通道/持久化） | 新增任何诊断类词汇、异常类型、告警/通知通道前 |
+| `docs/crosscutting/diagnostics-modeling.md` | 诊断与可观测性建模标准（错误/警告/通知/诊断/日志/trace-safe/指标/业务分析：分类学/通道/隐私/背压/生命周期） | 新增任何诊断类词汇、异常类型、告警/通知通道前 |
 | `docs/crosscutting/localization.md` | 语言与本地化建模标准（注释/文档/commit/产品文案/诊断原文/模型文本的语言与住所） | 动用户面文案、加错误消息文本、做 i18n 前 |
 | `docs/crosscutting/testing-modeling.md` | 测试建模标准全文（住所/分层/假缝/断言/工具栈） | 新增或重构任何测试前 |
 | `docs/development.md` | 环境、构建、测试、格式化、发布命令 | 搭环境/跑测试/发布前 |
 | `docs/crosscutting/security.md` | API Key、会话数据、文件安全、Project Trust | 碰鉴权/文件操作前 |
 | `packages/nova_ai/AGENTS.md` | nova_ai 包级指南 | 深入改 nova_ai 前 |
+| `packages/nova_agent/AGENTS.md` | nova_agent 包级指南（Agent 生命周期与测试契约） | 深入改 nova_agent 前 |
 | `packages/nova_harness/AGENTS.md` | nova_harness 包级指南（最全） | 深入改 nova_harness 前 |
 
 ## 仓库地图
@@ -35,7 +36,12 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | 包 | 角色 |
 |---|---|
 | `packages/nova_protocol` | 跨领域共享纯数据词汇（LLM/Agent/Auth/ID/诊断），零行为、零兄弟包依赖 |
-| `packages/nova_ai` | LLM provider 抽象层（聊天流式、非流式图像生成与结构化分类、鉴权、混合模型注册）+ 包内 `catalog/` 模型目录构建管线（对位 pi `packages/ai/catalog/`） |
+| `packages/nova_catalog` | 通用模型目录知识与构建编排（对位 pi `packages/ai/catalog/`）；消费方专用生成与校验归各消费包 |
+| `packages/nova_ai` | LLM provider 抽象层（聊天流式、非流式图像生成与结构化分类、鉴权、混合模型注册） |
+| `packages/nova_gateway_protocol` | Gateway 独立公开 DTO、SSE 事件、版本与 Schema，零 HTTP/业务逻辑 |
+| `packages/nova_gateway_client` | 独立 Gateway 官方 SDK；只依赖公开协议，返回公开 DTO 事件流，不依赖 `nova_ai` |
+| `packages/nova_gateway` | Nova 原生模型服务、公共目录站与 OpenAI 兼容适配 |
+| `packages/nova_logging` | structlog 上下文与 formatter、多 sink/目标过滤、有界队列、flush/超时关停与运行统计 |
 | `packages/nova_async` | 完整取消词汇与等待机制族叶子包（AbortSignal/AbortScope/竞速/退避/TaskTracker/KeyedLock/Deadline） |
 | `packages/nova_exec_protocol` | executor 独立版本化 wire DTO |
 | `packages/nova_exec_policy` | Shell 分析、执行策略、权限编译与配置物化 |
@@ -43,8 +49,8 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 | `packages/nova_harness` | 高阶 SDK：会话树/压缩/资源/包管理/RuntimeManager |
 | `packages/nova_server` | JSON-RPC 协议服务层 + client 家族 + headless exec |
 | `packages/nova_client` | TS 前端运行时（TUI 宿主在内） |
-| `packages/nova-exec-server` | Rust 通用执行后端（进程/fs/PTY/沙箱） |
-| `packages/nova-exec-server-client` | executor 的 Python 薄客户端 |
+| `packages/nova-exec-server` | Rust 通用执行后端（进程/fs/PTY/沙箱 + Noise Relay 两端 + Nova Registry/Rendezvous） |
+| `packages/nova_exec_server_client` | executor 的 Python 薄客户端 |
 | `bundles/nova_coding_agent` | 官方编程 bundle（10 工具 + 6 扩展 + agents） |
 
 数据建模现状：`nova_protocol` 共享纯数据词汇＋边界协议包＋行为机制与组件内部类型，已完成分址——见 `docs/crosscutting/data-modeling.md`「住所」。
@@ -53,9 +59,9 @@ Nova 是一个用于构建大语言模型（LLM）智能体的 **Python 单体�
 
 ```bash
 pixi install -e dev        # 环境初始化（dev 含 black/isort/pytest）
-pixi run -e dev test-all   # 十个测试套件全量（各包独立跑，避免 conftest 冲突）
-pixi run -e dev format     # black + isort 全仓
-pixi run -e dev typecheck  # pyright（protocol/async/ai/agent/harness/server + exec 协议与策略）
+pixi run -e dev test-all   # 全量测试（Python 各包独立跑）
+pixi run -e dev format     # black + isort 全仓（生成物除外）
+pixi run -e dev typecheck  # pyright（含 protocol/catalog/gateway/async/ai/agent/harness/server）
 cd packages/nova_client && npm run build   # TS 前端编译
 ```
 

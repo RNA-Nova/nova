@@ -35,8 +35,8 @@
 |---|---|---|
 | 形状 | `data-modeling.md` | 【现状】共享领域纯数据、边界协议、机制与组件类型已完成分址；语义 id 渐进棘轮等存量治理见全文 |
 | 结构 | `structure-modeling.md` | 【现状】住所三层/包内组织（领域内聚优先，单领域 `types/` 或 `types.py` 可保留）/依赖方向/结构核对——类型住所归 `data-modeling.md` §一不重复，本面管模块与包 |
-| 诊断与观测 | `diagnostics-modeling.md` | 【现状】落地波次 1/2 完成；波次 3-5【待补】（见其 §十四） |
-| 并发与取消 | `concurrency.md` | 取消原语与机制件【现状】；Agent run/proxy 所有权接入【现状】；其余编排层【待补】——token 树/两阶段中止/超时治理/死因分型/竞速裁决/任务台账；取消三海拔引用 `data-modeling.md` §七不重复 |
+| 诊断与观测 | `diagnostics-modeling.md` | 【现状】落地波次 1/2 完成；波次 3-5【待补】（见其 §十四）；`nova_logging` 与 Gateway 日志接线已落地，trace-safe/指标/业务分析分层、字段级隐私、背压与关停生命周期已成文 |
+| 并发与取消 | `concurrency.md` | 取消原语与机制件【现状】；Agent run/proxy 所有权接入【现状】；任务五概念分件、建类判据、接受边界、终态分层与关闭/失败监督已成文；Agent 权威事件流与有界收尾【现状】，其余编排层闭环【待补】；取消三海拔引用 `data-modeling.md` §七不重复 |
 | 配置 | `configuration.md` | 【待补】（codex 调查改判立篇——配置是层栈对象不是值）：层栈与优先级（global/project/CLI/SDK/会话条目）、合并语义、逐键 provenance【目标态】、strict 未知键、schema 导出【待补】、旗标生命周期【目标态】、项目配置安全 denylist（trust 门） |
 | 安全 | `security.md` | 【现状】清单篇；升格标准篇【待补】——威胁模型按受众分级（模型/子进程/日志/repr/落盘）、出口分类学（落盘/RPC/弹窗/日志/终端各自的清洗要求）、防线分层（值层脱敏→出口清洗→环境排除→命令审批→终端消毒）、验收测试 |
 | 持久化 | 不立篇 | 双载分工："怎么落盘"归 `data-modeling.md` §三/§四；"什么落不落"归 `diagnostics-modeling.md` §六（含"先落盘后发声"顺序契约） |

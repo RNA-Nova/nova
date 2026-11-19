@@ -205,7 +205,7 @@ class _FakeManager:
 class TestExecutorLayer:
     def _make(self):
         fs = _FakeFs()
-        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ssh://u@h")
+        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ws://u@h")
         return layer, fs
 
     def test_read_write_uri_wrapping(self):
@@ -220,7 +220,7 @@ class TestExecutorLayer:
         assert _run(layer.metadata("/r/none")).exists is False
         fs = _FakeFs()
         fs.files["file:///r/a.txt"] = b"xyz"
-        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ssh://u@h")
+        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ws://u@h")
         stat = _run(layer.metadata("/r/a.txt"))
         assert stat.exists and stat.is_file and stat.size == 3 and stat.mtime_ms == 42
 
@@ -230,7 +230,7 @@ class TestExecutorLayer:
             _run(layer.list_dir("/r/none"))
         fs = _FakeFs()
         fs.files["file:///r/f.txt"] = b"x"
-        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ssh://u@h")
+        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ws://u@h")
         with pytest.raises(NotADirectoryError):
             _run(layer.list_dir("/r/f.txt"))
         entries = _run(layer.list_dir("/r"))
@@ -249,7 +249,7 @@ class TestExecutorLayer:
         # 单文件路径 walk 即自身（不发 walk 请求）
         fs = _FakeFs()
         fs.files["file:///r/a.py"] = b"x"
-        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ssh://u@h")
+        layer = ExecutorFileSystemLayer(_FakeManager(_FakeClient(fs)), "ws://u@h")
         single = _run(layer.walk("/r/a.py"))
         assert [i.path for i in single.entries] == ["/r/a.py"]
 
@@ -313,7 +313,7 @@ class TestBackendResolution:
 
     def test_backend_file_layer_remote(self):
         set_backend_selection(
-            BackendSelection(backend="executor", url="ssh://u@h", remote_cwd="/w")
+            BackendSelection(backend="executor", url="ws://u@h", remote_cwd="/w")
         )
         layer = backend_file_layer()
         assert isinstance(layer, ExecutorFileSystemLayer)
@@ -328,7 +328,7 @@ class TestBackendResolution:
         set_backend_selection(
             BackendSelection(
                 backend="executor",
-                url="ssh://u@h",
+                url="ws://u@h",
                 remote_cwd="/work/proj",
                 remote_home="/home/u",
             )
@@ -340,6 +340,6 @@ class TestBackendResolution:
 
     def test_resolve_remote_without_cwd_falls_back_home(self):
         set_backend_selection(
-            BackendSelection(backend="executor", url="ssh://u@h", remote_home="/home/u")
+            BackendSelection(backend="executor", url="ws://u@h", remote_home="/home/u")
         )
         assert resolve_backend_path("a.txt", _Ctx("/local")) == "/home/u/a.txt"

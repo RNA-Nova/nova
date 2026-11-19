@@ -3,11 +3,11 @@
 mod common;
 
 use common::exec_server::exec_server;
+use nova_exec_server::InitializeParams;
+use nova_exec_server::InitializeResponse;
 use nova_exec_server_protocol::JSONRPCError;
 use nova_exec_server_protocol::JSONRPCMessage;
 use nova_exec_server_protocol::JSONRPCResponse;
-use nova_exec_server::InitializeParams;
-use nova_exec_server::InitializeResponse;
 use pretty_assertions::assert_eq;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;

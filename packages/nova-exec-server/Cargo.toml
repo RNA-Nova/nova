@@ -2,6 +2,9 @@
 resolver = "2"
 members = [
     "crates/exec-server-protocol",
+    "crates/exec-server-relay-protocol",
+    "crates/exec-server-relay-server",
+    "crates/exec-server-aws-auth",
     "crates/exec-server",
     "crates/exec-server-cli",
     "crates/exec-server-protocol-core",
@@ -34,6 +37,9 @@ repository = "https://github.com/RNA-Nova/nova"
 [workspace.dependencies]
 # 内部依赖
 nova-exec-server-protocol = { path = "crates/exec-server-protocol" }
+nova-exec-server-relay-protocol = { path = "crates/exec-server-relay-protocol" }
+nova-exec-server-relay-server = { path = "crates/exec-server-relay-server" }
+nova-exec-server-aws-auth = { path = "crates/exec-server-aws-auth" }
 nova-exec-server = { path = "crates/exec-server" }
 nova-exec-server-protocol-core = { path = "crates/exec-server-protocol-core" }
 nova-exec-server-file-system = { path = "crates/exec-server-file-system" }
@@ -96,6 +102,16 @@ rama-tcp = { version = "=0.3.0-alpha.4", features = ["http"] }
 rama-tls-rustls = { version = "=0.3.0-alpha.4", features = ["http"] }
 rama-unix = "=0.3.0-alpha.4"
 
+# AWS SigV4（Direct 远程注册）
+aws-config = { version = "1", features = ["credentials-login"] }
+aws-credential-types = "1"
+aws-sigv4 = "1"
+aws-smithy-runtime-api = { version = "1", features = ["client", "http-1x"] }
+aws-smithy-types = { version = "1", features = ["http-body-1-x"] }
+aws-types = "1"
+http-body = "1.0.1"
+http-body-util = "0.1.3"
+
 # 进程与 PTY
 portable-pty = "0.9.0"
 
@@ -120,6 +136,17 @@ sha2 = "0.10"
 constant_time_eq = "0.3.1"
 hmac = "0.12.1"
 jsonwebtoken = "9.3.1"
+clatter = { version = "2.2.0", default-features = false, features = [
+    "alloc",
+    "getrandom",
+    "use-25519",
+    "use-aes-gcm",
+    "use-rust-crypto-ml-kem",
+    "use-sha",
+] }
+prost = "0.14.3"
+prost-build = "0.14.3"
+protoc-bin-vendored = "3"
 
 # 命令行
 clap = "4"
@@ -155,6 +182,7 @@ regex = "1.12.3"
 regex-lite = "0.1.8"
 reqwest = { version = "0.12", features = ["cookies"] }
 rustix = { version = "1.1.4", features = ["net"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 seccompiler = "0.5.0"
 serde_with = "3.17"
 shlex = "1.3.0"
@@ -193,6 +221,7 @@ indexmap = "2.12.0"
 opentelemetry-appender-tracing = "0.31.0"
 opentelemetry-otlp = "0.31.0"
 opentelemetry-semantic-conventions = "0.31.0"
+opentelemetry-http = "0.31.0"
 os_info = "3.12.0"
 serde_ignored = "0.1.14"
 serde_path_to_error = "0.1.20"

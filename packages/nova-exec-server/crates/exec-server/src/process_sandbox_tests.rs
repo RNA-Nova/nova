@@ -6,13 +6,13 @@ use std::time::Duration;
 use nova_exec_server_file_system::WindowsSandboxSelection;
 #[cfg(target_os = "macos")]
 use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
+use nova_exec_server_network_proxy::NetworkProxyConfig;
 #[cfg(target_os = "macos")]
 use nova_exec_server_network_proxy::NetworkUnixSocketPermission;
 #[cfg(target_os = "macos")]
 use nova_exec_server_network_proxy::NetworkUnixSocketPermissionEntry;
 #[cfg(target_os = "macos")]
 use nova_exec_server_network_proxy::NetworkUnixSocketPermissions;
-use nova_exec_server_network_proxy::NetworkProxyConfig;
 use nova_exec_server_network_proxy::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
 use nova_exec_server_network_proxy::RemoteNetworkProxyConfig;
 use nova_exec_server_network_proxy::RemoteNetworkProxyLaunchConfig;
@@ -675,10 +675,8 @@ async fn managed_network_honors_windows_sandbox_level(windows_sandbox_level: Win
     let self_exe = std::env::current_exe().expect("current executable");
     let runtime_paths = ExecServerRuntimePaths::new(self_exe, None).expect("runtime paths");
     let permissions = PermissionProfile::read_only();
-    let mut sandbox = FileSystemSandboxContext::from_permission_profile(
-        permissions.clone(),
-        cwd_uri.clone(),
-    );
+    let mut sandbox =
+        FileSystemSandboxContext::from_permission_profile(permissions.clone(), cwd_uri.clone());
     sandbox.windows_sandbox_selection = windows_sandbox_level.into();
     sandbox.windows_sandbox_proxy_settings_mode =
         Some(nova_exec_server_sandboxing::WindowsSandboxProxySettingsMode::Preserve);

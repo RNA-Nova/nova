@@ -4,9 +4,8 @@
 
 - ``LocalProcessRunner``：asyncio 子进程 + ``resolve_binary`` 三级解析；
 - ``ExecutorProcessRunner``：executor ``process/start`` **无壳 argv 直启**
-  （正则不经 shell 转义——这是不走 bash 通道的原因）；rg 路径来自 SSH
-  供给探测（``command -v rg``）随句柄缓存，fd 远程不解析（远程 find
-  走 rg --files 或便携引擎）。
+  （正则不经 shell 转义——这是不走 bash 通道的原因）；远程不预探 fd/rg
+  路径（find/grep 走便携引擎，或由调用方显式提供 runner 能力）。
 
 会话面（``ProcessSession``）：stdout 行流（跨 chunk 拼行、去 \\r）+
 terminate + 退出码 + stderr 收集（远程经 ``output_with_stream`` 的流
@@ -19,8 +18,6 @@ import asyncio
 from typing import Any, AsyncIterator, List, Optional, Protocol
 
 from nova_harness.core.utils.binaries import resolve_binary
-
-from nova_coding_agent.executor.provision import is_ssh_url, parse_ssh_target
 
 
 class ProcessSession(Protocol):
@@ -199,26 +196,20 @@ class _ExecutorSession:
 class ExecutorProcessRunner:
     """远程 executor spawn（``process/start`` 无壳 argv 直启）。
 
-    ``rg_path`` 来自 SSH 供给探测（``command -v rg``）随句柄缓存；
-    非 SSH 端点（ws:// 直连）与未探测到时回 None（上层落便携引擎）。
-    ``policy``（SpawnPolicy）随 spawn 透传——与 bash 引擎同一策略缝。
+    Nova 不再随 SSH 供给探测远程 rg，因此 ``rg_path``/``fd_path`` 缺省
+    均为 None，上层落便携引擎。``policy``（SpawnPolicy）随 spawn 透传。
     """
 
     def __init__(self, manager, url: str, policy: Optional[Any] = None) -> None:
         self._manager = manager
         self._url = url
         self._policy = policy
-        self._target = parse_ssh_target(url) if is_ssh_url(url) else None
 
     async def _client(self):
         return await self._manager.get_client(self._url)
 
     async def rg_path(self) -> Optional[str]:
-        if self._target is None:
-            return None
-        await self._client()  # 幂等——确保已供给（探测含 rg）
-        handle = self._manager.get_ssh_handle(self._target)
-        return getattr(handle, "rg_path", None) or None
+        return None
 
     async def fd_path(self) -> Optional[str]:
         return None

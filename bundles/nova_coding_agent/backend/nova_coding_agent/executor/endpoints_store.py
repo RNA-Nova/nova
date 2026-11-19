@@ -1,5 +1,4 @@
-"""执行端点注册表（批次 D——词汇搬家：settings ``executor.endpoints`` →
-``~/.nova/exec-server/config.toml`` 的 ``[[environments]]``）。
+"""执行端点注册表（``~/.nova/exec-server/config.toml`` 的 ``[[environments]]``）。
 
 读写纪律：
 
@@ -9,11 +8,9 @@
   的条目块），其余段（sandbox_mode/[otel]/[network_proxy]/
   default_environment）原样保留；咨询式文件锁对位规则写门。
 
-注册即环境（codex 词表）：ws(s) 端点登记为 `url` 环境；SSH 目标登记为
-`program = "ssh"` 环境（对位 codex environments.toml 的 ssh 承载形态——
-磁盘上只有合法词汇，SDK 校验直通）。读侧把 ssh program 条目还原为
-bundle 的 canonical `ssh://` URL（现有 /executor 流程按 URL scheme 路由
-ssh 供给，零改动）。
+这里只把 ws(s) URL 环境暴露给 /executor 切换命令。通用 stdio command
+环境（包括调用方自行配置的 SSH 承载）仍归 SDK 配置层，不转换为 bundle
+自有 URL 方案，也不触发任何供给行为。
 """
 
 from __future__ import annotations
@@ -33,38 +30,33 @@ def endpoints_config_path() -> Path:
 
 
 def load_endpoints() -> list[dict]:
-    """读全部已登记端点（SDK loader——坏文件响亮抛错）。
-
-    ssh program 条目还原为 canonical `ssh://` URL（bundle 路由词汇）。
-    """
+    """读已登记的 ws(s) URL 端点（坏配置响亮抛错）。"""
     from nova_exec_server_client import load_executor_config
 
     config = load_executor_config(project_trusted=False)
-    out = []
-    for e in config.environments:
-        if e.url:
-            out.append({"name": e.id, "url": e.url, "cwd": e.cwd})
-        elif e.program == "ssh" and e.args:
-            out.append({"name": e.id, "url": f"ssh://{e.args[0]}", "cwd": e.cwd})
-    return out
+    return [
+        {"name": environment.id, "url": environment.url, "cwd": environment.cwd}
+        for environment in config.environments
+        if environment.url
+    ]
 
 
 def register_endpoint(name: str, url: str, cwd: str | None = None) -> None:
-    """登记/覆盖端点（[[environments]] 条目；同名替换）。"""
+    """登记/覆盖 ws(s) 端点（[[environments]] 条目；同名替换）。"""
+    if not url.startswith(("ws://", "wss://")):
+        raise ValueError("执行端点仅支持 ws:// 或 wss://")
+    if cwd is not None:
+        raise ValueError("ws(s) 端点不支持 cwd；cwd 仅属于 stdio command 环境")
     path = endpoints_config_path()
     lock = FileLock(str(path) + ".lock")
     with lock:
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         _removed, text = _remove_environment_block(text, name)
-        entry_lines = [f"{_ENVIRONMENTS_HEADER}", f'id = "{name}"']
-        if url.startswith("ssh://"):
-            # SSH 目标按 codex 词表登记为 ssh program 环境
-            entry_lines.append('program = "ssh"')
-            entry_lines.append(f'args = ["{url[len("ssh://") :]}"]')
-        else:
-            entry_lines.append(f'url = "{url}"')
-        if cwd:
-            entry_lines.append(f'cwd = "{cwd}"')
+        entry_lines = [
+            _ENVIRONMENTS_HEADER,
+            f'id = "{name}"',
+            f'url = "{url}"',
+        ]
         addition = "\n".join(entry_lines) + "\n"
         if text and not text.endswith("\n"):
             text += "\n"

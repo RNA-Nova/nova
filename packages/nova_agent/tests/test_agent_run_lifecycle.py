@@ -62,9 +62,10 @@ async def test_external_cancel_abandons_and_joins_provider(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    prompt_task = asyncio.create_task(agent.prompt("hello"))
+    prompt_task = agent.prompt("hello")
     await started.wait()
-    prompt_task.cancel()
+    assert prompt_task.task is not None
+    prompt_task.task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await prompt_task
 
@@ -76,9 +77,10 @@ async def test_external_cancel_abandons_and_joins_provider(dummy_model):
 
 
 @pytest.mark.asyncio
-async def test_listener_error_abandons_and_joins_provider(dummy_model):
+async def test_observer_error_does_not_abort_provider(dummy_model):
     started = asyncio.Event()
     finished = asyncio.Event()
+    failed = asyncio.Event()
     holder = {}
 
     def stream_fn(model, context, options):
@@ -86,28 +88,24 @@ async def test_listener_error_abandons_and_joins_provider(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    failed = False
 
     def fail_once(event, _signal):
-        nonlocal failed
-        if (
-            event.type == "message_start"
-            and event.message.role == "assistant"
-            and not failed
-        ):
-            failed = True
+        if event.type == "message_start" and event.message.role == "assistant":
+            failed.set()
             raise RuntimeError("listener failed")
 
     agent.subscribe(fail_once)
-    await agent.prompt("hello")
+    run = agent.prompt("hello")
+    await failed.wait()
+    assert not holder["signal"].aborted
 
+    agent.abort()
+    await run
     driver = holder["driver"]
     await asyncio.gather(driver, return_exceptions=True)
     assert finished.is_set()
     assert holder["signal"].aborted
-    assert (
-        assistant_message(agent.state.messages[-1]).error_kind is NovaErrorKind.INTERNAL
-    )
+    assert assistant_message(agent.state.messages[-1]).stop_reason is StopReason.ABORTED
 
 
 @pytest.mark.asyncio
@@ -122,7 +120,7 @@ async def test_wait_for_idle_tracks_active_run_until_completion(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    run = agent.start_prompt("one")
+    run = agent.prompt("one")
     await started.wait()
     waiter = asyncio.create_task(agent.wait_for_idle())
     await asyncio.sleep(0)
@@ -130,9 +128,10 @@ async def test_wait_for_idle_tracks_active_run_until_completion(dummy_model):
 
     release.set()
     await waiter
-    await run
-    assert text_of(assistant_message(agent.state.messages[-1])) == "done"
+    # wait_for_idle 本身就是完整 settle 边界，不依赖再 await 外层 Task。
     assert agent.signal is None
+    assert text_of(assistant_message(agent.state.messages[-1])) == "done"
+    await run
 
 
 @pytest.mark.asyncio
@@ -146,13 +145,14 @@ async def test_public_streaming_flag_cannot_bypass_active_guard(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    prompt_task = asyncio.create_task(agent.prompt("hello"))
+    prompt_task = agent.prompt("hello")
     await started.wait()
     agent.state.is_streaming = False
     with pytest.raises(RuntimeError, match="already processing"):
         agent.reset()
 
-    prompt_task.cancel()
+    assert prompt_task.task is not None
+    prompt_task.task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await prompt_task
     driver = holder["driver"]
@@ -161,9 +161,11 @@ async def test_public_streaming_flag_cannot_bypass_active_guard(dummy_model):
 
 
 @pytest.mark.asyncio
-async def test_parallel_tool_failure_cancels_siblings_before_agent_end(dummy_model):
+async def test_observer_failure_does_not_cancel_tool_siblings(dummy_model):
     started = asyncio.Event()
+    failed = asyncio.Event()
     finished = asyncio.Event()
+    release = asyncio.Event()
 
     class FastTool(AgentTool):
         name: str = "fast"
@@ -183,33 +185,43 @@ async def test_parallel_tool_failure_cancels_siblings_before_agent_end(dummy_mod
         async def execute(self, tool_call_id, params, signal=None, on_update=None):
             started.set()
             try:
-                await asyncio.Event().wait()
+                await release.wait()
                 return AgentToolResult(content=[TextContent(text="slow")], details={})
             finally:
                 finished.set()
 
-    agent = Agent(
-        stream_fn=lambda model, context, options: multi_tool_call_stream(
-            model, [("fast", {}), ("slow", {})]
-        )
-    )
+    calls = 0
+
+    def stream_fn(model, context, options):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return multi_tool_call_stream(model, [("fast", {}), ("slow", {})])
+        return text_stream(model, "done")
+
+    agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
     agent.set_tools([FastTool(), SlowTool()])
 
     def fail_fast(event, _signal):
         if event.type == "tool_execution_end" and event.tool_name == "fast":
+            failed.set()
             raise RuntimeError("listener failed")
 
     agent.subscribe(fail_fast)
-    await agent.prompt("go")
-
+    run = agent.prompt("go")
+    await failed.wait()
     assert started.is_set()
+    assert not finished.is_set()
+
+    release.set()
+    await run
     assert finished.is_set()
     assert not agent.state.is_streaming
 
 
 @pytest.mark.asyncio
-async def test_start_prompt_registers_before_returning_task(dummy_model):
+async def test_prompt_registers_before_returning_task(dummy_model):
     started = asyncio.Event()
     finished = asyncio.Event()
     holder = {}
@@ -234,7 +246,7 @@ async def test_start_prompt_registers_before_returning_task(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    task = agent.start_prompt("hello")
+    task = agent.prompt("hello")
     assert agent.state.is_streaming
     assert agent.signal is not None
     await started.wait()
@@ -277,7 +289,7 @@ async def test_abort_timeout_forces_cancellation_and_warns(dummy_model, caplog):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    task = agent.start_prompt("hello")
+    task = agent.prompt("hello")
     await started.wait()
     with caplog.at_level("WARNING"):
         agent.abort()
@@ -299,7 +311,7 @@ async def test_abort_timeout_forces_cancellation_and_warns(dummy_model, caplog):
 
 
 @pytest.mark.asyncio
-async def test_start_prompt_normal_completion_allows_next_generation(dummy_model):
+async def test_prompt_normal_completion_allows_next_generation(dummy_model):
     calls = 0
 
     def stream_fn(model, context, options):
@@ -310,7 +322,7 @@ async def test_start_prompt_normal_completion_allows_next_generation(dummy_model
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
 
-    await agent.start_prompt("first")
+    await agent.prompt("first")
     assert not agent.state.is_streaming
     assert agent.signal is None
 
@@ -326,7 +338,7 @@ async def test_start_prompt_normal_completion_allows_next_generation(dummy_model
 
 
 @pytest.mark.asyncio
-async def test_start_prompt_rejects_second_active_run(dummy_model):
+async def test_prompt_rejects_second_active_run(dummy_model):
     started = asyncio.Event()
     finished = asyncio.Event()
     holder = {}
@@ -336,11 +348,11 @@ async def test_start_prompt_rejects_second_active_run(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    task = agent.start_prompt("first")
+    task = agent.prompt("first")
     await started.wait()
 
     with pytest.raises(RuntimeError, match="already processing"):
-        agent.start_prompt("second")
+        agent.prompt("second")
 
     agent.abort()
     await task
@@ -348,14 +360,14 @@ async def test_start_prompt_rejects_second_active_run(dummy_model):
     assert finished.is_set()
 
 
-def test_start_prompt_without_model_raises_synchronously():
+def test_prompt_without_model_raises_synchronously():
     agent = Agent(stream_fn=lambda model, context, options: text_stream(model, "ok"))
     with pytest.raises(RuntimeError, match="No model configured"):
-        agent.start_prompt("hello")
+        agent.prompt("hello")
 
 
 @pytest.mark.asyncio
-async def test_start_prompt_external_cancel_allows_next_generation(dummy_model):
+async def test_prompt_external_cancel_allows_next_generation(dummy_model):
     started = asyncio.Event()
     finished = asyncio.Event()
     holder = {}
@@ -365,9 +377,10 @@ async def test_start_prompt_external_cancel_allows_next_generation(dummy_model):
 
     agent = Agent(stream_fn=stream_fn)
     agent.set_model(dummy_model)
-    task = agent.start_prompt("first")
+    task = agent.prompt("first")
     await started.wait()
-    task.cancel()
+    assert task.task is not None
+    task.task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
@@ -410,7 +423,7 @@ async def test_reset_during_run_raises_and_abort_allows_reuse(dummy_model):
     agent = Agent(stream_fn=stream)
     agent.set_model(dummy_model)
     agent.set_tools([HangingTool()])
-    run = agent.start_prompt("run")
+    run = agent.prompt("run")
     await started.wait()
 
     with pytest.raises(RuntimeError, match="already processing"):
@@ -421,3 +434,248 @@ async def test_reset_during_run_raises_and_abort_allows_reuse(dummy_model):
     agent.set_tools([])
     await agent.prompt("next")
     assert text_of(assistant_message(agent.state.messages[-1])) == "done"
+
+
+@pytest.mark.asyncio
+async def test_agent_end_listener_error_does_not_duplicate_terminal_events(dummy_model):
+    events = []
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+    failed = False
+
+    def fail_once(event, _signal):
+        nonlocal failed
+        events.append(event.type)
+        if event.type == "agent_end" and not failed:
+            failed = True
+            raise RuntimeError("agent_end listener failed")
+
+    agent.subscribe(fail_once)
+    await agent.prompt("x")
+
+    assert events.count("turn_end") == 1
+    assert events.count("agent_end") == 1
+    assert [message.role for message in agent.state.messages] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_turn_end_listener_error_does_not_duplicate_terminal_events(dummy_model):
+    events = []
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+    failed = False
+
+    def fail_once(event, _signal):
+        nonlocal failed
+        events.append(event.type)
+        if event.type == "turn_end" and not failed:
+            failed = True
+            raise RuntimeError("turn_end listener failed")
+
+    agent.subscribe(fail_once)
+    await agent.prompt("x")
+
+    assert events.count("turn_end") == 1
+    assert events.count("agent_end") == 1
+    assert [message.role for message in agent.state.messages] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_all_listeners_observe_event_before_first_error_propagates(dummy_model):
+    seen = []
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+    failed = False
+
+    def first(event, _signal):
+        seen.append(("first", event.type))
+
+    def middle(event, _signal):
+        nonlocal failed
+        seen.append(("middle", event.type))
+        if event.type == "agent_end" and not failed:
+            failed = True
+            raise RuntimeError("middle listener failed")
+
+    def last(event, _signal):
+        seen.append(("last", event.type))
+
+    agent.subscribe(first)
+    agent.subscribe(middle)
+    agent.subscribe(last)
+    await agent.prompt("x")
+
+    terminal = [name for name, event_type in seen if event_type == "agent_end"]
+    assert terminal == ["first", "middle", "last"]
+    assert seen.count(("first", "agent_end")) == 1
+    assert seen.count(("middle", "agent_end")) == 1
+    assert seen.count(("last", "agent_end")) == 1
+
+
+@pytest.mark.asyncio
+async def test_hard_abort_skips_uncooperative_listeners_and_settles(dummy_model):
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    async def blocking_listener(event, _signal):
+        if event.type == "agent_end":
+            await asyncio.Event().wait()
+
+    unsubscribe = agent.subscribe(blocking_listener)
+    run = agent.prompt("x")
+    await asyncio.sleep(0.05)
+    agent.abort()
+    async with asyncio.timeout(1.0):
+        await run
+
+    assert not agent.state.is_streaming
+    assert agent.signal is None
+    unsubscribe()
+    agent.stream_fn = lambda m, c, o: text_stream(m, "next")
+    await agent.prompt("next")
+    assert agent.state.messages[-1].role == "assistant"
+
+
+async def _terminal_events(run):
+    """从权威事件流收集 agent_end，不经过任何观察订阅。"""
+    return [event async for event in run.events if event.type == "agent_end"]
+
+
+@pytest.mark.asyncio
+async def test_external_cancel_publishes_terminal_to_run_events(dummy_model):
+    started = asyncio.Event()
+    finished = asyncio.Event()
+    holder = {}
+
+    def stream_fn(model, context, options):
+        return _pending_stream(model, started, finished, holder, options)
+
+    agent = Agent(stream_fn=stream_fn)
+    agent.set_model(dummy_model)
+
+    run = agent.prompt("hello")
+    await started.wait()
+    assert run.task is not None
+    run.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    await asyncio.gather(holder["driver"], return_exceptions=True)
+
+    assert [event.type for event in await _terminal_events(run)] == ["agent_end"]
+    assert assistant_message(agent.state.messages[-1]).stop_reason is StopReason.ABORTED
+    assert agent.signal is None
+
+
+@pytest.mark.asyncio
+async def test_run_events_do_not_wait_for_blocking_observers(dummy_model):
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    async def blocking_listener(event, _signal):
+        if event.type == "agent_end":
+            await asyncio.Event().wait()
+
+    agent.subscribe(blocking_listener)
+    run = agent.prompt("x")
+    async with asyncio.timeout(1.0):
+        assert [event.type for event in await _terminal_events(run)] == ["agent_end"]
+        await run
+
+    assert assistant_message(agent.state.messages[-1]).stop_reason is StopReason.STOP
+    assert agent.signal is None
+
+
+@pytest.mark.asyncio
+async def test_uncooperative_tool_is_abandoned_and_cannot_cross_run(dummy_model):
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    release_tool = asyncio.Event()
+    release_second = asyncio.Event()
+    second_started = asyncio.Event()
+    calls = 0
+
+    class StuckTool(AgentTool):
+        name: str = "stuck"
+        label: str = "stuck"
+        description: str = "stuck"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release_tool.wait()
+            return AgentToolResult(content=[TextContent(text="late")], details={})
+
+    async def stream_fn(model, context, options):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return multi_tool_call_stream(model, [("stuck", {})])
+        second_started.set()
+        await release_second.wait()
+        return text_stream(model, "next")
+
+    agent = Agent(stream_fn=stream_fn, tool_execution="sequential")
+    agent.set_model(dummy_model)
+    agent.set_tools([StuckTool()])
+
+    first = agent.prompt("first")
+    await started.wait()
+    agent.abort()
+    async with asyncio.timeout(1.0):
+        await first
+    assert cancelled.is_set()
+    assert len(await _terminal_events(first)) == 1
+
+    second = agent.prompt("second")
+    await second_started.wait()
+    release_tool.set()
+    release_second.set()
+    await second
+
+    second_events = [event async for event in second.events]
+    assert not [
+        event
+        for event in second_events
+        if event.type == "tool_execution_end" and event.tool_name == "stuck"
+    ]
+    assert len([event for event in second_events if event.type == "agent_end"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_observer_failure_does_not_change_run_terminal(dummy_model):
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    def always_fail(event, _signal):
+        if event.type == "message_start" and event.message.role == "assistant":
+            raise RuntimeError("persistent listener failure")
+
+    agent.subscribe(always_fail)
+    run = agent.prompt("x")
+    async with asyncio.timeout(1.0):
+        assert [event.type for event in await _terminal_events(run)] == ["agent_end"]
+        await run
+
+    assert assistant_message(agent.state.messages[-1]).stop_reason is StopReason.STOP
+    assert agent.signal is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_first_task_step_still_settles(dummy_model):
+    agent = Agent(stream_fn=lambda m, c, o: text_stream(m, "ok"))
+    agent.set_model(dummy_model)
+
+    run = agent.prompt("x")
+    assert run.task is not None
+    run.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert [event.type for event in await _terminal_events(run)] == ["agent_end"]
+    assert assistant_message(agent.state.messages[-1]).stop_reason is StopReason.ABORTED
+    assert agent.signal is None
+    await agent.wait_for_idle()

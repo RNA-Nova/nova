@@ -1,44 +1,32 @@
 """Agent loop：转录差分、请求准备、回合决策与工具调度。"""
 
-import asyncio
 import dataclasses
-import logging
 import time
 from typing import List, Optional, cast
 
 from nova_ai import (
-    NOVA_ATTRIBUTION,
-    AssistantMessageEventStream,
     ToolStateChanges,
     get_current_tools,
     get_tool_state_changes,
-    merge_client_identity,
     to_thinking_level,
     to_tool_declaration,
 )
-from nova_async import AbortController, AbortSignal, any_signal
+from nova_async import AbortSignal
 from nova_protocol import (
     AgentEndEvent,
     AgentMessage,
     AgentStartEvent,
     AssistantMessage,
-    ClientIdentity,
-    Context,
-    DoneEvent,
-    ErrorEvent,
     Message,
     MessageEndEvent,
     MessageStartEvent,
-    MessageUpdateEvent,
     ModelThinkingLevel,
-    StartEvent,
     StopReason,
     SystemMessage,
     TurnEndEvent,
     TurnStartEvent,
 )
 
-from ..stream_fn import get_default_stream_fn
 from ..types import (
     AgentContext,
     AgentEventSink,
@@ -47,13 +35,9 @@ from ..types import (
     PrepareRequestContext,
     StreamFn,
 )
-from ..utils import default_convert_to_llm, invoke_hook
+from ..utils import invoke_hook
+from .response import stream_assistant_response
 from .tools import execute_tool_calls, fail_tool_calls_from_truncated_message
-
-DEFAULT_AGENT_IDENTITY = ClientIdentity(attribution=NOVA_ATTRIBUTION)
-"""Agent 循环默认归因；调用方 identity 逐字段覆盖，显式 null 可关闭。"""
-
-logger = logging.getLogger(__name__)
 
 
 def _with_tool_changes(
@@ -270,7 +254,7 @@ async def _run_loop(
                     stream_options=stream_options,
                 )
 
-            assistant_msg = await _stream_assistant_response(
+            assistant_msg = await stream_assistant_response(
                 current_context, config, signal, emit, stream_fn
             )
             new_messages.append(assistant_msg)
@@ -350,107 +334,3 @@ async def _run_loop(
         break
 
     await emit(AgentEndEvent(messages=new_messages))
-
-
-async def _stream_assistant_response(
-    context: AgentContext,
-    config: AgentLoopConfig,
-    signal: Optional[AbortSignal],
-    emit: AgentEventSink,
-    stream_fn: Optional[StreamFn],
-) -> AssistantMessage:
-    """转录 → LLM 消息 → 流式回复；provider 上下文只从转录构建。"""
-    messages = await invoke_hook(
-        config.transform_context, context.messages, signal, default=context.messages
-    )
-    convert = config.convert_to_llm or default_convert_to_llm
-    llm_messages = await invoke_hook(convert, messages)
-    llm_context = Context(messages=llm_messages)
-
-    stream_func = stream_fn or get_default_stream_fn()
-    resolved_api_key = config.stream_options.api_key
-    resolved = await invoke_hook(config.get_api_key, config.model.provider)
-    if resolved:
-        resolved_api_key = resolved
-    # 每个请求一个本地取消源；父 signal 经 any 组合，提前退出时只取消本请求。
-    request_controller = AbortController(name="agent-request")
-    request_signal = any_signal([signal, request_controller.signal])
-    stream_options = dataclasses.replace(
-        config.stream_options,
-        api_key=resolved_api_key,
-        identity=merge_client_identity(
-            DEFAULT_AGENT_IDENTITY, config.stream_options.identity
-        ),
-        signal=request_signal,
-    )
-    response = cast(
-        AssistantMessageEventStream,
-        await invoke_hook(stream_func, config.model, llm_context, stream_options),
-    )
-
-    async def final_result() -> AssistantMessage:
-        message = await response.result()
-        # 记录 Agent 实际请求的级别；provider_thinking_level 是另一份端点事实。
-        message.thinking_level = (
-            ModelThinkingLevel(stream_options.reasoning.value)
-            if stream_options.reasoning is not None
-            else ModelThinkingLevel.OFF
-        )
-        return message
-
-    try:
-        partial_message: Optional[AssistantMessage] = None
-        added_partial = False
-        async for event in response:
-            if isinstance(event, StartEvent):
-                partial_message = event.partial
-                context.messages.append(partial_message)
-                added_partial = True
-                await emit(MessageStartEvent(message=partial_message.model_copy()))
-            elif not isinstance(event, (DoneEvent, ErrorEvent)):
-                if partial_message is not None:
-                    partial_message = event.partial
-                    context.messages[-1] = partial_message
-                    await emit(
-                        MessageUpdateEvent(
-                            assistant_message_event=event,
-                            message=partial_message.model_copy(),
-                        )
-                    )
-            else:
-                final_message = await final_result()
-                if added_partial:
-                    context.messages[-1] = final_message
-                else:
-                    context.messages.append(final_message)
-                if not added_partial:
-                    await emit(MessageStartEvent(message=final_message.model_copy()))
-                await emit(MessageEndEvent(message=final_message))
-                return final_message
-
-        final_message = await final_result()
-        if added_partial:
-            context.messages[-1] = final_message
-        else:
-            context.messages.append(final_message)
-            await emit(MessageStartEvent(message=final_message.model_copy()))
-        await emit(MessageEndEvent(message=final_message))
-        return final_message
-    finally:
-        # 消费者先举旗让 provider 走自己的清理，再 join；结果已先到者不被改写。
-        driver = response.task
-        if driver is not None and not driver.done():
-            request_controller.abort()
-            # 给 provider 一个按 signal 收尾的机会；不响应则硬取消，不能挂住 run。
-            await asyncio.sleep(0)
-            if not driver.done():
-                driver.cancel()
-        if driver is not None:
-            try:
-                async with asyncio.timeout(0.1):
-                    await asyncio.gather(driver, return_exceptions=True)
-            except TimeoutError:
-                logger.warning(
-                    "Provider driver did not finish within 100ms of abandonment; "
-                    "proceeding with terminal events"
-                )

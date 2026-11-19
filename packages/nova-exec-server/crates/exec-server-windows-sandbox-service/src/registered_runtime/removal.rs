@@ -57,7 +57,8 @@ impl PreparedRemoval {
 
 /// Restore durable temporary-enable intent before owner restoration or IPC admission.
 pub(crate) fn restore_disabled_accounts() -> Result<()> {
-    let _lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+    let _lock =
+        nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
     let Some(mut record) = crate::installation_record::load_runtime()? else {
         return Ok(());
     };
@@ -97,7 +98,8 @@ pub(crate) fn prepare(
     let mut targets = Vec::new();
     for index in 0..record.runtime()?.accounts.len() {
         let account = record.runtime()?.accounts[index].clone();
-        let Some(flags) = nova_exec_server_windows_sandbox::local_user_flags(account.account.username())?
+        let Some(flags) =
+            nova_exec_server_windows_sandbox::local_user_flags(account.account.username())?
         else {
             ensure!(
                 super::registered_packages(&account.user_sid, &record.runtime()?.package_family)?
@@ -160,9 +162,11 @@ pub(crate) fn prepare(
         None
     } else {
         Some(
-            nova_exec_server_windows_sandbox::string_from_sid_bytes(&nova_exec_server_windows_sandbox::resolve_sid(
-                nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP,
-            )?)
+            nova_exec_server_windows_sandbox::string_from_sid_bytes(
+                &nova_exec_server_windows_sandbox::resolve_sid(
+                    nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP,
+                )?,
+            )
             .map_err(anyhow::Error::msg)?,
         )
     };

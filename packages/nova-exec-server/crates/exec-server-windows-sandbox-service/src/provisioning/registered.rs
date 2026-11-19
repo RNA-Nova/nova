@@ -38,10 +38,13 @@ pub(super) fn run(
     ) -> Result<InstallationRecord>,
 ) -> Result<SandboxProvisioningResponse> {
     // Keep admission, account provisioning and package registration in one transaction.
-    let _setup_lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+    let _setup_lock =
+        nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
     ensure!(
-        nova_exec_server_windows_sandbox::resolve_sid(nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP)
-            .is_ok_and(|current| current == sandbox_sid),
+        nova_exec_server_windows_sandbox::resolve_sid(
+            nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP
+        )
+        .is_ok_and(|current| current == sandbox_sid),
         nova_exec_server_windows_sandbox::SANDBOX_GROUP_CHANGED
     );
     let settings = request.settings;
@@ -67,8 +70,10 @@ pub(super) fn run(
             ensure!(
                 nova_exec_server_windows_sandbox::local_user_flags(account)?
                     .is_some_and(|flags| flags & (UF_ACCOUNTDISABLE | UF_PASSWORD_EXPIRED) == 0)
-                    && string_from_sid_bytes(&nova_exec_server_windows_sandbox::resolve_sid(account)?)
-                        .map_err(anyhow::Error::msg)?
+                    && string_from_sid_bytes(&nova_exec_server_windows_sandbox::resolve_sid(
+                        account
+                    )?)
+                    .map_err(anyhow::Error::msg)?
                         == entry.user_sid,
                 "registration refresh cannot repair or replace a sandbox account"
             );
@@ -111,7 +116,9 @@ pub(super) fn run(
                 },
                 || {
                     for entry in &installation.runtime()?.accounts {
-                        let sid = nova_exec_server_windows_sandbox::resolve_sid(entry.account.username())?;
+                        let sid = nova_exec_server_windows_sandbox::resolve_sid(
+                            entry.account.username(),
+                        )?;
                         ensure!(
                             string_from_sid_bytes(&sid).map_err(anyhow::Error::msg)?
                                 == entry.user_sid,

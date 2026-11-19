@@ -1,6 +1,6 @@
 """六个 fs 工具的远程后端切换测试（内存 layer 注入）。
 
-真实模式格翻转为 ssh 远程（resolve_backend_path 走真路径解析），
+真实模式格翻转为远程 executor（resolve_backend_path 走真路径解析），
 仅把 ``backend_file_layer`` 换为内存 layer——验证工具在远程后端下
 解析远程路径并经由 fs 层读写（便携引擎、无本机 fd/rg）。
 """
@@ -114,11 +114,11 @@ class MemLayer:
 
 @pytest.fixture(autouse=True)
 def _remote_backend():
-    """翻转为 ssh 远程后端（真实模式格——resolve_backend_path 全真）。"""
+    """翻转为远程 executor 后端（真实模式格——resolve_backend_path 全真）。"""
     set_backend_selection(
         BackendSelection(
             backend="executor",
-            url="ssh://u@remote",
+            url="ws://u@remote",
             remote_cwd=_REMOTE_CWD,
             remote_home="/home/u",
         )

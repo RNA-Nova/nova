@@ -255,7 +255,7 @@ def _switch_module():
     return module
 
 
-def test_attach_policy_ssh_uses_remote_cwd(monkeypatch, tmp_path):
+def test_attach_policy_remote_uses_remote_cwd(monkeypatch, tmp_path):
     home = _config_with_mode(tmp_path, "read-only")
     switch = _switch_module()
     monkeypatch.setattr(
@@ -265,7 +265,7 @@ def test_attach_policy_ssh_uses_remote_cwd(monkeypatch, tmp_path):
     )
     ctx = _Ctx()
     selection = BackendSelection(
-        backend="executor", url="ssh://u@h", remote_cwd="/remote/w"
+        backend="executor", url="ws://u@h", remote_cwd="/remote/w"
     )
     switch._attach_policy(ctx, selection)
     assert selection.spawn_policy is not None
@@ -327,7 +327,7 @@ def test_selection_roundtrip_keeps_policy():
     set_backend_selection(
         BackendSelection(
             backend="executor",
-            url="ssh://u@h",
+            url="ws://u@h",
             remote_cwd="/remote/w",
             spawn_policy=policy,
         )

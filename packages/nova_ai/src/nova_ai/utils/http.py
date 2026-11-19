@@ -6,7 +6,7 @@
   （``AbortScope``）包住请求，举旗即杀断在飞连接抛 ``AbortedError``；
 - ``fetch_json``：async GET + 重试 + 非 200 raise + ``.json()``
   （运行期目录拉取；每次尝试走 ``request_with_abort``，尝试之间检查 abort
-  并可中断退避）。构建期单次 GET 归 ``nova_ai.catalog``，不反向复用本模块。
+  并可中断退避）。构建期单次 GET 归 ``nova_catalog``，不反向复用本模块。
 
 传输错误统一包装为 ``RuntimeError``——调用方按 RuntimeError 识别传输
 失败并重试，无需感知 httpx 异常族。

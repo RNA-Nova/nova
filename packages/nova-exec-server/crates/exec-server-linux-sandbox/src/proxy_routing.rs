@@ -4,6 +4,7 @@ use crate::proxy_lifecycle::move_fd_above_stdio;
 use crate::proxy_lifecycle::receive_listener;
 use crate::proxy_lifecycle::send_listener;
 use nova_exec_server_network_proxy::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
+use nova_exec_server_network_proxy::write_attribution_frame;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -48,31 +49,8 @@ const HOST_BRIDGE_READY: u8 = 1;
 const LOOPBACK_INTERFACE_NAME: &[u8] = b"lo";
 const HANDOFF_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
 
-// 归因帧（attribution frame）写入端：帧结构移植自 codex-network-proxy 的
-// attribution.rs（8 字节 magic + u16 BE 长度 + token 字节），读取端是
-// nova-exec-server-network-proxy 的 attribution.rs。两端均为 nova 自有且
-// 从未发布，魔数取 nova 命名（NVX），两端常量必须同步。
-const ATTRIBUTION_FRAME_MAGIC: &[u8; 8] = b"\0NVXPXY1";
-const MAX_ATTRIBUTION_TOKEN_LEN: usize = 128;
-
-/// Writes the trusted bridge preface consumed by the shared proxy ingress.
-fn write_attribution_frame(writer: &mut impl Write, token: &str) -> io::Result<()> {
-    if token.is_empty() || token.len() > MAX_ATTRIBUTION_TOKEN_LEN {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid network proxy attribution token length",
-        ));
-    }
-    let token_len = u16::try_from(token.len()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "network proxy attribution token is too long",
-        )
-    })?;
-    writer.write_all(ATTRIBUTION_FRAME_MAGIC)?;
-    writer.write_all(&token_len.to_be_bytes())?;
-    writer.write_all(token.as_bytes())
-}
+// 归因帧写入统一由 network-proxy 单点供给：帧结构为 8 字节 magic +
+// u16 BE 长度 + token 字节，读取端是同 crate 的 attribution.rs。
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProxyRouteSpec {

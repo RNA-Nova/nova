@@ -21,7 +21,10 @@ async fn two_executor_instances_are_isolated() -> anyhow::Result<()> {
     let mut sessions = Vec::new();
     for server in [&mut server_a, &mut server_b] {
         let initialize_id = server
-            .send_request("initialize", serde_json::json!({"clientName": "coexist-test"}))
+            .send_request(
+                "initialize",
+                serde_json::json!({"clientName": "coexist-test"}),
+            )
             .await?;
         let JSONRPCMessage::Response(JSONRPCResponse { id, result, .. }) =
             server.next_event().await?
@@ -38,9 +41,7 @@ async fn two_executor_instances_are_isolated() -> anyhow::Result<()> {
 
     // A 实例起进程写标记
     let work_dir = tempfile::tempdir()?;
-    let cwd_uri = nova_exec_server_utils_path_uri::PathUri::from_host_native_path(
-        work_dir.path(),
-    )?;
+    let cwd_uri = nova_exec_server_utils_path_uri::PathUri::from_host_native_path(work_dir.path())?;
     let start_id = server_a
         .send_request(
             "process/start",

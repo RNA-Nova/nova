@@ -15,6 +15,7 @@ mod transport;
 mod process_otel_tests;
 
 pub(crate) use handler::ExecServerHandler;
+pub use processor::ConnectionProcessor;
 pub use request_dispatcher::ConcurrentRequestLimit;
 pub use request_dispatcher::RequestDispatchMode;
 pub use transport::DEFAULT_LISTEN_URL;

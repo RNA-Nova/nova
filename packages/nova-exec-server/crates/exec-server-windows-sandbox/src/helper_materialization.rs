@@ -38,7 +38,10 @@ fn legacy_lookup() -> PathBuf {
     PathBuf::from(COMMAND_RUNNER_EXE)
 }
 
-pub(crate) fn resolve_command_runner(sandbox_home: &Path, log_dir: Option<&Path>) -> Result<PathBuf> {
+pub(crate) fn resolve_command_runner(
+    sandbox_home: &Path,
+    log_dir: Option<&Path>,
+) -> Result<PathBuf> {
     if registered_core_requested() {
         let exe = std::env::current_exe().context("resolve registered Core helper source")?;
         let direct_path = exe.with_file_name(COMMAND_RUNNER_EXE);

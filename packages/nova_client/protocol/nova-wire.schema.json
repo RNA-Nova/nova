@@ -277,6 +277,7 @@
                 "azure-openai-responses",
                 "openai-codex-responses",
                 "anthropic-messages",
+                "nova-gateway",
                 "bedrock-converse-stream",
                 "google-generative-ai",
                 "google-gemini-cli",

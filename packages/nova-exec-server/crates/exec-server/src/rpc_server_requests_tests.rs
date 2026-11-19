@@ -51,6 +51,7 @@ impl RpcServerRequestSender {
 
 #[tokio::test(flavor = "current_thread")]
 async fn rpc_server_sender_bounds_tracestate_without_dropping_traceparent() {
+    let _trace_test_guard = crate::TRACING_TEST_LOCK.lock().await;
     let tracer_provider = SdkTracerProvider::builder().build();
     let tracer = tracer_provider.tracer("exec-server-test");
     let subscriber =
@@ -58,8 +59,8 @@ async fn rpc_server_sender_bounds_tracestate_without_dropping_traceparent() {
     let _subscriber_guard = subscriber.set_default();
     tracing::callsite::rebuild_interest_cache();
 
-    let ordinary_tracestate =
-        TraceState::from_key_value([("vendor", "value")]).expect("ordinary tracestate should be valid");
+    let ordinary_tracestate = TraceState::from_key_value([("vendor", "value")])
+        .expect("ordinary tracestate should be valid");
     let oversized_tracestate =
         TraceState::from_key_value([("first", "a".repeat(256)), ("second", "b".repeat(256))])
             .expect("oversized aggregate tracestate should have valid members");

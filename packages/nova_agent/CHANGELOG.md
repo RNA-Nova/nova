@@ -9,14 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### Added
 
-- **转录与生命周期**：`SystemMessage` 承载系统提示词与工具差分；新增 `prepare_request` / `prepare_next_turn` / `finish_turn`、`run_tool_call` 与 `stream_proxy`。
+- **转录与生命周期**：`SystemMessage` 承载系统提示词与工具差分；新增 `prepare_request` / `prepare_next_turn` / `finish_turn` 与 `run_tool_call`。
 - **工具结果**：`structured_content`、`usage`、`duration_ms`、`output_schema` 与 `replay`；公开 `AgentToolCallOutcome`。
 - **请求身份与可观测性**：`ClientIdentity`、provider 归因头、错误分类和敏感信息清洗。
+- **统一运行句柄**：`AgentRun` 持有 `task`、`events`、`signal` 与 `abort()`；`prompt()` / `continue_()` 同步返回句柄，`run.events` 是单次 run 的权威事件流，`on_message_end` 承载显式消息干预。
 
 ### Fixed
 
-- **运行收尾**：provider abandonment、并行工具异常排水、run 代际清理与 proxy 在飞取消。
-- **启动与终止**：`start_prompt()` 同步登记 active run；abort 采用 100ms 优雅窗口，超时硬取消并告警。
+- **运行收尾**：provider abandonment、并行工具异常排水与 run 代际清理；driver、工具及各运行作用域的取消后 join 均有界，迟到事件不能跨代污染。
+- **启动与终止**：`prompt()` / `continue_()` 同步登记并返回 `AgentRun`；公开 Task 与 `wait_for_idle()` 共用单一 settle 边界，首步前取消也会发布权威事件流终态；abort 采用 100ms 优雅窗口，超时硬取消并告警。
 - **并发与观测**：sequential 终态在门内、通知在门外；工具 update observer 异常转为工具错误结果。
 - **参数与契约**：单次调用工具集、联合输入保留、optional null 归一及 `ToolCall.namespace` 往返。
 

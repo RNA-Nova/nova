@@ -3,13 +3,13 @@
 mod common;
 
 use common::exec_server::exec_server;
-use nova_exec_server_protocol::JSONRPCMessage;
-use nova_exec_server_protocol::JSONRPCResponse;
 use nova_exec_server::EnvironmentInfo;
 use nova_exec_server::EnvironmentStatus;
 use nova_exec_server::EnvironmentStatusKind;
 use nova_exec_server::InitializeParams;
 use nova_exec_server::InitializeResponse;
+use nova_exec_server_protocol::JSONRPCMessage;
+use nova_exec_server_protocol::JSONRPCResponse;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

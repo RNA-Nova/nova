@@ -1267,7 +1267,6 @@ mod tests {
     use super::ExecResponse;
     use super::FsOpenMode;
     use super::FsOpenParams;
-    use super::WireFsOpenParams;
     use super::FsReadFileParams;
     use super::FsWriteBlockParams;
     use super::FsWriteBlockResponse;
@@ -1276,6 +1275,7 @@ mod tests {
     use super::ProcessId;
     use super::ProcessSandboxType;
     use super::ShellInfo;
+    use super::WireFsOpenParams;
     use nova_exec_server_file_system::FileSystemSandboxContext;
     use nova_exec_server_network_proxy::ManagedNetworkSandboxContext;
     use nova_exec_server_network_proxy::NetworkProxyAuditMetadata;
@@ -1751,8 +1751,7 @@ mod tests {
             file_system,
             network: NetworkSandboxPolicy::Restricted,
         };
-        let sandbox =
-            FileSystemSandboxContext::from_permission_profile(permissions, cwd.clone());
+        let sandbox = FileSystemSandboxContext::from_permission_profile(permissions, cwd.clone());
 
         let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
 
@@ -1952,8 +1951,7 @@ mod tests {
             &file_system_policy,
             NetworkSandboxPolicy::Restricted,
         );
-        let sandbox =
-            FileSystemSandboxContext::from_permission_profile(permissions, cwd.clone());
+        let sandbox = FileSystemSandboxContext::from_permission_profile(permissions, cwd.clone());
 
         let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
 
@@ -2072,10 +2070,8 @@ mod tests {
                 .expect("legacy open should resolve"),
             FsOpenParams {
                 handle_id: "legacy-handle".to_string(),
-                path: nova_exec_server_utils_path_uri::PathUri::parse(
-                    "file:///tmp/existing.txt"
-                )
-                .expect("file URI"),
+                path: nova_exec_server_utils_path_uri::PathUri::parse("file:///tmp/existing.txt")
+                    .expect("file URI"),
                 mode: FsOpenMode::Read,
                 sandbox: None,
             }

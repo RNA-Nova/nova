@@ -337,7 +337,7 @@ PTY 复用进程族方法：`process/start` 传 `tty: true`，输出经
 
 ## 客户端
 
-- Python SDK：`packages/nova-exec-server-client`（`ExecutorClient`——initialize 时
+- Python SDK：`packages/nova_exec_server_client`（`ExecutorClient`——initialize 时
   做 protocolVersion major 匹配，不等即 `ProtocolError`）。写流客户端门
   （v1.9，对位 codex e7798c9944）：`fs.open(mode=replace)` 与 `fs.write_block`
   先查缓存的 `environmentInfo.capabilities.fileWriteStreaming`，false 即本地

@@ -36,9 +36,6 @@ pub use denial::is_likely_executor_managed_sandbox_denied;
 pub use denial::is_likely_sandbox_denied;
 pub use linux_pid_namespace::LinuxSandboxPidNamespace;
 pub use manager::SandboxCommand;
-pub use nova_exec_server_mxc_sandbox::NOVA_EXEC_SERVER_WINDOWS_MXC_ARG1;
-pub use nova_exec_server_mxc_sandbox::is_available as windows_mxc_available;
-pub use nova_exec_server_mxc_sandbox::run_main as run_windows_mxc_main;
 pub use manager::SandboxDirectSpawnTransformRequest;
 pub use manager::SandboxExecRequest;
 pub use manager::SandboxManager;
@@ -49,16 +46,19 @@ pub use manager::SandboxablePreference;
 pub use manager::compatibility_sandbox_policy_for_permission_profile;
 pub use manager::get_platform_sandbox;
 pub use manager::with_managed_mitm_ca_readable_root;
+pub use nova_exec_server_mxc_sandbox::NOVA_EXEC_SERVER_WINDOWS_MXC_ARG1;
+pub use nova_exec_server_mxc_sandbox::is_available as windows_mxc_available;
+pub use nova_exec_server_mxc_sandbox::run_main as run_windows_mxc_main;
 // 对位 codex 11da6b9edc
 pub use sandbox_integrity::FileContentsChecker;
 pub use sandbox_integrity::IntegrityFinding;
 pub use sandbox_integrity::IntegrityFindingDetails;
 // 对位 codex 39f4277087 `codex_uds::` 同名函数（nova 的 uds 归并在本 crate）
+pub use nova_exec_server_protocol_core::config_types::WindowsSandboxProxySettingsMode;
 #[cfg(unix)]
 pub use seatbelt_daemon::prepare_shared_daemon_socket_directory;
 #[cfg(unix)]
 pub use seatbelt_daemon::shared_daemon_socket_directory;
-pub use nova_exec_server_protocol_core::config_types::WindowsSandboxProxySettingsMode;
 pub use spawn::SpawnRequest;
 pub use spawn::WindowsSandboxSpawnRequest;
 pub use spawn::spawn_process;

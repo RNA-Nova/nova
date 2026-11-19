@@ -94,7 +94,16 @@ def test_every_registered_module_has_family_docstring():
             assert first_line, f"{directory.name}/{name} 缺 docstring 首行族声明"
 
 
-_ALLOWED_NOVA_IMPORTS = frozenset({"nova_ai", "nova_async", "nova_protocol"})
+_ALLOWED_NOVA_IMPORTS = frozenset(
+    {
+        "nova_ai",
+        "nova_async",
+        "nova_catalog",
+        "nova_gateway_client",
+        "nova_gateway_protocol",
+        "nova_protocol",
+    }
+)
 
 
 def _nova_imports(path: Path):
@@ -115,6 +124,17 @@ def test_dependency_direction_stays_inside_lower_layers():
     offenders = [
         f"{path.relative_to(_SRC)}:{line} imports {module}"
         for path in sorted(_SRC.rglob("*.py"))
+        for line, root, module in _nova_imports(path)
+        if root not in _ALLOWED_NOVA_IMPORTS
+    ]
+    assert offenders == []
+
+
+def test_generation_scripts_depend_only_on_lower_layers():
+    scripts = _SRC.parent / "scripts"
+    offenders = [
+        f"{path.relative_to(scripts)}:{line} imports {module}"
+        for path in sorted(scripts.rglob("*.py"))
         for line, root, module in _nova_imports(path)
         if root not in _ALLOWED_NOVA_IMPORTS
     ]

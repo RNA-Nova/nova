@@ -2,12 +2,13 @@ use std::io::Write;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use nova_exec_server_http_client::HttpClientFactory;
-use nova_exec_server_http_client::OutboundProxyPolicy;
+use ctor::ctor;
 use nova_exec_server::HttpClient;
 use nova_exec_server::HttpRedirectPolicy;
 use nova_exec_server::HttpRequestParams;
 use nova_exec_server::RouteAwareHttpClient;
+use nova_exec_server_http_client::HttpClientFactory;
+use nova_exec_server_http_client::OutboundProxyPolicy;
 use pretty_assertions::assert_eq;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -15,6 +16,18 @@ use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
+
+// 每个 integration test 文件都是独立进程；ctor 在测试线程启动前把回环目标
+// 固定为直连。这样 macOS 系统代理或调用方 shell 中的 HTTP(S)_PROXY 都不会
+// 把“关闭端口连接失败”夹具变成代理返回的 HTTP 响应，也不依赖外层 NO_PROXY。
+#[ctor]
+static DIRECT_LOOPBACK_PROXY_ENV: () = {
+    // SAFETY：ctor 在本测试进程的 main/测试线程启动前执行，不存在并发环境读写。
+    unsafe {
+        std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+        std::env::set_var("no_proxy", "127.0.0.1,localhost");
+    }
+};
 
 #[tokio::test(flavor = "current_thread")]
 async fn delegated_http_success_logs_do_not_expose_sensitive_request_or_response_data()

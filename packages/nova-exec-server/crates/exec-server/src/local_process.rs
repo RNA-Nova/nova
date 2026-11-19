@@ -98,7 +98,7 @@ const EXITED_PROCESS_RETENTION: Duration = Duration::from_secs(30);
 struct RetainedOutputChunk {
     seq: u64,
     stream: ExecOutputStream,
-    chunk: Vec<u8>,
+    chunk: crate::protocol::ByteChunk,
 }
 
 struct RunningProcess {
@@ -581,7 +581,7 @@ impl LocalProcess {
                 let mut total_bytes = 0;
                 let mut next_seq = process.next_seq;
                 for retained in process.output.iter().filter(|chunk| chunk.seq > after_seq) {
-                    let chunk_len = retained.chunk.len();
+                    let chunk_len = retained.chunk.0.len();
                     if !chunks.is_empty() && total_bytes + chunk_len > max_bytes {
                         break;
                     }
@@ -589,7 +589,7 @@ impl LocalProcess {
                     chunks.push(ProcessOutputChunk {
                         seq: retained.seq,
                         stream: retained.stream,
-                        chunk: retained.chunk.clone().into(),
+                        chunk: retained.chunk.clone(),
                     });
                     next_seq = retained.seq + 1;
                     if total_bytes >= max_bytes {
@@ -995,7 +995,7 @@ async fn stream_output(
             process.output.push_back(RetainedOutputChunk {
                 seq,
                 stream,
-                chunk: chunk.clone(),
+                chunk: chunk.clone().into(),
             });
             while process.retained_bytes > RETAINED_OUTPUT_BYTES_PER_PROCESS
                 || process.output.len() > RETAINED_OUTPUT_CHUNKS_PER_PROCESS
@@ -1003,13 +1003,14 @@ async fn stream_output(
                 let Some(evicted) = process.output.pop_front() else {
                     break;
                 };
-                process.retained_bytes = process.retained_bytes.saturating_sub(evicted.chunk.len());
+                process.retained_bytes =
+                    process.retained_bytes.saturating_sub(evicted.chunk.0.len());
             }
             let _ = process.wake_tx.send(seq);
             let output = ProcessOutputChunk {
                 seq,
                 stream,
-                chunk: chunk.into(),
+                chunk: chunk.clone().into(),
             };
             process
                 .events
@@ -1084,11 +1085,13 @@ fn watch_exit(
                     for chunk in &process.output {
                         match chunk.stream {
                             ExecOutputStream::Stdout | ExecOutputStream::Pty => {
-                                stdout.extend_from_slice(&chunk.chunk);
+                                stdout.extend_from_slice(chunk.chunk.as_ref());
                             }
-                            ExecOutputStream::Stderr => stderr.extend_from_slice(&chunk.chunk),
+                            ExecOutputStream::Stderr => {
+                                stderr.extend_from_slice(chunk.chunk.as_ref())
+                            }
                         }
-                        aggregated.extend_from_slice(&chunk.chunk);
+                        aggregated.extend_from_slice(chunk.chunk.as_ref());
                     }
                     let exec_output = ExecToolCallOutput {
                         exit_code,
@@ -1554,7 +1557,10 @@ mod tests {
             ("OVERLAY".to_string(), "overlay".to_string()),
             ("POLICY_SET".to_string(), "overlay-wins".to_string()),
             ("NOVA_EXEC_SERVER_THREAD_ID".into(), "overlay-thread".into()),
-            ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "overlay-call".into()),
+            (
+                "NOVA_EXEC_SERVER_TOOL_CALL_ID".into(),
+                "overlay-call".into(),
+            ),
             (
                 "openai_identity_token_file".to_string(),
                 "/run/identity-token".to_string(),
@@ -1581,7 +1587,10 @@ mod tests {
             ("OVERLAY".to_string(), "overlay".to_string()),
             ("POLICY_SET".to_string(), "overlay-wins".to_string()),
             ("NOVA_EXEC_SERVER_THREAD_ID".into(), thread_id.to_string()),
-            ("NOVA_EXEC_SERVER_TOOL_CALL_ID".into(), "current-call".into()),
+            (
+                "NOVA_EXEC_SERVER_TOOL_CALL_ID".into(),
+                "current-call".into(),
+            ),
         ]);
         if cfg!(target_os = "windows") {
             expected.insert("PATHEXT".to_string(), ".COM;.EXE;.BAT;.CMD".to_string());
@@ -1835,7 +1844,7 @@ mod tests {
                 .map(|seq| RetainedOutputChunk {
                     seq,
                     stream: ExecOutputStream::Stdout,
-                    chunk: vec![b'x'],
+                    chunk: vec![b'x'].into(),
                 })
                 .collect();
             running.retained_bytes = RETAINED_OUTPUT_CHUNKS_PER_PROCESS;

@@ -17,7 +17,6 @@ use crate::file_handle::FileHandleManager;
 use crate::file_handle::MAX_READ_STREAM_BLOCK_SIZE;
 use crate::file_handle::stream_file_blocks;
 use crate::local_file_system::LocalFileSystem;
-use crate::regular_file::OpenMode;
 use crate::protocol::FS_READ_DIRECTORY_METHOD;
 use crate::protocol::FS_WRITE_FILE_METHOD;
 use crate::protocol::FsCanonicalizeParams;
@@ -56,6 +55,7 @@ use crate::protocol::FsWriteStreamDoneParams;
 use crate::protocol::FsWriteStreamDoneResponse;
 use crate::protocol::FsWriteStreamParams;
 use crate::protocol::FsWriteStreamResponse;
+use crate::regular_file::OpenMode;
 use crate::rpc::RpcNotificationSender;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_request;
@@ -102,8 +102,11 @@ impl FileSystemHandler {
             .file_handles
             .open(
                 params.handle_id,
-                self.file_system
-                    .open_file(&params.path, params.mode.into(), params.sandbox.as_ref()),
+                self.file_system.open_file(
+                    &params.path,
+                    params.mode.into(),
+                    params.sandbox.as_ref(),
+                ),
             )
             .await
             .map_err(map_fs_error)?;
@@ -147,7 +150,7 @@ impl FileSystemHandler {
         validate_file_handle_id(&params.handle_id)?;
         // v1.12 语义翻转：写流句柄的 close 即中止，但不再删半成品——文件留在
         // 盘上（对齐 writeBlock/scp 等一切上传工具，为断点续传让路）
-        self.file_handles.close(&params.handle_id);
+        self.file_handles.close(&params.handle_id).await;
         Ok(FsCloseResponse {})
     }
 
@@ -231,9 +234,7 @@ impl FileSystemHandler {
             .await;
 
             // 被同名重开取代时不发 done——本代流的迟到终态不得串入新流路由
-            if !superseded
-                && let Some(notifications) = &notifications
-            {
+            if !superseded && let Some(notifications) = &notifications {
                 let _ = notifications
                     .notify(
                         crate::protocol::FS_READ_STREAM_DONE_METHOD,
@@ -247,7 +248,9 @@ impl FileSystemHandler {
             }
 
             // 代际守卫摘除：条目仍是本代才摘——同名重开的新条目不动
-            file_handles.close_if_generation(&handle_id_clone, generation);
+            file_handles
+                .close_if_generation(&handle_id_clone, generation)
+                .await;
         });
 
         Ok(FsReadStreamResponse {
@@ -556,7 +559,8 @@ fn map_fs_error(err: io::Error) -> JSONRPCErrorError {
         io::ErrorKind::NotFound => not_found(err.to_string()),
         // ResourceBusy（写流 queue full）与兄弟违规同档：客户端灌速引发的流控
         // 终态 = 客户端语义"降速重来"，与乱序/超限/eof 违规同族，不归内部错误
-        io::ErrorKind::InvalidInput | io::ErrorKind::PermissionDenied
+        io::ErrorKind::InvalidInput
+        | io::ErrorKind::PermissionDenied
         | io::ErrorKind::ResourceBusy => invalid_request(err.to_string()),
         _ => internal_error(err.to_string()),
     }
@@ -1141,8 +1145,8 @@ mod tests {
         assert_eq!(handler.file_handles.open_handle_count(), 0);
 
         // 文件不存在 + offset>0：同样 invalid_params
-        let missing = PathUri::from_host_native_path(temp_dir.path().join("missing.bin"))
-            .expect("path URI");
+        let missing =
+            PathUri::from_host_native_path(temp_dir.path().join("missing.bin")).expect("path URI");
         let err = handler
             .write_stream(FsWriteStreamParams {
                 handle_id: "w2".to_string(),
@@ -1733,7 +1737,10 @@ mod tests {
                 .expect_err("done should report the seq violation");
             assert_eq!(err.code, -32600);
             assert!(err.message.contains("expected seq 1, got 2"));
-            assert_eq!(std::fs::read(&file_path).expect("partial file stays"), b"aa");
+            assert_eq!(
+                std::fs::read(&file_path).expect("partial file stays"),
+                b"aa"
+            );
         }
 
         #[tokio::test]
@@ -1757,7 +1764,10 @@ mod tests {
                 .expect_err("done without eof should fail");
             assert_eq!(err.code, -32600);
             assert!(err.message.contains("without an eof chunk"));
-            assert_eq!(std::fs::read(&file_path).expect("partial file stays"), b"half");
+            assert_eq!(
+                std::fs::read(&file_path).expect("partial file stays"),
+                b"half"
+            );
         }
     }
 }

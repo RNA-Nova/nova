@@ -222,7 +222,8 @@ pub(crate) fn provision(
 pub(crate) fn prepare_cleanup(record: InstallationRecord) -> Result<InstallationRecord> {
     validate_record(&record)?;
     for account in &record.runtime()?.accounts {
-        if nova_exec_server_windows_sandbox::local_user_flags(account.account.username())?.is_some() {
+        if nova_exec_server_windows_sandbox::local_user_flags(account.account.username())?.is_some()
+        {
             validate_account_sid(account)?;
         }
     }
@@ -346,9 +347,6 @@ fn validate_target(
             sandbox_member = true;
         }
     }
-    ensure!(
-        sandbox_member,
-        "runtime account is not in NovaSandboxUsers"
-    );
+    ensure!(sandbox_member, "runtime account is not in NovaSandboxUsers");
     Ok(user_sid)
 }

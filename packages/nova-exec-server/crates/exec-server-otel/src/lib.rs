@@ -1,5 +1,6 @@
 pub(crate) mod config;
 pub(crate) mod metrics;
+pub(crate) mod network_policy;
 pub(crate) mod provider;
 pub(crate) mod trace_context;
 

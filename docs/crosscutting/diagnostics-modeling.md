@@ -181,17 +181,71 @@ codex 的 Rust 协议层（`EventMsg` 家族）含 `Error/Warning/GuardianWarnin
 
 ## 八、日志（开发者通道）
 
-- `logger` 分级照旧（DEBUG/INFO/WARNING/ERROR）= 开发者通道，进日志文件，**永不替代用户通道**；
-- 分诊规则：**用户需要据此行动的**必须升格到用户通道（WarningEvent/错误消息），纯诊断留 logger——铁律 4 的执法面：升格后 logger 可同记一行（带 `exc_info`），但不许只记日志不上报；
-- 遥测见下节，日志不承担分析职责（codex tracing 与 analytics 分家对位）。
+> 状态：【目标态定稿，基础设施已落地】`nova_logging` 已实现 contextvars、白名单 formatter、有界队列、轮转与排干，Gateway 已接入；其余包仍按需由各自组合根装配。日志只服务排障，**永不替代用户诊断、遥测或业务分析**。
 
-## 九、遥测（机器通道）
+### 1. 数据分类先于输出格式
 
-> 状态：【目标态·有意缓建】现状零运行期遥测面（归一产物 `http_status`/`domain` 只产不消，`TelemetryFn` 缝无消费方）——缓建理由：遥测是可观测性不是正确性，且消费方（运营形态）尚不存在。**触发线（任一即立项）**：① 服务器/桌面端形态立项；② 出现"想看错误分布而不得"的真实排障需求；③ 诊断波次 4/5 启动时顺带接线。
+| 数据 | 通道 | 内容 | 禁止 |
+|---|---|---|---|
+| 详细日志 | stdlib `logging` | 请求生命周期、状态转移、重试、断连、异常与有限上下文 | 不得承担用户通知或产品分析 |
+| trace-safe 元数据 | `nova_telemetry` 的 span/event | 类型、长度、耗时、状态、模型、usage、cost 等可分析字段 | 默认不含 prompt、正文、账户隐私和原始 payload |
+| 指标 | `nova_telemetry` 的 counter/gauge/histogram | 请求数、在途数、耗时、token、成本、错误分布 | 不得用无界高基数标签冒充指标 |
+| 业务分析事件 | `nova_analytics`（有真实需求才立） | 用户行为、产品运行、功能使用与商业分析 | 不得与排障日志混名、混队列或混用途 |
 
-- **终态错误上报单点**：`kind + http_status + domain`，**消息免载荷**（codex `track_turn_codex_error` 对位，隐私面——刻意严于 OTel 默认 `record_exception` 带 message 的做法）。对齐 OTel GenAI semconv：`kind` 即 `error.type`（低基数分类器的天然出口）、`http_status` 即 `http.status_code`、`domain` 挂 `nova.error.domain`；span status 只用 ERROR/UNSET；
-- 警告上报复用 `WarningKind`；取消不计错误指标（铁律 3 在遥测面的投影）；
-- 分类学只有一套（`NovaErrorKind`），遥测不另建免载荷枚举。
+**字段级分工**：详细日志可在有明确用途时记录截断后的参数/输出；trace-safe 只保留长度、类型、行数、状态等元数据；metrics 只保留低基数标签。不能为了“结构化”而把同一份完整 payload 发往所有通道。
+
+### 2. 事件与上下文契约
+
+- 使用受控 `event` 名称（如 `gateway.request.started/retrying/completed/failed/closed`），不要靠自由文本做分析。
+- 通用字段：`ts/level/event/requestId/sessionId/runId/provider/model/transport/retryAttempt/retriesTaken/status/errorKind/durationMs`；`requestId` 在一次逻辑请求及其全部重试中保持不变。
+- `requestId/sessionId/runId/provider/model` 通过 `contextvars` 与组合根的 adapter/filter 传递，禁止逐层手拼字符串，禁止用整 `Model` 充当上下文。
+- 级别：DEBUG=有限协议细节，INFO=开始/结束/重试/刷新/关停，WARNING=瞬时失败与降级，ERROR=最终失败（带 `exc_info`）。
+- 默认不记录每个文本/思考/工具参数 delta；只记录开始、重试、建连、终态、取消、断连和耗时。需要正文时必须另有独立开关、长度上限与用途说明。
+- 用户需要据此行动时必须升格到用户通道（WarningEvent/错误消息），纯诊断留 logger；升格后 logger 可同记一行（带 `exc_info`），但不许只记日志不上报。
+
+### 3. 装配与出口
+
+- 业务包只获取 `logging.getLogger(__name__)`，不得自行 `basicConfig()`、决定文件路径或安装全局 handler；CLI/TUI/Gateway 等组合根统一装配。
+- **日志底座选定 `structlog`**：开发环境输出人类可读 console，生产环境用 `JSONRenderer` 输出 JSONL（容器优先 stdout，文件部署用轮转文件）。`merge_contextvars()` 管理 contextvars，processor 管线只挂白名单字段；用 `ProcessorFormatter` 统一接入既有 stdlib logger 与 Uvicorn，避免业务包直接依赖某种 logger 实现。异常 traceback 在出口清洗，sink 失败不得拖垮业务；Uvicorn access log 与 Nova 请求生命周期日志分开，不重复记录同一业务事件。
+- **异步与保留策略复用标准库**：`QueueHandler + QueueListener` 隔离磁盘 I/O，配合大小/保留份数轮转；禁止另写第二套 QueueHandler/QueueListener 机制。flush 在同一队列中插入屏障，回执代表此前接受的记录已离开 sink；关停有等待预算，超时后非 daemon 后台线程仍继续排干，不得清空队列或让解释器悄悄截断收尾。强制退出归外层 watchdog。`capture_logs()` 用于验证事件、字段与 context，不靠字符串碰运气。
+- **多出口独立过滤**：每个 sink 可独立选择 console/JSON、默认级别与 logger 名最长前缀 `target_levels`；root/handler 的粗筛级别必须放到所有目标规则的最低点，不能把目标级 DEBUG 提前截掉。POSIX 日志文件及轮转副本强制 `0600`。进程只允许一个活跃 runtime，上一代关闭完成前再次装配必须响亮失败。
+- **失败出口单点**：标准 stream/file handler 必须覆盖 stdlib 默认 `handleError`（默认实现会把原始 record 写到 stderr），写入、轮转、关闭失败统一进入脱敏回执与 `LoggingStats`；自定义流只声明实际消费的 `LogStream.write/flush` 最小协议。
+- 共享 formatter/context/handler 可形成 `nova_logging` 机制包，但它不得 import `nova_ai`；secret 清洗函数由组合根注入，避免依赖环。
+
+### 4. 隐私与背压
+
+- 默认禁止记录 Authorization/API Key/完整 headers/messages/工具参数/完整请求或响应 body/带 userinfo 或 query 的 URL/原始 provider 错误响应。
+- 异常消息与 traceback 在最终 formatter/出口统一清洗；这只是兜底，**不能用清洗代替默认不收集**。
+- 账户 ID/email 默认不进 trace-safe 和指标；环境变量只记录是否存在，不记录值。
+- 生产写入必须有界：队列容量、丢弃策略和 flush 超时要成文；入队丢弃数与 sink 失败数必须能经 `LoggingStats` 读取，诊断回执只报异常类型，不回显原始记录。不得用无界队列把慢磁盘或慢后端的压力传回 Agent 主循环。
+
+## 九、遥测与业务分析（机器通道）
+
+> 状态：【目标态定稿】现状零统一遥测面。`nova_telemetry` 是类型化 schema 与 adapter 的家，不再以“以后再说”模糊处理；按本节触发线分批落地。业务分析 `nova_analytics` 另有独立立项门槛，不预建。
+
+### 1. Schema 与适配器
+
+- 遥测 schema 必须版本化，定义 span/event/metric 的名称、属性类型、必填性、单位、允许值和基数；禁止散落匿名 tags。
+- **遥测底座选定 OpenTelemetry Python（`opentelemetry-api` / `opentelemetry-sdk`）**：默认提供 no-op 与 in-memory adapter，业务逻辑不依赖外部后端；真实 exporter 用 `opentelemetry-exporter-otlp`，span 经 `BatchSpanProcessor`，指标经 `PeriodicExportingMetricReader`，关停 flush 复用 SDK 语义，不自建第二套 OTel 队列。adapter 不得反向侵入 Provider 调用链。
+- span 表示一次逻辑请求（含鉴权与 setup），可挂首个 chunk、block 完成、重试、终态等事件；记录 `stop/usage/cost/response.id`，**正文内容永不进 span**。
+- 指标：counter 不允许负增量，gauge 表达在途量，histogram 表达耗时/大小时必须声明单位与 bucket；duration 统一 ms 与固定 bucket。标签 key/value 全量校验，未知高基数来源归 `other` 或拒绝。
+- **终态错误上报单点**：`kind + http_status + domain`，消息免载荷；`kind` 对齐 OTel `error.type`，`http_status` 对齐 `http.status_code`，`domain` 挂 `nova.error.domain`，span status 只用 ERROR/UNSET。警告复用 `WarningKind`，取消不计错误指标，分类学只有 `NovaErrorKind` 一套。
+
+### 2. 业务分析的独立边界
+
+真实产品分析需求出现时，`nova_analytics` 采用独立有界队列 + reducer + sender：
+
+- 队列有固定容量；`try_send` 非阻塞，满时丢弃并记录 warning，不得阻塞业务。
+- reducer 负责聚合同类事件与去重；去重 key 有上限，不能无限增长。
+- flush 有独立回执与超时，覆盖实际发送与调度；失败告警但不回抛业务异常。
+- disabled 时 queue=None，flush 是 no-op；debug 可用 capture file 代替真实上报。
+- 业务分析事件与排障日志分家，不把错误日志改名上报，不为了“完整”预建一个分析平台。
+
+### 3. 生命周期与测试
+
+- 组合根装配 exporter；`shutdown()` 幂等关闭 tracer/logger/metrics，`shutdown_with_timeout()` 在有界预算内完成，最后一条数据不得静默丢失。
+- 测试使用 in-memory exporter 与 caplog：验证 schema/字段全等、requestId 跨重试一致、并发 context 不串、无 delta 日志、无重复日志、无 secret、无高基数标签、队列满策略、flush 超时和 disabled no-op。
+- **触发线（任一即立项）**：① 服务器/桌面端形态立项；② 出现“想看错误分布而不得”的真实排障需求；③ 诊断波次 4/5 启动时顺带接线。Gateway 已满足①，后续遥测按本标准实施，不再以“遥测有用但没有日志”含糊跳过。
 
 ## 十、领域层纪律
 
@@ -266,5 +320,7 @@ docs/crosscutting/diagnostics-modeling.md  # 诊断家族地图（分散架构�
 3. **领域挂 kind + 消费改读**：`ModelsError` / `ExecutorError` 映射；RetryController 与压缩恢复改读 `error_kind`；自动重试接 `retry_after_ms`——**部分落地（2026-10）**：`AssistantMessage.retry_after_ms` 载体 + 三转换点抄录 + 高层 Agent/proxy 转换点接入 + RetryController/压缩恢复改读 kind（子串清单删除）+ `LOGIN_REQUIRED` 产出 + anthropic 流内 error.type 映射 + catalog 传输保真（`CatalogOutcome.cause`）；残余：ExecutorError 映射（executor-client 侧）；
 4. **FatalToolError 接 loop** + WarningEvent 入事件流 + logger 分诊升格 + 呈现层去重 + `NovaDiagnostic` 接装配层；
 5. **遥测单点 + RPC `data.errorKind` + Rust 协议层投影**。
+
+**日志基础设施注记（2026-11）**：`nova_logging` 已完成受控上下文、白名单 formatter、注入式出口清洗、多 sink/目标级过滤、有界队列、flush 屏障、超时关停、0600 轮转文件与运行统计；Gateway 已接入请求/上游/终态/关闭日志及 stdout + JSONL 文件双出口，requestId 跨 SSE 与关停保留，默认无正文、密钥、完整 URL 或 delta。上述波次 4 的“logger 分诊升格”指存量散点日志的用户通道治理，不因日志底座落地而自动完成。
 
 **现状注记（存量，不归波次）**：错误消息化（`AssistantMessage.error_message` + `ErrorEvent`）、provider 错误体标准化（`utils/errors.py`）、传输重试结构嗅探（`_shared/retry.py`）、refresh errors 字典、`ModelsError` 六域 code、取消三海拔、`ExecutorError` 七类层级、会话重试事件（`AutoRetryStart/EndEvent`）、信息回执通道（UI 原语 `notify_message` 糖 + `set_status`）、扩展错误事件（`ExtensionErrorEvent`）。

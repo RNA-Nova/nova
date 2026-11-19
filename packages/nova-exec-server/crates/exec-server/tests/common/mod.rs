@@ -18,19 +18,20 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use ctor::ctor;
-use nova_exec_server_http_client::HttpClientFactory;
-use nova_exec_server_http_client::OutboundProxyPolicy;
 use nova_exec_server::ExecServerRuntimePaths;
 use nova_exec_server::ExecServerTelemetry;
 use nova_exec_server::NOVA_EXEC_SERVER_ARG0_EXEC_HELPER_ARG1;
 use nova_exec_server::NOVA_EXEC_SERVER_FS_HELPER_ARG1;
 use nova_exec_server::RequestDispatchMode;
+use nova_exec_server_http_client::HttpClientFactory;
+use nova_exec_server_http_client::OutboundProxyPolicy;
 
 pub(crate) mod exec_server;
 
 pub(crate) const DELAYED_OUTPUT_AFTER_EXIT_PARENT_ARG: &str =
     "--nova-test-delayed-output-after-exit-parent";
-pub(crate) const SYSTEM_PROXY_REQUEST_URL_ENV: &str = "NOVA_EXEC_SERVER_TEST_SYSTEM_PROXY_REQUEST_URL";
+pub(crate) const SYSTEM_PROXY_REQUEST_URL_ENV: &str =
+    "NOVA_EXEC_SERVER_TEST_SYSTEM_PROXY_REQUEST_URL";
 pub(crate) const SYSTEM_PROXY_URL_ENV: &str = "NOVA_EXEC_SERVER_TEST_SYSTEM_PROXY_URL";
 
 // 对位 codex 39f4277087 tests/common/mod.rs 同名宏：宿主机无原生 MXC 时跳过用例。
@@ -158,7 +159,9 @@ pub(crate) async fn connect_remote_exec_client(
 /// Remote* 后座的惰性客户端包装（每次调用现取连接、断线自动恢复——
 /// 对位 codex RemoteProcess/RemoteFileSystem 的 Lazy 后座）。
 #[allow(dead_code)]
-pub(crate) fn lazy_remote_exec_client(websocket_url: &str) -> nova_exec_server::LazyRemoteExecServerClient {
+pub(crate) fn lazy_remote_exec_client(
+    websocket_url: &str,
+) -> nova_exec_server::LazyRemoteExecServerClient {
     use std::time::Duration;
 
     nova_exec_server::LazyRemoteExecServerClient::new(
@@ -302,7 +305,10 @@ fn run_exec_server_from_test_binary(mut args: impl Iterator<Item = std::ffi::OsS
         env::var(SYSTEM_PROXY_URL_ENV),
     ) {
         (Ok(request_url), Ok(proxy_url)) => {
-            nova_exec_server_http_client::cache_system_proxy_route_for_test(&request_url, proxy_url);
+            nova_exec_server_http_client::cache_system_proxy_route_for_test(
+                &request_url,
+                proxy_url,
+            );
             HttpClientFactory::new(OutboundProxyPolicy::RespectSystemProxy)
         }
         (Err(env::VarError::NotPresent), Err(env::VarError::NotPresent)) => {

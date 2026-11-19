@@ -8,7 +8,7 @@
 import json
 from pathlib import Path
 
-from nova_ai.catalog import model_data as mdata
+import scripts.model_data as mdata
 from nova_protocol import ClassifierModel, ImageModel, Model
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent

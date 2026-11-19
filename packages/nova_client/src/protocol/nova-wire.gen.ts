@@ -68,7 +68,7 @@ export interface AppendEntryResult {
 export interface AssistantMessage {
   role: "assistant";
   content: (TextContent | ThinkingContent | ToolCall)[];
-  api: "openai-completions" | "openai-responses" | "azure-openai-responses" | "openai-codex-responses" | "anthropic-messages" | "bedrock-converse-stream" | "google-generative-ai" | "google-gemini-cli" | "google-vertex" | string;
+  api: "openai-completions" | "openai-responses" | "azure-openai-responses" | "openai-codex-responses" | "anthropic-messages" | "nova-gateway" | "bedrock-converse-stream" | "google-generative-ai" | "google-gemini-cli" | "google-vertex" | string;
   provider: "amazon-bedrock" | "anthropic" | "google" | "google-gemini-cli" | "google-antigravity" | "google-vertex" | "openai" | "azure-openai-responses" | "openai-codex" | "github-copilot" | "xai" | "groq" | "cerebras" | "openrouter" | "vercel-ai-gateway" | "zai" | "zai-coding-cn" | "mistral" | "minimax" | "minimax-cn" | "huggingface" | "opencode" | "opencode-go" | "nvidia" | "moonshotai" | "moonshotai-cn" | "kimi-coding" | "volcengine" | string;
   model: string;
   usage: Usage;

@@ -58,7 +58,10 @@ async fn open_platform(
 
     let (mut receiver, sender) = UnixStream::pair().map_err(io_error)?;
     let sender: OwnedFd = sender.into();
-    let child = spawn_command(command, nova_exec_server_utils_pty::ChildStdin::File(sender))?;
+    let child = spawn_command(
+        command,
+        nova_exec_server_utils_pty::ChildStdin::File(sender),
+    )?;
     receiver.write_all(&request).map_err(io_error)?;
     receiver
         .shutdown(std::net::Shutdown::Write)

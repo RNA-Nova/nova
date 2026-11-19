@@ -5,14 +5,14 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+use globset::Candidate;
+use globset::GlobBuilder;
+use globset::GlobMatcher;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_absolute_path::canonicalize_preserving_symlinks;
 use nova_exec_server_utils_path_uri::LegacyAppPathString;
 use nova_exec_server_utils_path_uri::PathConvention;
 use nova_exec_server_utils_path_uri::PathUri;
-use globset::Candidate;
-use globset::GlobBuilder;
-use globset::GlobMatcher;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -1192,7 +1192,10 @@ impl FileSystemSandboxPolicy {
         if prepared.invalid_pattern {
             return true;
         }
-        prepared.denied_roots.iter().any(|root| path.starts_with(root))
+        prepared
+            .denied_roots
+            .iter()
+            .any(|root| path.starts_with(root))
             || prepared.deny_read_matchers.iter().any(|matcher| {
                 let path = match convention {
                     PathConvention::Posix => path.decoded_path_bytes(),
@@ -3505,12 +3508,10 @@ mod tests {
                     .contains(&explicit_metadata),
                 "explicit {name} rule should win over the default protected carveout"
             );
-            assert!(
-                policy.can_write_local_path_with_cwd(
-                    explicit_metadata.join("config.toml").as_path(),
-                    cwd.path()
-                )
-            );
+            assert!(policy.can_write_local_path_with_cwd(
+                explicit_metadata.join("config.toml").as_path(),
+                cwd.path()
+            ));
         }
     }
 
@@ -3619,18 +3620,17 @@ mod tests {
             Some(".git")
         );
         assert!(
-            file_system_policy.can_write_local_path_with_cwd(Path::new("src/main.rs"), relative_cwd,)
+            file_system_policy
+                .can_write_local_path_with_cwd(Path::new("src/main.rs"), relative_cwd,)
         );
         assert!(
             !file_system_policy
                 .can_write_local_path_with_cwd(Path::new(".nova/config.toml"), relative_cwd,)
         );
-        assert!(
-            !file_system_policy.can_write_local_path_with_cwd(
-                Path::new(".agents/skills/example/SKILL.md"),
-                relative_cwd,
-            )
-        );
+        assert!(!file_system_policy.can_write_local_path_with_cwd(
+            Path::new(".agents/skills/example/SKILL.md"),
+            relative_cwd,
+        ));
     }
 
     #[cfg(unix)]
@@ -4059,7 +4059,8 @@ mod tests {
             FileSystemAccessMode::Deny
         );
         assert_eq!(
-            policy.resolve_access_for_local_path_with_cwd(docs_private_public.as_path(), cwd.path()),
+            policy
+                .resolve_access_for_local_path_with_cwd(docs_private_public.as_path(), cwd.path()),
             FileSystemAccessMode::Write
         );
     }

@@ -19,7 +19,7 @@ pub struct ExecServerRuntimePaths {
     /// （对位 codex 39f4277087 `ExecServerRuntimeOptions::proxy_private_ips_via_upstream`）
     pub proxy_private_ips_via_upstream: bool,
     /// User-config opt-out of writable-root symlink checks beneath this host's home.
-    /// （配置源未接入 nova，当前恒为 None，见移植报告挂账项）
+    /// （由 executor home 的 config.toml 中 allow_symlinked_nova_home=true 启用）
     #[cfg(target_os = "macos")]
     pub allowed_symlinked_nova_home: Option<AbsolutePathBuf>,
 }

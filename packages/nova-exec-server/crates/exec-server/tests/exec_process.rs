@@ -14,32 +14,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
-#[cfg(unix)]
-use nova_exec_server_network_proxy::NetworkProxyConfig;
-#[cfg(unix)]
-use nova_exec_server_network_proxy::RemoteNetworkProxyConfig;
-#[cfg(unix)]
-use nova_exec_server_network_proxy::RemoteNetworkProxyLaunchConfig;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
-use nova_exec_server_file_system::WindowsSandboxSelection;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::models::PermissionProfile;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::permissions::FileSystemPath;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
-#[cfg(unix)]
-use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
-use nova_exec_server_protocol_core::protocol::SandboxPolicy;
-use nova_exec_server::ExecBackend;
 use nova_exec_server::Environment;
+use nova_exec_server::ExecBackend;
 #[cfg(unix)]
 use nova_exec_server::ExecEnvPolicy;
 use nova_exec_server::ExecMetadata;
@@ -60,6 +36,30 @@ use nova_exec_server::ShellInfo;
 use nova_exec_server::ShellSnapshotRequest;
 use nova_exec_server::StartedExecProcess;
 use nova_exec_server::WriteStatus;
+use nova_exec_server_file_system::WindowsSandboxSelection;
+#[cfg(unix)]
+use nova_exec_server_network_proxy::NetworkProxyConfig;
+#[cfg(unix)]
+use nova_exec_server_network_proxy::RemoteNetworkProxyConfig;
+#[cfg(unix)]
+use nova_exec_server_network_proxy::RemoteNetworkProxyLaunchConfig;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::config_types::ShellEnvironmentPolicyInherit;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::models::PermissionProfile;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::permissions::FileSystemPath;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
+#[cfg(unix)]
+use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
+use nova_exec_server_protocol_core::protocol::SandboxPolicy;
 use nova_exec_server_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;

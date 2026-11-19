@@ -27,11 +27,7 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
         /*inc*/ 1,
         &[("model", "gpt-5.1"), ("env", "dev")],
     )?;
-    metrics.histogram(
-        "nova.tool_latency",
-        /*value*/ 25,
-        &[("tool", "shell")],
-    )?;
+    metrics.histogram("nova.tool_latency", /*value*/ 25, &[("tool", "shell")])?;
     metrics.gauge_with_description(
         "nova.active",
         "Number of active Codex operations.",
@@ -196,11 +192,8 @@ fn context_histograms_preserve_zero_and_family_ranges() -> Result<()> {
 // Ensures defaults merge per line and overrides take precedence.
 #[test]
 fn send_merges_default_tags_per_line() -> Result<()> {
-    let (metrics, exporter) = build_metrics_with_defaults(&[
-        ("service", "nova-cli"),
-        ("env", "prod"),
-        ("region", "us"),
-    ])?;
+    let (metrics, exporter) =
+        build_metrics_with_defaults(&[("service", "nova-cli"), ("env", "prod"), ("region", "us")])?;
 
     metrics.counter(
         "nova.alpha",

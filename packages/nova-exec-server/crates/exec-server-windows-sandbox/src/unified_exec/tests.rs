@@ -9,6 +9,7 @@ use crate::ipc_framed::Message;
 use crate::ipc_framed::decode_bytes;
 use crate::ipc_framed::read_frame;
 use crate::run_windows_sandbox_capture;
+use crate::test_support::WindowsSandboxAccountTestGuard;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use nova_exec_server_protocol_core::config_types::WindowsSandboxLevel;
@@ -16,7 +17,6 @@ use nova_exec_server_protocol_core::models::PermissionProfile;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 use nova_exec_server_utils_pty::ProcessDriver;
 use nova_exec_server_utils_pty::ProcessSignal;
-use crate::test_support::WindowsSandboxAccountTestGuard;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::fs;
@@ -360,7 +360,9 @@ fn registered_non_tty_cmd_forwards_env_output_and_exit() {
         crate::registered_core_requested(),
         "registered Core opt-in is required"
     );
-    let sandbox_home = PathBuf::from(std::env::var_os("NOVA_EXEC_SERVER_HOME").expect("fixture NOVA_EXEC_SERVER_HOME"));
+    let sandbox_home = PathBuf::from(
+        std::env::var_os("NOVA_EXEC_SERVER_HOME").expect("fixture NOVA_EXEC_SERVER_HOME"),
+    );
     assert!(
         crate::app_package::registered_setup_is_ready(&sandbox_home)
             .expect("validate the installed package and service receipt"),
@@ -369,7 +371,10 @@ fn registered_non_tty_cmd_forwards_env_output_and_exit() {
     let cwd = tempfile::tempdir().expect("isolated command workspace");
     current_thread_runtime().block_on(async {
         let mut env_map: HashMap<String, String> = std::env::vars().collect();
-        env_map.insert("NOVA_EXEC_SERVER_REGISTERED_TEST".into(), "REGISTERED-ENV-OK".into());
+        env_map.insert(
+            "NOVA_EXEC_SERVER_REGISTERED_TEST".into(),
+            "REGISTERED-ENV-OK".into(),
+        );
         let spawned = spawn_windows_sandbox_session_elevated_for_permission_profile(
             &PermissionProfile::workspace_write(),
             workspace_roots_for(cwd.path()).as_slice(),
@@ -682,7 +687,10 @@ fn legacy_capture_emits_output_and_preserves_descendant_after_normal_exit() {
     let _guard = legacy_process_test_guard();
     let cwd = sandbox_cwd();
     let sandbox_home = sandbox_home("legacy-capture-pwsh");
-    println!("capture pwsh sandbox_home={}", sandbox_home.path().display());
+    println!(
+        "capture pwsh sandbox_home={}",
+        sandbox_home.path().display()
+    );
     let ready_marker = sandbox_home.path().join("descendant-started");
     let release_marker = sandbox_home.path().join("release-descendant");
     let survival_marker = sandbox_home.path().join("descendant-survived");
@@ -698,7 +706,12 @@ fn legacy_capture_emits_output_and_preserves_descendant_after_normal_exit() {
     );
     let parent_command = format!(
         "{ASSERT_NO_CONSOLE} Write-Output LEGACY-CAPTURE-DIRECT; {}",
-        start_powershell_child(&pwsh, sandbox_home.path(), &descendant_command, &parent_tail,),
+        start_powershell_child(
+            &pwsh,
+            sandbox_home.path(),
+            &descendant_command,
+            &parent_tail,
+        ),
     );
     let permission_profile = PermissionProfile::workspace_write();
     let result = run_windows_sandbox_capture(
@@ -840,9 +853,12 @@ fn legacy_workspace_write_delete_is_limited_to_writable_roots() {
         )
         .await
         .expect("spawn legacy delete session");
-        let (stdout, exit_code) =
-            collect_stdout_and_exit(spawned, sandbox_home.path(), Duration::from_secs(/*secs*/ 10))
-                .await;
+        let (stdout, exit_code) = collect_stdout_and_exit(
+            spawned,
+            sandbox_home.path(),
+            Duration::from_secs(/*secs*/ 10),
+        )
+        .await;
         let stdout = String::from_utf8_lossy(&stdout);
 
         assert_eq!(
@@ -1044,7 +1060,9 @@ fn legacy_tty_job_terminates_and_preserves_descendants() {
     // sandbox 的 descendant 生命周期，托管环境不可验证；codex CI 在自管
     // runner 池运行本组测试。TODO(nova): 真机 relay 落地后移除本门控。
     if std::env::var_os("CI").is_some() {
-        eprintln!("skipping: hosted-runner job-object hierarchy interferes with sandbox descendants");
+        eprintln!(
+            "skipping: hosted-runner job-object hierarchy interferes with sandbox descendants"
+        );
         return;
     }
     let Some(pwsh) = pwsh_path() else {

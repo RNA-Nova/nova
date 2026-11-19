@@ -455,8 +455,8 @@ impl SandboxManager {
             SandboxType::MacosSeatbelt => return Err(SandboxTransformError::SeatbeltUnavailable),
             SandboxType::LinuxSeccomp => {
                 let pending = pending_sandboxed_request?;
-                let exe = sandbox_exe
-                    .ok_or(SandboxTransformError::MissingLinuxSandboxExecutable)?;
+                let exe =
+                    sandbox_exe.ok_or(SandboxTransformError::MissingLinuxSandboxExecutable)?;
                 // 托管网络要求下：调用方未带上下文而现场代理可用时，就地准备
                 // env 与沙箱上下文（对位 codex 99914f4950；exec-server 路径已在
                 // process_sandbox 提前备好，此分支兜底直连调用方）。
@@ -790,9 +790,7 @@ fn add_windows_sandbox_wrapper_setup_env_from_vars(
     registered_core: bool,
 ) {
     // This outer helper must use the parent's runtime selection, not shell-policy overrides.
-    env.retain(|key, _| {
-        !key.eq_ignore_ascii_case("NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE")
-    });
+    env.retain(|key, _| !key.eq_ignore_ascii_case("NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE"));
     if registered_core {
         env.insert(
             "NOVA_EXEC_SERVER_WINDOWS_REGISTERED_CORE".into(),
@@ -841,7 +839,9 @@ fn compatibility_workspace_write_policy(
         .and_then(|tmpdir| {
             AbsolutePathBuf::from_absolute_path(std::path::PathBuf::from(tmpdir)).ok()
         })
-        .is_some_and(|tmpdir| file_system_policy.can_write_local_path_with_cwd(tmpdir.as_path(), cwd));
+        .is_some_and(|tmpdir| {
+            file_system_policy.can_write_local_path_with_cwd(tmpdir.as_path(), cwd)
+        });
     let slash_tmp = Path::new("/tmp");
     let slash_tmp_writable = slash_tmp.is_absolute()
         && slash_tmp.is_dir()

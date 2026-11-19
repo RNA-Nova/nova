@@ -3,14 +3,15 @@ EnvironmentManager，本模块只留 nova 胶水）。
 
 批次 B 归位：连接管理词汇归 executor 栈自持（SDK 的
 ``EnvironmentManager``——懒创建/缓存/状态观察/增删/清扫，对位 codex
-environments 体系）。本模块保留的三件 nova 特有胶水：
+environments 体系）。本模块只保留两件 nova 胶水：
 
 - **本地 spawn**：解析 nova-executor 二进制并 spawn 回环实例
   （ws://127.0.0.1:0 + 随机 bearer token）——spawn 后作为 ws 环境
   动态注册进 SDK 注册表；
-- **SSH 供给**：经 provision 供给远程实例 + 回环隧道（隧道死亡
-  重新供给 + 换注册——对应 SDK 的 refresh 语义）；
-- **进程级清理**：atexit 回收隧道与 spawn 的 executor。
+- **进程级清理**：atexit 回收 spawn 的 executor。
+
+远程接入只消费既有 ws(s) 端点；Nova 不再提供 SSH 密钥引导、远程二进制
+上传或 ``ssh://`` 隧道供给。通用 stdio command 环境仍由 SDK 配置层承载。
 
 二进制解析链：``NOVA_EXECUTOR_BIN`` 环境变量 → nova 托管 bin
 （~/.nova/agent/bin/）→ 仓库本地构建（target/release|debug，开发态）→ PATH。
@@ -25,7 +26,7 @@ import os
 import secrets
 import subprocess
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Optional
 
 from nova_exec_server_client import (
     EnvironmentManager,
@@ -34,16 +35,6 @@ from nova_exec_server_client import (
     ExecutorEnvironment,
 )
 from nova_harness.config.defaults import get_agent_dir
-
-from nova_coding_agent.executor.provision import (
-    BootstrapFn,
-    ProgressFn,
-    SshRemoteHandle,
-    SshTarget,
-    is_ssh_url,
-    parse_ssh_target,
-    provision,
-)
 
 # 等待本地 executor 打印监听地址的超时
 _SPAWN_READY_TIMEOUT_S = 10.0
@@ -80,35 +71,25 @@ class ExecutorClientManager:
     """executor 客户端生命周期（进程级单例——薄适配层）。
 
     客户端缓存/连接生命周期全归 SDK ``EnvironmentManager``；本类持有
-    nova 胶水（本地 spawn 的 daemon 进程、SSH 隧道句柄）并把动态端点
-    注册为环境。后端进程是一会话一进程，模块级状态即会话级。
+    本地 spawn 的 daemon 进程并把动态端点注册为环境。后端进程是一会话
+    一进程，模块级状态即会话级。
     """
 
     def __init__(self) -> None:
         self._env_manager = EnvironmentManager(ExecutorConfig())
         self._spawned: list[subprocess.Popen] = []
-        self._ssh_handles: dict[str, SshRemoteHandle] = {}
         self._lock = asyncio.Lock()
         self._atexit_registered = False
 
     def _ensure_atexit(self) -> None:
-        """首个后端进程/隧道创建时挂 atexit 清理（幂等）。
-
-        后端进程正常退出（含 RPC 服务器信号优雅关停后的解释器退出）时
-        回收 ssh 隧道子进程与本地 spawn 的 executor——python 一死它们
-        即成孤儿（远程 executor 随之长存，实证过）。SIGKILL 无解
-        （挂账：executor 侧空闲超时自毁）。
-        """
+        """首个本地后端进程创建时挂 atexit 清理（幂等）。"""
         if self._atexit_registered:
             return
         self._atexit_registered = True
         atexit.register(self._sync_cleanup)
 
     def _sync_cleanup(self) -> None:
-        """atexit 同步清理：终止隧道 ssh 与本地 spawn 的 executor。"""
-        for handle in self._ssh_handles.values():
-            handle.stop()
-        self._ssh_handles.clear()
+        """atexit 同步清理：终止本地 spawn 的 executor。"""
         for proc in self._spawned:
             try:
                 proc.terminate()
@@ -117,59 +98,26 @@ class ExecutorClientManager:
         self._spawned.clear()
 
     async def get_client(self, url: Optional[str] = None) -> ExecutorClient:
-        """获取客户端：url=None → 本地 spawn；ssh:// → SSH 隧道；其余直连。
+        """获取客户端：url=None → 本地 spawn；其余仅接受 ws(s) 直连。
 
-        连接生命周期全在 SDK EnvironmentManager（缓存命中直返）；SSH 隧道
-        死亡（断网/休眠/远端重启）→ 重新供给并以新端点换注册。
+        连接生命周期全在 SDK EnvironmentManager（缓存命中直返）。
         """
         key = url or "__local__"
         async with self._lock:
-            handle = self._ssh_handles.get(key)
-            if handle is not None and not handle.alive():
-                # 隧道死亡：重供给 + 换注册（等价 SDK refresh 的供给侧）
-                self._ssh_handles.pop(key, None)
-                handle = None
             if url is None:
                 # status() 现为 async 实况探活（A16——探活失败即判
                 # DISCONNECTED 触发重新 spawn，不再信缓存的 CONNECTED）
                 status = await self._env_manager.status("__local__")
                 if status.state.value != "connected":
                     await self._register_local_spawn()
-            elif is_ssh_url(url):
-                if handle is None:
-                    await self._register_ssh(parse_ssh_target(url))
             else:
+                if not url.startswith(("ws://", "wss://")):
+                    raise ValueError("executor 远程端点仅支持 ws:// 或 wss://")
                 await self._env_manager.upsert_environment(
                     ExecutorEnvironment(id=key, url=url),
                     token=os.environ.get("NOVA_EXECUTOR_TOKEN"),
                 )
             return await self._env_manager.get_client(key)
-
-    async def provision_ssh(
-        self,
-        target: SshTarget,
-        on_progress: Optional[ProgressFn] = None,
-        bootstrap: Optional[BootstrapFn] = None,
-    ) -> ExecutorClient:
-        """/executor 命令的 eagerly 供给入口（带进度与首连引导回调）。
-
-        已供给且隧道活着时直接复用——幂等，/executor 重选同主机零开销。
-        """
-        async with self._lock:
-            handle = await self._ensure_ssh_handle(target, on_progress, bootstrap)
-            await self._env_manager.upsert_environment(
-                ExecutorEnvironment(id=handle.target.canonical_url, url=handle.url),
-                token=handle.token,
-            )
-            return await self._env_manager.get_client(handle.target.canonical_url)
-
-    async def _register_ssh(self, target: SshTarget) -> None:
-        """懒路径注册：BatchMode 供给（免密应已就绪——首连引导归 /executor 命令）。"""
-        handle = await self._ensure_ssh_handle(target)
-        await self._env_manager.upsert_environment(
-            ExecutorEnvironment(id=handle.target.canonical_url, url=handle.url),
-            token=handle.token,
-        )
 
     async def _register_local_spawn(self) -> None:
         """本地 spawn 一次并注册为 ws 环境（随机 bearer 进 token 侧表）。"""
@@ -177,27 +125,6 @@ class ExecutorClientManager:
         await self._env_manager.upsert_environment(
             ExecutorEnvironment(id="__local__", url=url), token=token
         )
-
-    def get_ssh_handle(self, target: SshTarget) -> Optional[SshRemoteHandle]:
-        """已供给的 SSH 句柄（/executor 扩展读远程家目录/shell 定远程 cwd 用）。"""
-        return self._ssh_handles.get(target.canonical_url)
-
-    async def _ensure_ssh_handle(
-        self,
-        target: SshTarget,
-        on_progress: Optional[ProgressFn] = None,
-        bootstrap: Optional[BootstrapFn] = None,
-    ) -> SshRemoteHandle:
-        key = target.canonical_url
-        handle = self._ssh_handles.get(key)
-        if handle is not None and handle.alive():
-            return handle
-        if handle is not None:
-            handle.stop()
-        handle = await provision(target, on_progress=on_progress, bootstrap=bootstrap)
-        self._ssh_handles[key] = handle
-        self._ensure_atexit()
-        return handle
 
     async def _spawn_local(self) -> tuple[str, str]:
         binary = resolve_executor_binary()
@@ -213,6 +140,11 @@ class ExecutorClientManager:
         # exec-server-cli 的 --ws-auth 族——旧 `--auth bearer/--auth-token`
         # 拼写在 CLI 不存在（clap 直接拒绝，spawn 必死）。
         token_sha256 = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        # 父死子随：显式注入 leash 环境变量，并把子进程 stdin 保持为父进程
+        # 私管——父进程死亡/管道关闭时 executor 收到 EOF 退出（对位 codex
+        # ParentLifetime::StdinPipe）。`_spawned` 持有 proc，stdin 不会提前关闭。
+        env = dict(os.environ)
+        env["NOVA_EXEC_SERVER_EXIT_ON_STDIN_CLOSE"] = "1"
         proc = subprocess.Popen(
             [
                 binary,
@@ -223,9 +155,11 @@ class ExecutorClientManager:
                 "--ws-token-sha256",
                 token_sha256,
             ],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            env=env,
         )
         self._spawned.append(proc)
         self._ensure_atexit()
@@ -261,11 +195,8 @@ class ExecutorClientManager:
         raise TimeoutError("nova-executor 启动超时（未打印监听地址）")
 
     async def close_all(self) -> None:
-        """断开全部客户端（SDK 清扫）并终止 spawn 的 executor 子进程与 SSH 隧道。"""
+        """断开全部客户端（SDK 清扫）并终止本地 spawn 的 executor。"""
         await self._env_manager.close_all()
-        for handle in self._ssh_handles.values():
-            handle.stop()
-        self._ssh_handles.clear()
         for proc in self._self_spawned():
             try:
                 proc.terminate()

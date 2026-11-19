@@ -191,6 +191,7 @@ impl FileHandleManager {
             file: Arc::clone(&file),
             write_stream,
             generation,
+            operation_lock: Arc::new(tokio::sync::Mutex::new(())),
             _permit: permit,
         });
         drop(table);
@@ -256,9 +257,10 @@ impl FileHandleManager {
                 ))),
             };
         if result.is_err() {
-            match generation {
-                Some(generation) => self.close_if_generation(handle_id, generation),
-                None => self.close(handle_id),
+            // 流路径由调用方在释放条目操作锁后按代际收尾（close_if_generation），
+            // 避免在锁内嵌套 close 形成自死锁；普通读路径维持失败即关。
+            if generation.is_none() {
+                self.close(handle_id).await;
             }
         }
         result
@@ -393,6 +395,32 @@ impl FileHandleManager {
         }
     }
 
+    /// 获取本代条目的操作锁并复核代际：锁内执行读通知/写落盘期间，
+    /// close/reopen 无法插入；返回 NotFound 表示条目已摘除或已被重开取代。
+    async fn lock_for_generation(
+        &self,
+        handle_id: &str,
+        generation: u64,
+    ) -> io::Result<tokio::sync::OwnedMutexGuard<()>> {
+        let operation_lock = {
+            let table = self.lock_handles();
+            table
+                .entries
+                .get(handle_id)
+                .map(|entry| Arc::clone(&entry.operation_lock))
+        };
+        let Some(operation_lock) = operation_lock else {
+            return Err(unknown_handle_error(handle_id));
+        };
+        let guard = operation_lock.lock_owned().await;
+        let current_generation = self.handle_generation(handle_id);
+        if current_generation == Some(generation) {
+            Ok(guard)
+        } else {
+            Err(unknown_handle_error(handle_id))
+        }
+    }
+
     /// 当前条目代际（None = 已摘除）：流任务判定"我那一届还在不在"用。
     pub(crate) fn handle_generation(&self, handle_id: &str) -> Option<u64> {
         self.lock_handles()
@@ -401,20 +429,41 @@ impl FileHandleManager {
             .map(|entry| entry.generation)
     }
 
-    pub(crate) fn close(&self, handle_id: &str) {
-        self.lock_handles().entries.remove(handle_id);
+    pub(crate) async fn close(&self, handle_id: &str) {
+        let operation_lock = {
+            let table = self.lock_handles();
+            table
+                .entries
+                .get(handle_id)
+                .map(|entry| Arc::clone(&entry.operation_lock))
+        };
+        if let Some(operation_lock) = operation_lock {
+            let _guard = operation_lock.lock_owned().await;
+            self.lock_handles().entries.remove(handle_id);
+        }
     }
 
     /// 代际守卫摘除（nova 自有，流任务收尾专用）：仅当当前条目仍是调用方那
     /// 一代才摘除——close→同名重开后旧任务的收尾 close 不会误摘新句柄。
-    pub(crate) fn close_if_generation(&self, handle_id: &str, generation: u64) {
-        let mut table = self.lock_handles();
-        if table
-            .entries
-            .get(handle_id)
-            .is_some_and(|entry| entry.generation == generation)
-        {
-            table.entries.remove(handle_id);
+    /// 与读通知/写落盘共用条目锁，close 在在飞块落定后才允许执行。
+    pub(crate) async fn close_if_generation(&self, handle_id: &str, generation: u64) {
+        let operation_lock = {
+            let table = self.lock_handles();
+            table
+                .entries
+                .get(handle_id)
+                .map(|entry| Arc::clone(&entry.operation_lock))
+        };
+        if let Some(operation_lock) = operation_lock {
+            let _guard = operation_lock.lock_owned().await;
+            let mut table = self.lock_handles();
+            if table
+                .entries
+                .get(handle_id)
+                .is_some_and(|entry| entry.generation == generation)
+            {
+                table.entries.remove(handle_id);
+            }
         }
     }
 
@@ -462,6 +511,9 @@ struct FileHandleEntry {
     /// 旧流任务据此识别"条目已非我那一届"（见 close_if_generation /
     /// read_block_for_generation / stream_file_blocks）。
     generation: u64,
+    /// 读通知/写落盘与 close/reopen 的互斥锁：check-then-act 不再开窗——
+    /// close 必须等当前块通知或写入落定后才能摘除并允许同名重开。
+    operation_lock: Arc<tokio::sync::Mutex<()>>,
     // Closing an entry releases capacity even if a read or write still holds the file.
     _permit: OwnedSemaphorePermit,
 }
@@ -535,6 +587,30 @@ where
             break;
         }
 
+        let operation_guard = match file_handles
+            .lock_for_generation(handle_id, generation)
+            .await
+        {
+            Ok(guard) => guard,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                if file_handles.handle_generation(handle_id).is_some() {
+                    return (total_bytes, None, true);
+                }
+                file_handles
+                    .close_if_generation(handle_id, generation)
+                    .await;
+                error = Some(err.to_string());
+                break;
+            }
+            Err(err) => {
+                file_handles
+                    .close_if_generation(handle_id, generation)
+                    .await;
+                error = Some(err.to_string());
+                break;
+            }
+        };
+
         match read_stream_block_for_generation(
             file_handles,
             handle_id,
@@ -551,13 +627,8 @@ where
                 current_offset = current_offset.saturating_add(bytes_len);
 
                 // 读取期间被同名重开取代：本块不再发射——本代流的迟到 chunk
-                // 不得串入新流路由（路由在客户端按 handle_id 键控）。残余窗口
-                // = 本次判定与 emit 内 notify().await 的间隔：出站拥塞时阻塞
-                // notify 可挂数秒（数据完整性优先的刻意设计），窗口内
-                // close→同名重开仍可能让一个已读出的旧文件块串入新流——
-                // 彻底闭合需要协议级流令牌，本批明认的取舍。
-                // 注意仅"条目还在但非本代"才算取代；纯摘除（close/断连）不算——
-                // 后续读块会以 NotFound 收尾，保持 done 带 error 的既有语义。
+                // 不得串入新流路由（路由在客户端按 handle_id 键控）。操作锁把
+                // 判定、读取与通知串成一段：close/reopen 只能在本块通知落定后发生。
                 if let Some(current) = file_handles.handle_generation(handle_id)
                     && current != generation
                 {
@@ -572,6 +643,10 @@ where
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                drop(operation_guard);
+                file_handles
+                    .close_if_generation(handle_id, generation)
+                    .await;
                 // NotFound = 条目摘除或代际不符（定位读对有效 fd 不产生
                 // NotFound）：条目还在即被同名重开取代——静默收尾；
                 // 条目没了即 close/断连中断——done 带 error（既有语义）。
@@ -582,6 +657,10 @@ where
                 break;
             }
             Err(err) => {
+                drop(operation_guard);
+                file_handles
+                    .close_if_generation(handle_id, generation)
+                    .await;
                 // 与 NotFound 臂同一不变式：在飞读以非 NotFound 的 I/O 错误
                 //（如 EIO）失败时若已被同名重开取代，同样静默收尾——本代流的
                 // 迟到终态（done error）不得串入新流路由。
@@ -594,6 +673,7 @@ where
                 break;
             }
         }
+        drop(operation_guard);
     }
 
     (total_bytes, error, false)
@@ -628,21 +708,17 @@ async fn run_write_stream_task(
     while let Some(input) = rx.recv().await {
         match input {
             WriteStreamInput::Chunk { seq, bytes, eof } => {
-                // 代际守卫（逐块，先于一切写入）：close→同名重开后本任务的
-                // 剩余积压块属于旧流——排空语义只覆盖"纯 close"（条目摘除后
-                // 把已收队列落定，文件留盘供续传）；条目被取代（代际不同）
-                // 时继续写会把旧流内容交错进新文件（同路径重开共享 inode），
-                // 故静默收尾——不落盘、不摘新句柄（收尾的代际守卫摘除在
-                // 循环外的尾 close）。
-                // 残余窗口明认：本判定与 write_block_at 落盘之间是
-                // check-then-act——在飞块的写入窗口内完成 close→重开，
-                // 该块仍可能落进新文件（窗口从"整个排空期"收窄到"单块在飞
-                // 期"，与读侧的残余窗口同类；彻底闭合需协议级流令牌）。
-                if let Some(current) = manager.handle_generation(&handle_id)
-                    && current != generation
-                {
-                    break;
-                }
+                let operation_guard =
+                    match manager.lock_for_generation(&handle_id, generation).await {
+                        Ok(guard) => Some(guard),
+                        // 纯 close（条目摘除但无重开）：保留既有排空语义——已入
+                        // channel 的块继续落盘，不受条目锁约束。
+                        Err(_) if manager.handle_generation(&handle_id).is_none() => None,
+                        // 同名重开：本任务静默收尾，不写不摘新句柄。
+                        Err(_) => break,
+                    };
+                // 代际守卫与落盘共用条目操作锁：close/reopen 只能在单块写入
+                // 落定后发生，check-then-act 不再留下旧流写入新文件的窗口。
                 // 背压 latch 汇入本地终态（本地错误时间上更早，先到先得）
                 if failed.is_none() {
                     failed = backpressure.get().cloned();
@@ -684,6 +760,7 @@ async fn run_write_stream_task(
                 // 空块（eof 哨兵）只携带标志位，不落盘
                 expected_seq += 1;
                 eof_seen = eof;
+                drop(operation_guard);
             }
             WriteStreamInput::Done { respond } => {
                 // 背压 latch 同样须在交账前汇入（队列满之后可能再无 chunk 进来）
@@ -703,7 +780,7 @@ async fn run_write_stream_task(
                 //（交账先于摘除会在 done 与任务收尾之间留出复用被误拒的窗口）。
                 // 代际守卫：Done 在 channel 里排队期间条目被 close→同名重开时，
                 // 此处只摘自己那代，不动新条目。
-                manager.close_if_generation(&handle_id, generation);
+                manager.close_if_generation(&handle_id, generation).await;
                 let _ = respond.send(result);
                 break;
             }
@@ -712,7 +789,7 @@ async fn run_write_stream_task(
     // 无 Done 的收尾路径（close/断连摘条目 → channel 对端全掉 → recv=None）；
     // Done 臂已摘除时此处为幂等空操作。代际守卫：close→同名重开后旧任务的
     // 收尾不会误摘新句柄。
-    manager.close_if_generation(&handle_id, generation);
+    manager.close_if_generation(&handle_id, generation).await;
 }
 
 fn read_block_at(file: &File, offset: u64, len: usize) -> io::Result<FileReadBlock> {

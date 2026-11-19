@@ -18,8 +18,7 @@ pub(crate) const MAX_CLIENT_INBOUND_NOTIFICATION_LEN: usize = 2 * MAX_HTTP_BODY_
 // nova 扩展数据面（上游豁免名单之外）：fs/readStream/chunk 单块解码上限
 // MAX_READ_STREAM_BLOCK_SIZE（4 MiB），base64+分帧后约 5.6 MiB——按本协议
 // 最大帧放宽（对位上游"数据面通知放宽"语义，阈值为 nova 特有扩展点）。
-pub(crate) const MAX_FS_READ_STREAM_CHUNK_NOTIFICATION_LEN: usize =
-    2 * MAX_READ_STREAM_BLOCK_SIZE;
+pub(crate) const MAX_FS_READ_STREAM_CHUNK_NOTIFICATION_LEN: usize = 2 * MAX_READ_STREAM_BLOCK_SIZE;
 
 pub(crate) fn client_inbound_message_exceeded_limit(
     message: Result<&JSONRPCMessage, &serde_json::Error>,

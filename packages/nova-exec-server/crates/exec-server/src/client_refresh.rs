@@ -29,8 +29,8 @@ use super::ExecServerClient;
 use super::ExecServerError;
 use super::Inner;
 use super::LazyRemoteExecServerClient;
-use crate::environment::EnvironmentConnectionState;
 use super::fail_all_in_flight_work;
+use crate::environment::EnvironmentConnectionState;
 
 /// 共享的启动/重连结果 + 刷新作废旧工作的取消令牌；可选传输参数供刷新
 /// 携带新端点（静态端点场景为 None，回退 `self.transport_params`）。
@@ -113,7 +113,7 @@ impl LazyRemoteExecServerClient {
             let transport = attempt
                 .transport
                 .as_ref()
-                .or(Some(&self.transport_params))
+                .or(self.transport_params.as_ref())
                 .ok_or_else(|| {
                     Arc::new(ExecServerError::Protocol(
                         "missing transport params for lazy exec-server connection".to_string(),

@@ -6,14 +6,11 @@
 from .agent import Agent
 from .agent_loop import (
     DEFAULT_AGENT_IDENTITY,
-    AgentEventStream,
-    agent_loop,
-    agent_loop_continue,
     run_agent_loop,
     run_agent_loop_continue,
     run_tool_call,
 )
-from .proxy import ProxyAssistantMessageEvent, ProxyStreamOptions, stream_proxy
+from .run import AgentRun
 from .stream_fn import get_default_stream_fn, set_default_stream_fn
 from .types import (
     AfterToolCallContext,
@@ -46,15 +43,10 @@ __version__ = "0.1.5"
 
 __all__ = [
     "Agent",
+    "AgentRun",
     "DEFAULT_AGENT_IDENTITY",
-    "ProxyAssistantMessageEvent",
-    "ProxyStreamOptions",
-    "stream_proxy",
     "set_default_stream_fn",
     "get_default_stream_fn",
-    "AgentEventStream",
-    "agent_loop",
-    "agent_loop_continue",
     "run_agent_loop",
     "run_agent_loop_continue",
     "run_tool_call",

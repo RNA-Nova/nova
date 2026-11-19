@@ -29,6 +29,7 @@ def test_dispose_cleans_nova_ai_session_resources(monkeypatch):
         agent=SimpleNamespace(abort=lambda: None),
         _extension_runner=None,
         _disconnect_from_agent=lambda: None,
+        _events=SimpleNamespace(close=lambda: None),
         _event_listeners=[],
         session_id="session-1",
     )

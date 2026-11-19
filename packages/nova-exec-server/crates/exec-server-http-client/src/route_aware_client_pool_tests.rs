@@ -1120,4 +1120,3 @@ impl Write for TestLogSink {
         Ok(())
     }
 }
-

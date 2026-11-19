@@ -193,7 +193,8 @@ mod tests {
         assert_ne!(workspace_sid, extra_sid);
         assert_eq!(
             extra_sid,
-            writable_root_cap_sid_for_path(&sandbox_home, &extra_root).expect("extra root sid again")
+            writable_root_cap_sid_for_path(&sandbox_home, &extra_root)
+                .expect("extra root sid again")
         );
 
         let caps = load_or_create_cap_sids(&sandbox_home).expect("load caps");

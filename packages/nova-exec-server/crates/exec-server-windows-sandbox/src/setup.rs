@@ -291,7 +291,8 @@ pub fn run_setup_refresh_with_extra_read_roots(
     let deny_read_paths =
         setup_refresh_deny_read_paths(permission_profile, workspace_roots, command_cwd)?;
     let runtime = current_setup_runtime();
-    let mut read_roots = gather_read_roots(command_cwd, &permissions, env_map, sandbox_home, runtime);
+    let mut read_roots =
+        gather_read_roots(command_cwd, &permissions, env_map, sandbox_home, runtime);
     read_roots.extend(extra_read_roots);
     run_setup_refresh_inner(
         SandboxSetupRequest {
@@ -951,10 +952,20 @@ fn run_setup_exe(
     if !retained_handles.is_empty() {
         // Service requests are serialized and must not join a bare setup flight
         // whose helper was started without these directory protections.
-        return run_setup_exe_payload(&payload_b64, needs_elevation, sandbox_home, retained_handles);
+        return run_setup_exe_payload(
+            &payload_b64,
+            needs_elevation,
+            sandbox_home,
+            retained_handles,
+        );
     }
     run_setup_singleflight(payload_b64.clone(), || {
-        run_setup_exe_payload(&payload_b64, needs_elevation, sandbox_home, retained_handles)
+        run_setup_exe_payload(
+            &payload_b64,
+            needs_elevation,
+            sandbox_home,
+            retained_handles,
+        )
     })
 }
 
@@ -2629,7 +2640,8 @@ mod tests {
 
         let expected_workspace = dunce::canonicalize(&command_cwd).expect("canonical workspace");
         let expected_extra = dunce::canonicalize(&extra_root).expect("canonical extra root");
-        let forbidden_sandbox_home = dunce::canonicalize(&sandbox_home).expect("canonical sandbox home");
+        let forbidden_sandbox_home =
+            dunce::canonicalize(&sandbox_home).expect("canonical sandbox home");
         let forbidden_sandbox = dunce::canonicalize(&sandbox_root).expect("canonical sandbox root");
         assert_eq!(effective_write_roots, payload_write_roots);
         assert!(effective_write_roots.contains(&expected_workspace));

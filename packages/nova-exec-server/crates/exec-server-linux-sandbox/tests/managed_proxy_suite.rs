@@ -673,7 +673,10 @@ async fn approved_command_with_denied_reads_preserves_standard_devices() {
     );
     let mut env = create_env_from_core_vars();
     strip_proxy_env(&mut env);
-    env.insert("NOVA_TEST_DENIED".into(), denied.to_string_lossy().into_owned());
+    env.insert(
+        "NOVA_TEST_DENIED".into(),
+        denied.to_string_lossy().into_owned(),
+    );
     env.insert(
         "NOVA_TEST_OUTPUT".into(),
         output_file.to_string_lossy().into_owned(),

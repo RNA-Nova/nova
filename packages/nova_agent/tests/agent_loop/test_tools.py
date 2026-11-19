@@ -13,9 +13,11 @@ from _helpers.agent import (
     tool_call_then_text_stream,
 )
 from _helpers.messages import tool_result_message
+from nova_ai import SimpleStreamOptions
 from nova_async import AbortedError
 from nova_protocol import (
     AgentToolResult,
+    StopReason,
     TextContent,
     ToolCall,
     ToolResultMessage,
@@ -26,12 +28,14 @@ from nova_agent import (
     AfterToolCallResult,
     Agent,
     AgentContext,
+    AgentLoopConfig,
     AgentTool,
     AgentToolCallOutcome,
     BeforeToolCallResult,
     RunToolCallOptions,
     run_tool_call,
 )
+from nova_agent.agent_loop.tools import execute_tool_calls
 
 
 def _only_tool_result(agent: Agent) -> ToolResultMessage:
@@ -307,7 +311,7 @@ async def test_sequential_config_blocks_second_tool_until_first_finishes(dummy_m
     agent = Agent(stream_fn=stream, tool_execution="sequential")
     agent.set_model(dummy_model)
     agent.set_tools([BlockingEchoTool()])
-    run = agent.start_prompt("go")
+    run = agent.prompt("go")
     await first_started.wait()
     assert started == ["first"]
 
@@ -354,3 +358,150 @@ async def test_terminate_requires_every_result_in_batch(
     assert len(results) == 2
     assert calls == expected_calls
     assert agent.state.messages[-1].role == expected_last_role
+
+
+@pytest.mark.asyncio
+async def test_duration_excludes_after_hook(dummy_model):
+    class ImmediateTool(AgentTool):
+        name: str = "immediate"
+        description: str = "returns immediately"
+        label: str = "Immediate"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="done")], details={})
+
+    async def slow_after(_context, _signal):
+        await asyncio.sleep(0.1)
+
+    outcome = await run_tool_call(
+        ToolCall(id="call-1", name="immediate", arguments={}),
+        RunToolCallOptions(
+            tools=[ImmediateTool()],
+            assistant_message=make_assistant_message(dummy_model, []),
+            context=AgentContext(),
+            after_tool_call=slow_after,
+        ),
+    )
+    assert outcome.duration_ms is not None
+    assert outcome.duration_ms < 100
+
+
+@pytest.mark.asyncio
+async def test_parallel_end_completion_order_differs_from_result_source_order(
+    dummy_model,
+):
+    release_slow = asyncio.Event()
+    completion_order = []
+
+    class OrderedTool(AgentTool):
+        name: str = "ordered"
+        description: str = "controls completion order"
+        label: str = "Ordered"
+        parameters: dict = {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        }
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            if params["value"] == "slow":
+                await release_slow.wait()
+            return AgentToolResult(
+                content=[TextContent(text=params["value"])], details={}
+            )
+
+    calls = 0
+
+    async def stream(model, context, options):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return multi_tool_call_stream(
+                model,
+                [("ordered", {"value": "slow"}), ("ordered", {"value": "fast"})],
+            )
+        return text_stream(model, "done")
+
+    agent = Agent(stream_fn=stream)
+    agent.set_model(dummy_model)
+    agent.set_tools([OrderedTool()])
+
+    def release_on_fast_end(event, _signal):
+        if event.type == "tool_execution_end":
+            completion_order.append(event.tool_call_id)
+            if event.tool_call_id == "tc-2":
+                release_slow.set()
+
+    agent.subscribe(release_on_fast_end)
+    await agent.prompt("go")
+
+    assert completion_order == ["tc-2", "tc-1"]
+    results = [
+        message
+        for message in agent.state.messages
+        if isinstance(message, ToolResultMessage)
+    ]
+    assert [message.tool_call_id for message in results] == ["tc-1", "tc-2"]
+
+
+@pytest.mark.asyncio
+async def test_tool_batch_drops_events_after_cleanup_returns(dummy_model):
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    events = []
+    failed = False
+
+    class FastTool(AgentTool):
+        name: str = "fast"
+        label: str = "fast"
+        description: str = "fast"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="fast")], details={})
+
+    class SlowTool(AgentTool):
+        name: str = "slow"
+        label: str = "slow"
+        description: str = "slow"
+        parameters: dict = {"type": "object", "properties": {}}
+
+        async def execute(self, tool_call_id, params, signal=None, on_update=None):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+            return AgentToolResult(content=[TextContent(text="slow")], details={})
+
+    async def emit(event):
+        nonlocal failed
+        events.append(event)
+        if (
+            event.type == "tool_execution_end"
+            and event.tool_name == "fast"
+            and not failed
+        ):
+            failed = True
+            raise RuntimeError("listener failed")
+
+    calls = [
+        ToolCall(id="tc-fast", name="fast", arguments={}),
+        ToolCall(id="tc-slow", name="slow", arguments={}),
+    ]
+    assistant = make_assistant_message(
+        dummy_model, calls, stop_reason=StopReason.TOOL_USE
+    )
+    context = AgentContext(messages=[], tools=[FastTool(), SlowTool()])
+    config = AgentLoopConfig(stream_options=SimpleStreamOptions(), model=dummy_model)
+
+    with pytest.raises(RuntimeError, match="listener failed"):
+        await execute_tool_calls(context, assistant, calls, config, None, emit)
+    assert cancelled.is_set()
+
+    count_before = len(events)
+    release.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert events[count_before:] == []

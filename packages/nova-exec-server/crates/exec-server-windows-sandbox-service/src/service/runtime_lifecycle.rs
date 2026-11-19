@@ -28,7 +28,8 @@ pub(super) fn foreground_owner(
     _token: crate::ipc::OwnedHandle,
     runtime: nova_exec_server_windows_sandbox::SetupRuntime,
 ) -> Result<crate::installation_record::InstallationRecord> {
-    let _lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+    let _lock =
+        nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
     if let Some(previous) = crate::installation_record::load()? {
         let same_owner =
             previous.user_sid == record.user_sid && previous.sandbox_home == record.sandbox_home;

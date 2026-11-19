@@ -147,7 +147,7 @@ async def test_mixed_batch_parallel_overlap_sequential_exclusive(dummy_model) ->
     agent = Agent(stream_fn=stream_fn, tool_execution="parallel")
     agent.set_model(dummy_model)
     agent.set_tools([ParallelTool(), SequentialTool()])
-    run = agent.start_prompt("go")
+    run = agent.prompt("go")
     await both_parallel_started.wait()
     assert events == ["p1:start", "p2:start"]
 
@@ -198,7 +198,7 @@ async def test_two_sequential_tools_fifo_order(dummy_model) -> None:
     agent = Agent(stream_fn=stream_fn, tool_execution="parallel")
     agent.set_model(dummy_model)
     agent.set_tools([SequentialTool()])
-    run = agent.start_prompt("go")
+    run = agent.prompt("go")
     await first_started.wait()
     assert events == ["first:start"]
 
@@ -323,7 +323,7 @@ async def test_after_hook_stays_inside_execution_gate(dummy_model):
     )
     agent.set_model(dummy_model)
     agent.set_tools(_gated_tools(started))
-    prompt_task = agent.start_prompt("go")
+    prompt_task = agent.prompt("go")
     await after_started.wait()
     assert started == []
     release_after.set()
@@ -349,7 +349,7 @@ async def test_end_listener_is_outside_execution_gate(dummy_model):
     agent.set_model(dummy_model)
     agent.set_tools(_gated_tools(started, sequential_started))
     agent.subscribe(on_end)
-    prompt_task = agent.start_prompt("go")
+    prompt_task = agent.prompt("go")
     await end_started.wait()
     await sequential_started.wait()
     assert started == ["sequential"]

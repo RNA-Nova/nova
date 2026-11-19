@@ -77,7 +77,8 @@ impl std::error::Error for SandboxAccountCredentialMismatch {}
 /// This is a coarse readiness check; `require_logon_sandbox_creds` performs the
 /// additional runtime validation for offline firewall settings.
 pub fn sandbox_setup_is_complete(sandbox_home: &Path) -> bool {
-    let marker_ok = matches!(load_marker(sandbox_home), Ok(Some(marker)) if marker.version_matches());
+    let marker_ok =
+        matches!(load_marker(sandbox_home), Ok(Some(marker)) if marker.version_matches());
     if !marker_ok {
         return false;
     }

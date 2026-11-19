@@ -1,7 +1,7 @@
 """ProcessRunner 缝测试：Local/Executor 双实现 + grep/find 的 runner 调度。
 
-Executor 侧经假 manager/client/handle（不触真实 ssh/WS）；调度层验证
-rg 路径存在时走 rg 链、缺失时落便携引擎。
+Executor 侧经假 manager/client/handle（不触真实 WS）；调度层验证
+远程加速路径缺省时落便携引擎。
 """
 
 import asyncio
@@ -112,33 +112,20 @@ class _FakeClient:
 
 
 class _FakeManager:
-    def __init__(self, client=None, ssh_handle=None):
+    def __init__(self, client=None):
         self._client = client
-        self._ssh_handle = ssh_handle
 
     async def get_client(self, url=None):
         return self._client
 
-    def get_ssh_handle(self, target):
-        return self._ssh_handle
-
 
 class TestExecutorProcessRunner:
-    def test_rg_path_from_ssh_handle(self):
-        handle = SimpleNamespace(rg_path="/usr/bin/rg")
-        runner = ExecutorProcessRunner(_FakeManager(ssh_handle=handle), "ssh://u@h")
-        assert _run(runner.rg_path()) == "/usr/bin/rg"
-
-    def test_rg_path_none_for_ws_url_and_missing_handle(self):
+    def test_rg_path_none_without_ssh_provisioning(self):
         runner = ExecutorProcessRunner(_FakeManager(), "ws://127.0.0.1:1")
         assert _run(runner.rg_path()) is None
-        runner2 = ExecutorProcessRunner(
-            _FakeManager(ssh_handle=SimpleNamespace(rg_path="")), "ssh://u@h"
-        )
-        assert _run(runner2.rg_path()) is None
 
     def test_fd_path_remote_none(self):
-        runner = ExecutorProcessRunner(_FakeManager(), "ssh://u@h")
+        runner = ExecutorProcessRunner(_FakeManager(), "ws://127.0.0.1:1")
         assert _run(runner.fd_path()) is None
 
     def test_spawn_session_line_split_and_stderr(self):
@@ -149,7 +136,7 @@ class TestExecutorProcessRunner:
         ]
         handle = _FakeHandle(chunks, exit_code=0)
         client = _FakeClient(handle)
-        runner = ExecutorProcessRunner(_FakeManager(client=client), "ssh://u@h")
+        runner = ExecutorProcessRunner(_FakeManager(client=client), "ws://127.0.0.1:1")
 
         async def go():
             session = await runner.spawn(["rg", "--json"], "/remote/work")
@@ -177,7 +164,7 @@ class TestExecutorProcessRunner:
 
         handle = _FakeHandle([], exit_code=0)
         client = _FakeClient(handle)
-        runner = ExecutorProcessRunner(_FakeManager(client=client), "ssh://u@h")
+        runner = ExecutorProcessRunner(_FakeManager(client=client), "ws://127.0.0.1:1")
         ctl = AbortController()
         session = _run(runner.spawn(["rg", "x"], "/w", signal=ctl.signal))
         assert client.process.started[0]["signal"] is ctl.signal

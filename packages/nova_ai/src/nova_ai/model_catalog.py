@@ -12,9 +12,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Sequence, cast
 
-from nova_ai.catalog.define import stamp_fields
-from nova_ai.catalog.input_limits import apply_image_resize_defaults
-from nova_ai.catalog.reasoning import apply_models_dev_effort
 from nova_protocol import (
     AnyModel,
     ClassifierModel,
@@ -23,6 +20,10 @@ from nova_protocol import (
     ModelFields,
     ModelType,
 )
+
+from nova_catalog.define import stamp_fields
+from nova_catalog.input_limits import apply_image_resize_defaults
+from nova_catalog.reasoning import apply_models_dev_effort
 
 __all__ = [
     "builtin_catalog_generated_at",

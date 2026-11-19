@@ -77,10 +77,7 @@ pub fn create_env(policy: &ShellEnvironmentPolicy) -> HashMap<String, String> {
     create_env_from_vars(std::env::vars(), policy)
 }
 
-pub fn create_env_from_vars<I>(
-    vars: I,
-    policy: &ShellEnvironmentPolicy,
-) -> HashMap<String, String>
+pub fn create_env_from_vars<I>(vars: I, policy: &ShellEnvironmentPolicy) -> HashMap<String, String>
 where
     I: IntoIterator<Item = (String, String)>,
 {
@@ -105,10 +102,7 @@ where
     env_map
 }
 
-pub fn populate_env<I>(
-    vars: I,
-    policy: &ShellEnvironmentPolicy,
-    ) -> HashMap<String, String>
+pub fn populate_env<I>(vars: I, policy: &ShellEnvironmentPolicy) -> HashMap<String, String>
 where
     I: IntoIterator<Item = (String, String)>,
 {
@@ -278,10 +272,7 @@ mod windows_tests {
             ..Default::default()
         };
         assert_eq!(
-            populate_env(
-                make_vars(&[("GH_HOST", "github.stale.example")]),
-                &policy,
-            ),
+            populate_env(make_vars(&[("GH_HOST", "github.stale.example")]), &policy,),
             HashMap::from([("gh_host".to_string(), "github.trusted.example".to_string(),)]),
         );
     }

@@ -31,6 +31,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::linux_run_main::synthetic_mount_registry_root;
+use globset::GlobBuilder;
+use globset::GlobSet;
+use globset::GlobSetBuilder;
 use nova_exec_server_protocol_core::error::ExecErr;
 use nova_exec_server_protocol_core::error::Result;
 use nova_exec_server_protocol_core::permissions::is_protected_metadata_name;
@@ -42,9 +45,6 @@ use nova_exec_server_protocol_core::protocol::WritableRoot;
 use nova_exec_server_sandboxing::find_executable_in_search_paths;
 use nova_exec_server_sandboxing::find_pre_sandbox_executable_in_path;
 use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
-use globset::GlobBuilder;
-use globset::GlobSet;
-use globset::GlobSetBuilder;
 
 /// Linux "platform defaults" that keep common system binaries and dynamic
 /// libraries readable when a split filesystem policy requests `:minimal`.
@@ -2100,9 +2100,9 @@ mod tests {
             args.args
         );
         assert!(
-            args.args.windows(2).any(|window| {
-                window[0] == "--dir" && window[1] == real_child_str.as_str()
-            }),
+            args.args
+                .windows(2)
+                .any(|window| { window[0] == "--dir" && window[1] == real_child_str.as_str() }),
             "可写后代未在 canonical 遮蔽下重建: {:?}",
             args.args
         );
@@ -2119,8 +2119,7 @@ mod tests {
         let logical_memories = logical_nova.join("memories");
         std::fs::create_dir_all(&logical_home).expect("create logical home");
         std::fs::create_dir_all(&real_memories).expect("create memories dir");
-        std::os::unix::fs::symlink(&real_nova, &logical_nova)
-            .expect("create symlinked nova home");
+        std::os::unix::fs::symlink(&real_nova, &logical_nova).expect("create symlinked nova home");
 
         let logical_memories_root =
             AbsolutePathBuf::from_absolute_path(&logical_memories).expect("absolute memories");
@@ -2646,8 +2645,7 @@ mod tests {
     // 对位 codex 39f4277087 `bwrap.rs::non_utf8_daemon_socket_mask_path_is_rejected`
     #[test]
     fn non_utf8_daemon_socket_mask_path_is_rejected() {
-        let daemon_directory =
-            PathBuf::from(OsString::from_vec(b"/tmp/nova-daemon-\xff".to_vec()));
+        let daemon_directory = PathBuf::from(OsString::from_vec(b"/tmp/nova-daemon-\xff".to_vec()));
         assert!(
             append_daemon_socket_masks(
                 &mut Vec::new(),
@@ -2683,9 +2681,8 @@ mod tests {
             .windows(3)
             .position(|window| window == ["--ro-bind", "/tmp", "/tmp"])
             .expect("read-only tmp bind");
-        let daemon_directory = path_to_string(
-            &nova_exec_server_sandboxing::shared_daemon_socket_directory().unwrap(),
-        );
+        let daemon_directory =
+            path_to_string(&nova_exec_server_sandboxing::shared_daemon_socket_directory().unwrap());
         assert_eq!(
             &args.args[tmp_bind + 3..tmp_bind + 9],
             [

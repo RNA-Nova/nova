@@ -9,7 +9,7 @@
 - **工具系统**：JSON Schema 参数校验与类型矫正、并行/串行执行模式、执行进度回调、`before`/`after` 拦截钩子。
 - **消息队列**：steering（运行中插队）与 follow-up（收尾后续跑）双队列，注入时机明确。
 - **生命周期控制**：`AbortSignal` 取消传播到 provider 流与工具执行；`continue_()` 支持失败重试与队列续跑。
-- **高低层双 API**：`Agent` 类提供状态容器与屏障式事件语义；低层 `agent_loop()` 返回事件流，便于自管状态。
+- **统一运行句柄**：`prompt()` / `continue_()` 同步返回 `AgentRun`，提供 `task`、`events`、`signal` 与 `abort()`；`await run` 等待完整 settle，`run.events` 是权威事件流。
 
 要求 Python `>=3.13,<3.14`。
 
@@ -19,7 +19,7 @@
 pip install nova-agent nova-ai
 ```
 
-本包 PyPI 名为 `nova-agent`，import 名为 `nova_agent`；跨组件类型（`Model`、消息、流式事件、`AbortSignal` 等）由 `nova-protocol` 提供，流式调用原语由 `nova-ai` 提供，几个包需在同一环境中。
+本包 PyPI 名为 `nova-agent`，import 名为 `nova_agent`；跨组件类型（`Model`、消息、流式事件等）由 `nova-protocol` 提供，取消词汇（`AbortSignal` 等）由 `nova-async` 提供，流式调用原语由 `nova-ai` 提供，几个包需在同一环境中。
 
 仓库内开发安装（monorepo 根目录统一环境）：
 
@@ -218,31 +218,33 @@ prompt("读取 config.json")
 | `tool_execution_update` | 工具流式进度 | 同上 + `partial_result` |
 | `tool_execution_end` | 工具执行结束 | 同上 + `result`、`is_error` |
 
-### 订阅者的 await 语义
+### 权威事件流与独立观察
 
-- `subscribe(fn)` 接受同步或异步函数，签名 `(event, signal)`，`signal` 是当前 run 的 `AbortSignal`；返回退订函数。
-- 事件按订阅顺序逐个 `await` 监听器——`Agent` 路径上事件处理是**屏障**：`message_end` 的监听器全部完成后，循环才开始工具预检。
-- `agent_end` 是 run 的最后一个事件；`prompt()` / `wait_for_idle()` 在 `agent_end` 监听器全部结束后才落定，`state.is_streaming` 也保持 `True` 到那一刻。
+- `run.events` 是本次 run 的权威、单消费者事件流，包含正常完成、Provider 失败、abort、外部 Task 取消和首步前取消的完整事件序列，包括 `agent_end`。
+- `agent.subscribe(fn)` 用于直接 SDK 使用者长期观察多个 run，接受同步或异步函数，签名 `(event, signal)`，返回退订函数。每个观察者独立消费、独立异常和取消；慢或失败的观察者不影响 run。
+- 需要“处理完成后才能继续”的消息干预使用 `on_message_end` 执行 hook，不混入观察订阅。Harness 直接消费 `run.events`，不使用观察适配器。
 
 ## Run 生命周期与任务所有权【现状】
 
-每次 `prompt()` / `continue_()` 都是独立的一代 run。活动守卫使用私有运行身份，不依赖公开可写的 `state.is_streaming`；旧 run 只能清理自己的任务槽，其迟到事件与状态归约不得污染新 run。被 abort/replace 接管的 run 不再走正常完成。
+每次 `prompt()` / `continue_()` 都同步返回独立的 `AgentRun`。活动守卫使用私有运行身份，不依赖公开可写的 `state.is_streaming`；旧 run 的迟到事件与状态归约不得污染新 run。被 abort/replace 接管的 run 不再走正常完成。
+
+每次 run 只有一个公开 settle Task：执行、失败终态补齐、watchdog 清理、状态归约和 active run 清理全部完成后才落定。`await run` 等待同一边界；`run.events.result()` 只表示事件终态并返回本次新消息。直接取消 Task 属于硬取消，仍先发布内部与权威事件流终态，再把 `CancelledError` 交给调用方；首步前取消也由 done callback 同步完成清理。
 
 任务按生命周期分作用域，不要求所有地方共用一本总账：
 
-- **request 级**：provider 自己管理 HTTP、driver 与 transport；Agent 负责消费关系。正常完成不能只等 `result()`，还要确认 driver 已收尾。外部取消或监听器异常等提前退出（abandonment）时，Agent 先通知 provider 清理，再 join；无响应时才硬取消。
-- **tool batch 级**：工具与 update 任务按批归属。正常路径等待全部结果，异常路径先停止接纳，再取消未完成 sibling，最后等全部任务落定；close 后晚到的 update 不得起跑。
+- **request 级**：provider 自己管理 HTTP、driver 与 transport；Agent 负责消费关系。`DoneEvent` / `ErrorEvent` 到达后不再 abort，只 join；abandonment 先通知 provider 清理，再有界 join，无响应时才硬取消。硬取消后也不无界等待取消抵抗的 driver。
+- **tool batch 级**：工具与 update 任务按批归属，串行工具和单次 `run_tool_call` 也有独立取消边界。异常路径先关事件闸，再 `close → cancel_all → 有界 wait`；迟到的工具事件在工具作用域和 Agent run 身份两层被丢弃。
 
-终态线性化顺序为：
+正常终态线性化顺序为：
 
 ```text
-provider 收尾 → 工具批收尾 → 终态消息 → 监听器完成
-→ agent_end → 按 run 身份清理 → 公开 idle
+provider 收尾 → 工具批收尾 → 终态消息与内部归约 → run.events 的 agent_end
+→ 按 run 身份清理 → 公开 idle
 ```
 
-`stream.result()` 返回不等于 driver/transport 已结束；`close()` 不等于取消，`cancel_all()` 不等于排水，`wait()` 才是排水。session 级后台任务归 harness 的会话属主，不与当前 run 共用跨代台账。
+硬取消也须完成内部归约、权威事件流终态和完整 settle。`run.events.result()` 返回不等于 driver/transport 已结束；`close()` 不等于取消，`cancel_all()` 不等于排水，`wait()` 才是排水。session 级后台任务归 harness 的会话属主，不与当前 run 共用跨代台账。
 
-补充行为契约【现状】：工具 update observer 异常转成工具错误结果；run 级 listener 异常使 run 失败并先排水。sequential 的临界区为 execute + update 排干 + after（终态产生），`tool_execution_end` 与 toolResult 通知在门外。`start_prompt()` 在返回 Task 前同步登记 active run，供立即 abort/wait 使用；`create_task(agent.prompt())` 仅调度，不代表 run 已接受。abort 先协作取消，超过 100ms 未收尾则硬取消并告警，不把清理超时伪装成全部成功。
+补充行为契约【现状】：工具 update observer 异常转成工具错误结果；观察者异常不影响 run。`turn_end` / `agent_end` 每类终态事件最多一次；执行型 hook 失败只按当前阶段补齐，不重复生成整套生命周期。abort 先协作取消，超过 100ms 未收尾则硬取消并告警。sequential 的临界区为 execute + update 排干 + after（终态产生），`tool_execution_end` 与 toolResult 通知在门外。
 
 ## Agent 选项
 
@@ -353,20 +355,21 @@ def prepare(ctx, signal):
 
 | 方法 | 说明 |
 |---|---|
-| `await prompt(input, images=None)` | 发起对话。`input` 为 `str`（可附 `images: List[ImageContent]`，如 `ImageContent(data=<base64>, mime_type="image/jpeg")`）、单条 `AgentMessage` 或 `AgentMessage` 列表。运行中调用、或未配置模型时抛 `RuntimeError` |
-| `start_prompt(input, images=None)` | 同步登记 active run 并返回后台 `asyncio.Task`，供立即 `abort()` / `wait_for_idle()` 使用；参数与 `prompt()` 相同 |
-| `await continue_()` | 从当前上下文继续（事件序列见上文）；无可继续内容时抛 `RuntimeError` |
+| `prompt(input, images=None)` | 同步创建并返回 `AgentRun`。`input` 为 `str`（可附 `images: List[ImageContent]`，如 `ImageContent(data=<base64>, mime_type="image/jpeg")`）、单条 `AgentMessage` 或 `AgentMessage` 列表；运行中调用、或未配置模型时抛 `RuntimeError` |
+| `continue_()` | 同步创建并返回 continuation 的 `AgentRun`；无可继续内容时抛 `RuntimeError` |
 | `abort()` | 先协作取消；超过 100ms 未收尾则硬取消并告警 |
-| `await wait_for_idle()` | 等待当前 run 落定；等待方自身被取消不会传染给 run（`asyncio.shield`） |
-| `subscribe(fn)` | 订阅事件，返回退订函数 |
+| `await wait_for_idle()` | 等待当前 run 完整落定；等待方自身被取消不会传染给 run（`asyncio.shield`） |
+| `subscribe(fn)` | 注册独立观察监听器，返回退订函数；慢或失败的观察者不影响 run |
 | `set_model(m)` / `set_thinking_level(l)` / `set_tools(ts)` | 状态修改；工具集变化会在下次请求前记录成转录差分 |
 | `replace_messages(ms)` / `append_message(m)` / `clear_messages()` | 消息操作（`replace` 拷贝顶层数组） |
 | `peek_queued_messages()` | 预览下一条待消费队列消息，不从队列移除 |
 | `reset()` | 清空消息、双队列与错误状态，保留当前折叠后的系统提示词与工具基线；运行中调用抛 `RuntimeError` |
 
-属性：`state`、`signal`（当前 run 的 `AbortSignal`，空闲时 `None`）、`session_id`、`thinking_budgets`、`transport`、`steering_mode` / `follow_up_mode`（property，附 `set_/get_` 方法）可读写；`tool_execution`、`stream_fn`、`convert_to_llm`、`transform_context`、`get_api_key`、`max_retry_delay_ms`、`identity`、`on_payload`、`on_response`、`on_provider_stream_event` 与五个 hook 是普通属性，两次 run 之间可直接赋值。
+`AgentRun` 成员：`task`（完整 settle Task）、`events`（本次权威事件流）、`signal`（本次取消信号）、`abort()`（先协作取消再硬取消）；`await run` 等待完整 settle，`run.events.result()` 获取本次新消息。
 
-`prompt()` / `continue_()` 对 provider 失败等运行期异常**不向外抛**：框架生成一条 `stop_reason="error"`（已中断则为 `"aborted"`）的 assistant 失败消息，补发 `message_start` / `message_end` / `turn_end` / `agent_end` 后正常收尾，错误文本可从 `state.error_message` 读取。
+属性：`state`、`signal`（当前 run 的 `AbortSignal`，空闲时 `None`）、`session_id`、`thinking_budgets`、`transport`、`steering_mode` / `follow_up_mode`（property，附 `set_/get_` 方法）可读写；`tool_execution`、`stream_fn`、`convert_to_llm`、`transform_context`、`get_api_key`、`max_retry_delay_ms`、`identity`、`on_payload`、`on_response`、`on_provider_stream_event` 与六个 hook 是普通属性，两次 run 之间可直接赋值。
+
+`prompt()` / `continue_()` 对 provider 失败等运行期异常**不向外抛**：框架生成一条 `stop_reason="error"`（已中断则为 `"aborted"`）的 assistant 失败消息，补发 `message_start` / `message_end` / `turn_end` / `agent_end` 后正常收尾，错误文本可从 `state.error_message` 读取。直接取消返回的 Task 仍按取消语义向原调用方抛出 `CancelledError`，但内部与权威事件流终态会先落定。
 
 ## Steering 与 Follow-up
 
@@ -481,58 +484,53 @@ def convert(messages):
 agent = Agent(convert_to_llm=convert)
 ```
 
-## 低层 API
+## 使用 AgentRun 消费事件
 
-不使用 `Agent` 类时，可以直接驱动循环：
+需要在中途观察事件时，使用 `prompt()` / `continue_()` 返回的 `AgentRun`：
 
 ```python
-from nova_agent import AgentContext, AgentLoopConfig, agent_loop
-from nova_ai import SimpleStreamOptions
-from nova_protocol import SystemMessage, UserMessage
+run = agent.prompt("你好")
 
-config = AgentLoopConfig(stream_options=SimpleStreamOptions(), model=model)
-context = AgentContext(
-    messages=[SystemMessage(content="你是一个简洁的助手")]
-)
-
-stream = agent_loop(
-    [UserMessage(role="user", content="你好")],
-    context,
-    config,
-    stream_fn=my_stream_fn,
-)
-async for event in stream:
+async for event in run.events:
     print(event.type)
 
-new_messages = await stream.result()  # 本次 run 新增的全部消息
+new_messages = await run.events.result()
+await run  # 再确认完整 settle（driver、工具与状态清理全部完成）
 ```
 
-四个入口：
+`run.events` 是单消费者流。`run.events.result()` 表示收到 `agent_end`；`await run` 表示完整 settle。提前放弃时使用 `run.abort()` 和 `run.task`，不要再包一层 `asyncio.create_task()`。
 
-- `agent_loop(prompts, context, config, signal=None, stream_fn=None)`：以新 prompt 开跑，返回 `AgentEventStream`；
-- `agent_loop_continue(context, config, signal=None, stream_fn=None)`：不加新消息续跑；`context` 为空或尾消息是 `assistant` 时抛 `ValueError`；
-- `run_agent_loop(prompts, context, config, emit, signal=None, stream_fn=None)` / `run_agent_loop_continue(context, config, emit, signal=None, stream_fn=None)`：async 函数形态，事件直接推给 `emit` sink，返回新消息列表——前两个 facade 就是在它们之上包了一层 `AgentEventStream`。
+内部执行函数 `run_agent_loop()` / `run_agent_loop_continue()` 仍保留给循环自身和底层契约测试；它们不是另一种公开消费模型。直接 SDK 使用者需要多个观察者时使用 `agent.subscribe()`，需要唯一系统消费者时使用 `run.events`。
 
-`AgentContext` 只有 `messages` 与可选 `tools`，没有独立的 `system_prompt` 字段。`AgentLoopConfig` 的 `stream_options`（`SimpleStreamOptions`）与 `model` 必填，其余可选——`convert_to_llm`、`transform_context`、`get_api_key`、`before_tool_call`、`after_tool_call`、`prepare_request`、`prepare_next_turn`、`finish_turn`、`get_steering_messages`、`get_follow_up_messages`、`tool_execution`。
+## 通过 Nova Gateway 调用模型
 
-与 `Agent` 类的取舍：低层流是**观察式**的——事件 push 进流后循环立即继续推进，不等待消费者处理。`agent_loop()` 在包含初始消息的工作副本上运行，原 `context` 不接收本次新消息；`agent_loop_continue()` 则复用并续写原 `context.messages`。`Agent` 类在循环关键路径上 `await` 每个监听器（屏障语义），并自动归约 `state`。需要把事件转发进自己的管道、或完全自管状态时用低层 API；需要「`message_end` 处理完才开始工具预检」这类屏障、或现成的状态容器时用 `Agent`。
+模型服务代理不属于 Agent 内核。`nova_ai.api_impls.nova_gateway` 调用独立的 `nova_gateway_client` 官方 SDK，将公开 SSE DTO 重建为标准 `AssistantMessageEventStream`：
 
-## 服务端代理流
+```python
+from nova_ai import SimpleStreamOptions
+from nova_ai.api_impls import nova_gateway
 
-`stream_proxy(model, context, ProxyStreamOptions(proxy_url=..., auth_token=...))` 经 `POST {proxy_url}/api/stream` 调用服务端代理，把 SSE 中的判别联合事件重建为标准 `AssistantMessageEventStream`。它增量重建文本、思考与工具参数，拒绝非法 `contentIndex`，连接在终态事件前断开会产生错误终态；`auth_token` 只进入 Authorization 请求头，不进入请求体或配置的 `repr`。
+stream = nova_gateway.stream_simple(
+    model,  # model.base_url 指向 Gateway
+    context,
+    SimpleStreamOptions(api_key="gateway-token"),
+)
+message = await stream.result()
+```
+
+下游只传 `provider/id` 和白名单选项，不传上游地址或上游凭据。AI 适配层支持文本、思考与工具参数增量重建、断连错误终态和取消；`nova_gateway` 模块可直接作为 `nova_ai.create_provider(api=...)` 的协议实现。只需要公开 DTO 时，也可直接使用不依赖 `nova_ai` 的 `nova_gateway_client`。
 
 ## 示例
 
-[`examples/`](./examples) 目录下的六个脚本全部使用 mock `stream_fn`，离线即可运行：
+[`examples/`](./examples) 目录下的五个脚本全部使用 mock `stream_fn`，离线即可运行：
 
 | 文件 | 主题 |
 |---|---|
 | `01_quickstart.py` | Agent 最小用法：创建、订阅事件、prompt、状态查看 |
 | `02_custom_tools.py` | 继承 `AgentTool` 实现自定义工具；JSON Schema 校验与类型矫正 |
-| `03_hooks.py` | 五个 hook：工具 before/after、`prepare_request`、`prepare_next_turn`、`finish_turn` |
+| `03_hooks.py` | 六个 hook：工具 before/after、`on_message_end`、`prepare_request`、`prepare_next_turn`、`finish_turn` |
 | `04_steering_followup.py` | `steer()` 运行中插入、`follow_up()` 停止前排队、队列 drain 模式 |
 | `05_abort_continue.py` | `abort()` 取消、`wait_for_idle()` 的 shield 语义、`continue_()` 继续 |
-| `06_agent_loop_lowlevel.py` | 低层 `agent_loop()`：`AgentEventStream` 自管状态 |
 
 ## 开发
 

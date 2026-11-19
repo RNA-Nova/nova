@@ -38,9 +38,9 @@ async fn linux_sandbox_self_contained_without_helper_flag() -> Result<()> {
         return Ok(());
     }
 
-    let mut command = tokio::process::Command::new(
-        nova_exec_server_utils_cargo_bin::cargo_bin("nova-exec-server")?,
-    );
+    let mut command = tokio::process::Command::new(nova_exec_server_utils_cargo_bin::cargo_bin(
+        "nova-exec-server",
+    )?);
     // 关键形态：不传 --executor-linux-sandbox-exe——helper 只能来自自分身。
     command
         .args(["--listen", "stdio"])
@@ -52,13 +52,20 @@ async fn linux_sandbox_self_contained_without_helper_flag() -> Result<()> {
     let mut stdin = child.stdin.take().context("executor stdin")?;
     let mut stdout = BufReader::new(child.stdout.take().context("executor stdout")?);
 
-    send_json_line(&mut stdin, &serde_json::json!({
-        "id": 1, "method": "initialize",
-        "params": {"clientName": "self-contained-test", "resumeSessionId": null}
-    }))
+    send_json_line(
+        &mut stdin,
+        &serde_json::json!({
+            "id": 1, "method": "initialize",
+            "params": {"clientName": "self-contained-test", "resumeSessionId": null}
+        }),
+    )
     .await?;
     wait_for_response(&mut stdout, 1).await?;
-    send_json_line(&mut stdin, &serde_json::json!({"method": "initialized", "params": {}})).await?;
+    send_json_line(
+        &mut stdin,
+        &serde_json::json!({"method": "initialized", "params": {}}),
+    )
+    .await?;
 
     let cwd = nova_exec_server_utils_path_uri::PathUri::from_host_native_path("/tmp")?;
     let sandbox = FileSystemSandboxContext::from_permission_profile(
@@ -88,10 +95,8 @@ async fn linux_sandbox_self_contained_without_helper_flag() -> Result<()> {
         }
         if message["method"] == "process/output"
             && message["params"]["chunk"].as_str().is_some_and(|chunk| {
-                String::from_utf8_lossy(
-                    &base64_decode(chunk).unwrap_or_default(),
-                )
-                .contains("SELF_CONTAINED_OK")
+                String::from_utf8_lossy(&base64_decode(chunk).unwrap_or_default())
+                    .contains("SELF_CONTAINED_OK")
             })
         {
             saw_marker = true;

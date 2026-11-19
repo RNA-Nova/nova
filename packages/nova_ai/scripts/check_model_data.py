@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from nova_ai.catalog import model_data as mdata
+from . import model_data as mdata
 
 
 def main(*, package_root: Optional[Path] = None) -> int:

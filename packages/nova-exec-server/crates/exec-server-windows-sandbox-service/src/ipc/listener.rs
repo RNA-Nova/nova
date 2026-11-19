@@ -28,8 +28,9 @@ pub(super) struct ProvisioningListener {
 impl ProvisioningListener {
     pub(super) fn open() -> Result<Self> {
         let pipe_name = nova_exec_server_windows_sandbox::windows_sandbox_service_pipe_name()?;
-        let _setup_lock =
-            nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
+        let _setup_lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(
+            /*timeout_ms*/ 5_000,
+        )?;
         if crate::installation_record::load()?
             .and_then(|record| record.runtime)
             .is_some_and(|runtime| runtime.retiring.is_some())
@@ -47,9 +48,12 @@ impl ProvisioningListener {
 
     pub(super) fn refresh(self) -> Result<Self> {
         let current_group = {
-            let _setup_lock =
-                nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(/*timeout_ms*/ 5_000)?;
-            nova_exec_server_windows_sandbox::resolve_sid(nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP)
+            let _setup_lock = nova_exec_server_windows_sandbox::acquire_sandbox_setup_lock(
+                /*timeout_ms*/ 5_000,
+            )?;
+            nova_exec_server_windows_sandbox::resolve_sid(
+                nova_exec_server_windows_sandbox::SANDBOX_USERS_GROUP,
+            )
         };
         if current_group.is_ok_and(|current| current == self.sandbox_sid) {
             unsafe { pipes::DisconnectNamedPipe(self.pipe.0) };

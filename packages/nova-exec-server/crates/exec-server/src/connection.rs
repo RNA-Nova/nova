@@ -35,29 +35,33 @@ use tokio::io::BufWriter;
 use crate::client_inbound_request_limit::MAX_CLIENT_INBOUND_REQUEST_LEN;
 use crate::client_inbound_request_limit::client_inbound_message_exceeded_limit;
 
-pub(crate) const CHANNEL_CAPACITY: usize = 128;
+pub const CHANNEL_CAPACITY: usize = 128;
 // 与 WebSocket 传输保持同一序列化 JSON-RPC 单消息上限，stdio 共享每消息边界。
 const MAX_STDIO_JSONRPC_MESSAGE_LEN: usize = 64 * 1024 * 1024;
 const STDIO_TERMINATION_GRACE_PERIOD: Duration = Duration::from_secs(2);
 #[cfg(test)]
-pub(crate) const WEBSOCKET_KEEPALIVE_INTERVAL: Duration = Duration::from_millis(25);
+pub const WEBSOCKET_KEEPALIVE_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(not(test))]
-pub(crate) const WEBSOCKET_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+pub const WEBSOCKET_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
-pub(crate) enum JsonRpcConnectionEvent {
+pub enum JsonRpcConnectionEvent {
     Message(JSONRPCMessage),
     QueuedRequest {
         request: JSONRPCRequest,
         request_span: tracing::Span,
         queued_at: Instant,
     },
-    MalformedMessage { reason: String },
-    Disconnected { reason: Option<String> },
+    MalformedMessage {
+        reason: String,
+    },
+    Disconnected {
+        reason: Option<String>,
+    },
 }
 
 impl JsonRpcConnectionEvent {
-    pub(crate) fn message(message: JSONRPCMessage) -> Self {
+    pub fn message(message: JSONRPCMessage) -> Self {
         let JSONRPCMessage::Request(request) = message else {
             return Self::Message(message);
         };
@@ -92,7 +96,7 @@ impl JsonRpcConnectionEvent {
 }
 
 #[derive(Clone)]
-pub(crate) enum JsonRpcTransport {
+pub enum JsonRpcTransport {
     // Plain means no child process; transport bytes may still be encrypted.
     Plain,
     Stdio { transport: StdioTransport },
@@ -114,7 +118,7 @@ impl JsonRpcTransport {
 }
 
 #[derive(Clone)]
-pub(crate) struct StdioTransport {
+pub struct StdioTransport {
     handle: Arc<StdioTransportHandle>,
 }
 
@@ -225,7 +229,9 @@ fn kill_process_tree(child_process: &mut Child, process_group_id: Option<u32>) {
     };
 
     #[cfg(unix)]
-    if let Err(err) = nova_exec_server_utils_pty::process_group::kill_process_group(process_group_id) {
+    if let Err(err) =
+        nova_exec_server_utils_pty::process_group::kill_process_group(process_group_id)
+    {
         warn!("failed to kill exec-server stdio process group {process_group_id}: {err}");
     }
 
@@ -273,12 +279,12 @@ fn log_stdio_child_wait_result(result: std::io::Result<std::process::ExitStatus>
     }
 }
 
-pub(crate) struct JsonRpcConnection {
-    pub(crate) outgoing_tx: mpsc::Sender<JSONRPCMessage>,
-    pub(crate) incoming_rx: mpsc::Receiver<JsonRpcConnectionEvent>,
-    pub(crate) disconnected_rx: watch::Receiver<bool>,
-    pub(crate) task_handles: Vec<tokio::task::JoinHandle<()>>,
-    pub(crate) transport: JsonRpcTransport,
+pub struct JsonRpcConnection {
+    pub outgoing_tx: mpsc::Sender<JSONRPCMessage>,
+    pub incoming_rx: mpsc::Receiver<JsonRpcConnectionEvent>,
+    pub disconnected_rx: watch::Receiver<bool>,
+    pub task_handles: Vec<tokio::task::JoinHandle<()>>,
+    pub transport: JsonRpcTransport,
 }
 
 impl JsonRpcConnection {
@@ -298,7 +304,7 @@ impl JsonRpcConnection {
 
     /// 客户端侧 stdio 连接：对 executor 发来的请求/未知通知/畸形消息施加
     /// 入站上限（响应与数据面通知不受此限，对位 codex 54487a5b61）。
-    pub(crate) fn client_from_stdio<R, W>(reader: R, writer: W, connection_label: String) -> Self
+    pub fn client_from_stdio<R, W>(reader: R, writer: W, connection_label: String) -> Self
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,

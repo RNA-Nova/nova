@@ -109,15 +109,11 @@ class TestBashToolBackendResolution:
     def test_executor_remote_cwd_change_rebuilds(self):
         tool = self._make_tool()
         set_backend_selection(
-            BackendSelection(
-                backend="executor", url="ssh://a@h", remote_cwd="/data/one"
-            )
+            BackendSelection(backend="executor", url="ws://a@h", remote_cwd="/data/one")
         )
         ops1 = tool._resolve_operations()
         set_backend_selection(
-            BackendSelection(
-                backend="executor", url="ssh://a@h", remote_cwd="/data/two"
-            )
+            BackendSelection(backend="executor", url="ws://a@h", remote_cwd="/data/two")
         )
         ops2 = tool._resolve_operations()
         assert ops2 is not ops1  # remote_cwd 变化 → 重建
@@ -206,7 +202,7 @@ class TestExecutorBashOperationsRemoteCwd:
         handle = _FakeProcHandle()
         ops = ExecutorBashOperations(
             _FakeManagerForOps(_FakeClient(handle)),
-            url="ssh://alice@gpu-01",
+            url="ws://alice@gpu-01",
             remote_cwd="/home/alice/.nova/agent/executor/workspaces/s1",
         )
         result = self._run(ops, "/Users/local/project")

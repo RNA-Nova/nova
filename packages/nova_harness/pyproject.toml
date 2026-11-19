@@ -43,7 +43,7 @@ nova-agent = { path = "../../nova_agent" }
 nova-protocol = { path = "../../nova_protocol" }
 nova-exec-protocol = { path = "../../nova_exec_protocol" }
 nova-exec-policy = { path = "../../nova_exec_policy" }
-nova-exec-server-client = { path = "../../nova-exec-server-client" }
+nova-exec-server-client = { path = "../../nova_exec_server_client" }
 
 [tool.poetry.scripts]
 nova-harness = "nova_harness.app.main:main"

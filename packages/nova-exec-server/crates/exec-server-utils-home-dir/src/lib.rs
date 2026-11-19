@@ -28,7 +28,9 @@ fn find_nova_exec_server_home_from_env(
             let metadata = std::fs::metadata(&path).map_err(|err| match err.kind() {
                 std::io::ErrorKind::NotFound => std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("NOVA_EXEC_SERVER_HOME points to {val:?}, but that path does not exist"),
+                    format!(
+                        "NOVA_EXEC_SERVER_HOME points to {val:?}, but that path does not exist"
+                    ),
                 ),
                 _ => std::io::Error::new(
                     err.kind(),
@@ -102,8 +104,8 @@ mod tests {
             .to_str()
             .expect("file nova executor home path should be valid utf-8");
 
-        let err =
-            find_nova_exec_server_home_from_env(Some(file_str)).expect_err("file NOVA_EXEC_SERVER_HOME");
+        let err = find_nova_exec_server_home_from_env(Some(file_str))
+            .expect_err("file NOVA_EXEC_SERVER_HOME");
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert!(
             err.to_string().contains("not a directory"),
@@ -119,8 +121,8 @@ mod tests {
             .to_str()
             .expect("temp nova executor home path should be valid utf-8");
 
-        let resolved =
-            find_nova_exec_server_home_from_env(Some(temp_str)).expect("valid NOVA_EXEC_SERVER_HOME");
+        let resolved = find_nova_exec_server_home_from_env(Some(temp_str))
+            .expect("valid NOVA_EXEC_SERVER_HOME");
         let expected = temp_home
             .path()
             .canonicalize()

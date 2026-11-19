@@ -368,8 +368,7 @@ fn write_fake_bwrap_in(dir: &Path, contents: &str) -> tempfile::TempPath {
     // A sibling spawn may retain the temporary file's writable descriptor.
     // Remove that inode before the helper creates the executable in its child.
     std::fs::remove_file(&path).expect("remove empty temporary file");
-    nova_exec_server_utils_cargo_bin::write_executable(&path, contents)
-        .expect("write fake bwrap");
+    nova_exec_server_utils_cargo_bin::write_executable(&path, contents).expect("write fake bwrap");
     path
 }
 

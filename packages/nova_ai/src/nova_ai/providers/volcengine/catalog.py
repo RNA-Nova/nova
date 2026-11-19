@@ -4,15 +4,16 @@
 （``gateway/strategies.py``）——恢复/拉站/分流/持久化/发布全部归策略；
 本模块只含账户层两件事：拉取（ark ``/models`` 在售状态表——运行期
 带 signal 的传输路径；URL/坏状态集/解析单点在
-``nova_ai.catalog.sources.ark``）、筛选（显式 Shutdown/Retiring 剔除，
+``nova_catalog.sources.ark``）、筛选（显式 Shutdown/Retiring 剔除，
 钉住模型豁免；无凭据匿名不筛）。
 """
 
 from typing import Dict, Optional, Sequence, Set
 
-from nova_ai.catalog.sources.ark import parse_ark_status
 from nova_async import AbortedError, AbortSignal
 from nova_protocol import AnyModel
+
+from nova_catalog.sources.ark import parse_ark_status
 
 from ...gateway.catalog import CatalogError
 from ...gateway.provider import RefreshModelsContext
@@ -28,7 +29,7 @@ async def fetch_ark_status(
     base_url: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """火山方舟在售状态表（运行期拉取路径——带 signal；解析单点在
-    ``nova_ai.catalog.sources.ark.parse_ark_status``）。
+    ``nova_catalog.sources.ark.parse_ark_status``）。
 
     ``None`` = 无状态表（无 key / 载荷非 dict）。传输失败不再静默吞——
     抛给调用方裁决（有凭据时失败不得冒充“无需筛选”）。

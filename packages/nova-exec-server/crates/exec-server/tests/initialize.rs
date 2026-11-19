@@ -2,12 +2,12 @@ mod common;
 
 use common::exec_server::exec_server;
 use common::exec_server::exec_server_with_env;
+use nova_exec_server::InitializeParams;
+use nova_exec_server::InitializeResponse;
 use nova_exec_server_protocol::JSONRPCError;
 use nova_exec_server_protocol::JSONRPCErrorError;
 use nova_exec_server_protocol::JSONRPCMessage;
 use nova_exec_server_protocol::JSONRPCResponse;
-use nova_exec_server::InitializeParams;
-use nova_exec_server::InitializeResponse;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 

@@ -9,6 +9,7 @@ pub(crate) mod tags;
 mod timer;
 pub(crate) mod validation;
 
+use crate::config::StatsigMetricsSettings;
 pub use crate::metrics::buffered::record_global_operation;
 pub use crate::metrics::client::MetricsClient;
 pub use crate::metrics::config::MetricsConfig;
@@ -18,13 +19,12 @@ pub use crate::metrics::error::Result;
 pub use crate::metrics::process::record_process_start_once;
 pub use crate::metrics::timer::Timer;
 pub use names::*;
-pub use tags::ORIGINATOR_TAG;
-pub use tags::SessionMetricTagValues;
-pub use tags::bounded_originator_tag_value;
-use crate::config::StatsigMetricsSettings;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::RwLock;
+pub use tags::ORIGINATOR_TAG;
+pub use tags::SessionMetricTagValues;
+pub use tags::bounded_originator_tag_value;
 
 static GLOBAL_METRICS: OnceLock<MetricsClient> = OnceLock::new();
 static GLOBAL_STATSIG_METRICS_SETTINGS: OnceLock<StatsigMetricsSettings> = OnceLock::new();

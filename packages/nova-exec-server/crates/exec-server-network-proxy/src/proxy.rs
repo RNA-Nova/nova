@@ -1,8 +1,8 @@
 //! 网络代理编排层（移植自 codex network-proxy `proxy.rs`）。
 //!
 //! 裁点（第一期）：
-//! - Windows 面：`WindowsProxyIngress` / 共享路由 / 托管端口段未移植；
-//!   `network_proxy_restricting_sid` 保留 cfg(windows) 占位（恒 None，待 ingress 恢复）。
+//! - Windows 共享 ingress 已移植：`WindowsProxyIngress` 与 restricting SID 路由已接入；
+//!   `network_proxy_restricting_sid` 由活动路由颁发，close/reopen 由 active_route 守卫。
 //! - 凭证经纪：`virtualize_child_credentials` 调用、`remote_launch_config` 里的
 //!   broker-only 检测与凭证字段剥离逻辑未移植（远程边界由
 //!   `RemoteNetworkProxyConfig::from_effective_config` 拒绝 broker 配置兜底）。
@@ -31,6 +31,10 @@ use crate::runtime::HostBlockReason;
 use crate::runtime::unix_socket_permissions_supported;
 use crate::socks5;
 use crate::state::NetworkProxyState;
+#[cfg(target_os = "windows")]
+use crate::windows_proxy_ingress::WindowsProxyIngress;
+#[cfg(target_os = "windows")]
+use crate::windows_proxy_ingress::WindowsProxyRoute;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
@@ -221,9 +225,41 @@ impl NetworkProxyBuilder {
         // 对位 codex 39f4277087 proxy.rs `build`：监听器地址与运行时设置都以
         // local-binding 归一后的配置为准。
         let current_cfg = state.local_binding_policy.resolved_config(&current_cfg);
-        let (requested_http_addr, requested_socks_addr, reserved_listeners) =
-            if self.managed_by_nova {
-                let runtime = config::resolve_runtime(&current_cfg)?;
+        #[cfg(target_os = "windows")]
+        let current_cfg = crate::NetworkProxyConfig {
+            dangerously_allow_all_unix_sockets: Some(false),
+            unix_sockets: None,
+            ..current_cfg
+        };
+        #[cfg(target_os = "windows")]
+        let mut windows_ingress = None;
+        let (requested_http_addr, requested_socks_addr, reserved_listeners) = if self
+            .managed_by_nova
+        {
+            let runtime = config::resolve_runtime(&current_cfg)?;
+            #[cfg(target_os = "windows")]
+            let shared_ingress_addrs = if self.managed_proxy_routing
+                == ManagedProxyRouting::SharedIngress
+            {
+                let (managed_http_addr, managed_socks_addr) =
+                    config::clamp_bind_addrs(runtime.http_addr, runtime.socks_addr, &current_cfg);
+                let ingress = WindowsProxyIngress::shared(
+                    managed_http_addr,
+                    managed_socks_addr,
+                    current_cfg.enable_socks5,
+                )?;
+                let http_addr = ingress.http_addr();
+                let socks_addr = ingress.socks_addr();
+                windows_ingress = Some(ingress);
+                Some((http_addr, socks_addr))
+            } else {
+                None
+            };
+            #[cfg(not(target_os = "windows"))]
+            let shared_ingress_addrs: Option<(SocketAddr, SocketAddr)> = None;
+            if let Some((http_addr, socks_addr)) = shared_ingress_addrs {
+                (http_addr, socks_addr, None)
+            } else {
                 let reserved = reserve_loopback_ephemeral_listeners(current_cfg.enable_socks5)
                     .context("reserve managed loopback proxy listeners")?;
                 let http_addr = reserved.http_addr()?;
@@ -233,14 +269,15 @@ impl NetworkProxyBuilder {
                     socks_addr,
                     Some(reserved.into_reserved_listeners()),
                 )
-            } else {
-                let runtime = config::resolve_runtime(&current_cfg)?;
-                (
-                    self.http_addr.unwrap_or(runtime.http_addr),
-                    self.socks_addr.unwrap_or(runtime.socks_addr),
-                    None,
-                )
-            };
+            }
+        } else {
+            let runtime = config::resolve_runtime(&current_cfg)?;
+            (
+                self.http_addr.unwrap_or(runtime.http_addr),
+                self.socks_addr.unwrap_or(runtime.socks_addr),
+                None,
+            )
+        };
 
         // 对调用方覆盖的地址重新做绑定钳制，保证 unix-socket 代理只监听 loopback。
         let (http_addr, socks_addr) =
@@ -260,6 +297,11 @@ impl NetworkProxyBuilder {
             policy_decider: self.policy_decider,
             environment_proxies: Arc::new(Mutex::new(HashMap::new())),
             execution_scope: None,
+            #[cfg(target_os = "windows")]
+            windows_runtime: windows_ingress.map(|ingress| WindowsSharedProxyRuntime {
+                ingress,
+                active_route: Arc::new(Mutex::new(None)),
+            }),
         })
     }
 }
@@ -294,6 +336,101 @@ fn reserve_loopback_ephemeral_listeners(
 fn reserve_loopback_ephemeral_listener() -> Result<StdTcpListener> {
     StdTcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
         .context("bind loopback ephemeral port")
+}
+
+#[cfg(target_os = "windows")]
+const WINDOWS_MANAGED_HTTP_PROXY_PORTS: std::ops::RangeInclusive<u16> = 3128..=3159;
+#[cfg(target_os = "windows")]
+const WINDOWS_MANAGED_SOCKS_PROXY_PORTS: std::ops::RangeInclusive<u16> = 8081..=8112;
+
+#[cfg(target_os = "windows")]
+pub(super) fn reserve_windows_managed_listeners(
+    http_addr: SocketAddr,
+    socks_addr: SocketAddr,
+    reserve_socks_listener: bool,
+) -> Result<ReservedListenerSet> {
+    let http_addr = windows_managed_loopback_addr(http_addr);
+    let socks_addr = windows_managed_loopback_addr(socks_addr);
+    let http_listener =
+        reserve_windows_managed_listener(http_addr, WINDOWS_MANAGED_HTTP_PROXY_PORTS, "HTTP")?;
+    let socks_listener = if reserve_socks_listener {
+        Some(reserve_windows_managed_listener(
+            socks_addr,
+            WINDOWS_MANAGED_SOCKS_PROXY_PORTS,
+            "SOCKS5",
+        )?)
+    } else {
+        None
+    };
+    Ok(ReservedListenerSet::new(http_listener, socks_listener))
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn reserve_windows_managed_socks_listener(
+    socks_addr: SocketAddr,
+) -> Result<StdTcpListener> {
+    reserve_windows_managed_listener(
+        windows_managed_loopback_addr(socks_addr),
+        WINDOWS_MANAGED_SOCKS_PROXY_PORTS,
+        "SOCKS5",
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn reserve_windows_managed_listener(
+    requested_addr: SocketAddr,
+    ports: std::ops::RangeInclusive<u16>,
+    protocol: &str,
+) -> Result<StdTcpListener> {
+    let requested_port = requested_addr.port();
+    anyhow::ensure!(
+        requested_port != 0,
+        "managed Windows {protocol} proxy must use a fixed non-zero port"
+    );
+    let start = *ports.start();
+    let end = *ports.end();
+
+    for port in std::iter::once(requested_port).chain(ports.filter(|port| *port != requested_port))
+    {
+        let addr = SocketAddr::new(requested_addr.ip(), port);
+        match StdTcpListener::bind(addr) {
+            Ok(listener) => {
+                if port != requested_port {
+                    warn!(
+                        "managed Windows {protocol} proxy port {requested_port} is unavailable; using bounded fallback port {port}"
+                    );
+                }
+                return Ok(listener);
+            }
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                ) => {}
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("reserve managed Windows {protocol} proxy listener on {addr}")
+                });
+            }
+        }
+    }
+
+    warn!(
+        "managed Windows {protocol} proxy port {requested_port} and preferred ports {start}-{end} are unavailable; falling back to an ephemeral loopback port"
+    );
+    reserve_loopback_ephemeral_listener()
+        .with_context(|| format!("reserve fallback loopback Windows {protocol} proxy listener"))
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn windows_managed_loopback_addr(addr: SocketAddr) -> SocketAddr {
+    if !addr.ip().is_loopback() {
+        warn!(
+            "managed Windows proxies must bind to loopback; clamping {addr} to 127.0.0.1:{}",
+            addr.port()
+        );
+    }
+    SocketAddr::from(([127, 0, 0, 1], addr.port()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -338,12 +475,26 @@ struct EnvironmentProxy {
 // ingress 变体（该面未镜像，见 lib.rs 裁点）。
 enum ProxyRuntime {
     Listeners(ProxyListeners),
+    #[cfg(target_os = "windows")]
+    SharedIngress {
+        route: Arc<WindowsProxyRoute>,
+    },
 }
 
 impl ProxyRuntime {
+    #[cfg(target_os = "windows")]
+    fn network_proxy_restricting_sid(&self) -> Option<String> {
+        match self {
+            Self::Listeners(_) => None,
+            Self::SharedIngress { route } => Some(route.sid().to_string()),
+        }
+    }
+
     async fn wait(&mut self) -> Result<()> {
         match self {
             Self::Listeners(listeners) => listeners.wait().await,
+            #[cfg(target_os = "windows")]
+            Self::SharedIngress { .. } => std::future::pending().await,
         }
     }
 
@@ -353,8 +504,17 @@ impl ProxyRuntime {
                 listeners.cancel();
                 Some(listeners)
             }
+            // 共享 ingress 由 WindowsProxyIngress 持有监听器；drop route 只注销路由。
+            #[cfg(target_os = "windows")]
+            Self::SharedIngress { .. } => None,
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsSharedProxyRuntime {
+    ingress: Arc<WindowsProxyIngress>,
+    active_route: Arc<Mutex<Option<Arc<WindowsProxyRoute>>>>,
 }
 
 #[derive(Clone)]
@@ -370,6 +530,8 @@ pub struct NetworkProxy {
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     environment_proxies: Arc<Mutex<HashMap<String, EnvironmentProxy>>>,
     execution_scope: Option<Arc<ExecutionScope>>,
+    #[cfg(target_os = "windows")]
+    windows_runtime: Option<WindowsSharedProxyRuntime>,
 }
 
 impl std::fmt::Debug for NetworkProxy {
@@ -655,16 +817,32 @@ impl NetworkProxy {
     }
 
     pub fn socks_addr(&self) -> SocketAddr {
+        #[cfg(target_os = "windows")]
+        if let Some(runtime) = self.windows_runtime.as_ref() {
+            return runtime.ingress.socks_addr();
+        }
         self.socks_addr
     }
 
     /// 返回标识该逻辑代理路由的 restricting SID（供 Windows 沙箱关联路由）。
-    ///
-    /// 裁点：Windows 共享 ingress 未移植，当前恒为 None。
     #[cfg(target_os = "windows")]
     pub fn network_proxy_restricting_sid(&self, environment_id: Option<&str>) -> Option<String> {
-        let _ = environment_id;
-        None
+        match environment_id {
+            Some(environment_id) => self
+                .environment_proxies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(environment_id)
+                .and_then(|proxy| proxy.runtime.network_proxy_restricting_sid()),
+            None => self.windows_runtime.as_ref().and_then(|runtime| {
+                runtime
+                    .active_route
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .as_ref()
+                    .map(|route| route.sid().to_string())
+            }),
+        }
     }
 
     pub async fn current_cfg(&self) -> Result<crate::NetworkProxyConfig> {
@@ -962,6 +1140,37 @@ impl NetworkProxy {
             return Ok(proxy.addrs);
         }
 
+        #[cfg(target_os = "windows")]
+        if let Some(runtime) = self.windows_runtime.as_ref() {
+            let addrs = EnvironmentProxyAddrs {
+                http_addr: runtime.ingress.http_addr(),
+                socks_addr: runtime.ingress.socks_addr(),
+            };
+            let route = runtime.ingress.register_route(
+                http_proxy::http_proxy_service(
+                    self.state.clone(),
+                    self.policy_decider.clone(),
+                    Some(environment_id.to_string()),
+                ),
+                self.socks_enabled.then(|| {
+                    socks5::socks5_proxy_service(
+                        self.state.clone(),
+                        self.policy_decider.clone(),
+                        Some(environment_id.to_string()),
+                        self.socks5_udp_enabled,
+                    )
+                }),
+            );
+            proxies.insert(
+                environment_id.to_string(),
+                EnvironmentProxy {
+                    addrs,
+                    runtime: ProxyRuntime::SharedIngress { route },
+                },
+            );
+            return Ok(addrs);
+        }
+
         // 对位 codex 39f4277087：fail-fast——非 tokio 上下文走到 listener
         // spawn 会在 JoinSet::spawn 处 panic，此处先行报出带上下文的错误
         tokio::runtime::Handle::try_current().with_context(|| {
@@ -1088,6 +1297,34 @@ impl NetworkProxy {
             return Ok(NetworkProxyHandle::noop());
         }
 
+        #[cfg(target_os = "windows")]
+        if let Some(runtime) = self.windows_runtime.as_ref() {
+            let route = runtime.ingress.register_route(
+                http_proxy::http_proxy_service(
+                    self.state.clone(),
+                    self.policy_decider.clone(),
+                    /*environment_id*/ None,
+                ),
+                current_cfg.enable_socks5.then(|| {
+                    socks5::socks5_proxy_service(
+                        self.state.clone(),
+                        self.policy_decider.clone(),
+                        /*environment_id*/ None,
+                        current_cfg.enable_socks5_udp,
+                    )
+                }),
+            );
+            *runtime
+                .active_route
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(route.clone());
+            return Ok(NetworkProxyHandle::windows_shared(
+                route,
+                runtime.active_route.clone(),
+                Arc::clone(&self.environment_proxies),
+            ));
+        }
+
         if !cfg!(target_os = "windows") && !unix_socket_permissions_supported() {
             warn!(
                 "allowUnixSockets and dangerouslyAllowAllUnixSockets are macOS-only; requests will be rejected on this platform"
@@ -1170,6 +1407,8 @@ impl NetworkProxy {
 pub struct NetworkProxyHandle {
     runtime: Option<ProxyRuntime>,
     environment_proxies: Option<Arc<Mutex<HashMap<String, EnvironmentProxy>>>>,
+    #[cfg(target_os = "windows")]
+    windows_active_route: Option<Arc<Mutex<Option<Arc<WindowsProxyRoute>>>>>,
 }
 
 impl NetworkProxyHandle {
@@ -1177,6 +1416,21 @@ impl NetworkProxyHandle {
         Self {
             runtime: None,
             environment_proxies: None,
+            #[cfg(target_os = "windows")]
+            windows_active_route: None,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn windows_shared(
+        route: Arc<WindowsProxyRoute>,
+        active_route: Arc<Mutex<Option<Arc<WindowsProxyRoute>>>>,
+        environment_proxies: Arc<Mutex<HashMap<String, EnvironmentProxy>>>,
+    ) -> Self {
+        Self {
+            runtime: Some(ProxyRuntime::SharedIngress { route }),
+            environment_proxies: Some(environment_proxies),
+            windows_active_route: Some(active_route),
         }
     }
 
@@ -1197,6 +1451,14 @@ impl NetworkProxyHandle {
     }
 
     fn stop_runtimes(&mut self) -> Vec<ProxyListeners> {
+        #[cfg(target_os = "windows")]
+        if let Some(active_route) = self.windows_active_route.take() {
+            active_route
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+        }
+
         let environments = self
             .environment_proxies
             .take()

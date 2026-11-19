@@ -3,8 +3,6 @@ mod common;
 use anyhow::Context;
 use anyhow::Result;
 use futures::TryStreamExt;
-use nova_exec_server_http_client::HttpClientFactory;
-use nova_exec_server_http_client::OutboundProxyPolicy;
 use nova_exec_server::ExecServerClient;
 use nova_exec_server::ExecServerError;
 use nova_exec_server::ExecutorFileSystem;
@@ -17,6 +15,8 @@ use nova_exec_server::FsWriteBlockParams;
 use nova_exec_server::ReadFileOptions;
 use nova_exec_server::RemoteExecServerConnectArgs;
 use nova_exec_server::RemoteFileSystem;
+use nova_exec_server_http_client::HttpClientFactory;
+use nova_exec_server_http_client::OutboundProxyPolicy;
 use nova_exec_server_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -615,6 +615,7 @@ async fn replace_open_truncates_existing_file() -> Result<()> {
 #[cfg(unix)]
 #[tokio::test]
 async fn writable_open_obeys_sandbox_write_permissions() -> Result<()> {
+    use nova_exec_server::FileSystemSandboxContext;
     use nova_exec_server_protocol_core::models::PermissionProfile;
     use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
     use nova_exec_server_protocol_core::permissions::FileSystemPath;
@@ -622,7 +623,6 @@ async fn writable_open_obeys_sandbox_write_permissions() -> Result<()> {
     use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
     use nova_exec_server_protocol_core::permissions::FileSystemSpecialPath;
     use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
-    use nova_exec_server::FileSystemSandboxContext;
     use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 
     let server = exec_server().await?;
@@ -707,12 +707,12 @@ async fn connect_file_system(websocket_url: &str) -> Result<Arc<dyn ExecutorFile
 // Only the Unix stream tests above need this sandbox builder.
 #[cfg(unix)]
 fn read_only_sandbox(path: std::path::PathBuf) -> nova_exec_server::FileSystemSandboxContext {
+    use nova_exec_server::FileSystemSandboxContext;
     use nova_exec_server_protocol_core::models::PermissionProfile;
     use nova_exec_server_protocol_core::permissions::FileSystemAccessMode;
     use nova_exec_server_protocol_core::permissions::FileSystemSandboxEntry;
     use nova_exec_server_protocol_core::permissions::FileSystemSandboxPolicy;
     use nova_exec_server_protocol_core::permissions::NetworkSandboxPolicy;
-    use nova_exec_server::FileSystemSandboxContext;
     use nova_exec_server_utils_absolute_path::AbsolutePathBuf;
 
     let path = AbsolutePathBuf::from_absolute_path(&path)
@@ -755,14 +755,12 @@ async fn write_stream_resumes_from_offset_after_abort() -> Result<()> {
         })
         .await?;
     client
-        .fs_write_stream_chunk(
-            nova_exec_server_protocol::FsWriteStreamChunkNotification {
-                handle_id: "w-first".to_string(),
-                seq: 0,
-                chunk: b"hello ".to_vec().into(),
-                eof: false,
-            },
-        )
+        .fs_write_stream_chunk(nova_exec_server_protocol::FsWriteStreamChunkNotification {
+            handle_id: "w-first".to_string(),
+            seq: 0,
+            chunk: b"hello ".to_vec().into(),
+            eof: false,
+        })
         .await?;
     client
         .fs_close(FsCloseParams {
@@ -792,14 +790,12 @@ async fn write_stream_resumes_from_offset_after_abort() -> Result<()> {
         })
         .await?;
     client
-        .fs_write_stream_chunk(
-            nova_exec_server_protocol::FsWriteStreamChunkNotification {
-                handle_id: "w-second".to_string(),
-                seq: 0,
-                chunk: b"world".to_vec().into(),
-                eof: true,
-            },
-        )
+        .fs_write_stream_chunk(nova_exec_server_protocol::FsWriteStreamChunkNotification {
+            handle_id: "w-second".to_string(),
+            seq: 0,
+            chunk: b"world".to_vec().into(),
+            eof: true,
+        })
         .await?;
     let done = client
         .fs_write_stream_done(nova_exec_server_protocol::FsWriteStreamDoneParams {

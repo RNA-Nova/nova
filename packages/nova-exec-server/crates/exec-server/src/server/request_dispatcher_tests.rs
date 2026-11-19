@@ -152,6 +152,7 @@ fn request_span_uses_bounded_name_wire_method_and_inbound_trace_parent() {
 /// （对位 codex 39f4277087 `request_queue_waits_for_dispatcher_admission_before_recording_telemetry`）
 #[tokio::test]
 async fn request_queue_waits_for_dispatcher_admission_before_recording_telemetry() {
+    let _trace_test_guard = crate::TRACING_TEST_LOCK.lock().await;
     let span_exporter = InMemorySpanExporter::default();
     let tracer_provider = SdkTracerProvider::builder()
         .with_simple_exporter(span_exporter.clone())

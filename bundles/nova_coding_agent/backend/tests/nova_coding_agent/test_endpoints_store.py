@@ -23,12 +23,17 @@ def test_load_empty_when_no_file(store_home):
 
 def test_register_and_load_roundtrip(store_home):
     endpoints_store.register_endpoint("gpu-01", "wss://gpu-01:8080")
-    endpoints_store.register_endpoint("gpu-02", "ssh://alice@gpu-02", cwd="/data")
+    endpoints_store.register_endpoint("gpu-02", "ws://127.0.0.1:9000")
     loaded = endpoints_store.load_endpoints()
     assert loaded == [
         {"name": "gpu-01", "url": "wss://gpu-01:8080", "cwd": None},
-        {"name": "gpu-02", "url": "ssh://alice@gpu-02", "cwd": "/data"},
+        {"name": "gpu-02", "url": "ws://127.0.0.1:9000", "cwd": None},
     ]
+
+
+def test_register_rejects_ssh_product_scheme(store_home):
+    with pytest.raises(ValueError, match="仅支持 ws"):
+        endpoints_store.register_endpoint("gpu-02", "ssh://alice@gpu-02", cwd="/data")
 
 
 def test_register_replaces_same_name(store_home):
