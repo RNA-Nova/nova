@@ -5,8 +5,7 @@
 //! - `NetworkMode::Full` → `crate::NetworkMode::Proxy`（nova 线上词汇无 Limited/Full 档）；
 //! - nova 的 `NetworkProxyConfig::default()` 基线为 enable_socks5=false（锚点为 true），
 //!   显式打开（对位 connection_lifecycle/lifecycle_tests.rs 的同款适配）；
-//! - 裁掉 `#[cfg(target_os = "windows")]` 断言块：`WINDOWS_SANDBOX_PROXY_PORTS_ENV_KEY`
-//!   与 `network_proxy_restricting_sid` 属 Windows 共享 ingress 面（未镜像，见 lib.rs 裁点）。
+//! - Windows 共享 ingress 由 Windows 专项测试覆盖；本组只锁定 DedicatedListeners。
 
 use super::*;
 use crate::ManagedNetworkSandboxContext;

@@ -116,6 +116,10 @@ impl ReservedListenerSet {
             })
     }
 
+    pub(super) fn into_listeners(self) -> (StdTcpListener, Option<StdTcpListener>) {
+        (self.http_listener, self.socks_listener)
+    }
+
     fn into_reserved_listeners(self) -> Arc<ReservedListeners> {
         Arc::new(ReservedListeners::new(
             self.http_listener,
@@ -126,9 +130,8 @@ impl ReservedListenerSet {
 
 /// Selects how managed sandbox clients reach their logical proxy instance.
 ///
-/// 对位 codex `ManagedProxyRouting`。裁点：nova 未移植 Windows 共享
-/// ingress（SID 归属路由），两种路由当前都使用既有的专用 loopback 监听；
-/// 该选择目前只影响 exec-server 侧的 restricting-SID 门控。
+/// 对位 codex `ManagedProxyRouting`。Windows 使用共享 ingress 的 SID 归属路由；
+/// 专用 loopback 监听用于直接约束端点访问的沙箱。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ManagedProxyRouting {
     /// Use shared SID-attributed ingress when available and dedicated listeners otherwise.
@@ -471,8 +474,8 @@ struct EnvironmentProxy {
 }
 
 // 对位 codex 39f4277087 connection_lifecycle：监听器与连接作用域同一宿主，
-// 停止 = cancel + 排干（drain），而非 JoinHandle::abort。nova 无 Windows 共享
-// ingress 变体（该面未镜像，见 lib.rs 裁点）。
+// 停止 = cancel + 排干（drain），而非 JoinHandle::abort；Windows 共享 ingress
+// 由 WindowsProxyIngress 持有监听器，路由只负责注销。
 enum ProxyRuntime {
     Listeners(ProxyListeners),
     #[cfg(target_os = "windows")]
@@ -512,6 +515,7 @@ impl ProxyRuntime {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Clone)]
 struct WindowsSharedProxyRuntime {
     ingress: Arc<WindowsProxyIngress>,
     active_route: Arc<Mutex<Option<Arc<WindowsProxyRoute>>>>,
@@ -1400,6 +1404,8 @@ impl NetworkProxy {
         Ok(NetworkProxyHandle {
             runtime: Some(ProxyRuntime::Listeners(listeners)),
             environment_proxies: Some(Arc::clone(&self.environment_proxies)),
+            #[cfg(target_os = "windows")]
+            windows_active_route: None,
         })
     }
 }
@@ -1818,7 +1824,11 @@ mod tests {
             mode: NetworkMode::Proxy,
             ..NetworkProxyConfig::default()
         }));
-        let proxy = NetworkProxy::builder().state(state).build().await?;
+        let proxy = NetworkProxy::builder()
+            .state(state)
+            .managed_proxy_routing(ManagedProxyRouting::DedicatedListeners)
+            .build()
+            .await?;
         let handle = proxy.run().await?;
 
         let base_env = HashMap::from([("PRESERVED".to_string(), "value".to_string())]);
@@ -2033,7 +2043,12 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         let state = Arc::new(network_proxy_state_for_policy(settings));
-        let proxy = match NetworkProxy::builder().state(state).build().await {
+        let proxy = match NetworkProxy::builder()
+            .state(state)
+            .managed_proxy_routing(ManagedProxyRouting::DedicatedListeners)
+            .build()
+            .await
+        {
             Ok(proxy) => proxy,
             Err(err) => {
                 if err
@@ -2322,8 +2337,7 @@ mod tests {
 
     // 对位锚点 proxy.rs `wait_fails_fast_when_either_listener_fails`（124 复核
     // 补随迁）：任一监听器任务失败时 `NetworkProxyHandle::wait` 必须立即失败，
-    // 不得挂起。nova 适配：无 `windows_active_route` 字段（Windows 共享 ingress
-    // 未镜像，见 lib.rs 裁点）。
+    // 不得挂起。
     #[tokio::test]
     async fn wait_fails_fast_when_either_listener_fails() {
         for failing_listener in ["http", "socks"] {
@@ -2344,6 +2358,8 @@ mod tests {
             let handle = NetworkProxyHandle {
                 runtime: Some(ProxyRuntime::Listeners(listeners)),
                 environment_proxies: Some(Arc::new(Mutex::new(HashMap::new()))),
+                #[cfg(target_os = "windows")]
+                windows_active_route: None,
             };
 
             let error = tokio::time::timeout(std::time::Duration::from_secs(1), handle.wait())

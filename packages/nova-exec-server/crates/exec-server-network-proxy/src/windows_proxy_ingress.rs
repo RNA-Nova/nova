@@ -204,7 +204,7 @@ impl WindowsProxyIngress {
         self: &Arc<Self>,
         http: WindowsRouteService,
         socks: Option<WindowsRouteService>,
-    ) -> WindowsProxyRoute {
+    ) -> Arc<WindowsProxyRoute> {
         let services = Arc::new(RouteServices { http, socks });
         let mut routes = self
             .routes
@@ -217,11 +217,11 @@ impl WindowsProxyIngress {
             }
         };
         routes.insert(sid.clone(), Arc::clone(&services));
-        WindowsProxyRoute {
+        Arc::new(WindowsProxyRoute {
             sid,
             services,
             ingress: Arc::clone(self),
-        }
+        })
     }
 
     fn is_running(&self) -> bool {

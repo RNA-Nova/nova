@@ -1,9 +1,6 @@
 #![cfg(target_os = "windows")]
 
 // Windows 稳定 ingress 集成测试（随 codex 一并带入）。
-// 注意：Windows 共享代理 ingress（windows_proxy_ingress.rs）第一期未移植，
-// `NetworkProxy::network_proxy_restricting_sid` 当前恒为 None——主测试因此标记
-// #[ignore]，待 ingress 恢复批次一并恢复（见 src/lib.rs 裁点说明）。
 // 相对 codex 的机械适配：crate 名 codex_windows_sandbox →
 // nova_exec_server_windows_sandbox；`NetworkMode::Full` → `NetworkMode::Proxy`。
 
@@ -78,7 +75,6 @@ impl ConfigReloader for StaticReloader {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "depends on the Windows shared proxy ingress (not yet ported)"]
 async fn restricted_tokens_select_stable_routes_and_cleanup() -> anyhow::Result<()> {
     let (origin_port, origin_task) = start_http_origin().await?;
     let (first_decider, first_requests) = recording_decider();
