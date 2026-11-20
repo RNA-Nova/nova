@@ -318,6 +318,22 @@ impl JsonRpcConnection {
         )
     }
 
+    /// Relay 桥的本地 stdio 侧承载 client→executor 正向请求，不是 executor→client
+    /// 反向请求，因此只受 stdio 总帧上限约束，不能套用客户端的 8KiB 反向请求上限。
+    pub fn relay_bridge_from_stdio<R, W>(reader: R, writer: W, connection_label: String) -> Self
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        Self::from_stdio_with_max_message_len(
+            reader,
+            writer,
+            connection_label,
+            MAX_STDIO_JSONRPC_MESSAGE_LEN,
+            /*max_inbound_request_len*/ None,
+        )
+    }
+
     fn from_stdio_with_max_message_len<R, W>(
         reader: R,
         writer: W,
@@ -916,6 +932,43 @@ mod tests {
                     "JSON-RPC message from hostile stdio peer exceeds maximum length of {MAX_CLIENT_INBOUND_REQUEST_LEN} bytes"
                 )
         ));
+
+        drop(peer);
+        drop(connection);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn relay_bridge_stdio_connection_accepts_large_client_request() -> anyhow::Result<()> {
+        let request = serde_json::json!({
+            "id": 1,
+            "method": "fs/writeFile",
+            "params": {
+                "path": "file:///tmp/nova-relay-large-request",
+                "data": "x".repeat(MAX_CLIENT_INBOUND_REQUEST_LEN),
+            },
+        });
+        assert!(serde_json::to_vec(&request)?.len() > MAX_CLIENT_INBOUND_REQUEST_LEN);
+        let expected: JSONRPCMessage = serde_json::from_value(request.clone())?;
+        let encoded = serde_json::to_vec(&request)?;
+        let (reader, mut peer) = tokio::io::duplex(encoded.len().saturating_add(1));
+        let mut connection = JsonRpcConnection::relay_bridge_from_stdio(
+            reader,
+            tokio::io::sink(),
+            "relay bridge stdio peer".to_string(),
+        );
+
+        peer.write_all(&encoded).await?;
+        peer.write_all(b"\n").await?;
+        let event = timeout(Duration::from_secs(1), connection.incoming_rx.recv())
+            .await?
+            .expect("relay bridge should accept the large client request");
+        match event {
+            JsonRpcConnectionEvent::QueuedRequest { request, .. } => {
+                assert_eq!(JSONRPCMessage::Request(request), expected)
+            }
+            event => anyhow::bail!("expected large JSON-RPC request, got {event:?}"),
+        }
 
         drop(peer);
         drop(connection);

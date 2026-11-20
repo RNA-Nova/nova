@@ -31,8 +31,24 @@ struct Cli {
     initialize_timeout_sec: u64,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(run());
+    // tokio::io::stdin 的底层阻塞读不能随 future abort 取消。父进程仍握着
+    // stdin 写端时，默认 Runtime drop 会等这条阻塞读，导致桥主逻辑已结束、
+    // 进程却不退出，Python 监督器也就收不到 EOF。显式后台关闭运行时，让
+    // 已完成的传输收尾立即体现为子进程退出。
+    runtime.shutdown_background();
+    result
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
     let provider = NoiseRendezvousEnvironmentConfig::new(
@@ -55,12 +71,13 @@ async fn main() -> Result<()> {
     })
     .await
     .context("failed to establish Nova Noise Relay transport")?;
-    let local = JsonRpcConnection::client_from_stdio(
+    let local = JsonRpcConnection::relay_bridge_from_stdio(
         tokio::io::stdin(),
         tokio::io::stdout(),
         "nova-exec-relay-stdio".to_string(),
     );
     bridge(local, remote).await?;
+    tracing::debug!("Nova Relay bridge main finished");
     Ok(())
 }
 
@@ -92,14 +109,20 @@ async fn bridge(local: JsonRpcConnection, remote: JsonRpcConnection) -> Result<(
                 }
             }
             event = remote_incoming.recv() => {
-                let Some(event) = event else { break Ok(()); };
+                let Some(event) = event else {
+                    tracing::debug!("Nova Relay bridge remote incoming channel closed");
+                    break Ok(());
+                };
                 match connection_message(event) {
                     Ok(Some(message)) => {
                         if local_outgoing.send(message).await.is_err() {
                             break Ok(());
                         }
                     }
-                    Ok(None) => break Ok(()),
+                    Ok(None) => {
+                        tracing::debug!("Nova Relay bridge remote side disconnected");
+                        break Ok(());
+                    }
                     Err(error) => break Err(error),
                 }
             }

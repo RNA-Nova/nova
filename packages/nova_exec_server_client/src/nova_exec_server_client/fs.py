@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
 from collections import deque
@@ -470,11 +471,31 @@ class FileSystemManager:
                 # 续传要重放源——一次性迭代器/生成器无法重放，明确报错而非
                 # 静默产出错数据
                 _ensure_replayable(data_source)
-                # getMetadata 对账服务端文件大小（断线窗口内推送丢失由此兜底；
-                # 传入本轮已推字节数——外来增长检测的上界口径）
-                confirmed = await self._reconcile_write_offset(
-                    path, confirmed, chunks.count, sandbox=sandbox, signal=signal
-                )
+                # 对账请求本身也可能撞上另一条通道尚未完成的恢复（典型为
+                # 数据面写流断开、控制面 getMetadata 同时离线）。对账失败不能
+                # 逃出续传循环，更不能在未经对账时按旧 offset 直接重开写流；
+                # 与写流共用同一有界重试预算，直到拿到可信服务端游标。
+                while True:
+                    try:
+                        confirmed = await self._reconcile_write_offset(
+                            path,
+                            confirmed,
+                            chunks.count,
+                            sandbox=sandbox,
+                            signal=signal,
+                        )
+                        break
+                    except (TransportError, TimeoutError) as reconcile_err:
+                        attempts += 1
+                        if attempts > max_resume_attempts:
+                            raise FileSystemError(
+                                f"write stream `{path}` reconciliation failed after "
+                                f"{attempts} resume attempts: {reconcile_err}"
+                            ) from reconcile_err
+                        # 让 stdout EOF / 进程退出监督器先发布 recovering；否则
+                        # 对账在 connected→recovering 的竞态窗口会连续拿到
+                        # not connected，在事件循环一次也未让出时烧完全部预算。
+                        await asyncio.sleep(0)
                 continue
             # done 对账：全量字节数 = 本轮起点 + 本轮推送
             if total != confirmed + chunks.count:

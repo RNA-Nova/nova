@@ -439,6 +439,7 @@ where
                 incoming_message = websocket.next() => {
                     force_incoming = false;
                     let Some(incoming_message) = incoming_message else {
+                        debug!("Noise harness rendezvous websocket ended");
                         break;
                     };
                     // Count each completed read after expiry. If only the deadline arm
@@ -512,8 +513,12 @@ where
                                 }
                             }
                         }
-                        Ok(Message::Close(_)) => break,
+                        Ok(Message::Close(_)) => {
+                            debug!("Noise harness rendezvous websocket received close frame");
+                            break;
+                        }
                         Ok(Message::Pong(_)) => {
+                            debug!("Noise harness rendezvous websocket received pong");
                             pong_watchdog.received_pong();
                             frames_drained_after_pong_deadline = 0;
                         }
@@ -533,6 +538,7 @@ where
                 }
             }
         }
+        debug!("Noise harness relay task ended");
         let _ = disconnected_tx.send(true);
     }
     .instrument(stream_span));
@@ -586,6 +592,7 @@ where
     if let Some(deadline) = pong_watchdog.deadline() {
         pong_deadline.reset(deadline);
     }
+    debug!("Noise harness rendezvous websocket sent keepalive ping");
     Ok(())
 }
 

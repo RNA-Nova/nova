@@ -37,7 +37,6 @@ use url::Url;
 
 use crate::registry::Registry;
 use crate::registry::RegistryError;
-use crate::rendezvous::RendezvousError;
 use crate::rendezvous::RendezvousRouter;
 use crate::rendezvous::Role;
 
@@ -422,7 +421,6 @@ async fn serve_socket(
             }
             frame = outgoing.recv() => {
                 let Some(frame) = frame else { break; };
-                physical.complete_send(&frame.stream_id);
                 let bytes = frame.encode_to_vec();
                 if socket_outgoing.send(Message::Binary(bytes.into())).await.is_err() {
                     break;
@@ -438,13 +436,8 @@ async fn serve_socket(
                         let Ok(frame) = RelayMessageFrame::decode(bytes.as_ref()) else {
                             break;
                         };
-                        if let Err(error) = state.rendezvous.forward(&physical, frame.clone()) {
-                            match error {
-                                RendezvousError::StreamOverloaded => {
-                                    state.rendezvous.abort_stream(&frame.stream_id);
-                                }
-                                _ => break,
-                            }
+                        if state.rendezvous.forward(&physical, frame.clone()).await.is_err() {
+                            break;
                         }
                     }
                     Ok(Message::Ping(payload)) => {

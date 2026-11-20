@@ -9,7 +9,6 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const PHYSICAL_QUEUE_CAPACITY: usize = 256;
-const STREAM_QUEUE_CAPACITY: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Role {
@@ -31,10 +30,6 @@ pub enum RendezvousError {
     UnknownStream,
     #[error("connection does not own this stream")]
     StreamOwnership,
-    #[error("stream send queue is full")]
-    StreamOverloaded,
-    #[error("physical send queue is full")]
-    PhysicalOverloaded,
     #[error("invalid Relay frame: {0}")]
     InvalidFrame(String),
 }
@@ -45,7 +40,6 @@ pub struct PhysicalConnection {
     pub registration_id: String,
     pub role: Role,
     outgoing: mpsc::Sender<RelayMessageFrame>,
-    pending_by_stream: Mutex<HashMap<String, usize>>,
     close: CancellationToken,
 }
 
@@ -66,51 +60,26 @@ impl PhysicalConnection {
         self.close.cancelled()
     }
 
-    fn send(&self, frame: RelayMessageFrame) -> Result<(), RendezvousError> {
+    /// 正常数据帧使用有界异步队列施加背压；对端消费慢时暂停源端读取，
+    /// 不把短暂的生产/消费速度差误判成连接故障。
+    async fn send(&self, frame: RelayMessageFrame) -> Result<(), RendezvousError> {
         if self.is_closed() {
             return Err(RendezvousError::Closed);
         }
-        let is_reset = matches!(frame.body, Some(relay_message_frame::Body::Reset(_)));
-        {
-            let pending = self
-                .pending_by_stream
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !is_reset
-                && pending.get(&frame.stream_id).copied().unwrap_or(0) >= STREAM_QUEUE_CAPACITY
-            {
-                return Err(RendezvousError::StreamOverloaded);
-            }
-        }
-        self.outgoing.try_send(frame.clone()).map_err(|error| {
-            if self.is_closed() {
-                RendezvousError::Closed
-            } else {
-                match error {
-                    mpsc::error::TrySendError::Full(_) => RendezvousError::PhysicalOverloaded,
-                    mpsc::error::TrySendError::Closed(_) => RendezvousError::Closed,
-                }
-            }
-        })?;
-        let mut pending = self
-            .pending_by_stream
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *pending.entry(frame.stream_id).or_default() += 1;
-        Ok(())
+        self.outgoing
+            .send(frame)
+            .await
+            .map_err(|_| RendezvousError::Closed)
     }
 
-    pub(crate) fn complete_send(&self, stream_id: &str) {
-        let mut pending = self
-            .pending_by_stream
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(count) = pending.get_mut(stream_id) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                pending.remove(stream_id);
-            }
+    /// 连接清扫已经不能等待；reset 尽力投递，失败时直接关闭对端。
+    fn try_send(&self, frame: RelayMessageFrame) -> Result<(), RendezvousError> {
+        if self.is_closed() {
+            return Err(RendezvousError::Closed);
         }
+        self.outgoing
+            .try_send(frame)
+            .map_err(|_| RendezvousError::Closed)
     }
 }
 
@@ -161,7 +130,6 @@ impl RendezvousRouter {
             registration_id,
             role,
             outgoing,
-            pending_by_stream: Mutex::new(HashMap::new()),
             close: CancellationToken::new(),
         });
         let mut inner = self
@@ -182,7 +150,7 @@ impl RendezvousRouter {
         Ok((physical, receiver))
     }
 
-    pub fn forward(
+    pub async fn forward(
         &self,
         source: &Arc<PhysicalConnection>,
         frame: RelayMessageFrame,
@@ -228,14 +196,9 @@ impl RendezvousRouter {
             let route = inner.streams.get(&stream_id).expect("route inserted");
             (route.peer(source)?, route.generation.clone())
         };
-        if let Err(error) = peer.send(frame) {
-            if matches!(
-                error,
-                RendezvousError::PhysicalOverloaded | RendezvousError::Closed
-            ) {
-                peer.close();
-                self.close_physical(&peer);
-            }
+        if let Err(error) = peer.send(frame).await {
+            peer.close();
+            self.close_physical(&peer);
             return Err(error);
         }
         if is_reset {
@@ -244,7 +207,7 @@ impl RendezvousRouter {
         Ok(())
     }
 
-    pub fn abort_stream(&self, stream_id: &str) -> bool {
+    pub async fn abort_stream(&self, stream_id: &str) -> bool {
         let route = self
             .inner
             .lock()
@@ -256,7 +219,7 @@ impl RendezvousRouter {
         };
         let frame = RelayMessageFrame::reset(stream_id.to_string(), "stream_closed".to_string());
         for peer in [route.agent, route.harness] {
-            if peer.send(frame.clone()).is_err() {
+            if peer.send(frame.clone()).await.is_err() {
                 peer.close();
             }
         }
@@ -297,7 +260,7 @@ impl RendezvousRouter {
             };
             let reset =
                 RelayMessageFrame::reset(route.stream_id.clone(), "peer_closed".to_string());
-            if peer.send(reset).is_err() {
+            if peer.try_send(reset).is_err() {
                 peer.close();
             }
         }
@@ -326,8 +289,8 @@ mod tests {
         RelayMessageFrame::data(stream_id.to_string(), 0, payload, None)
     }
 
-    #[test]
-    fn routes_only_between_registered_generation_peers() {
+    #[tokio::test]
+    async fn routes_only_between_registered_generation_peers() {
         let router = RendezvousRouter::default();
         let (agent, mut agent_rx) = router
             .connect("env".to_string(), "reg".to_string(), Role::Environment)
@@ -337,17 +300,17 @@ mod tests {
             .expect("harness");
         router
             .forward(&harness, RelayMessageFrame::resume("stream-a".to_string()))
+            .await
             .expect("open stream");
-        assert_eq!(
-            agent_rx.blocking_recv().expect("resume").stream_id,
-            "stream-a"
-        );
+        assert_eq!(agent_rx.recv().await.expect("resume").stream_id, "stream-a");
         router
             .forward(&agent, frame("stream-a", b"ciphertext".to_vec()))
+            .await
             .expect("data");
         assert_eq!(
             harness_rx
-                .blocking_recv()
+                .recv()
+                .await
                 .expect("data")
                 .into_data()
                 .expect("data body")
@@ -355,7 +318,7 @@ mod tests {
             b"ciphertext"
         );
         router.close_physical(&harness);
-        assert!(agent_rx.blocking_recv().is_some(), "agent receives reset");
+        assert!(agent_rx.recv().await.is_some(), "agent receives reset");
     }
 
     type Connected = (
@@ -366,7 +329,7 @@ mod tests {
         mpsc::Receiver<RelayMessageFrame>,
     );
 
-    fn connected_stream() -> Connected {
+    async fn connected_stream() -> Connected {
         let router = RendezvousRouter::default();
         let (agent, mut agent_rx) = router
             .connect("env".to_string(), "reg".to_string(), Role::Environment)
@@ -376,31 +339,32 @@ mod tests {
             .expect("harness");
         router
             .forward(&harness, RelayMessageFrame::resume("stream-a".to_string()))
+            .await
             .expect("open stream");
-        assert_eq!(
-            agent_rx.blocking_recv().expect("resume").stream_id,
-            "stream-a"
-        );
-        agent.complete_send("stream-a");
+        assert_eq!(agent_rx.recv().await.expect("resume").stream_id, "stream-a");
         (router, agent, agent_rx, harness, harness_rx)
     }
 
-    #[test]
-    fn foreign_harness_cannot_take_over_an_existing_stream() {
-        let (router, _agent, mut agent_rx, harness, _harness_rx) = connected_stream();
+    #[tokio::test]
+    async fn foreign_harness_cannot_take_over_an_existing_stream() {
+        let (router, _agent, mut agent_rx, harness, _harness_rx) = connected_stream().await;
         let (foreign, _foreign_rx) = router
             .connect("env".to_string(), "reg".to_string(), Role::Harness)
             .expect("foreign harness");
         assert!(matches!(
-            router.forward(&foreign, RelayMessageFrame::resume("stream-a".to_string())),
+            router
+                .forward(&foreign, RelayMessageFrame::resume("stream-a".to_string()))
+                .await,
             Err(RendezvousError::StreamOwnership)
         ));
         router
             .forward(&harness, frame("stream-a", b"original-owner".to_vec()))
+            .await
             .expect("original owner retains the stream");
         assert_eq!(
             agent_rx
-                .blocking_recv()
+                .recv()
+                .await
                 .expect("data")
                 .into_data()
                 .expect("data body")
@@ -409,68 +373,60 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stream_backpressure_recovers_after_the_socket_send_completes() {
-        let (router, agent, mut agent_rx, harness, _harness_rx) = connected_stream();
-        for _ in 0..STREAM_QUEUE_CAPACITY {
+    #[tokio::test]
+    async fn full_physical_queue_waits_for_drain_without_disconnecting() {
+        let (router, agent, mut agent_rx, harness, _harness_rx) = connected_stream().await;
+        for _ in 0..PHYSICAL_QUEUE_CAPACITY {
             router
                 .forward(&harness, frame("stream-a", b"ciphertext".to_vec()))
-                .expect("within stream budget");
-        }
-        assert!(matches!(
-            router.forward(&harness, frame("stream-a", b"overflow".to_vec())),
-            Err(RendezvousError::StreamOverloaded)
-        ));
-        agent_rx.blocking_recv().expect("one frame sent");
-        agent.complete_send("stream-a");
-        router
-            .forward(&harness, frame("stream-a", b"after-drain".to_vec()))
-            .expect("completed socket sends release stream capacity");
-    }
-
-    #[test]
-    fn physical_overload_closes_the_connection_and_removes_its_routes() {
-        let (router, agent, _agent_rx, harness, _harness_rx) = connected_stream();
-        for index in 0..PHYSICAL_QUEUE_CAPACITY {
-            router
-                .forward(
-                    &harness,
-                    RelayMessageFrame::resume(format!("stream-{index}")),
-                )
+                .await
                 .expect("within physical budget");
         }
-        assert!(matches!(
-            router.forward(
-                &harness,
-                RelayMessageFrame::resume("stream-overflow".to_string())
-            ),
-            Err(RendezvousError::PhysicalOverloaded)
-        ));
-        assert!(agent.is_closed());
-        assert!(matches!(
-            router.forward(&harness, frame("stream-a", b"closed".to_vec())),
-            Err(RendezvousError::UnknownStream)
-        ));
+        let mut blocked = tokio::spawn({
+            let router = router.clone();
+            let harness = Arc::clone(&harness);
+            async move {
+                router
+                    .forward(&harness, frame("stream-a", b"overflow".to_vec()))
+                    .await
+            }
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut blocked)
+                .await
+                .is_err(),
+            "a full queue must backpressure the producer"
+        );
+        assert!(!agent.is_closed());
+
+        agent_rx.recv().await.expect("drain one frame");
+        tokio::time::timeout(std::time::Duration::from_secs(1), &mut blocked)
+            .await
+            .expect("draining releases the producer")
+            .expect("forward task")
+            .expect("forward succeeds");
+        assert!(!agent.is_closed());
     }
 
-    #[test]
-    fn abort_stream_resets_both_peers_and_allows_stream_reuse() {
-        let (router, _agent, mut agent_rx, harness, mut harness_rx) = connected_stream();
-        assert!(router.abort_stream("stream-a"));
+    #[tokio::test]
+    async fn abort_stream_resets_both_peers_and_allows_stream_reuse() {
+        let (router, _agent, mut agent_rx, harness, mut harness_rx) = connected_stream().await;
+        assert!(router.abort_stream("stream-a").await);
         assert_eq!(
-            agent_rx.blocking_recv().expect("agent reset").stream_id,
+            agent_rx.recv().await.expect("agent reset").stream_id,
             "stream-a"
         );
         assert_eq!(
-            harness_rx.blocking_recv().expect("harness reset").stream_id,
+            harness_rx.recv().await.expect("harness reset").stream_id,
             "stream-a"
         );
-        assert!(!router.abort_stream("stream-a"));
+        assert!(!router.abort_stream("stream-a").await);
         router
             .forward(&harness, RelayMessageFrame::resume("stream-a".to_string()))
+            .await
             .expect("reopen after reset");
         assert_eq!(
-            agent_rx.blocking_recv().expect("new resume").stream_id,
+            agent_rx.recv().await.expect("new resume").stream_id,
             "stream-a"
         );
     }

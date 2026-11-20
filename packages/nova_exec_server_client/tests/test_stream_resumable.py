@@ -176,6 +176,63 @@ async def test_write_stream_resumable_recovers_and_concatenates():
 
 
 @pytest.mark.asyncio
+async def test_write_stream_resumable_retries_transient_reconcile_failures():
+    """数据面断线后，控制面对账也可瞬时断线；对账应在同一预算内重试，
+    而不是把 TransportError 直接透出或按旧游标盲目重写。"""
+    server = FakeWriteStreamServer(break_plan=[1, None])
+    original = server.send_request
+    reconcile_failures = 0
+
+    async def flaky_reconcile(method, params=None, *, channel=None, for_cleanup=False):
+        nonlocal reconcile_failures
+        if method == "fs/getMetadata" and reconcile_failures < 2:
+            reconcile_failures += 1
+            raise TransportError("reconcile transport disconnected")
+        return await original(method, params, channel=channel, for_cleanup=for_cleanup)
+
+    server.send_request = flaky_reconcile  # type: ignore[method-assign]
+    fs = FileSystemManager(server)
+
+    total = await fs.write_stream_resumable(
+        "file:///tmp/out.bin",
+        b"aabbcc",
+        block_size=2,
+        max_resume_attempts=4,
+    )
+
+    assert total == 6
+    assert bytes(server.file) == b"aabbcc"
+    assert reconcile_failures == 2
+    assert server.open_offsets == [None, 2]
+
+
+@pytest.mark.asyncio
+async def test_write_stream_resumable_reconcile_retry_budget_is_bounded():
+    """对账持续离线同样受重试上限约束，且未完成对账前不得重开写流。"""
+    server = FakeWriteStreamServer(break_plan=[1])
+    original = server.send_request
+
+    async def offline_reconcile(
+        method, params=None, *, channel=None, for_cleanup=False
+    ):
+        if method == "fs/getMetadata":
+            raise TransportError("reconcile still offline")
+        return await original(method, params, channel=channel, for_cleanup=for_cleanup)
+
+    server.send_request = offline_reconcile  # type: ignore[method-assign]
+    fs = FileSystemManager(server)
+
+    with pytest.raises(FileSystemError, match="reconciliation failed after 3"):
+        await fs.write_stream_resumable(
+            "file:///tmp/out.bin",
+            b"aabbcc",
+            block_size=2,
+            max_resume_attempts=2,
+        )
+    assert server.open_offsets == [None]
+
+
+@pytest.mark.asyncio
 async def test_write_stream_resumable_done_reconciliation_mismatch_fails():
     """done 的 totalBytes 与推送不符 → 对账失败抛错"""
     server = FakeWriteStreamServer()
