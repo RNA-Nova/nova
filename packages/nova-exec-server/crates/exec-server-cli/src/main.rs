@@ -39,6 +39,10 @@ struct Cli {
     #[arg(long, env = "NOVA_EXEC_SERVER_REGISTRY_TOKEN", hide_env_values = true)]
     registry_token: Option<String>,
 
+    /// 从 enrollment JSON 读取 Nova Registry 的节点 token。
+    #[arg(long, value_name = "PATH", conflicts_with = "registry_token")]
+    registry_enrollment: Option<PathBuf>,
+
     /// 使用 AWS SigV4 签名 Direct 注册与 WebSocket 握手。
     #[arg(long, requires = "remote")]
     aws_sigv4: bool,
@@ -409,6 +413,32 @@ fn main() -> Result<()> {
     run_server()
 }
 
+#[derive(serde::Deserialize)]
+struct RegistryEnrollment {
+    node_token: String,
+}
+
+fn read_registry_enrollment(path: &std::path::Path) -> Result<String> {
+    let contents = std::fs::read(path).with_context(|| {
+        format!(
+            "failed to read registry enrollment {}",
+            path.display()
+        )
+    })?;
+    let enrollment: RegistryEnrollment = serde_json::from_slice(&contents).with_context(|| {
+        format!(
+            "failed to parse registry enrollment {}",
+            path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        !enrollment.node_token.trim().is_empty(),
+        "registry enrollment {} has an empty node_token",
+        path.display()
+    );
+    Ok(enrollment.node_token)
+}
+
 #[tokio::main]
 async fn run_server() -> Result<()> {
     let cli = Cli::parse();
@@ -432,10 +462,12 @@ async fn run_server() -> Result<()> {
                 service: cli.aws_service.clone(),
             }
         } else {
-            let token = cli
-                .registry_token
-                .clone()
-                .context("--remote requires --registry-token or NOVA_EXEC_SERVER_REGISTRY_TOKEN")?;
+            let token = match cli.registry_enrollment.as_ref() {
+                Some(path) => read_registry_enrollment(path)?,
+                None => cli.registry_token.clone().context(
+                    "--remote requires --registry-token, --registry-enrollment, or NOVA_EXEC_SERVER_REGISTRY_TOKEN",
+                )?,
+            };
             RemoteAuth::NovaToken(token)
         };
         RunMode::Remote {
@@ -734,6 +766,48 @@ fn lock_file_exclusive(file: &std::fs::File) -> std::io::Result<()> {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod registry_enrollment_tests {
+    use super::Cli;
+    use super::read_registry_enrollment;
+    use clap::Parser;
+    use clap::error::ErrorKind;
+
+    #[test]
+    fn reads_node_token_without_exposing_it_in_errors() {
+        let root = tempfile::tempdir().expect("temp root");
+        let path = root.path().join("enrollment.json");
+        std::fs::write(&path, r#"{"node_token":"test-node-token","other":true}"#)
+            .expect("write enrollment");
+        assert_eq!(
+            read_registry_enrollment(&path).expect("read enrollment"),
+            "test-node-token"
+        );
+
+        std::fs::write(&path, r#"{"node_token":"  "}"#).expect("write empty enrollment");
+        let error = read_registry_enrollment(&path).expect_err("reject empty token");
+        assert!(error.to_string().contains("empty node_token"));
+        assert!(!error.to_string().contains("test-node-token"));
+    }
+
+    #[test]
+    fn enrollment_conflicts_with_direct_token() {
+        let error = Cli::try_parse_from([
+            "nova-exec-server",
+            "--remote",
+            "https://relay.example",
+            "--environment-id",
+            "windows-dev",
+            "--registry-token",
+            "test-token",
+            "--registry-enrollment",
+            "enrollment.json",
+        ])
+        .expect_err("reject conflicting token sources");
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
