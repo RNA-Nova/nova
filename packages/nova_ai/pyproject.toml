@@ -39,7 +39,7 @@ httpx2 = ">=2.0,<3"
 # nova-gateway-client 统一由根 pyproject.toml editable 安装。
 
 [tool.poetry.group.dev.dependencies]
-black = "^23.10.1"
+black = "^26.10.1"
 isort = "^5.12.0"
 pre-commit = "^3.5.0"
 pytest = ">=8.2"
